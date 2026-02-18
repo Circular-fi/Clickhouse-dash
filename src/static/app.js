@@ -5,7 +5,10 @@
   const runButtonElement = document.getElementById("runButton");
   const cancelButtonElement = document.getElementById("cancelButton");
   const clearButtonElement = document.getElementById("clearButton");
-  const themeSelectElement = document.getElementById("themeSelect");
+  const themeSelectRootElement = document.getElementById("themeSelect");
+  const themeSelectButtonElement = document.getElementById("themeSelectButton");
+  const themeSelectTextElement = document.getElementById("themeSelectText");
+  const themeSelectMenuElement = document.getElementById("themeSelectMenu");
 
   const queryIdentifierTextElement = document.getElementById("queryIdentifierText");
   const queryStatusTextElement = document.getElementById("queryStatusText");
@@ -47,9 +50,18 @@
   const memoryChartCanvas = document.getElementById("memoryChart");
   const threadChartCanvas = document.getElementById("threadChart");
 
+  const resultsPanelElement =
+  document.getElementById("resultsPanel") || document.querySelector(".panel--results");
+
+
+
   const THEME_STORAGE_KEY = "chdash.theme";
+  
 
-
+  function setResultsVisible(visible) {
+    if (!resultsPanelElement) return;
+    resultsPanelElement.classList.toggle("is-hidden", !visible);
+  }
 
   function setText(el, value) {
     if (el) el.textContent = value;
@@ -322,19 +334,180 @@
   let currentThemeMode = getSavedThemeMode();
   applyTheme(currentThemeMode);
 
-  if (themeSelectElement) {
-    themeSelectElement.value = currentThemeMode;
-    themeSelectElement.addEventListener("change", () => {
-      currentThemeMode = themeSelectElement.value;
-      setSavedThemeMode(currentThemeMode);
-      applyTheme(currentThemeMode);
+  const THEME_LABELS = { system: "System", dark: "Dark", light: "Light" };
+  let themeOptionButtons = [];
+  let themeMenuCloseTimer = 0;
+
+  function syncThemeDropdownUi() {
+    if (!themeSelectTextElement) return;
+
+    const label = THEME_LABELS[currentThemeMode] || "System";
+    themeSelectTextElement.textContent = label;
+
+    if (Array.isArray(themeOptionButtons)) {
+      for (const btn of themeOptionButtons) {
+        const v = btn?.dataset?.value;
+        btn.setAttribute("aria-selected", String(v === currentThemeMode));
+      }
+    }
+  }
+
+  function closeThemeMenu({ focusButton = false } = {}) {
+    if (!themeSelectMenuElement || !themeSelectButtonElement || !themeSelectRootElement) return;
+
+    // add closing state so selected stays hidden during the close animation
+    themeSelectRootElement.classList.add("themeSelect--closing");
+    themeSelectRootElement.classList.remove("themeSelect--open");
+    themeSelectButtonElement.setAttribute("aria-expanded", "false");
+
+    if (focusButton) themeSelectButtonElement.focus();
+
+    if (themeMenuCloseTimer) clearTimeout(themeMenuCloseTimer);
+    themeMenuCloseTimer = setTimeout(() => {
+      themeMenuCloseTimer = 0;
+
+      requestAnimationFrame(() => {
+        themeSelectMenuElement.hidden = true;
+        themeSelectRootElement.classList.remove("themeSelect--closing");
+      });
+    }, 150);
+  }
+
+  function openThemeMenu() {
+    if (!themeSelectMenuElement || !themeSelectButtonElement || !themeSelectRootElement) return;
+
+    if (themeMenuCloseTimer) {
+      clearTimeout(themeMenuCloseTimer);
+      themeMenuCloseTimer = 0;
+    }
+
+    themeSelectRootElement.classList.remove("themeSelect--closing");
+    themeSelectMenuElement.hidden = false;
+    themeSelectButtonElement.setAttribute("aria-expanded", "true");
+
+    requestAnimationFrame(() => {
+      themeSelectRootElement.classList.add("themeSelect--open");
+
+      // focus first non-selected option (selected is hidden)
+      const first = themeOptionButtons.find(b => b?.dataset?.value !== currentThemeMode) || themeOptionButtons[0];
+      first?.focus();
     });
   }
+
+
+  function toggleThemeMenu() {
+    if (!themeSelectRootElement) return;
+    const isOpen = themeSelectRootElement.classList.contains("themeSelect--open");
+    if (isOpen) closeThemeMenu({ focusButton: true });
+    else openThemeMenu();
+  }
+
+  function setThemeMode(mode, { persist = true } = {}) {
+    const m = String(mode || "").toLowerCase();
+    if (!THEME_LABELS[m]) return;
+
+    currentThemeMode = m;
+    if (persist) setSavedThemeMode(currentThemeMode);
+    applyTheme(currentThemeMode);
+    syncThemeDropdownUi();
+  }
+
+  function moveThemeFocus(delta) {
+    const items = themeOptionButtons;
+    if (!items.length) return;
+
+    const active = document.activeElement;
+    let idx = items.findIndex(x => x === active);
+    if (idx < 0) idx = items.findIndex(b => b?.dataset?.value === currentThemeMode);
+    if (idx < 0) idx = 0;
+
+    idx = (idx + delta + items.length) % items.length;
+    items[idx]?.focus();
+  }
+
+  function initThemeDropdown() {
+    if (!themeSelectRootElement || !themeSelectButtonElement || !themeSelectMenuElement) return;
+
+    themeOptionButtons = Array.from(themeSelectMenuElement.querySelectorAll(".themeSelect__option"));
+
+    syncThemeDropdownUi();
+    closeThemeMenu();
+
+    themeSelectButtonElement.addEventListener("click", toggleThemeMenu);
+
+    themeSelectButtonElement.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleThemeMenu();
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        openThemeMenu();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        openThemeMenu();
+        requestAnimationFrame(() => moveThemeFocus(-1));
+        return;
+      }
+    });
+
+    themeSelectMenuElement.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeThemeMenu({ focusButton: true });
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveThemeFocus(+1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveThemeFocus(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === " ") {
+        const active = document.activeElement;
+        if (active && active.classList && active.classList.contains("themeSelect__option")) {
+          e.preventDefault();
+          const v = active.dataset.value;
+          setThemeMode(v);
+          closeThemeMenu({ focusButton: true });
+        }
+        return;
+      }
+      if (e.key === "Tab") {
+        closeThemeMenu();
+      }
+    });
+
+    for (const btn of themeOptionButtons) {
+      btn.addEventListener("click", () => {
+        const v = btn.dataset.value;
+        setThemeMode(v);
+        closeThemeMenu({ focusButton: true });
+      });
+    }
+
+    document.addEventListener("pointerdown", (e) => {
+      if (!themeSelectRootElement.contains(e.target)) closeThemeMenu();
+    });
+  }
+
+  initThemeDropdown();
+
 
   const themeMedia = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
   if (themeMedia && typeof themeMedia.addEventListener === "function") {
     themeMedia.addEventListener("change", () => {
-      if (currentThemeMode === "system") applyTheme("system");
+      if (currentThemeMode === "system") {
+        applyTheme("system");
+        syncThemeDropdownUi();
+      }
     });
   } else if (themeMedia && typeof themeMedia.addListener === "function") {
     themeMedia.addListener(() => {
@@ -586,7 +759,10 @@
   let currentStatusValue = "idle";
   let lastErrorMessage = "";
   let scheduledFlush = false;
-  const flushBatchSize = 400;
+  const flushBatchSize = 400;  
+  let isVerticalResults = false;
+  let flushRafId = 0;
+
 
   let latestElapsedSeconds = 0;
 
@@ -684,18 +860,33 @@
   function clearResults() {
     resultColumns = [];
     pendingRows = [];
-    scheduledFlush = false;
     allResultRows = [];
     updateCopyButtonState();
 
+    scheduledFlush = false;
+    if (flushRafId) {
+      cancelAnimationFrame(flushRafId);
+      flushRafId = 0;
+    }
+
+    isVerticalResults = false;
+    const tableEl = resultTableHeadElement?.closest("table");
+    if (tableEl) tableEl.classList.remove("resultTable--vertical");
 
     if (resultTableHeadElement) resultTableHeadElement.innerHTML = "";
     if (resultTableBodyElement) resultTableBodyElement.innerHTML = "";
     setText(resultColumnsTextElement, "-");
+    setResultsVisible(false);
   }
+
+
 
   function setResultMeta(columns) {
     resultColumns = Array.isArray(columns) ? columns : [];
+
+    const tableEl = resultTableHeadElement?.closest("table");
+    if (tableEl) tableEl.classList.remove("resultTable--vertical");
+
     const headRow = document.createElement("tr");
     for (const columnName of resultColumns) {
       const th = document.createElement("th");
@@ -709,19 +900,88 @@
     setText(resultColumnsTextElement, `${resultColumns.length} column(s)`);
   }
 
+  function renderVerticalSingleRow(row) {
+    if (!resultTableHeadElement || !resultTableBodyElement) return;
+
+    isVerticalResults = true;
+    pendingRows.length = 0;
+    scheduledFlush = false;
+
+    if (flushRafId) {
+      cancelAnimationFrame(flushRafId);
+      flushRafId = 0;
+    }
+
+    const tableEl = resultTableHeadElement.closest("table");
+    if (tableEl) tableEl.classList.add("resultTable--vertical");
+
+    // Header: Column | Value
+    const headRow = document.createElement("tr");
+    const th1 = document.createElement("th");
+    th1.textContent = "Column";
+    const th2 = document.createElement("th");
+    th2.textContent = "Value";
+    headRow.appendChild(th1);
+    headRow.appendChild(th2);
+
+    resultTableHeadElement.innerHTML = "";
+    resultTableHeadElement.appendChild(headRow);
+
+    // Body: one row per column
+    resultTableBodyElement.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+
+    for (let i = 0; i < resultColumns.length; i++) {
+      const tr = document.createElement("tr");
+
+      const th = document.createElement("th");
+      const colName = String(resultColumns[i] ?? "");
+      th.textContent = colName;
+      th.title = colName; // hover to see full name if ellipsized
+
+      const td = document.createElement("td");
+      const raw = Array.isArray(row) ? row[i] : null;
+      const cleaned = coerceDeep(raw);
+      td.textContent = (cleaned === null || cleaned === undefined)
+        ? ""
+        : (typeof cleaned === "string" ? cleaned : JSON.stringify(cleaned));
+
+      tr.appendChild(th);
+      tr.appendChild(td);
+      fragment.appendChild(tr);
+    }
+
+    resultTableBodyElement.appendChild(fragment);
+  }
+
+  function maybeSwitchToVerticalSingleRow() {
+    if (!Array.isArray(resultColumns) || resultColumns.length < 2) return;
+    if (!Array.isArray(allResultRows) || allResultRows.length !== 1) return;
+
+    renderVerticalSingleRow(allResultRows[0]);
+  }
+
+
+
   function enqueueRowForRender(row) {
     pendingRows.push(row);
     scheduleFlush();
   }
 
   function scheduleFlush() {
-    if (scheduledFlush) return;
-    scheduledFlush = true;
-    requestAnimationFrame(flushPendingRows);
-  }
+      if (scheduledFlush) return;
+      scheduledFlush = true;
+      flushRafId = requestAnimationFrame(flushPendingRows);
+    }
 
-  function flushPendingRows() {
+    function flushPendingRows() {
     scheduledFlush = false;
+
+    if (isVerticalResults) {
+      pendingRows.length = 0;
+      return;
+    }
+
     if (pendingRows.length === 0) return;
     if (!resultTableBodyElement) return;
 
@@ -751,6 +1011,7 @@
     resultTableBodyElement.appendChild(fragment);
     if (pendingRows.length > 0) scheduleFlush();
   }
+
 
   async function createQuery(queryText) {
     const response = await fetch("/api/query", {
@@ -782,6 +1043,9 @@
         ? responseBody.message
         : `Cancel failed with status ${response.status}`;
       throw new Error(messageText);
+    }
+    if (!Array.isArray(allResultRows) || allResultRows.length == 0) {
+      clearResults();
     }
     return responseBody;
   }
@@ -1075,10 +1339,12 @@
       if (!payload) return;
       clearResults();
       setResultMeta(payload.columns);
+      setResultsVisible(true);
     });
 
     eventSource.addEventListener("result_rows", (event) => {
       const payload = safelyParseJson(event.data);
+      setResultsVisible(true);
       if (!payload) return;
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
       for (const row of rows) {
@@ -1113,12 +1379,19 @@
         setStatus("done");
       }
 
+      maybeSwitchToVerticalSingleRow();
       setText(readRowsRateTextElement, "-");
       setText(readBytesRateTextElement, "-");
       setText(cpuTextElement, "-");
       setText(memoryTextElement, "-");
       setText(threadTextElement, "-");
       progressCardElement.classList.remove("is-indeterminate");
+      const hasRows = Array.isArray(allResultRows) && allResultRows.length > 0;
+      const hasError = String(lastErrorMessage || "").trim().length > 0;
+
+      if (!hasRows && !hasError) {
+        setResultsVisible(false);
+      }
 
       if (cancelButtonElement) cancelButtonElement.disabled = true;
       closeActiveStream();
@@ -1140,7 +1413,7 @@
     clearMetrics();
     clearResults();
 
-    setStatus("starting…");
+    setStatus("starting");
     if (cancelButtonElement) cancelButtonElement.disabled = true;
     if (runButtonElement) runButtonElement.disabled = true;
 
@@ -1149,7 +1422,7 @@
       activeQueryIdentifier = responsePayload.query_id;
       setQueryIdentifier(activeQueryIdentifier);
 
-      setStatus("connecting…");
+      setStatus("connecting");
       startStream(responsePayload.stream_url);
     } catch (error) {
       setStatus("error");
@@ -1165,8 +1438,8 @@
     if (!activeQueryIdentifier) return;
 
     if (cancelButtonElement) cancelButtonElement.disabled = true;
-    setStatus("canceling…");
-
+    setStatus("canceling");
+    
     try {
       await requestCancellation(activeQueryIdentifier);
     } catch (error) {
@@ -1403,7 +1676,7 @@
   clearButtonElement?.addEventListener("click", handleClear);
   copyJsonButtonElement?.addEventListener("click", handleCopyJson);
 
-
+  setResultsVisible(false);
   loadDefaultQueryIfEmpty();
   scheduleChartsRender();
   updateCopyButtonState();

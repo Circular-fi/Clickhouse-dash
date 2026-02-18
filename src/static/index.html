@@ -33,11 +33,28 @@
           <button id="cancelButton" class="button" disabled>Cancel</button>
           <button id="clearButton" class="button">Clear</button>
 
-          <select id="themeSelect" class="button" aria-label="Theme">
-            <option value="system">System</option>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-          </select>
+          <div id="themeSelect" class="themeSelect" aria-label="Theme">
+            <button
+              id="themeSelectButton"
+              class="button themeSelect__button"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false">
+              <span id="themeSelectText">System</span>
+            </button>
+
+            <div
+              id="themeSelectMenu"
+              class="themeSelect__menu"
+              role="listbox"
+              tabindex="-1"
+              hidden>
+              <button type="button" class="themeSelect__option" role="option" data-value="system" aria-selected="true">System</button>
+              <button type="button" class="themeSelect__option" role="option" data-value="dark" aria-selected="false">Dark</button>
+              <button type="button" class="themeSelect__option" role="option" data-value="light" aria-selected="false">Light</button>
+            </div>
+          </div>
+
         </div>
       </div>
     </section>
@@ -107,7 +124,7 @@
       </div>
     </section>
 
-    <section class="panel panel--results">
+    <section id="resultsPanel" class="panel panel--results">
       <div class="panel__header">
         <div class="panel__title">Results</div>
         <div class="panel__meta">
