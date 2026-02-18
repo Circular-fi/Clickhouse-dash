@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/hex"
 	"fmt"
 	"time"
 	"strings"
 	"errors"
 	"strconv"
+	"reflect"
 	"reflect"
 
 	clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -27,7 +29,16 @@ func formatResultValue(value any) string {
 	case time.Time:
 		return typed.Format(time.RFC3339Nano)
 	default:
-		return fmt.Sprint(typed)
+		rv := reflect.ValueOf(value)
+        if rv.IsValid() {
+            switch rv.Kind() {
+            case reflect.Slice, reflect.Array, reflect.Map, reflect.Struct:
+                if b, err := json.Marshal(value); err == nil {
+                    return string(b)
+                }
+            }
+        }
+        return fmt.Sprint(value)
 	}
 }
 
@@ -116,15 +127,29 @@ func resolveDatabaseTypeNames(rows any) ([]string, error) {
 func allocateScanPointerForDatabaseType(databaseTypeName string) any {
 	normalized := strings.ToLower(strings.TrimSpace(databaseTypeName))
 
-	// Nullable(T)
-	if strings.HasPrefix(normalized, "nullable(") && strings.HasSuffix(normalized, ")") {
-		normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "nullable("), ")"))
-	}
+    nullable := false
+    for {
+        if strings.HasPrefix(normalized, "nullable(") && strings.HasSuffix(normalized, ")") {
+            nullable = true
+            normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "nullable("), ")"))
+            continue
+        }
+        if strings.HasPrefix(normalized, "lowcardinality(") && strings.HasSuffix(normalized, ")") {
+            normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "lowcardinality("), ")"))
+            continue
+        }
+        break
+    }
 
-	// LowCardinality(T)
-	if strings.HasPrefix(normalized, "lowcardinality(") && strings.HasSuffix(normalized, ")") {
-		normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "lowcardinality("), ")"))
-	}
+    if nullable ||
+        strings.HasPrefix(normalized, "array(") ||
+        strings.HasPrefix(normalized, "map(") ||
+        strings.HasPrefix(normalized, "tuple(") ||
+        strings.HasPrefix(normalized, "nested(") ||
+        strings.HasPrefix(normalized, "decimal") {
+        var v any
+        return &v
+    }
 
 	switch {
 	case normalized == "string" || normalized == "uuid" || strings.HasPrefix(normalized, "fixedstring("):
@@ -175,13 +200,19 @@ func allocateScanPointerForDatabaseType(databaseTypeName string) any {
 	default:
 		// For now, represent unknown types as string ONLY if ClickHouse can scan it as string.
 		// If you hit Arrays/Maps/Tuples/Decimals, we will add dedicated cases.
-		var v string
+		var v any
 		return &v
 	}
 }
 
 func stringifyScanPointer(pointer any) string {
 	switch v := pointer.(type) {
+	case *any:
+        if v == nil || *v == nil {
+            return "NULL"
+        }
+        return formatResultValue(*v)
+
 	case *string:
 		if v == nil {
 			return ""
