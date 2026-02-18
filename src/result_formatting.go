@@ -1,258 +1,246 @@
 package main
 
 import (
-	"encoding/json"
-	"encoding/hex"
-	"fmt"
-	"time"
-	"strings"
-	"errors"
-	"strconv"
-	"reflect"
-	"reflect"
+  "encoding/hex"
+  "encoding/json"
+  "fmt"
+  "math/big"
+  "reflect"
+  "strings"
+  "time"
 
-	clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+  clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+type dynamicOrderedMap struct {
+  m map[string]any
+}
 
+func newDynamicOrderedMap() *dynamicOrderedMap {
+  return &dynamicOrderedMap{m: make(map[string]any)}
+}
+
+func (d *dynamicOrderedMap) Reset() {
+  if d.m == nil {
+    d.m = make(map[string]any)
+    return
+  }
+  for k := range d.m {
+    delete(d.m, k)
+  }
+}
+
+func (d *dynamicOrderedMap) Put(key any, value any) {
+  if d.m == nil {
+    d.m = make(map[string]any)
+  }
+  d.m[fmt.Sprint(key)] = value
+}
+
+func (d *dynamicOrderedMap) Get(key any) (any, bool) {
+  if d.m == nil {
+    return nil, false
+  }
+  v, ok := d.m[fmt.Sprint(key)]
+  return v, ok
+}
+
+func (d *dynamicOrderedMap) Keys() <-chan any {
+  ch := make(chan any)
+  go func() {
+    if d.m != nil {
+      for k := range d.m {
+        ch <- k
+      }
+    }
+    close(ch)
+  }()
+  return ch
+}
+
+func (d dynamicOrderedMap) MarshalJSON() ([]byte, error) {
+	normalized := make(map[string]any, len(d.m))
+	for k, v := range d.m {
+		normalized[k] = normalizeForJSON(v)
+	}
+	return json.Marshal(normalized)
+}
+
+func unwrapTypeName(databaseTypeName string) string {
+  s := strings.ToLower(strings.TrimSpace(databaseTypeName))
+  for {
+    if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") {
+      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")"))
+      continue
+    }
+    if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") {
+      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")"))
+      continue
+    }
+    break
+  }
+  return s
+}
+
+func newScanDestinationFromColumnType(ct clickhouseDriver.ColumnType) any {
+  normalized := unwrapTypeName(ct.DatabaseTypeName())
+  if strings.HasPrefix(normalized, "map(") {
+    return newDynamicOrderedMap()
+  }
+
+  st := ct.ScanType()
+  if st == nil {
+    var v any
+    return &v
+  }
+  return reflect.New(st).Interface()
+}
+
+func resetDynamicContainers(scanDestinations []any) {
+  for _, d := range scanDestinations {
+    if om, ok := d.(*dynamicOrderedMap); ok {
+      om.Reset()
+    }
+  }
+}
+
+func stringifyScanPointer(pointer any) string {
+  if pointer == nil {
+    return "NULL"
+  }
+
+  rv := reflect.ValueOf(pointer)
+  for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
+    if rv.IsNil() {
+      return "NULL"
+    }
+    rv = rv.Elem()
+  }
+
+  if !rv.IsValid() {
+    return "NULL"
+  }
+
+  return formatResultValue(rv.Interface())
+}
 
 func formatResultValue(value any) string {
 	if value == nil {
 		return "NULL"
 	}
 
-	switch typed := value.(type) {
+	if m, ok := value.(json.Marshaler); ok {
+		if b, err := m.MarshalJSON(); err == nil {
+			return string(b)
+		}
+	}
+
+	switch v := value.(type) {
 	case string:
-		return typed
+		return v
 	case []byte:
-		return hex.EncodeToString(typed)
+		return hex.EncodeToString(v)
 	case time.Time:
-		return typed.Format(time.RFC3339Nano)
+		return v.Format(time.RFC3339Nano)
+	case big.Int:
+		return v.String()
+	case *big.Int:
+		if v == nil {
+			return "NULL"
+		}
+		return v.String()
 	default:
 		rv := reflect.ValueOf(value)
-        if rv.IsValid() {
-            switch rv.Kind() {
-            case reflect.Slice, reflect.Array, reflect.Map, reflect.Struct:
-                if b, err := json.Marshal(value); err == nil {
-                    return string(b)
-                }
-            }
-        }
-        return fmt.Sprint(value)
+		if rv.IsValid() {
+			switch rv.Kind() {
+			case reflect.Slice, reflect.Array, reflect.Map, reflect.Struct:
+				normalized := normalizeForJSON(value)
+				if b, err := json.Marshal(normalized); err == nil {
+					return string(b)
+				}
+			}
+		}
+		if s, ok := value.(fmt.Stringer); ok {
+			return s.String()
+		}
+		return fmt.Sprint(value)
 	}
 }
 
-func safeColumnTypes(rows clickhouseDriver.Rows) ([]string, error) {
-	type columnTypesProvider interface {
-		ColumnTypes() ([]clickhouseDriver.ColumnType, error)
-	}
 
-	provider, ok := any(rows).(columnTypesProvider)
-	if !ok {
-		return nil, errors.New("driver rows does not support ColumnTypes()")
-	}
+func normalizeForJSON(v any) any {
+  if v == nil {
+    return nil
+  }
 
-	columnTypes, err := provider.ColumnTypes()
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]string, 0, len(columnTypes))
-	for _, ct := range columnTypes {
-		out = append(out, ct.DatabaseTypeName())
-	}
-	return out, nil
-}
-
-func resolveDatabaseTypeNames(rows any) ([]string, error) {
-	method := reflect.ValueOf(rows).MethodByName("ColumnTypes")
-	if !method.IsValid() {
-		return nil, fmt.Errorf("rows does not expose ColumnTypes()")
-	}
-
-	results := method.Call(nil)
-
-	// Possible forms:
-	//  - ColumnTypes() ([]T, error)
-	//  - ColumnTypes() ([]T)
-	if len(results) == 0 {
-		return nil, fmt.Errorf("ColumnTypes() returned no values")
-	}
-
-	if len(results) == 2 {
-		if !results[1].IsNil() {
-			if err, ok := results[1].Interface().(error); ok {
-				return nil, err
-			}
-			return nil, fmt.Errorf("ColumnTypes() returned a non-error second value")
-		}
-	}
-
-	sliceValue := results[0]
-	if sliceValue.Kind() != reflect.Slice {
-		return nil, fmt.Errorf("ColumnTypes() first value is not a slice")
-	}
-
-	typeNames := make([]string, 0, sliceValue.Len())
-	for index := 0; index < sliceValue.Len(); index++ {
-		element := sliceValue.Index(index)
-
-		// Try DatabaseTypeName() string
-		dbTypeMethod := element.MethodByName("DatabaseTypeName")
-		if dbTypeMethod.IsValid() {
-			out := dbTypeMethod.Call(nil)
-			if len(out) == 1 && out[0].Kind() == reflect.String {
-				typeNames = append(typeNames, out[0].String())
-				continue
-			}
-		}
-
-		// Try Name() string (fallback)
-		nameMethod := element.MethodByName("Name")
-		if nameMethod.IsValid() {
-			out := nameMethod.Call(nil)
-			if len(out) == 1 && out[0].Kind() == reflect.String {
-				typeNames = append(typeNames, out[0].String())
-				continue
-			}
-		}
-
-		// Last resort
-		typeNames = append(typeNames, fmt.Sprint(element.Interface()))
-	}
-
-	return typeNames, nil
-}
-
-func allocateScanPointerForDatabaseType(databaseTypeName string) any {
-	normalized := strings.ToLower(strings.TrimSpace(databaseTypeName))
-
-    nullable := false
-    for {
-        if strings.HasPrefix(normalized, "nullable(") && strings.HasSuffix(normalized, ")") {
-            nullable = true
-            normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "nullable("), ")"))
-            continue
-        }
-        if strings.HasPrefix(normalized, "lowcardinality(") && strings.HasSuffix(normalized, ")") {
-            normalized = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(normalized, "lowcardinality("), ")"))
-            continue
-        }
-        break
+  rv := reflect.ValueOf(v)
+  for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
+    if rv.IsNil() {
+      return nil
     }
+    rv = rv.Elem()
+  }
+  if !rv.IsValid() {
+    return nil
+  }
 
-    if nullable ||
-        strings.HasPrefix(normalized, "array(") ||
-        strings.HasPrefix(normalized, "map(") ||
-        strings.HasPrefix(normalized, "tuple(") ||
-        strings.HasPrefix(normalized, "nested(") ||
-        strings.HasPrefix(normalized, "decimal") {
-        var v any
-        return &v
+  if bi, ok := rv.Interface().(big.Int); ok {
+    return bi.String()
+  }
+  if bip, ok := rv.Interface().(*big.Int); ok {
+    if bip == nil {
+      return nil
     }
+    return bip.String()
+  }
+  if t, ok := rv.Interface().(time.Time); ok {
+    return t.Format(time.RFC3339Nano)
+  }
+  if b, ok := rv.Interface().([]byte); ok {
+    return hex.EncodeToString(b)
+  }
 
-	switch {
-	case normalized == "string" || normalized == "uuid" || strings.HasPrefix(normalized, "fixedstring("):
-		var v string
-		return &v
+  switch rv.Kind() {
+  case reflect.Slice, reflect.Array:
+    n := rv.Len()
+    out := make([]any, n)
+    for i := 0; i < n; i++ {
+      out[i] = normalizeForJSON(rv.Index(i).Interface())
+    }
+    return out
 
-	case normalized == "float32":
-		var v float32
-		return &v
-	case normalized == "float64":
-		var v float64
-		return &v
+  case reflect.Map:
+    out := make(map[string]any, rv.Len())
+    iter := rv.MapRange()
+    for iter.Next() {
+      k := fmt.Sprint(iter.Key().Interface())
+      out[k] = normalizeForJSON(iter.Value().Interface())
+    }
+    return out
 
-	case normalized == "uint8":
-		var v uint8
-		return &v
-	case normalized == "uint16":
-		var v uint16
-		return &v
-	case normalized == "uint32":
-		var v uint32
-		return &v
-	case normalized == "uint64":
-		var v uint64
-		return &v
-
-	case normalized == "int8":
-		var v int8
-		return &v
-	case normalized == "int16":
-		var v int16
-		return &v
-	case normalized == "int32":
-		var v int32
-		return &v
-	case normalized == "int64":
-		var v int64
-		return &v
-
-	case normalized == "bool":
-		var v bool
-		return &v
-
-	case normalized == "date" || normalized == "datetime" || strings.HasPrefix(normalized, "datetime64"):
-		var v time.Time
-		return &v
-
-	default:
-		// For now, represent unknown types as string ONLY if ClickHouse can scan it as string.
-		// If you hit Arrays/Maps/Tuples/Decimals, we will add dedicated cases.
-		var v any
-		return &v
-	}
-}
-
-func stringifyScanPointer(pointer any) string {
-	switch v := pointer.(type) {
-	case *any:
-        if v == nil || *v == nil {
-            return "NULL"
+  case reflect.Struct:
+    rt := rv.Type()
+    out := make(map[string]any)
+    for i := 0; i < rt.NumField(); i++ {
+      f := rt.Field(i)
+      if f.PkgPath != "" {
+        continue
+      }
+      name := f.Name
+      if tag := f.Tag.Get("json"); tag != "" {
+        parts := strings.Split(tag, ",")
+        if parts[0] == "-" {
+          continue
         }
-        return formatResultValue(*v)
+        if parts[0] != "" {
+          name = parts[0]
+        }
+      }
+      out[name] = normalizeForJSON(rv.Field(i).Interface())
+    }
+    return out
 
-	case *string:
-		if v == nil {
-			return ""
-		}
-		return *v
-
-	case *float32:
-		return strconv.FormatFloat(float64(*v), 'f', -1, 32)
-	case *float64:
-		return strconv.FormatFloat(*v, 'f', -1, 64)
-
-	case *uint8:
-		return strconv.FormatUint(uint64(*v), 10)
-	case *uint16:
-		return strconv.FormatUint(uint64(*v), 10)
-	case *uint32:
-		return strconv.FormatUint(uint64(*v), 10)
-	case *uint64:
-		return strconv.FormatUint(*v, 10)
-
-	case *int8:
-		return strconv.FormatInt(int64(*v), 10)
-	case *int16:
-		return strconv.FormatInt(int64(*v), 10)
-	case *int32:
-		return strconv.FormatInt(int64(*v), 10)
-	case *int64:
-		return strconv.FormatInt(*v, 10)
-
-	case *bool:
-		if *v {
-			return "true"
-		}
-		return "false"
-
-	case *time.Time:
-		return v.Format(time.RFC3339Nano)
-
-	default:
-		return fmt.Sprint(pointer)
-	}
+  default:
+    return rv.Interface()
+  }
 }
-

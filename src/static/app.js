@@ -142,6 +142,7 @@
   }
 
   function coerceDeep(v) {
+    v = parseJsonStringIfLikely(v);
     if (Array.isArray(v)) return v.map(coerceDeep);
     if (v && typeof v === "object") {
       const out = {};
@@ -150,7 +151,6 @@
     }
     return coerceNumberLike(v);
   }
-
 
   function rowToObject(row) {
     const obj = {};
@@ -444,6 +444,26 @@
     if (out[out.length - 1] !== points[points.length - 1]) out.push(points[points.length - 1]);
     return out;
   }
+
+  function parseJsonStringIfLikely(v) {
+    if (typeof v !== "string") return v;
+    const s = v.trim();
+    if (!s) return v;
+
+    const first = s[0];
+    const last = s[s.length - 1];
+
+    const looksLikeJson =
+      (first === "[" && last === "]") ||
+      (first === "{" && last === "}") ||
+      (first === "\"" && last === "\"");
+
+    if (!looksLikeJson) return v;
+
+    const parsed = safelyParseJson(s);
+    return parsed === null ? v : parsed;
+  }
+
 
   function drawSparkline(canvas, points, opts = {}) {
     const prepared = prepareCanvas(canvas);

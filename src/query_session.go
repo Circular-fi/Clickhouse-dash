@@ -223,6 +223,13 @@ func (session *querySession) requestCancellation() {
 // executeQuery runs the ClickHouse query and drains the result stream.
 func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.Conn, sessionStore *querySessionStore) {
   executionStartedTime := time.Now()
+
+  defer func() {
+    if r := recover(); r != nil {
+      session.finishWithError(time.Now(), fmt.Errorf("panic: %v", r), executionStartedTime)
+    }
+  }()
+
   defer func() {
     sessionStore.remove(session.queryIdentifier)
   }()
@@ -237,6 +244,37 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
     clickhouse.WithLogs(session.onLog),
   )
 
+  if !isReadOnlyClickhouseStatement(session.queryText) {
+    if execError := clickhouseConnection.Exec(ctx, session.queryText); execError != nil {
+      session.finishWithError(time.Now(), execError, executionStartedTime)
+      return
+    }
+
+    session.trySendCritical(serverSentEventsMessage{
+      eventName: "result_meta",
+      payload: map[string]any{
+        "query_id": session.queryIdentifier,
+        "columns":  []string{"status"},
+        "types":    []string{"String"},
+      },
+    })
+
+    session.mutex.Lock()
+    session.resultRowsReturned = 1
+    session.mutex.Unlock()
+
+    session.trySendResult(serverSentEventsMessage{
+      eventName: "result_rows",
+      payload: map[string]any{
+        "query_id": session.queryIdentifier,
+        "rows":     [][]string{{"OK"}},
+      },
+    })
+
+    session.finishSuccessfully(time.Now(), executionStartedTime)
+    return
+  }
+
   rows, queryError := clickhouseConnection.Query(ctx, session.queryText)
   if queryError != nil {
     session.finishWithError(time.Now(), queryError, executionStartedTime)
@@ -245,10 +283,17 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
   defer rows.Close()
 
   columnNames := rows.Columns()
-  columnTypeNames, typeError := resolveDatabaseTypeNames(rows)
-  if typeError != nil || len(columnTypeNames) != len(columnNames) {
-    session.finishWithError(time.Now(), fmt.Errorf("cannot resolve result column types: %w", typeError), executionStartedTime)
+  columnTypes := rows.ColumnTypes()
+  if len(columnTypes) != len(columnNames) {
+    session.finishWithError(time.Now(), fmt.Errorf("cannot resolve result column types: columns=%d types=%d", len(columnNames), len(columnTypes)), executionStartedTime)
     return
+  }
+
+  columnTypeNames := make([]string, len(columnTypes))
+  scanDestinations := make([]any, len(columnTypes))
+  for i, ct := range columnTypes {
+    columnTypeNames[i] = ct.DatabaseTypeName()
+    scanDestinations[i] = newScanDestinationFromColumnType(ct)
   }
 
   session.trySendCritical(serverSentEventsMessage{
@@ -261,14 +306,7 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
   })
 
   columnCount := len(columnNames)
-
-  scanDestinations := make([]any, columnCount)
-  valuePointers := make([]any, columnCount)
-  for columnIndex := 0; columnIndex < columnCount; columnIndex++ {
-    destinationPointer := allocateScanPointerForDatabaseType(columnTypeNames[columnIndex])
-    scanDestinations[columnIndex] = destinationPointer
-    valuePointers[columnIndex] = destinationPointer
-  }
+  valuePointers := scanDestinations
 
   batch := make([][]string, 0, resultBatchRows)
   lastFlush := time.Now()
@@ -294,6 +332,8 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
   }
 
   for rows.Next() {
+    resetDynamicContainers(scanDestinations)
+
     if scanError := rows.Scan(scanDestinations...); scanError != nil {
       session.finishWithError(time.Now(), scanError, executionStartedTime)
       return
