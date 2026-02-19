@@ -212,7 +212,7 @@ func (server *dashboardServer) handleCreateQuery(httpResponseWriter http.Respons
 
 	writeJson(httpResponseWriter, http.StatusOK, map[string]any{
 		"query_id":   queryIdentifier,
-		"stream_url": fmt.Sprintf("/api/query/stream?query_id=%s", queryIdentifier),
+		"stream_url": fmt.Sprintf("api/query/stream?query_id=%s", queryIdentifier),
 	})
 }
 
