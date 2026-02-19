@@ -285,8 +285,34 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
   columnNames := rows.Columns()
   columnTypes := rows.ColumnTypes()
   if len(columnTypes) != len(columnNames) {
-    session.finishWithError(time.Now(), fmt.Errorf("cannot resolve result column types: columns=%d types=%d", len(columnNames), len(columnTypes)), executionStartedTime)
+    session.finishWithError(
+      time.Now(),
+      fmt.Errorf("cannot resolve result column types: columns=%d types=%d", len(columnNames), len(columnTypes)),
+      executionStartedTime,
+    )
     return
+  }
+
+  if safeQuery, ok := buildSafeProjectionQuery(session.queryText, columnNames, columnTypes); ok {
+    rows.Close()
+
+    rows, queryError = clickhouseConnection.Query(ctx, safeQuery)
+    if queryError != nil {
+      session.finishWithError(time.Now(), queryError, executionStartedTime)
+      return
+    }
+    defer rows.Close()
+
+    columnNames = rows.Columns()
+    columnTypes = rows.ColumnTypes()
+    if len(columnTypes) != len(columnNames) {
+      session.finishWithError(
+        time.Now(),
+        fmt.Errorf("cannot resolve result column types after projection: columns=%d types=%d", len(columnNames), len(columnTypes)),
+        executionStartedTime,
+      )
+      return
+    }
   }
 
   columnTypeNames := make([]string, len(columnTypes))
@@ -304,6 +330,8 @@ func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.
       "types":    columnTypeNames,
     },
   })
+
+
 
   columnCount := len(columnNames)
   valuePointers := scanDestinations

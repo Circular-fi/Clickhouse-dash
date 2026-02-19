@@ -1359,6 +1359,7 @@
       if (payload && payload.message) {
         setError(payload.message);
         setStatus("error");
+        setResultsVisible(true)
       }
     });
 

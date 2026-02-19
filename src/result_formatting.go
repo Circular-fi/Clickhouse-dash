@@ -1,61 +1,65 @@
 package main
 
 import (
-  "encoding/hex"
-  "encoding/json"
-  "fmt"
-  "math/big"
-  "reflect"
-  "strings"
-  "time"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"reflect"
+	"strings"
+	"time"
 
-  clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
+type textMarshaler interface {
+	MarshalText() ([]byte, error)
+}
+
 type dynamicOrderedMap struct {
-  m map[string]any
+	m map[string]any
 }
 
 func newDynamicOrderedMap() *dynamicOrderedMap {
-  return &dynamicOrderedMap{m: make(map[string]any)}
+	return &dynamicOrderedMap{m: make(map[string]any)}
 }
 
 func (d *dynamicOrderedMap) Reset() {
-  if d.m == nil {
-    d.m = make(map[string]any)
-    return
-  }
-  for k := range d.m {
-    delete(d.m, k)
-  }
+	if d.m == nil {
+		d.m = make(map[string]any)
+		return
+	}
+	for k := range d.m {
+		delete(d.m, k)
+	}
 }
 
 func (d *dynamicOrderedMap) Put(key any, value any) {
-  if d.m == nil {
-    d.m = make(map[string]any)
-  }
-  d.m[fmt.Sprint(key)] = value
+	if d.m == nil {
+		d.m = make(map[string]any)
+	}
+	d.m[fmt.Sprint(key)] = value
 }
 
 func (d *dynamicOrderedMap) Get(key any) (any, bool) {
-  if d.m == nil {
-    return nil, false
-  }
-  v, ok := d.m[fmt.Sprint(key)]
-  return v, ok
+	if d.m == nil {
+		return nil, false
+	}
+	v, ok := d.m[fmt.Sprint(key)]
+	return v, ok
 }
 
 func (d *dynamicOrderedMap) Keys() <-chan any {
-  ch := make(chan any)
-  go func() {
-    if d.m != nil {
-      for k := range d.m {
-        ch <- k
-      }
-    }
-    close(ch)
-  }()
-  return ch
+	ch := make(chan any)
+	go func() {
+		if d.m != nil {
+			for k := range d.m {
+				ch <- k
+			}
+		}
+		close(ch)
+	}()
+	return ch
 }
 
 func (d dynamicOrderedMap) MarshalJSON() ([]byte, error) {
@@ -66,62 +70,81 @@ func (d dynamicOrderedMap) MarshalJSON() ([]byte, error) {
 	return json.Marshal(normalized)
 }
 
-func unwrapTypeName(databaseTypeName string) string {
-  s := strings.ToLower(strings.TrimSpace(databaseTypeName))
-  for {
-    if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") {
-      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")"))
-      continue
-    }
-    if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") {
-      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")"))
-      continue
-    }
-    break
-  }
-  return s
+func parseTypeName(databaseTypeName string) (base string, nullable bool) {
+	s := strings.ToLower(strings.TrimSpace(databaseTypeName))
+	for {
+		if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") {
+			nullable = true
+			s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")"))
+			continue
+		}
+		if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") {
+			s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")"))
+			continue
+		}
+		break
+	}
+	return s, nullable
 }
 
 func newScanDestinationFromColumnType(ct clickhouseDriver.ColumnType) any {
-  normalized := unwrapTypeName(ct.DatabaseTypeName())
-  if strings.HasPrefix(normalized, "map(") {
-    return newDynamicOrderedMap()
-  }
+	base, nullable := parseTypeName(ct.DatabaseTypeName())
 
-  st := ct.ScanType()
-  if st == nil {
-    var v any
-    return &v
-  }
-  return reflect.New(st).Interface()
+	if strings.HasPrefix(base, "map(") {
+		return newDynamicOrderedMap()
+	}
+
+	if nullable ||
+		strings.HasPrefix(base, "array(") ||
+		strings.HasPrefix(base, "tuple(") ||
+		strings.HasPrefix(base, "nested(") ||
+		strings.HasPrefix(base, "decimal") ||
+		base == "json" ||
+		base == "dynamic" ||
+		base == "variant" ||
+		base == "nothing" ||
+		strings.HasPrefix(base, "int128") ||
+		strings.HasPrefix(base, "uint128") ||
+		strings.HasPrefix(base, "int256") ||
+		strings.HasPrefix(base, "uint256") {
+		var v any
+		return &v
+	}
+
+	st := ct.ScanType()
+	if st == nil {
+		var v any
+		return &v
+	}
+	return reflect.New(st).Interface()
 }
 
 func resetDynamicContainers(scanDestinations []any) {
-  for _, d := range scanDestinations {
-    if om, ok := d.(*dynamicOrderedMap); ok {
-      om.Reset()
-    }
-  }
+	for _, d := range scanDestinations {
+		if om, ok := d.(*dynamicOrderedMap); ok {
+			om.Reset()
+		}
+	}
 }
 
 func stringifyScanPointer(pointer any) string {
-  if pointer == nil {
-    return "NULL"
-  }
+	if pointer == nil {
+		return "NULL"
+	}
 
-  rv := reflect.ValueOf(pointer)
-  for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
-    if rv.IsNil() {
-      return "NULL"
-    }
-    rv = rv.Elem()
-  }
+	rv := reflect.ValueOf(pointer)
+	for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
+		if rv.IsNil() {
+			return "NULL"
+		}
+		rv = rv.Elem()
+	}
 
-  if !rv.IsValid() {
-    return "NULL"
-  }
+	if !rv.IsValid() {
+		return "NULL"
+	}
 
-  return formatResultValue(rv.Interface())
+	return formatResultValue(rv.Interface())
 }
 
 func formatResultValue(value any) string {
@@ -131,6 +154,12 @@ func formatResultValue(value any) string {
 
 	if m, ok := value.(json.Marshaler); ok {
 		if b, err := m.MarshalJSON(); err == nil {
+			return string(b)
+		}
+	}
+
+	if tm, ok := value.(textMarshaler); ok {
+		if b, err := tm.MarshalText(); err == nil {
 			return string(b)
 		}
 	}
@@ -149,98 +178,221 @@ func formatResultValue(value any) string {
 			return "NULL"
 		}
 		return v.String()
-	default:
-		rv := reflect.ValueOf(value)
-		if rv.IsValid() {
-			switch rv.Kind() {
-			case reflect.Slice, reflect.Array, reflect.Map, reflect.Struct:
-				normalized := normalizeForJSON(value)
-				if b, err := json.Marshal(normalized); err == nil {
-					return string(b)
-				}
+	}
+
+	if s, ok := value.(fmt.Stringer); ok {
+		return s.String()
+	}
+
+	rv := reflect.ValueOf(value)
+	if rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.Slice, reflect.Array, reflect.Map, reflect.Struct:
+			normalized := normalizeForJSON(value)
+			if b, err := json.Marshal(normalized); err == nil {
+				return string(b)
 			}
 		}
-		if s, ok := value.(fmt.Stringer); ok {
-			return s.String()
+	}
+
+	return fmt.Sprint(value)
+}
+
+func normalizeForJSON(v any) any {
+	if v == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(v)
+	for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
+		if rv.IsNil() {
+			return nil
 		}
-		return fmt.Sprint(value)
+		rv = rv.Elem()
+	}
+	if !rv.IsValid() {
+		return nil
+	}
+
+	if tm, ok := rv.Interface().(textMarshaler); ok {
+		if b, err := tm.MarshalText(); err == nil {
+			return string(b)
+		}
+	}
+
+	if bi, ok := rv.Interface().(big.Int); ok {
+		return bi.String()
+	}
+	if bip, ok := rv.Interface().(*big.Int); ok {
+		if bip == nil {
+			return nil
+		}
+		return bip.String()
+	}
+	if t, ok := rv.Interface().(time.Time); ok {
+		return t.Format(time.RFC3339Nano)
+	}
+	if b, ok := rv.Interface().([]byte); ok {
+		return hex.EncodeToString(b)
+	}
+	if s, ok := rv.Interface().(fmt.Stringer); ok {
+		return s.String()
+	}
+
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		n := rv.Len()
+		out := make([]any, n)
+		for i := 0; i < n; i++ {
+			out[i] = normalizeForJSON(rv.Index(i).Interface())
+		}
+		return out
+
+	case reflect.Map:
+		out := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			k := fmt.Sprint(iter.Key().Interface())
+			out[k] = normalizeForJSON(iter.Value().Interface())
+		}
+		return out
+
+	case reflect.Struct:
+		rt := rv.Type()
+		out := make(map[string]any)
+		for i := 0; i < rt.NumField(); i++ {
+			f := rt.Field(i)
+			if f.PkgPath != "" {
+				continue
+			}
+			name := f.Name
+			if tag := f.Tag.Get("json"); tag != "" {
+				parts := strings.Split(tag, ",")
+				if parts[0] == "-" {
+					continue
+				}
+				if parts[0] != "" {
+					name = parts[0]
+				}
+			}
+			out[name] = normalizeForJSON(rv.Field(i).Interface())
+		}
+		return out
+
+	default:
+		return rv.Interface()
 	}
 }
 
+func unwrapTypeName(databaseTypeName string) string { 
+  s := strings.ToLower(strings.TrimSpace(databaseTypeName)) 
+  for { 
+    if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") { 
+      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")")) 
+      continue 
+    } 
+    if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") { 
+      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")")) 
+      continue 
+    } 
+    break 
+  } 
+  return s 
+}
 
-func normalizeForJSON(v any) any {
-  if v == nil {
-    return nil
-  }
+func trimTrailingSemicolons(q string) string {
+	q = strings.TrimSpace(q)
+	for strings.HasSuffix(q, ";") {
+		q = strings.TrimSpace(strings.TrimSuffix(q, ";"))
+	}
+	return q
+}
 
-  rv := reflect.ValueOf(v)
-  for rv.IsValid() && (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) {
-    if rv.IsNil() {
-      return nil
-    }
-    rv = rv.Elem()
-  }
-  if !rv.IsValid() {
-    return nil
-  }
+func chIdent(name string) string {
+	// ClickHouse accepte les backticks; on escape les backticks internes
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
 
-  if bi, ok := rv.Interface().(big.Int); ok {
-    return bi.String()
-  }
-  if bip, ok := rv.Interface().(*big.Int); ok {
-    if bip == nil {
-      return nil
-    }
-    return bip.String()
-  }
-  if t, ok := rv.Interface().(time.Time); ok {
-    return t.Format(time.RFC3339Nano)
-  }
-  if b, ok := rv.Interface().([]byte); ok {
-    return hex.EncodeToString(b)
-  }
+func isBigNumericType(dbType string) bool {
+	base := strings.ToLower(strings.TrimSpace(unwrapTypeName(dbType)))
 
-  switch rv.Kind() {
-  case reflect.Slice, reflect.Array:
-    n := rv.Len()
-    out := make([]any, n)
-    for i := 0; i < n; i++ {
-      out[i] = normalizeForJSON(rv.Index(i).Interface())
-    }
-    return out
+	if strings.HasPrefix(base, "decimal") || strings.HasPrefix(base, "decimal32") ||
+		strings.HasPrefix(base, "decimal64") || strings.HasPrefix(base, "decimal128") ||
+		strings.HasPrefix(base, "decimal256") {
+		return true
+	}
 
-  case reflect.Map:
-    out := make(map[string]any, rv.Len())
-    iter := rv.MapRange()
-    for iter.Next() {
-      k := fmt.Sprint(iter.Key().Interface())
-      out[k] = normalizeForJSON(iter.Value().Interface())
-    }
-    return out
+	switch base {
+	case "int128", "uint128", "int256", "uint256":
+		return true
+	default:
+		return false
+	}
+}
 
-  case reflect.Struct:
-    rt := rv.Type()
-    out := make(map[string]any)
-    for i := 0; i < rt.NumField(); i++ {
-      f := rt.Field(i)
-      if f.PkgPath != "" {
-        continue
-      }
-      name := f.Name
-      if tag := f.Tag.Get("json"); tag != "" {
-        parts := strings.Split(tag, ",")
-        if parts[0] == "-" {
-          continue
-        }
-        if parts[0] != "" {
-          name = parts[0]
-        }
-      }
-      out[name] = normalizeForJSON(rv.Field(i).Interface())
-    }
-    return out
+func hasNestedMap(dbType string) bool {
+	base := strings.ToLower(strings.TrimSpace(unwrapTypeName(dbType)))
+	cnt := strings.Count(base, "map(")
+	if cnt == 0 {
+		return false
+	}
+	// Map imbriqué si:
+	// - le type ne commence pas par Map(  (ex: Tuple(... Map(...)) / Array(Map(...)))
+	// - OU il y a plusieurs "map(" (ex: Map(String, Tuple(... Map(...))) ou Map(String, Map(...)))
+	if !strings.HasPrefix(base, "map(") {
+		return true
+	}
+	return cnt > 1
+}
 
-  default:
-    return rv.Interface()
-  }
+func shouldJSONStringify(dbType string) bool {
+	// On stringify les Maps imbriqués (ceux qui déclenchent Row() → panic dans le driver)
+	if hasNestedMap(dbType) {
+		return true
+	}
+
+	// Tu peux aussi sécuriser des types “complexes” réputés pénibles à scanner dynamiquement
+	// (optionnel mais pratique)
+	base := strings.ToLower(strings.TrimSpace(unwrapTypeName(dbType)))
+	if strings.HasPrefix(base, "dynamic") || strings.HasPrefix(base, "variant") || strings.HasPrefix(base, "json") {
+		return true
+	}
+
+	return false
+}
+
+func buildSafeProjectionQuery(original string, cols []string, types []clickhouseDriver.ColumnType) (string, bool) {
+	need := false
+	exprs := make([]string, len(cols))
+
+	for i := range cols {
+		colName := cols[i]
+		ref := "__q." + chIdent(colName)
+		alias := chIdent(colName)
+
+		dbt := types[i].DatabaseTypeName()
+
+		switch {
+		case shouldJSONStringify(dbt):
+			need = true
+			exprs[i] = fmt.Sprintf("toJSONString(%s) AS %s", ref, alias)
+
+		case isBigNumericType(dbt):
+			// gros ints/decimals : representation exacte en string (et ton front pourra parser)
+			need = true
+			exprs[i] = fmt.Sprintf("toString(%s) AS %s", ref, alias)
+
+		default:
+			// on laisse passer tel quel
+			exprs[i] = fmt.Sprintf("%s AS %s", ref, alias)
+		}
+	}
+
+	if !need {
+		return "", false
+	}
+
+	inner := trimTrailingSemicolons(original)
+	safe := fmt.Sprintf("SELECT %s FROM (%s) AS __q", strings.Join(exprs, ", "), inner)
+	return safe, true
 }
