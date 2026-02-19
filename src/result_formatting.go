@@ -91,24 +91,11 @@ func newScanDestinationFromColumnType(ct clickhouseDriver.ColumnType) any {
 	base, nullable := parseTypeName(ct.DatabaseTypeName())
 
 	if strings.HasPrefix(base, "map(") {
+		if nullable {
+			var v any
+			return &v
+		}
 		return newDynamicOrderedMap()
-	}
-
-	if nullable ||
-		strings.HasPrefix(base, "array(") ||
-		strings.HasPrefix(base, "tuple(") ||
-		strings.HasPrefix(base, "nested(") ||
-		strings.HasPrefix(base, "decimal") ||
-		base == "json" ||
-		base == "dynamic" ||
-		base == "variant" ||
-		base == "nothing" ||
-		strings.HasPrefix(base, "int128") ||
-		strings.HasPrefix(base, "uint128") ||
-		strings.HasPrefix(base, "int256") ||
-		strings.HasPrefix(base, "uint256") {
-		var v any
-		return &v
 	}
 
 	st := ct.ScanType()
@@ -284,20 +271,20 @@ func normalizeForJSON(v any) any {
 	}
 }
 
-func unwrapTypeName(databaseTypeName string) string { 
-  s := strings.ToLower(strings.TrimSpace(databaseTypeName)) 
-  for { 
-    if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") { 
-      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")")) 
-      continue 
-    } 
-    if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") { 
-      s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")")) 
-      continue 
-    } 
-    break 
-  } 
-  return s 
+func unwrapTypeName(databaseTypeName string) string {
+	s := strings.ToLower(strings.TrimSpace(databaseTypeName))
+	for {
+		if strings.HasPrefix(s, "nullable(") && strings.HasSuffix(s, ")") {
+			s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "nullable("), ")"))
+			continue
+		}
+		if strings.HasPrefix(s, "lowcardinality(") && strings.HasSuffix(s, ")") {
+			s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "lowcardinality("), ")"))
+			continue
+		}
+		break
+	}
+	return s
 }
 
 func trimTrailingSemicolons(q string) string {
@@ -309,7 +296,6 @@ func trimTrailingSemicolons(q string) string {
 }
 
 func chIdent(name string) string {
-	// ClickHouse accepte les backticks; on escape les backticks internes
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
@@ -336,9 +322,6 @@ func hasNestedMap(dbType string) bool {
 	if cnt == 0 {
 		return false
 	}
-	// Map imbriqué si:
-	// - le type ne commence pas par Map(  (ex: Tuple(... Map(...)) / Array(Map(...)))
-	// - OU il y a plusieurs "map(" (ex: Map(String, Tuple(... Map(...))) ou Map(String, Map(...)))
 	if !strings.HasPrefix(base, "map(") {
 		return true
 	}
@@ -346,13 +329,10 @@ func hasNestedMap(dbType string) bool {
 }
 
 func shouldJSONStringify(dbType string) bool {
-	// On stringify les Maps imbriqués (ceux qui déclenchent Row() → panic dans le driver)
 	if hasNestedMap(dbType) {
 		return true
 	}
 
-	// Tu peux aussi sécuriser des types “complexes” réputés pénibles à scanner dynamiquement
-	// (optionnel mais pratique)
 	base := strings.ToLower(strings.TrimSpace(unwrapTypeName(dbType)))
 	if strings.HasPrefix(base, "dynamic") || strings.HasPrefix(base, "variant") || strings.HasPrefix(base, "json") {
 		return true
@@ -378,12 +358,10 @@ func buildSafeProjectionQuery(original string, cols []string, types []clickhouse
 			exprs[i] = fmt.Sprintf("toJSONString(%s) AS %s", ref, alias)
 
 		case isBigNumericType(dbt):
-			// gros ints/decimals : representation exacte en string (et ton front pourra parser)
 			need = true
 			exprs[i] = fmt.Sprintf("toString(%s) AS %s", ref, alias)
 
 		default:
-			// on laisse passer tel quel
 			exprs[i] = fmt.Sprintf("%s AS %s", ref, alias)
 		}
 	}

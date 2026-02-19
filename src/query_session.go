@@ -13,7 +13,6 @@ import (
   clickhouseDriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-// querySessionStatus represents the lifecycle status of a query session.
 type querySessionStatus string
 
 const (
@@ -25,17 +24,11 @@ const (
   querySessionStatusResultLimitReached querySessionStatus = "result_limit_reached"
 )
 
-// IMPORTANT: batching côté producteur (executeQuery)
-// => évite de remplir resultEventChannel si le navigateur est plus lent que la DB.
 const (
   resultBatchRows   = 200
   resultBatchPeriod = 50 * time.Millisecond
 )
 
-// querySession contains state and callbacks for a single query execution.
-//
-// The session is created by POST /api/query, started on first SSE attach (GET /api/query/stream),
-// and can be canceled via POST /api/query/cancel or by closing the SSE connection.
 type querySession struct {
   logger *slog.Logger
 
@@ -84,7 +77,6 @@ type querySession struct {
   resultTruncated       bool
 }
 
-// querySessionSnapshot is an immutable view of a session at a specific time.
 type querySessionSnapshot struct {
   queryIdentifier string
   status          querySessionStatus
@@ -110,7 +102,6 @@ type querySessionSnapshot struct {
   threadPeakCount            int
 }
 
-// newQuerySession creates a new query session.
 func newQuerySession(
   logger *slog.Logger,
   queryIdentifier string,
@@ -140,7 +131,6 @@ func newQuerySession(
   }
 }
 
-// trySendResult sends result rows; if the client is too slow, we cancel to avoid OOM.
 func (session *querySession) trySendResult(message serverSentEventsMessage) {
   select {
   case session.resultEventChannel <- message:
@@ -157,7 +147,6 @@ func (session *querySession) trySendResult(message serverSentEventsMessage) {
   }
 }
 
-// trySendNonCritical sends a message without blocking; if the client is slow, the message is dropped.
 func (session *querySession) trySendNonCritical(message serverSentEventsMessage) {
   select {
   case session.nonCriticalEventChannel <- message:
@@ -165,7 +154,6 @@ func (session *querySession) trySendNonCritical(message serverSentEventsMessage)
   }
 }
 
-// trySendCritical sends a message without blocking; if the client is slow or disconnected, the message is dropped.
 func (session *querySession) trySendCritical(message serverSentEventsMessage) {
   select {
   case session.criticalEventChannel <- message:
@@ -200,7 +188,6 @@ func (session *querySession) start(clickhouseConnection clickhouseDriver.Conn, s
   })
 }
 
-// requestCancellation requests cancellation of the query session (best effort).
 func (session *querySession) requestCancellation() {
   session.mutex.Lock()
   defer session.mutex.Unlock()
@@ -220,7 +207,6 @@ func (session *querySession) requestCancellation() {
   session.finishedTime = time.Now()
 }
 
-// executeQuery runs the ClickHouse query and drains the result stream.
 func (session *querySession) executeQuery(clickhouseConnection clickhouseDriver.Conn, sessionStore *querySessionStore) {
   executionStartedTime := time.Now()
 
