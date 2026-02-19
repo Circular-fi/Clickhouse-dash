@@ -1014,7 +1014,7 @@
 
 
   async function createQuery(queryText) {
-    const response = await fetch("/api/query", {
+    const response = await fetch("api/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sql: queryText })
@@ -1031,7 +1031,7 @@
   }
 
   async function requestCancellation(queryIdentifier) {
-    const response = await fetch("/api/query/cancel", {
+    const response = await fetch("api/query/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query_id: queryIdentifier })
