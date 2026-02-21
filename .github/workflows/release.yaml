@@ -9,28 +9,77 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  build-and-release:
+    name: Build & Release (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-amd64
+          - os: macos-latest
+            name: macos-amd64
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: src/go.mod
-          cache: false
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
 
-      - name: Download Go modules
-        working-directory: src
-        run: go mod download
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Configure (CMake)
+        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --target chdash
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          OUT="clickhouse-dash_${VERSION}_${{ matrix.name }}"
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+
+          if [ -f build/chdash ]; then
+            cp build/chdash "$OUT/"
+          elif [ -f build/chdash.exe ]; then
+            cp build/chdash.exe "$OUT/"
+          else
+            echo "binary not found" >&2
+            ls -la build
+            exit 1
+          fi
+
+          # Bundle frontend assets if present in the repo.
+          if [ -d src/static ]; then
+            mkdir -p "$OUT/static"
+            # rsync is present on ubuntu & mac runners.
+            rsync -a src/static/ "$OUT/static/"
+          fi
+
+          # Docs
+          [ -f README.md ] && cp README.md "$OUT/" || true
+          [ -f LICENSE ] && cp LICENSE "$OUT/" || true
+
+          tar -czf "${OUT}.tar.gz" "$OUT"
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
         with:
-          version: "~> v2"
-          args: release --clean
-          workdir: src
+          files: |
+            clickhouse-dash_${{ github.ref_name }}_${{ matrix.name }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CGO_ENABLED: "0"

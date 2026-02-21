@@ -583,7 +583,7 @@ button.button:hover {
   user-select: none;
 }
 
-@media (max-width: 70rem) {
+@media (max-width: 72rem) {
   .layout {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;

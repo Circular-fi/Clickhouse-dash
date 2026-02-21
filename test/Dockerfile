@@ -1,28 +1,40 @@
-FROM golang:1.24.13-alpine3.23 AS base
-WORKDIR /src
-RUN apk add --no-cache ca-certificates
+FROM alpine:3.20 AS builder
+WORKDIR /work
 
-FROM base AS gotidy
-CMD ["go", "mod", "tidy"]
+RUN apk add --no-cache \
+    ca-certificates \
+    build-base \
+    cmake \
+    ninja \
+    git \
+    openssl-dev \
+    zlib-dev \
+    curl
 
-FROM base AS builder
-WORKDIR /src
-RUN apk add --no-cache ca-certificates
-COPY src/go.mod ./
-COPY src/go.sum ./
-RUN go mod download
-COPY src/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/clickhouse-dash
+COPY ./src /work/src
 
-FROM scratch AS production
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /out/clickhouse-dash /clickhouse-dash
+RUN cmake -S /work/src -B /work/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build /work/build --target chdash
+
+FROM alpine:3.20 AS production
+WORKDIR /app
+
+RUN apk add --no-cache \
+    ca-certificates \
+    libstdc++ \
+    curl
+
+COPY --from=builder /work/build/chdash /app/chdash
+
+COPY ./src/static /app/static
+
+ENV LISTEN_HOST=0.0.0.0
+ENV LISTEN_PORT=8080
+ENV STATIC_DIR=/app/static
+
 EXPOSE 8080
-ENV PORT=8080
-HEALTHCHECK --interval=5s\
-            --timeout=1s \
-            --start-interval=500ms \
-            --start-period=5s \
-            --retries=1 \
-            CMD ["/clickhouse-dash", "--health"]
-ENTRYPOINT ["/clickhouse-dash"]
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=10 \
+  CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+
+ENTRYPOINT ["/app/chdash"]
