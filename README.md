@@ -1,6 +1,6 @@
 # clickhouse-dash
 
-A real-time ClickHouse query dashboard with live metrics, high-frequency sampling, and a zero-dependency frontend.
+A real-time ClickHouse query dashboard with live metrics.
 
 Backend: **C++17** (clickhouse-cpp + cpp-httplib + rapidjson)  
 Frontend: **Vanilla JS + Canvas**  
