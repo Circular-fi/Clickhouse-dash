@@ -18,7 +18,8 @@ jobs:
         include:
           - os: ubuntu-latest
             name: linux-amd64
-          - os: macos-latest
+          # macOS Intel runner to produce an amd64 (x86_64) binary.
+          - os: macos-13
             name: macos-amd64
 
     steps:
@@ -35,10 +36,17 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install cmake ninja
+          # CMake is preinstalled on GitHub macOS runners.
+          # Installing via Homebrew can upgrade to CMake 4.x, which breaks some deps (RapidJSON).
+          brew install ninja
+
+      - name: Tool versions
+        run: |
+          cmake --version
+          ninja --version
 
       - name: Configure (CMake)
-        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
       - name: Build
         run: cmake --build build --target chdash
@@ -63,14 +71,11 @@ jobs:
             exit 1
           fi
 
-          # Bundle frontend assets if present in the repo.
           if [ -d src/static ]; then
             mkdir -p "$OUT/static"
-            # rsync is present on ubuntu & mac runners.
             rsync -a src/static/ "$OUT/static/"
           fi
 
-          # Docs
           [ -f README.md ] && cp README.md "$OUT/" || true
           [ -f LICENSE ] && cp LICENSE "$OUT/" || true
 
