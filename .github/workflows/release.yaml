@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux (one runner, cross-compile for arm64)
+          # Linux
           - runner: ubuntu-latest
             goos: linux
             goarch: amd64
@@ -24,20 +24,12 @@ jobs:
             goos: linux
             goarch: arm64
 
-          # macOS (one runner, build both arch via CMAKE_OSX_ARCHITECTURES)
+          # macOS
           - runner: macos-latest
             goos: darwin
             goarch: amd64
           - runner: macos-latest
             goos: darwin
-            goarch: arm64
-
-          # Windows (one runner, build both via -A x64/ARM64)
-          - runner: windows-latest
-            goos: windows
-            goarch: amd64
-          - runner: windows-latest
-            goos: windows
             goarch: arm64
 
     steps:
@@ -53,10 +45,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # ---- deps / toolchain ----
+      # ---- Dependencies ----
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
-        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build
@@ -68,37 +59,24 @@ jobs:
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
-        shell: bash
         run: |
           brew update
-          # éviter d’installer cmake via brew (risque CMake 4.x)
           brew install ninja
 
-      - name: MSVC dev cmd (Windows amd64)
-        if: runner.os == 'Windows' && matrix.goarch == 'amd64'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: MSVC dev cmd (Windows arm64)
-        if: runner.os == 'Windows' && matrix.goarch == 'arm64'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64_arm64
-
       - name: Tool versions
-        shell: bash
         run: |
           cmake --version
+          ninja --version
 
-      # ---- configure/build ----
-      - name: Configure (Linux/macOS)
-        if: runner.os != 'Windows'
+      # ---- Configure ----
+      - name: Configure
         shell: bash
         run: |
           set -euo pipefail
 
           EXTRA=()
+
+          # macOS arch selection
           if [ "${{ matrix.goos }}" = "darwin" ]; then
             if [ "${{ matrix.goarch }}" = "amd64" ]; then
               EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
@@ -107,6 +85,7 @@ jobs:
             fi
           fi
 
+          # Linux arm64 cross-compile
           if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
             EXTRA+=(
               "-DCMAKE_SYSTEM_NAME=Linux"
@@ -121,36 +100,10 @@ jobs:
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             "${EXTRA[@]}"
 
-      - name: Build (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          cmake --build build --target chdash
+      - name: Build
+        run: cmake --build build --target chdash
 
-      - name: Configure (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            ARCH="x64"
-          else
-            ARCH="ARM64"
-          fi
-
-          # VS generator avoids zstd/ASM MSVC_RUNTIME_LIBRARY issues with Ninja
-          cmake -S src -B build \
-            -G "Visual Studio 17 2022" -A "${ARCH}" \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake --build build --config Release --target chdash
-
-      # ---- package ----
+      # ---- Package ----
       - name: Package
         id: package
         shell: bash
@@ -161,20 +114,12 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$OUT"
 
-          BIN=""
           if [ -f build/chdash ]; then
-            BIN="build/chdash"
-          elif [ -f build/Release/chdash.exe ]; then
-            BIN="build/Release/chdash.exe"
-          elif [ -f build/chdash.exe ]; then
-            BIN="build/chdash.exe"
+            cp build/chdash "$OUT/"
           else
-            echo "binary not found (expected build/chdash or build/Release/chdash.exe)" >&2
-            find build -maxdepth 3 -type f -name "chdash*" -print || true
+            echo "binary not found" >&2
             exit 1
           fi
-
-          cp "$BIN" "$OUT/"
 
           if [ -d src/static ]; then
             mkdir -p "$OUT/static"
@@ -206,14 +151,11 @@ jobs:
           path: dist
 
       - name: Flatten
-        shell: bash
         run: |
-          set -euo pipefail
           mkdir -p out
           find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
-          ls -la out
 
-      - name: Create/Update GitHub Release and upload assets
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: out/*.tar.gz
