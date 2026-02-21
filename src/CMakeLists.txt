@@ -4,13 +4,6 @@ project(chdash LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_compile_options(
-  -Wall -Wextra
-  -Wno-error
-  -Wno-error=implicit-fallthrough
-  -Wno-implicit-fallthrough
-)
-
 include(FetchContent)
 
 # ---- Disable all RapidJSON extras (examples/tests/docs) ----
@@ -48,6 +41,20 @@ add_executable(chdash
   server.cpp
   query_session.cpp
 )
+
+# Important: apply warning flags ONLY to our target.
+# Putting -Wall/-Wextra at directory scope makes CMake translate them to /Wextra on MSVC
+# and they propagate into dependencies (absl/zstd/...), breaking Windows builds.
+if (MSVC)
+  target_compile_options(chdash PRIVATE /W4)
+else()
+  target_compile_options(chdash PRIVATE
+    -Wall -Wextra
+    -Wno-error
+    -Wno-error=implicit-fallthrough
+    -Wno-implicit-fallthrough
+  )
+endif()
 
 target_include_directories(chdash PRIVATE
   ${clickhouse_cpp_SOURCE_DIR}
