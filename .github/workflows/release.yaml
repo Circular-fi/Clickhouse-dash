@@ -1,7 +1,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -10,43 +9,76 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build & Release (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+  build:
+    name: Build (${{ matrix.goos }} ${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            name: linux-amd64
-          # macOS Intel runner to produce an amd64 (x86_64) binary.
-          - os: macos-13
-            name: macos-amd64
+          # Linux
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+
+          # macOS
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+
+          # Windows
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+          - runner: windows-11-arm
+            goos: windows
+            goarch: arm64
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+      # MSVC env (needed for Ninja+cl on Windows)
+      - name: MSVC dev cmd (Windows amd64)
+        if: startsWith(matrix.runner, 'windows') && matrix.goarch == 'amd64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: MSVC dev cmd (Windows arm64)
+        if: startsWith(matrix.runner, 'windows') && matrix.goarch == 'arm64'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
+
+      - name: Install deps (Linux)
+        if: startsWith(matrix.runner, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build
 
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
+      - name: Install deps (macOS)
+        if: startsWith(matrix.runner, 'macos')
         run: |
           brew update
-          # CMake is preinstalled on GitHub macOS runners.
-          # Installing via Homebrew can upgrade to CMake 4.x, which breaks some deps (RapidJSON).
+          # Évite d’installer CMake via brew (peut monter en CMake 4.x et casser certaines deps)
           brew install ninja
 
-      - name: Tool versions
+      - name: Install deps (Windows)
+        if: startsWith(matrix.runner, 'windows')
+        shell: pwsh
         run: |
+          choco install ninja -y --no-progress
           cmake --version
           ninja --version
 
-      - name: Configure (CMake)
+      - name: Configure
         run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
       - name: Build
@@ -56,9 +88,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
-          OUT="clickhouse-dash_${VERSION}_${{ matrix.name }}"
+          VERSION="${GITHUB_REF_NAME#v}"
 
+          OUT="clickhouse-dash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
           rm -rf "$OUT"
           mkdir -p "$OUT"
 
@@ -67,25 +99,50 @@ jobs:
           elif [ -f build/chdash.exe ]; then
             cp build/chdash.exe "$OUT/"
           else
-            echo "binary not found" >&2
-            ls -la build
+            echo "binary not found in build/" >&2
+            ls -la build || true
             exit 1
           fi
 
           if [ -d src/static ]; then
             mkdir -p "$OUT/static"
+            # copie tout ce qui est présent dans le repo (index.html/css/fonts/app.js si existant)
             rsync -a src/static/ "$OUT/static/"
           fi
 
           [ -f README.md ] && cp README.md "$OUT/" || true
           [ -f LICENSE ] && cp LICENSE "$OUT/" || true
 
-          tar -czf "${OUT}.tar.gz" "$OUT"
+          cmake -E tar "cfvz" "${OUT}.tar.gz" "$OUT"
 
-      - name: Publish GitHub Release assets
+      - name: Upload artifact (per platform)
+        uses: actions/upload-artifact@v4
+        with:
+          name: clickhouse-dash_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: clickhouse-dash_${{ github.ref_name#'v' }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
+          ls -la out
+
+      - name: Create/Update GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            clickhouse-dash_${{ github.ref_name }}_${{ matrix.name }}.tar.gz
+          files: out/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
