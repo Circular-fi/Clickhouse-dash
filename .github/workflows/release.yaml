@@ -25,7 +25,7 @@ jobs:
             goarch: arm64
 
           # macOS
-          - runner: macos-15-intel
+          - runner: macos-13
             goos: darwin
             goarch: amd64
           - runner: macos-14
@@ -44,6 +44,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Compute version (strip leading v)
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       # MSVC env (needed for Ninja+cl on Windows)
       - name: MSVC dev cmd (Windows amd64)
         if: startsWith(matrix.runner, 'windows') && matrix.goarch == 'amd64'
@@ -59,12 +68,14 @@ jobs:
 
       - name: Install deps (Linux)
         if: startsWith(matrix.runner, 'ubuntu')
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build
 
       - name: Install deps (macOS)
         if: startsWith(matrix.runner, 'macos')
+        shell: bash
         run: |
           brew update
           # Évite d’installer CMake via brew (peut monter en CMake 4.x et casser certaines deps)
@@ -78,17 +89,29 @@ jobs:
           cmake --version
           ninja --version
 
+      - name: Tool versions
+        shell: bash
+        run: |
+          cmake --version
+          ninja --version
+
       - name: Configure
-        run: cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        shell: bash
+        run: |
+          cmake -S src -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
       - name: Build
-        run: cmake --build build --target chdash
+        shell: bash
+        run: |
+          cmake --build build --target chdash
 
       - name: Package
+        id: package
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
 
           OUT="clickhouse-dash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
           rm -rf "$OUT"
@@ -106,20 +129,21 @@ jobs:
 
           if [ -d src/static ]; then
             mkdir -p "$OUT/static"
-            # copie tout ce qui est présent dans le repo (index.html/css/fonts/app.js si existant)
             rsync -a src/static/ "$OUT/static/"
           fi
 
           [ -f README.md ] && cp README.md "$OUT/" || true
           [ -f LICENSE ] && cp LICENSE "$OUT/" || true
 
-          cmake -E tar "cfvz" "${OUT}.tar.gz" "$OUT"
+          TAR="${OUT}.tar.gz"
+          cmake -E tar "cfvz" "$TAR" "$OUT"
+          echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact (per platform)
         uses: actions/upload-artifact@v4
         with:
-          name: clickhouse-dash_${{ github.ref_name }}_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: clickhouse-dash_${{ github.ref_name#'v' }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          name: clickhouse-dash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: ${{ steps.package.outputs.tar }}
           if-no-files-found: error
 
   release:
