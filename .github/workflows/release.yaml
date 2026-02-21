@@ -16,27 +16,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
+          # Linux (one runner, cross-compile for arm64)
           - runner: ubuntu-latest
             goos: linux
             goarch: amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-latest
             goos: linux
             goarch: arm64
 
-          # macOS
-          - runner: macos-13
+          # macOS (one runner, build both arch via CMAKE_OSX_ARCHITECTURES)
+          - runner: macos-latest
             goos: darwin
             goarch: amd64
-          - runner: macos-14
+          - runner: macos-latest
             goos: darwin
             goarch: arm64
 
-          # Windows
+          # Windows (one runner, build both via -A x64/ARM64)
           - runner: windows-latest
             goos: windows
             goarch: amd64
-          - runner: windows-11-arm
+          - runner: windows-latest
             goos: windows
             goarch: arm64
 
@@ -53,60 +53,104 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # MSVC env (needed for Ninja+cl on Windows)
+      # ---- deps / toolchain ----
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build
+          if [ "${{ matrix.goarch }}" = "arm64" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+              libc6-dev-arm64-cross
+          fi
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew update
+          # éviter d’installer cmake via brew (risque CMake 4.x)
+          brew install ninja
+
       - name: MSVC dev cmd (Windows amd64)
-        if: startsWith(matrix.runner, 'windows') && matrix.goarch == 'amd64'
+        if: runner.os == 'Windows' && matrix.goarch == 'amd64'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
       - name: MSVC dev cmd (Windows arm64)
-        if: startsWith(matrix.runner, 'windows') && matrix.goarch == 'arm64'
+        if: runner.os == 'Windows' && matrix.goarch == 'arm64'
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: arm64
-
-      - name: Install deps (Linux)
-        if: startsWith(matrix.runner, 'ubuntu')
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build
-
-      - name: Install deps (macOS)
-        if: startsWith(matrix.runner, 'macos')
-        shell: bash
-        run: |
-          brew update
-          # Évite d’installer CMake via brew (peut monter en CMake 4.x et casser certaines deps)
-          brew install ninja
-
-      - name: Install deps (Windows)
-        if: startsWith(matrix.runner, 'windows')
-        shell: pwsh
-        run: |
-          choco install ninja -y --no-progress
-          cmake --version
-          ninja --version
+          arch: x64_arm64
 
       - name: Tool versions
         shell: bash
         run: |
           cmake --version
-          ninja --version
 
-      - name: Configure
+      # ---- configure/build ----
+      - name: Configure (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
+
+          EXTRA=()
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            if [ "${{ matrix.goarch }}" = "amd64" ]; then
+              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+            else
+              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
+            fi
+          fi
+
+          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
+            EXTRA+=(
+              "-DCMAKE_SYSTEM_NAME=Linux"
+              "-DCMAKE_SYSTEM_PROCESSOR=aarch64"
+              "-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc"
+              "-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
+            )
+          fi
+
           cmake -S src -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            "${EXTRA[@]}"
 
-      - name: Build
+      - name: Build (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cmake --build build --target chdash
 
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            ARCH="x64"
+          else
+            ARCH="ARM64"
+          fi
+
+          # VS generator avoids the zstd/ASM MSVC_RUNTIME_LIBRARY error seen with Ninja on Windows
+          cmake -S src -B build \
+            -G "Visual Studio 17 2022" -A "${ARCH}" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --target chdash
+
+      # ---- package ----
       - name: Package
         id: package
         shell: bash
@@ -117,15 +161,20 @@ jobs:
           rm -rf "$OUT"
           mkdir -p "$OUT"
 
+          BIN=""
           if [ -f build/chdash ]; then
-            cp build/chdash "$OUT/"
+            BIN="build/chdash"
+          elif [ -f build/Release/chdash.exe ]; then
+            BIN="build/Release/chdash.exe"
           elif [ -f build/chdash.exe ]; then
-            cp build/chdash.exe "$OUT/"
+            BIN="build/chdash.exe"
           else
-            echo "binary not found in build/" >&2
-            ls -la build || true
+            echo "binary not found (expected build/chdash or build/Release/chdash.exe)" >&2
+            find build -maxdepth 3 -type f -name "chdash*" -print || true
             exit 1
           fi
+
+          cp "$BIN" "$OUT/"
 
           if [ -d src/static ]; then
             mkdir -p "$OUT/static"
@@ -139,7 +188,7 @@ jobs:
           cmake -E tar "cfvz" "$TAR" "$OUT"
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
-      - name: Upload artifact (per platform)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: clickhouse-dash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
