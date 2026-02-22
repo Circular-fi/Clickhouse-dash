@@ -16,13 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
+          # Linux (STATIC musl -> scratch compatible)
           - runner: ubuntu-latest
             goos: linux
             goarch: amd64
-          - runner: ubuntu-latest
-            goos: linux
-            goarch: arm64
 
           # macOS
           - runner: macos-latest
@@ -45,54 +42,52 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # ---- Dependencies ----
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
+      # ---- Linux build (STATIC musl inside Alpine) ----
+      - name: Build (Linux static musl)
+        if: matrix.goos == 'linux'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build
-          if [ "${{ matrix.goarch }}" = "arm64" ]; then
-            sudo apt-get install -y --no-install-recommends \
-              gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-              libc6-dev-arm64-cross
-          fi
+          set -euo pipefail
 
+          docker run --rm \
+            -v "$PWD":/work \
+            -w /work \
+            alpine:3.20 sh -euxc '
+              apk add --no-cache build-base cmake ninja git ca-certificates
+
+              cmake -S src -B build -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc -s"
+
+              cmake --build build --target chdash
+
+              echo "== file =="
+              file build/chdash
+
+              echo "== ldd (should fail or say not a dynamic executable) =="
+              ldd build/chdash || true
+            '
+
+      # ---- macOS deps ----
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
           brew install ninja
 
-      - name: Tool versions
-        run: |
-          cmake --version
-          ninja --version
-
-      # ---- Configure ----
-      - name: Configure
+      # ---- macOS configure/build ----
+      - name: Configure (macOS)
+        if: matrix.goos == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
 
           EXTRA=()
-
-          # macOS arch selection
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            if [ "${{ matrix.goarch }}" = "amd64" ]; then
-              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
-            else
-              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
-            fi
-          fi
-
-          # Linux arm64 cross-compile
-          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm64" ]; then
-            EXTRA+=(
-              "-DCMAKE_SYSTEM_NAME=Linux"
-              "-DCMAKE_SYSTEM_PROCESSOR=aarch64"
-              "-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc"
-              "-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
-            )
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+          else
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
           fi
 
           cmake -S src -B build -G Ninja \
@@ -100,9 +95,11 @@ jobs:
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             "${EXTRA[@]}"
 
-      - name: Build
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
         run: cmake --build build --target chdash
 
+      # ---- Package (chdash at archive root) ----
       - name: Package
         id: package
         shell: bash
@@ -112,16 +109,19 @@ jobs:
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
           if [ ! -f build/chdash ]; then
-            echo "binary not found" >&2
+            echo "binary not found at build/chdash" >&2
             exit 1
           fi
+
+          # Put ONLY "chdash" at the root of the tar.gz
           tar -C build -czf "$TAR" chdash
+
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clickhouse-dash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          name: chdash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
           path: ${{ steps.package.outputs.tar }}
           if-no-files-found: error
 
@@ -136,9 +136,12 @@ jobs:
           path: dist
 
       - name: Flatten
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p out
           find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
+          ls -la out
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
