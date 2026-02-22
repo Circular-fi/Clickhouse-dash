@@ -111,13 +111,11 @@ jobs:
 
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
-          if [ -f build/chdash ]; then
-            cmake -E tar "cfvz" "$TAR" build/chdash
-          else
+          if [ ! -f build/chdash ]; then
             echo "binary not found" >&2
             exit 1
           fi
-
+          tar -C build -czf "$TAR" chdash
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
