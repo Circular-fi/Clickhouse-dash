@@ -103,34 +103,21 @@ jobs:
       - name: Build
         run: cmake --build build --target chdash
 
-      # ---- Package ----
       - name: Package
         id: package
         shell: bash
         run: |
           set -euo pipefail
 
-          OUT="clickhouse-dash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          rm -rf "$OUT"
-          mkdir -p "$OUT"
+          TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
           if [ -f build/chdash ]; then
-            cp build/chdash "$OUT/"
+            cmake -E tar "cfvz" "$TAR" build/chdash
           else
             echo "binary not found" >&2
             exit 1
           fi
 
-          if [ -d src/static ]; then
-            mkdir -p "$OUT/static"
-            rsync -a src/static/ "$OUT/static/"
-          fi
-
-          [ -f README.md ] && cp README.md "$OUT/" || true
-          [ -f LICENSE ] && cp LICENSE "$OUT/" || true
-
-          TAR="${OUT}.tar.gz"
-          cmake -E tar "cfvz" "$TAR" "$OUT"
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
