@@ -23,7 +23,6 @@ jobs:
           - runner: macos-latest
             goos: darwin
             goarch: amd64
-
           - runner: macos-latest
             goos: darwin
             goarch: arm64
@@ -55,11 +54,11 @@ jobs:
 
               cmake -S src -B build -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -DCHDASH_EMBED_STATIC=ON \
                 -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc -s"
 
               cmake --build build --target chdash
-
               file build/chdash
               ldd build/chdash || true
             '
@@ -85,6 +84,7 @@ jobs:
 
           cmake -S src -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCHDASH_EMBED_STATIC=ON \
             "${EXTRA[@]}"
 
@@ -97,7 +97,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
           if [ ! -f build/chdash ]; then
@@ -105,9 +104,7 @@ jobs:
             exit 1
           fi
 
-          # Put ONLY "chdash" at the root of the tar.gz (no build/ prefix, no folder)
           tar -C build -czf "$TAR" chdash
-
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
