@@ -16,15 +16,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux (STATIC musl -> scratch compatible)
           - runner: ubuntu-latest
             goos: linux
             goarch: amd64
 
-          # macOS
           - runner: macos-latest
             goos: darwin
             goarch: amd64
+
           - runner: macos-latest
             goos: darwin
             goarch: arm64
@@ -42,8 +41,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      # ---- Linux build (STATIC musl inside Alpine) ----
-      - name: Build (Linux static musl)
+      - name: Build (Linux static musl, embedded static)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
@@ -53,30 +51,25 @@ jobs:
             -v "$PWD":/work \
             -w /work \
             alpine:3.20 sh -euxc '
-              apk add --no-cache build-base cmake ninja git ca-certificates
+              apk add --no-cache ca-certificates build-base cmake ninja git
 
               cmake -S src -B build -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCHDASH_EMBED_STATIC=ON \
                 -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc -s"
 
               cmake --build build --target chdash
 
-              echo "== file =="
               file build/chdash
-
-              echo "== ldd (should fail or say not a dynamic executable) =="
               ldd build/chdash || true
             '
 
-      # ---- macOS deps ----
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
           brew install ninja
 
-      # ---- macOS configure/build ----
       - name: Configure (macOS)
         if: matrix.goos == 'darwin'
         shell: bash
@@ -92,14 +85,13 @@ jobs:
 
           cmake -S src -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCHDASH_EMBED_STATIC=ON \
             "${EXTRA[@]}"
 
       - name: Build (macOS)
         if: matrix.goos == 'darwin'
         run: cmake --build build --target chdash
 
-      # ---- Package (chdash at archive root) ----
       - name: Package
         id: package
         shell: bash
@@ -113,7 +105,7 @@ jobs:
             exit 1
           fi
 
-          # Put ONLY "chdash" at the root of the tar.gz
+          # Put ONLY "chdash" at the root of the tar.gz (no build/ prefix, no folder)
           tar -C build -czf "$TAR" chdash
 
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"

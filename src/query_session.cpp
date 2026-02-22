@@ -187,13 +187,10 @@ void QuerySession::finish_error(const std::string& message) {
 }
 
 void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::time_point& now) {
-  // Throttle to ~40ms.
-  if (last_sample_at_.time_since_epoch().count() != 0 && now - last_sample_at_ < std::chrono::milliseconds(40)) {
+  if (last_sample_at_.time_since_epoch().count() != 0 && now - last_sample_at_ < std::chrono::milliseconds(10)) {
     return;
   }
   last_sample_at_ = now;
-
-  // Update threads_inst_/threads_peak_ with the same best-effort windowing used by the Go version.
   int64_t thr_cur = 0;
   const auto window = std::chrono::seconds(2);
   for (const auto& kv : thread_last_seen_) {
@@ -263,8 +260,6 @@ void QuerySession::run_query() {
       finish_canceled();
       return;
     }
-
-    // DB + query_id on this connection.
     try {
       if (!database_.empty()) client_query_->Execute("USE " + database_);
     } catch (...) {}
@@ -281,8 +276,6 @@ void QuerySession::run_query() {
 
     if (!is_select_like) {
       client_query_->Execute(sql_);
-
-      // result_meta
       {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -293,7 +286,6 @@ void QuerySession::run_query() {
         w.EndObject();
         push_sse_json_event("result_meta", sb.GetString());
       }
-      // result_rows
       {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);

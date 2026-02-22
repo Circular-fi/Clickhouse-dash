@@ -36,10 +36,11 @@ public:
   explicit Server(AppConfig cfg);
 
   int run();
+  bool health_check(std::string* error_message = nullptr);
 
 private:
   std::shared_ptr<clickhouse::Client> make_client(const std::string& db) const;
-
+  
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_create_query(const httplib::Request& req, httplib::Response& res);
   void handle_query_stream(const httplib::Request& req, httplib::Response& res);

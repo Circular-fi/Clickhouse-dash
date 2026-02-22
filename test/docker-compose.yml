@@ -18,18 +18,10 @@ services:
     depends_on:
         clickhouse:
           condition: service_healthy
-    # healthcheck:
-    #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-8080}/healthz"]
-    #     interval: 10s
-    #     timeout: 3s
-    #     retries: 10
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: clickhouse
-    ports:
-      - "8123:8123"   # HTTP
-      - "9000:9000"   # Native
     environment:
       CLICKHOUSE_USER: test
       CLICKHOUSE_PASSWORD: test

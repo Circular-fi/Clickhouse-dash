@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "serve_embedded_static.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -104,25 +105,6 @@ struct StreamState {
 };
 
 static std::string build_tick_json(const SessionSnapshot& snap, StreamState& st) {
-  // Mirror Go tick array layout.
-  // [
-  //  0 elapsedMs,
-  //  1 percentCenti,
-  //  2 knownInt,
-  //  3 readRowsTotal,
-  //  4 readBytesTotal,
-  //  5 totalRowsToRead,
-  //  6 rowsPerSec,
-  //  7 bytesPerSec,
-  //  8 cpuCenti,
-  //  9 cpuInstMaxCenti,
-  // 10 memInst,
-  // 11 memInstMax,
-  // 12 threadsInst,
-  // 13 threadsInstMax,
-  // 14 samples
-  // ]
-
   int64_t percentCenti = 0;
   int64_t knownInt = 0;
   if (snap.total_rows_to_read > 0) {
@@ -166,7 +148,6 @@ static std::string build_tick_json(const SessionSnapshot& snap, StreamState& st)
     if (cpuCenti > st.cpu_inst_max_centi) st.cpu_inst_max_centi = cpuCenti;
   }
 
-  // Update publish timestamp at the end (so dt computations use the previous value).
   st.last_publish = now;
 
   const int64_t memInst = snap.current_mem_bytes;
@@ -193,7 +174,6 @@ static std::string build_tick_json(const SessionSnapshot& snap, StreamState& st)
   if (memMax < 0) w.Null(); else w.Int64(memMax);
   w.Int64(thrInst);
   w.Int64(thrMax);
-  // samples
   auto samples = st.session->drain_samples();
   if (samples.empty()) {
     w.Null();
@@ -240,20 +220,21 @@ static std::string build_done_json(const SessionSnapshot& snap, const std::strin
 }
 
 Server::Server(AppConfig cfg) : cfg_(std::move(cfg)) {
-  // Static files (optional).
-  http_.set_mount_point("/static", cfg_.static_dir);
-
   http_.Get("/", [&](const auto& /*req*/, auto& res) {
-    std::ifstream f(cfg_.static_dir + "/index.html", std::ios::binary);
-    if (!f) {
+    httplib::Request fake;
+    fake.method = "GET";
+    fake.path = "/";
+    if (!try_serve_embedded(fake, res)) {
       res.status = 404;
-      res.set_content("index.html not found (check static_dir)", "text/plain");
-      return;
+      res.set_content("embedded index.html not found", "text/plain");
     }
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    res.status = 200;
-    res.set_content(ss.str(), "text/html; charset=utf-8");
+  });
+
+  http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
+    if (!try_serve_embedded(req, res)) {
+      res.status = 404;
+      res.set_content("embedded asset not found", "text/plain");
+    }
   });
 
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
@@ -290,27 +271,35 @@ int Server::run() {
   return http_.listen(host.c_str(), port) ? 0 : 1;
 }
 
-void Server::handle_healthz(const httplib::Request& /*req*/, httplib::Response& res) {
+
+bool Server::health_check(std::string* error_message) {
   try {
-    // If a query is currently running, avoid issuing any ClickHouse query here.
     {
       std::lock_guard<std::mutex> lk(mu_);
       for (const auto& kv : sessions_) {
         const auto snap = kv.second->snapshot();
         if (snap.status == SessionStatus::Running || snap.status == SessionStatus::Created) {
-          res.status = 200;
-          res.set_content("ok (busy)", "text/plain");
-          return;
+          return true;
         }
       }
     }
 
     auto c = make_client(cfg_.ch_db);
     c->Execute("SELECT 1");
+    return true;
+  } catch (const std::exception& e) {
+    if (error_message) *error_message = e.what();
+    return false;
+  }
+}
+
+void Server::handle_healthz(const httplib::Request& , httplib::Response& res) {
+  std::string err;
+  if (this->health_check(&err)) {
     res.status = 200;
     res.set_content("ok", "text/plain");
-  } catch (const std::exception& e) {
-    json_error(res, 503, "db_unhealthy", e.what());
+  } else {
+    json_error(res, 503, "db_unhealthy", err);
   }
 }
 
@@ -324,7 +313,6 @@ void Server::handle_create_query(const httplib::Request& req, httplib::Response&
   }
 
   std::string sql = doc["sql"].GetString();
-  // trim
   while (!sql.empty() && (sql.back() == ' ' || sql.back() == '\n' || sql.back() == '\r' || sql.back() == '\t' || sql.back() == ';')) sql.pop_back();
   size_t i = 0;
   while (i < sql.size() && (sql[i] == ' ' || sql[i] == '\n' || sql[i] == '\r' || sql[i] == '\t')) i++;
@@ -342,7 +330,6 @@ void Server::handle_create_query(const httplib::Request& req, httplib::Response&
   const std::string qid = gen_query_id();
 
   auto client_query = make_client(db);
-
   auto session = std::make_shared<QuerySession>(qid, sql, db, client_query, cfg_.result_preview_row_limit);
 
   {
@@ -391,7 +378,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   res.set_chunked_content_provider(
     "text/event-stream",
     [st](size_t /*offset*/, httplib::DataSink& sink) {
-      // Local queued chunks first.
       if (!st->local_chunks.empty()) {
         auto chunk = std::move(st->local_chunks.front());
         st->local_chunks.pop_front();
@@ -399,7 +385,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         return true;
       }
 
-      // Periodic tick / done should not be starved by result_rows bursts.
       const auto now = std::chrono::steady_clock::now();
       if (st->last_publish.time_since_epoch().count() == 0 || now - st->last_publish >= std::chrono::milliseconds(250)) {
         const auto snap = st->session->snapshot();
@@ -417,7 +402,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         return true;
       }
 
-      // Drain produced query chunks.
       std::string produced;
       const bool cont = st->session->wait_pop_sse_chunk(produced, 30);
       if (!produced.empty()) {
@@ -425,7 +409,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         return true;
       }
 
-      // If the session ended, close the stream cleanly even if we didn't hit the 250ms tick boundary.
       if (!cont) {
         const auto snap = st->session->snapshot();
         const bool truncated = (snap.status == SessionStatus::ResultLimitReached);
@@ -446,7 +429,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
       return cont;
     },
     [session](bool success) {
-      // Client disconnected before the stream naturally ended.
       if (!success) {
         session->request_cancel();
       }
@@ -478,4 +460,4 @@ void Server::handle_cancel_query(const httplib::Request& req, httplib::Response&
   res.set_content("{\"ok\":true}", "application/json");
 }
 
-} // namespace chdash
+} 

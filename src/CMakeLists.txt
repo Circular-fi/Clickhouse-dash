@@ -4,6 +4,8 @@ project(chdash LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
+
 include(FetchContent)
 
 # ---- Disable all RapidJSON extras (examples/tests/docs) ----
@@ -41,6 +43,20 @@ add_executable(chdash
   server.cpp
   query_session.cpp
 )
+
+if (CHDASH_EMBED_STATIC)
+  include(${CMAKE_CURRENT_LIST_DIR}/EmbedStatic.cmake)
+
+  set(_STATIC_DIR "${CMAKE_CURRENT_LIST_DIR}/static")
+  set(_EMBED_CPP  "${CMAKE_BINARY_DIR}/embedded_static.cpp")
+  set(_EMBED_HPP  "${CMAKE_BINARY_DIR}/embedded_static.hpp")
+
+  chdash_embed_directory("${_STATIC_DIR}" "${_EMBED_CPP}" "${_EMBED_HPP}" "chdash_embedded")
+
+  target_sources(chdash PRIVATE "${_EMBED_CPP}")
+  target_include_directories(chdash PRIVATE "${CMAKE_BINARY_DIR}")
+  target_compile_definitions(chdash PRIVATE CHDASH_EMBED_STATIC=1)
+endif()
 
 # Important: apply warning flags ONLY to our target.
 # Putting -Wall/-Wextra at directory scope makes CMake translate them to /Wextra on MSVC

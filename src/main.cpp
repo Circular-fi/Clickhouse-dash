@@ -86,7 +86,7 @@ static bool parse_hostport(const std::string& in, std::string& host_out, int& po
   return true;
 }
 
-int main() {
+int main(int argc, char** argv) {
   chdash::AppConfig cfg;
 
   // Static assets directory (index.html, app.js, style.css, fonts/...).
@@ -134,8 +134,18 @@ int main() {
   cfg.ch_password = envs("CH_PASS", envs("CH_PASSWORD", ""));
   cfg.ch_db = envs("CH_DB", envs("CH_DATABASE", "default"));
 
-  // Preview row limit sent to the browser (kept small on purpose).
   cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 500);
+  
+  if (argc > 1 && std::string(argv[1]) == "--health") {
+    chdash::Server srv(cfg);
+    std::string err;
+    if (srv.health_check(&err)) {
+      return 0;
+    } else {
+      std::cerr << "Health check failed: " << err << std::endl;
+      return 1;
+    }
+  }
 
   try {
     chdash::Server s(cfg);
