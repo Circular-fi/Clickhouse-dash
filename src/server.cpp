@@ -411,6 +411,8 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
 
       if (!cont) {
         const auto snap = st->session->snapshot();
+        const auto finalTick = sse_json_event("tick", build_tick_json(snap, *st));
+        sink.write(finalTick.data(), finalTick.size());
         const bool truncated = (snap.status == SessionStatus::ResultLimitReached);
         const auto done = sse_json_event("done", build_done_json(snap, "", truncated));
         sink.write(done.data(), done.size());
