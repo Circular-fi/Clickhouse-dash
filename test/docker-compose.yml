@@ -4,8 +4,9 @@ services:
     build:
         context: ../
         dockerfile: ./test/Dockerfile
-        target: production
+        target: dev #or 'production'
     container_name: clickhouse-dash
+    stop_grace_period: 0s
     restart: unless-stopped
     environment:
         CH_URL: "clickhouse:9000"

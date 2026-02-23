@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
   chdash::AppConfig cfg;
 
   // Static assets directory (index.html, app.js, style.css, fonts/...).
-  cfg.static_dir = envs("STATIC_DIR", envs("CHDASH_STATIC_DIR", "./static"));
+  cfg.static_dir = envs("STATIC_DIR", "./static");
 
   // --- Listen address ---
   // Priority:

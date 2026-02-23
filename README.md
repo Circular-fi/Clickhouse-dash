@@ -143,6 +143,36 @@ Artifacts include the binary and (if present) `src/static/`.
 
 ---
 
+## ✅ TODO / Roadmap 
+
+### Query workflow
+
+* [ ] Local query history (favorites/pin)
+* [ ] SQL auto-format (button + optional format-on-run)
+
+### UI / UX
+
+* [ ] Frontend version badge (`vX.Y.Z` + commit)
+* [ ] User + DB indicator
+* [ ] Better rendering: nicer editor + pretty JSON + collapse long cells
+
+### Data explorer
+
+* [ ] Databases/Tables page (sizes + sort/filter)
+* [ ] MV/Buffer dependency graph (click to inspect)
+
+### Perf / Ops
+
+* [ ] Query perf tracking (CPU/RAM/threads + top queries)
+* [ ] Cluster perf overview (per-host if possible)
+
+### Connectivity / Multi-tenancy
+
+* [ ] Multi-DB / multi-connection
+* [ ] Standard URL connection (`CH_URLs` + TLS params)
+
+---
+
 ## 📝 License
 
 MIT (see `LICENSE`).

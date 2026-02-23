@@ -12,6 +12,7 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <filesystem>
 
 namespace chdash {
 
@@ -29,6 +30,32 @@ static std::string gen_query_id() {
   uint64_t a = rng();
   uint64_t b = rng();
   return hex(a, 8) + "-" + hex(a >> 32, 4) + "-" + hex(a >> 48, 4) + "-" + hex(b, 4) + "-" + hex(b >> 16, 12);
+}
+
+static bool try_serve_fs(const std::string& static_dir, const httplib::Request& req, httplib::Response& res) {
+  std::string path = req.path;
+  if (path.empty() || path == "/") path = "/index.html";
+
+  std::string rel;
+  if (path.rfind("/static/", 0) == 0) rel = path.substr(std::string("/static/").size());
+  else if (!path.empty() && path[0] == '/') rel = path.substr(1);
+  else rel = path;
+
+  if (rel.find("..") != std::string::npos) return false;
+  if (rel.find('\\') != std::string::npos) return false;
+
+  std::filesystem::path full = std::filesystem::path(static_dir) / rel;
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(full, ec)) return false;
+
+  std::ifstream in(full, std::ios::binary);
+  if (!in) return false;
+
+  std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+  res.set_header("Cache-Control", "no-cache");
+  res.set_content(std::move(body), mime_from_path(rel));
+  return true;
 }
 
 static void json_error(httplib::Response& res, int status, const std::string& code, const std::string& message) {
@@ -224,16 +251,16 @@ Server::Server(AppConfig cfg) : cfg_(std::move(cfg)) {
     httplib::Request fake;
     fake.method = "GET";
     fake.path = "/";
-    if (!try_serve_embedded(fake, res)) {
+    if (!try_serve_embedded(fake, res) && !try_serve_fs(cfg_.static_dir, fake, res)) {
       res.status = 404;
-      res.set_content("embedded index.html not found", "text/plain");
+      res.set_content("index.html not found", "text/plain");
     }
   });
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
-    if (!try_serve_embedded(req, res)) {
+    if (!try_serve_embedded(req, res) && !try_serve_fs(cfg_.static_dir, req, res)) {
       res.status = 404;
-      res.set_content("embedded asset not found", "text/plain");
+      res.set_content("asset not found", "text/plain");
     }
   });
 
