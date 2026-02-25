@@ -346,47 +346,64 @@ static std::optional<std::string> try_format_query(
     size_t max_bytes,
     std::string* err_log
 ) {
-  if (sql.size() > max_bytes) return std::nullopt;
+    if (sql.size() > max_bytes) {
+        if (err_log) *err_log = "sql too large";
+        return std::nullopt;
+    }
 
-  const std::string escaped = escape_for_clickhouse_string(sql);
-  const std::string fmt_sql = "SELECT formatQuery('" + escaped + "') AS query";
+    const std::string escaped = escape_for_clickhouse_string(sql);
+    const std::string fmt_sql =
+        "SELECT formatQuery('" + escaped + "') AS query";
 
-  std::string err;
-  auto client = make_client_from_uri(
-      host.runner_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &err
-  );
-  if (!client) {
-    if (err_log) *err_log = err;
-    return "can't make client";
-  }
+    std::string err;
+    auto client = make_client_from_uri(
+        host.runner_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        &err
+    );
 
-  std::optional<std::string> formatted;
-  try {
-    bool got = false;
-    client->Select(fmt_sql, [&](const clickhouse::Block& b) {
-      if (got) return;
-      got = true;
-      if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
-      clickhouse::ColumnRef col = b[0];
-      if (!col) return;
-      if (auto nullable = col->As<clickhouse::ColumnNullable>()) {
-        if (nullable->IsNull(0)) return;
-        col = nullable->Nested();
-      }
-      if (auto s = col->As<clickhouse::ColumnString>()) {
-        formatted = std::string(s->At(0));
-      }
-    });
-  } catch (const std::exception& e) {
-    if (err_log) *err_log = e.what();
-    return fmt_sql;
-    // return std::nullopt;
-  }
-  return formatted;
+    if (!client) {
+        if (err_log) *err_log = "make_client failed: " + err;
+        return std::nullopt;
+    }
+
+    std::optional<std::string> formatted;
+
+    try {
+        client->Select(fmt_sql, [&](const clickhouse::Block& b) {
+
+            // Ignore empty blocks (important)
+            if (b.GetRowCount() == 0 || b.GetColumnCount() == 0)
+                return;
+
+            clickhouse::ColumnRef col = b[0];
+            if (!col)
+                return;
+
+            // Handle Nullable
+            if (auto nullable = col->As<clickhouse::ColumnNullable>()) {
+                if (nullable->IsNull(0))
+                    return;
+                col = nullable->Nested();
+            }
+
+            if (auto s = col->As<clickhouse::ColumnString>()) {
+                formatted = std::string(s->At(0));
+            }
+        });
+
+    } catch (const std::exception& e) {
+        if (err_log) *err_log = std::string("exception: ") + e.what();
+        return std::nullopt;
+    }
+
+    if (!formatted) {
+        if (err_log) *err_log = "no formatted result returned";
+    }
+
+    return formatted;
 }
 
 static std::string escape_single_quotes(std::string_view in) {
