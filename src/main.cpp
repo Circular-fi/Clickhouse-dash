@@ -1,10 +1,14 @@
 #include "server.hpp"
 
+#include "hcl.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <unordered_set>
 
 static std::string envs(const char* k, const std::string& def = "") {
   const char* v = std::getenv(k);
@@ -86,6 +90,88 @@ static bool parse_hostport(const std::string& in, std::string& host_out, int& po
   return true;
 }
 
+static void load_hosts_from_hcl(chdash::AppConfig& cfg, const std::string& hcl_src) {
+  using namespace chdash;
+
+  auto root = parse_hcl(hcl_src);
+
+  // health { interval_ms = 5000 timeout_ms = 800 }
+  if (auto it = root.blocks.find("health"); it != root.blocks.end() && !it->second.empty()) {
+    const auto& h = it->second.front();
+    if (auto v = hcl_get_int(h, "interval_ms")) cfg.health.interval_ms = static_cast<int>(*v);
+    if (auto v = hcl_get_int(h, "timeout_ms")) cfg.health.timeout_ms = static_cast<int>(*v);
+  }
+
+  // clickhouse { host { ... } host { ... } }
+  auto it_ch = root.blocks.find("clickhouse");
+  if (it_ch == root.blocks.end() || it_ch->second.empty()) {
+    throw std::runtime_error("CH_HOSTS: missing clickhouse { ... } block");
+  }
+  const auto& ch = it_ch->second.front();
+  auto it_hosts = ch.blocks.find("host");
+  if (it_hosts == ch.blocks.end() || it_hosts->second.empty()) {
+    throw std::runtime_error("CH_HOSTS: missing clickhouse { host { ... } } blocks");
+  }
+
+  std::unordered_set<std::string> ids;
+  for (const auto& ho : it_hosts->second) {
+    auto name = hcl_get_string(ho, "name");
+    auto runner_uri = hcl_get_string(ho, "runner_uri");
+    auto system_uri = hcl_get_string(ho, "system_uri");
+    if (!name || name->empty()) throw std::runtime_error("CH_HOSTS: host.name is required");
+    if (!runner_uri || runner_uri->empty()) throw std::runtime_error("CH_HOSTS: host.runner_uri is required");
+    if (!system_uri || system_uri->empty()) throw std::runtime_error("CH_HOSTS: host.system_uri is required");
+    if (!ids.insert(*name).second) throw std::runtime_error("CH_HOSTS: duplicate host.name: " + *name);
+
+    HostSpec hs;
+    hs.id = *name;
+    hs.label = *name;
+    hs.runner_uri = *runner_uri;
+    hs.system_uri = *system_uri;
+    cfg.hosts.push_back(std::move(hs));
+  }
+
+  if (cfg.hosts.empty()) {
+    throw std::runtime_error("CH_HOSTS: no hosts configured");
+  }
+}
+
+static void load_hosts_from_legacy_env(chdash::AppConfig& cfg) {
+  // Backward-compatible single host configuration.
+  std::string host = envs("CH_HOST", "clickhouse");
+  int port = envi("CH_PORT", 9000);
+
+  // docker-compose.yml uses: CH_URL, CH_USER, CH_PASS
+  {
+    const std::string ch_url = envs("CH_URL", "");
+    if (!ch_url.empty()) {
+      std::string h = host;
+      int p = port;
+      if (parse_hostport(ch_url, h, p)) {
+        if (!h.empty()) host = h;
+        if (p > 0) port = p;
+      }
+    }
+  }
+
+  const bool tls = envb("CH_TLS", false);
+  const int tls_port = envi("CH_TLS_PORT", 9440);
+  const std::string user = envs("CH_USER", "default");
+  const std::string pass = envs("CH_PASS", envs("CH_PASSWORD", ""));
+
+  int use_port = tls ? tls_port : port;
+
+  std::string uri = "clickhouse://" + user + ":" + pass + "@" + host + ":" + std::to_string(use_port);
+  if (tls) uri += "?secure=1";
+
+  chdash::HostSpec hs;
+  hs.id = "default";
+  hs.label = "default";
+  hs.runner_uri = uri;
+  hs.system_uri = uri;
+  cfg.hosts.push_back(std::move(hs));
+}
+
 int main(int argc, char** argv) {
   chdash::AppConfig cfg;
 
@@ -95,7 +181,7 @@ int main(int argc, char** argv) {
   // --- Listen address ---
   // Priority:
   //   1) CHDASH_LISTEN ("host:port")
-  //   2) LISTEN_HOST + LISTEN_PORT (docker-compose.yml)
+  //   2) LISTEN_HOST + LISTEN_PORT
   //   3) PORT (platform default)
   //   4) 0.0.0.0:8080
   {
@@ -109,33 +195,34 @@ int main(int argc, char** argv) {
     }
   }
 
-  // --- ClickHouse connection ---
-  // docker-compose.yml uses: CH_URL, CH_USER, CH_PASS
-  // We also accept: CH_HOST/CH_PORT and CH_PASSWORD
-  cfg.ch_host = envs("CH_HOST", "clickhouse");
-  cfg.ch_port = envi("CH_PORT", 9000);
+  cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 500);
+  cfg.health.interval_ms = envi("HEALTH_INTERVAL_MS", 5000);
+  cfg.health.timeout_ms = envi("HEALTH_TIMEOUT_MS", 800);
 
-  {
-    const std::string ch_url = envs("CH_URL", "");
-    if (!ch_url.empty()) {
-      std::string host = cfg.ch_host;
-      int port = cfg.ch_port;
-      if (parse_hostport(ch_url, host, port)) {
-        if (!host.empty()) cfg.ch_host = host;
-        if (port > 0) cfg.ch_port = port;
-      }
+  // Version info (compile-time).
+#ifdef CHDASH_SEMVER
+  cfg.version_semver = CHDASH_SEMVER;
+#endif
+#ifdef CHDASH_GIT_SHA
+  cfg.version_git_sha = CHDASH_GIT_SHA;
+#endif
+#ifdef CHDASH_BUILD_TIME
+  cfg.version_build_time = CHDASH_BUILD_TIME;
+#endif
+
+  // --- ClickHouse hosts ---
+  const std::string ch_hosts = envs("CH_HOSTS", "");
+  try {
+    if (!ch_hosts.empty()) {
+      load_hosts_from_hcl(cfg, ch_hosts);
+    } else {
+      load_hosts_from_legacy_env(cfg);
     }
+  } catch (const std::exception& e) {
+    std::cerr << "config error: " << e.what() << std::endl;
+    return 1;
   }
 
-  cfg.ch_tls = envb("CH_TLS", false);
-  cfg.ch_tls_port = envi("CH_TLS_PORT", 9440);
-
-  cfg.ch_user = envs("CH_USER", "default");
-  cfg.ch_password = envs("CH_PASS", envs("CH_PASSWORD", ""));
-  cfg.ch_db = envs("CH_DB", envs("CH_DATABASE", "default"));
-
-  cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 500);
-  
   if (argc > 1 && std::string(argv[1]) == "--health") {
     chdash::Server srv(cfg);
     std::string err;
@@ -150,7 +237,10 @@ int main(int argc, char** argv) {
   try {
     chdash::Server s(cfg);
     std::cerr << "listen=http://" << cfg.listen << "\n";
-    std::cerr << "clickhouse_host=" << cfg.ch_host << " clickhouse_port=" << cfg.ch_port << " db=" << cfg.ch_db << "\n";
+    std::cerr << "hosts=" << cfg.hosts.size() << " health_interval_ms=" << cfg.health.interval_ms << " timeout_ms=" << cfg.health.timeout_ms << "\n";
+    for (const auto& h : cfg.hosts) {
+      std::cerr << "host=" << h.id << " runner_uri=" << h.runner_uri << " system_uri=" << h.system_uri << "\n";
+    }
     return s.run();
   } catch (const std::exception& e) {
     std::cerr << "fatal: " << e.what() << "\n";

@@ -16,9 +16,11 @@ Transport: **Server-Sent Events (SSE)**
 - 📈 Smooth sparklines (front)
 - 📦 Single lightweight binary
 - 🧠 Automatic rate derivation (rows/sec & bytes/sec)
-- 🛑 Query cancellation (**best effort**) without issuing a second ClickHouse query
-
-> Note: this project is designed for ClickHouse setups where you **cannot run a second query in parallel** (same user / same connection). Metrics are collected from the **native TCP protocol callbacks**.
+- 🧭 Multi-host support with a UI selector (persisted in localStorage)
+- 🩺 Background host health checks (TCP Ping)
+- 🛑 Query cancellation via signed JWT cancel tokens + `KILL QUERY` (system user)
+- 🧹 Local query history (last 100, localStorage)
+- 🏷️ Version badge (from `/api/meta`)
 
 ---
 
@@ -27,8 +29,9 @@ Transport: **Server-Sent Events (SSE)**
 ```
 Browser
   │
-  │  POST /api/query
+  │  POST /api/query/run   (alias: POST /api/query)
   │  GET  /api/query/stream?query_id=...   (SSE)
+  │  POST /api/query/cancel
   ▼
 HTTP server (cpp-httplib)
   │
@@ -108,7 +111,8 @@ Environment variables:
 | `LISTEN_HOST` | `0.0.0.0` | Used if `CHDASH_LISTEN` not set |
 | `LISTEN_PORT` | `8080` | Used if `CHDASH_LISTEN` not set |
 | `PORT` | (none) | Fallback port (platform) |
-| `STATIC_DIR` / `CHDASH_STATIC_DIR` | `./static` | Directory for `index.html`, `app.js`, `style.css`, fonts |
+| `STATIC_DIR` | `./static` | Directory for `index.html`, `app.js`, `style.css`, fonts |
+| `CH_HOSTS` | (none) | Multi-host HCL config (recommended) |
 | `CH_URL` | (none) | `host:port` or `tcp://host:port` |
 | `CH_HOST` | `clickhouse` | ClickHouse host |
 | `CH_PORT` | `9000` | ClickHouse native TCP port |
@@ -116,8 +120,26 @@ Environment variables:
 | `CH_TLS_PORT` | `9440` | TLS native TCP port |
 | `CH_USER` | `default` | ClickHouse user |
 | `CH_PASS` / `CH_PASSWORD` | (empty) | ClickHouse password |
-| `CH_DB` / `CH_DATABASE` | `default` | Default database |
 | `RESULT_PREVIEW_ROW_LIMIT` | `500` | Max rows returned to the browser |
+| `HEALTH_INTERVAL_MS` | `5000` | Host health polling interval (ms) when `CH_HOSTS` omits `health` |
+| `HEALTH_TIMEOUT_MS` | `800` | Ping timeout (ms) when `CH_HOSTS` omits `health` |
+
+### Example `CH_HOSTS`
+
+```hcl
+health {
+  interval_ms = 5000
+  timeout_ms  = 800
+}
+
+clickhouse {
+  host {
+    name       = "local"
+    runner_uri = "clickhouse://user:pass@clickhouse:9000"
+    system_uri = "clickhouse://system:pass@clickhouse:9000"
+  }
+}
+```
 
 ---
 
@@ -125,10 +147,14 @@ Environment variables:
 
 - `GET /` → serves `static/index.html`
 - `GET /static/*` → static assets
-- `GET /healthz` → health check (does **not** query ClickHouse while busy)
-- `POST /api/query` → `{ "sql": "...", "database": "..." }` → `{ query_id, stream_url }`
+- `GET /healthz` → strict health check (all configured hosts must be healthy)
+- `GET /api/meta` → `{ name, version, git_sha, build_time }`
+- `GET /api/hosts` → health snapshot for all hosts (polled by the UI)
+- `GET /api/health` → strict JSON health (`ok=true` only if all hosts are healthy)
+- `POST /api/query/run` → `{ "sql": "...", "host_id": "par1" }` → `{ query_id, cancel_token, formatted_sql, stream_url }`
+  - Alias: `POST /api/query`
 - `GET /api/query/stream?query_id=...` → SSE stream (`meta`, `tick`, `done`)
-- `POST /api/query/cancel` → `{ "query_id": "..." }`
+- `POST /api/query/cancel` → `{ "cancel_token": "..." }` → `{ "ok": true }`
 
 ---
 
@@ -147,13 +173,10 @@ Artifacts include the binary and (if present) `src/static/`.
 
 ### Query workflow
 
-* [ ] Local query history (favorites/pin)
 * [ ] SQL auto-format (button + optional format-on-run)
 
 ### UI / UX
 
-* [ ] Frontend version badge (`vX.Y.Z` + commit)
-* [ ] User + DB indicator
 * [ ] Better rendering: nicer editor + pretty JSON + collapse long cells
 
 ### Data explorer
@@ -165,11 +188,6 @@ Artifacts include the binary and (if present) `src/static/`.
 
 * [ ] Query perf tracking (CPU/RAM/threads + top queries)
 * [ ] Cluster perf overview (per-host if possible)
-
-### Connectivity / Multi-tenancy
-
-* [ ] Multi-DB / multi-connection
-* [ ] Standard URL connection (`CH_URLs` + TLS params)
 
 ---
 

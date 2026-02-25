@@ -42,6 +42,10 @@ add_executable(chdash
   main.cpp
   server.cpp
   query_session.cpp
+  hcl.cpp
+  jwt.cpp
+  ch_uri.cpp
+  health_runner.cpp
 )
 
 if (CHDASH_EMBED_STATIC)
@@ -81,8 +85,40 @@ target_include_directories(chdash PRIVATE
 # pthreads (souvent requis)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-
 target_link_libraries(chdash PRIVATE
   clickhouse-cpp-lib
   Threads::Threads
+)
+
+# ---- Build metadata (/api/meta) ----
+find_package(Git QUIET)
+if (GIT_FOUND)
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    OUTPUT_VARIABLE CHDASH_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    OUTPUT_VARIABLE CHDASH_SEMVER
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+endif()
+
+if (NOT CHDASH_GIT_SHA)
+  set(CHDASH_GIT_SHA "unknown")
+endif()
+if (NOT CHDASH_SEMVER)
+  set(CHDASH_SEMVER "dev")
+endif()
+
+string(TIMESTAMP CHDASH_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
+target_compile_definitions(chdash PRIVATE
+  CHDASH_GIT_SHA="${CHDASH_GIT_SHA}"
+  CHDASH_SEMVER="${CHDASH_SEMVER}"
+  CHDASH_BUILD_TIME="${CHDASH_BUILD_TIME}"
 )

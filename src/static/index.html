@@ -10,7 +10,61 @@
 </head>
 
 <body>
-  <main class="layout">
+  <header class="appHeader" role="banner">
+    <div class="appHeader__left">
+      <div class="appBrand">
+        <span class="appBrand__name">ClickHouse Dash</span>
+        <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
+      </div>
+
+      <nav class="appNav" aria-label="Pages">
+        <!-- <a class="appNav__item is-active" href="/">Query</a> -->
+      </nav>
+    </div>
+
+    <div class="appHeader__right">
+      <div id="hostPicker" class="picker" aria-label="Target host">
+        <button
+          id="hostPickerButton"
+          class="button picker__button"
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+          title="Target host">
+          <span id="hostPickerDot" class="hostDot hostDot--bad" aria-hidden="true"></span>
+          <span id="hostPickerText" class="picker__text">Host</span>
+          <span id="hostPickerPing" class="hostPing" aria-label="ping"></span>
+          <span class="picker__chev" aria-hidden="true">▾</span>
+        </button>
+
+        <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
+      </div>
+
+      <div id="themeSelect" class="themeSelect" aria-label="Theme">
+        <button
+          id="themeSelectButton"
+          class="button themeSelect__button"
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded="false">
+          <span id="themeSelectText">System</span>
+        </button>
+
+        <div
+          id="themeSelectMenu"
+          class="themeSelect__menu"
+          role="listbox"
+          tabindex="-1"
+          hidden>
+          <button type="button" class="themeSelect__option" role="option" data-value="system" aria-selected="true">System</button>
+          <button type="button" class="themeSelect__option" role="option" data-value="dark" aria-selected="false">Dark</button>
+          <button type="button" class="themeSelect__option" role="option" data-value="light" aria-selected="false">Light</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout" role="main">
     <section class="panel panel--query">
       <textarea
         id="queryTextArea"
@@ -35,28 +89,10 @@
           <button id="cancelButton" class="button" disabled>Cancel</button>
           <button id="clearButton" class="button">Clear</button>
 
-          <div id="themeSelect" class="themeSelect" aria-label="Theme">
-            <button
-              id="themeSelectButton"
-              class="button themeSelect__button"
-              type="button"
-              aria-haspopup="listbox"
-              aria-expanded="false">
-              <span id="themeSelectText">System</span>
-            </button>
-
-            <div
-              id="themeSelectMenu"
-              class="themeSelect__menu"
-              role="listbox"
-              tabindex="-1"
-              hidden>
-              <button type="button" class="themeSelect__option" role="option" data-value="system" aria-selected="true">System</button>
-              <button type="button" class="themeSelect__option" role="option" data-value="dark" aria-selected="false">Dark</button>
-              <button type="button" class="themeSelect__option" role="option" data-value="light" aria-selected="false">Light</button>
-            </div>
+          <div class="historyMenu">
+            <button id="historyButton" class="button" type="button">History</button>
+            <div id="historyPanel" class="historyPanel" hidden></div>
           </div>
-
         </div>
       </div>
     </section>

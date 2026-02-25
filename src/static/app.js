@@ -5,6 +5,18 @@
   const runButtonElement = document.getElementById("runButton");
   const cancelButtonElement = document.getElementById("cancelButton");
   const clearButtonElement = document.getElementById("clearButton");
+  const historyButtonElement = document.getElementById("historyButton");
+  const historyPanelElement = document.getElementById("historyPanel");
+
+  const versionBadgeElement = document.getElementById("versionBadge");
+
+  // Pretty host picker (header)
+  const hostPickerRootElement = document.getElementById("hostPicker");
+  const hostPickerButtonElement = document.getElementById("hostPickerButton");
+  const hostPickerMenuElement = document.getElementById("hostPickerMenu");
+  const hostPickerTextElement = document.getElementById("hostPickerText");
+  const hostPickerDotElement = document.getElementById("hostPickerDot");
+  const hostPickerPingElement = document.getElementById("hostPickerPing");
   const themeSelectRootElement = document.getElementById("themeSelect");
   const themeSelectButtonElement = document.getElementById("themeSelectButton");
   const themeSelectTextElement = document.getElementById("themeSelectText");
@@ -56,6 +68,13 @@
 
 
   const THEME_STORAGE_KEY = "chdash.theme";
+  const HOST_STORAGE_KEY = "chdash.selectedHost";
+  const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
+  const HISTORY_MAX_ENTRIES = 100;
+
+  let hostsSnapshot = null;
+  let selectedHostId = null;
+  let lastCancelToken = null;
   
 
   function setResultsVisible(visible) {
@@ -78,6 +97,293 @@
     } catch {
       return null;
     }
+  }
+
+  // ---- /api/meta (version badge) ----
+
+  async function loadMeta() {
+    if (!versionBadgeElement) return;
+    try {
+      const resp = await fetch("/api/meta", { cache: "no-store" });
+      if (!resp.ok) {
+        setText(versionBadgeElement, "meta: error");
+        return;
+      }
+      const data = await resp.json();
+      const verObj = data && data.version ? data.version : null;
+      const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
+      const sha = verObj && typeof verObj === "object" ? String(verObj.git_sha || "") : String(data.git_sha || "");
+      const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
+      const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
+      setText(versionBadgeElement, text);
+      if (build) versionBadgeElement.title = `Backend version\nBuild: ${build}`;
+    } catch {
+      setText(versionBadgeElement, "meta: offline");
+    }
+  }
+
+  // ---- Hosts (SSE /api/hosts/stream) ----
+
+  function getStoredHostId() {
+    try {
+      return localStorage.getItem(HOST_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  function storeHostId(hostId) {
+    try {
+      localStorage.setItem(HOST_STORAGE_KEY, String(hostId || ""));
+    } catch {
+      // ignore
+    }
+  }
+
+  function setSelectedHostId(hostId) {
+    selectedHostId = hostId ? String(hostId) : null;
+    if (selectedHostId) storeHostId(selectedHostId);
+    applyHostPickerUi();
+  }
+
+  function pickDefaultHostId(snapshot) {
+    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
+    const ids = hosts.map((h) => String(h.id));
+    const stored = getStoredHostId();
+    if (stored && ids.includes(String(stored))) return String(stored);
+    return ids.length ? ids[0] : null;
+  }
+
+  function applyHostPickerUi() {
+    if (!hostsSnapshot) return;
+    const hosts = Array.isArray(hostsSnapshot.hosts) ? hostsSnapshot.hosts : [];
+    const h = hosts.find((x) => x && String(x.id) === String(selectedHostId));
+    const healthy = !!(h && h.healthy);
+    const pingMs = h && h.ping_ms != null ? Number(h.ping_ms) : null;
+    const label = h ? String(h.label || h.id) : (selectedHostId || "Host");
+
+    if (hostPickerTextElement) hostPickerTextElement.textContent = label;
+
+    if (hostPickerDotElement) {
+      hostPickerDotElement.classList.toggle("hostDot--good", healthy);
+      hostPickerDotElement.classList.toggle("hostDot--bad", !healthy);
+    }
+
+    if (hostPickerPingElement) {
+      if (healthy && pingMs != null && Number.isFinite(pingMs)) {
+        hostPickerPingElement.textContent = `${Math.round(pingMs)} ms`;
+      } else {
+        hostPickerPingElement.textContent = healthy ? "-" : "down";
+      }
+    }
+  }
+
+  function closeHostMenu() {
+    if (!hostPickerMenuElement || !hostPickerButtonElement) return;
+    hostPickerMenuElement.hidden = true;
+    hostPickerButtonElement.setAttribute("aria-expanded", "false");
+  }
+
+  function openHostMenu() {
+    if (!hostPickerMenuElement || !hostPickerButtonElement) return;
+    hostPickerMenuElement.hidden = false;
+    hostPickerButtonElement.setAttribute("aria-expanded", "true");
+    hostPickerMenuElement.focus({ preventScroll: true });
+  }
+
+  function toggleHostMenu() {
+    if (!hostPickerMenuElement) return;
+    if (hostPickerMenuElement.hidden) openHostMenu();
+    else closeHostMenu();
+  }
+
+  function renderHostPicker(snapshot) {
+    if (!hostPickerMenuElement) return;
+    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
+    hostPickerMenuElement.innerHTML = "";
+
+    for (const h of hosts) {
+      if (!h || !h.id) continue;
+      const id = String(h.id);
+      const label = String(h.label || h.id);
+      const healthy = !!h.healthy;
+      const pingMs = h.ping_ms != null ? Number(h.ping_ms) : null;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pickerOption";
+      btn.setAttribute("role", "option");
+      btn.setAttribute("data-id", id);
+      btn.setAttribute("aria-selected", String(id === String(selectedHostId)));
+
+      const dot = document.createElement("span");
+      dot.className = `hostDot ${healthy ? "hostDot--good" : "hostDot--bad"}`;
+      dot.setAttribute("aria-hidden", "true");
+
+      const text = document.createElement("span");
+      text.className = "pickerOption__label";
+      text.textContent = label;
+
+      const meta = document.createElement("span");
+      meta.className = "pickerOption__meta";
+      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? `${Math.round(pingMs)} ms` : (healthy ? "-" : "down");
+
+      btn.appendChild(dot);
+      btn.appendChild(text);
+      btn.appendChild(meta);
+
+      btn.addEventListener("click", () => {
+        setSelectedHostId(id);
+        // update selection highlight
+        for (const el of hostPickerMenuElement.querySelectorAll(".pickerOption")) {
+          el.setAttribute("aria-selected", String(el.getAttribute("data-id") === String(id)));
+        }
+        closeHostMenu();
+      });
+
+      hostPickerMenuElement.appendChild(btn);
+    }
+
+    if (!selectedHostId) {
+      selectedHostId = pickDefaultHostId(snapshot);
+      if (selectedHostId) storeHostId(selectedHostId);
+    } else {
+      // if selected host disappeared, fallback to first
+      const ids = hosts.map((x) => String(x.id));
+      if (!ids.includes(String(selectedHostId))) {
+        selectedHostId = ids.length ? ids[0] : null;
+        if (selectedHostId) storeHostId(selectedHostId);
+      }
+    }
+
+    applyHostPickerUi();
+  }
+
+  function startHostsSse() {
+    if (!hostPickerRootElement) return;
+    try {
+      const es = new EventSource("/api/hosts/stream");
+      es.addEventListener("hosts", (ev) => {
+        const data = safelyParseJson(ev.data);
+        if (!data) return;
+        hostsSnapshot = data;
+        renderHostPicker(data);
+      });
+      es.onerror = () => {
+        // keep UI, but if SSE is blocked we'll fallback to a one-shot fetch
+        // (no polling here to keep server quiet; SSE is the preferred path)
+        es.close();
+        fetch("/api/hosts", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (!data) return;
+            hostsSnapshot = data;
+            renderHostPicker(data);
+          })
+          .catch(() => {});
+      };
+    } catch {
+      // ignore
+    }
+  }
+
+  // ---- Local history (localStorage, 100 entries) ----
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .filter((x) => x && typeof x === "object" && typeof x.ts_ms === "number" && typeof x.sql_raw === "string")
+        .slice(0, HISTORY_MAX_ENTRIES);
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(items) {
+    try {
+      const trimmed = Array.isArray(items) ? items.slice(0, HISTORY_MAX_ENTRIES) : [];
+      localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch {
+      // ignore
+    }
+  }
+
+  function addHistoryEntry(entry) {
+    const items = loadHistory();
+    items.unshift(entry);
+    // Dedup by host + sql_raw
+    const seen = new Set();
+    const deduped = [];
+    for (const it of items) {
+      const key = `${it.host_id || ""}::${it.sql_raw || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(it);
+      if (deduped.length >= HISTORY_MAX_ENTRIES) break;
+    }
+    saveHistory(deduped);
+  }
+
+  function formatHistoryTime(tsMs) {
+    try {
+      const d = new Date(tsMs);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const ss = String(d.getSeconds()).padStart(2, "0");
+      return `${hh}:${mm}:${ss}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function renderHistoryPanel() {
+    if (!historyPanelElement) return;
+    const items = loadHistory();
+    historyPanelElement.innerHTML = "";
+
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "historyEmpty";
+      empty.textContent = "No history yet";
+      historyPanelElement.appendChild(empty);
+      return;
+    }
+
+    for (const it of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "historyItem";
+
+      const title = document.createElement("div");
+      title.className = "historyItem__title";
+      title.textContent = `${formatHistoryTime(it.ts_ms)} · ${it.host_id || ""}`;
+
+      const body = document.createElement("div");
+      body.className = "historyItem__sql";
+      body.textContent = (it.sql_formatted || it.sql_raw || "").slice(0, 200);
+
+      btn.appendChild(title);
+      btn.appendChild(body);
+
+      btn.addEventListener("click", () => {
+        if (it.host_id) setSelectedHostId(String(it.host_id));
+        if (queryTextAreaElement) queryTextAreaElement.value = String(it.sql_formatted || it.sql_raw || "");
+        historyPanelElement.hidden = true;
+      });
+
+      historyPanelElement.appendChild(btn);
+    }
+  }
+
+  function toggleHistory() {
+    if (!historyPanelElement) return;
+    const willShow = historyPanelElement.hidden;
+    if (willShow) renderHistoryPanel();
+    historyPanelElement.hidden = !willShow;
   }
 
   async function copyTextToClipboard(text) {
@@ -1014,11 +1320,25 @@
 
 
   async function createQuery(queryText) {
-    const response = await fetch("api/query", {
+    const hostId = selectedHostId || getStoredHostId();
+    if (!hostId) {
+      throw new Error("No host selected.");
+    }
+
+    // Prefer the new endpoint; keep old one as fallback for older backends.
+    let response = await fetch("/api/query/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sql: queryText })
+      body: JSON.stringify({ sql: queryText, host_id: hostId })
     });
+
+    if (response.status === 404) {
+      response = await fetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: queryText, host_id: hostId })
+      });
+    }
 
     const responseBody = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1027,14 +1347,26 @@
         : `Request failed with status ${response.status}`;
       throw new Error(messageText);
     }
+    // Optional: auto-replace textarea with formatted sql
+    if (queryTextAreaElement && responseBody && typeof responseBody.formatted_sql === "string") {
+      queryTextAreaElement.value = responseBody.formatted_sql;
+    }
+
+    // Keep cancel token if provided by backend
+    lastCancelToken = responseBody && responseBody.cancel_token ? String(responseBody.cancel_token) : null;
+
     return responseBody;
   }
 
   async function requestCancellation(queryIdentifier) {
-    const response = await fetch("api/query/cancel", {
+    const payload = lastCancelToken
+      ? { cancel_token: lastCancelToken }
+      : { query_id: queryIdentifier };
+
+    const response = await fetch("/api/query/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query_id: queryIdentifier })
+      body: JSON.stringify(payload)
     });
 
     const responseBody = await response.json().catch(() => ({}));
@@ -1423,6 +1755,13 @@
       activeQueryIdentifier = responsePayload.query_id;
       setQueryIdentifier(activeQueryIdentifier);
 
+      addHistoryEntry({
+        ts_ms: Date.now(),
+        host_id: selectedHostId || getStoredHostId() || "",
+        sql_raw: queryText,
+        sql_formatted: typeof responsePayload.formatted_sql === "string" ? responsePayload.formatted_sql : null,
+      });
+
       setStatus("connecting");
       startStream(responsePayload.stream_url);
     } catch (error) {
@@ -1677,7 +2016,43 @@
   clearButtonElement?.addEventListener("click", handleClear);
   copyJsonButtonElement?.addEventListener("click", handleCopyJson);
 
+  // Host picker interactions
+  hostPickerButtonElement?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleHostMenu();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!hostPickerRootElement || !hostPickerMenuElement) return;
+    if (hostPickerMenuElement.hidden) return;
+    const t = e.target;
+    if (!(t instanceof Node)) return;
+    if (!hostPickerRootElement.contains(t)) closeHostMenu();
+  });
+
+  historyButtonElement?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleHistory();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!historyPanelElement || historyPanelElement.hidden) return;
+    const t = e.target;
+    if (!(t instanceof Node)) return;
+    const inMenu = historyPanelElement.contains(t);
+    const inBtn = historyButtonElement ? historyButtonElement.contains(t) : false;
+    if (!inMenu && !inBtn) historyPanelElement.hidden = true;
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeHostMenu();
+    }
+  });
+
   setResultsVisible(false);
+  loadMeta();
+  startHostsSse();
   loadDefaultQueryIfEmpty();
   scheduleChartsRender();
   updateCopyButtonState();

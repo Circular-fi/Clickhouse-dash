@@ -848,3 +848,210 @@ button.button:hover {
 .panel--results.is-hidden {
   display: none;
 }
+
+.appHeader {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.appHeader__left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.appHeader__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.appBrand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.appBrand__name {
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.appNav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appNav__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid transparent;
+  opacity: 0.9;
+}
+
+.appNav__item:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.appNav__item.is-active {
+  opacity: 1;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+
+.appNav__item.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Ensure main content is separated from header visually */
+.layout {
+  padding-top: 10px;
+}
+
+/* ---- Pretty host picker (similar to theme picker) ---- */
+
+.picker {
+  position: relative;
+}
+
+.picker__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.picker__text {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker__chev {
+  opacity: 0.7;
+  font-size: 12px;
+  margin-left: 2px;
+}
+
+.picker__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 280px;
+  max-width: 360px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.22);
+  padding: 6px;
+}
+
+.pickerOption {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.pickerOption:hover {
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  border-color: var(--border);
+}
+
+.pickerOption[aria-selected="true"] {
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border-color: var(--border);
+}
+
+.pickerOption__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerOption__meta {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* ---- History popover ---- */
+.historyMenu { position: relative; }
+.historyPanel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(520px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.22);
+  padding: 8px;
+  z-index: 60;
+}
+
+.historyItem {
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.historyItem:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.historyItem__title {
+  opacity: 0.8;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.historyItem__sql {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  opacity: 0.95;
+  white-space: pre-wrap;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+
+.historyEmpty {
+  padding: 10px;
+  opacity: 0.7;
+}
