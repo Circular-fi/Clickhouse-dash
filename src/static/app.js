@@ -3,6 +3,7 @@
 
   const queryTextAreaElement = document.getElementById("queryTextArea");
   const runButtonElement = document.getElementById("runButton");
+  const formatButtonElement = document.getElementById("formatButton");
   const cancelButtonElement = document.getElementById("cancelButton");
   const clearButtonElement = document.getElementById("clearButton");
   const historyButtonElement = document.getElementById("historyButton");
@@ -1358,6 +1359,32 @@
     return responseBody;
   }
 
+  async function formatQuery(queryText) {
+    const hostId = selectedHostId || getStoredHostId();
+    if (!hostId) {
+      throw new Error("No host selected.");
+    }
+
+    const response = await fetch("/api/format", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql: queryText, host_id: hostId })
+    });
+
+    const responseBody = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const messageText = responseBody && responseBody.message
+        ? responseBody.message
+        : `Request failed with status ${response.status}`;
+      throw new Error(messageText);
+    }
+
+    if (responseBody && typeof responseBody.formatted_sql === "string") {
+      return responseBody.formatted_sql;
+    }
+    throw new Error("No formatted SQL returned.");
+  }
+
   async function requestCancellation(queryIdentifier) {
     const payload = lastCancelToken
       ? { cancel_token: lastCancelToken }
@@ -1735,6 +1762,26 @@
     eventSource.onerror = () => {};
   }
 
+  async function handleFormat() {
+    const queryText = (queryTextAreaElement?.value || "").trim();
+    if (!queryText) {
+      setError("Please write a query first.");
+      return;
+    }
+
+    setError("");
+    if (formatButtonElement) formatButtonElement.disabled = true;
+
+    try {
+      const formatted = await formatQuery(queryText);
+      if (queryTextAreaElement) queryTextAreaElement.value = formatted;
+    } catch (error) {
+      setError(error && error.message ? error.message : String(error));
+    } finally {
+      if (formatButtonElement) formatButtonElement.disabled = false;
+    }
+  }
+
   async function handleRun() {
     const queryText = (queryTextAreaElement?.value || "").trim();
     if (!queryText) {
@@ -2012,6 +2059,7 @@
 
 
   runButtonElement?.addEventListener("click", handleRun);
+  formatButtonElement?.addEventListener("click", handleFormat);
   cancelButtonElement?.addEventListener("click", handleCancel);
   clearButtonElement?.addEventListener("click", handleClear);
   copyJsonButtonElement?.addEventListener("click", handleCopyJson);

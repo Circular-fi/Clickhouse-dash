@@ -454,6 +454,8 @@ Server::Server(AppConfig cfg)
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });
   http_.Get("/api/health", [&](const auto& req, auto& res) { handle_api_health(req, res); });
 
+  http_.Post("/api/format", [&](const auto& req, auto& res) { handle_api_format(req, res); });
+
   http_.Post("/api/query/run", [&](const auto& req, auto& res) { handle_query_run(req, res); });
   http_.Post("/api/query", [&](const auto& req, auto& res) { handle_query_run(req, res); });
 
@@ -612,6 +614,58 @@ void Server::handle_api_health(const httplib::Request&, httplib::Response& res) 
   res.set_content(sb.GetString(), "application/json");
 }
 
+void Server::handle_api_format(const httplib::Request& req, httplib::Response& res) {
+  rapidjson::Document doc;
+  if (!parse_json_body(req, doc)) {
+    return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
+  }
+  if (!doc.HasMember("sql") || !doc["sql"].IsString()) {
+    return json_error(res, 400, "missing_sql", "Missing SQL text.");
+  }
+  if (!doc.HasMember("host_id") || !doc["host_id"].IsString()) {
+    return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  }
+
+  std::string sql_raw = doc["sql"].GetString();
+  std::string sql = trim_sql(sql_raw);
+  if (sql.empty()) {
+    return json_error(res, 400, "missing_sql", "Missing SQL text.");
+  }
+
+  const std::string host_id = doc["host_id"].GetString();
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) {
+    return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  }
+
+  // Block if health runner considers the host down.
+  if (health_) {
+    HostsSnapshot hs = health_->snapshot();
+    for (const auto& h : hs.hosts) {
+      if (h.id == host_id && !h.healthy) {
+        return json_error(res, 503, "host_down", "Selected host is down.");
+      }
+    }
+  }
+
+  std::string fmt_err;
+  const auto formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
+  if (!formatted.has_value()) {
+    const std::string msg = fmt_err.empty() ? "Failed to format query." : fmt_err;
+    return json_error(res, 422, "format_failed", msg);
+  }
+
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("formatted_sql");
+  w.String(formatted->c_str());
+  w.EndObject();
+
+  res.status = 200;
+  res.set_content(sb.GetString(), "application/json");
+}
+
 void Server::handle_query_run(const httplib::Request& req, httplib::Response& res) {
   rapidjson::Document doc;
   if (!parse_json_body(req, doc)) {
@@ -739,6 +793,16 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           return true;
         }
 
+        // Prioritize produced query chunks (result_meta/result_rows/error) before
+        // periodic tick/done. Otherwise very fast queries can finish before the
+        // first publish window and get closed without delivering their results.
+        std::string produced;
+        st->session->wait_pop_sse_chunk(produced, 0);
+        if (!produced.empty()) {
+          sink.write(produced.data(), produced.size());
+          return true;
+        }
+
         const auto now = std::chrono::steady_clock::now();
         if (st->last_publish.time_since_epoch().count() == 0 || now - st->last_publish >= std::chrono::milliseconds(250)) {
           const auto snap = st->session->snapshot();
@@ -761,7 +825,6 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           return true;
         }
 
-        std::string produced;
         const bool cont = st->session->wait_pop_sse_chunk(produced, 30);
         if (!produced.empty()) {
           sink.write(produced.data(), produced.size());

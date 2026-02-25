@@ -51,6 +51,8 @@ private:
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);
   void handle_api_health(const httplib::Request& req, httplib::Response& res);
 
+  void handle_api_format(const httplib::Request& req, httplib::Response& res);
+
   void handle_query_run(const httplib::Request& req, httplib::Response& res);
   void handle_query_stream(const httplib::Request& req, httplib::Response& res);
   void handle_query_cancel(const httplib::Request& req, httplib::Response& res);
