@@ -142,8 +142,6 @@
     }
   }
 
-  // ---- /api/meta (version badge) ----
-
   async function loadMeta() {
     if (!versionBadgeElement) return;
     try {
@@ -165,7 +163,6 @@
     }
   }
 
-  // ---- Hosts (SSE /api/hosts/stream) ----
 
   function getStoredHostId() {
     try {
@@ -179,7 +176,7 @@
     try {
       localStorage.setItem(HOST_STORAGE_KEY, String(hostId || ""));
     } catch {
-      // ignore
+      
     }
   }
 
@@ -327,7 +324,7 @@
   function startHostsSse() {
     if (!hostPickerRootElement) return;
     try {
-      const es = new EventSource("/api/hosts/stream");
+      const es = new EventSource("api/hosts/stream");
       es.addEventListener("hosts", (ev) => {
         const data = safelyParseJson(ev.data);
         if (!data) return;
@@ -338,7 +335,7 @@
         // keep UI, but if SSE is blocked we'll fallback to a one-shot fetch
         // (no polling here to keep server quiet; SSE is the preferred path)
         es.close();
-        fetch("/api/hosts", { cache: "no-store" })
+        fetch("api/hosts", { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => {
             if (!data) return;

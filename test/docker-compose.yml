@@ -4,13 +4,11 @@ services:
     build:
         context: ../
         dockerfile: ./test/Dockerfile
-        target: dev #or 'production'
+        target: dev
     container_name: clickhouse-dash
     stop_grace_period: 0s
     restart: unless-stopped
     environment:
-        # Multi-host configuration (HCL). "runner_uri" is used for running user queries,
-        # "system_uri" is used for health checks + KILL QUERY.
         CH_HOSTS: |
           health {
             interval_ms = 5000
