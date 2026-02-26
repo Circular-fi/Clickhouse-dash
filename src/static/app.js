@@ -145,7 +145,7 @@
   async function loadMeta() {
     if (!versionBadgeElement) return;
     try {
-      const resp = await fetch("/api/meta", { cache: "no-store" });
+      const resp = await fetch("api/meta", { cache: "no-store" });
       if (!resp.ok) {
         setText(versionBadgeElement, "meta: error");
         return;
@@ -1479,14 +1479,14 @@
     }
 
     // Prefer the new endpoint; keep old one as fallback for older backends.
-    let response = await fetch("/api/query/run", {
+    let response = await fetch("api/query/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sql: queryText, host_id: hostId })
     });
 
     if (response.status === 404) {
-      response = await fetch("/api/query", {
+      response = await fetch("api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: queryText, host_id: hostId })
@@ -1517,7 +1517,7 @@
       throw new Error("No host selected.");
     }
 
-    const response = await fetch("/api/format", {
+    const response = await fetch("api/format", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sql: queryText, host_id: hostId })
@@ -1542,7 +1542,7 @@
       ? { cancel_token: lastCancelToken }
       : { query_id: queryIdentifier };
 
-    const response = await fetch("/api/query/cancel", {
+    const response = await fetch("api/query/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
