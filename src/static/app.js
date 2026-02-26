@@ -5,7 +5,6 @@
   const runButtonElement = document.getElementById("runButton");
   const formatButtonElement = document.getElementById("formatButton");
   const cancelButtonElement = document.getElementById("cancelButton");
-  const clearButtonElement = document.getElementById("clearButton");
   const historyButtonElement = document.getElementById("historyButton");
   const historyPanelElement = document.getElementById("historyPanel");
 
@@ -87,6 +86,49 @@
     if (el) el.textContent = value;
   }
 
+  function setMetricPlain(el, value) {
+    if (!el) return;
+    el.classList.remove("metricAligned");
+    el.removeAttribute("data-kind");
+    el.textContent = value;
+  }
+
+  function setMetricAligned(el, { prefix = "", num = "", unit = "", suffix = "", kind = "" } = {}) {
+    if (!el) return;
+
+    el.classList.add("metricAligned");
+    if (kind) el.setAttribute("data-kind", kind);
+    else el.removeAttribute("data-kind");
+
+    const nodes = [];
+
+    if (prefix) {
+      const p = document.createElement("span");
+      p.className = "metricAligned__prefix";
+      p.textContent = prefix;
+      nodes.push(p);
+    }
+
+    const n = document.createElement("span");
+    n.className = "metricAligned__num";
+    n.textContent = num;
+    nodes.push(n);
+
+    const u = document.createElement("span");
+    u.className = "metricAligned__unit";
+    u.textContent = unit;
+    nodes.push(u);
+
+    if (suffix) {
+      const s = document.createElement("span");
+      s.className = "metricAligned__suffix";
+      s.textContent = suffix;
+      nodes.push(s);
+    }
+
+    el.replaceChildren(...nodes);
+  }
+
   function asFiniteNumber(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -155,6 +197,15 @@
     return ids.length ? ids[0] : null;
   }
 
+  function formatPingMsLabel(pingMs) {
+    const ms = Number(pingMs);
+    if (!Number.isFinite(ms)) return null;
+    if (ms > 0 && ms < 1) return "<1ms";
+    const rounded = Math.round(ms);
+    if (rounded < 1) return "<1ms";
+    return `${rounded} ms`;
+  }
+
   function applyHostPickerUi() {
     if (!hostsSnapshot) return;
     const hosts = Array.isArray(hostsSnapshot.hosts) ? hostsSnapshot.hosts : [];
@@ -172,7 +223,7 @@
 
     if (hostPickerPingElement) {
       if (healthy && pingMs != null && Number.isFinite(pingMs)) {
-        hostPickerPingElement.textContent = `${Math.round(pingMs)} ms`;
+        hostPickerPingElement.textContent = formatPingMsLabel(pingMs) || "-";
       } else {
         hostPickerPingElement.textContent = healthy ? "-" : "down";
       }
@@ -194,6 +245,7 @@
 
   function toggleHostMenu() {
     if (!hostPickerMenuElement) return;
+    if (hostPickerRootElement?.classList.contains("is-static")) return;
     if (hostPickerMenuElement.hidden) openHostMenu();
     else closeHostMenu();
   }
@@ -201,49 +253,6 @@
   function renderHostPicker(snapshot) {
     if (!hostPickerMenuElement) return;
     const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
-    hostPickerMenuElement.innerHTML = "";
-
-    for (const h of hosts) {
-      if (!h || !h.id) continue;
-      const id = String(h.id);
-      const label = String(h.label || h.id);
-      const healthy = !!h.healthy;
-      const pingMs = h.ping_ms != null ? Number(h.ping_ms) : null;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "pickerOption";
-      btn.setAttribute("role", "option");
-      btn.setAttribute("data-id", id);
-      btn.setAttribute("aria-selected", String(id === String(selectedHostId)));
-
-      const dot = document.createElement("span");
-      dot.className = `hostDot ${healthy ? "hostDot--good" : "hostDot--bad"}`;
-      dot.setAttribute("aria-hidden", "true");
-
-      const text = document.createElement("span");
-      text.className = "pickerOption__label";
-      text.textContent = label;
-
-      const meta = document.createElement("span");
-      meta.className = "pickerOption__meta";
-      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? `${Math.round(pingMs)} ms` : (healthy ? "-" : "down");
-
-      btn.appendChild(dot);
-      btn.appendChild(text);
-      btn.appendChild(meta);
-
-      btn.addEventListener("click", () => {
-        setSelectedHostId(id);
-        // update selection highlight
-        for (const el of hostPickerMenuElement.querySelectorAll(".pickerOption")) {
-          el.setAttribute("aria-selected", String(el.getAttribute("data-id") === String(id)));
-        }
-        closeHostMenu();
-      });
-
-      hostPickerMenuElement.appendChild(btn);
-    }
 
     if (!selectedHostId) {
       selectedHostId = pickDefaultHostId(snapshot);
@@ -255,6 +264,61 @@
         selectedHostId = ids.length ? ids[0] : null;
         if (selectedHostId) storeHostId(selectedHostId);
       }
+    }
+
+    const staticPicker = hosts.length <= 1;
+
+    if (hostPickerRootElement) {
+      hostPickerRootElement.classList.toggle("is-static", staticPicker);
+    }
+
+    if (hostPickerButtonElement) {
+      // Keep the visual style unchanged (no :disabled styling) but make it non-interactive
+      hostPickerButtonElement.disabled = false;
+      hostPickerButtonElement.setAttribute("aria-disabled", String(staticPicker));
+      if (staticPicker) closeHostMenu();
+    }
+
+    hostPickerMenuElement.innerHTML = "";
+
+    for (const h of hosts) {
+      if (!h || !h.id) continue;
+      const id = String(h.id);
+      if (selectedHostId && id === String(selectedHostId)) continue;
+      const label = String(h.label || h.id);
+      const healthy = !!h.healthy;
+      const pingMs = h.ping_ms != null ? Number(h.ping_ms) : null;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pickerOption";
+      btn.setAttribute("role", "option");
+      btn.setAttribute("data-id", id);
+      btn.setAttribute("aria-selected", "false");
+
+      const dot = document.createElement("span");
+      dot.className = `hostDot ${healthy ? "hostDot--good" : "hostDot--bad"}`;
+      dot.setAttribute("aria-hidden", "true");
+
+      const text = document.createElement("span");
+      text.className = "pickerOption__label";
+      text.textContent = label;
+
+      const meta = document.createElement("span");
+      meta.className = "pickerOption__meta";
+      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? (formatPingMsLabel(pingMs) || "-") : (healthy ? "-" : "down");
+
+      btn.appendChild(dot);
+      btn.appendChild(text);
+      btn.appendChild(meta);
+
+      btn.addEventListener("click", () => {
+        setSelectedHostId(id);
+        renderHostPicker(hostsSnapshot || snapshot);
+        closeHostMenu();
+      });
+
+      hostPickerMenuElement.appendChild(btn);
     }
 
     applyHostPickerUi();
@@ -588,11 +652,59 @@
     return `${sign}${formatted} ${units[unitIndex]}`.trim();
   }
 
+  const FIGURE_SPACE = "\u2007";
+
+  function formatScaledParts(value, base, units) {
+    if (value === null || value === undefined) return null;
+    if (!Number.isFinite(value)) return null;
+
+    const sign = value < 0 ? "-" : "";
+    let abs = Math.abs(value);
+
+    let unitIndex = 0;
+    let scaled = abs;
+    while (scaled >= base && unitIndex < units.length - 1) {
+      scaled /= base;
+      unitIndex++;
+    }
+
+    // Guard against rounding pushing us over the threshold (e.g. 999.995 -> 1000.00)
+    let fixed = scaled.toFixed(2);
+    if (fixed.startsWith("1000") && unitIndex < units.length - 1) {
+      scaled /= base;
+      unitIndex++;
+      fixed = scaled.toFixed(2);
+    }
+
+    const [intPartRaw, fracPart = "00"] = fixed.split(".");
+    const intPart = String(intPartRaw).padStart(3, FIGURE_SPACE);
+
+    return {
+      num: `${sign}${intPart}.${fracPart}`,
+      unit: String(units[unitIndex] || ""),
+    };
+  }
+
+  function formatCompactParts(value) {
+    return formatScaledParts(value, 1000, ["", "k", "M", "B", "T", "P"]);
+  }
+
+  function formatBytesParts(value) {
+    return formatScaledParts(value, 1024, ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]);
+  }
+
   function formatNumber(value) {
     if (value === null || value === undefined) return "-";
     if (!Number.isFinite(value)) return "-";
     return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
+
+  function formatFixed2(value) {
+    if (value === null || value === undefined) return "-";
+    if (!Number.isFinite(value)) return "-";
+    return Number(value).toFixed(2);
+  }
+
 
   function formatSeconds(value) {
     if (value === null || value === undefined) return "-";
@@ -1065,6 +1177,7 @@
   let lastDonePayload = null;
   let currentStatusValue = "idle";
   let lastErrorMessage = "";
+  let isFormatting = false;
   let scheduledFlush = false;
   const flushBatchSize = 400;  
   let isVerticalResults = false;
@@ -1094,10 +1207,52 @@
     }
   }
 
+  function isQueryRunning() {
+    const st = String(currentStatusValue || "").toLowerCase();
+    return st === "starting" || st === "connecting" || st === "running" || st === "canceling";
+  }
+
+  function updateRunAndFormatButtonState() {
+    const running = isQueryRunning();
+    if (runButtonElement) runButtonElement.disabled = running;
+    if (formatButtonElement) formatButtonElement.disabled = running || isFormatting;
+  }
+
+  function updateActionButtonState() {
+    if (!cancelButtonElement) return;
+
+    const st = String(currentStatusValue || "").toLowerCase();
+    const running = isQueryRunning();
+
+    if (running) {
+      cancelButtonElement.textContent = "Cancel";
+      cancelButtonElement.classList.add("button--danger");
+      cancelButtonElement.classList.remove("button--primary");
+      cancelButtonElement.disabled = st === "canceling" || !activeQueryIdentifier;
+      return;
+    }
+
+    cancelButtonElement.textContent = "Clear";
+    cancelButtonElement.classList.remove("button--primary");
+    cancelButtonElement.classList.remove("button--danger");
+    const hasText = String(queryTextAreaElement?.value || "").trim().length > 0;
+    cancelButtonElement.disabled = !hasText;
+  }
+
+  function handleActionButton() {
+    if (isQueryRunning()) {
+      handleCancel();
+      return;
+    }
+    handleClear();
+  }
+
   function setStatus(text) {
     currentStatusValue = text;
     setText(queryStatusTextElement, text);
     updateCopyButtonState();
+    updateActionButtonState();
+    updateRunAndFormatButtonState();
   }
 
   function setQueryIdentifier(text) {
@@ -1146,15 +1301,15 @@
   function clearMetrics() {
     setText(elapsedSecondsTextElement, "-");
     setText(progressPercentTextElement, "-");
-    setText(readRowsRateTextElement, "-");
-    setText(readRowsTotalTextElement, "-");
-    setText(readBytesRateTextElement, "-");
-    setText(readBytesTotalTextElement, "-");
+    setMetricPlain(readRowsRateTextElement, "-");
+    setMetricPlain(readRowsTotalTextElement, "-");
+    setMetricPlain(readBytesRateTextElement, "-");
+    setMetricPlain(readBytesTotalTextElement, "-");
 
     setText(cpuTextElement, "-");
     setText(cpuMaxTextElement, "-");
-    setText(memoryTextElement, "-");
-    setText(memoryMaxTextElement, "-");
+    setMetricPlain(memoryTextElement, "-");
+    setMetricPlain(memoryMaxTextElement, "-");
     setText(threadTextElement, "-");
     setText(threadMaxTextElement, "-");
 
@@ -1473,8 +1628,17 @@
       setProgressVisual(false, 0);
     }
 
-    setText(readRowsTotalTextElement, `${formatCompactNumber(readRows)} rows`);
-    setText(readBytesTotalTextElement, `${formatBytes(readBytes)}`);
+    {
+      const rowsParts = formatCompactParts(readRows);
+      if (!rowsParts) setMetricPlain(readRowsTotalTextElement, "-");
+      else setMetricAligned(readRowsTotalTextElement, { ...rowsParts, suffix: "rows" });
+    }
+
+    {
+      const bytesParts = formatBytesParts(readBytes);
+      if (!bytesParts) setMetricPlain(readBytesTotalTextElement, "-");
+      else setMetricAligned(readBytesTotalTextElement, { ...bytesParts, kind: "bytes" });
+    }
   }
 
   function updateResourceFromParts(rowsPerSec, bytesPerSec, cpuInst, cpuMax, memInst, memMax, thrInst, thrMax) {
@@ -1500,14 +1664,32 @@
     if (zeroFrame && hasNonZeroResourceFrame) return;
     if (!zeroFrame) hasNonZeroResourceFrame = true;
 
-    setText(readRowsRateTextElement, `${formatCompactNumber(rps)} rows/s`);
-    setText(readBytesRateTextElement, `${formatBytes(bps)}/s`);
+    {
+      const rowsParts = formatCompactParts(rps);
+      if (!rowsParts) setMetricPlain(readRowsRateTextElement, "-");
+      else setMetricAligned(readRowsRateTextElement, { ...rowsParts, suffix: "rows/s" });
+    }
 
-    setText(cpuTextElement, `${formatNumber(cpu)}%`);
-    setText(cpuMaxTextElement, `max: ${cpuM == null ? "-" : formatNumber(cpuM)}%`);
+    {
+      const bytesParts = formatBytesParts(bps);
+      if (!bytesParts) setMetricPlain(readBytesRateTextElement, "-");
+      else setMetricAligned(readBytesRateTextElement, { ...bytesParts, kind: "bytes", suffix: "/s" });
+    }
 
-    setText(memoryTextElement, mem === null ? "-" : formatBytes(mem));
-    setText(memoryMaxTextElement, `max: ${memM === null ? "-" : formatBytes(memM)}`);
+    setText(cpuTextElement, `${formatFixed2(cpu)}%`);
+    setText(cpuMaxTextElement, `max: ${cpuM == null ? "-" : formatFixed2(cpuM)}%`);
+
+    {
+      const bytesParts = mem === null ? null : formatBytesParts(mem);
+      if (!bytesParts) setMetricPlain(memoryTextElement, "-");
+      else setMetricAligned(memoryTextElement, { ...bytesParts, kind: "bytes" });
+    }
+
+    {
+      const bytesParts = memM === null ? null : formatBytesParts(memM);
+      if (!bytesParts) setMetricPlain(memoryMaxTextElement, "max: -");
+      else setMetricAligned(memoryMaxTextElement, { prefix: "max:", ...bytesParts, kind: "bytes" });
+    }
 
     setText(threadTextElement, `${formatNumber(th)}`);
     setText(threadMaxTextElement, `max: ${thM == null ? "-" : formatNumber(thM)}`);
@@ -1683,7 +1865,6 @@
       const payload = safelyParseJson(event.data);
       if (!payload) return;
       setStatus("running");
-      if (cancelButtonElement) cancelButtonElement.disabled = false;
       setError("");
     });
 
@@ -1740,10 +1921,10 @@
       }
 
       maybeSwitchToVerticalSingleRow();
-      setText(readRowsRateTextElement, "-");
-      setText(readBytesRateTextElement, "-");
+      setMetricPlain(readRowsRateTextElement, "-");
+      setMetricPlain(readBytesRateTextElement, "-");
       setText(cpuTextElement, "-");
-      setText(memoryTextElement, "-");
+      setMetricPlain(memoryTextElement, "-");
       setText(threadTextElement, "-");
       progressCardElement.classList.remove("is-indeterminate");
       const hasRows = Array.isArray(allResultRows) && allResultRows.length > 0;
@@ -1753,8 +1934,8 @@
         setResultsVisible(false);
       }
 
-      if (cancelButtonElement) cancelButtonElement.disabled = true;
       closeActiveStream();
+      updateActionButtonState();
       updateCopyButtonState();
     });
 
@@ -1763,6 +1944,7 @@
   }
 
   async function handleFormat() {
+    if (isQueryRunning()) return;
     const queryText = (queryTextAreaElement?.value || "").trim();
     if (!queryText) {
       setError("Please write a query first.");
@@ -1770,19 +1952,23 @@
     }
 
     setError("");
-    if (formatButtonElement) formatButtonElement.disabled = true;
+    isFormatting = true;
+    updateRunAndFormatButtonState();
 
     try {
       const formatted = await formatQuery(queryText);
       if (queryTextAreaElement) queryTextAreaElement.value = formatted;
+      updateActionButtonState();
     } catch (error) {
       setError(error && error.message ? error.message : String(error));
     } finally {
-      if (formatButtonElement) formatButtonElement.disabled = false;
+      isFormatting = false;
+      updateRunAndFormatButtonState();
     }
   }
 
   async function handleRun() {
+    if (isQueryRunning()) return;
     const queryText = (queryTextAreaElement?.value || "").trim();
     if (!queryText) {
       setError("Please write a query first.");
@@ -1794,8 +1980,6 @@
     clearResults();
 
     setStatus("starting");
-    if (cancelButtonElement) cancelButtonElement.disabled = true;
-    if (runButtonElement) runButtonElement.disabled = true;
 
     try {
       const responsePayload = await createQuery(queryText);
@@ -1814,24 +1998,21 @@
     } catch (error) {
       setStatus("error");
       setError(error && error.message ? error.message : String(error));
-      if (cancelButtonElement) cancelButtonElement.disabled = true;
       closeActiveStream();
     } finally {
-      if (runButtonElement) runButtonElement.disabled = false;
+      updateRunAndFormatButtonState();
     }
   }
 
   async function handleCancel() {
     if (!activeQueryIdentifier) return;
-
-    if (cancelButtonElement) cancelButtonElement.disabled = true;
     setStatus("canceling");
     
     try {
       await requestCancellation(activeQueryIdentifier);
     } catch (error) {
       setError(error && error.message ? error.message : String(error));
-      if (cancelButtonElement) cancelButtonElement.disabled = false;
+      setStatus("running");
     }
   }
 
@@ -1847,11 +2028,12 @@
     setQueryIdentifier("");
     setStatus("idle");
 
+    if (queryTextAreaElement) queryTextAreaElement.value = "";
+    updateActionButtonState();
+
     clearMetrics();
     clearResults();
-
-    if (cancelButtonElement) cancelButtonElement.disabled = true;
-    if (runButtonElement) runButtonElement.disabled = false;
+    updateRunAndFormatButtonState();
     setError("");
   }
 
@@ -2060,12 +2242,14 @@
 
   runButtonElement?.addEventListener("click", handleRun);
   formatButtonElement?.addEventListener("click", handleFormat);
-  cancelButtonElement?.addEventListener("click", handleCancel);
-  clearButtonElement?.addEventListener("click", handleClear);
+  cancelButtonElement?.addEventListener("click", handleActionButton);
   copyJsonButtonElement?.addEventListener("click", handleCopyJson);
+
+  queryTextAreaElement?.addEventListener("input", updateActionButtonState);
 
   // Host picker interactions
   hostPickerButtonElement?.addEventListener("click", (e) => {
+    if (hostPickerRootElement?.classList.contains("is-static")) return;
     e.preventDefault();
     toggleHostMenu();
   });
@@ -2102,6 +2286,7 @@
   loadMeta();
   startHostsSse();
   loadDefaultQueryIfEmpty();
+  updateActionButtonState();
   scheduleChartsRender();
   updateCopyButtonState();
 })();

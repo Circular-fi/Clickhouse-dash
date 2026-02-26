@@ -583,12 +583,10 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
           return true;
         }
 
-        // No updates; keep connection alive.
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return true;
       },
-      [](bool /*success*/) {
-        // no-op
+      [](bool) {
       }
   );
 }

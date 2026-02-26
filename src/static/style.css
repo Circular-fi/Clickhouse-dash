@@ -350,7 +350,7 @@ body {
   user-select: none;
 }
 
-button.button:hover {
+button.button:not(:disabled):hover {
   background: var(--buttonBgHover);
   border-color: var(--buttonBorderHover);
 }
@@ -367,8 +367,29 @@ button.button:hover {
   box-shadow: 0 0.75rem 1.6rem rgba(29, 78, 216, 0.18);
 }
 
-.button--primary:hover {
+.button--primary:disabled {
+  border-color: var(--buttonBorder);
+  background: var(--buttonBg);
+  box-shadow: none;
+}
+
+.button--primary:not(:disabled):hover {
   border-color: rgba(37, 99, 235, 0.78);
+}
+
+.button--danger {
+  border-color: rgba(239, 68, 68, 0.62);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 60%),
+    rgba(239, 68, 68, 0.72);
+  box-shadow: 0 0.55rem 1.2rem rgba(239, 68, 68, 0.12);
+}
+
+.button--danger:not(:disabled):hover {
+  border-color: rgba(239, 68, 68, 0.78);
+}
+
+#cancelButton {
+  min-width: 4.2rem;
 }
 
 
@@ -442,6 +463,43 @@ button.button:hover {
   color: var(--muted);
   font-weight: 850;
   text-align: right;
+}
+
+/* Stable metric formatting (keep decimal dot + unit aligned) */
+.metricCompact__value.metricAligned,
+.metricCompact__sub.metricAligned {
+  width: 100%;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.25ch;
+  white-space: nowrap;
+}
+
+.metricAligned__prefix {
+  opacity: 0.75;
+}
+
+.metricAligned__num {
+  display: inline-block;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.metricAligned__unit {
+  display: inline-block;
+  width: 1ch;
+  text-align: left;
+  opacity: 0.92;
+}
+
+.metricAligned[data-kind="bytes"] .metricAligned__unit {
+  width: 2ch;
+}
+
+.metricAligned__suffix {
+  margin-left: 0.25ch;
 }
 
 .metricCompact--progress {
@@ -889,6 +947,14 @@ button.button:hover {
   white-space: nowrap;
 }
 
+.versionBadge {
+  font-size: 0.7rem;
+  font-weight: 750;
+  opacity: 0.55;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .appNav {
   display: flex;
   align-items: center;
@@ -935,35 +1001,124 @@ button.button:hover {
 }
 
 .picker__button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+  padding-right: 2.35rem;
+  min-width: 14rem;
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.picker__button::after {
+  content: "";
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  background-color: var(--themeSelectArrow);
+  opacity: 0.95;
+  pointer-events: none;
+
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8.5l4 4 4-4' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8.5l4 4 4-4' fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 16px 16px;
+  mask-size: 16px 16px;
+}
+
+.picker__button[aria-expanded="true"]::after {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.picker__button[aria-expanded="true"] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom: 0;
+  background:
+    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
+    var(--panelBg);
+}
+
+.picker__button:focus-visible {
+  outline: none;
+  border-color: var(--accentBorder);
+  box-shadow: var(--ring);
+}
+
+
+/* Host picker: when only one host, render as static info (no dropdown affordance) */
+.picker.is-static .picker__button {
+  cursor: default;
+  border-color: var(--buttonBorder);
+  background: transparent;
+  box-shadow: none;
+  padding-right: 0.8rem;
+}
+
+.picker.is-static .picker__button:hover {
+  background: transparent;
+  border-color: var(--buttonBorder);
+}
+
+.picker.is-static .picker__button:focus-visible {
+  border-color: var(--buttonBorder);
+  box-shadow: none;
+}
+
+.picker.is-static .picker__button::after {
+  content: none;
+  display: none;
 }
 
 .picker__text {
+  flex: 1;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .picker__chev {
-  opacity: 0.7;
-  font-size: 12px;
-  margin-left: 2px;
+  display: none;
 }
 
 .picker__menu {
   position: absolute;
+  left: 0;
   right: 0;
-  top: calc(100% + 8px);
-  min-width: 280px;
-  max-width: 360px;
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  box-shadow: 0 18px 50px rgba(0,0,0,0.22);
-  padding: 6px;
+
+  width: 100%;
+  min-width: 100%;
+  box-sizing: border-box;
+
+  top: 100%;
+  margin-top: -1px;
+  z-index: 1;
+
+  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--borderStrong);
+  border-top: 0;
+
+  background:
+    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
+    var(--panelBg);
+
+  box-shadow:
+    0 0.0625rem 0 rgba(255, 255, 255, 0.03),
+    0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
+
+  backdrop-filter: blur(0.55rem);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .pickerOption {
@@ -971,23 +1126,26 @@ button.button:hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 10px;
-  border-radius: 12px;
+  height: 2.2rem;
+  padding: 0 0.65rem;
+  border-radius: 0.7rem;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  user-select: none;
+  font-size: 0.75rem;
+  font-weight: 850;
 }
 
 .pickerOption:hover {
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
-  border-color: var(--border);
+  background: var(--rowHover);
 }
 
 .pickerOption[aria-selected="true"] {
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
 }
 
 .pickerOption__label {
@@ -1000,6 +1158,28 @@ button.button:hover {
 
 .pickerOption__meta {
   opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.hostDot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.hostDot--good {
+  background: rgba(34, 197, 94, 0.95);
+}
+
+.hostDot--bad {
+  background: rgba(239, 68, 68, 0.95);
+}
+
+.hostPing {
+  opacity: 0.8;
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
