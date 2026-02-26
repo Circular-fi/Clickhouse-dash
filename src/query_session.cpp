@@ -13,6 +13,77 @@
 
 namespace chdash {
 
+// ClickHouse may pretty-print complex types returned by DESCRIBE with newlines/indentation.
+// This produces noisy JSON ("\n    ") in result_meta. Normalize it to a single-line form
+// while keeping the type parseable for the frontend.
+static std::string normalize_type_string(std::string s) {
+  std::string out;
+  out.reserve(s.size());
+
+  bool space_pending = false;
+  bool in_squote = false;
+  bool in_btick = false;
+
+  auto is_ws = [](unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+  };
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char ch = s[i];
+    const char prev = (i > 0) ? s[i - 1] : '\0';
+
+    // Preserve content inside quotes/backticks (best-effort).
+    if (!in_btick && ch == '\'' && prev != '\\') {
+      in_squote = !in_squote;
+      space_pending = false;
+      out.push_back(ch);
+      continue;
+    }
+    if (!in_squote && ch == '`') {
+      in_btick = !in_btick;
+      space_pending = false;
+      out.push_back(ch);
+      continue;
+    }
+    if (in_squote || in_btick) {
+      out.push_back(ch);
+      continue;
+    }
+
+    if (is_ws(static_cast<unsigned char>(ch))) {
+      space_pending = true;
+      continue;
+    }
+
+    if (!out.empty() && (ch == ')' || ch == ']' || ch == '}' || ch == ',')) {
+      while (!out.empty() && out.back() == ' ') out.pop_back();
+    }
+
+    if (space_pending) {
+      const char last = out.empty() ? '\0' : out.back();
+      const bool no_space_before = (ch == ')' || ch == ']' || ch == '}' || ch == ',');
+      const bool no_space_after = (last == '(' || last == '[' || last == '{' || last == ',');
+      if (!no_space_before && !no_space_after && last != ' ' && last != '\0') {
+        out.push_back(' ');
+      }
+      space_pending = false;
+    }
+
+    out.push_back(ch);
+    if (ch == ',') {
+      out.push_back(' ');
+    }
+  }
+
+  // Trim.
+  while (!out.empty() && out.back() == ' ') out.pop_back();
+  size_t start = 0;
+  while (start < out.size() && out[start] == ' ') start++;
+  if (start > 0) out.erase(0, start);
+
+  return out;
+}
+
 static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
                         const std::chrono::steady_clock::time_point& end_or_zero) {
   if (start.time_since_epoch().count() == 0) return 0;
@@ -263,11 +334,6 @@ void QuerySession::run_query() {
     try {
       if (!database_.empty()) client_query_->Execute("USE " + database_);
     } catch (...) {}
-
-    try {
-      client_query_->Execute("SET query_id='" + query_id_ + "'");
-    } catch (...) {}
-
     std::string sql_trim = sql_;
     while (!sql_trim.empty() && (sql_trim.front()==' ' || sql_trim.front()=='\t' || sql_trim.front()=='\n' || sql_trim.front()=='\r')) sql_trim.erase(sql_trim.begin());
 
@@ -313,7 +379,53 @@ void QuerySession::run_query() {
     bool meta_sent = false;
     int rows_returned = 0;
 
-    clickhouse::Query q(sql_);
+    // clickhouse-cpp currently loses named Tuple element names (it only keeps element types).
+    // To let the frontend display Tuple / Array(Tuple(...)) as objects with field names, we
+    // prefetch verbose column types from the server via DESCRIBE (SELECT ...).
+    std::unordered_map<std::string, std::string> described_types;
+    try {
+      std::string ds = sql_;
+      // Trim and drop a trailing semicolon (DESCRIBE ( ... ) doesn't accept it).
+      auto ltrim = [](std::string& s) {
+        while (!s.empty() && (s.front()==' ' || s.front()=='\t' || s.front()=='\n' || s.front()=='\r')) s.erase(s.begin());
+      };
+      auto rtrim = [](std::string& s) {
+        while (!s.empty() && (s.back()==' ' || s.back()=='\t' || s.back()=='\n' || s.back()=='\r')) s.pop_back();
+      };
+      ltrim(ds); rtrim(ds);
+      if (!ds.empty() && ds.back() == ';') { ds.pop_back(); rtrim(ds); }
+
+      clickhouse::Query dq("DESCRIBE (" + ds + ")");
+      dq.OnData([&](const clickhouse::Block& b) {
+        if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
+
+        int idx_name = -1;
+        int idx_type = -1;
+        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+          const auto& cn = b.GetColumnName(i);
+          if (cn == "name") idx_name = static_cast<int>(i);
+          else if (cn == "type") idx_type = static_cast<int>(i);
+        }
+        if (idx_name < 0) idx_name = 0;
+        if (idx_type < 0) idx_type = 1;
+
+        auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
+        auto c_type = b[idx_type]->As<clickhouse::ColumnString>();
+        if (!c_name || !c_type) return;
+
+        for (size_t r = 0; r < b.GetRowCount(); ++r) {
+          const std::string_view n = c_name->At(r);
+          const std::string_view t = c_type->At(r);
+          described_types[std::string(n)] = normalize_type_string(std::string(t));
+        }
+      });
+
+      client_query_->Select(dq);
+    } catch (...) {
+      // Best-effort: if DESCRIBE fails (e.g. invalid SQL), fall back to clickhouse-cpp types.
+    }
+
+    clickhouse::Query q(sql_, query_id_);
 
     // Ensure ClickHouse actually sends ProfileEvents packets to the client (native TCP).
     // Otherwise CPU/RAM/thread stats will stay empty.
@@ -451,8 +563,15 @@ void QuerySession::run_query() {
         w.Key("types");
         w.StartArray();
         for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-          const auto& tn = block[i]->Type()->GetName();
-          w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+          const auto& name = block.GetColumnName(i);
+          auto it = described_types.find(name);
+          if (it != described_types.end()) {
+            const auto& tn = it->second;
+            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+          } else {
+            const auto& tn = block[i]->Type()->GetName();
+            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+          }
         }
         w.EndArray();
         w.EndObject();

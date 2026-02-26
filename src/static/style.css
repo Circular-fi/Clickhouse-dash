@@ -586,7 +586,7 @@ button.button:not(:disabled):hover {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
 }
 
 .resultTable thead th {
@@ -608,6 +608,32 @@ button.button:not(:disabled):hover {
   border-bottom: 1px solid var(--rowDivider);
   vertical-align: top;
   white-space: pre;
+}
+
+.jsonCell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  tab-size: 2;
+}
+
+.jsonTokKey {
+  color: #f64500;
+}
+
+.jsonTokStr {
+  color: #22c55e;
+}
+
+.jsonTokNum {
+  color: #f59e0b;
+}
+
+.jsonTokBool {
+  color: #a78bfa;
+}
+
+.jsonTokNull {
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .resultTable tbody tr:hover td {

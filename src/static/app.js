@@ -142,6 +142,8 @@
     }
   }
 
+  // ---- /api/meta (version badge) ----
+
   async function loadMeta() {
     if (!versionBadgeElement) return;
     try {
@@ -163,6 +165,7 @@
     }
   }
 
+  // ---- Hosts (SSE /api/hosts/stream) ----
 
   function getStoredHostId() {
     try {
@@ -176,7 +179,7 @@
     try {
       localStorage.setItem(HOST_STORAGE_KEY, String(hostId || ""));
     } catch {
-      
+      // ignore
     }
   }
 
@@ -521,6 +524,22 @@
     return n;
   }
 
+  function coerceBoolLike(v) {
+    if (v === null || v === undefined) return v;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      if (s === "true") return true;
+      if (s === "false") return false;
+      if (s === "1") return true;
+      if (s === "0") return false;
+      const n = Number(s);
+      if (Number.isFinite(n)) return n !== 0;
+    }
+    return !!v;
+  }
+
   function coerceDeep(v) {
     v = parseJsonStringIfLikely(v);
     if (Array.isArray(v)) return v.map(coerceDeep);
@@ -537,7 +556,7 @@
     for (let i = 0; i < resultColumns.length; i++) {
       const key = String(resultColumns[i] ?? "");
       const rawVal = Array.isArray(row) ? row[i] : (i === 0 ? row : null);
-      obj[key] = coerceDeep(rawVal);
+      obj[key] = coerceDeepTyped(rawVal, resultTypeAsts[i] || null);
     }
     return obj;
   }
@@ -571,14 +590,16 @@
 
         if (colCount === 1) {
           const v = Array.isArray(row) ? row[0] : row;
-          return { mode: "value", value: coerceDeep(v) };
+          const cleaned = coerceDeepTyped(v, resultTypeAsts[0] || null);
+          if (cleaned && typeof cleaned === "object") return { mode: "json", value: cleaned };
+          return { mode: "value", value: cleaned };
         }
 
         return { mode: "json", value: rowToObject(row) };
       }
 
       if (colCount === 1) {
-        const arr = allResultRows.map(r => coerceDeep(Array.isArray(r) ? r[0] : r));
+        const arr = allResultRows.map(r => coerceDeepTyped(Array.isArray(r) ? r[0] : r, resultTypeAsts[0] || null));
         return { mode: "json", value: arr };
       }
 
@@ -1054,6 +1075,208 @@
   }
 
 
+  // ---- ClickHouse type helpers (frontend) ----
+  // We receive values as JSON from the backend (via clickhouse-cpp native columns).
+  // Tuples are encoded as arrays, which JS tends to stringify as "a,b,c".
+  // Convert Tuple / Array(Tuple) into objects using the column type string so nested data stays readable.
+
+  function splitTopLevel(str, sepChar) {
+    const out = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth = Math.max(0, depth - 1);
+      else if (ch === sepChar && depth === 0) {
+        out.push(str.slice(start, i));
+        start = i + 1;
+      }
+    }
+    out.push(str.slice(start));
+    return out.map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  function stripIdentifierQuotes(name) {
+    const t = String(name ?? "").trim();
+    if (t.length >= 2) {
+      const first = t[0];
+      const last = t[t.length - 1];
+      if ((first === "`" && last === "`") || (first === "\"" && last === "\"")) {
+        return t.slice(1, -1);
+      }
+    }
+    return t;
+  }
+
+  function parseChType(typeStr) {
+    const s = String(typeStr ?? "").trim();
+    if (!s) return null;
+
+    const unwrap = (prefix) => {
+      if (!s.startsWith(prefix + "(") || !s.endsWith(")")) return null;
+      return s.slice(prefix.length + 1, -1).trim();
+    };
+
+    const innerNullable = unwrap("Nullable");
+    if (innerNullable) return parseChType(innerNullable);
+
+    const innerLc = unwrap("LowCardinality");
+    if (innerLc) return parseChType(innerLc);
+
+    const innerArray = unwrap("Array");
+    if (innerArray) return { kind: "Array", inner: parseChType(innerArray) };
+
+    const innerMap = unwrap("Map");
+    if (innerMap) {
+      const parts = splitTopLevel(innerMap, ",");
+      return { kind: "Map", key: parseChType(parts[0]), value: parseChType(parts[1]) };
+    }
+
+    const innerTuple = unwrap("Tuple");
+    if (innerTuple) {
+      const parts = splitTopLevel(innerTuple, ",");
+      const fields = parts.map((part, idx) => {
+        let depth = 0;
+        let splitAt = -1;
+        for (let i = 0; i < part.length; i++) {
+          const ch = part[i];
+          if (ch === "(") depth++;
+          else if (ch === ")") depth = Math.max(0, depth - 1);
+          else if (depth === 0 && /\s/.test(ch)) { splitAt = i; break; }
+        }
+
+        if (splitAt > 0) {
+          const maybeNameRaw = part.slice(0, splitAt).trim();
+          const maybeName = stripIdentifierQuotes(maybeNameRaw);
+          const rest = part.slice(splitAt).trim();
+          if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(maybeName) && rest) {
+            return { name: maybeName, type: parseChType(rest) };
+          }
+        }
+        return { name: `_${idx}`, type: parseChType(part) };
+      });
+      return { kind: "Tuple", fields };
+    }
+
+    return { kind: "Scalar", name: s };
+  }
+
+  function coerceDeepTyped(v, typeAst) {
+    v = parseJsonStringIfLikely(v);
+    if (!typeAst) return coerceDeep(v);
+
+    if (v === null || v === undefined) return v;
+
+    if (typeAst.kind === "Tuple") {
+      if (Array.isArray(v)) {
+        const out = {};
+        const fields = Array.isArray(typeAst.fields) ? typeAst.fields : [];
+        for (let i = 0; i < fields.length; i++) {
+          const f = fields[i];
+          out[String(f.name ?? `_${i}`)] = coerceDeepTyped(v[i], f.type);
+        }
+        return out;
+      }
+      if (v && typeof v === "object") {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
+        return out;
+      }
+      return coerceNumberLike(v);
+    }
+
+    if (typeAst.kind === "Array") {
+      if (Array.isArray(v)) return v.map(x => coerceDeepTyped(x, typeAst.inner));
+      return coerceDeep(v);
+    }
+
+    if (typeAst.kind === "Map") {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = coerceDeepTyped(val, typeAst.value);
+        return out;
+      }
+      if (Array.isArray(v)) {
+        return v.map(pair => {
+          if (!Array.isArray(pair) || pair.length < 2) return coerceDeep(pair);
+          return [coerceDeepTyped(pair[0], typeAst.key), coerceDeepTyped(pair[1], typeAst.value)];
+        });
+      }
+      return coerceDeep(v);
+    }
+
+    if (typeAst.kind === "Scalar") {
+      const tName = String(typeAst.name ?? "").trim();
+      if (tName === "Bool") return coerceBoolLike(v);
+    }
+
+    return coerceNumberLike(v);
+  }
+
+  function formatCellForDisplay(raw, colIndex, pretty = false) {
+    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
+    if (typed === null || typed === undefined) return "";
+    if (typeof typed === "string") return typed;
+    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
+    return JSON.stringify(typed, null, pretty ? 2 : 0);
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function highlightJsonHtml(jsonText) {
+    const re = /("(?:\\.|[^"\\])*"(?=\s*:))|("(?:\\.|[^"\\])*"\s*)|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+    let out = "";
+    let last = 0;
+
+    for (const m of jsonText.matchAll(re)) {
+      const idx = m.index ?? 0;
+      out += escapeHtml(jsonText.slice(last, idx));
+
+      const tok = m[0];
+      let cls = "jsonTokNum";
+      if (m[1]) cls = "jsonTokKey";
+      else if (m[2]) cls = "jsonTokStr";
+      else if (m[3]) cls = "jsonTokBool";
+      else if (tok === "null") cls = "jsonTokNull";
+
+      out += `<span class="${cls}">${escapeHtml(tok)}</span>`;
+      last = idx + tok.length;
+    }
+
+    out += escapeHtml(jsonText.slice(last));
+    return out;
+  }
+
+  function setCellContent(td, raw, colIndex, pretty = false) {
+    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
+
+    td.classList.remove("jsonCell");
+    if (typed === null || typed === undefined) {
+      td.textContent = "";
+      return;
+    }
+    if (typeof typed === "string" || typeof typed === "number" || typeof typed === "boolean") {
+      td.textContent = String(typed);
+      return;
+    }
+
+    const jsonText = JSON.stringify(typed, null, pretty ? 2 : 0);
+    td.classList.add("jsonCell");
+
+    if (pretty) td.innerHTML = highlightJsonHtml(jsonText);
+    else td.textContent = jsonText;
+  }
+
+
+
   function drawSparkline(canvas, points, opts = {}) {
     const prepared = prepareCanvas(canvas);
     if (!prepared) return;
@@ -1169,6 +1392,8 @@
   let activeEventSource = null;
 
   let resultColumns = [];
+  let resultTypes = [];
+  let resultTypeAsts = [];
   let pendingRows = [];
   let allResultRows = [];
   let lastDonePayload = null;
@@ -1318,6 +1543,8 @@
 
   function clearResults() {
     resultColumns = [];
+    resultTypes = [];
+    resultTypeAsts = [];
     pendingRows = [];
     allResultRows = [];
     updateCopyButtonState();
@@ -1340,8 +1567,10 @@
 
 
 
-  function setResultMeta(columns) {
+  function setResultMeta(columns, types) {
     resultColumns = Array.isArray(columns) ? columns : [];
+    resultTypes = Array.isArray(types) ? types : [];
+    resultTypeAsts = resultTypes.map(parseChType);
 
     const tableEl = resultTableHeadElement?.closest("table");
     if (tableEl) tableEl.classList.remove("resultTable--vertical");
@@ -1400,10 +1629,7 @@
 
       const td = document.createElement("td");
       const raw = Array.isArray(row) ? row[i] : null;
-      const cleaned = coerceDeep(raw);
-      td.textContent = (cleaned === null || cleaned === undefined)
-        ? ""
-        : (typeof cleaned === "string" ? cleaned : JSON.stringify(cleaned));
+      setCellContent(td, raw, i, true);
 
       tr.appendChild(th);
       tr.appendChild(td);
@@ -1420,9 +1646,30 @@
     renderVerticalSingleRow(allResultRows[0]);
   }
 
+  function maybePrettifySingleRowComplexCells() {
+    if (isVerticalResults) return;
+    if (!Array.isArray(resultColumns) || resultColumns.length !== 1) return;
+    if (!Array.isArray(allResultRows) || allResultRows.length !== 1) return;
+    if (!resultTableBodyElement) return;
 
+    const row = allResultRows[0];
+    const raw = Array.isArray(row) ? row[0] : row;
+    const typed = coerceDeepTyped(raw, resultTypeAsts[0] || null);
+    if (!typed || typeof typed !== "object") return;
 
-  function enqueueRowForRender(row) {
+    // "done" can arrive before the scheduled RAF flush in very fast queries.
+    if (scheduledFlush || pendingRows.length) flushPendingRows();
+
+    const td = resultTableBodyElement.querySelector("tr td");
+    if (!td) {
+      requestAnimationFrame(() => {
+        const td2 = resultTableBodyElement.querySelector("tr td");
+        if (td2) setCellContent(td2, raw, 0, true);
+      });
+      return;
+    }
+    setCellContent(td, raw, 0, true);
+  }  function enqueueRowForRender(row) {
     pendingRows.push(row);
     scheduleFlush();
   }
@@ -1454,8 +1701,7 @@
       if (Array.isArray(row)) {
         for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
           const td = document.createElement("td");
-          const value = row[columnIndex] === undefined || row[columnIndex] === null ? "" : String(row[columnIndex]);
-          td.textContent = value;
+          td.textContent = formatCellForDisplay(Array.isArray(row) ? row[columnIndex] : null, columnIndex);
           tr.appendChild(td);
         }
       } else {
@@ -1875,7 +2121,7 @@
       const payload = safelyParseJson(event.data);
       if (!payload) return;
       clearResults();
-      setResultMeta(payload.columns);
+      setResultMeta(payload.columns, payload.types);
       setResultsVisible(true);
     });
 
@@ -1918,6 +2164,7 @@
       }
 
       maybeSwitchToVerticalSingleRow();
+      maybePrettifySingleRowComplexCells();
       setMetricPlain(readRowsRateTextElement, "-");
       setMetricPlain(readBytesRateTextElement, "-");
       setText(cpuTextElement, "-");
