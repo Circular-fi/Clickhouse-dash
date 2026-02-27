@@ -3,6 +3,10 @@
 
   const queryTextAreaElement = document.getElementById("queryTextArea");
   const runButtonElement = document.getElementById("runButton");
+  const runMenuButtonElement = document.getElementById("runMenuButton");
+  const runMenuElement = document.getElementById("runMenu");
+  const runOptAutoFormatElement = document.getElementById("runOptAutoFormat");
+  const runOptMultiQueryElement = document.getElementById("runOptMultiQuery");
   const formatButtonElement = document.getElementById("formatButton");
   const cancelButtonElement = document.getElementById("cancelButton");
   const historyButtonElement = document.getElementById("historyButton");
@@ -70,11 +74,19 @@
   const THEME_STORAGE_KEY = "chdash.theme";
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
+  const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const HISTORY_MAX_ENTRIES = 100;
 
   let hostsSnapshot = null;
   let selectedHostId = null;
   let lastCancelToken = null;
+
+  let runOptAutoFormat = true;
+  let runOptMultiQuery = false;
+  let isBatchRun = false;
+  let batchStopRequested = false;
+  let batchProgressLabel = "";
+  let resultsStackElement = null;
   
 
   function setResultsVisible(visible) {
@@ -352,6 +364,52 @@
     }
   }
 
+  function loadRunOptions() {
+    try {
+      const raw = localStorage.getItem(RUN_OPTIONS_STORAGE_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== "object") return;
+      if (typeof obj.autoFormat === "boolean") runOptAutoFormat = obj.autoFormat;
+      if (typeof obj.multiQuery === "boolean") runOptMultiQuery = obj.multiQuery;
+    } catch {
+      // ignore
+    }
+  }
+
+  function saveRunOptions() {
+    try {
+      localStorage.setItem(
+        RUN_OPTIONS_STORAGE_KEY,
+        JSON.stringify({ autoFormat: !!runOptAutoFormat, multiQuery: !!runOptMultiQuery })
+      );
+    } catch {
+      // ignore
+    }
+  }
+
+  function applyRunOptionsUi() {
+    if (runOptAutoFormatElement) runOptAutoFormatElement.checked = !!runOptAutoFormat;
+    if (runOptMultiQueryElement) runOptMultiQueryElement.checked = !!runOptMultiQuery;
+  }
+
+  function closeRunMenu() {
+    if (!runMenuElement || !runMenuButtonElement) return;
+    runMenuElement.hidden = true;
+    runMenuButtonElement.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleRunMenu() {
+    if (!runMenuElement || !runMenuButtonElement) return;
+    if (runMenuElement.hidden) {
+      runMenuElement.hidden = false;
+      runMenuButtonElement.setAttribute("aria-expanded", "true");
+      runMenuElement.focus({ preventScroll: true });
+    } else {
+      closeRunMenu();
+    }
+  }
+
   // ---- Local history (localStorage, 100 entries) ----
 
   function loadHistory() {
@@ -522,22 +580,6 @@
     }
 
     return n;
-  }
-
-  function coerceBoolLike(v) {
-    if (v === null || v === undefined) return v;
-    if (typeof v === "boolean") return v;
-    if (typeof v === "number") return v !== 0;
-    if (typeof v === "string") {
-      const s = v.trim().toLowerCase();
-      if (s === "true") return true;
-      if (s === "false") return false;
-      if (s === "1") return true;
-      if (s === "0") return false;
-      const n = Number(s);
-      if (Number.isFinite(n)) return n !== 0;
-    }
-    return !!v;
   }
 
   function coerceDeep(v) {
@@ -1206,11 +1248,6 @@
       return coerceDeep(v);
     }
 
-    if (typeAst.kind === "Scalar") {
-      const tName = String(typeAst.name ?? "").trim();
-      if (tName === "Bool") return coerceBoolLike(v);
-    }
-
     return coerceNumberLike(v);
   }
 
@@ -1220,59 +1257,6 @@
     if (typeof typed === "string") return typed;
     if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
     return JSON.stringify(typed, null, pretty ? 2 : 0);
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  function highlightJsonHtml(jsonText) {
-    const re = /("(?:\\.|[^"\\])*"(?=\s*:))|("(?:\\.|[^"\\])*"\s*)|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
-    let out = "";
-    let last = 0;
-
-    for (const m of jsonText.matchAll(re)) {
-      const idx = m.index ?? 0;
-      out += escapeHtml(jsonText.slice(last, idx));
-
-      const tok = m[0];
-      let cls = "jsonTokNum";
-      if (m[1]) cls = "jsonTokKey";
-      else if (m[2]) cls = "jsonTokStr";
-      else if (m[3]) cls = "jsonTokBool";
-      else if (tok === "null") cls = "jsonTokNull";
-
-      out += `<span class="${cls}">${escapeHtml(tok)}</span>`;
-      last = idx + tok.length;
-    }
-
-    out += escapeHtml(jsonText.slice(last));
-    return out;
-  }
-
-  function setCellContent(td, raw, colIndex, pretty = false) {
-    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
-
-    td.classList.remove("jsonCell");
-    if (typed === null || typed === undefined) {
-      td.textContent = "";
-      return;
-    }
-    if (typeof typed === "string" || typeof typed === "number" || typeof typed === "boolean") {
-      td.textContent = String(typed);
-      return;
-    }
-
-    const jsonText = JSON.stringify(typed, null, pretty ? 2 : 0);
-    td.classList.add("jsonCell");
-
-    if (pretty) td.innerHTML = highlightJsonHtml(jsonText);
-    else td.textContent = jsonText;
   }
 
 
@@ -1430,6 +1414,7 @@
   }
 
   function isQueryRunning() {
+    if (isBatchRun) return true;
     const st = String(currentStatusValue || "").toLowerCase();
     return st === "starting" || st === "connecting" || st === "running" || st === "canceling";
   }
@@ -1437,7 +1422,9 @@
   function updateRunAndFormatButtonState() {
     const running = isQueryRunning();
     if (runButtonElement) runButtonElement.disabled = running;
+    if (runMenuButtonElement) runMenuButtonElement.disabled = running;
     if (formatButtonElement) formatButtonElement.disabled = running || isFormatting;
+    if (running) closeRunMenu();
   }
 
   function updateActionButtonState() {
@@ -1469,9 +1456,16 @@
     handleClear();
   }
 
-  function setStatus(text) {
-    currentStatusValue = text;
-    setText(queryStatusTextElement, text);
+  function setStatus(status, displayText) {
+    currentStatusValue = status;
+    const base = displayText ?? status;
+    if (isBatchRun && batchProgressLabel) {
+      const st = String(status || "").toLowerCase();
+      const show = st === "starting" || st === "connecting" || st === "running" || st === "canceling";
+      setText(queryStatusTextElement, show ? `${base} · ${batchProgressLabel}` : base);
+    } else {
+      setText(queryStatusTextElement, base);
+    }
     updateCopyButtonState();
     updateActionButtonState();
     updateRunAndFormatButtonState();
@@ -1562,7 +1556,74 @@
     if (resultTableHeadElement) resultTableHeadElement.innerHTML = "";
     if (resultTableBodyElement) resultTableBodyElement.innerHTML = "";
     setText(resultColumnsTextElement, "-");
-    setResultsVisible(false);
+    const hasStack = resultsStackElement && resultsStackElement.childElementCount > 0;
+    if (!hasStack) setResultsVisible(false);
+  }
+
+  function ensureResultsStack() {
+    if (resultsStackElement || !resultsPanelElement) return;
+    resultsStackElement = document.createElement("div");
+    resultsStackElement.className = "resultsStack";
+    const header = resultsPanelElement.querySelector(".panel__header");
+    const anchor = header ? header.nextSibling : resultsPanelElement.firstChild;
+    resultsPanelElement.insertBefore(resultsStackElement, anchor);
+  }
+
+  function clearResultsStack() {
+    if (!resultsStackElement) return;
+    resultsStackElement.remove();
+    resultsStackElement = null;
+  }
+
+  function removeIds(root) {
+    if (!root) return;
+    if (root.removeAttribute) root.removeAttribute("id");
+    const nodes = root.querySelectorAll("[id]");
+    for (const n of nodes) n.removeAttribute("id");
+  }
+
+  function archiveCurrentResultsBlock(title, metaText) {
+    ensureResultsStack();
+    if (!resultsStackElement) return;
+
+    const block = document.createElement("div");
+    block.className = "resultsStack__block";
+
+    const header = document.createElement("div");
+    header.className = "resultsStack__header";
+    const t = document.createElement("span");
+    t.textContent = title || "Result";
+    header.appendChild(t);
+
+    if (metaText) {
+      const m = document.createElement("span");
+      m.className = "resultsStack__meta";
+      m.textContent = metaText;
+      header.appendChild(m);
+    }
+
+    const body = document.createElement("div");
+    body.className = "resultsStack__body";
+
+    const err = errorBannerElement && !errorBannerElement.hidden ? String(errorBannerElement.textContent || "") : "";
+    if (err) {
+      const eb = document.createElement("div");
+      eb.className = "errorBanner";
+      eb.textContent = err;
+      body.appendChild(eb);
+    }
+
+    const wrap = resultsPanelElement?.querySelector(".tableWrap");
+    if (wrap) {
+      const clone = wrap.cloneNode(true);
+      removeIds(clone);
+      body.appendChild(clone);
+    }
+
+    block.appendChild(header);
+    block.appendChild(body);
+    resultsStackElement.appendChild(block);
+    setResultsVisible(true);
   }
 
 
@@ -1629,7 +1690,7 @@
 
       const td = document.createElement("td");
       const raw = Array.isArray(row) ? row[i] : null;
-      setCellContent(td, raw, i, true);
+      td.textContent = formatCellForDisplay(raw, i, true);
 
       tr.appendChild(th);
       tr.appendChild(td);
@@ -1664,11 +1725,11 @@
     if (!td) {
       requestAnimationFrame(() => {
         const td2 = resultTableBodyElement.querySelector("tr td");
-        if (td2) setCellContent(td2, raw, 0, true);
+        if (td2) td2.textContent = formatCellForDisplay(raw, 0, true);
       });
       return;
     }
-    setCellContent(td, raw, 0, true);
+    td.textContent = formatCellForDisplay(raw, 0, true);
   }  function enqueueRowForRender(row) {
     pendingRows.push(row);
     scheduleFlush();
@@ -1746,15 +1807,165 @@
         : `Request failed with status ${response.status}`;
       throw new Error(messageText);
     }
-    // Optional: auto-replace textarea with formatted sql
-    if (queryTextAreaElement && responseBody && typeof responseBody.formatted_sql === "string") {
-      queryTextAreaElement.value = responseBody.formatted_sql;
-    }
 
     // Keep cancel token if provided by backend
     lastCancelToken = responseBody && responseBody.cancel_token ? String(responseBody.cancel_token) : null;
 
     return responseBody;
+  }
+
+  function normalizeStatementText(sql) {
+    let s = String(sql || "").trim();
+    while (s.endsWith(";")) s = s.slice(0, -1).trimEnd();
+    return s;
+  }
+
+  function splitSqlStatements(sqlText) {
+    const s = String(sqlText || "");
+    const out = [];
+    let buf = "";
+
+    let inSingle = false;
+    let inDouble = false;
+    let inBacktick = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      const nx = i + 1 < s.length ? s[i + 1] : "";
+
+      if (inLineComment) {
+        buf += ch;
+        if (ch === "\n") inLineComment = false;
+        continue;
+      }
+
+      if (inBlockComment) {
+        buf += ch;
+        if (ch === "*" && nx === "/") {
+          buf += nx;
+          i++;
+          inBlockComment = false;
+        }
+        continue;
+      }
+
+      if (inSingle) {
+        buf += ch;
+        if (ch === "\\" && nx) {
+          buf += nx;
+          i++;
+          continue;
+        }
+        if (ch === "'" && nx === "'") {
+          buf += nx;
+          i++;
+          continue;
+        }
+        if (ch === "'") inSingle = false;
+        continue;
+      }
+
+      if (inDouble) {
+        buf += ch;
+        if (ch === "\\" && nx) {
+          buf += nx;
+          i++;
+          continue;
+        }
+        if (ch === '"') inDouble = false;
+        continue;
+      }
+
+      if (inBacktick) {
+        buf += ch;
+        if (ch === "`") inBacktick = false;
+        continue;
+      }
+
+      if (ch === "-" && nx === "-") {
+        buf += ch + nx;
+        i++;
+        inLineComment = true;
+        continue;
+      }
+
+      if (ch === "#") {
+        buf += ch;
+        inLineComment = true;
+        continue;
+      }
+
+      if (ch === "/" && nx === "*") {
+        buf += ch + nx;
+        i++;
+        inBlockComment = true;
+        continue;
+      }
+
+      if (ch === "'") {
+        buf += ch;
+        inSingle = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        buf += ch;
+        inDouble = true;
+        continue;
+      }
+
+      if (ch === "`") {
+        buf += ch;
+        inBacktick = true;
+        continue;
+      }
+
+      if (ch === ";") {
+        const stmt = normalizeStatementText(buf);
+        if (stmt) out.push(stmt);
+        buf = "";
+        continue;
+      }
+
+      buf += ch;
+    }
+
+    const tail = normalizeStatementText(buf);
+    if (tail) out.push(tail);
+    return out;
+  }
+
+  async function formatSqlBestEffort(sqlText) {
+    const parts = splitSqlStatements(sqlText);
+    if (parts.length <= 1) {
+      try {
+        return await formatQuery(parts[0] || "");
+      } catch {
+        return normalizeStatementText(sqlText);
+      }
+    }
+
+    const formattedParts = [];
+    for (const p of parts) {
+      try {
+        formattedParts.push(await formatQuery(p));
+      } catch {
+        formattedParts.push(p);
+      }
+    }
+    return formattedParts.map(normalizeStatementText).filter(Boolean).join(";\n\n");
+  }
+
+  async function formatSqlStrict(sqlText) {
+    const parts = splitSqlStatements(sqlText);
+    if (parts.length <= 1) {
+      return await formatQuery(parts[0] || "");
+    }
+    const formattedParts = [];
+    for (const p of parts) formattedParts.push(await formatQuery(p));
+    return formattedParts.map(normalizeStatementText).filter(Boolean).join(";\n\n");
   }
 
   async function formatQuery(queryText) {
@@ -2101,90 +2312,109 @@
     clearMetrics();
     clearResults();
 
-    const eventSource = new EventSource(streamUrl);
-    activeEventSource = eventSource;
+    return new Promise((resolve) => {
+      let resolved = false;
+      const finish = (payload) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(payload || null);
+      };
 
-    eventSource.addEventListener("meta", (event) => {
-      const payload = safelyParseJson(event.data);
-      if (!payload) return;
-      setStatus("running");
-      setError("");
-    });
+      const eventSource = new EventSource(streamUrl);
+      activeEventSource = eventSource;
 
-    eventSource.addEventListener("tick", (event) => {
-      const payload = safelyParseJson(event.data);
-      if (payload == null) return;
-      updateFromTick(payload);
-    });
+      eventSource.addEventListener("meta", (event) => {
+        const payload = safelyParseJson(event.data);
+        if (!payload) return;
+        setStatus("running");
+        setError("");
+      });
 
-    eventSource.addEventListener("result_meta", (event) => {
-      const payload = safelyParseJson(event.data);
-      if (!payload) return;
-      clearResults();
-      setResultMeta(payload.columns, payload.types);
-      setResultsVisible(true);
-    });
+      eventSource.addEventListener("tick", (event) => {
+        const payload = safelyParseJson(event.data);
+        if (payload == null) return;
+        updateFromTick(payload);
+      });
 
-    eventSource.addEventListener("result_rows", (event) => {
-      const payload = safelyParseJson(event.data);
-      setResultsVisible(true);
-      if (!payload) return;
-      const rows = Array.isArray(payload.rows) ? payload.rows : [];
-      for (const row of rows) {
-        allResultRows.push(row);
-        enqueueRowForRender(row);
-      }
-      updateCopyButtonState();
-    });
+      eventSource.addEventListener("result_meta", (event) => {
+        const payload = safelyParseJson(event.data);
+        if (!payload) return;
+        clearResults();
+        setResultMeta(payload.columns, payload.types);
+        setResultsVisible(true);
+      });
 
-    eventSource.addEventListener("error", (event) => {
-      const payload = event && event.data ? safelyParseJson(event.data) : null;
-      if (payload && payload.message) {
-        setError(payload.message);
-        setStatus("error");
-        setResultsVisible(true)
-      }
-    });
-
-    eventSource.addEventListener("done", (event) => {
-      const payload = safelyParseJson(event.data);
-      if (payload) {
-        lastDonePayload = payload;
-        let status = String(payload.status || "finished")
-        setStatus(status);
-        if (status == "finished") {
-          setText(progressPercentTextElement, `${formatNumber(100)} %`);
-          setProgressVisual(true, 100);
+      eventSource.addEventListener("result_rows", (event) => {
+        const payload = safelyParseJson(event.data);
+        setResultsVisible(true);
+        if (!payload) return;
+        const rows = Array.isArray(payload.rows) ? payload.rows : [];
+        for (const row of rows) {
+          allResultRows.push(row);
+          enqueueRowForRender(row);
         }
-        setText(elapsedSecondsTextElement, formatSeconds(asFiniteNumber(payload.elapsed_seconds) ?? latestElapsedSeconds));
-        if (payload.message) setError(payload.message);
-        if (payload.percent_known === false) setProgressVisual(true, 100);
-      } else {
-        setStatus("done");
-      }
+        updateCopyButtonState();
+      });
 
-      maybeSwitchToVerticalSingleRow();
-      maybePrettifySingleRowComplexCells();
-      setMetricPlain(readRowsRateTextElement, "-");
-      setMetricPlain(readBytesRateTextElement, "-");
-      setText(cpuTextElement, "-");
-      setMetricPlain(memoryTextElement, "-");
-      setText(threadTextElement, "-");
-      progressCardElement.classList.remove("is-indeterminate");
-      const hasRows = Array.isArray(allResultRows) && allResultRows.length > 0;
-      const hasError = String(lastErrorMessage || "").trim().length > 0;
+      eventSource.addEventListener("error", (event) => {
+        const payload = event && event.data ? safelyParseJson(event.data) : null;
+        if (payload && payload.message) {
+          setError(payload.message);
+          setStatus("error");
+          setResultsVisible(true)
+        }
+      });
 
-      if (!hasRows && !hasError) {
-        setResultsVisible(false);
-      }
+      eventSource.addEventListener("done", (event) => {
+        const payload = safelyParseJson(event.data);
+        if (payload) {
+          lastDonePayload = payload;
+          const status = String(payload.status || "finished");
+          setStatus(status);
+          if (status === "finished") {
+            setText(progressPercentTextElement, `${formatNumber(100)} %`);
+            setProgressVisual(true, 100);
+          }
+          setText(elapsedSecondsTextElement, formatSeconds(asFiniteNumber(payload.elapsed_seconds) ?? latestElapsedSeconds));
+          if (payload.message) setError(payload.message);
+          if (payload.percent_known === false) setProgressVisual(true, 100);
+        } else {
+          setStatus("done");
+        }
 
-      closeActiveStream();
-      updateActionButtonState();
-      updateCopyButtonState();
+        maybeSwitchToVerticalSingleRow();
+        maybePrettifySingleRowComplexCells();
+        setMetricPlain(readRowsRateTextElement, "-");
+        setMetricPlain(readBytesRateTextElement, "-");
+        setText(cpuTextElement, "-");
+        setMetricPlain(memoryTextElement, "-");
+        setText(threadTextElement, "-");
+        progressCardElement.classList.remove("is-indeterminate");
+        const hasRows = Array.isArray(allResultRows) && allResultRows.length > 0;
+        const hasError = String(lastErrorMessage || "").trim().length > 0;
+
+        if (!hasRows && !hasError) {
+          const hasStack = resultsStackElement && resultsStackElement.childElementCount > 0;
+          if (!hasStack) setResultsVisible(false);
+        }
+
+        closeActiveStream();
+        updateActionButtonState();
+        updateCopyButtonState();
+        finish(payload);
+      });
+
+      eventSource.addEventListener("keepalive", () => {});
+      eventSource.onerror = () => {
+        if (resolved) return;
+        setError("Connection lost.");
+        setStatus("error");
+        closeActiveStream();
+        updateActionButtonState();
+        updateCopyButtonState();
+        finish({ status: "error", message: "connection lost" });
+      };
     });
-
-    eventSource.addEventListener("keepalive", () => {});
-    eventSource.onerror = () => {};
   }
 
   async function handleFormat() {
@@ -2200,7 +2430,7 @@
     updateRunAndFormatButtonState();
 
     try {
-      const formatted = await formatQuery(queryText);
+      const formatted = await formatSqlStrict(queryText);
       if (queryTextAreaElement) queryTextAreaElement.value = formatted;
       updateActionButtonState();
     } catch (error) {
@@ -2212,44 +2442,123 @@
   }
 
   async function handleRun() {
-    if (isQueryRunning()) return;
-    const queryText = (queryTextAreaElement?.value || "").trim();
-    if (!queryText) {
+    if (isQueryRunning() || isFormatting) return;
+
+    const rawText = String(queryTextAreaElement?.value || "");
+    const rawTrimmed = rawText.trim();
+    if (!rawTrimmed) {
       setError("Please write a query first.");
       return;
     }
 
+    closeRunMenu();
+    batchStopRequested = false;
+    isBatchRun = false;
+    batchProgressLabel = "";
+
     setError("");
+    clearResultsStack();
     clearMetrics();
     clearResults();
-
     setStatus("starting");
 
-    try {
-      const responsePayload = await createQuery(queryText);
-      activeQueryIdentifier = responsePayload.query_id;
-      setQueryIdentifier(activeQueryIdentifier);
-
-      addHistoryEntry({
-        ts_ms: Date.now(),
-        host_id: selectedHostId || getStoredHostId() || "",
-        sql_raw: queryText,
-        sql_formatted: typeof responsePayload.formatted_sql === "string" ? responsePayload.formatted_sql : null,
-      });
-
-      setStatus("connecting");
-      startStream(responsePayload.stream_url);
-    } catch (error) {
-      setStatus("error");
-      setError(error && error.message ? error.message : String(error));
-      closeActiveStream();
-    } finally {
+    let effectiveText = rawTrimmed;
+    if (runOptAutoFormat) {
+      isFormatting = true;
       updateRunAndFormatButtonState();
+      try {
+        const formatted = await formatSqlBestEffort(rawTrimmed);
+        if (formatted && queryTextAreaElement) {
+          queryTextAreaElement.value = formatted;
+          effectiveText = formatted;
+        }
+      } finally {
+        isFormatting = false;
+        updateRunAndFormatButtonState();
+      }
     }
+
+    const statements = splitSqlStatements(effectiveText);
+    if (statements.length === 0) {
+      setError("Please write a query first.");
+      setStatus("idle");
+      return;
+    }
+
+    if (statements.length > 1 && !runOptMultiQuery) {
+      setStatus("error");
+      setError("Multiple statements detected. Enable Allow multiquery to run them.");
+      return;
+    }
+
+    addHistoryEntry({
+      ts_ms: Date.now(),
+      host_id: selectedHostId || getStoredHostId() || "",
+      sql_raw: rawTrimmed,
+      sql_formatted: runOptAutoFormat ? effectiveText : null,
+    });
+
+    if (statements.length === 1) {
+      try {
+        const responsePayload = await createQuery(statements[0]);
+        activeQueryIdentifier = responsePayload.query_id;
+        setQueryIdentifier(activeQueryIdentifier);
+        setStatus("connecting");
+        startStream(responsePayload.stream_url);
+      } catch (error) {
+        setStatus("error");
+        setError(error && error.message ? error.message : String(error));
+        closeActiveStream();
+      } finally {
+        updateRunAndFormatButtonState();
+      }
+      return;
+    }
+
+    isBatchRun = true;
+    updateRunAndFormatButtonState();
+    const total = statements.length;
+
+    for (let i = 0; i < total; i++) {
+      if (batchStopRequested) break;
+      batchProgressLabel = `${i + 1}/${total}`;
+      setStatus("starting");
+
+      try {
+        const responsePayload = await createQuery(statements[i]);
+        activeQueryIdentifier = responsePayload.query_id;
+        setQueryIdentifier(activeQueryIdentifier);
+        setStatus("connecting");
+        const donePayload = await startStream(responsePayload.stream_url);
+
+        const status = String(donePayload?.status || currentStatusValue || "finished");
+        const cols = Array.isArray(resultColumns) ? resultColumns.length : 0;
+        const rows = Array.isArray(allResultRows) ? allResultRows.length : 0;
+        const meta = `${status} · ${rows} row(s) · ${cols} col(s)`;
+
+        if (i < total - 1) {
+          archiveCurrentResultsBlock(`Query ${i + 1}/${total}`, meta);
+        }
+
+        if (status === "error" || status === "canceled") break;
+      } catch (error) {
+        setStatus("error");
+        setError(error && error.message ? error.message : String(error));
+        closeActiveStream();
+        break;
+      }
+    }
+
+    isBatchRun = false;
+    batchStopRequested = false;
+    batchProgressLabel = "";
+    updateActionButtonState();
+    updateRunAndFormatButtonState();
   }
 
   async function handleCancel() {
     if (!activeQueryIdentifier) return;
+    batchStopRequested = true;
     setStatus("canceling");
     
     try {
@@ -2263,6 +2572,9 @@
   function handleClear() {
     closeActiveStream();
     activeQueryIdentifier = null;
+    isBatchRun = false;
+    batchStopRequested = false;
+    batchProgressLabel = "";
     lastDonePayload = null;
     lastErrorMessage = "";
     currentStatusValue = "idle";
@@ -2277,6 +2589,8 @@
 
     clearMetrics();
     clearResults();
+    clearResultsStack();
+    setResultsVisible(false);
     updateRunAndFormatButtonState();
     setError("");
   }
@@ -2485,6 +2799,19 @@
 
 
   runButtonElement?.addEventListener("click", handleRun);
+  runMenuButtonElement?.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (isQueryRunning()) return;
+    toggleRunMenu();
+  });
+  runOptAutoFormatElement?.addEventListener("change", () => {
+    runOptAutoFormat = !!runOptAutoFormatElement.checked;
+    saveRunOptions();
+  });
+  runOptMultiQueryElement?.addEventListener("change", () => {
+    runOptMultiQuery = !!runOptMultiQueryElement.checked;
+    saveRunOptions();
+  });
   formatButtonElement?.addEventListener("click", handleFormat);
   cancelButtonElement?.addEventListener("click", handleActionButton);
   copyJsonButtonElement?.addEventListener("click", handleCopyJson);
@@ -2506,6 +2833,15 @@
     if (!hostPickerRootElement.contains(t)) closeHostMenu();
   });
 
+  document.addEventListener("click", (e) => {
+    if (!runMenuElement || runMenuElement.hidden) return;
+    const t = e.target;
+    if (!(t instanceof Node)) return;
+    const inMenu = runMenuElement.contains(t);
+    const inBtn = runMenuButtonElement ? runMenuButtonElement.contains(t) : false;
+    if (!inMenu && !inBtn) closeRunMenu();
+  });
+
   historyButtonElement?.addEventListener("click", (e) => {
     e.preventDefault();
     toggleHistory();
@@ -2523,10 +2859,13 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       closeHostMenu();
+      closeRunMenu();
     }
   });
 
   setResultsVisible(false);
+  loadRunOptions();
+  applyRunOptionsUi();
   loadMeta();
   startHostsSse();
   loadDefaultQueryIfEmpty();

@@ -334,6 +334,103 @@ body {
   flex-wrap: wrap;
 }
 
+.runSplit {
+  position: relative;
+  display: inline-flex;
+}
+
+.runSplit__buttons {
+  display: inline-flex;
+}
+
+.runSplit__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.runSplit__toggle {
+  width: 2.2rem;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 0;
+}
+
+.runSplit__toggle:disabled {
+  border-left: 0;
+}
+
+.runMenu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  min-width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.22);
+  padding: 8px;
+  z-index: 60;
+}
+
+.runMenu__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+.runMenu__item:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.runMenu__check {
+  width: 16px;
+  height: 16px;
+}
+
+.resultsStack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.resultsStack__block {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  overflow: hidden;
+}
+
+.resultsStack__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 850;
+  font-size: 0.75rem;
+}
+
+.resultsStack__meta {
+  opacity: 0.78;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.resultsStack__body {
+  padding: 10px 12px;
+}
+
 .button {
   padding: 0.56rem 0.8rem;
   border-radius: 0.75rem;
@@ -608,32 +705,6 @@ button.button:not(:disabled):hover {
   border-bottom: 1px solid var(--rowDivider);
   vertical-align: top;
   white-space: pre;
-}
-
-.jsonCell {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  tab-size: 2;
-}
-
-.jsonTokKey {
-  color: #f64500;
-}
-
-.jsonTokStr {
-  color: #22c55e;
-}
-
-.jsonTokNum {
-  color: #f59e0b;
-}
-
-.jsonTokBool {
-  color: #a78bfa;
-}
-
-.jsonTokNull {
-  color: #94a3b8;
-  font-style: italic;
 }
 
 .resultTable tbody tr:hover td {
@@ -1260,4 +1331,13 @@ button.button:not(:disabled):hover {
 .historyEmpty {
   padding: 10px;
   opacity: 0.7;
+}
+
+
+#runButton {
+  border-radius: 0.75rem 0px 0px 0.75rem;
+}
+#runMenuButton {
+  border-radius: 0px 0.75rem  0.75rem 0px;
+  width: 0.4rem;
 }

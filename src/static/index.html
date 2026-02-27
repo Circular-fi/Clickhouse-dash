@@ -85,7 +85,30 @@
         </div>
 
         <div class="queryActions">
-          <button id="runButton" class="button button--primary">Run</button>
+          <div id="runSplit" class="runSplit">
+            <div class="runSplit__buttons">
+              <button id="runButton" class="button button--primary runSplit__main" type="button">Run</button>
+              <button
+                id="runMenuButton"
+                class="button button--primary runSplit__toggle"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                title="Run options">
+                ▾
+              </button>
+            </div>
+            <div id="runMenu" class="runMenu" role="menu" tabindex="-1" hidden>
+              <label class="runMenu__item">
+                <input id="runOptAutoFormat" class="runMenu__check" type="checkbox" />
+                <span>Auto-format</span>
+              </label>
+              <label class="runMenu__item">
+                <input id="runOptMultiQuery" class="runMenu__check" type="checkbox" />
+                <span>Allow multiquery</span>
+              </label>
+            </div>
+          </div>
           <button id="formatButton" class="button" type="button">Format</button>
           <button id="cancelButton" class="button" disabled>Clear</button>
 

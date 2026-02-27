@@ -23,8 +23,12 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
  && cmake --build /work/build --target clickhouse-cpp-lib
 
 FROM toolchain AS dev-builder
+RUN mkdir -p /work/src
 COPY --from=deps /work/build /work/build
-COPY src /work/src
+COPY src/CMakeLists.txt /work/src/
+COPY src/EmbedStatic.cmake /work/src/
+COPY src/*.cpp /work/src
+COPY src/*.hpp /work/src
 
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Debug \
