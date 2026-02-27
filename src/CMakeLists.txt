@@ -5,16 +5,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
+option(CHDASH_BUILD_APP "Build chdash executable" ON)
 
 include(FetchContent)
 
-# ---- Disable all RapidJSON extras (examples/tests/docs) ----
 set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
-# clickhouse-cpp
 FetchContent_Declare(
   clickhouse_cpp
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
@@ -22,7 +21,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(clickhouse_cpp)
 
-# cpp-httplib (header-only)
 FetchContent_Declare(
   httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
@@ -30,7 +28,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(httplib)
 
-# rapidjson (header-only)
 FetchContent_Declare(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
@@ -38,17 +35,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(rapidjson)
 
-add_executable(chdash
-  main.cpp
-  server.cpp
-  query_session.cpp
-  hcl.cpp
-  jwt.cpp
-  ch_uri.cpp
-  health_runner.cpp
-)
+if (CHDASH_BUILD_APP)
+  add_executable(chdash
+    main.cpp
+    server.cpp
+    query_session.cpp
+    hcl.cpp
+    jwt.cpp
+    ch_uri.cpp
+    health_runner.cpp
+  )
+endif()
 
-if (CHDASH_EMBED_STATIC)
+if (CHDASH_BUILD_APP AND CHDASH_EMBED_STATIC)
   include(${CMAKE_CURRENT_LIST_DIR}/EmbedStatic.cmake)
 
   set(_STATIC_DIR "${CMAKE_CURRENT_LIST_DIR}/static")
@@ -62,63 +61,28 @@ if (CHDASH_EMBED_STATIC)
   target_compile_definitions(chdash PRIVATE CHDASH_EMBED_STATIC=1)
 endif()
 
-# Important: apply warning flags ONLY to our target.
-# Putting -Wall/-Wextra at directory scope makes CMake translate them to /Wextra on MSVC
-# and they propagate into dependencies (absl/zstd/...), breaking Windows builds.
-if (MSVC)
-  target_compile_options(chdash PRIVATE /W4)
-else()
-  target_compile_options(chdash PRIVATE
-    -Wall -Wextra
-    -Wno-error
-    -Wno-error=implicit-fallthrough
-    -Wno-implicit-fallthrough
+if (CHDASH_BUILD_APP)
+  if (MSVC)
+    target_compile_options(chdash PRIVATE /W4)
+  else()
+    target_compile_options(chdash PRIVATE
+      -Wall -Wextra
+      -Wno-error
+      -Wno-error=implicit-fallthrough
+      -Wno-implicit-fallthrough
+    )
+  endif()
+
+  target_include_directories(chdash PRIVATE
+    ${clickhouse_cpp_SOURCE_DIR}
+    ${httplib_SOURCE_DIR}
+    ${rapidjson_SOURCE_DIR}/include
+  )
+
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash PRIVATE
+    clickhouse-cpp-lib
+    Threads::Threads
   )
 endif()
-
-target_include_directories(chdash PRIVATE
-  ${clickhouse_cpp_SOURCE_DIR}
-  ${httplib_SOURCE_DIR}
-  ${rapidjson_SOURCE_DIR}/include
-)
-
-# pthreads (souvent requis)
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-target_link_libraries(chdash PRIVATE
-  clickhouse-cpp-lib
-  Threads::Threads
-)
-
-# ---- Build metadata (/api/meta) ----
-find_package(Git QUIET)
-if (GIT_FOUND)
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    OUTPUT_VARIABLE CHDASH_GIT_SHA
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-  )
-  execute_process(
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    OUTPUT_VARIABLE CHDASH_SEMVER
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-  )
-endif()
-
-if (NOT CHDASH_GIT_SHA)
-  set(CHDASH_GIT_SHA "unknown")
-endif()
-if (NOT CHDASH_SEMVER)
-  set(CHDASH_SEMVER "dev")
-endif()
-
-string(TIMESTAMP CHDASH_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ" UTC)
-target_compile_definitions(chdash PRIVATE
-  CHDASH_GIT_SHA="${CHDASH_GIT_SHA}"
-  CHDASH_SEMVER="${CHDASH_SEMVER}"
-  CHDASH_BUILD_TIME="${CHDASH_BUILD_TIME}"
-)

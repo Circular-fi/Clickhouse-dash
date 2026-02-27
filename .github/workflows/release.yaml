@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -30,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Compute version (strip leading v)
         id: vars
@@ -40,34 +43,43 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Build (Linux static musl, embedded static)
+      - name: Set up QEMU
+        if: matrix.goos == 'linux'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        if: matrix.goos == 'linux'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build (Linux via Dockerfile target=production, cached)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
 
-          docker run --rm \
-            -v "$PWD":/work \
-            -w /work \
-            alpine:3.20 sh -euxc '
-              apk add --no-cache ca-certificates build-base cmake ninja git
+          rm -rf build_out
+          mkdir -p build_out
 
-              cmake -S src -B build -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-                -DCHDASH_EMBED_STATIC=ON \
-                -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc -s"
+          docker buildx build             --platform "linux/${{ matrix.goarch }}"             -f test/Dockerfile             --target production             --cache-from type=gha             --cache-to type=gha,mode=max             --output "type=local,dest=build_out"             .
 
-              cmake --build build --target chdash
-              file build/chdash
-              ldd build/chdash || true
-            '
+          test -f build_out/chdash
+          chmod +x build_out/chdash
+          file build_out/chdash || true
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install ninja
+          brew install ninja cmake
+
+      - name: Cache CMake deps (macOS)
+        if: matrix.goos == 'darwin'
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/_deps
+            build/CMakeCache.txt
+          key: cmake-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
 
       - name: Configure (macOS)
         if: matrix.goos == 'darwin'
@@ -82,15 +94,11 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
           fi
 
-          cmake -S src -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DCHDASH_EMBED_STATIC=ON \
-            "${EXTRA[@]}"
+          cmake -S src -B build -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DCMAKE_POLICY_VERSION_MINIMUM=3.5             -DCHDASH_EMBED_STATIC=ON             "${EXTRA[@]}"
 
       - name: Build (macOS)
         if: matrix.goos == 'darwin'
-        run: cmake --build build --target chdash
+        run: cmake --build build --target chdash -- -j2
 
       - name: Package
         id: package
@@ -99,12 +107,20 @@ jobs:
           set -euo pipefail
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
-          if [ ! -f build/chdash ]; then
-            echo "binary not found at build/chdash" >&2
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            BIN="build_out/chdash"
+          else
+            BIN="build/chdash"
+          fi
+
+          if [ ! -f "$BIN" ]; then
+            echo "binary not found at $BIN" >&2
             exit 1
           fi
 
-          tar -C build -czf "$TAR" chdash
+          mkdir -p pkg
+          cp "$BIN" pkg/chdash
+          tar -C pkg -czf "$TAR" chdash
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
@@ -124,17 +140,49 @@ jobs:
         with:
           path: dist
 
-      - name: Flatten
+      - name: Flatten + checksums
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
+          (cd out && sha256sum *.tar.gz > SHA256SUMS)
           ls -la out
 
-      - name: Publish Release
+      - name: Publish Release (generated notes)
         uses: softprops/action-gh-release@v2
         with:
-          files: out/*.tar.gz
+          generate_release_notes: true
+          files: |
+            out/*.tar.gz
+            out/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Publish Docker image (GHCR)
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push (multi-arch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY}"
+
+          docker buildx build             --platform linux/amd64,linux/arm64             -f test/Dockerfile             --target production             -t "${IMAGE}:${TAG}"             -t "${IMAGE}:latest"             --cache-from type=gha             --cache-to type=gha,mode=max             --push             .

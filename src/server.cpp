@@ -406,6 +406,333 @@ static std::optional<std::string> try_format_query(
     return formatted;
 }
 
+static bool is_ascii_space(char c) {
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+static std::string trim_ascii_spaces(std::string_view in) {
+  size_t b = 0;
+  while (b < in.size() && is_ascii_space(in[b])) ++b;
+  size_t e = in.size();
+  while (e > b && is_ascii_space(in[e - 1])) --e;
+  return std::string(in.substr(b, e - b));
+}
+
+static bool is_ident_char(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static std::vector<std::string> split_top_level(std::string_view s, char sep) {
+  std::vector<std::string> out;
+  size_t last = 0;
+  bool in_str = false;
+  bool esc = false;
+  int par = 0, br = 0, cr = 0;
+
+  auto flush = [&](size_t pos) {
+    out.push_back(std::string(s.substr(last, pos - last)));
+    last = pos + 1;
+  };
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') {
+        in_str = false;
+      }
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == '[') ++br;
+    else if (c == ']' && br > 0) --br;
+    else if (c == '{') ++cr;
+    else if (c == '}' && cr > 0) --cr;
+
+    if (c == sep && par == 0 && br == 0 && cr == 0) {
+      flush(i);
+    }
+  }
+
+  out.push_back(std::string(s.substr(last)));
+  return out;
+}
+
+static bool contains_token_outside_strings(std::string_view s, std::string_view tok) {
+  bool in_str = false;
+  bool esc = false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (i + tok.size() <= s.size() && s.substr(i, tok.size()) == tok) return true;
+  }
+  return false;
+}
+
+static std::string pretty_array_arg(std::string_view arr_expr, const std::string& base_indent) {
+  // Only rewrite when it clearly looks like a "complex" array (outer arrays of tuples, etc.).
+  // Simple arrays like ['a','b'] are intentionally kept inline.
+  std::string t = trim_ascii_spaces(arr_expr);
+  if (t.size() < 2 || t.front() != '[' || t.back() != ']') return t;
+
+  // Heuristic: array contains tuple(...) outside strings.
+  const bool has_tuple =
+      contains_token_outside_strings(t, "tuple(") || contains_token_outside_strings(t, "Tuple(");
+  if (!has_tuple) return t;
+
+  const std::string_view inner(t.data() + 1, t.size() - 2);
+  auto items = split_top_level(inner, ',');
+  if (items.size() <= 1) return t;
+
+  const std::string item_indent = base_indent + "  ";
+  std::ostringstream oss;
+  oss << base_indent << "[\n";
+  for (size_t i = 0; i < items.size(); ++i) {
+    std::string it = trim_ascii_spaces(items[i]);
+    oss << item_indent << it;
+    if (i + 1 < items.size()) oss << ",";
+    oss << "\n";
+  }
+  oss << base_indent << "]";
+  return oss.str();
+}
+
+static size_t find_from_keyword_top_level(const std::string& s) {
+  // Find " FROM " at top-level (not inside (), [] or strings).
+  const std::string needle = " FROM ";
+  bool in_str = false;
+  bool esc = false;
+  int par = 0, br = 0, cr = 0;
+  for (size_t i = 0; i + needle.size() <= s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == '[') ++br;
+    else if (c == ']' && br > 0) --br;
+    else if (c == '{') ++cr;
+    else if (c == '}' && cr > 0) --cr;
+
+    if (par == 0 && br == 0 && cr == 0 && s.compare(i, needle.size(), needle) == 0) return i;
+  }
+  return std::string::npos;
+}
+
+static bool has_top_level_comma(std::string_view s) {
+  bool in_str = false;
+  bool esc = false;
+  int par = 0, br = 0, cr = 0;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == '[') ++br;
+    else if (c == ']' && br > 0) --br;
+    else if (c == '{') ++cr;
+    else if (c == '}' && cr > 0) --cr;
+    if (c == ',' && par == 0 && br == 0 && cr == 0) return true;
+  }
+  return false;
+}
+
+static std::string postprocess_format_query(std::string s, size_t threshold) {
+  // Rule 2: If SELECT has a single (long) expression, put it on the next line.
+  if (s.rfind("SELECT ", 0) == 0 && s.find('\n') == std::string::npos) {
+    const size_t from_pos = find_from_keyword_top_level(s);
+    const size_t expr_beg = std::string("SELECT ").size();
+    const size_t expr_end = (from_pos == std::string::npos) ? s.size() : from_pos;
+    if (expr_end > expr_beg) {
+      const std::string_view expr = std::string_view(s).substr(expr_beg, expr_end - expr_beg);
+      if (!has_top_level_comma(expr) && (expr_end - expr_beg) > threshold) {
+        std::string out;
+        out.reserve(s.size() + 8);
+        out.append("SELECT\n  ");
+        out.append(trim_ascii_spaces(expr));
+        out.append(s.substr(expr_end));
+        s.swap(out);
+      }
+    }
+  }
+
+  // Rule 4 (+ Rule 3): Multiline CAST(...) args; pretty outer arrays of tuples.
+  std::string out;
+  out.reserve(s.size() + 64);
+  bool in_str = false;
+  bool esc = false;
+  for (size_t i = 0; i < s.size();) {
+    const char c = s[i];
+    if (in_str) {
+      out.push_back(c);
+      if (esc) {
+        esc = false;
+      } else if (c == '\\') {
+        esc = true;
+      } else if (c == '\'') {
+        in_str = false;
+      }
+      ++i;
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      out.push_back(c);
+      ++i;
+      continue;
+    }
+
+    const bool is_cast =
+        (i + 5 <= s.size() && s.compare(i, 5, "CAST(") == 0 && (i == 0 || !is_ident_char(s[i - 1])));
+    if (!is_cast) {
+      out.push_back(c);
+      ++i;
+      continue;
+    }
+
+    // Find matching ')'
+    size_t j = i + 5;
+    bool in2 = false;
+    bool esc2 = false;
+    int par = 1;
+    for (; j < s.size(); ++j) {
+      char cj = s[j];
+      if (in2) {
+        if (esc2) {
+          esc2 = false;
+          continue;
+        }
+        if (cj == '\\') {
+          esc2 = true;
+          continue;
+        }
+        if (cj == '\'') in2 = false;
+        continue;
+      }
+      if (cj == '\'') {
+        in2 = true;
+        esc2 = false;
+        continue;
+      }
+      if (cj == '(') ++par;
+      else if (cj == ')') {
+        --par;
+        if (par == 0) break;
+      }
+    }
+    if (j >= s.size()) {
+      // malformed; passthrough
+      out.append(s.substr(i));
+      break;
+    }
+
+    const size_t call_len = (j + 1) - i;
+    const std::string_view inner = std::string_view(s).substr(i + 5, (j - (i + 5)));
+    auto args = split_top_level(inner, ',');
+    if (args.size() < 2 || call_len <= threshold) {
+      out.append(s.substr(i, call_len));
+      i = j + 1;
+      continue;
+    }
+
+    // Determine indentation at the call site.
+    size_t line_start = out.rfind('\n');
+    line_start = (line_start == std::string::npos) ? 0 : (line_start + 1);
+    std::string base_indent;
+    if (line_start < out.size()) {
+      base_indent = out.substr(line_start);
+      for (char ic : base_indent) {
+        if (ic != ' ' && ic != '\t') { base_indent.clear(); break; }
+      }
+    }
+    const std::string arg_indent = base_indent + "  ";
+
+    out.append("CAST(\n");
+    for (size_t k = 0; k < args.size(); ++k) {
+      std::string a = trim_ascii_spaces(args[k]);
+      std::string rendered;
+      if (!a.empty() && a.front() == '[' && a.back() == ']') {
+        rendered = pretty_array_arg(a, arg_indent);
+      } else {
+        rendered = arg_indent + a;
+      }
+      out.append(rendered);
+      if (k + 1 < args.size()) out.push_back(',');
+      out.push_back('\n');
+    }
+    out.append(base_indent);
+    out.push_back(')');
+
+    i = j + 1;
+  }
+
+  return out;
+}
+
 static std::string escape_single_quotes(std::string_view in) {
   std::string out;
   out.reserve(in.size() + 8);
@@ -586,7 +913,8 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return true;
       },
-      [](bool) {
+      [](bool /*success*/) {
+        // no-op
       }
   );
 }
@@ -652,12 +980,13 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     const std::string msg = fmt_err.empty() ? "Failed to format query." : fmt_err;
     return json_error(res, 422, "format_failed", msg);
   }
+  const std::string pretty = postprocess_format_query(*formatted, 80);
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("formatted_sql");
-  w.String(formatted->c_str());
+  w.String(pretty.c_str());
   w.EndObject();
 
   res.status = 200;
@@ -743,7 +1072,12 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   w.Key("query_id"); w.String(qid.c_str());
   w.Key("cancel_token"); w.String(cancel_token.c_str());
   w.Key("formatted_sql");
-  if (formatted.has_value()) w.String(formatted->c_str()); else w.Null();
+  if (formatted.has_value()) {
+    const std::string pretty = postprocess_format_query(*formatted, 80);
+    w.String(pretty.c_str());
+  } else {
+    w.Null();
+  }
   std::string stream = "api/query/stream?query_id=" + qid;
   w.Key("stream_url"); w.String(stream.c_str());
   w.EndObject();

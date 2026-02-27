@@ -1,55 +1,65 @@
 # syntax=docker/dockerfile:1.6
 
-FROM alpine:3.20 AS base-build
+FROM alpine:3.20 AS toolchain
 WORKDIR /work
 
-# Toolchain + static C++ runtime
 RUN apk add --no-cache \
     ca-certificates \
     build-base \
     libstdc++-dev \
     cmake \
     ninja \
-    git
+    git \
+    lld
 
-FROM base-build AS builder
-COPY ./src /work/src
+FROM toolchain AS deps
+COPY src/CMakeLists.txt /work/src/
+COPY src/EmbedStatic.cmake /work/src/
+
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
-      -DCHDASH_EMBED_STATIC=ON \
-      -DCMAKE_EXE_LINKER_FLAGS="-static -s" \
- && cmake --build /work/build --target chdash \
- && file /work/build/chdash \
- && cp /work/build/chdash /work/chdash
+      -DCHDASH_BUILD_APP=OFF \
+      -DCHDASH_EMBED_STATIC=OFF \
+ && cmake --build /work/build --target clickhouse-cpp-lib
 
-# Optional dev image (dynamic, for local iteration)
-FROM base-build AS dev-builder
-RUN apk add --no-cache lld binutils
-COPY ./src/CMakeLists.txt ./src/EmbedStatic.cmake /work/src/
-COPY ./src/*.cpp ./src/*.hpp /work/src/
+FROM toolchain AS dev-builder
+COPY --from=deps /work/build /work/build
+COPY src /work/src
+
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Debug \
+      -DCHDASH_BUILD_APP=ON \
       -DCHDASH_EMBED_STATIC=OFF \
       -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
- && cmake --build /work/build --target chdash \
+ && cmake --build /work/build --target chdash -j$(nproc) \
+ && cp /work/build/chdash /work/chdash
+
+FROM toolchain AS prod-builder
+COPY --from=deps /work/build /work/build
+COPY src /work/src
+
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCHDASH_BUILD_APP=ON \
+      -DCHDASH_EMBED_STATIC=ON \
+      -DCMAKE_EXE_LINKER_FLAGS="-static -s -fuse-ld=lld" \
+ && cmake --build /work/build --target chdash -j$(nproc) \
+ && strip /work/build/chdash \
  && cp /work/build/chdash /work/chdash
 
 FROM alpine:3.20 AS dev
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 COPY --from=dev-builder /work/chdash /chdash
-COPY ./src/static /static
+COPY src/static /static
 EXPOSE 8080
 ENV PORT=8080
 ENV STATIC_DIR=/static
 ENTRYPOINT ["/chdash"]
 
-# Production: fully static binary in scratch
 FROM scratch AS production
-COPY --from=builder /work/chdash /chdash
-# CA certs for TLS connections to ClickHouse
-COPY --from=base-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=prod-builder /work/chdash /chdash
+COPY --from=toolchain /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 EXPOSE 8080
 ENV PORT=8080
-HEALTHCHECK --interval=5s --timeout=1s --start-interval=500ms --start-period=5s --retries=1 \
-  CMD ["/chdash", "--health"]
+HEALTHCHECK --interval=5s --timeout=1s --start-period=5s --retries=1 CMD ["/chdash", "--health"]
 ENTRYPOINT ["/chdash"]
