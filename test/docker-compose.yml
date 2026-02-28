@@ -20,6 +20,11 @@ services:
               runner_uri = "clickhouse://test:test@clickhouse:9000"
               system_uri = "clickhouse://test:test@clickhouse:9000"
             }
+            host {
+              name       = "local2"
+              runner_uri = "clickhouse://test:test@clickhouse:9000"
+              system_uri = "clickhouse://test:test@clickhouse:9000"
+            }
           }
         LISTEN_HOST: "0.0.0.0"
         LISTEN_PORT: ${PORT:-8080}

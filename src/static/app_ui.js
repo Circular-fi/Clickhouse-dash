@@ -333,7 +333,7 @@
 
       btn.addEventListener("click", () => {
         if (it.host_id) setSelectedHostId(String(it.host_id));
-        if (dom.queryTextArea) dom.queryTextArea.value = String(it.sql_formatted || it.sql_raw || "");
+        if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(it.sql_formatted || it.sql_raw || ""));
         dom.historyPanel.hidden = true;
       });
 

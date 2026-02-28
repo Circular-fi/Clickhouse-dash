@@ -8,6 +8,7 @@
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
+  const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   const HISTORY_MAX_ENTRIES = 100;
 
   const safeRead = (key) => {
@@ -50,6 +51,7 @@
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
+    EDITOR_STORAGE_KEY,
 
     getSavedThemeMode() {
       const v = safeRead(THEME_STORAGE_KEY);
@@ -109,6 +111,15 @@
         if (deduped.length >= HISTORY_MAX_ENTRIES) break;
       }
       storage.saveHistory(deduped);
+    },
+
+    loadEditorSql() {
+      const v = safeRead(EDITOR_STORAGE_KEY);
+      return v ? String(v) : "";
+    },
+
+    saveEditorSql(sqlText) {
+      safeWrite(EDITOR_STORAGE_KEY, String(sqlText ?? ""));
     },
   };
 

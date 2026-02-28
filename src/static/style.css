@@ -407,7 +407,7 @@ body {
   max-width: min(26rem, 90vw);
   border-radius: 0.75rem 0px 0.75rem 0.75rem;
   border: 1px solid var(--border);
-  background: var(--panel);
+  background-color: var(--panel);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
   padding: 0.35rem;
   display: flex;
@@ -419,6 +419,7 @@ body {
   transform-origin: top right;
   visibility: hidden;
   pointer-events: none;
+  z-index: 60;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
 }
 
@@ -974,15 +975,12 @@ button.button:not(:disabled):hover {
 
   background:
     linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
-    var(--panelBg);
+    var(--panel);
 
   /* shadow qui “tombe” vers le bas (peu/pas de blur au-dessus) */
   box-shadow:
     0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
-
-  backdrop-filter: blur(0.55rem);
-
   /* animation base (fermée) */
   transform-origin: top;
   opacity: 0;
@@ -1054,7 +1052,7 @@ button.button:not(:disabled):hover {
 
   border-top-left-radius: 0;
   border-top-right-radius: 0;
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
 }
 
@@ -1073,7 +1071,7 @@ button.button:not(:disabled):hover {
 .themeSelect.themeSelect--open .themeSelect__button {
   background:
     linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
-    var(--panelBg);
+    var(--panel);
 }
 
 
@@ -1241,8 +1239,7 @@ button.button:not(:disabled):hover {
   border-bottom-right-radius: 0;
   border-bottom: 0;
   background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
-    var(--panelBg);
+    var(--panel);
 }
 
 .picker__button:focus-visible {
@@ -1306,15 +1303,10 @@ button.button:not(:disabled):hover {
   border: 1px solid var(--borderStrong);
   border-top: 0;
 
-  background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
-    var(--panelBg);
+  background: var(--panel);
 
   box-shadow:
-    0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
-
-  backdrop-filter: blur(0.55rem);
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }

@@ -58,6 +58,7 @@ COPY src/static /static
 EXPOSE 8080
 ENV PORT=8080
 ENV STATIC_DIR=/static
+HEALTHCHECK --interval=5s --timeout=1s --start-period=5s --retries=1 CMD ["/chdash", "--health"]
 ENTRYPOINT ["/chdash"]
 
 FROM scratch AS production

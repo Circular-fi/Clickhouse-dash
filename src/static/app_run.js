@@ -72,7 +72,7 @@
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
     const joined = sql.joinSqlStatements(normalized);
 
-    if (dom.queryTextArea) dom.queryTextArea.value = joined;
+    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joined);
 
     storage.addHistoryEntry({
       ts_ms: Date.now(),
