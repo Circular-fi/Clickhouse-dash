@@ -25,7 +25,6 @@
     if (lastErrorMessage) {
       dom.errorBanner.hidden = false;
       dom.errorBanner.textContent = lastErrorMessage;
-      setResultsVisible(true);
     } else {
       dom.errorBanner.hidden = true;
       dom.errorBanner.textContent = "";
@@ -190,6 +189,15 @@
       return buildCopyValue(v);
     }
 
+    if (allResultRows.length === 1) {
+      const row = allResultRows[0];
+      const obj = {};
+      for (let i = 0; i < resultColumns.length; i++) {
+        obj[resultColumns[i]] = Array.isArray(row) ? row[i] : null;
+      }
+      return JSON.stringify(obj, null, 2);
+    }
+
     const objects = allResultRows.map((row) => {
       const obj = {};
       for (let i = 0; i < resultColumns.length; i++) {
@@ -296,13 +304,15 @@
   function setMultiqueryMode(enabled) {
     if (!dom.resultsPanel) return;
     dom.resultsPanel.classList.toggle("is-multiquery", !!enabled);
+    if (dom.copyJsonButton) dom.copyJsonButton.hidden = !!enabled;
+    if (dom.copyJsonToast) dom.copyJsonToast.hidden = true;
+    if (dom.resultColumnsText) dom.resultColumnsText.hidden = !!enabled;
   }
 
   function hideLiveWrapIfStackHasBlocks() {
     if (!dom.liveResultsWrap) return;
     const hasBlocks = !!(resultsStackElement && resultsStackElement.childElementCount > 0);
     dom.liveResultsWrap.hidden = hasBlocks;
-    if (hasBlocks) setMultiqueryMode(true);
     dom.copyJsonButton && (dom.copyJsonButton.disabled = true);
   }
 

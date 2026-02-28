@@ -65,5 +65,65 @@
     }, durationMs);
   }
 
-  ns.util = { setText, escapeHtml, highlightJsonHtml, renderPrettyJson, copyTextToClipboard, flashButtonText };
+  function formatInt(value) {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return Math.trunc(n).toLocaleString("en-US");
+  }
+
+  function formatSeconds(value) {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return "-";
+    if (n < 1) return `${Math.round(n * 1000)}ms`;
+    if (n < 10) return `${n.toFixed(3)}s`;
+    return `${n.toFixed(2)}s`;
+  }
+
+  function formatBytes(value) {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) return "-";
+    const abs = Math.abs(n);
+    if (abs < 1024) return `${formatInt(n)}B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let v = abs;
+    let u = -1;
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024;
+      u++;
+    }
+    const sign = n < 0 ? "-" : "";
+    const num = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+    return `${sign}${num}${units[u]}`;
+  }
+
+  function replaceTextAreaValue(textAreaEl, nextValue) {
+    if (!textAreaEl) return;
+    const v = String(nextValue ?? "");
+    try {
+      textAreaEl.focus();
+      textAreaEl.setSelectionRange(0, textAreaEl.value.length);
+      const ok = document.execCommand && document.execCommand("insertText", false, v);
+      if (ok) return;
+    } catch {
+      null;
+    }
+    try {
+      textAreaEl.setRangeText(v, 0, textAreaEl.value.length, "end");
+    } catch {
+      textAreaEl.value = v;
+    }
+  }
+
+  ns.util = {
+    setText,
+    escapeHtml,
+    highlightJsonHtml,
+    renderPrettyJson,
+    copyTextToClipboard,
+    flashButtonText,
+    formatInt,
+    formatSeconds,
+    formatBytes,
+    replaceTextAreaValue,
+  };
 })();

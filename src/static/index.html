@@ -95,8 +95,7 @@
                 aria-haspopup="menu"
                 aria-expanded="false"
                 title="Run options">
-                ▾
-              </button>
+                </button>
             </div>
             <div id="runMenu" class="runMenu" role="menu" tabindex="-1" hidden>
               <button id="runOptAutoFormat" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
@@ -190,7 +189,7 @@
         <div class="panel__title">Results</div>
         <div class="panel__meta">
           <span class="metaItem" id="resultColumnsText">-</span>
-          <button id="copyJsonButton" class="button button--small" type="button" disabled>
+          <button id="copyJsonButton" class="button button--small resultsStack__copy" type="button" disabled>
             Copy JSON
           </button>
           <span id="copyJsonToast" class="copyToast" hidden>Copied</span>
@@ -207,14 +206,7 @@
       </div>
     </section>
   </main>
-  <script src="./static/app_dom.js" defer></script>
-  <script src="./static/app_state.js" defer></script>
-  <script src="./static/app_utils.js" defer></script>
-  <script src="./static/app_sql.js" defer></script>
-  <script src="./static/app_api.js" defer></script>
-  <script src="./static/app_results.js" defer></script>
-  <script src="./static/app_ui.js" defer></script>
-  <script src="./static/app_run.js" defer></script>
+
   <script src="./static/app.js" defer></script>
 </body>
 </html>

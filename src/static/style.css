@@ -345,6 +345,7 @@ body {
 .runSplit {
   position: relative;
   display: inline-flex;
+  z-index: 1;
 }
 
 .runSplit__buttons {
@@ -398,21 +399,21 @@ body {
 
 .runMenu {
   position: absolute;
-  top: calc(100% + 8px);
+  top: 100%;
   right: 0;
   left: auto;
   min-width: 100%;
   width: max-content;
   max-width: min(26rem, 90vw);
-  border-radius: 14px;
+  border-radius: 0.75rem 0px 0.75rem 0.75rem;
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  background: var(--panel);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
   padding: 0.35rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-
+  font-size: 0.75rem;
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
   transform-origin: top right;
@@ -535,7 +536,6 @@ html[data-theme="light"] .runMenu__opt:hover {
 }
 
 button.button:not(:disabled):hover {
-  background: var(--buttonBgHover);
   border-color: var(--buttonBorderHover);
 }
 
@@ -558,7 +558,9 @@ button.button:not(:disabled):hover {
 }
 
 .button--primary:not(:disabled):hover {
-  border-color: rgba(37, 99, 235, 0.78);
+  border-color: rgba(37, 99, 235, 0.6) !important;
+  background: linear-gradient(180deg, rgba(120, 120, 120, 0.08), transparent 60%),
+    var(--accent);
 }
 
 .button--danger {
@@ -742,7 +744,7 @@ button.button:not(:disabled):hover {
 
 #copyJsonButton,
 .resultsStack__copy {
-  min-inline-size: 7.5rem;
+  min-inline-size: 5.5rem;
 }
 
 
@@ -1434,11 +1436,25 @@ button.button:not(:disabled):hover {
 
 #runButton {
   border-radius: 0.75rem 0px 0px 0.75rem;
+  border-right: 0px;
 }
+
 #runMenuButton {
   border-radius: 0px 0.75rem  0.75rem 0px;
   width: 0.4rem;
+  border-left: 0px;
 }
+
+.runSplit.is-open > .runSplit__buttons > #runButton {
+  border-radius: 0.75rem 0px 0px 0px;
+  border-bottom: 0px;
+}
+
+.runSplit.is-open > .runSplit__buttons > #runMenuButton {
+  border-radius: 0px 0.75rem 0px 0px;
+  border-bottom: 0px;
+}
+
 
 .jsonPretty {
   margin: 0;

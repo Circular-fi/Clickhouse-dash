@@ -25,8 +25,12 @@
     const payload = await readJsonBody(response);
 
     if (!response.ok) {
+      const code = payload && payload.error_code ? String(payload.error_code) : "";
       const msg = payload && payload.message ? String(payload.message) : `Request failed with status ${response.status}`;
-      throw new Error(msg);
+      const err = new Error(code ? `${code}: ${msg}` : msg);
+      err.code = code || null;
+      err.payload = payload;
+      throw err;
     }
 
     return payload;
@@ -37,6 +41,15 @@
     if (!Array.isArray(sqls)) throw new Error("formatSqls expects an array.");
 
     const payload = await postJson("api/format", { host_id: hostId, sqls });
+
+    if (payload && payload.error_code) {
+      const code = String(payload.error_code || "format_failed");
+      const msg = payload && payload.message ? String(payload.message) : "Format failed.";
+      const err = new Error(`${code}: ${msg}`);
+      err.code = code;
+      err.payload = payload;
+      throw err;
+    }
 
     if (!payload || !Array.isArray(payload.formatted_sqls)) {
       throw new Error("Invalid format response.");

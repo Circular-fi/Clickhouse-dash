@@ -182,20 +182,34 @@
     }
   }
 
-  function applyTheme(mode) {
-    const m = mode === "dark" || mode === "light" ? mode : "system";
-    if (m === "system") dom.root.removeAttribute("data-theme");
-    else dom.root.dataset.theme = m;
+  function getResolvedTheme(mode) {
+    if (mode === "dark" || mode === "light") return mode;
+    try {
+      const mql = window.matchMedia("(prefers-color-scheme: dark)");
+      return mql && mql.matches ? "dark" : "light";
+    } catch {
+      return "dark";
+    }
+  }
 
-    if (dom.themeSelectText) dom.themeSelectText.textContent = m === "system" ? "System" : (m[0].toUpperCase() + m.slice(1));
+  function applyTheme(mode) {
+    const resolved = getResolvedTheme(mode);
+    if (mode === "system") delete dom.root.dataset.theme;
+    else dom.root.dataset.theme = resolved;
+
+    if (dom.themeSelectText) dom.themeSelectText.textContent = mode === "system" ? "System" : (resolved[0].toUpperCase() + resolved.slice(1));
 
     if (dom.themeSelectMenu) {
       const btns = dom.themeSelectMenu.querySelectorAll(".themeSelect__option[data-value]");
       for (const b of btns) {
-        const v = b.getAttribute("data-value");
-        b.setAttribute("aria-selected", String(v === m));
+        const m = b.getAttribute("data-value");
+        b.setAttribute("aria-selected", String(m === mode));
       }
     }
+  }
+
+  function isThemeMenuOpen() {
+    return !!(dom.themeSelect && dom.themeSelect.classList.contains("themeSelect--open"));
   }
 
   function openThemeMenu() {
@@ -203,26 +217,32 @@
     dom.themeSelectMenu.hidden = false;
     dom.themeSelectButton.setAttribute("aria-expanded", "true");
     dom.themeSelect.classList.remove("themeSelect--closing");
-    dom.themeSelect.classList.add("themeSelect--open");
+    requestAnimationFrame(() => {
+      dom.themeSelect.classList.add("themeSelect--open");
+    });
     dom.themeSelectMenu.focus({ preventScroll: true });
   }
 
-  function closeThemeMenu() {
+  function closeThemeMenu({ immediate = false } = {}) {
     if (!dom.themeSelectMenu || !dom.themeSelect || !dom.themeSelectButton) return;
     dom.themeSelectButton.setAttribute("aria-expanded", "false");
     dom.themeSelect.classList.remove("themeSelect--open");
-    dom.themeSelect.classList.add("themeSelect--closing");
-    setTimeout(() => {
-      if (dom.themeSelect.classList.contains("themeSelect--open")) return;
+    if (immediate) {
       dom.themeSelect.classList.remove("themeSelect--closing");
       dom.themeSelectMenu.hidden = true;
+      return;
+    }
+    dom.themeSelect.classList.add("themeSelect--closing");
+    setTimeout(() => {
+      if (!isThemeMenuOpen()) dom.themeSelectMenu.hidden = true;
+      dom.themeSelect.classList.remove("themeSelect--closing");
     }, 160);
   }
 
   function toggleThemeMenu() {
     if (!dom.themeSelectMenu) return;
-    if (dom.themeSelectMenu.hidden) openThemeMenu();
-    else closeThemeMenu();
+    if (isThemeMenuOpen()) closeThemeMenu();
+    else openThemeMenu();
   }
 
   function openRunMenu() {
@@ -328,71 +348,6 @@
     dom.historyPanel.hidden = !willShow;
   }
 
-  function handleEditorTabKey(ev) {
-    if (ev.key !== "Tab") return;
-    if (!dom.queryTextArea) return;
-
-    const ta = dom.queryTextArea;
-    const value = String(ta.value || "");
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    if (start == null || end == null) return;
-
-    ev.preventDefault();
-
-    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-    let lineEnd = value.indexOf("\n", end);
-    if (lineEnd === -1) lineEnd = value.length;
-
-    const selection = value.slice(start, end);
-    const multiLine = selection.includes("\n") || ev.shiftKey;
-
-    if (!multiLine && start === end) {
-      ta.setRangeText("\t", start, end, "end");
-      return;
-    }
-
-    if (!multiLine && start !== end) {
-      ta.setRangeText("\t", start, end, "end");
-      return;
-    }
-
-    const block = value.slice(lineStart, lineEnd);
-    const lines = block.split("\n");
-
-    if (!ev.shiftKey) {
-      const replaced = lines.map((l) => `\t${l}`).join("\n");
-      ta.setRangeText(replaced, lineStart, lineEnd, "preserve");
-      ta.selectionStart = start + 1;
-      ta.selectionEnd = end + lines.length;
-      return;
-    }
-
-    let removedFirst = 0;
-    let removedTotal = 0;
-
-    const outLines = lines.map((l, idx) => {
-      if (l.startsWith("\t")) {
-        if (idx === 0) removedFirst = 1;
-        removedTotal += 1;
-        return l.slice(1);
-      }
-      const m = l.match(/^( {1,4})/);
-      if (m && m[1]) {
-        const n = m[1].length;
-        if (idx === 0) removedFirst = n;
-        removedTotal += n;
-        return l.slice(n);
-      }
-      return l;
-    });
-
-    const replaced = outLines.join("\n");
-    ta.setRangeText(replaced, lineStart, lineEnd, "preserve");
-    ta.selectionStart = Math.max(lineStart, start - removedFirst);
-    ta.selectionEnd = Math.max(lineStart, end - removedTotal);
-  }
-
   function init() {
     applyRunOptionsUi();
 
@@ -411,7 +366,7 @@
       if (dom.hostPicker && dom.hostPickerMenu && !dom.hostPickerMenu.hidden) {
         if (t instanceof Node && !dom.hostPicker.contains(t)) closeHostMenu();
       }
-      if (dom.themeSelect && dom.themeSelectMenu && !dom.themeSelectMenu.hidden) {
+      if (dom.themeSelect && dom.themeSelectMenu && isThemeMenuOpen()) {
         if (t instanceof Node && !dom.themeSelect.contains(t)) closeThemeMenu();
       }
     });
@@ -420,14 +375,12 @@
       if (ev.key === "Escape") {
         closeRunMenu({ immediate: true });
         closeHostMenu();
-        closeThemeMenu();
+        closeThemeMenu({ immediate: true });
         if (dom.historyPanel) dom.historyPanel.hidden = true;
       }
     });
 
     if (dom.historyButton) dom.historyButton.addEventListener("click", toggleHistory);
-
-    if (dom.queryTextArea) dom.queryTextArea.addEventListener("keydown", handleEditorTabKey);
 
     if (dom.themeSelectButton) dom.themeSelectButton.addEventListener("click", toggleThemeMenu);
     if (dom.themeSelectMenu) {
