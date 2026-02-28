@@ -99,14 +99,14 @@
               </button>
             </div>
             <div id="runMenu" class="runMenu" role="menu" tabindex="-1" hidden>
-              <label class="runMenu__item">
-                <input id="runOptAutoFormat" class="runMenu__check" type="checkbox" />
-                <span>Auto-format</span>
-              </label>
-              <label class="runMenu__item">
-                <input id="runOptMultiQuery" class="runMenu__check" type="checkbox" />
-                <span>Allow multiquery</span>
-              </label>
+              <button id="runOptAutoFormat" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
+                <span class="runMenu__optCheck" aria-hidden="true"></span>
+                <span class="runMenu__optText">Auto-format</span>
+              </button>
+              <button id="runOptMultiQuery" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
+                <span class="runMenu__optCheck" aria-hidden="true"></span>
+                <span class="runMenu__optText">Allow multiquery</span>
+              </button>
             </div>
           </div>
           <button id="formatButton" class="button" type="button">Format</button>
@@ -207,7 +207,14 @@
       </div>
     </section>
   </main>
-
+  <script src="./static/app_dom.js" defer></script>
+  <script src="./static/app_state.js" defer></script>
+  <script src="./static/app_utils.js" defer></script>
+  <script src="./static/app_sql.js" defer></script>
+  <script src="./static/app_api.js" defer></script>
+  <script src="./static/app_results.js" defer></script>
+  <script src="./static/app_ui.js" defer></script>
+  <script src="./static/app_run.js" defer></script>
   <script src="./static/app.js" defer></script>
 </body>
 </html>

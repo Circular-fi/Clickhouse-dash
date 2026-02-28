@@ -945,17 +945,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   if (!parse_json_body(req, doc)) {
     return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
   }
-  if (!doc.HasMember("sql") || !doc["sql"].IsString()) {
-    return json_error(res, 400, "missing_sql", "Missing SQL text.");
-  }
   if (!doc.HasMember("host_id") || !doc["host_id"].IsString()) {
     return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  }
-
-  std::string sql_raw = doc["sql"].GetString();
-  std::string sql = trim_sql(sql_raw);
-  if (sql.empty()) {
-    return json_error(res, 400, "missing_sql", "Missing SQL text.");
   }
 
   const std::string host_id = doc["host_id"].GetString();
@@ -964,7 +955,6 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
 
-  // Block if health runner considers the host down.
   if (health_) {
     HostsSnapshot hs = health_->snapshot();
     for (const auto& h : hs.hosts) {
@@ -974,13 +964,57 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     }
   }
 
-  std::string fmt_err;
-  const auto formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
-  if (!formatted.has_value()) {
-    const std::string msg = fmt_err.empty() ? "Failed to format query." : fmt_err;
-    return json_error(res, 422, "format_failed", msg);
+  auto format_one = [&](std::string sql_raw, std::string* out_pretty, std::string* err) -> bool {
+    std::string sql = trim_sql(std::move(sql_raw));
+    if (sql.empty()) {
+      if (err) *err = "Missing SQL text.";
+      return false;
+    }
+    std::string fmt_err;
+    const auto formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
+    if (!formatted.has_value()) {
+      if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
+      return false;
+    }
+    if (out_pretty) *out_pretty = postprocess_format_query(*formatted, 80);
+    return true;
+  };
+
+  if (doc.HasMember("sqls") && doc["sqls"].IsArray()) {
+    const auto& arr = doc["sqls"];
+    rapidjson::StringBuffer sb;
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("formatted_sqls");
+    w.StartArray();
+    for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+      if (!arr[i].IsString()) {
+        return json_error(res, 400, "invalid_sqls", "sqls must be an array of strings.");
+      }
+      std::string pretty;
+      std::string err;
+      if (!format_one(arr[i].GetString(), &pretty, &err)) {
+        return json_error(res, 422, "format_failed", err);
+      }
+      w.String(pretty.c_str());
+    }
+    w.EndArray();
+    w.EndObject();
+
+    res.status = 200;
+    res.set_content(sb.GetString(), "application/json");
+    return;
   }
-  const std::string pretty = postprocess_format_query(*formatted, 80);
+
+  if (!doc.HasMember("sql") || !doc["sql"].IsString()) {
+    return json_error(res, 400, "missing_sql", "Missing SQL text.");
+  }
+
+  std::string pretty;
+  std::string err;
+  if (!format_one(doc["sql"].GetString(), &pretty, &err)) {
+    return json_error(res, 422, "format_failed", err);
+  }
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -992,6 +1026,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   res.status = 200;
   res.set_content(sb.GetString(), "application/json");
 }
+
 
 void Server::handle_query_run(const httplib::Request& req, httplib::Response& res) {
   rapidjson::Document doc;
@@ -1028,17 +1063,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
 
   const std::string qid = gen_query_id();
 
-  // 1) Auto-format (best effort). Query still runs even if it returns NULL or fails.
-  std::optional<std::string> formatted;
-  {
-    std::string fmt_err;
-    formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
-    if (!fmt_err.empty()) {
-      std::cerr << "[formatQuery] host=" << host_id << " qid=" << qid << " error: " << fmt_err << "\n";
-    }
-  }
-
-  // 2) Create session + start execution.
+  // 1) Create session + start execution.
   std::string client_err;
   auto client_query = make_client_from_uri(
     host->runner_uri,
@@ -1059,7 +1084,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   }
   session->start();
 
-  // 3) Mint cancel token.
+  // 2) Mint cancel token.
   JwtClaims claims;
   claims.query_id = qid;
   claims.host_id = host_id;
@@ -1071,13 +1096,6 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   w.StartObject();
   w.Key("query_id"); w.String(qid.c_str());
   w.Key("cancel_token"); w.String(cancel_token.c_str());
-  w.Key("formatted_sql");
-  if (formatted.has_value()) {
-    const std::string pretty = postprocess_format_query(*formatted, 80);
-    w.String(pretty.c_str());
-  } else {
-    w.Null();
-  }
   std::string stream = "api/query/stream?query_id=" + qid;
   w.Key("stream_url"); w.String(stream.c_str());
   w.EndObject();
