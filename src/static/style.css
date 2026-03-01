@@ -345,7 +345,6 @@ body {
 .runSplit {
   position: relative;
   display: inline-flex;
-  z-index: 1;
 }
 
 .runSplit__buttons {
@@ -415,11 +414,11 @@ body {
   gap: 0.15rem;
   font-size: 0.75rem;
   opacity: 0;
+  z-index: 3;
   transform: translateY(-6px) scaleY(0.98);
   transform-origin: top right;
   visibility: hidden;
   pointer-events: none;
-  z-index: 60;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
 }
 
@@ -463,12 +462,25 @@ html[data-theme="light"] .runMenu__opt:hover {
   flex: 0 0 auto;
 }
 
+.runMenu__optCheck {
+  position: relative;
+  inline-size: 1rem;
+  block-size: 1rem;
+  flex: 0 0 1rem;
+  border-radius: 0.37rem;
+  box-sizing: border-box;
+}
+
 .runMenu__opt[aria-checked="true"] .runMenu__optCheck::after {
   content: "";
   position: absolute;
-  inset: 2px;
+  inline-size: calc(100% - 4px);
+  block-size: calc(100% - 4px);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   border-radius: 0.25rem;
-  background: var(--accent);
+  background: var(--accentBorder);
 }
 
 .runMenu__optText {
@@ -965,7 +977,7 @@ button.button:not(:disabled):hover {
 
   top: 100%;
   margin-top: -1px;           /* chevauche pile la bordure du bouton */
-  z-index: 1;
+  z-index: 70;
 
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
 
@@ -981,6 +993,9 @@ button.button:not(:disabled):hover {
   box-shadow:
     0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
+
+  backdrop-filter: none;
+
   /* animation base (fermée) */
   transform-origin: top;
   opacity: 0;
@@ -1238,8 +1253,7 @@ button.button:not(:disabled):hover {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom: 0;
-  background:
-    var(--panel);
+  background: var(--panel);
 }
 
 .picker__button:focus-visible {
@@ -1295,7 +1309,7 @@ button.button:not(:disabled):hover {
 
   top: 100%;
   margin-top: -1px;
-  z-index: 1;
+  z-index: 70;
 
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
 
@@ -1306,7 +1320,10 @@ button.button:not(:disabled):hover {
   background: var(--panel);
 
   box-shadow:
+    0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
+
+  backdrop-filter: none;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
