@@ -449,7 +449,7 @@
 
   async function handleCopyLiveJson() {
     try {
-      const copyText = results.buildCopyJsonText();
+      const copyText = perQuerySink && perQuerySink.buildCopyJsonText ? perQuerySink.buildCopyJsonText() : results.buildCopyJsonText();
       await util.copyTextToClipboard(copyText);
       util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     } catch {
@@ -536,8 +536,47 @@
     };
   }
 
-  function streamQuery(streamUrl, agg) {
+  
+function makeStreamSink(sink) {
+  // Sink can redirect table meta/rows rendering to a per-query panel during multiquery.
+  // If not provided, fall back to the global results renderer.
+  const s = sink && typeof sink === "object" ? sink : null;
+
+  const api = {
+    // Table streaming
+    renderTableMeta: (cols, types) => {
+      if (s && typeof s.renderTableMeta === "function") return s.renderTableMeta(cols, types);
+      if (results && typeof results.renderTableMeta === "function") return results.renderTableMeta(cols, types);
+    },
+    appendRows: (rows) => {
+      if (s && typeof s.appendRows === "function") return s.appendRows(rows);
+      if (results && typeof results.appendRows === "function") return results.appendRows(rows);
+    },
+    clearLiveResults: () => {
+      if (s && typeof s.clearLiveResults === "function") return s.clearLiveResults();
+      if (results && typeof results.clearLiveResults === "function") return results.clearLiveResults();
+    },
+    // Errors/status (still global unless sink overrides)
+    setError: (msg) => {
+      if (s && typeof s.setError === "function") return s.setError(msg);
+      if (results && typeof results.setError === "function") return results.setError(msg);
+    },
+    setStatus: (st) => {
+      if (s && typeof s.setStatus === "function") return s.setStatus(st);
+      if (results && typeof results.setStatus === "function") return results.setStatus(st);
+    },
+    finalizeAfterDone: () => {
+      if (s && typeof s.finalizeAfterDone === "function") return s.finalizeAfterDone();
+      if (results && typeof results.finalizeAfterDone === "function") return results.finalizeAfterDone();
+    },
+  };
+
+  return api;
+}
+
+function streamQuery(streamUrl, agg, sink) {
     return new Promise((resolve) => {
+      const streamSink = makeStreamSink(sink);
       let doneReceived = false;
       let sseErrorEventReceived = false;
 
@@ -557,13 +596,13 @@
         if (!data) return;
         const cols = Array.isArray(data.columns) ? data.columns : [];
         const types = Array.isArray(data.types) ? data.types : [];
-        results.renderTableMeta(cols, types);
+        streamSink.renderTableMeta(cols, types);
       });
 
       es.addEventListener("result_rows", (ev) => {
         const data = parseSseJson(ev);
         if (!data) return;
-        results.appendRows(Array.isArray(data.rows) ? data.rows : []);
+        streamSink.appendRows(Array.isArray(data.rows) ? data.rows : []);
       });
 
       es.addEventListener("tick", (ev) => {
@@ -579,8 +618,8 @@
         if (!data) return;
         sseErrorEventReceived = true;
         const msg = data && data.message ? String(data.message) : "Query error.";
-        results.setError(msg);
-        results.setStatus("error");
+        streamSink.setError(msg);
+        streamSink.setStatus("error");
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;
         setProgressIndeterminate(false);
@@ -591,7 +630,7 @@
         doneReceived = true;
         const st = data && data.status ? String(data.status) : "done";
 
-        results.setStatus(st);
+        streamSink.setStatus(st);
 
         const lower = st.toLowerCase();
         if ((lower === "canceled" || lower === "cancelled") && !results.getErrorText()) {
@@ -604,7 +643,7 @@
         }
 
         applyDoneMetrics(data, agg);
-        results.finalizeAfterDone();
+        streamSink.finalizeAfterDone();
 
         if (agg) agg.terminal = true;
         closeActiveStream();
@@ -615,8 +654,8 @@
         if (doneReceived || sseErrorEventReceived) return;
         const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
         if (errVisible) return;
-        results.setError("Connection lost.");
-        results.setStatus("error");
+        streamSink.setError("Connection lost.");
+        streamSink.setStatus("error");
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;
         setProgressIndeterminate(false);
@@ -655,7 +694,7 @@
     return parts.join(" · ");
   }
 
-  async function runOneStatement(statement) {
+  async function runOneStatement(statement, sink, streamSink = null) {
     resetMetrics();
     setProgressIndeterminate(true);
 
@@ -670,7 +709,7 @@
     results.setStatus("running");
 
     const agg = createStatementAgg();
-    const done = await streamQuery(streamUrl, agg);
+    const done = await streamQuery(streamUrl, agg, sink);
 
     const finalStatus = done && done.status ? String(done.status) : "done";
     setQueryStatusText(statusLabel(finalStatus));
@@ -765,17 +804,39 @@
       for (let i = 0; i < total; i++) {
         if (state.batchStopRequested) break;
 
-        results.clearLiveResults();
+        // Create/activate the per-query panel and stream directly into it.
+        const perQuerySink = results && typeof results.beginMultiqueryPanel === "function"
+          ? results.beginMultiqueryPanel({ index: i, total, autoToggle: true })
+          : null;
+
+        // Clear only the target we are about to stream into (global in single-query, panel in multiquery)
+        if (perQuerySink && typeof perQuerySink.clearLiveResults === "function") perQuerySink.clearLiveResults();
+        else results.clearLiveResults();
+
         resetMetrics();
         setQueryIdText(null);
         setQueryStatusText(`running (${i + 1}/${total})`);
 
         const stmt = statements[i];
-        const { done, agg } = await runOneStatement(stmt);
+        let done = null;
+        let agg = null;
+        try {
+          const out = await runOneStatement(stmt, perQuerySink);
+          done = out.done;
+          agg = out.agg;
+        } catch (err) {
+          // Per-statement failure: show inside the active panel when in multiquery.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (perQuerySink && typeof perQuerySink.setError === "function") perQuerySink.setError(msg);
+          else results.setError(msg);
+          done = { status: "error" };
+          agg = createStatementAgg();
+          state.batchStopRequested = true;
+        }
 
         const st = done && done.status ? String(done.status) : "done";
-        const outRows = results.getRowCount();
-        const outCols = results.getColCount();
+        const outRows = perQuerySink && perQuerySink.getRowCount ? perQuerySink.getRowCount() : results.getRowCount();
+        const outCols = perQuerySink && perQuerySink.getColumnCount ? perQuerySink.getColumnCount() : results.getColCount();
 
         const readRows = done && Number(done.read_rows) > 0 ? Number(done.read_rows) : agg.lastReadRows;
         const readBytes = done && Number(done.read_bytes) > 0 ? Number(done.read_bytes) : agg.lastReadBytes;
@@ -793,11 +854,21 @@
           truncated: !!(done && done.result_truncated),
         });
 
-        const expandedByDefault = statusIsStopping(st) || !!results.getErrorText();
-        const copyText = results.buildCopyJsonText();
-        const errorText = results.takeErrorText();
+        // IMPORTANT: do not clear local errors at finalize time; keep them visible in the panel.
+        const hasError = !!(perQuerySink && typeof perQuerySink.getErrorText === "function"
+          ? perQuerySink.getErrorText()
+          : results.getErrorText());
+        const expandedByDefault = statusIsStopping(st) || hasError;
 
-        results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
+        if (results && typeof results.endMultiqueryPanel === "function" && perQuerySink) {
+          // Finalize the already-streaming panel (keeps same DOM/classes as live renderer)
+          results.endMultiqueryPanel(perQuerySink, { expandedByDefault, metaText });
+        } else {
+          // Backward-compatible path: snapshot from the global live renderer
+          const copyText = results.buildCopyJsonText();
+          const errorText = results.takeErrorText();
+          results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
+        }
 
         if (statusIsStopping(st)) {
           state.batchStopRequested = true;
@@ -809,11 +880,14 @@
       setQueryIdText(null);
       setQueryStatusText("done");
       resetMetrics();
+      resetCharts();
+      resetLiveMetrics();
     } catch (err) {
       if (isFormatFailedError(err)) {
         showFormatFailure(err);
       } else {
         const msg = err instanceof Error ? err.message : String(err);
+        // No per-query sink available here; show globally.
         results.setError(msg);
         results.setStatus("error");
         setQueryStatusText("error");

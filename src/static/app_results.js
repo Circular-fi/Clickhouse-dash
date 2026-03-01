@@ -653,7 +653,229 @@
     dom.copyJsonButton && (dom.copyJsonButton.disabled = true);
   }
 
-  ns.results = {
+  
+  // --- Multiquery streaming panels (Query x/n) ---
+  // These helpers let app_run route streaming table meta/rows into a per-query panel,
+  // while keeping the single-query live renderer unchanged.
+
+  let activeMultiqueryPanel = null;
+
+  function findTablePartsIn(wrap) {
+    if (!wrap) return { thead: null, tbody: null, table: null };
+    const table = wrap.querySelector("table");
+    const thead = wrap.querySelector("thead");
+    const tbody = wrap.querySelector("tbody");
+    return { thead, tbody, table };
+  }
+
+  function clearTableIn(wrap) {
+    const { thead, tbody } = findTablePartsIn(wrap);
+    if (thead) thead.innerHTML = "";
+    if (tbody) tbody.innerHTML = "";
+  }
+
+  function ensureLocalErrorBanner(body) {
+    if (!body) return null;
+    let el = body.querySelector(".errorBanner");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "errorBanner";
+      el.hidden = true;
+      body.insertBefore(el, body.firstChild);
+    }
+    return el;
+  }
+
+  function setBlockExpandedLocal(blockObj, expanded) {
+    if (!blockObj || !blockObj.body || !blockObj.toggleBtn) return;
+    blockObj.body.hidden = !expanded;
+    blockObj.toggleBtn.textContent = expanded ? "Hide" : "Show";
+    blockObj.block.classList.toggle("is-collapsed", !expanded);
+  }
+
+  function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) {
+    ensureResultsStack();
+    if (!resultsStackElement) return null;
+
+    // Collapse previous active panel if requested
+    if (autoToggle && activeMultiqueryPanel) {
+      setBlockExpandedLocal(activeMultiqueryPanel, false);
+    }
+
+    const title = `Query ${index + 1}/${total}`;
+
+    const block = document.createElement("div");
+    block.className = "resultsStack__block";
+    block.dataset.qIndex = String(index);
+
+    const header = document.createElement("div");
+    header.className = "resultsStack__header";
+
+    const t = document.createElement("span");
+    t.textContent = title;
+    header.appendChild(t);
+
+    const right = document.createElement("div");
+    right.className = "resultsStack__right";
+
+    const metaSpan = document.createElement("span");
+    metaSpan.className = "resultsStack__meta";
+    metaSpan.textContent = "";
+    right.appendChild(metaSpan);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "button button--small resultsStack__copy";
+    copyBtn.textContent = "Copy JSON";
+    right.appendChild(copyBtn);
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "button button--small resultsStack__toggle";
+    toggleBtn.textContent = "Hide";
+    right.appendChild(toggleBtn);
+
+    header.appendChild(right);
+
+    const body = document.createElement("div");
+    body.className = "resultsStack__body";
+    body.hidden = false;
+
+    const blockObj = { block, body, toggleBtn };
+    toggleBtn.addEventListener("click", () => {
+      const expanded = body.hidden;
+      setBlockExpandedLocal(blockObj, expanded);
+    });
+
+    // Clone the live tableWrap template so structure/classes match 1:1.
+    const wrap = dom.liveResultsWrap || (dom.resultsPanel ? dom.resultsPanel.querySelector(".tableWrap") : null);
+    let wrapClone = null;
+    if (wrap) {
+      wrapClone = wrap.cloneNode(true);
+      removeIds(wrapClone);
+      body.appendChild(wrapClone);
+    }
+
+    block.appendChild(header);
+    block.appendChild(body);
+    resultsStackElement.appendChild(block);
+    setResultsVisible(true);
+
+    // local state for copy/meta
+    const local = {
+      columns: [],
+      types: [],
+      allRows: [],
+      errorText: "",
+      wrap: wrapClone,
+      errorBanner: ensureLocalErrorBanner(body),
+    };
+
+    function updateMetaText() {
+      const r = local.allRows.length;
+      const c = local.columns.length;
+      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} × ${c} col${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
+    }
+
+    // Allow the runner to override the meta text at the end (e.g., include status/elapsed/cpu).
+    function setMetaTextLocal(text) {
+      metaSpan.textContent = String(text ?? "");
+    }
+
+    function renderTableMetaLocal(columns, types) {
+      local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
+      local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+      local.allRows.length = 0;
+      if (!local.wrap) return;
+      resetTableMode();
+      clearTableIn(local.wrap);
+      const { thead } = findTablePartsIn(local.wrap);
+      if (!thead) return;
+      const tr = document.createElement("tr");
+      for (let i = 0; i < local.columns.length; i++) {
+        const th = document.createElement("th");
+        th.textContent = local.columns[i];
+        if (local.types[i]) th.title = local.types[i];
+        tr.appendChild(th);
+      }
+      thead.appendChild(tr);
+      updateMetaText();
+    }
+
+    function appendRowsLocal(rowsChunk) {
+      if (!Array.isArray(rowsChunk)) return;
+      local.allRows.push(...rowsChunk);
+      if (!local.wrap) return;
+      const { tbody } = findTablePartsIn(local.wrap);
+      if (!tbody) return;
+      for (const row of rowsChunk) {
+        const tr = document.createElement("tr");
+        if (Array.isArray(row)) {
+          for (let i = 0; i < row.length; i++) {
+            const td = document.createElement("td");
+            td.textContent = row[i] == null ? "" : String(row[i]);
+            tr.appendChild(td);
+          }
+        } else {
+          const td = document.createElement("td");
+          td.textContent = row == null ? "" : String(row);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      updateMetaText();
+    }
+
+    function buildCopyJsonTextLocal() {
+      // Keep same behavior as live: rows are array-of-arrays; we stringify that.
+      return JSON.stringify(local.allRows, null, 2);
+    }
+
+    function setErrorLocal(message) {
+      local.errorText = String(message || "").trim();
+      if (!local.errorBanner) return;
+      if (local.errorText) {
+        local.errorBanner.hidden = false;
+        local.errorBanner.textContent = local.errorText;
+      } else {
+        local.errorBanner.hidden = true;
+        local.errorBanner.textContent = "";
+      }
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      const text = buildCopyJsonTextLocal();
+      try { await navigator.clipboard.writeText(text); } catch {}
+    });
+
+    // Mark as active and expanded
+    activeMultiqueryPanel = blockObj;
+    if (autoToggle) setBlockExpandedLocal(blockObj, true);
+
+    return {
+      renderTableMeta: renderTableMetaLocal,
+      appendRows: appendRowsLocal,
+      clearLiveResults: () => clearTableIn(local.wrap),
+      getRowCount: () => local.allRows.length,
+      getColumnCount: () => local.columns.length,
+      buildCopyJsonText: buildCopyJsonTextLocal,
+      setError: setErrorLocal,
+      getErrorText: () => local.errorText,
+      takeErrorText: () => { const t = local.errorText; local.errorText = ""; setErrorLocal(""); return t; },
+      setMetaText: setMetaTextLocal,
+      setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
+      finalize: ({ expandedByDefault = false } = {}) => {
+        if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
+      },
+    };
+  }
+
+  function endMultiqueryPanel(sink, { expandedByDefault = false, metaText = null } = {}) {
+    if (sink && typeof sink.setMetaText === "function" && metaText != null) sink.setMetaText(metaText);
+    if (sink && typeof sink.finalize === "function") sink.finalize({ expandedByDefault });
+  }
+
+ns.results = { beginMultiqueryPanel, endMultiqueryPanel,
     clearLiveResults,
     clearResultsStack,
     setError,
