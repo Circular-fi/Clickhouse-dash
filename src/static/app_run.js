@@ -219,30 +219,23 @@
     scheduleChartsRender();
   }
 
-  function formatIntShort(value) {
+  function formatShort(value, mul = 1000, units = ['k', 'M', 'B', 'T'], fixed=2, space=false) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
-    const sign = n < 0 ? "-" : "";
-    const abs = Math.abs(n);
-    if (abs < 1000) return `${sign}${Math.round(abs)}`;
-    if (abs < 1e6) return `${sign}${(abs / 1e3).toFixed(abs < 1e4 ? 2 : 1)}k`;
-    if (abs < 1e9) return `${sign}${(abs / 1e6).toFixed(abs < 1e7 ? 2 : 1)}M`;
-    return `${sign}${(abs / 1e9).toFixed(abs < 1e10 ? 2 : 1)}B`;
+    const sign = n < 0 ? '-' : '';
+    if (n < mul) return `${Math.round(n)} B`;
+    let v = Math.abs(n);
+    let u = -1;
+    while (v >= mul && u < units.length - 1) {
+      v /= mul;
+      u++;
+    }
+    const d = u > 1 ? 2 : 0;
+    return `${sign}${v.toFixed(fixed)}${space?' ':''}${units[u]}`;
   }
 
   function formatBytesShort(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) return "-";
-    if (n < 1024) return `${Math.round(n)} B`;
-    const units = ["KiB", "MiB", "GiB", "TiB"];
-    let v = n;
-    let u = -1;
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024;
-      u++;
-    }
-    const d = v < 10 ? 2 : (v < 100 ? 1 : 0);
-    return `${v.toFixed(d)} ${units[u]}`;
+    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"],  2, true);
   }
 
   function formatSecondsFromMs(ms) {
@@ -282,6 +275,17 @@
     resetCharts();
   }
 
+  function resetLiveMetrics() {
+    lockProgressIndeterminate = false;
+    // util.setText(dom.elapsedSecondsText, "-");
+    // util.setText(dom.progressPercentText, "-");
+    util.setText(dom.readRowsRateText, "-");
+    util.setText(dom.readBytesRateText, "-");
+    util.setText(dom.cpuText, "-");
+    util.setText(dom.memoryText, "-");
+    util.setText(dom.threadText, "-");
+  }
+
   function setProgressIndeterminate(enabled) {
     if (!dom.progressCard) return;
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
@@ -318,8 +322,8 @@
       else setProgressIndeterminate(false);
     }
 
-    if (Number.isFinite(rowsPerSec)) util.setText(dom.readRowsRateText, `${formatIntShort(rowsPerSec)}/s`);
-    if (Number.isFinite(readRowsTotal)) util.setText(dom.readRowsTotalText, formatIntShort(readRowsTotal));
+    if (Number.isFinite(rowsPerSec)) util.setText(dom.readRowsRateText, `${formatShort(rowsPerSec)}/s`);
+    if (Number.isFinite(readRowsTotal)) util.setText(dom.readRowsTotalText, formatShort(readRowsTotal));
 
     if (Number.isFinite(bytesPerSec)) util.setText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
     if (Number.isFinite(readBytesTotal)) util.setText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
@@ -392,8 +396,8 @@
     const rr = done.read_rows != null ? Number(done.read_rows) : null;
     const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
 
-    if (rr != null && Number.isFinite(rr) && rr > 0) util.setText(dom.readRowsTotalText, formatIntShort(rr));
-    else if (agg && agg.lastReadRows != null) util.setText(dom.readRowsTotalText, formatIntShort(agg.lastReadRows));
+    if (rr != null && Number.isFinite(rr) && rr > 0) util.setText(dom.readRowsTotalText, formatShort(rr));
+    else if (agg && agg.lastReadRows != null) util.setText(dom.readRowsTotalText, formatShort(agg.lastReadRows));
 
     if (rb != null && Number.isFinite(rb) && rb > 0) util.setText(dom.readBytesTotalText, formatBytesShort(rb));
     else if (agg && agg.lastReadBytes != null) util.setText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
@@ -423,6 +427,7 @@
   function updateActionButtons() {
     const busy = state.isRunning || state.isFormatting;
     if (dom.runButton) dom.runButton.disabled = busy;
+    if (dom.runMenuButton) dom.runMenuButton.disabled = busy;
     if (dom.formatButton) dom.formatButton.disabled = busy;
 
     if (dom.cancelButton) {
@@ -640,16 +645,13 @@
     const parts = [];
     parts.push(statusLabel(status));
     if (elapsedSeconds != null) parts.push(util.formatSeconds(elapsedSeconds));
-    if (outRows != null && outCols != null) parts.push(`out ${outRows}r ${outCols}c`);
-    if (readRows != null || readBytes != null) {
-      const rr = readRows == null ? "-" : formatIntShort(readRows);
-      const rb = readBytes == null ? "-" : formatBytesShort(readBytes);
-      parts.push(`read ${rr}r ${rb}`);
-    }
-    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`cpu ${formatPercentFromCenti(cpuMaxCenti)}`);
-    if (memMax != null && memMax > 0) parts.push(`mem ${formatBytesShort(memMax)}`);
-    if (thrMax != null && thrMax > 0) parts.push(`thr ${thrMax}`);
-    if (truncated) parts.push("truncated");
+    if (outRows != null && outCols != null) parts.push(`${outRows} row${outRows > 1 ? 's' : ''} ${outCols} column${outCols > 1 ? 's' : ''}`);
+    if (readRows != null) parts.push(`${formatShort(readRows)} row${readRows > 1 ? 's' : ''}`);
+    if (readBytes != null) parts.push(`${formatBytesShort(readBytes)}`);;
+    
+    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU - ${formatPercentFromCenti(cpuMaxCenti)}`);
+    if (memMax != null && memMax > 0) parts.push(`max RAM ${formatBytesShort(memMax)}`);
+    if (thrMax != null && thrMax > 0) parts.push(`max thread${thrMax > 1 ? 's' : ''} ${thrMax}`);
     return parts.join(" · ");
   }
 
@@ -682,6 +684,11 @@
 
   async function handleRun() {
     if (state.isRunning || state.isFormatting) return;
+
+    results.clearResultsStack();
+    results.clearLiveResults();
+    resetMetrics();
+    setQueryIdText(null);
 
     results.setError("");
     ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: false });
@@ -737,6 +744,8 @@
         statements = formattedStatements;
       }
 
+      console.log('here', statements.length);
+
       storage.addHistoryEntry({
         ts_ms: Date.now(),
         host_id: hostId,
@@ -746,6 +755,7 @@
 
       if (statements.length === 1) {
         await runOneStatement(statements[0]);
+        resetLiveMetrics()
         if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
         return;
       }
@@ -798,6 +808,7 @@
       results.hideLiveWrapIfStackHasBlocks();
       setQueryIdText(null);
       setQueryStatusText("done");
+      resetMetrics();
     } catch (err) {
       if (isFormatFailedError(err)) {
         showFormatFailure(err);

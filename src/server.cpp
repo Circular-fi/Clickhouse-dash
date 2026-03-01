@@ -994,7 +994,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       std::string pretty;
       std::string err;
       if (!format_one(arr[i].GetString(), &pretty, &err)) {
-        return json_error(res, 200, "format_failed", err);
+        return json_error(res, 200, "format_failed", std::to_string(i));
       }
       w.String(pretty.c_str());
     }

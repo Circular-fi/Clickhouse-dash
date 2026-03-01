@@ -44,8 +44,8 @@
 
     if (payload && payload.error_code) {
       const code = String(payload.error_code || "format_failed");
-      const msg = payload && payload.message ? String(payload.message) : "Format failed.";
-      const err = new Error(`${code}: ${msg}`);
+      const msg = payload && payload.message ? `Format failed. Query n°${String(payload.message)}` : "Format failed.";
+      const err = new Error(`${code}: ${msg} test`);
       err.code = code;
       err.payload = payload;
       throw err;
