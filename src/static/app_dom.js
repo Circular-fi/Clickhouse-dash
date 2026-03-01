@@ -45,14 +45,24 @@
     elapsedSecondsText: byId("elapsedSecondsText"),
     progressCard: byId("progressCard"),
     progressPercentText: byId("progressPercentText"),
+
+    readRowsChart: byId("readRowsChart"),
     readRowsRateText: byId("readRowsRateText"),
     readRowsTotalText: byId("readRowsTotalText"),
+
+    readBytesChart: byId("readBytesChart"),
     readBytesRateText: byId("readBytesRateText"),
     readBytesTotalText: byId("readBytesTotalText"),
+
+    cpuChart: byId("cpuChart"),
     cpuText: byId("cpuText"),
     cpuMaxText: byId("cpuMaxText"),
+
+    memoryChart: byId("memoryChart"),
     memoryText: byId("memoryText"),
     memoryMaxText: byId("memoryMaxText"),
+
+    threadChart: byId("threadChart"),
     threadText: byId("threadText"),
     threadMaxText: byId("threadMaxText"),
 
