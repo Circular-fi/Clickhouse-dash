@@ -669,10 +669,6 @@ button.button:not(:disabled):hover {
   text-align: unset; /* flex handles alignment */
 }
 
-.metricCompact__value--split .metricCompact__number {
-  /* inherits tabular nums */
-}
-
 .metricCompact__value--split .metricCompact__unit {
   display: inline-block;
   text-align: right;
