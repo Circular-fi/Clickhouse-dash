@@ -9,6 +9,51 @@
     el.textContent = value;
   }
 
+  // Set a metric value with a stable unit area (prevents jitter when unit switches, e.g. M <-> B).
+  // Renders: <span class="metricCompact__number">123.4</span><span class="metricCompact__unit">MiB/s</span>
+  function setMetricText(el, rawValue) {
+  if (!el) return;
+
+  const text = String(rawValue ?? "").trim();
+
+  // Sépare nombre + unité (ex: 123.4MB/s, 10k, 1.2B, 15 ms)
+  const match = text.match(/^(-?\d+(?:[.,]\d+)?)(.*)$/);
+
+  if (!match) {
+    el.textContent = text;
+    el.classList.remove("metricCompact__value--split");
+    return;
+  }
+
+  const number = match[1];
+  const unit = (match[2] || "").trim();
+
+  if (!unit) {
+    el.textContent = number;
+    el.classList.remove("metricCompact__value--split");
+    return;
+  }
+
+  el.classList.add("metricCompact__value--split");
+
+  // Nettoyage classes précédentes
+  const unitClassList = [
+    "metricCompact__unit_1",
+    "metricCompact__unit_3",
+    "metricCompact__unit_4"
+  ];
+
+  // Détermine largeur adaptée
+  let unitClass = "metricCompact__unit_4";
+  if (unit.length <= 1) unitClass = "metricCompact__unit_1";
+  else if (unit.length <= 3) unitClass = "metricCompact__unit_3";
+
+  el.innerHTML = `
+    <span class="metricCompact__number">${number}</span>
+    <span class="metricCompact__unit ${unitClass}">${unit}</span>
+  `;
+}
+
   function escapeHtml(text) {
     return String(text)
       .replace(/&/g, "&amp;")
@@ -116,6 +161,7 @@
 
   ns.util = {
     setText,
+    setMetricText,
     escapeHtml,
     highlightJsonHtml,
     renderPrettyJson,

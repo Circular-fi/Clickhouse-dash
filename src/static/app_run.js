@@ -258,14 +258,14 @@
     lockProgressIndeterminate = false;
     util.setText(dom.elapsedSecondsText, "-");
     util.setText(dom.progressPercentText, "-");
-    util.setText(dom.readRowsRateText, "-");
-    util.setText(dom.readRowsTotalText, "-");
-    util.setText(dom.readBytesRateText, "-");
-    util.setText(dom.readBytesTotalText, "-");
+    util.setMetricText(dom.readRowsRateText, "-");
+    util.setMetricText(dom.readRowsTotalText, "-");
+    util.setMetricText(dom.readBytesRateText, "-");
+    util.setMetricText(dom.readBytesTotalText, "-");
     util.setText(dom.cpuText, "-");
     util.setText(dom.cpuMaxText, "-");
-    util.setText(dom.memoryText, "-");
-    util.setText(dom.memoryMaxText, "-");
+    util.setMetricText(dom.memoryText, "-");
+    util.setMetricText(dom.memoryMaxText, "-");
     util.setText(dom.threadText, "-");
     util.setText(dom.threadMaxText, "-");
     if (dom.progressCard) {
@@ -279,10 +279,10 @@
     lockProgressIndeterminate = false;
     // util.setText(dom.elapsedSecondsText, "-");
     // util.setText(dom.progressPercentText, "-");
-    util.setText(dom.readRowsRateText, "-");
-    util.setText(dom.readBytesRateText, "-");
+    util.setMetricText(dom.readRowsRateText, "-");
+    util.setMetricText(dom.readBytesRateText, "-");
     util.setText(dom.cpuText, "-");
-    util.setText(dom.memoryText, "-");
+    util.setMetricText(dom.memoryText, "-");
     util.setText(dom.threadText, "-");
   }
 
@@ -322,17 +322,17 @@
       else setProgressIndeterminate(false);
     }
 
-    if (Number.isFinite(rowsPerSec)) util.setText(dom.readRowsRateText, `${formatShort(rowsPerSec)}/s`);
-    if (Number.isFinite(readRowsTotal)) util.setText(dom.readRowsTotalText, formatShort(readRowsTotal));
+    if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, `${formatShort(rowsPerSec)}/s`);
+    if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, formatShort(readRowsTotal));
 
-    if (Number.isFinite(bytesPerSec)) util.setText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
-    if (Number.isFinite(readBytesTotal)) util.setText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
+    if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
+    if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
 
     util.setText(dom.cpuText, formatPercentFromCenti(cpuCenti));
     util.setText(dom.cpuMaxText, formatPercentFromCenti(cpuMaxCenti));
 
-    util.setText(dom.memoryText, memInst == null ? "-" : formatBytesShort(memInst));
-    util.setText(dom.memoryMaxText, memMax == null ? "-" : formatBytesShort(memMax));
+    util.setMetricText(dom.memoryText, memInst == null ? "-" : formatBytesShort(memInst));
+    util.setMetricText(dom.memoryMaxText, memMax == null ? "-" : formatBytesShort(memMax));
 
     util.setText(dom.threadText, Number.isFinite(thrInst) ? String(thrInst) : "-");
     util.setText(dom.threadMaxText, Number.isFinite(thrMax) ? String(thrMax) : "-");
@@ -396,11 +396,11 @@
     const rr = done.read_rows != null ? Number(done.read_rows) : null;
     const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
 
-    if (rr != null && Number.isFinite(rr) && rr > 0) util.setText(dom.readRowsTotalText, formatShort(rr));
-    else if (agg && agg.lastReadRows != null) util.setText(dom.readRowsTotalText, formatShort(agg.lastReadRows));
+    if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, formatShort(rr));
+    else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, formatShort(agg.lastReadRows));
 
-    if (rb != null && Number.isFinite(rb) && rb > 0) util.setText(dom.readBytesTotalText, formatBytesShort(rb));
-    else if (agg && agg.lastReadBytes != null) util.setText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
+    if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, formatBytesShort(rb));
+    else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
 
     setProgressIndeterminate(false);
   }

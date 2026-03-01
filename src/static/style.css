@@ -653,9 +653,43 @@ button.button:not(:disabled):hover {
   font-weight: 950;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
-  min-width: 6ch;
+  display: inline-block;
+  min-width: 7ch;
+  text-align: right;
+  white-space: nowrap;
+  line-height: 1;
+  font-synthesis: none;
+}
+
+/* Stable layout when value is split into number + unit (set by JS) */
+.metricCompact__value.metricCompact__value--split {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  text-align: unset; /* flex handles alignment */
+}
+
+.metricCompact__value--split .metricCompact__number {
+  /* inherits tabular nums */
+}
+
+.metricCompact__value--split .metricCompact__unit {
+  display: inline-block;
   text-align: right;
 }
+
+.metricCompact__unit_1 {
+  width: 1ch;
+}
+
+.metricCompact__unit_3 {
+  width: 3ch;
+}
+
+.metricCompact__unit_4 {
+  width: 4ch;
+}
+
 
 .metricCompact__sub {
   margin-top: 0.2rem;
