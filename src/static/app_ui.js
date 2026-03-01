@@ -351,6 +351,100 @@
   function init() {
     applyRunOptionsUi();
 
+    if (dom.queryTextArea) {
+      const ta = dom.queryTextArea;
+      if (!String(ta.value || "").trim()) {
+        const saved = storage.loadEditorSql();
+        if (saved) ta.value = saved;
+      }
+
+      ta.addEventListener("input", () => {
+        storage.saveEditorSql(ta.value);
+      });
+
+      ta.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Tab") return;
+        ev.preventDefault();
+
+        const v = String(ta.value || "");
+        const selStart = ta.selectionStart;
+        const selEnd = ta.selectionEnd;
+        if (selStart == null || selEnd == null) return;
+
+        const lineStart = v.lastIndexOf("\n", Math.max(0, selStart - 1)) + 1;
+        let endAdj = selEnd;
+        if (endAdj > 0 && v[endAdj - 1] === "\n") endAdj -= 1;
+        let lineEnd = v.indexOf("\n", endAdj);
+        if (lineEnd === -1) lineEnd = v.length;
+
+        if (selStart === selEnd) {
+          try {
+            ta.focus();
+            const ok = document.execCommand && document.execCommand("insertText", false, "\t");
+            if (!ok) ta.setRangeText("\t", selStart, selEnd, "end");
+          } catch {
+            ta.setRangeText("\t", selStart, selEnd, "end");
+          }
+          return;
+        }
+
+        const chunk = v.slice(lineStart, lineEnd);
+        const lines = chunk.split("\n");
+        const lineStarts = [];
+        let offset = 0;
+        for (const ln of lines) {
+          lineStarts.push(lineStart + offset);
+          offset += ln.length + 1;
+        }
+
+        const dedent = !!ev.shiftKey;
+        const removedStarts = [];
+
+        const nextLines = lines.map((ln, idx) => {
+          if (!dedent) return `\t${ln}`;
+          if (ln.startsWith("\t")) {
+            removedStarts.push(lineStarts[idx]);
+            return ln.slice(1);
+          }
+          return ln;
+        });
+
+        const nextChunk = nextLines.join("\n");
+
+        const countLE = (arr, pos) => {
+          let c = 0;
+          for (const x of arr) if (x <= pos) c++;
+          return c;
+        };
+
+        const countLT = (arr, pos) => {
+          let c = 0;
+          for (const x of arr) if (x < pos) c++;
+          return c;
+        };
+
+        const deltaStart = dedent ? -countLT(removedStarts, selStart) : countLE(lineStarts, selStart);
+        const deltaEnd = dedent ? -countLT(removedStarts, selEnd) : countLE(lineStarts, selEnd);
+
+        try {
+          ta.focus();
+          ta.setSelectionRange(lineStart, lineEnd);
+          const ok = document.execCommand && document.execCommand("insertText", false, nextChunk);
+          if (!ok) ta.setRangeText(nextChunk, lineStart, lineEnd, "end");
+        } catch {
+          ta.setRangeText(nextChunk, lineStart, lineEnd, "end");
+        }
+
+        const nextStart = Math.max(lineStart, selStart + deltaStart);
+        const nextEnd = Math.max(nextStart, selEnd + deltaEnd);
+        try {
+          ta.setSelectionRange(nextStart, nextEnd);
+        } catch {
+          return;
+        }
+      });
+    }
+
     if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);
 
     if (dom.runOptAutoFormat) dom.runOptAutoFormat.addEventListener("click", () => toggleRunOption("autoFormat"));

@@ -741,7 +741,7 @@ button.button:not(:disabled):hover {
 .panel--query {
   display: flex;
   flex-direction: column;
-  height: calc(100% - 1.5rem);
+  height: 100%;
 }
 
 .panel--results {

@@ -7,6 +7,138 @@
   const { dom, state, storage, api, sql, results, util, ui } = ns;
 
   let activeEventSource = null;
+  let lockProgressIndeterminate = false;
+
+  function formatIntShort(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    const sign = n < 0 ? "-" : "";
+    const abs = Math.abs(n);
+    if (abs < 1000) return `${sign}${Math.round(abs)}`;
+    if (abs < 1e6) return `${sign}${(abs / 1e3).toFixed(abs < 1e4 ? 2 : 1)}k`;
+    if (abs < 1e9) return `${sign}${(abs / 1e6).toFixed(abs < 1e7 ? 2 : 1)}M`;
+    return `${sign}${(abs / 1e9).toFixed(abs < 1e10 ? 2 : 1)}B`;
+  }
+
+  function formatSecondsFromMs(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    const s = n / 1000;
+    if (s < 10) return `${s.toFixed(3)}s`;
+    if (s < 100) return `${s.toFixed(2)}s`;
+    if (s < 1000) return `${s.toFixed(1)}s`;
+    return `${Math.round(s)}s`;
+  }
+
+  function formatSeconds(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    if (n < 10) return `${n.toFixed(3)}s`;
+    if (n < 100) return `${n.toFixed(2)}s`;
+    if (n < 1000) return `${n.toFixed(1)}s`;
+    return `${Math.round(n)}s`;
+  }
+
+  function formatBytesShort(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    if (n < 1024) return `${Math.round(n)} B`;
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let v = n;
+    let u = -1;
+    while (v >= 1024 && u < units.length - 1) {
+      v /= 1024;
+      u++;
+    }
+    const d = v < 10 ? 2 : (v < 100 ? 1 : 0);
+    return `${v.toFixed(d)} ${units[u]}`;
+  }
+
+  function formatPercentFromCenti(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "-";
+    return `${(n / 100).toFixed(1)}%`;
+  }
+
+  function resetMetrics() {
+    lockProgressIndeterminate = false;
+    util.setText(dom.elapsedSecondsText, "-");
+    util.setText(dom.progressPercentText, "-");
+    util.setText(dom.readRowsRateText, "-");
+    util.setText(dom.readRowsTotalText, "-");
+    util.setText(dom.readBytesRateText, "-");
+    util.setText(dom.readBytesTotalText, "-");
+    util.setText(dom.cpuText, "-");
+    util.setText(dom.cpuMaxText, "-");
+    util.setText(dom.memoryText, "-");
+    util.setText(dom.memoryMaxText, "-");
+    util.setText(dom.threadText, "-");
+    util.setText(dom.threadMaxText, "-");
+    if (dom.progressCard) {
+      dom.progressCard.classList.remove("is-indeterminate");
+      dom.progressCard.style.setProperty("--p", "0");
+    }
+  }
+
+  function setProgressIndeterminate(enabled) {
+    if (!dom.progressCard) return;
+    dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
+  }
+
+  function applyTickMetrics(arr) {
+    if (!Array.isArray(arr) || arr.length < 14) return;
+
+    const elapsedMs = Number(arr[0]);
+    const percentCenti = Number(arr[1]);
+    const knownInt = Number(arr[2]);
+    const readRowsTotal = Number(arr[3]);
+    const readBytesTotal = Number(arr[4]);
+    const rowsPerSec = Number(arr[6]);
+    const bytesPerSec = Number(arr[7]);
+    const cpuCenti = Number(arr[8]);
+    const cpuMaxCenti = Number(arr[9]);
+    const memInst = arr[10] == null ? null : Number(arr[10]);
+    const memMax = arr[11] == null ? null : Number(arr[11]);
+    const thrInst = Number(arr[12]);
+    const thrMax = Number(arr[13]);
+
+    util.setText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
+
+    if (knownInt === 1 && Number.isFinite(percentCenti)) {
+      const pct = Math.max(0, Math.min(100, percentCenti / 100));
+      util.setText(dom.progressPercentText, `${pct.toFixed(2)}%`);
+      if (dom.progressCard) dom.progressCard.style.setProperty("--p", String(pct / 100));
+      setProgressIndeterminate(false);
+    } else {
+      util.setText(dom.progressPercentText, "-");
+      if (state.isRunning && !lockProgressIndeterminate) setProgressIndeterminate(true);
+      else setProgressIndeterminate(false);
+    }
+
+    util.setText(dom.readRowsRateText, `${formatIntShort(rowsPerSec)}/s`);
+    util.setText(dom.readRowsTotalText, formatIntShort(readRowsTotal));
+
+    util.setText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
+    util.setText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
+
+    util.setText(dom.cpuText, formatPercentFromCenti(cpuCenti));
+    util.setText(dom.cpuMaxText, formatPercentFromCenti(cpuMaxCenti));
+
+    util.setText(dom.memoryText, memInst == null ? "-" : formatBytesShort(memInst));
+    util.setText(dom.memoryMaxText, memMax == null ? "-" : formatBytesShort(memMax));
+
+    util.setText(dom.threadText, Number.isFinite(thrInst) ? String(thrInst) : "-");
+    util.setText(dom.threadMaxText, Number.isFinite(thrMax) ? String(thrMax) : "-");
+  }
+
+  function applyDoneMetrics(done) {
+    if (!done || typeof done !== "object") return;
+    lockProgressIndeterminate = true;
+    if (done.elapsed_seconds != null) util.setText(dom.elapsedSecondsText, formatSeconds(done.elapsed_seconds));
+    if (done.read_rows != null) util.setText(dom.readRowsTotalText, formatIntShort(done.read_rows));
+    if (done.read_bytes != null) util.setText(dom.readBytesTotalText, formatBytesShort(done.read_bytes));
+    setProgressIndeterminate(false);
+  }
 
   function setQueryIdText(queryId) {
     util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : "#-");
@@ -72,7 +204,7 @@
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
     const joined = sql.joinSqlStatements(normalized);
 
-    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joined);
+    if (dom.queryTextArea) dom.queryTextArea.value = joined;
 
     storage.addHistoryEntry({
       ts_ms: Date.now(),
@@ -82,33 +214,6 @@
     });
 
     return normalized;
-  }
-
-  function isFormatFailedError(err) {
-    const code = err && err.code ? String(err.code) : "";
-    const payloadCode = err && err.payload && err.payload.error_code ? String(err.payload.error_code) : "";
-    return code === "format_failed" || payloadCode === "format_failed";
-  }
-
-  function buildFormatErrorText(err) {
-    const payload = err && err.payload ? err.payload : null;
-    const code = payload && payload.error_code ? String(payload.error_code) : err && err.code ? String(err.code) : "";
-    const msg = payload && payload.message ? String(payload.message) : err instanceof Error ? String(err.message || "") : String(err || "");
-    const clean = msg.trim();
-    if (!code) return clean || "Format failed.";
-    if (clean.toLowerCase().startsWith(code.toLowerCase() + ":")) return clean;
-    return `${code}: ${clean || "Format failed."}`;
-  }
-
-  function showFormatFailure(err) {
-    const msg = buildFormatErrorText(err);
-    results.clearResultsStack();
-    results.clearLiveResults();
-    results.setError(msg);
-    results.setStatus("error");
-    setQueryStatusText("error");
-    results.setResultsVisible(true);
-    if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
   }
 
   function parseSseJson(ev) {
@@ -141,12 +246,22 @@
         results.appendRows(Array.isArray(data.rows) ? data.rows : []);
       });
 
-      es.addEventListener("error", (ev) => {
+      es.addEventListener("tick", (ev) => {
         const data = parseSseJson(ev);
+        if (!data) return;
+        applyTickMetrics(data);
+      });
+
+      es.addEventListener("error", (ev) => {
+        if (!ev || typeof ev.data !== "string" || !ev.data) return;
+        const data = parseSseJson(ev);
+        if (!data) return;
         sseErrorEventReceived = true;
         const msg = data && data.message ? String(data.message) : "Query error.";
         results.setError(msg);
         results.setStatus("error");
+        lockProgressIndeterminate = true;
+        setProgressIndeterminate(false);
       });
 
       es.addEventListener("done", (ev) => {
@@ -154,6 +269,11 @@
         doneReceived = true;
         const st = data && data.status ? String(data.status) : "done";
         results.setStatus(st);
+        if (st.toLowerCase() === "error" && data && data.message) {
+          const current = dom.errorBanner && !dom.errorBanner.hidden ? String(dom.errorBanner.textContent || "") : "";
+          if (!current.trim()) results.setError(String(data.message));
+        }
+        applyDoneMetrics(data);
         closeActiveStream();
         resolve({ ...data, status: st });
       });
@@ -164,6 +284,8 @@
         if (errVisible) return;
         results.setError("Connection lost.");
         results.setStatus("error");
+        lockProgressIndeterminate = true;
+        setProgressIndeterminate(false);
         closeActiveStream();
         resolve({ status: "error" });
       };
@@ -188,10 +310,14 @@
     if (s === "done") return "done";
     if (s === "error") return "error";
     if (s === "canceled" || s === "cancelled") return "canceled";
+    if (s === "result_limit_reached") return "limit reached";
     return s || "-";
   }
 
   async function runOneStatement(statement) {
+    resetMetrics();
+    setProgressIndeterminate(true);
+
     const hostId = getSelectedHostId();
     const { queryId, cancelToken, streamUrl } = await api.runSql(hostId, statement);
 
@@ -250,6 +376,7 @@
 
     results.clearResultsStack();
     results.clearLiveResults();
+    resetMetrics();
     setQueryIdText(null);
     setQueryStatusText("running");
 
@@ -298,7 +425,15 @@
         const st = done && done.status ? String(done.status) : "done";
         const rows = getLiveRowCount();
         const cols = getLiveColCount();
-        const metaText = `${statusLabel(st)} · ${rows} rows · ${cols} cols`;
+
+        const metaParts = [
+          statusLabel(st),
+          done && done.elapsed_seconds != null ? formatSeconds(done.elapsed_seconds) : "-",
+          `${rows} ${rows === 1 ? "row" : "rows"}`,
+          `${cols} ${cols === 1 ? "column" : "columns"}`,
+        ];
+        if (done && done.result_truncated) metaParts.push("truncated");
+        const metaText = metaParts.filter((x) => String(x || "").trim()).join(" · ");
 
         const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
         const expandedByDefault = errVisible || ["error", "canceled", "cancelled"].includes(String(st).toLowerCase());
@@ -316,15 +451,10 @@
       setQueryIdText(null);
       setQueryStatusText("done");
     } catch (err) {
-      if (isFormatFailedError(err)) {
-        showFormatFailure(err);
-      } else {
-        const msg = err instanceof Error ? err.message : String(err);
-        results.setError(msg);
-        results.setStatus("error");
-        setQueryStatusText("error");
-        results.setResultsVisible(true);
-      }
+      const msg = err instanceof Error ? err.message : String(err);
+      results.setError(msg);
+      results.setStatus("error");
+      setQueryStatusText("error");
     } finally {
       closeActiveStream();
       state.cancelToken = null;
@@ -349,7 +479,9 @@
     try {
       await formatEditorSql();
     } catch (err) {
-      showFormatFailure(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      results.setError(msg);
+      results.setStatus("error");
     } finally {
       setBusy({ running: false, formatting: false, batch: false });
     }
@@ -367,6 +499,7 @@
       results.setMultiqueryMode(false);
       results.clearResultsStack();
       results.clearLiveResults();
+      resetMetrics();
       setQueryIdText(null);
       setQueryStatusText("-");
       updateActionButtons();
@@ -387,6 +520,8 @@
       if (ok && state.isBatchRun) {
         results.setError("Query canceled successfully.");
         results.setStatus("canceled");
+        lockProgressIndeterminate = true;
+        setProgressIndeterminate(false);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
