@@ -409,8 +409,39 @@
     util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : "#-");
   }
 
-  function setQueryStatusText(value) {
-    util.setText(dom.queryStatusText, value || "-");
+  // Prevent out-of-order SSE/UI updates from regressing the status text.
+  // Example: if a "done/canceled" arrives before the click-handler sets
+  // "canceling", we must NOT allow the later "canceling" to overwrite it.
+  const STATUS_RANK = {
+    "-": 0,
+    connected: 10,
+    running: 20,
+    canceling: 30,
+    done: 40,
+    canceled: 50,
+    error: 60,
+  };
+
+  function normalizeStatusText(value) {
+    if (!value) return "-";
+    const v = String(value).toLowerCase();
+    if (v === "cancelled") return "canceled";
+    if (v === "finished" || v === "success") return "done";
+    return v;
+  }
+
+  function setQueryStatusText(value, opts) {
+    const force = !!(opts && opts.force);
+    const next = normalizeStatusText(value);
+    const nextRank = STATUS_RANK[next] ?? STATUS_RANK["-"];
+    const cur = state.queryStatusText || "-";
+    const curRank = STATUS_RANK[cur] ?? STATUS_RANK["-"];
+
+    // Allow upgrades, block regressions (unless forced).
+    if (!force && nextRank < curRank) return;
+
+    state.queryStatusText = next;
+    util.setText(dom.queryStatusText, next || "-");
   }
 
   function closeActiveStream() {
@@ -561,6 +592,11 @@ function makeStreamSink(sink) {
       if (s && typeof s.setError === "function") return s.setError(msg);
       if (results && typeof results.setError === "function") return results.setError(msg);
     },
+    getErrorText: () => {
+      if (s && typeof s.getErrorText === "function") return s.getErrorText();
+      if (results && typeof results.getErrorText === "function") return results.getErrorText();
+      return "";
+    },
     setStatus: (st) => {
       if (s && typeof s.setStatus === "function") return s.setStatus(st);
       if (results && typeof results.setStatus === "function") return results.setStatus(st);
@@ -630,11 +666,25 @@ function streamQuery(streamUrl, agg, sink) {
         doneReceived = true;
         const st = data && data.status ? String(data.status) : "done";
 
+        if (st) setQueryStatusText(st);
+        state.cancelRequested = false;
         streamSink.setStatus(st);
 
+        // Keep the global run status in sync when a query terminates with an error/cancel.
+        // (The bottom-right dashboard indicator is global, not per-query.)
+        const lowerGlobal = String(st).toLowerCase();
+        if (lowerGlobal === "canceled" || lowerGlobal === "cancelled") {
+          if (results && typeof results.setStatus === "function") results.setStatus("canceled");
+        } else if (lowerGlobal === "error") {
+          if (results && typeof results.setStatus === "function") results.setStatus("error");
+        }
+
         const lower = st.toLowerCase();
-        if ((lower === "canceled" || lower === "cancelled") && !results.getErrorText()) {
-          results.setError("Query canceled.");
+        // In multiquery, cancellation must be shown in the active query panel, not the global banner.
+        // In single-query, streamSink maps to the global renderer anyway.
+        if (lower === "canceled" || lower === "cancelled") {
+          const hasLocalErr = typeof streamSink.getErrorText === "function" && String(streamSink.getErrorText() || "").trim().length > 0;
+          if (!hasLocalErr) streamSink.setError("Query canceled.");
         }
 
         if (lower === "finished") {
@@ -652,8 +702,27 @@ function streamQuery(streamUrl, agg, sink) {
 
       es.onerror = () => {
         if (doneReceived || sseErrorEventReceived) return;
+
+        // If the user requested cancellation, the server may close the SSE stream without a final "done".
+        // Treat this as a canceled query to avoid getting stuck in "canceling".
+        if (state.cancelRequested) {
+          state.cancelRequested = false;
+          streamSink.setStatus("canceled");
+          setQueryStatusText("canceled");
+          if (results && typeof results.setStatus === "function") results.setStatus("canceled");
+          closeActiveStream();
+          resolve({ status: "canceled" });
+          return;
+        }
+
         const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
-        if (errVisible) return;
+        if (errVisible) {
+          // Even if we don't want to overwrite the banner, we must still resolve to unblock the runner.
+          closeActiveStream();
+          resolve({ status: "error" });
+          return;
+        }
+
         streamSink.setError("Connection lost.");
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
@@ -705,18 +774,24 @@ function streamQuery(streamUrl, agg, sink) {
     state.cancelToken = cancelToken;
 
     setQueryIdText(queryId);
-    setQueryStatusText("running");
+    // New run should always reset the status indicator, even if a previous run ended in a terminal state.
+    setQueryStatusText("running", { force: true });
     results.setStatus("running");
+    state.cancelRequested = false;
 
     const agg = createStatementAgg();
     const done = await streamQuery(streamUrl, agg, sink);
 
-    const finalStatus = done && done.status ? String(done.status) : "done";
+    let finalStatus = done && done.status ? String(done.status) : "done";
+    // normalize spelling
+    const fsLower = String(finalStatus).toLowerCase();
+    if (fsLower === "cancelled") finalStatus = "canceled";
     setQueryStatusText(statusLabel(finalStatus));
     results.setStatus(finalStatus);
 
     state.activeQueryId = null;
     state.cancelToken = null;
+    state.cancelRequested = false;
 
     return { done, agg };
   }
@@ -800,6 +875,7 @@ function streamQuery(streamUrl, agg, sink) {
       }
 
       const total = statements.length;
+      let batchFinalStatus = "done";
 
       for (let i = 0; i < total; i++) {
         if (state.batchStopRequested) break;
@@ -834,7 +910,13 @@ function streamQuery(streamUrl, agg, sink) {
           state.batchStopRequested = true;
         }
 
-        const st = done && done.status ? String(done.status) : "done";
+        let st = done && done.status ? String(done.status) : "done";
+        const stLower = String(st).toLowerCase();
+        if (stLower === "cancelled") st = "canceled";
+        // Track final batch status for the global indicator
+        if (stLower === "error") batchFinalStatus = "error";
+        else if (stLower === "canceled" || stLower === "cancelled") batchFinalStatus = "canceled";
+        else if (batchFinalStatus !== "error" && batchFinalStatus !== "canceled") batchFinalStatus = "done";
         const outRows = perQuerySink && perQuerySink.getRowCount ? perQuerySink.getRowCount() : results.getRowCount();
         const outCols = perQuerySink && perQuerySink.getColumnCount ? perQuerySink.getColumnCount() : results.getColCount();
 
@@ -878,7 +960,8 @@ function streamQuery(streamUrl, agg, sink) {
 
       results.hideLiveWrapIfStackHasBlocks();
       setQueryIdText(null);
-      setQueryStatusText("done");
+      setQueryStatusText(statusLabel(batchFinalStatus));
+      results.setStatus(batchFinalStatus);
       resetMetrics();
       resetCharts();
       resetLiveMetrics();
@@ -953,6 +1036,7 @@ function streamQuery(streamUrl, agg, sink) {
 
     try {
       await api.cancelQuery(token);
+      state.cancelRequested = true;
       setQueryStatusText("canceling");
       results.setStatus("canceling");
     } catch (err) {
