@@ -9,150 +9,215 @@
   let activeEventSource = null;
   let lockProgressIndeterminate = false;
 
-  const metricCharts = (() => {
-    const maxPoints = 64;
+  const series = {
+    readRowsPerSec: [],
+    readBytesPerSec: [],
+    cpu: [],
+    memBytes: [],
+    threads: [],
+  };
 
-    function cssVar(name) {
-      const v = getComputedStyle(dom.root).getPropertyValue(name);
-      return String(v || "").trim();
+  const MAX_STORE_POINTS = 2400;
+  const EPS_T = 1e-9;
+
+  let chartsScheduled = false;
+
+  function getCssVar(name, fallback = "") {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return v && v.trim() ? v.trim() : fallback;
+  }
+
+  function pushPointMonotone(arr, t, v) {
+    if (!Number.isFinite(t) || !Number.isFinite(v)) return;
+    const n = arr.length;
+    if (n === 0) {
+      arr.push({ t, v });
+      return;
+    }
+    const last = arr[n - 1];
+    if (t < last.t - EPS_T) return;
+    if (Math.abs(t - last.t) <= EPS_T) {
+      last.v = v;
+      return;
+    }
+    arr.push({ t, v });
+    if (arr.length > MAX_STORE_POINTS) {
+      arr.splice(0, arr.length - MAX_STORE_POINTS);
+    }
+  }
+
+  function prepareCanvas(canvas) {
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+
+    const w = Math.max(1, Math.floor(rect.width * dpr));
+    const h = Math.max(1, Math.floor(rect.height * dpr));
+
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
     }
 
-    function ensureCanvas(canvas) {
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const w = Math.max(1, Math.floor(rect.width));
-      const h = Math.max(1, Math.floor(rect.height));
-      const dpr = window.devicePixelRatio || 1;
-      const wantW = Math.max(1, Math.floor(w * dpr));
-      const wantH = Math.max(1, Math.floor(h * dpr));
-      if (canvas.width !== wantW || canvas.height !== wantH) {
-        canvas.width = wantW;
-        canvas.height = wantH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return { ctx, w, h };
+  }
+
+  function quantile(values, q) {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const idx = Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * q)));
+    return sorted[idx];
+  }
+
+  function computeAutoMax(points, opts) {
+    const q = opts.autoMaxQuantile;
+    if (!q || !Array.isArray(points) || points.length < 2) return null;
+    const vals = [];
+    for (const p of points) if (Number.isFinite(p.v)) vals.push(p.v);
+    if (vals.length === 0) return null;
+    const qv = quantile(vals, q);
+    if (qv == null) return null;
+    return qv * (opts.autoMaxPadFactor ?? 1.10);
+  }
+
+  function decimate(points, maxPoints) {
+    if (!Array.isArray(points) || points.length <= maxPoints) return points;
+    const step = Math.ceil(points.length / maxPoints);
+    const out = [];
+    for (let i = 0; i < points.length; i += step) out.push(points[i]);
+    if (out[out.length - 1] !== points[points.length - 1]) out.push(points[points.length - 1]);
+    return out;
+  }
+
+  function drawSparkline(canvas, points, opts = {}) {
+    const prepared = prepareCanvas(canvas);
+    if (!prepared) return;
+    const { ctx, w, h } = prepared;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const pad = Math.round(h * 0.10);
+    const topReserved = Math.round(h * 0.46);
+    const x0 = pad;
+    const y0 = topReserved;
+    const x1 = w - pad;
+    const y1 = h - pad;
+
+    const border = getCssVar("--border", "rgba(148,163,184,0.14)");
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.floor(x0) + 0.5, Math.floor(y0) + 0.5, Math.floor(x1 - x0), Math.floor(y1 - y0));
+
+    if (!Array.isArray(points) || points.length === 0) return;
+
+    const drawable = decimate(points, Math.max(80, Math.floor(w * 1.2)));
+    if (drawable.length === 1) {
+      const p = drawable[0];
+      const line = opts.lineColor || getCssVar("--accentBorder", "#2563eb");
+      ctx.globalAlpha = 0.70;
+      ctx.fillStyle = line;
+      ctx.beginPath();
+      ctx.arc(Math.floor((x0 + x1) * 0.5), Math.floor((y0 + y1) * 0.5), 3, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    const tMin = drawable[0].t;
+    const tMax = drawable[drawable.length - 1].t;
+    const tSpan = Math.max(1e-12, tMax - tMin);
+
+    const vMin = opts.min ?? 0;
+
+    let vMax = null;
+    if (opts.max != null && Number.isFinite(opts.max)) {
+      vMax = opts.max;
+    } else {
+      const auto = computeAutoMax(drawable, opts);
+      if (auto != null && Number.isFinite(auto)) vMax = auto;
+      else {
+        let m = -Infinity;
+        for (const p of drawable) if (Number.isFinite(p.v)) m = Math.max(m, p.v);
+        vMax = Number.isFinite(m) ? m : (vMin + 1);
       }
-      const ctx = canvas.getContext("2d", { alpha: true, desynchronized: true });
-      if (!ctx) return null;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      return { ctx, w, h };
     }
 
-    function makeSpark(canvas, { fixedMax = null } = {}) {
-      const points = [];
-      let maxHint = null;
+    const minMax = opts.minMax ?? null;
+    if (minMax != null && Number.isFinite(minMax)) vMax = Math.max(vMax, minMax);
+    if (!Number.isFinite(vMax) || vMax <= vMin) vMax = vMin + 1;
 
-      function push(value, hint) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) return;
-        points.push(n);
-        if (points.length > maxPoints) points.splice(0, points.length - maxPoints);
-        if (hint != null) {
-          const h = Number(hint);
-          if (Number.isFinite(h) && h > 0) maxHint = h;
-        }
-      }
+    const line = opts.lineColor || getCssVar("--accentBorder", "#2563eb");
+    const fillAlpha = opts.fillAlpha ?? 0.12;
 
-      function clear() {
-        points.length = 0;
-        maxHint = null;
-        render();
-      }
-
-      function render() {
-        const info = ensureCanvas(canvas);
-        if (!info) return;
-        const { ctx, w, h } = info;
-        ctx.clearRect(0, 0, w, h);
-        if (points.length < 2) return;
-
-        const maxPoint = points.reduce((m, v) => (v > m ? v : m), 0);
-        const maxValue = fixedMax != null ? fixedMax : maxHint != null ? maxHint : maxPoint;
-        const denom = maxValue > 0 ? maxValue : 1;
-
-        const stroke = cssVar("--accentBorder") || "#2563eb";
-        const fill = cssVar("--accent") || "rgba(37,99,235,0.14)";
-
-        const n = points.length;
-        const dx = w / (n - 1);
-
-        ctx.globalAlpha = 0.9;
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = stroke;
-
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const x = i * dx;
-          const y = h - (points[i] / denom) * (h - 2) - 1;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = fill;
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const x = i * dx;
-          const y = h - (points[i] / denom) * (h - 2) - 1;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.lineTo(w, h);
-        ctx.lineTo(0, h);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      return { push, clear, render };
+    function X(t) {
+      return x0 + ((t - tMin) / tSpan) * (x1 - x0);
     }
 
-    const rows = makeSpark(dom.readRowsChart);
-    const bytes = makeSpark(dom.readBytesChart);
-    const cpu = makeSpark(dom.cpuChart, { fixedMax: 100 });
-    const memory = makeSpark(dom.memoryChart);
-    const threads = makeSpark(dom.threadChart);
-
-    function reset() {
-      rows.clear();
-      bytes.clear();
-      cpu.clear();
-      memory.clear();
-      threads.clear();
+    function Y(v) {
+      const vv = opts.clampMax ? Math.min(v, vMax) : v;
+      return y1 - ((vv - vMin) / (vMax - vMin)) * (y1 - y0);
     }
 
-    function pushTick({ rowsPerSec, bytesPerSec, cpuPct, memInst, memMax, thrInst, thrMax }) {
-      rows.push(rowsPerSec);
-      bytes.push(bytesPerSec);
-      cpu.push(cpuPct);
-      memory.push(memInst, memMax);
-      threads.push(thrInst, thrMax);
-    }
+    ctx.beginPath();
+    ctx.moveTo(X(drawable[0].t), y1);
+    for (const p of drawable) ctx.lineTo(X(p.t), Y(p.v));
+    ctx.lineTo(X(drawable[drawable.length - 1].t), y1);
+    ctx.closePath();
+    ctx.globalAlpha = fillAlpha;
+    ctx.fillStyle = line;
+    ctx.fill();
 
-    function renderAll() {
-      rows.render();
-      bytes.render();
-      cpu.render();
-      memory.render();
-      threads.render();
-    }
+    ctx.beginPath();
+    ctx.moveTo(X(drawable[0].t), Y(drawable[0].v));
+    for (let i = 1; i < drawable.length; i++) ctx.lineTo(X(drawable[i].t), Y(drawable[i].v));
+    ctx.globalAlpha = 0.90;
+    ctx.strokeStyle = line;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
 
-    let rafId = 0;
-    function scheduleRender() {
-      if (rafId) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        renderAll();
-      });
-    }
+    ctx.globalAlpha = 0.16;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
 
-    window.addEventListener(
-      "resize",
-      () => {
-        scheduleRender();
-      },
-      { passive: true }
-    );
+  function renderCharts() {
+    drawSparkline(dom.readRowsChart, series.readRowsPerSec, { min: 0 });
+    drawSparkline(dom.readBytesChart, series.readBytesPerSec, { min: 0 });
 
-    return { reset, pushTick, renderAll, scheduleRender };
-  })();
+    drawSparkline(dom.cpuChart, series.cpu, {
+      min: 0,
+      autoMaxQuantile: 0.98,
+      autoMaxPadFactor: 1.10,
+      minMax: 100,
+      clampMax: true,
+    });
+
+    drawSparkline(dom.memoryChart, series.memBytes, { min: 0 });
+    drawSparkline(dom.threadChart, series.threads, { min: 0 });
+  }
+
+  function scheduleChartsRender() {
+    if (chartsScheduled) return;
+    chartsScheduled = true;
+    requestAnimationFrame(() => {
+      chartsScheduled = false;
+      renderCharts();
+    });
+  }
+
+  function resetCharts() {
+    series.readRowsPerSec.length = 0;
+    series.readBytesPerSec.length = 0;
+    series.cpu.length = 0;
+    series.memBytes.length = 0;
+    series.threads.length = 0;
+    scheduleChartsRender();
+  }
 
   function formatIntShort(value) {
     const n = Number(value);
@@ -163,25 +228,6 @@
     if (abs < 1e6) return `${sign}${(abs / 1e3).toFixed(abs < 1e4 ? 2 : 1)}k`;
     if (abs < 1e9) return `${sign}${(abs / 1e6).toFixed(abs < 1e7 ? 2 : 1)}M`;
     return `${sign}${(abs / 1e9).toFixed(abs < 1e10 ? 2 : 1)}B`;
-  }
-
-  function formatSecondsFromMs(ms) {
-    const n = Number(ms);
-    if (!Number.isFinite(n) || n < 0) return "-";
-    const s = n / 1000;
-    if (s < 10) return `${s.toFixed(3)}s`;
-    if (s < 100) return `${s.toFixed(2)}s`;
-    if (s < 1000) return `${s.toFixed(1)}s`;
-    return `${Math.round(s)}s`;
-  }
-
-  function formatSeconds(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) return "-";
-    if (n < 10) return `${n.toFixed(3)}s`;
-    if (n < 100) return `${n.toFixed(2)}s`;
-    if (n < 1000) return `${n.toFixed(1)}s`;
-    return `${Math.round(n)}s`;
   }
 
   function formatBytesShort(value) {
@@ -195,14 +241,24 @@
       v /= 1024;
       u++;
     }
-    const d = v < 10 ? 2 : v < 100 ? 1 : 0;
+    const d = v < 10 ? 2 : (v < 100 ? 1 : 0);
     return `${v.toFixed(d)} ${units[u]}`;
+  }
+
+  function formatSecondsFromMs(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n < 0) return "-";
+    const s = n / 1000;
+    if (s < 10) return `${s.toFixed(3)}s`;
+    if (s < 100) return `${s.toFixed(2)}s`;
+    if (s < 1000) return `${s.toFixed(1)}s`;
+    return `${Math.round(s)}s`;
   }
 
   function formatPercentFromCenti(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
-    return `${(n / 100).toFixed(1)}%`;
+    return `${(n / 100).toFixed(2)}%`;
   }
 
   function resetMetrics() {
@@ -223,7 +279,7 @@
       dom.progressCard.classList.remove("is-indeterminate");
       dom.progressCard.style.setProperty("--p", "0");
     }
-    metricCharts.reset();
+    resetCharts();
   }
 
   function setProgressIndeterminate(enabled) {
@@ -231,12 +287,12 @@
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
   }
 
-  function applyTickMetrics(arr) {
+  function applyTickMetrics(arr, agg) {
     if (!Array.isArray(arr) || arr.length < 14) return;
 
     const elapsedMs = Number(arr[0]);
     const percentCenti = Number(arr[1]);
-    const knownInt = Number(arr[2]);
+    const percentKnown = !!arr[2];
     const readRowsTotal = Number(arr[3]);
     const readBytesTotal = Number(arr[4]);
     const rowsPerSec = Number(arr[6]);
@@ -247,10 +303,11 @@
     const memMax = arr[11] == null ? null : Number(arr[11]);
     const thrInst = Number(arr[12]);
     const thrMax = Number(arr[13]);
+    const samples = Array.isArray(arr[14]) ? arr[14] : null;
 
-    util.setText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
+    if (Number.isFinite(elapsedMs)) util.setText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
 
-    if (knownInt === 1 && Number.isFinite(percentCenti)) {
+    if (percentKnown && Number.isFinite(percentCenti)) {
       const pct = Math.max(0, Math.min(100, percentCenti / 100));
       util.setText(dom.progressPercentText, `${pct.toFixed(2)}%`);
       if (dom.progressCard) dom.progressCard.style.setProperty("--p", String(pct / 100));
@@ -261,11 +318,11 @@
       else setProgressIndeterminate(false);
     }
 
-    util.setText(dom.readRowsRateText, `${formatIntShort(rowsPerSec)}/s`);
-    util.setText(dom.readRowsTotalText, formatIntShort(readRowsTotal));
+    if (Number.isFinite(rowsPerSec)) util.setText(dom.readRowsRateText, `${formatIntShort(rowsPerSec)}/s`);
+    if (Number.isFinite(readRowsTotal)) util.setText(dom.readRowsTotalText, formatIntShort(readRowsTotal));
 
-    util.setText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
-    util.setText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
+    if (Number.isFinite(bytesPerSec)) util.setText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
+    if (Number.isFinite(readBytesTotal)) util.setText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
 
     util.setText(dom.cpuText, formatPercentFromCenti(cpuCenti));
     util.setText(dom.cpuMaxText, formatPercentFromCenti(cpuMaxCenti));
@@ -276,26 +333,72 @@
     util.setText(dom.threadText, Number.isFinite(thrInst) ? String(thrInst) : "-");
     util.setText(dom.threadMaxText, Number.isFinite(thrMax) ? String(thrMax) : "-");
 
-    metricCharts.pushTick({
-      rowsPerSec,
-      bytesPerSec,
-      cpuPct: Number.isFinite(cpuCenti) ? cpuCenti / 100 : NaN,
-      memInst: memInst == null ? NaN : memInst,
-      memMax: memMax == null ? null : memMax,
-      thrInst,
-      thrMax,
-    });
-    metricCharts.scheduleRender();
+    if (agg) {
+      if (Number.isFinite(readRowsTotal)) agg.lastReadRows = readRowsTotal;
+      if (Number.isFinite(readBytesTotal)) agg.lastReadBytes = readBytesTotal;
+      if (Number.isFinite(cpuMaxCenti)) agg.cpuMaxCenti = Math.max(agg.cpuMaxCenti, cpuMaxCenti);
+      if (Number.isFinite(memMax)) agg.memMax = Math.max(agg.memMax, memMax);
+      if (Number.isFinite(thrMax)) agg.thrMax = Math.max(agg.thrMax, thrMax);
+
+      const tSec = Number.isFinite(elapsedMs) ? elapsedMs / 1000 : null;
+      if (tSec != null) {
+        if (Number.isFinite(rowsPerSec) && rowsPerSec >= 0) pushPointMonotone(series.readRowsPerSec, tSec, rowsPerSec);
+        if (Number.isFinite(bytesPerSec) && bytesPerSec >= 0) pushPointMonotone(series.readBytesPerSec, tSec, bytesPerSec);
+        if (Number.isFinite(cpuCenti)) pushPointMonotone(series.cpu, tSec, cpuCenti / 100);
+        if (memInst != null && Number.isFinite(memInst)) pushPointMonotone(series.memBytes, tSec, memInst);
+        if (Number.isFinite(thrInst)) pushPointMonotone(series.threads, tSec, thrInst);
+      }
+
+      if (samples && Array.isArray(samples) && samples.length > 0) {
+        for (const s of samples) {
+          if (!Array.isArray(s) || s.length < 2) continue;
+          const sm = Number(s[0]);
+          const st = Number.isFinite(sm) ? sm / 1000 : null;
+          if (st == null) continue;
+
+          const rb = Number(s[1]);
+          const cpu = s[2] == null ? null : Number(s[2]);
+          const mem = s[3] == null ? null : Number(s[3]);
+          const thr = s[4] == null ? null : Number(s[4]);
+
+          if (cpu != null && Number.isFinite(cpu)) pushPointMonotone(series.cpu, st, cpu / 100);
+          if (mem != null && Number.isFinite(mem)) pushPointMonotone(series.memBytes, st, mem);
+          if (thr != null && Number.isFinite(thr)) pushPointMonotone(series.threads, st, thr);
+
+          if (Number.isFinite(rb) && agg.lastSampleReadBytes != null && agg.lastSampleReadBytesT != null) {
+            const dt = st - agg.lastSampleReadBytesT;
+            if (dt > 1e-9) {
+              const bps = (rb - agg.lastSampleReadBytes) / dt;
+              if (Number.isFinite(bps) && bps >= 0) pushPointMonotone(series.readBytesPerSec, st, bps);
+            }
+          }
+
+          if (Number.isFinite(rb)) {
+            agg.lastSampleReadBytes = rb;
+            agg.lastSampleReadBytesT = st;
+          }
+        }
+      }
+    }
+
+    scheduleChartsRender();
   }
 
-  function applyDoneMetrics(done) {
+  function applyDoneMetrics(done, agg) {
     if (!done || typeof done !== "object") return;
     lockProgressIndeterminate = true;
-    if (done.elapsed_seconds != null) util.setText(dom.elapsedSecondsText, formatSeconds(done.elapsed_seconds));
-    if (done.read_rows != null) util.setText(dom.readRowsTotalText, formatIntShort(done.read_rows));
-    if (done.read_bytes != null) util.setText(dom.readBytesTotalText, formatBytesShort(done.read_bytes));
+    if (done.elapsed_seconds != null) util.setText(dom.elapsedSecondsText, util.formatSeconds(done.elapsed_seconds));
+
+    const rr = done.read_rows != null ? Number(done.read_rows) : null;
+    const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
+
+    if (rr != null && Number.isFinite(rr) && rr > 0) util.setText(dom.readRowsTotalText, formatIntShort(rr));
+    else if (agg && agg.lastReadRows != null) util.setText(dom.readRowsTotalText, formatIntShort(agg.lastReadRows));
+
+    if (rb != null && Number.isFinite(rb) && rb > 0) util.setText(dom.readBytesTotalText, formatBytesShort(rb));
+    else if (agg && agg.lastReadBytes != null) util.setText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
+
     setProgressIndeterminate(false);
-    metricCharts.scheduleRender();
   }
 
   function setQueryIdText(queryId) {
@@ -359,10 +462,16 @@
     if (!statements.length) throw new Error("Nothing to format.");
 
     const formatted = await api.formatSqls(hostId, statements);
+    if (!Array.isArray(formatted) || formatted.length !== statements.length) {
+      const err = new Error("format_failed: Invalid format response.");
+      err.code = "format_failed";
+      throw err;
+    }
+
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
     const joined = sql.joinSqlStatements(normalized);
 
-    if (dom.queryTextArea) dom.queryTextArea.value = joined;
+    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joined);
 
     storage.addHistoryEntry({
       ts_ms: Date.now(),
@@ -374,6 +483,33 @@
     return normalized;
   }
 
+  function isFormatFailedError(err) {
+    const code = err && err.code ? String(err.code) : "";
+    const payloadCode = err && err.payload && err.payload.error_code ? String(err.payload.error_code) : "";
+    return code === "format_failed" || payloadCode === "format_failed";
+  }
+
+  function buildFormatErrorText(err) {
+    const payload = err && err.payload ? err.payload : null;
+    const code = payload && payload.error_code ? String(payload.error_code) : err && err.code ? String(err.code) : "";
+    const msg = payload && payload.message ? String(payload.message) : err instanceof Error ? String(err.message || "") : String(err || "");
+    const clean = msg.trim();
+    if (!code) return clean || "Format failed.";
+    if (clean.toLowerCase().startsWith(code.toLowerCase() + ":")) return clean;
+    return `${code}: ${clean || "Format failed."}`;
+  }
+
+  function showFormatFailure(err) {
+    const msg = buildFormatErrorText(err);
+    results.clearResultsStack();
+    results.clearLiveResults();
+    results.setError(msg);
+    results.setStatus("error");
+    setQueryStatusText("error");
+    results.setResultsVisible(true);
+    if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
+  }
+
   function parseSseJson(ev) {
     try {
       return JSON.parse(ev.data);
@@ -382,13 +518,34 @@
     }
   }
 
-  function streamQuery(streamUrl) {
+  function createStatementAgg() {
+    return {
+      lastReadRows: null,
+      lastReadBytes: null,
+      cpuMaxCenti: 0,
+      memMax: 0,
+      thrMax: 0,
+      lastSampleReadBytes: null,
+      lastSampleReadBytesT: null,
+      terminal: false,
+    };
+  }
+
+  function streamQuery(streamUrl, agg) {
     return new Promise((resolve) => {
       let doneReceived = false;
       let sseErrorEventReceived = false;
 
       const es = new EventSource(streamUrl);
       activeEventSource = es;
+
+      es.addEventListener("meta", (ev) => {
+        const data = parseSseJson(ev);
+        if (data && data.status) {
+          const st = String(data.status);
+          if (st) setQueryStatusText(st);
+        }
+      });
 
       es.addEventListener("result_meta", (ev) => {
         const data = parseSseJson(ev);
@@ -405,10 +562,10 @@
       });
 
       es.addEventListener("tick", (ev) => {
+        if (agg && agg.terminal) return;
         const data = parseSseJson(ev);
         if (!data) return;
-        if (lockProgressIndeterminate) return;
-        applyTickMetrics(data);
+        applyTickMetrics(data, agg);
       });
 
       es.addEventListener("error", (ev) => {
@@ -420,6 +577,7 @@
         results.setError(msg);
         results.setStatus("error");
         lockProgressIndeterminate = true;
+        if (agg) agg.terminal = true;
         setProgressIndeterminate(false);
       });
 
@@ -427,12 +585,23 @@
         const data = parseSseJson(ev) || {};
         doneReceived = true;
         const st = data && data.status ? String(data.status) : "done";
+
         results.setStatus(st);
-        if (st.toLowerCase() === "error" && data && data.message) {
-          const current = dom.errorBanner && !dom.errorBanner.hidden ? String(dom.errorBanner.textContent || "") : "";
-          if (!current.trim()) results.setError(String(data.message));
+
+        const lower = st.toLowerCase();
+        if ((lower === "canceled" || lower === "cancelled") && !results.getErrorText()) {
+          results.setError("Query canceled.");
         }
-        applyDoneMetrics(data);
+
+        if (lower === "finished") {
+          util.setText(dom.progressPercentText, "100.00%");
+          if (dom.progressCard) dom.progressCard.style.setProperty("--p", "1");
+        }
+
+        applyDoneMetrics(data, agg);
+        results.finalizeAfterDone();
+
+        if (agg) agg.terminal = true;
         closeActiveStream();
         resolve({ ...data, status: st });
       });
@@ -444,23 +613,12 @@
         results.setError("Connection lost.");
         results.setStatus("error");
         lockProgressIndeterminate = true;
+        if (agg) agg.terminal = true;
         setProgressIndeterminate(false);
         closeActiveStream();
         resolve({ status: "error" });
       };
     });
-  }
-
-  function getLiveRowCount() {
-    if (!dom.resultTableBody) return 0;
-    return dom.resultTableBody.querySelectorAll("tr").length;
-  }
-
-  function getLiveColCount() {
-    if (!dom.resultTableHead) return 0;
-    const tr = dom.resultTableHead.querySelector("tr");
-    if (!tr) return 0;
-    return tr.querySelectorAll("th").length;
   }
 
   function statusLabel(status) {
@@ -471,6 +629,28 @@
     if (s === "canceled" || s === "cancelled") return "canceled";
     if (s === "result_limit_reached") return "limit reached";
     return s || "-";
+  }
+
+  function statusIsStopping(status) {
+    const s = String(status || "").toLowerCase();
+    return s === "error" || s === "canceled" || s === "cancelled";
+  }
+
+  function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, thrMax, truncated }) {
+    const parts = [];
+    parts.push(statusLabel(status));
+    if (elapsedSeconds != null) parts.push(util.formatSeconds(elapsedSeconds));
+    if (outRows != null && outCols != null) parts.push(`out ${outRows}r ${outCols}c`);
+    if (readRows != null || readBytes != null) {
+      const rr = readRows == null ? "-" : formatIntShort(readRows);
+      const rb = readBytes == null ? "-" : formatBytesShort(readBytes);
+      parts.push(`read ${rr}r ${rb}`);
+    }
+    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`cpu ${formatPercentFromCenti(cpuMaxCenti)}`);
+    if (memMax != null && memMax > 0) parts.push(`mem ${formatBytesShort(memMax)}`);
+    if (thrMax != null && thrMax > 0) parts.push(`thr ${thrMax}`);
+    if (truncated) parts.push("truncated");
+    return parts.join(" · ");
   }
 
   async function runOneStatement(statement) {
@@ -487,7 +667,8 @@
     setQueryStatusText("running");
     results.setStatus("running");
 
-    const done = await streamQuery(streamUrl);
+    const agg = createStatementAgg();
+    const done = await streamQuery(streamUrl, agg);
 
     const finalStatus = done && done.status ? String(done.status) : "done";
     setQueryStatusText(statusLabel(finalStatus));
@@ -496,7 +677,7 @@
     state.activeQueryId = null;
     state.cancelToken = null;
 
-    return done;
+    return { done, agg };
   }
 
   async function handleRun() {
@@ -528,7 +709,7 @@
     }
 
     if (statements.length > 1 && !state.runOptMultiQuery) {
-      results.setError("Multiquery is disabled. Enable \u201cAllow multiquery\u201d in the Run menu.");
+      results.setError("Multiquery is disabled. Enable “Allow multiquery” in the Run menu.");
       results.setStatus("error");
       return;
     }
@@ -580,30 +761,35 @@
         setQueryStatusText(`running (${i + 1}/${total})`);
 
         const stmt = statements[i];
-        const done = await runOneStatement(stmt);
+        const { done, agg } = await runOneStatement(stmt);
 
         const st = done && done.status ? String(done.status) : "done";
-        const rows = getLiveRowCount();
-        const cols = getLiveColCount();
+        const outRows = results.getRowCount();
+        const outCols = results.getColCount();
 
-        const metaParts = [
-          statusLabel(st),
-          done && done.elapsed_seconds != null ? formatSeconds(done.elapsed_seconds) : "-",
-          `${rows} ${rows === 1 ? "row" : "rows"}`,
-          `${cols} ${cols === 1 ? "column" : "columns"}`,
-        ];
-        if (done && done.read_rows != null) metaParts.push(`read ${formatIntShort(done.read_rows)}`);
-        if (done && done.read_bytes != null) metaParts.push(`disk ${formatBytesShort(done.read_bytes)}`);
-        if (done && done.result_truncated) metaParts.push("truncated");
-        const metaText = metaParts.filter((x) => String(x || "").trim()).join(" \u00b7 ");
+        const readRows = done && Number(done.read_rows) > 0 ? Number(done.read_rows) : agg.lastReadRows;
+        const readBytes = done && Number(done.read_bytes) > 0 ? Number(done.read_bytes) : agg.lastReadBytes;
 
-        const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
-        const expandedByDefault = errVisible || ["error", "canceled", "cancelled"].includes(String(st).toLowerCase());
+        const metaText = buildCompactMeta({
+          status: st,
+          elapsedSeconds: done && done.elapsed_seconds != null ? Number(done.elapsed_seconds) : null,
+          outRows,
+          outCols,
+          readRows,
+          readBytes,
+          cpuMaxCenti: agg.cpuMaxCenti || null,
+          memMax: agg.memMax || null,
+          thrMax: agg.thrMax || null,
+          truncated: !!(done && done.result_truncated),
+        });
 
+        const expandedByDefault = statusIsStopping(st) || !!results.getErrorText();
         const copyText = results.buildCopyJsonText();
-        results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault });
+        const errorText = results.takeErrorText();
 
-        if (["error", "canceled", "cancelled"].includes(String(st).toLowerCase())) {
+        results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
+
+        if (statusIsStopping(st)) {
           state.batchStopRequested = true;
           break;
         }
@@ -613,10 +799,15 @@
       setQueryIdText(null);
       setQueryStatusText("done");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.setError(msg);
-      results.setStatus("error");
-      setQueryStatusText("error");
+      if (isFormatFailedError(err)) {
+        showFormatFailure(err);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.setError(msg);
+        results.setStatus("error");
+        setQueryStatusText("error");
+        results.setResultsVisible(true);
+      }
     } finally {
       closeActiveStream();
       state.cancelToken = null;
@@ -641,9 +832,7 @@
     try {
       await formatEditorSql();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.setError(msg);
-      results.setStatus("error");
+      showFormatFailure(err);
     } finally {
       setBusy({ running: false, formatting: false, batch: false });
     }
@@ -678,13 +867,9 @@
     }
 
     try {
-      const ok = await api.cancelQuery(token);
-      if (ok && state.isBatchRun) {
-        results.setError("Query canceled successfully.");
-        results.setStatus("canceled");
-        lockProgressIndeterminate = true;
-        setProgressIndeterminate(false);
-      }
+      await api.cancelQuery(token);
+      setQueryStatusText("canceling");
+      results.setStatus("canceling");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       results.setError(msg);
@@ -692,9 +877,17 @@
     }
   }
 
+  function initCharts() {
+    window.addEventListener("resize", scheduleChartsRender);
+    const themeObserver = new MutationObserver(() => scheduleChartsRender());
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    scheduleChartsRender();
+  }
+
   function init() {
     updateActionButtons();
-    metricCharts.renderAll();
+    initCharts();
+
     if (dom.runButton) dom.runButton.addEventListener("click", handleRun);
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
     if (dom.cancelButton) dom.cancelButton.addEventListener("click", handleCancelOrClear);

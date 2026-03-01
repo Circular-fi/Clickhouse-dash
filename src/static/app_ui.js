@@ -14,6 +14,27 @@
     }
   }
 
+  async function loadMeta() {
+    if (!dom.versionBadge) return;
+    try {
+      const resp = await fetch("api/meta", { cache: "no-store" });
+      if (!resp.ok) {
+        dom.versionBadge.textContent = "meta: error";
+        return;
+      }
+      const data = await resp.json();
+      const verObj = data && data.version ? data.version : null;
+      const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
+      const sha = verObj && typeof verObj === "object" ? String(verObj.git_sha || "") : String(data.git_sha || "");
+      const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
+      const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
+      dom.versionBadge.textContent = text;
+      if (build) dom.versionBadge.title = `Backend version\nBuild: ${build}`;
+    } catch {
+      dom.versionBadge.textContent = "meta: offline";
+    }
+  }
+
   function formatPingMsLabel(pingMs) {
     const ms = Number(pingMs);
     if (!Number.isFinite(ms)) return "-";
@@ -348,102 +369,135 @@
     dom.historyPanel.hidden = !willShow;
   }
 
-  function init() {
-    applyRunOptionsUi();
+  function initEditor() {
+    if (!dom.queryTextArea) return;
 
-    if (dom.queryTextArea) {
-      const ta = dom.queryTextArea;
-      if (!String(ta.value || "").trim()) {
-        const saved = storage.loadEditorSql();
-        if (saved) ta.value = saved;
-      }
+    const current = String(dom.queryTextArea.value || "");
+    if (!current.trim() && storage.loadEditorSql) {
+      const saved = String(storage.loadEditorSql() || "");
+      if (saved.trim()) dom.queryTextArea.value = saved;
+    }
 
-      ta.addEventListener("input", () => {
-        storage.saveEditorSql(ta.value);
+    if (storage.saveEditorSql) {
+      dom.queryTextArea.addEventListener("input", () => {
+        storage.saveEditorSql(dom.queryTextArea.value);
       });
+    }
 
-      ta.addEventListener("keydown", (ev) => {
-        if (ev.key !== "Tab") return;
-        ev.preventDefault();
+    dom.queryTextArea.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
 
-        const v = String(ta.value || "");
-        const selStart = ta.selectionStart;
-        const selEnd = ta.selectionEnd;
-        if (selStart == null || selEnd == null) return;
+      const ta = dom.queryTextArea;
+      const value = String(ta.value || "");
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
 
-        const lineStart = v.lastIndexOf("\n", Math.max(0, selStart - 1)) + 1;
-        let endAdj = selEnd;
-        if (endAdj > 0 && v[endAdj - 1] === "\n") endAdj -= 1;
-        let lineEnd = v.indexOf("\n", endAdj);
-        if (lineEnd === -1) lineEnd = v.length;
+      e.preventDefault();
 
-        if (selStart === selEnd) {
+      const lineStartIndex = (text, idx) => {
+        const i = text.lastIndexOf("\n", idx - 1);
+        return i === -1 ? 0 : i + 1;
+      };
+
+      const lineEndIndex = (text, idx) => {
+        const i = text.indexOf("\n", idx);
+        return i === -1 ? text.length : i;
+      };
+
+      const outdentLine = (line) => {
+        if (line.startsWith("\t")) return { line: line.slice(1), removed: 1 };
+        if (line.startsWith("    ")) return { line: line.slice(4), removed: 4 };
+        if (line.startsWith("  ")) return { line: line.slice(2), removed: 2 };
+        if (line.startsWith(" ")) return { line: line.slice(1), removed: 1 };
+        return { line, removed: 0 };
+      };
+
+      if (start === end) {
+        if (!e.shiftKey) {
           try {
             ta.focus();
             const ok = document.execCommand && document.execCommand("insertText", false, "\t");
-            if (!ok) ta.setRangeText("\t", selStart, selEnd, "end");
+            if (ok) return;
           } catch {
-            ta.setRangeText("\t", selStart, selEnd, "end");
+            null;
           }
+          ta.setRangeText("\t", start, end, "end");
           return;
         }
 
-        const chunk = v.slice(lineStart, lineEnd);
-        const lines = chunk.split("\n");
-        const lineStarts = [];
-        let offset = 0;
-        for (const ln of lines) {
-          lineStarts.push(lineStart + offset);
-          offset += ln.length + 1;
+        const ls = lineStartIndex(value, start);
+        const le = lineEndIndex(value, start);
+        const line = value.slice(ls, le);
+        const rel = start - ls;
+        const prefix = line.slice(0, rel);
+        if (!/^[\t ]*$/.test(prefix)) return;
+
+        const od = outdentLine(line);
+        if (od.removed === 0) return;
+        ta.setRangeText(od.line, ls, le, "preserve");
+        const nextPos = Math.max(ls, start - od.removed);
+        ta.selectionStart = nextPos;
+        ta.selectionEnd = nextPos;
+        return;
+      }
+
+      let endAdj = end;
+      if (endAdj > start && value[endAdj - 1] === "\n") endAdj -= 1;
+
+      const blockStart = lineStartIndex(value, start);
+      const blockEnd = lineEndIndex(value, endAdj);
+      const block = value.slice(blockStart, blockEnd);
+      const oldLines = block.split("\n");
+
+      const deltas = [];
+      const newLines = [];
+
+      for (const ln of oldLines) {
+        if (e.shiftKey) {
+          const od = outdentLine(ln);
+          newLines.push(od.line);
+          deltas.push(-od.removed);
+        } else {
+          newLines.push("\t" + ln);
+          deltas.push(1);
         }
+      }
 
-        const dedent = !!ev.shiftKey;
-        const removedStarts = [];
+      const newBlock = newLines.join("\n");
 
-        const nextLines = lines.map((ln, idx) => {
-          if (!dedent) return `\t${ln}`;
-          if (ln.startsWith("\t")) {
-            removedStarts.push(lineStarts[idx]);
-            return ln.slice(1);
-          }
-          return ln;
-        });
+      const lineStarts = [];
+      let acc = 0;
+      for (let i = 0; i < oldLines.length; i++) {
+        lineStarts.push(acc);
+        acc += oldLines[i].length + 1;
+      }
 
-        const nextChunk = nextLines.join("\n");
-
-        const countLE = (arr, pos) => {
-          let c = 0;
-          for (const x of arr) if (x <= pos) c++;
-          return c;
-        };
-
-        const countLT = (arr, pos) => {
-          let c = 0;
-          for (const x of arr) if (x < pos) c++;
-          return c;
-        };
-
-        const deltaStart = dedent ? -countLT(removedStarts, selStart) : countLE(lineStarts, selStart);
-        const deltaEnd = dedent ? -countLT(removedStarts, selEnd) : countLE(lineStarts, selEnd);
-
-        try {
-          ta.focus();
-          ta.setSelectionRange(lineStart, lineEnd);
-          const ok = document.execCommand && document.execCommand("insertText", false, nextChunk);
-          if (!ok) ta.setRangeText(nextChunk, lineStart, lineEnd, "end");
-        } catch {
-          ta.setRangeText(nextChunk, lineStart, lineEnd, "end");
+      const shiftFor = (posRel, includeEquals) => {
+        let shift = 0;
+        for (let i = 0; i < lineStarts.length; i++) {
+          const ls = lineStarts[i];
+          if (includeEquals ? posRel >= ls : posRel > ls) shift += deltas[i];
         }
+        return shift;
+      };
 
-        const nextStart = Math.max(lineStart, selStart + deltaStart);
-        const nextEnd = Math.max(nextStart, selEnd + deltaEnd);
-        try {
-          ta.setSelectionRange(nextStart, nextEnd);
-        } catch {
-          return;
-        }
-      });
-    }
+      const startRel = start - blockStart;
+      const endRel = end - blockStart;
+      const includeEquals = !e.shiftKey;
+      const newStart = start + shiftFor(startRel, includeEquals);
+      const newEnd = end + shiftFor(endRel, includeEquals);
+
+      ta.setRangeText(newBlock, blockStart, blockEnd, "preserve");
+      ta.selectionStart = Math.max(blockStart, newStart);
+      ta.selectionEnd = Math.max(blockStart, newEnd);
+    });
+  }
+
+  function init() {
+    applyRunOptionsUi();
+
+    loadMeta();
+    initEditor();
 
     if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);
 

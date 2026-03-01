@@ -45,26 +45,22 @@
     elapsedSecondsText: byId("elapsedSecondsText"),
     progressCard: byId("progressCard"),
     progressPercentText: byId("progressPercentText"),
-
-    readRowsChart: byId("readRowsChart"),
     readRowsRateText: byId("readRowsRateText"),
     readRowsTotalText: byId("readRowsTotalText"),
-
-    readBytesChart: byId("readBytesChart"),
     readBytesRateText: byId("readBytesRateText"),
     readBytesTotalText: byId("readBytesTotalText"),
 
-    cpuChart: byId("cpuChart"),
+    readRowsChart: byId("readRowsChart"),
+    readBytesChart: byId("readBytesChart"),
     cpuText: byId("cpuText"),
     cpuMaxText: byId("cpuMaxText"),
-
-    memoryChart: byId("memoryChart"),
+    cpuChart: byId("cpuChart"),
     memoryText: byId("memoryText"),
     memoryMaxText: byId("memoryMaxText"),
-
-    threadChart: byId("threadChart"),
+    memoryChart: byId("memoryChart"),
     threadText: byId("threadText"),
     threadMaxText: byId("threadMaxText"),
+    threadChart: byId("threadChart"),
 
     resultsPanel: byId("resultsPanel") || document.querySelector(".panel--results"),
     resultColumnsText: byId("resultColumnsText"),

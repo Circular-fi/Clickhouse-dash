@@ -4,19 +4,31 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, util, state } = ns;
+  const { dom, util } = ns;
 
   let resultsStackElement = null;
 
   let resultColumns = [];
   let resultTypes = [];
+  let resultTypeAsts = [];
+  let pendingRows = [];
   let allResultRows = [];
   let lastErrorMessage = "";
   let currentStatusValue = "";
 
+  let scheduledFlush = false;
+  let flushRafId = 0;
+  const flushBatchSize = 400;
+
+  let isVerticalResults = false;
+
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
     dom.resultsPanel.classList.toggle("is-hidden", !visible);
+  }
+
+  function getErrorText() {
+    return String(lastErrorMessage || "").trim();
   }
 
   function setError(message) {
@@ -25,11 +37,18 @@
     if (lastErrorMessage) {
       dom.errorBanner.hidden = false;
       dom.errorBanner.textContent = lastErrorMessage;
+      setResultsVisible(true);
     } else {
       dom.errorBanner.hidden = true;
       dom.errorBanner.textContent = "";
     }
     updateCopyButtonState();
+  }
+
+  function takeErrorText() {
+    const text = getErrorText();
+    if (text) setError("");
+    return text;
   }
 
   function setStatus(status) {
@@ -42,16 +61,34 @@
     if (dom.resultTableBody) dom.resultTableBody.innerHTML = "";
   }
 
+  function resetTableMode() {
+    isVerticalResults = false;
+    const tableEl = dom.resultTableHead ? dom.resultTableHead.closest("table") : null;
+    if (tableEl) tableEl.classList.remove("resultTable--vertical");
+  }
+
   function clearLiveResults() {
     resultColumns = [];
     resultTypes = [];
+    resultTypeAsts = [];
+    pendingRows = [];
     allResultRows = [];
     currentStatusValue = "";
     lastErrorMessage = "";
+
+    scheduledFlush = false;
+    if (flushRafId) {
+      cancelAnimationFrame(flushRafId);
+      flushRafId = 0;
+    }
+
+    resetTableMode();
     clearTable();
+
     if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
     setError("");
     updateCopyButtonState();
+
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
     if (resultsStackElement && resultsStackElement.childElementCount > 0) setResultsVisible(true);
     else setResultsVisible(false);
@@ -79,14 +116,215 @@
     for (const n of nodes) n.removeAttribute("id");
   }
 
+  function safelyParseJson(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+
+  function parseJsonStringIfLikely(v) {
+    if (typeof v !== "string") return v;
+    const s = v.trim();
+    if (!s) return v;
+    const first = s[0];
+    const last = s[s.length - 1];
+    const looks =
+      (first === "[" && last === "]") ||
+      (first === "{" && last === "}") ||
+      (first === "\"" && last === "\"");
+    if (!looks) return v;
+    const parsed = safelyParseJson(s);
+    return parsed === null ? v : parsed;
+  }
+
+  const NUMERIC_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+  function coerceNumberLike(v) {
+    if (typeof v !== "string") return v;
+    const s = v.trim();
+    if (!s) return v;
+    if (!NUMERIC_RE.test(s)) return v;
+    const n = Number(s);
+    if (!Number.isFinite(n)) return v;
+    const isIntegerLike = /^[+-]?\d+$/.test(s);
+    if (isIntegerLike) {
+      try {
+        const bi = BigInt(s);
+        const abs = bi < 0n ? -bi : bi;
+        if (abs > BigInt(Number.MAX_SAFE_INTEGER)) return v;
+      } catch {
+        return v;
+      }
+    }
+    return n;
+  }
+
+  function coerceDeep(v) {
+    v = parseJsonStringIfLikely(v);
+    if (Array.isArray(v)) return v.map(coerceDeep);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
+      return out;
+    }
+    return coerceNumberLike(v);
+  }
+
+  function splitTopLevel(str, sepChar) {
+    const out = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch === "(") depth++;
+      else if (ch === ")") depth = Math.max(0, depth - 1);
+      else if (ch === sepChar && depth === 0) {
+        out.push(str.slice(start, i));
+        start = i + 1;
+      }
+    }
+    out.push(str.slice(start));
+    return out.map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+
+  function stripIdentifierQuotes(name) {
+    const t = String(name ?? "").trim();
+    if (t.length >= 2) {
+      const first = t[0];
+      const last = t[t.length - 1];
+      if ((first === "`" && last === "`") || (first === "\"" && last === "\"")) {
+        return t.slice(1, -1);
+      }
+    }
+    return t;
+  }
+
+  function parseChType(typeStr) {
+    const s = String(typeStr ?? "").trim();
+    if (!s) return null;
+
+    const unwrap = (prefix) => {
+      if (!s.startsWith(prefix + "(") || !s.endsWith(")")) return null;
+      return s.slice(prefix.length + 1, -1).trim();
+    };
+
+    const innerNullable = unwrap("Nullable");
+    if (innerNullable) return parseChType(innerNullable);
+
+    const innerLc = unwrap("LowCardinality");
+    if (innerLc) return parseChType(innerLc);
+
+    const innerArray = unwrap("Array");
+    if (innerArray) return { kind: "Array", inner: parseChType(innerArray) };
+
+    const innerMap = unwrap("Map");
+    if (innerMap) {
+      const parts = splitTopLevel(innerMap, ",");
+      return { kind: "Map", key: parseChType(parts[0]), value: parseChType(parts[1]) };
+    }
+
+    const innerTuple = unwrap("Tuple");
+    if (innerTuple) {
+      const parts = splitTopLevel(innerTuple, ",");
+      const fields = parts.map((part, idx) => {
+        let depth = 0;
+        let splitAt = -1;
+        for (let i = 0; i < part.length; i++) {
+          const ch = part[i];
+          if (ch === "(") depth++;
+          else if (ch === ")") depth = Math.max(0, depth - 1);
+          else if (depth === 0 && /\s/.test(ch)) {
+            splitAt = i;
+            break;
+          }
+        }
+
+        if (splitAt > 0) {
+          const maybeNameRaw = part.slice(0, splitAt).trim();
+          const maybeName = stripIdentifierQuotes(maybeNameRaw);
+          const rest = part.slice(splitAt).trim();
+          if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(maybeName) && rest) {
+            return { name: maybeName, type: parseChType(rest) };
+          }
+        }
+        return { name: `_${idx}`, type: parseChType(part) };
+      });
+      return { kind: "Tuple", fields };
+    }
+
+    return { kind: "Scalar", name: s };
+  }
+
+  function coerceDeepTyped(v, typeAst) {
+    v = parseJsonStringIfLikely(v);
+    if (!typeAst) return coerceDeep(v);
+
+    if (v === null || v === undefined) return v;
+
+    if (typeAst.kind === "Tuple") {
+      if (Array.isArray(v)) {
+        const out = {};
+        const fields = Array.isArray(typeAst.fields) ? typeAst.fields : [];
+        for (let i = 0; i < fields.length; i++) {
+          const f = fields[i];
+          out[String(f.name ?? `_${i}`)] = coerceDeepTyped(v[i], f.type);
+        }
+        return out;
+      }
+      if (v && typeof v === "object") {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
+        return out;
+      }
+      return coerceNumberLike(v);
+    }
+
+    if (typeAst.kind === "Array") {
+      if (Array.isArray(v)) return v.map((x) => coerceDeepTyped(x, typeAst.inner));
+      return coerceDeep(v);
+    }
+
+    if (typeAst.kind === "Map") {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = coerceDeepTyped(val, typeAst.value);
+        return out;
+      }
+      if (Array.isArray(v)) {
+        return v.map((pair) => {
+          if (!Array.isArray(pair) || pair.length < 2) return coerceDeep(pair);
+          return [coerceDeepTyped(pair[0], typeAst.key), coerceDeepTyped(pair[1], typeAst.value)];
+        });
+      }
+      return coerceDeep(v);
+    }
+
+    return coerceNumberLike(v);
+  }
+
+  function formatCellForDisplay(raw, colIndex, pretty = false) {
+    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
+    if (typed === null || typed === undefined) return "";
+    if (typeof typed === "string") return typed;
+    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
+    return JSON.stringify(typed, null, pretty ? 2 : 0);
+  }
+
+  function setResultColumnsText() {
+    if (!dom.resultColumnsText) return;
+    const n = resultColumns.length || 0;
+    util.setText(dom.resultColumnsText, `${n} ${n === 1 ? "column" : "columns"}`);
+  }
+
   function renderTableMeta(columns, types) {
     resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
     resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+    resultTypeAsts = resultTypes.map(parseChType);
 
-    if (dom.resultColumnsText) {
-      const n = resultColumns.length || 0;
-      util.setText(dom.resultColumnsText, `${n} ${n === 1 ? "column" : "columns"}`);
-    }
+    resetTableMode();
+    setResultColumnsText();
     clearTable();
 
     if (!dom.resultTableHead) return;
@@ -101,80 +339,170 @@
     setResultsVisible(true);
   }
 
-  function parseJsonIfLikely(value) {
-    if (typeof value !== "string") return null;
-    const s = value.trim();
-    if (!s) return null;
-    if (!(s.startsWith("{") || s.startsWith("["))) return null;
-    if (s.includes("\n")) return null;
-    try {
-      return JSON.parse(s);
-    } catch {
-      return null;
-    }
+  function enqueueRowForRender(row) {
+    pendingRows.push(row);
+    scheduleFlush();
   }
 
-  function cellToDisplayNode(value, { allowPrettyJson = false } = {}) {
-    if (value === null || value === undefined) return document.createTextNode("");
-    if (typeof value === "string") {
-      const parsed = allowPrettyJson ? parseJsonIfLikely(value) : null;
-      if (parsed && (Array.isArray(parsed) || (parsed && typeof parsed === "object"))) {
-        const pre = document.createElement("pre");
-        util.renderPrettyJson(pre, parsed);
-        return pre;
-      }
-      return document.createTextNode(value);
-    }
-    if (typeof value === "number" || typeof value === "boolean") return document.createTextNode(String(value));
-    if (typeof value === "object") {
-      if (allowPrettyJson) {
-        const pre = document.createElement("pre");
-        util.renderPrettyJson(pre, value);
-        return pre;
-      }
-      return document.createTextNode(JSON.stringify(value));
-    }
-    return document.createTextNode(String(value));
+  function scheduleFlush() {
+    if (scheduledFlush) return;
+    scheduledFlush = true;
+    flushRafId = requestAnimationFrame(flushPendingRows);
   }
 
-  function appendRows(rowsChunk) {
-    if (!Array.isArray(rowsChunk) || !dom.resultTableBody) return;
+  function flushPendingRows() {
+    scheduledFlush = false;
+    if (isVerticalResults) {
+      pendingRows.length = 0;
+      return;
+    }
 
-    const allowPrettySingleCell =
-      resultColumns.length === 1 &&
-      allResultRows.length === 0 &&
-      rowsChunk.length === 1;
+    if (pendingRows.length === 0) return;
+    if (!dom.resultTableBody) return;
 
     const frag = document.createDocumentFragment();
+    const toRender = Math.min(flushBatchSize, pendingRows.length);
 
-    for (const row of rowsChunk) {
-      if (!Array.isArray(row)) continue;
-      allResultRows.push(row);
-
+    for (let i = 0; i < toRender; i++) {
+      const row = pendingRows.shift();
       const tr = document.createElement("tr");
-      for (let c = 0; c < row.length; c++) {
+
+      if (Array.isArray(row)) {
+        for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
+          const td = document.createElement("td");
+          td.textContent = formatCellForDisplay(row[columnIndex], columnIndex, false);
+          tr.appendChild(td);
+        }
+      } else {
         const td = document.createElement("td");
-        const node = cellToDisplayNode(row[c], { allowPrettyJson: allowPrettySingleCell });
-        td.appendChild(node);
+        td.textContent = String(row);
         tr.appendChild(td);
       }
+
       frag.appendChild(tr);
     }
 
     dom.resultTableBody.appendChild(frag);
+    if (pendingRows.length > 0) scheduleFlush();
+  }
+
+  function appendRows(rowsChunk) {
+    if (!Array.isArray(rowsChunk)) return;
+    for (const row of rowsChunk) {
+      if (!Array.isArray(row)) continue;
+      allResultRows.push(row);
+      enqueueRowForRender(row);
+    }
     setResultsVisible(true);
     updateCopyButtonState();
   }
 
+  function renderVerticalSingleRow(row) {
+    if (!dom.resultTableHead || !dom.resultTableBody) return;
+
+    isVerticalResults = true;
+    pendingRows.length = 0;
+    scheduledFlush = false;
+    if (flushRafId) {
+      cancelAnimationFrame(flushRafId);
+      flushRafId = 0;
+    }
+
+    const tableEl = dom.resultTableHead.closest("table");
+    if (tableEl) tableEl.classList.add("resultTable--vertical");
+
+    const headRow = document.createElement("tr");
+    const th1 = document.createElement("th");
+    th1.textContent = "Column";
+    const th2 = document.createElement("th");
+    th2.textContent = "Value";
+    headRow.appendChild(th1);
+    headRow.appendChild(th2);
+
+    dom.resultTableHead.innerHTML = "";
+    dom.resultTableHead.appendChild(headRow);
+
+    dom.resultTableBody.innerHTML = "";
+    const frag = document.createDocumentFragment();
+
+    for (let i = 0; i < resultColumns.length; i++) {
+      const tr = document.createElement("tr");
+
+      const th = document.createElement("th");
+      const colName = String(resultColumns[i] ?? "");
+      th.textContent = colName;
+      th.title = colName;
+
+      const td = document.createElement("td");
+      td.textContent = formatCellForDisplay(Array.isArray(row) ? row[i] : null, i, true);
+
+      tr.appendChild(th);
+      tr.appendChild(td);
+      frag.appendChild(tr);
+    }
+
+    dom.resultTableBody.appendChild(frag);
+  }
+
+  function maybeSwitchToVerticalSingleRow() {
+    if (isVerticalResults) return;
+    if (!Array.isArray(resultColumns) || resultColumns.length < 2) return;
+    if (!Array.isArray(allResultRows) || allResultRows.length !== 1) return;
+    renderVerticalSingleRow(allResultRows[0]);
+  }
+
+  function maybePrettifySingleRowComplexCells() {
+    if (isVerticalResults) return;
+    if (!Array.isArray(resultColumns) || resultColumns.length !== 1) return;
+    if (!Array.isArray(allResultRows) || allResultRows.length !== 1) return;
+    if (!dom.resultTableBody) return;
+
+    const row = allResultRows[0];
+    const raw = Array.isArray(row) ? row[0] : row;
+    const typed = coerceDeepTyped(raw, resultTypeAsts[0] || null);
+    if (!typed || typeof typed !== "object") return;
+
+    if (scheduledFlush || pendingRows.length) flushPendingRows();
+
+    const td = dom.resultTableBody.querySelector("tr td");
+    if (!td) {
+      requestAnimationFrame(() => {
+        const td2 = dom.resultTableBody ? dom.resultTableBody.querySelector("tr td") : null;
+        if (td2) td2.textContent = formatCellForDisplay(raw, 0, true);
+      });
+      return;
+    }
+    td.textContent = formatCellForDisplay(raw, 0, true);
+  }
+
+  function finalizeAfterDone() {
+    if (scheduledFlush || pendingRows.length) flushPendingRows();
+    maybeSwitchToVerticalSingleRow();
+    maybePrettifySingleRowComplexCells();
+  }
+
   function buildCopyValue(value) {
     if (value === null || value === undefined) return "";
-    if (typeof value === "string") {
-      const parsed = parseJsonIfLikely(value);
-      if (parsed) return JSON.stringify(parsed, null, 2);
-      return value;
+    const typed = coerceDeepTyped(value, null);
+    if (typeof typed === "string") {
+      const parsed = safelyParseJson(typed);
+      if (parsed && (Array.isArray(parsed) || (parsed && typeof parsed === "object"))) {
+        return JSON.stringify(parsed, null, 2);
+      }
+      return typed;
     }
-    if (typeof value === "number" || typeof value === "boolean") return String(value);
-    return JSON.stringify(value, null, 2);
+    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
+    return JSON.stringify(typed, null, 2);
+  }
+
+  function rowToObject(row) {
+    const obj = {};
+    for (let i = 0; i < resultColumns.length; i++) {
+      const key = String(resultColumns[i] ?? "");
+      const rawVal = Array.isArray(row) ? row[i] : (i === 0 ? row : null);
+      obj[key] = coerceDeepTyped(rawVal, resultTypeAsts[i] || null);
+    }
+    return obj;
   }
 
   function buildCopyJsonText() {
@@ -186,26 +514,23 @@
     if (allResultRows.length === 1 && resultColumns.length === 1) {
       const row = allResultRows[0];
       const v = Array.isArray(row) ? row[0] : row;
-      return buildCopyValue(v);
+      return buildCopyValue(coerceDeepTyped(v, resultTypeAsts[0] || null));
     }
 
     if (allResultRows.length === 1) {
       const row = allResultRows[0];
-      const obj = {};
-      for (let i = 0; i < resultColumns.length; i++) {
-        obj[resultColumns[i]] = Array.isArray(row) ? row[i] : null;
-      }
-      return JSON.stringify(obj, null, 2);
+      return JSON.stringify(rowToObject(row), null, 2);
     }
 
-    const objects = allResultRows.map((row) => {
-      const obj = {};
-      for (let i = 0; i < resultColumns.length; i++) {
-        obj[resultColumns[i]] = Array.isArray(row) ? row[i] : null;
-      }
-      return obj;
-    });
+    if (resultColumns.length === 1) {
+      const arr = allResultRows.map((r) => {
+        const v = Array.isArray(r) ? r[0] : r;
+        return coerceDeepTyped(v, resultTypeAsts[0] || null);
+      });
+      return JSON.stringify(arr, null, 2);
+    }
 
+    const objects = allResultRows.map(rowToObject);
     return JSON.stringify(objects, null, 2);
   }
 
@@ -223,7 +548,15 @@
     dom.copyJsonButton.disabled = !(hasError || hasRows || finishedLike);
   }
 
-  function pushResultsBlock(title, metaText, copyText, { expandedByDefault = false } = {}) {
+  function getRowCount() {
+    return Array.isArray(allResultRows) ? allResultRows.length : 0;
+  }
+
+  function getColCount() {
+    return Array.isArray(resultColumns) ? resultColumns.length : 0;
+  }
+
+  function pushResultsBlock(title, metaText, copyText, { expandedByDefault = false, errorText = "" } = {}) {
     ensureResultsStack();
     if (!resultsStackElement) return;
 
@@ -280,7 +613,7 @@
       }
     });
 
-    const err = dom.errorBanner && !dom.errorBanner.hidden ? String(dom.errorBanner.textContent || "") : "";
+    const err = String(errorText || "").trim();
     if (err) {
       const eb = document.createElement("div");
       eb.className = "errorBanner";
@@ -313,6 +646,10 @@
     if (!dom.liveResultsWrap) return;
     const hasBlocks = !!(resultsStackElement && resultsStackElement.childElementCount > 0);
     dom.liveResultsWrap.hidden = hasBlocks;
+    if (hasBlocks) {
+      if (dom.copyJsonButton) dom.copyJsonButton.hidden = true;
+      if (dom.resultColumnsText) dom.resultColumnsText.hidden = true;
+    }
     dom.copyJsonButton && (dom.copyJsonButton.disabled = true);
   }
 
@@ -320,10 +657,15 @@
     clearLiveResults,
     clearResultsStack,
     setError,
+    takeErrorText,
+    getErrorText,
     setStatus,
     renderTableMeta,
     appendRows,
+    finalizeAfterDone,
     buildCopyJsonText,
+    getRowCount,
+    getColCount,
     pushResultsBlock,
     setMultiqueryMode,
     hideLiveWrapIfStackHasBlocks,
