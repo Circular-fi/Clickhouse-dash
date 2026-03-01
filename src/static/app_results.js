@@ -607,7 +607,7 @@
       try {
         const text = copyText == null ? "" : String(copyText);
         await util.copyTextToClipboard(text);
-        util.flashButtonText(copyBtn, { copiedText: "Copied (multiquery)" });
+        util.flashButtonText(copyBtn, { copiedText: "Copied" });
       } catch {
         return;
       }

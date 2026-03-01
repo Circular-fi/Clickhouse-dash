@@ -649,7 +649,7 @@
     if (readRows != null) parts.push(`${formatShort(readRows)} row${readRows > 1 ? 's' : ''}`);
     if (readBytes != null) parts.push(`${formatBytesShort(readBytes)}`);;
     
-    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU - ${formatPercentFromCenti(cpuMaxCenti)}`);
+    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${formatPercentFromCenti(cpuMaxCenti)}`);
     if (memMax != null && memMax > 0) parts.push(`max RAM ${formatBytesShort(memMax)}`);
     if (thrMax != null && thrMax > 0) parts.push(`max thread${thrMax > 1 ? 's' : ''} ${thrMax}`);
     return parts.join(" · ");
