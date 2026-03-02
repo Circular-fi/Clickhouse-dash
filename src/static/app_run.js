@@ -114,16 +114,10 @@
 
     if (!Array.isArray(points) || points.length === 0) return;
 
-    const drawable = decimate(points, Math.max(80, Math.floor(w * 1.2)));
+    let drawable = decimate(points, Math.max(80, Math.floor(w * 1.2)));
     if (drawable.length === 1) {
-      const p = drawable[0];
-      const line = opts.lineColor || getCssVar("--accentBorder", "#2563eb");
-      ctx.globalAlpha = 0.70;
-      ctx.fillStyle = line;
-      ctx.beginPath();
-      ctx.arc(Math.floor((x0 + x1) * 0.5), Math.floor((y0 + y1) * 0.5), 3, 0, Math.PI * 2);
-      ctx.fill();
-      return;
+      const p0 = drawable[0];
+      drawable = [p0, { t: p0.t + 1, v: p0.v }];
     }
 
     const tMin = drawable[0].t;
