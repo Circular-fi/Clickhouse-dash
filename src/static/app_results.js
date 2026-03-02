@@ -604,12 +604,15 @@
     });
 
     copyBtn.addEventListener("click", async () => {
+      const text = copyText == null ? "" : String(copyText);
+      // Optimistic UI: flash immediately so the user gets feedback even if
+      // clipboard permissions cause delays.
+      util.flashButtonText(copyBtn, { copiedText: "Copied" });
       try {
-        const text = copyText == null ? "" : String(copyText);
         await util.copyTextToClipboard(text);
-        util.flashButtonText(copyBtn, { copiedText: "Copied" });
       } catch {
-        return;
+        // If copy fails, show a brief error then revert.
+        util.flashButtonText(copyBtn, { copiedText: "Copy failed", durationMs: 1500 });
       }
     });
 
@@ -774,7 +777,7 @@
     function updateMetaText() {
       const r = local.allRows.length;
       const c = local.columns.length;
-      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
+      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} × ${c} col${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
     }
 
     // Allow the runner to override the meta text at the end (e.g., include status/elapsed/cpu).
@@ -845,7 +848,13 @@
 
     copyBtn.addEventListener("click", async () => {
       const text = buildCopyJsonTextLocal();
-      try { await navigator.clipboard.writeText(text); } catch {}
+      // Optimistic UI feedback.
+      util.flashButtonText(copyBtn, { copiedText: "Copied" });
+      try {
+        await util.copyTextToClipboard(text);
+      } catch {
+        util.flashButtonText(copyBtn, { copiedText: "Copy failed", durationMs: 1500 });
+      }
     });
 
     // Mark as active and expanded

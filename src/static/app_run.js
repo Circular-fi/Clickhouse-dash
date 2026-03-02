@@ -479,12 +479,14 @@
   }
 
   async function handleCopyLiveJson() {
+    if (!dom.copyJsonButton) return;
+    const copyText = perQuerySink && perQuerySink.buildCopyJsonText ? perQuerySink.buildCopyJsonText() : results.buildCopyJsonText();
+    // Optimistic UI so feedback is visible even if clipboard permissions delay/fail.
+    util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     try {
-      const copyText = perQuerySink && perQuerySink.buildCopyJsonText ? perQuerySink.buildCopyJsonText() : results.buildCopyJsonText();
       await util.copyTextToClipboard(copyText);
-      util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     } catch {
-      return;
+      util.flashButtonText(dom.copyJsonButton, { copiedText: "Copy failed", durationMs: 1500 });
     }
   }
 

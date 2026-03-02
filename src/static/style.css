@@ -63,7 +63,7 @@
   --metricBg: rgba(11, 15, 20, 0.52);
 
   --rowHover: rgba(29, 78, 216, 0.08);
-  --rowDivider: rgba(148, 163, 184, 0.1);
+  --rowDivider: rgba(255, 255, 255, 0.02);
 
   --themeSelectArrow: color-mix(in srgb, var(--text) 72%, transparent);
 }
@@ -114,7 +114,7 @@
     --metricBg: rgba(255, 255, 255, 0.72);
 
     --rowHover: rgba(29, 78, 216, 0.06);
-    --rowDivider: rgba(15, 23, 42, 0.1);
+    --rowDivider: rgba(0, 0, 0, 0.04);
   }
 }
 
@@ -154,7 +154,7 @@ html[data-theme="dark"] {
   --metricBg: rgba(11, 15, 20, 0.52);
 
   --rowHover: rgba(29, 78, 216, 0.08);
-  --rowDivider: rgba(148, 163, 184, 0.1);
+  --rowDivider: rgba(255, 255, 255, 0.02);
 }
 
 html[data-theme="light"] {
@@ -196,7 +196,7 @@ html[data-theme="light"] {
   --metricBg: rgba(255, 255, 255, 0.72);
 
   --rowHover: rgba(29, 78, 216, 0.06);
-  --rowDivider: rgba(15, 23, 42, 0.1);
+  --rowDivider: rgba(0, 0, 0, 0.04);
 }
 
 html {
@@ -849,6 +849,8 @@ button.button:not(:disabled):hover {
   text-align: left;
   padding: 0.75rem 0.75rem;
   border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--rowDivider);
+  border-right: 1px solid var(--rowDivider);
   color: color-mix(in srgb, var(--text) 92%, transparent);
   font-weight: 950;
   white-space: nowrap;
@@ -856,10 +858,11 @@ button.button:not(:disabled):hover {
 
 .resultTable tbody td {
   padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--rowDivider);
+  border: 1px solid var(--rowDivider);
   vertical-align: top;
   white-space: pre;
 }
+
 
 .resultTable tbody tr:hover td {
   background: var(--rowHover);
