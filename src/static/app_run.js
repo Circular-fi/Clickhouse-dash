@@ -488,6 +488,24 @@
     }
   }
 
+
+  function tabifyLeadingIndent(text, tabWidth = 4) {
+    const src = String(text ?? "");
+    const lines = src.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      // Only convert leading indentation (spaces at line start)
+      const m = ln.match(/^( +)/);
+      if (!m) continue;
+      const lead = m[1];
+      const nTabs = Math.floor(lead.length / tabWidth);
+      if (nTabs <= 0) continue;
+      const restSpaces = lead.length % tabWidth;
+      lines[i] = "\t".repeat(nTabs) + " ".repeat(restSpaces) + ln.slice(lead.length);
+    }
+    return lines.join("\n");
+  }
+
   async function formatEditorSql() {
     const hostId = getSelectedHostId();
     const raw = dom.queryTextArea ? dom.queryTextArea.value : "";
@@ -507,13 +525,15 @@
     const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
     const joined = sql.joinSqlStatements(normalized);
 
-    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joined);
+    const joinedTabified = tabifyLeadingIndent(joined, 4);
+
+    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joinedTabified);
 
     storage.addHistoryEntry({
       ts_ms: Date.now(),
       host_id: hostId,
       sql_raw: trimmed,
-      sql_formatted: joined,
+      sql_formatted: joinedTabified,
     });
 
     return normalized;

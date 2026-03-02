@@ -774,7 +774,7 @@
     function updateMetaText() {
       const r = local.allRows.length;
       const c = local.columns.length;
-      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} × ${c} col${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
+      metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
     }
 
     // Allow the runner to override the meta text at the end (e.g., include status/elapsed/cpu).

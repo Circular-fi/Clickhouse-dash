@@ -491,6 +491,63 @@
       ta.selectionStart = Math.max(blockStart, newStart);
       ta.selectionEnd = Math.max(blockStart, newEnd);
     });
+
+    // Convert 4 leading spaces into a tab while typing (indentation only).
+    dom.queryTextArea.addEventListener("beforeinput", (e) => {
+      if (e.inputType !== "insertText" || e.data !== " ") return;
+
+      const ta = dom.queryTextArea;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      if (start == null || end == null || start !== end) return;
+
+      const value = String(ta.value || "");
+      const lineStart = value.lastIndexOf("\n", start - 1) + 1; // 0 if not found
+      const prefix = value.slice(lineStart, start);
+
+      // Only within indentation region (tabs/spaces only before cursor)
+      if (!/^[\t ]*$/.test(prefix)) return;
+
+      // Count consecutive spaces immediately before cursor in indentation prefix
+      let run = 0;
+      for (let i = prefix.length - 1; i >= 0; i--) {
+        if (prefix[i] === " ") run++;
+        else break;
+        if (run >= 4) break;
+      }
+
+      // If this keystroke would complete 4 spaces, replace them with a tab
+      if (run === 3) {
+        e.preventDefault();
+        const deleteFrom = start - 3;
+        try {
+          ta.focus();
+          ta.setSelectionRange(deleteFrom, start);
+          const ok = document.execCommand && document.execCommand("insertText", false, "\t");
+          if (ok) return;
+        } catch {
+          null;
+        }
+        // Fallback if execCommand isn't available
+        ta.setRangeText("\t", deleteFrom, start, "end");
+      }
+    });
+
+    // Copy: convert tabs to 4 spaces in clipboard to keep alignment when pasting elsewhere.
+    dom.queryTextArea.addEventListener("copy", (e) => {
+      const ta = dom.queryTextArea;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      if (start == null || end == null || start === end) return;
+      const selected = String(ta.value || "").slice(start, end);
+      if (!selected.includes("\t")) return;
+
+      const text = selected.replace(/\t/g, "    ");
+      if (e.clipboardData) {
+        e.preventDefault();
+        e.clipboardData.setData("text/plain", text);
+      }
+    });
   }
 
   function init() {
