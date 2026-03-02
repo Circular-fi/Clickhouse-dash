@@ -510,7 +510,8 @@
 
   async function formatEditorSql() {
     const hostId = getSelectedHostId();
-    const raw = dom.queryTextArea ? dom.queryTextArea.value : "";
+    const ta = dom.queryTextArea;
+    const raw = ta ? ta.value : "";
     const trimmed = String(raw || "").trim();
     if (!trimmed) throw new Error("Nothing to format.");
 
@@ -529,7 +530,76 @@
 
     const joinedTabified = tabifyLeadingIndent(joined, 4);
 
-    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, joinedTabified);
+    const view = (() => {
+      if (!ta) return null;
+      const start = Number.isFinite(ta.selectionStart) ? ta.selectionStart : 0;
+      const end = Number.isFinite(ta.selectionEnd) ? ta.selectionEnd : start;
+      const scrollTop = Number.isFinite(ta.scrollTop) ? ta.scrollTop : 0;
+      const scrollLeft = Number.isFinite(ta.scrollLeft) ? ta.scrollLeft : 0;
+
+      const toLineCol = (text, pos) => {
+        let line = 0;
+        let col = 0;
+        for (let i = 0; i < pos && i < text.length; i++) {
+          const ch = text[i];
+          if (ch === "\n") {
+            line++;
+            col = 0;
+          } else {
+            col++;
+          }
+        }
+        return { line, col };
+      };
+
+      return {
+        scrollTop,
+        scrollLeft,
+        startLc: toLineCol(raw, start),
+        endLc: toLineCol(raw, end),
+      };
+    })();
+
+    if (ta) {
+      util.replaceTextAreaValue(ta, joinedTabified);
+      if (view) {
+        const fromLineCol = (text, lc) => {
+          let line = 0;
+          let col = 0;
+          for (let i = 0; i < text.length; i++) {
+            if (line > lc.line) return i;
+            if (line === lc.line && col >= lc.col) return i;
+            const ch = text[i];
+            if (ch === "\n") {
+              line++;
+              col = 0;
+            } else {
+              col++;
+            }
+          }
+          return text.length;
+        };
+
+        const newStart = fromLineCol(joinedTabified, view.startLc);
+        const newEnd = fromLineCol(joinedTabified, view.endLc);
+        const applyView = () => {
+          try {
+            ta.setSelectionRange(newStart, newEnd);
+          } catch {
+            null;
+          }
+          const maxTop = Math.max(0, ta.scrollHeight - ta.clientHeight);
+          const maxLeft = Math.max(0, ta.scrollWidth - ta.clientWidth);
+          ta.scrollTop = Math.min(Math.max(0, view.scrollTop), maxTop);
+          ta.scrollLeft = Math.min(Math.max(0, view.scrollLeft), maxLeft);
+        };
+
+        requestAnimationFrame(() => {
+          applyView();
+          requestAnimationFrame(applyView);
+        });
+      }
+    }
 
     storage.addHistoryEntry({
       ts_ms: Date.now(),
