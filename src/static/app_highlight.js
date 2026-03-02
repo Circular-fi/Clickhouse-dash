@@ -524,9 +524,9 @@
       if (gutter) {
         const s = prevText;
         let lines = 1;
-        for (let i = 0; i < s.length; i++) if (s[i] === "") lines += 1;
+        for (let i = 0; i < s.length; i++) if (s[i] === "\n") lines += 1;
         let out = "";
-        for (let i = 1; i <= lines; i++) out += i + (i === lines ? "" : "");
+        for (let i = 1; i <= lines; i++) out += String(i) + (i === lines ? "" : "\n");
         gutter.textContent = out;
       }
     };

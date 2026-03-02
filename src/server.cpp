@@ -6,9 +6,6 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
-#include <clickhouse/columns/string.h>
-#include <clickhouse/block.h>
-
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -16,7 +13,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <limits>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -45,30 +41,6 @@ static std::string gen_query_id() {
 static int64_t now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
-
-static std::vector<std::string> split_csv(std::string_view s) {
-  auto trim_local = [](std::string_view in) -> std::string_view {
-    size_t a = 0;
-    while (a < in.size() && (in[a] == ' ' || in[a] == '\t' || in[a] == '\r' || in[a] == '\n')) ++a;
-    size_t b = in.size();
-    while (b > a && (in[b - 1] == ' ' || in[b - 1] == '\t' || in[b - 1] == '\r' || in[b - 1] == '\n')) --b;
-    return in.substr(a, b - a);
-  };
-
-  std::vector<std::string> out;
-  size_t i = 0;
-  while (i < s.size()) {
-    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == ',')) ++i;
-    if (i >= s.size()) break;
-    size_t j = i;
-    while (j < s.size() && s[j] != ',') ++j;
-    std::string v = std::string(trim_local(s.substr(i, j - i)));
-    if (!v.empty()) out.push_back(std::move(v));
-    i = j + 1;
-  }
-  out.erase(std::unique(out.begin(), out.end()), out.end());
-  return out;
 }
 
 static int64_t now_unix_sec() {
@@ -1598,63 +1570,6 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
 
       if (c == '(') {
         const std::string indent = current_line_indent(out);
-
-        auto last_ident_before_paren = [&](const std::string& buf) -> std::string {
-          size_t p = buf.size();
-          while (p > 0) {
-            const char cc = buf[p - 1];
-            if (cc == ' ' || cc == '\t' || cc == '\n' || cc == '\r') {
-              --p;
-              continue;
-            }
-            break;
-          }
-          const size_t end = p;
-          while (p > 0) {
-            const char cc = buf[p - 1];
-            if ((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z') || cc == '_') {
-              --p;
-              continue;
-            }
-            break;
-          }
-          if (p >= end) return std::string();
-          return std::string(buf.substr(p, end - p));
-        };
-
-        auto reindent_multiline = [&](std::string_view txt, const std::string& target_indent) -> std::string {
-          std::vector<std::string_view> lines;
-          size_t pos = 0;
-          while (pos <= txt.size()) {
-            const size_t nl = txt.find('\n', pos);
-            const bool has = nl != std::string_view::npos;
-            const size_t end = has ? nl : txt.size();
-            lines.push_back(txt.substr(pos, end - pos));
-            if (!has) break;
-            pos = nl + 1;
-          }
-
-          size_t min_ws = std::numeric_limits<size_t>::max();
-          for (const auto& ln : lines) {
-            size_t k = 0;
-            while (k < ln.size() && (ln[k] == ' ' || ln[k] == '\t')) ++k;
-            if (k == ln.size()) continue;
-            min_ws = std::min(min_ws, k);
-          }
-          if (min_ws == std::numeric_limits<size_t>::max()) min_ws = 0;
-
-          std::string r;
-          r.reserve(txt.size() + lines.size() * target_indent.size() + 8);
-          for (size_t li = 0; li < lines.size(); ++li) {
-            std::string_view ln = lines[li];
-            if (ln.size() >= min_ws) ln = ln.substr(min_ws);
-            r.append(target_indent);
-            r.append(ln);
-            if (li + 1 < lines.size()) r.push_back('\n');
-          }
-          return r;
-        };
-
         out.push_back('(');
         ++i;
 
@@ -1676,17 +1591,6 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
           out.append(inner_trim);
           out.push_back('\n');
           out.append(indent);
-        } else if (looks_query && inner_trim.find('\n') != std::string_view::npos) {
-          const std::string prev = last_ident_before_paren(out.substr(0, out.size() - 1));
-          if (prev == "IN") {
-            const std::string inner_indent = indent + "    ";
-            out.push_back('\n');
-            out.append(reindent_multiline(inner_trim, inner_indent));
-            out.push_back('\n');
-            out.append(indent);
-          } else {
-            out.append(inner);
-          }
         } else {
           out.append(inner);
         }
@@ -2011,204 +1915,313 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   res.set_content(sb.GetString(), "application/json");
 }
 
+
+
 void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res) {
-  const auto host_it = req.params.find("host_id");
-  if (host_it == req.params.end() || host_it->second.empty()) {
-    return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  }
-  const std::string host_id = host_it->second;
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
-  if (!host) {
-    return json_error(res, 404, "unknown_host", "Unknown host_id.");
-  }
+  if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
+
+  std::string host_id = "default";
+  if (req.has_param("host_id")) host_id = req.get_param_value("host_id");
+
+  std::string types_csv = "keywords";
+  if (req.has_param("types")) types_csv = req.get_param_value("types");
 
   std::vector<std::string> types;
-  const auto types_it = req.params.find("types");
-  if (types_it == req.params.end() || types_it->second.empty()) {
-    types.push_back("keywords");
-  } else {
-    types = split_csv(types_it->second);
-  }
-  if (types.empty()) {
-    return json_error(res, 400, "missing_types", "Missing types.");
-  }
-
-  const int64_t generated_at = now_ms();
-  const int64_t ttl_ms = 10 * 60 * 1000;
-
-  struct TypeResult {
-    bool ok = false;
-    bool stale = false;
-    int64_t updated_at_ms = 0;
-    std::vector<std::string> items;
-    std::string error_code;
-    std::string error_message;
-  };
-
-  std::unordered_map<std::string, TypeResult> results;
-  results.reserve(types.size());
-
-  for (const auto& t : types) {
-    results.emplace(t, TypeResult{});
-  }
-
-  std::unordered_map<std::string, MetaCacheEntry> cached;
   {
-    std::lock_guard<std::mutex> lk(meta_mu_);
-    auto hit = meta_cache_.find(host_id);
-    if (hit != meta_cache_.end()) cached = hit->second;
-  }
-
-  auto get_cached = [&](const std::string& type) -> std::optional<MetaCacheEntry> {
-    auto it = cached.find(type);
-    if (it == cached.end()) return std::nullopt;
-    return it->second;
-  };
-
-  auto set_cache = [&](const std::string& type, MetaCacheEntry e) {
-    std::lock_guard<std::mutex> lk(meta_mu_);
-    meta_cache_[host_id][type] = std::move(e);
-  };
-
-  std::unordered_map<std::string, bool> should_fetch;
-  should_fetch.reserve(types.size());
-  for (const auto& type : types) {
-    const auto ce = get_cached(type);
-    const bool fresh = ce && (generated_at - ce->fetched_at_ms) <= ttl_ms;
-    should_fetch[type] = !fresh;
-    if (fresh) {
-      auto& r = results[type];
-      r.ok = true;
-      r.stale = false;
-      r.updated_at_ms = ce->updated_at_ms;
-      r.items = ce->items;
-    }
-  }
-
-  std::string client_err;
-  std::shared_ptr<clickhouse::Client> client;
-  for (const auto& type : types) {
-    if (!should_fetch[type]) continue;
-    if (type != "keywords") {
-      auto& r = results[type];
-      r.ok = false;
-      r.error_code = "unknown_type";
-      r.error_message = "Unknown metadata type.";
-      continue;
-    }
-
-    if (!client) {
-      client = make_client_from_uri(
-        host->system_uri,
-        std::chrono::seconds(3),
-        std::chrono::seconds(3),
-        std::chrono::seconds(3),
-        &client_err
-      );
-      if (!client) {
-        auto& r = results[type];
-        r.ok = false;
-        r.error_code = "host_down";
-        r.error_message = "Could not connect to host.";
+    std::string cur;
+    for (char c : types_csv) {
+      if (c == ',') {
+        if (!cur.empty()) types.push_back(cur);
+        cur.clear();
         continue;
       }
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+      cur.push_back(c);
     }
-
-    try {
-      std::vector<std::string> items;
-      client->Select("SELECT keyword FROM system.keywords", [&items](const clickhouse::Block& block) {
-        if (block.GetColumnCount() < 1) return;
-        const auto col = block[0]->As<clickhouse::ColumnString>();
-        if (!col) return;
-        const size_t n = col->Size();
-        for (size_t i = 0; i < n; ++i) {
-          const auto sv = col->At(i);
-          items.emplace_back(sv.data(), sv.size());
-        }
-      });
-
-      std::sort(items.begin(), items.end());
-      items.erase(std::unique(items.begin(), items.end()), items.end());
-
-      MetaCacheEntry e;
-      e.fetched_at_ms = generated_at;
-      e.updated_at_ms = generated_at;
-      e.items = items;
-      set_cache(type, e);
-
-      auto& r = results[type];
-      r.ok = true;
-      r.stale = false;
-      r.updated_at_ms = e.updated_at_ms;
-      r.items = std::move(items);
-    } catch (const std::exception& e) {
-      auto& r = results[type];
-      r.ok = false;
-      r.error_code = "clickhouse_error";
-      r.error_message = e.what();
-      const auto ce = get_cached(type);
-      if (ce) {
-        r.ok = true;
-        r.stale = true;
-        r.updated_at_ms = ce->updated_at_ms;
-        r.items = ce->items;
-      }
-    }
+    if (!cur.empty()) types.push_back(cur);
   }
+  if (types.empty()) types.push_back("keywords");
 
-  bool any_ok = false;
-  for (const auto& [_, r] : results) {
-    if (r.ok) { any_ok = true; break; }
-  }
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "unknown host_id");
+
+  const uint64_t now_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+  ).count();
+  const uint64_t ttl_ms = 10ULL * 60ULL * 1000ULL;
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+
   w.StartObject();
-  w.Key("version"); w.Int(1);
+  w.Key("version"); w.Uint(1);
   w.Key("host_id"); w.String(host_id.c_str());
-  w.Key("generated_at_ms"); w.Int64(generated_at);
+  w.Key("generated_at_ms"); w.Uint64(now_ms);
 
   w.Key("data");
   w.StartObject();
-  for (const auto& type : types) {
-    const auto it = results.find(type);
-    if (it == results.end()) continue;
-    const auto& r = it->second;
-    if (!r.ok) continue;
-    w.Key(type.c_str());
-    w.StartObject();
-    w.Key("updated_at_ms"); w.Int64(r.updated_at_ms);
-    if (r.stale) { w.Key("stale"); w.Bool(true); }
-    w.Key("items");
-    w.StartArray();
-    for (const auto& s : r.items) w.String(s.c_str());
-    w.EndArray();
-    w.EndObject();
+
+  struct ErrItem { std::string type; std::string code; std::string message; bool stale = false; };
+  std::vector<ErrItem> errors;
+
+  auto ensure_keywords = [&]() -> std::optional<MetaKeywords> {
+    const std::string key = host_id + "|keywords";
+    MetaCacheEntry cached;
+    bool has_cached = false;
+    {
+      std::lock_guard<std::mutex> lk(meta_mu_);
+      auto it = meta_cache_.find(key);
+      if (it != meta_cache_.end()) {
+        cached = it->second;
+        has_cached = it->second.has_value;
+      }
+    }
+
+    const bool fresh = has_cached && (now_ms - cached.fetched_at_ms) <= ttl_ms;
+    if (fresh) return cached.keywords;
+
+    MetaKeywords out;
+    out.updated_at_ms = now_ms;
+
+    std::string err;
+    auto client = make_client_from_uri(
+        host->runner_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(10),
+        std::chrono::seconds(10),
+        &err
+    );
+    if (!client) {
+      if (has_cached) {
+        errors.push_back({"keywords", "clickhouse_connect", err, true});
+        MetaCacheEntry upd = cached;
+        upd.stale = true;
+        {
+          std::lock_guard<std::mutex> lk(meta_mu_);
+          meta_cache_[key] = upd;
+        }
+        return cached.keywords;
+      }
+      errors.push_back({"keywords", "clickhouse_connect", err, false});
+      return std::nullopt;
+    }
+
+    try {
+      client->Select("SELECT keyword FROM system.keywords", [&](const clickhouse::Block& b) {
+        if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
+        auto col = b[0]->As<clickhouse::ColumnString>();
+        if (!col) return;
+        const size_t n = b.GetRowCount();
+        out.items.reserve(out.items.size() + n);
+        for (size_t i = 0; i < n; ++i) {
+          const std::string_view sv = col->At(i);
+          out.items.emplace_back(sv.data(), sv.size());
+        }
+      });
+    } catch (const std::exception& e) {
+      if (has_cached) {
+        errors.push_back({"keywords", "clickhouse_error", e.what(), true});
+        MetaCacheEntry upd = cached;
+        upd.stale = true;
+        {
+          std::lock_guard<std::mutex> lk(meta_mu_);
+          meta_cache_[key] = upd;
+        }
+        return cached.keywords;
+      }
+      errors.push_back({"keywords", "clickhouse_error", e.what(), false});
+      return std::nullopt;
+    }
+
+    MetaCacheEntry entry;
+    entry.fetched_at_ms = now_ms;
+    entry.has_value = true;
+    entry.stale = false;
+    entry.keywords = out;
+    {
+      std::lock_guard<std::mutex> lk(meta_mu_);
+      meta_cache_[key] = entry;
+    }
+    return out;
+  };
+
+  auto ensure_functions = [&]() -> std::optional<MetaFunctions> {
+    const std::string key = host_id + "|functions";
+    MetaCacheEntry cached;
+    bool has_cached = false;
+    {
+      std::lock_guard<std::mutex> lk(meta_mu_);
+      auto it = meta_cache_.find(key);
+      if (it != meta_cache_.end()) {
+        cached = it->second;
+        has_cached = it->second.has_value;
+      }
+    }
+
+    const bool fresh = has_cached && (now_ms - cached.fetched_at_ms) <= ttl_ms;
+    if (fresh) return cached.functions;
+
+    MetaFunctions out;
+    out.updated_at_ms = now_ms;
+
+    std::string err;
+    auto client = make_client_from_uri(
+        host->runner_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(10),
+        std::chrono::seconds(10),
+        &err
+    );
+    if (!client) {
+      if (has_cached) {
+        errors.push_back({"functions", "clickhouse_connect", err, true});
+        MetaCacheEntry upd = cached;
+        upd.stale = true;
+        {
+          std::lock_guard<std::mutex> lk(meta_mu_);
+          meta_cache_[key] = upd;
+        }
+        return cached.functions;
+      }
+      errors.push_back({"functions", "clickhouse_connect", err, false});
+      return std::nullopt;
+    }
+
+    try {
+      client->Select("SELECT name, is_aggregate, case_insensitive FROM system.functions", [&](const clickhouse::Block& b) {
+        if (b.GetRowCount() == 0 || b.GetColumnCount() < 3) return;
+        auto col_name = b[0]->As<clickhouse::ColumnString>();
+        auto col_agg = b[1]->As<clickhouse::ColumnUInt8>();
+        auto col_ci = b[2]->As<clickhouse::ColumnUInt8>();
+        if (!col_name || !col_agg || !col_ci) return;
+        const size_t n = b.GetRowCount();
+        out.items.reserve(out.items.size() + n);
+        for (size_t i = 0; i < n; ++i) {
+          const std::string_view sv = col_name->At(i);
+          MetaFunction f;
+          f.name.assign(sv.data(), sv.size());
+          f.is_aggregate = col_agg->At(i) != 0;
+          f.case_insensitive = col_ci->At(i) != 0;
+          out.items.push_back(std::move(f));
+        }
+      });
+    } catch (const std::exception& e) {
+      if (has_cached) {
+        errors.push_back({"functions", "clickhouse_error", e.what(), true});
+        MetaCacheEntry upd = cached;
+        upd.stale = true;
+        {
+          std::lock_guard<std::mutex> lk(meta_mu_);
+          meta_cache_[key] = upd;
+        }
+        return cached.functions;
+      }
+      errors.push_back({"functions", "clickhouse_error", e.what(), false});
+      return std::nullopt;
+    }
+
+    MetaCacheEntry entry;
+    entry.fetched_at_ms = now_ms;
+    entry.has_value = true;
+    entry.stale = false;
+    entry.functions = out;
+    {
+      std::lock_guard<std::mutex> lk(meta_mu_);
+      meta_cache_[key] = entry;
+    }
+    return out;
+  };
+
+  for (const auto& t : types) {
+    if (t == "keywords") {
+      auto val = ensure_keywords();
+      if (!val) continue;
+      bool stale = false;
+      {
+        std::lock_guard<std::mutex> lk(meta_mu_);
+        auto it = meta_cache_.find(host_id + "|keywords");
+        stale = it != meta_cache_.end() && it->second.stale;
+      }
+      w.Key("keywords");
+      w.StartObject();
+      w.Key("updated_at_ms"); w.Uint64(val->updated_at_ms);
+      if (stale) { w.Key("stale"); w.Bool(true); }
+      w.Key("items");
+      w.StartArray();
+      for (const auto& kw : val->items) w.String(kw.c_str());
+      w.EndArray();
+      w.EndObject();
+      continue;
+    }
+
+    if (t == "functions") {
+      auto val = ensure_functions();
+      if (!val) continue;
+      bool stale = false;
+      {
+        std::lock_guard<std::mutex> lk(meta_mu_);
+        auto it = meta_cache_.find(host_id + "|functions");
+        stale = it != meta_cache_.end() && it->second.stale;
+      }
+      w.Key("functions");
+      w.StartObject();
+      w.Key("updated_at_ms"); w.Uint64(val->updated_at_ms);
+      if (stale) { w.Key("stale"); w.Bool(true); }
+      w.Key("items");
+      w.StartArray();
+      for (const auto& fn : val->items) {
+        w.StartObject();
+        w.Key("name"); w.String(fn.name.c_str());
+        w.Key("is_aggregate"); w.Bool(fn.is_aggregate);
+        w.Key("case_insensitive"); w.Bool(fn.case_insensitive);
+        w.EndObject();
+      }
+      w.EndArray();
+      w.EndObject();
+      continue;
+    }
+
+    errors.push_back({t, "unsupported_type", "unsupported type", false});
   }
+
   w.EndObject();
 
   w.Key("errors");
   w.StartArray();
-  for (const auto& type : types) {
-    const auto it = results.find(type);
-    if (it == results.end()) continue;
-    const auto& r = it->second;
-    if (r.ok && !r.stale) continue;
-    if (r.error_code.empty()) continue;
+  for (const auto& e : errors) {
     w.StartObject();
-    w.Key("type"); w.String(type.c_str());
-    w.Key("error_code"); w.String(r.error_code.c_str());
-    w.Key("message"); w.String(r.error_message.c_str());
-    if (r.stale) { w.Key("stale_used"); w.Bool(true); }
+    w.Key("type"); w.String(e.type.c_str());
+    w.Key("code"); w.String(e.code.c_str());
+    w.Key("message"); w.String(e.message.c_str());
+    w.Key("stale"); w.Bool(e.stale);
     w.EndObject();
   }
   w.EndArray();
 
   w.EndObject();
 
-  res.status = any_ok ? 200 : 503;
+  if (!errors.empty()) {
+    bool has_data = sb.GetSize() > 0;
+    (void)has_data;
+  }
+
+  if (!errors.empty()) {
+    bool fatal = true;
+    for (const auto& e : errors) {
+      if (e.stale) { fatal = false; break; }
+    }
+    if (fatal) {
+      res.status = 503;
+      res.set_content(sb.GetString(), "application/json");
+      return;
+    }
+  }
+
+  res.status = 200;
   res.set_content(sb.GetString(), "application/json");
 }
+
+
 
 void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");

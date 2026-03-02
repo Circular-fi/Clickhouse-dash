@@ -56,6 +56,8 @@
     state.selectedHostId = hostId ? String(hostId) : null;
     if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
     applyHostPickerUi();
+    if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) ns.meta.hydrateFromStorage(state.selectedHostId);
+    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") ns.meta.maybeRefreshOnLoad();
   }
 
   function applyHostPickerUi() {
@@ -559,6 +561,10 @@
       }
     });
 
+    dom.queryTextArea.addEventListener("focus", () => {
+      if (ns.meta && typeof ns.meta.maybeRefreshOnUserAction === "function") ns.meta.maybeRefreshOnUserAction();
+    });
+
     if (ns.highlight && typeof ns.highlight.attach === "function") {
       const ctrl = ns.highlight.attach(dom.queryTextArea);
       if (ns.state) ns.state.highlightCtrl = ctrl || null;
@@ -570,6 +576,8 @@
 
     loadMeta();
     initEditor();
+
+    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") ns.meta.maybeRefreshOnLoad();
 
     if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);
 

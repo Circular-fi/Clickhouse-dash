@@ -46,8 +46,8 @@ public:
 
 private:
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
-  void handle_api_meta(const httplib::Request& req, httplib::Response& res);
   void handle_api_version(const httplib::Request& req, httplib::Response& res);
+  void handle_api_meta(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);
   void handle_api_health(const httplib::Request& req, httplib::Response& res);
@@ -58,6 +58,36 @@ private:
   void handle_query_stream(const httplib::Request& req, httplib::Response& res);
   void handle_query_cancel(const httplib::Request& req, httplib::Response& res);
 
+
+  struct MetaKeywords {
+    uint64_t updated_at_ms = 0;
+    std::vector<std::string> items;
+  };
+
+  struct MetaFunction {
+    std::string name;
+    bool is_aggregate = false;
+    bool case_insensitive = false;
+  };
+
+  struct MetaFunctions {
+    uint64_t updated_at_ms = 0;
+    std::vector<MetaFunction> items;
+  };
+
+  struct MetaCacheEntry {
+    uint64_t fetched_at_ms = 0;
+    bool has_value = false;
+    bool stale = false;
+    std::string error_code;
+    std::string error_message;
+    MetaKeywords keywords;
+    MetaFunctions functions;
+  };
+
+  std::mutex meta_mu_;
+  std::unordered_map<std::string, MetaCacheEntry> meta_cache_;
+
   AppConfig cfg_;
   httplib::Server http_;
 
@@ -66,15 +96,6 @@ private:
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;
-
-  struct MetaCacheEntry {
-    int64_t fetched_at_ms = 0;
-    int64_t updated_at_ms = 0;
-    std::vector<std::string> items;
-  };
-
-  std::mutex meta_mu_;
-  std::unordered_map<std::string, std::unordered_map<std::string, MetaCacheEntry>> meta_cache_;
 };
 
 } // namespace chdash

@@ -78,7 +78,7 @@
     const hostId = state.selectedHostId;
     if (!hostId) return;
     const types = ["keywords"].map(normalizeType);
-    const need = types.filter((t) => readClientUpdatedAt(hostId, t) === 0);
+    const need = types.filter((t) => shouldRefresh(hostId, t));
     if (!need.length) return;
     fetchAndStore(String(hostId), need);
   }
