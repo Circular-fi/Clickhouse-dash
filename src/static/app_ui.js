@@ -404,8 +404,73 @@
       });
     }
 
+    const replaceSelectionText = (ta, nextText) => {
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      try {
+        ta.focus();
+        ta.setSelectionRange(start, end);
+        const ok = document.execCommand && document.execCommand("insertText", false, nextText);
+        if (ok) return { start, end };
+      } catch {
+        null;
+      }
+      try {
+        ta.setRangeText(nextText, start, end, "end");
+        return { start, end };
+      } catch {
+        null;
+      }
+      const value = String(ta.value || "");
+      ta.value = value.slice(0, start) + nextText + value.slice(end);
+      const pos = start + nextText.length;
+      ta.selectionStart = pos;
+      ta.selectionEnd = pos;
+      return { start, end };
+    };
+
     dom.queryTextArea.addEventListener("keydown", (e) => {
-      if (e.key !== "Tab") return;
+      const key = e.key;
+      if (e.isComposing) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (key === "`" || key === "\"" || key === "'") {
+        const ta = dom.queryTextArea;
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        if (start == null || end == null || start === end) return;
+        e.preventDefault();
+        const value = String(ta.value || "");
+        const selected = value.slice(start, end);
+        replaceSelectionText(ta, key + selected + key);
+        ta.selectionStart = start + 1;
+        ta.selectionEnd = end + 1;
+        return;
+      }
+
+      if (key === "Enter") {
+        const ta = dom.queryTextArea;
+        const start = ta.selectionStart;
+        if (start == null) return;
+        const value = String(ta.value || "");
+        const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+        let i = lineStart;
+        while (i < value.length) {
+          const c = value[i];
+          if (c !== " " && c !== "\t") break;
+          i++;
+        }
+        const indent = value.slice(lineStart, i);
+        e.preventDefault();
+        const inserted = "\n" + indent;
+        const prev = replaceSelectionText(ta, inserted);
+        const pos = prev.start + inserted.length;
+        ta.selectionStart = pos;
+        ta.selectionEnd = pos;
+        return;
+      }
+
+      if (key !== "Tab") return;
 
       const ta = dom.queryTextArea;
       const value = String(ta.value || "");
@@ -434,14 +499,7 @@
 
       if (start === end) {
         if (!e.shiftKey) {
-          try {
-            ta.focus();
-            const ok = document.execCommand && document.execCommand("insertText", false, "\t");
-            if (ok) return;
-          } catch {
-            null;
-          }
-          ta.setRangeText("\t", start, end, "end");
+          replaceSelectionText(ta, "\t");
           return;
         }
 

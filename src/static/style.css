@@ -70,7 +70,7 @@
   --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
   --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
   --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
-  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
+  --sqlFunction: color-mix(in srgb, #a78bfa 75%, var(--text));
 }
 
 @media (prefers-color-scheme: light) {
@@ -1219,11 +1219,12 @@ button.button:not(:disabled):hover {
 .themeSelect.themeSelect--open .themeSelect__button {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  border-bottom: 0;
+  border-bottom-color: transparent;
   background: var(--buttonBg);
 }
 
 .themeSelect.themeSelect--closing .themeSelect__button {
+  border-bottom-color: transparent;
   background: var(--buttonBg);
 }
 
@@ -1413,7 +1414,7 @@ button.button:not(:disabled):hover {
 .picker__button[aria-expanded="true"] {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  border-bottom: 0;
+  border-bottom-color: transparent;
   background: var(--panel);
 }
 
