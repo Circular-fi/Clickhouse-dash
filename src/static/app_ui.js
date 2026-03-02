@@ -548,6 +548,10 @@
         e.clipboardData.setData("text/plain", text);
       }
     });
+
+    if (ns.highlight && typeof ns.highlight.attach === "function") {
+      ns.highlight.attach(dom.queryTextArea);
+    }
   }
 
   function init() {

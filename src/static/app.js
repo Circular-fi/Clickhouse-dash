@@ -46,6 +46,7 @@
       "app_dom.js",
       "app_state.js",
       "app_util.js",
+      "app_highlight.js",
       "app_sql.js",
       "app_api.js",
       "app_results.js",

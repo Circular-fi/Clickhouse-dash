@@ -66,6 +66,9 @@
   --rowDivider: rgba(255, 255, 255, 0.02);
 
   --themeSelectArrow: color-mix(in srgb, var(--text) 72%, transparent);
+
+  --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
+  --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
 }
 
 @media (prefers-color-scheme: light) {
@@ -318,6 +321,69 @@ body {
   tab-size: 4;
   -moz-tab-size: 4;
   overflow-wrap: anywhere;
+}
+
+.editorWrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: calc(100% - 3.25rem);
+  resize: vertical;
+  overflow: hidden;
+  border-radius: var(--radiusSm);
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+}
+
+.editorHighlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0.9rem;
+  border-radius: var(--radiusSm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.editorInput {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  resize: none;
+  -webkit-text-fill-color: transparent;
+}
+
+#queryTextArea.editorInput {
+  background: transparent;
+  border: 0;
+  color: transparent;
+}
+
+.editorInput::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  -webkit-text-fill-color: color-mix(in srgb, var(--muted) 78%, transparent);
+}
+
+.tok-str {
+  color: var(--sqlString);
+}
+
+.tok-com {
+  color: var(--sqlComment);
 }
 
 #queryTextArea::placeholder {
