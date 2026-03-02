@@ -6,6 +6,7 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <deque>
@@ -314,15 +315,15 @@ static std::string trim_sql(std::string sql) {
 }
 
 static std::string escape_for_clickhouse_string(std::string_view in) {
-  // Requirements:
-  //  1) remove/flatten newlines
-  //  2) escape backslashes
-  //  3) escape single quotes as \'
   std::string out;
   out.reserve(in.size() + 16);
-  for (char c : in) {
-    if (c == '\n' || c == '\r') {
-      out.push_back(' ');
+  for (size_t i = 0; i < in.size(); ++i) {
+    char c = in[i];
+    if (c == '\r') {
+      if (i + 1 < in.size() && in[i + 1] == '\n') {
+        ++i;
+      }
+      out.push_back('\n');
       continue;
     }
     if (c == '\\') {
@@ -515,7 +516,7 @@ static std::string pretty_array_arg(std::string_view arr_expr, const std::string
   auto items = split_top_level(inner, ',');
   if (items.size() <= 1) return t;
 
-  const std::string item_indent = base_indent + "  ";
+  const std::string item_indent = base_indent + "    ";
   std::ostringstream oss;
   oss << base_indent << "[\n";
   for (size_t i = 0; i < items.size(); ++i) {
@@ -599,6 +600,1060 @@ static bool has_top_level_comma(std::string_view s) {
   return false;
 }
 
+
+static size_t find_token_outside_strings(std::string_view s, std::string_view tok) {
+  bool in_str = false;
+  bool esc = false;
+  if (tok.empty()) return std::string::npos;
+  for (size_t i = 0; i + tok.size() <= s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (s.substr(i, tok.size()) == tok) return i;
+  }
+  return std::string::npos;
+}
+
+static int paren_delta_outside_strings(std::string_view s) {
+  bool in_str = false;
+  bool esc = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+  int delta = 0;
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+
+    if (in_line_comment) {
+      if (c == '\n') in_line_comment = false;
+      continue;
+    }
+
+    if (in_block_comment) {
+      if (c == '*' && i + 1 < s.size() && s[i + 1] == '/') {
+        in_block_comment = false;
+        ++i;
+      }
+      continue;
+    }
+
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+
+    if (c == '-' && i + 1 < s.size() && s[i + 1] == '-') {
+      in_line_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '*') {
+      in_block_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '(') ++delta;
+    else if (c == ')') --delta;
+  }
+
+  return delta;
+}
+
+struct BoolPart {
+  std::string op;
+  std::string text;
+};
+
+static bool is_word_char(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '`';
+}
+
+static std::vector<BoolPart> split_bool_ops_top_level(std::string_view s) {
+  std::vector<BoolPart> out;
+  size_t last = 0;
+
+  bool in_str = false;
+  bool esc = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+
+  int par = 0, br = 0, cr = 0;
+  std::string next_op;
+
+  auto flush = [&](size_t pos) {
+    BoolPart p;
+    p.op = next_op;
+    p.text = std::string(s.substr(last, pos - last));
+    out.push_back(std::move(p));
+    next_op.clear();
+  };
+
+  auto skip_ws = [&](size_t& i) {
+    while (i < s.size() && is_ascii_space(s[i])) ++i;
+  };
+
+  skip_ws(last);
+
+  for (size_t i = last; i < s.size(); ++i) {
+    const char c = s[i];
+
+    if (in_line_comment) {
+      if (c == '\n') in_line_comment = false;
+      continue;
+    }
+
+    if (in_block_comment) {
+      if (c == '*' && i + 1 < s.size() && s[i + 1] == '/') {
+        in_block_comment = false;
+        ++i;
+      }
+      continue;
+    }
+
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+
+    if (c == '-' && i + 1 < s.size() && s[i + 1] == '-') {
+      in_line_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '*') {
+      in_block_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == '[') ++br;
+    else if (c == ']' && br > 0) --br;
+    else if (c == '{') ++cr;
+    else if (c == '}' && cr > 0) --cr;
+
+    if (par != 0 || br != 0 || cr != 0) continue;
+
+    auto match_kw = [&](std::string_view kw) -> bool {
+      if (i + kw.size() > s.size()) return false;
+      for (size_t k = 0; k < kw.size(); ++k) {
+        const char a = s[i + k];
+        const char b = kw[k];
+        if (a != b && a != char(b + 32)) return false;
+      }
+      const char prev = (i == 0) ? ' ' : s[i - 1];
+      const char next = (i + kw.size() < s.size()) ? s[i + kw.size()] : ' ';
+      if (is_word_char(prev) || is_word_char(next)) return false;
+      return true;
+    };
+
+    if (match_kw("AND")) {
+      flush(i);
+      next_op = std::string(s.substr(i, 3));
+      size_t j = i + 3;
+      skip_ws(j);
+      last = j;
+      i = j ? (j - 1) : i;
+      continue;
+    }
+
+    if (match_kw("OR")) {
+      flush(i);
+      next_op = std::string(s.substr(i, 2));
+      size_t j = i + 2;
+      skip_ws(j);
+      last = j;
+      i = j ? (j - 1) : i;
+      continue;
+    }
+  }
+
+  BoolPart p;
+  p.op = next_op;
+  p.text = std::string(s.substr(last));
+  out.push_back(std::move(p));
+  return out;
+}
+
+
+
+static bool iequals_ascii(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    unsigned char ca = static_cast<unsigned char>(a[i]);
+    unsigned char cb = static_cast<unsigned char>(b[i]);
+    if (ca >= 'A' && ca <= 'Z') ca = static_cast<unsigned char>(ca + 32);
+    if (cb >= 'A' && cb <= 'Z') cb = static_cast<unsigned char>(cb + 32);
+    if (ca != cb) return false;
+  }
+  return true;
+}
+
+static bool is_where_terminator(std::string_view t) {
+  static const std::string_view kws[] = {
+      "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "UNION", "WINDOW", "PREWHERE", "SETTINGS", "FORMAT"};
+  for (auto kw : kws) {
+    if (t.size() >= kw.size() && t.substr(0, kw.size()) == kw) return true;
+  }
+  return false;
+}
+
+
+static std::string_view trim_view_ascii_spaces(std::string_view in) {
+  size_t b = 0;
+  while (b < in.size() && is_ascii_space(in[b])) ++b;
+  size_t e = in.size();
+  while (e > b && is_ascii_space(in[e - 1])) --e;
+  return in.substr(b, e - b);
+}
+
+
+
+static bool looks_like_query_block(std::string_view s) {
+  s = trim_view_ascii_spaces(s);
+  static const std::string_view kws[] = {"SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP"};
+  for (auto kw : kws) {
+    if (s.size() >= kw.size() && iequals_ascii(s.substr(0, kw.size()), kw)) return true;
+  }
+  return false;
+}
+
+static bool peel_one_outer_paren(std::string_view s, std::string_view& inner) {
+  s = trim_view_ascii_spaces(s);
+  if (s.size() < 2 || s.front() != '(' || s.back() != ')') return false;
+
+  bool in_str = false;
+  bool esc = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+  int par = 0;
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+
+    if (in_line_comment) {
+      if (c == '\n') in_line_comment = false;
+      continue;
+    }
+
+    if (in_block_comment) {
+      if (c == '*' && i + 1 < s.size() && s[i + 1] == '/') {
+        in_block_comment = false;
+        ++i;
+      }
+      continue;
+    }
+
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+
+    if (c == '-' && i + 1 < s.size() && s[i + 1] == '-') {
+      in_line_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '*') {
+      in_block_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (c == '(') ++par;
+    else if (c == ')') {
+      --par;
+      if (par == 0 && i != s.size() - 1) return false;
+    }
+  }
+
+  if (par != 0) return false;
+  inner = s.substr(1, s.size() - 2);
+  return true;
+}
+
+static std::string format_bool_expr(std::string_view expr, const std::string& base_indent);
+
+static bool peel_and_has_bool_ops(std::string_view expr, std::string_view& inner) {
+  if (!peel_one_outer_paren(expr, inner)) return false;
+  const auto parts = split_bool_ops_top_level(inner);
+  return parts.size() > 1;
+}
+
+static std::string format_bool_chain(std::string_view expr, const std::string& base_indent, std::string_view op) {
+  const auto parts = split_bool_ops_top_level(expr);
+  if (parts.size() < 2) return {};
+
+  for (size_t i = 1; i < parts.size(); ++i) {
+    if (!iequals_ascii(parts[i].op, op)) return {};
+  }
+
+  struct Operand {
+    std::string_view raw;
+    std::string_view inner;
+    bool multiline;
+  };
+
+  std::vector<Operand> ops;
+  ops.reserve(parts.size());
+  for (const auto& p : parts) {
+    std::string_view inner;
+    if (!peel_one_outer_paren(p.text, inner)) return {};
+    Operand o;
+    o.raw = trim_view_ascii_spaces(p.text);
+    o.inner = inner;
+    o.multiline = (inner.find('\n') != std::string_view::npos) || (split_bool_ops_top_level(inner).size() > 1);
+    ops.push_back(o);
+  }
+
+  auto emit_operand = [&](std::string& out, const Operand& o, const std::string& indent) {
+    if (!o.multiline) {
+      out.append(o.raw);
+      return;
+    }
+    out.push_back('(');
+    out.push_back('\n');
+    out.append(format_bool_expr(o.inner, indent + "    "));
+    out.push_back('\n');
+    out.append(indent);
+    out.push_back(')');
+  };
+
+  std::string out;
+  out.reserve(expr.size() + base_indent.size() * parts.size() + 64);
+
+  out.append(base_indent);
+  emit_operand(out, ops[0], base_indent);
+
+  for (size_t i = 1; i < ops.size(); ++i) {
+    out.push_back('\n');
+    out.append(base_indent);
+    out.append(parts[i].op);
+    out.push_back(' ');
+    if (!ops[i].multiline) {
+      out.append(ops[i].raw);
+      continue;
+    }
+    emit_operand(out, ops[i], base_indent);
+  }
+
+  return out;
+}
+
+static std::string format_bool_expr(std::string_view expr, const std::string& base_indent) {
+  expr = trim_view_ascii_spaces(expr);
+  if (expr.empty()) return base_indent;
+
+  if (auto f = format_bool_chain(expr, base_indent, "OR"); !f.empty()) return f;
+  if (auto f = format_bool_chain(expr, base_indent, "AND"); !f.empty()) return f;
+
+  std::string_view inner;
+  if (peel_one_outer_paren(expr, inner)) {
+    const auto inner_parts = split_bool_ops_top_level(inner);
+    if (inner_parts.size() > 1) {
+      std::string out;
+      out.reserve(base_indent.size() * 4 + expr.size() + 16);
+      out.append(base_indent);
+      out.push_back('(');
+      out.push_back('\n');
+      out.append(format_bool_expr(inner, base_indent + "    "));
+      out.push_back('\n');
+      out.append(base_indent);
+      out.push_back(')');
+      return out;
+    }
+  }
+
+  const auto parts = split_bool_ops_top_level(expr);
+  if (parts.empty()) {
+    std::string out;
+    out.reserve(base_indent.size() + expr.size());
+    out.append(base_indent);
+    out.append(expr);
+    return out;
+  }
+
+  std::string out;
+  out.reserve(base_indent.size() * parts.size() + expr.size() + 64);
+
+  {
+    std::string_view inner;
+    const std::string_view t0 = trim_view_ascii_spaces(parts[0].text);
+    if (peel_and_has_bool_ops(t0, inner)) {
+      out.append(base_indent);
+      out.push_back('(');
+      out.push_back('\n');
+      out.append(format_bool_expr(inner, base_indent + "    "));
+      out.push_back('\n');
+      out.append(base_indent);
+      out.push_back(')');
+    } else {
+      out.append(base_indent);
+      out.append(trim_ascii_spaces(parts[0].text));
+    }
+  }
+
+  for (size_t i = 1; i < parts.size(); ++i) {
+    std::string_view inner;
+    const std::string_view ti = trim_view_ascii_spaces(parts[i].text);
+    if (peel_and_has_bool_ops(ti, inner)) {
+      out.push_back('\n');
+      out.append(base_indent);
+      out.append(parts[i].op);
+      out.push_back(' ');
+      out.push_back('(');
+      out.push_back('\n');
+      out.append(format_bool_expr(inner, base_indent + "    "));
+      out.push_back('\n');
+      out.append(base_indent);
+      out.push_back(')');
+      continue;
+    }
+    out.push_back('\n');
+    out.append(base_indent);
+    out.append(parts[i].op);
+    out.push_back(' ');
+    out.append(trim_ascii_spaces(parts[i].text));
+  }
+  return out;
+}
+
+static bool is_bool_clause_start(std::string_view t, std::string_view& kw, std::string_view& rest) {
+  static const std::string_view kws[] = {"WHERE ", "HAVING ", "PREWHERE "};
+  for (auto k : kws) {
+    if (t.rfind(k, 0) == 0) {
+      kw = k.substr(0, k.size() - 1);
+      rest = t.substr(k.size());
+      return true;
+    }
+  }
+  return false;
+}
+
+static std::string reindent_where_and_join(std::string s) {
+  std::string out;
+  out.reserve(s.size() + 256);
+
+  bool in_clause = false;
+  int clause_depth = 0;
+  std::string clause_kw;
+  std::string clause_indent;
+  std::string clause_expr;
+
+  auto flush_clause = [&]() {
+    const std::string_view expr = trim_view_ascii_spaces(std::string_view(clause_expr));
+    const auto parts = split_bool_ops_top_level(expr);
+    const bool multiline = (expr.find('\n') != std::string_view::npos);
+
+    out.append(clause_indent);
+    out.append(clause_kw);
+    if (parts.size() <= 1 && !multiline) {
+      out.push_back(' ');
+      out.append(expr);
+      out.push_back('\n');
+    } else {
+      out.push_back('\n');
+      out.append(format_bool_expr(expr, clause_indent + "    "));
+      out.push_back('\n');
+    }
+
+    in_clause = false;
+    clause_depth = 0;
+    clause_kw.clear();
+    clause_indent.clear();
+    clause_expr.clear();
+  };
+
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    const size_t nl = s.find('\n', pos);
+    const bool has_nl = (nl != std::string::npos);
+    const size_t end = has_nl ? nl : s.size();
+    const std::string_view line = std::string_view(s).substr(pos, end - pos);
+
+    size_t ind_len = 0;
+    while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+    const std::string_view indent = line.substr(0, ind_len);
+    const std::string_view trimmed = line.substr(ind_len);
+
+    if (in_clause && clause_depth == 0 && (is_where_terminator(trimmed) || (!trimmed.empty() && trimmed.front() == ')'))) {
+      flush_clause();
+    }
+
+    if (!in_clause) {
+      std::string_view kw, rest;
+      if (is_bool_clause_start(trimmed, kw, rest)) {
+        in_clause = true;
+        clause_depth = 0;
+        clause_kw = std::string(kw);
+        clause_indent = std::string(indent);
+        clause_expr = std::string(rest);
+        clause_depth += paren_delta_outside_strings(trimmed);
+      } else {
+        const size_t join_pos = find_token_outside_strings(trimmed, " JOIN ");
+        const size_t on_pos = find_token_outside_strings(trimmed, " ON ");
+        if (join_pos != std::string::npos && on_pos != std::string::npos && join_pos < on_pos) {
+          std::string left = std::string(trimmed.substr(0, on_pos));
+          while (!left.empty() && (left.back() == ' ' || left.back() == '\t')) left.pop_back();
+          std::string right = std::string(trimmed.substr(on_pos + 1));
+          while (!right.empty() && (right.front() == ' ' || right.front() == '\t')) right.erase(right.begin());
+
+          out.append(indent);
+          out.append(left);
+          out.push_back('\n');
+
+          std::string_view rtrim = trim_view_ascii_spaces(right);
+          if (rtrim.rfind("ON ", 0) == 0) {
+            const std::string_view expr = rtrim.substr(3);
+            out.append(indent);
+            out.append("    ON");
+            out.push_back('\n');
+            out.append(format_bool_expr(expr, std::string(indent) + "        "));
+          } else {
+            out.append(indent);
+            out.append("    ");
+            out.append(right);
+          }
+
+          if (has_nl) out.push_back('\n');
+          pos = has_nl ? (nl + 1) : (s.size() + 1);
+          continue;
+        }
+
+        out.append(line);
+        if (has_nl) out.push_back('\n');
+      }
+    } else {
+      if (!clause_expr.empty()) clause_expr.push_back('\n');
+      clause_expr.append(trimmed);
+      clause_depth += paren_delta_outside_strings(trimmed);
+    }
+
+    pos = has_nl ? (nl + 1) : (s.size() + 1);
+  }
+
+  if (in_clause) flush_clause();
+
+  return out;
+}
+
+static std::string cascade_format_line(std::string_view line, size_t threshold) {
+  if (line.size() <= threshold) return std::string(line);
+
+  size_t ind_len = 0;
+  while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+  const std::string base_indent(line.substr(0, ind_len));
+  const std::string_view s = line.substr(ind_len);
+
+  bool in_str = false;
+  bool esc = false;
+  struct Group {
+    size_t start;
+    size_t commas;
+    bool child_break;
+  };
+  std::vector<Group> st;
+  std::vector<char> is_break_start(s.size(), 0);
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (c == '(') {
+      st.push_back(Group{i, 0, false});
+      continue;
+    }
+    if (c == ',' && !st.empty()) {
+      st.back().commas++;
+      continue;
+    }
+    if (c == ')' && !st.empty()) {
+      const Group g = st.back();
+      st.pop_back();
+      const size_t span = (i + 1) - g.start;
+      const bool brk = (span > threshold) && (g.commas > 0 || g.child_break);
+      if (brk) is_break_start[g.start] = 1;
+      if (!st.empty()) st.back().child_break = st.back().child_break || brk;
+      continue;
+    }
+  }
+
+  if (!st.empty()) return std::string(line);
+
+  auto is_clause = [&](std::string_view t) -> bool {
+    static const std::string_view kws[] = {"SELECT", "FROM", "WHERE", "AND", "OR", "GROUP", "HAVING", "ORDER", "LIMIT",
+                                           "INNER", "LEFT", "RIGHT", "FULL", "JOIN", "ON", "WITH"};
+    for (auto kw : kws) {
+      if (t.size() >= kw.size() && t.substr(0, kw.size()) == kw) return true;
+    }
+    return false;
+  };
+
+  const std::string_view t = trim_ascii_spaces(s);
+  if (is_clause(t)) return std::string(line);
+
+  std::string out;
+  out.reserve(line.size() + 128);
+  out.append(base_indent);
+
+  bool in2 = false;
+  bool esc2 = false;
+  std::vector<bool> brk_stack;
+  int depth = 0;
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in2) {
+      out.push_back(c);
+      if (esc2) {
+        esc2 = false;
+      } else if (c == '\\') {
+        esc2 = true;
+      } else if (c == '\'') {
+        in2 = false;
+      }
+      continue;
+    }
+    if (c == '\'') {
+      in2 = true;
+      esc2 = false;
+      out.push_back(c);
+      continue;
+    }
+
+    if (c == '(') {
+      const bool brk = is_break_start[i];
+      brk_stack.push_back(brk);
+      ++depth;
+      out.push_back('(');
+      if (brk) {
+        out.push_back('\n');
+        out.append(base_indent);
+        out.append(std::string(size_t(depth) * 4, ' '));
+        while (i + 1 < s.size() && (s[i + 1] == ' ' || s[i + 1] == '\t')) ++i;
+      }
+      continue;
+    }
+
+    if (c == ',' && !brk_stack.empty() && brk_stack.back()) {
+      out.push_back(',');
+      out.push_back('\n');
+      out.append(base_indent);
+      out.append(std::string(size_t(depth) * 4, ' '));
+      while (i + 1 < s.size() && (s[i + 1] == ' ' || s[i + 1] == '\t')) ++i;
+      continue;
+    }
+
+    if (c == ')' && !brk_stack.empty()) {
+      const bool brk = brk_stack.back();
+      brk_stack.pop_back();
+      if (brk) {
+        if (!out.empty() && out.back() != '\n') {
+          out.push_back('\n');
+          out.append(base_indent);
+          out.append(std::string(size_t(depth - 1) * 4, ' '));
+        }
+      }
+      out.push_back(')');
+      --depth;
+      continue;
+    }
+
+    out.push_back(c);
+  }
+
+  return out;
+}
+
+static std::string cascade_select_lists(std::string s, size_t threshold) {
+  std::string out;
+  out.reserve(s.size() + 256);
+
+  bool in_select = false;
+
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    const size_t nl = s.find('\n', pos);
+    const bool has_nl = (nl != std::string::npos);
+    const size_t end = has_nl ? nl : s.size();
+    const std::string_view line = std::string_view(s).substr(pos, end - pos);
+
+    size_t ind_len = 0;
+    while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+    const std::string_view trimmed = line.substr(ind_len);
+
+    if (!in_select && (trimmed == "SELECT" || trimmed.rfind("SELECT ", 0) == 0)) {
+      in_select = true;
+      out.append(line);
+    } else if (in_select && trimmed.rfind("FROM", 0) == 0) {
+      in_select = false;
+      out.append(line);
+    } else if (in_select) {
+      out.append(cascade_format_line(line, threshold));
+    } else {
+      out.append(line);
+    }
+
+    if (has_nl) out.push_back('\n');
+    pos = has_nl ? (nl + 1) : (s.size() + 1);
+  }
+
+  return out;
+}
+
+static std::string align_simple_as_in_select(std::string s) {
+  std::vector<std::string> lines;
+  lines.reserve(256);
+
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    const size_t nl = s.find('\n', pos);
+    const bool has_nl = (nl != std::string::npos);
+    const size_t end = has_nl ? nl : s.size();
+    lines.push_back(std::string(s.substr(pos, end - pos)));
+    pos = has_nl ? (nl + 1) : (s.size() + 1);
+  }
+
+  auto is_simple_as = [&](const std::string& line, size_t& ind_len, size_t& as_pos, size_t& lhs_len) -> bool {
+    ind_len = 0;
+    while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+    std::string_view trimmed(line.data() + ind_len, line.size() - ind_len);
+    const size_t pos_as = find_token_outside_strings(trimmed, " AS ");
+    if (pos_as == std::string::npos) return false;
+    std::string_view lhs = trimmed.substr(0, pos_as);
+    while (!lhs.empty() && (lhs.back() == ' ' || lhs.back() == '\t')) lhs.remove_suffix(1);
+    if (lhs.empty()) return false;
+    for (char c : lhs) {
+      if (c == ' ' || c == '\t') return false;
+    }
+    as_pos = pos_as;
+    lhs_len = lhs.size();
+    return true;
+  };
+
+  bool in_select = false;
+  std::vector<size_t> group;
+  size_t group_max = 0;
+
+  auto flush = [&]() {
+    if (group.size() < 2) {
+      group.clear();
+      group_max = 0;
+      return;
+    }
+    for (size_t idx : group) {
+      std::string& line = lines[idx];
+      size_t ind_len = 0, as_pos = 0, lhs_len = 0;
+      if (!is_simple_as(line, ind_len, as_pos, lhs_len)) continue;
+
+      std::string indent = line.substr(0, ind_len);
+      std::string_view trimmed(line.data() + ind_len, line.size() - ind_len);
+      std::string lhs = std::string(trimmed.substr(0, as_pos));
+      while (!lhs.empty() && (lhs.back() == ' ' || lhs.back() == '\t')) lhs.pop_back();
+      std::string rhs = std::string(trimmed.substr(as_pos + 1));
+      while (!rhs.empty() && (rhs.front() == ' ' || rhs.front() == '\t')) rhs.erase(rhs.begin());
+
+      const size_t pad = (group_max > lhs.size()) ? (group_max - lhs.size()) + 1 : 1;
+      line = indent + lhs + std::string(pad, ' ') + rhs;
+    }
+    group.clear();
+    group_max = 0;
+  };
+
+  for (size_t i = 0; i < lines.size(); ++i) {
+    const std::string& line = lines[i];
+    size_t ind_len = 0;
+    while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+    std::string_view trimmed(line.data() + ind_len, line.size() - ind_len);
+
+    if (!in_select && (trimmed == "SELECT" || trimmed.rfind("SELECT ", 0) == 0)) {
+      flush();
+      in_select = true;
+      continue;
+    }
+    if (in_select && trimmed.rfind("FROM", 0) == 0) {
+      flush();
+      in_select = false;
+      continue;
+    }
+    if (!in_select) {
+      flush();
+      continue;
+    }
+
+    size_t as_pos = 0, lhs_len = 0;
+    if (is_simple_as(line, ind_len, as_pos, lhs_len)) {
+      group.push_back(i);
+      group_max = std::max(group_max, lhs_len);
+    } else {
+      flush();
+    }
+  }
+  flush();
+
+  std::string out;
+  out.reserve(s.size() + 128);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    out.append(lines[i]);
+    if (i + 1 < lines.size()) out.push_back('\n');
+  }
+  return out;
+}
+
+
+static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
+  size_t i = 0;
+
+  auto current_line_indent = [](const std::string& out) -> std::string {
+    size_t line_start = out.rfind('\n');
+    line_start = (line_start == std::string::npos) ? 0 : (line_start + 1);
+    std::string ind;
+    ind.reserve(32);
+    for (size_t j = line_start; j < out.size(); ++j) {
+      const char c = out[j];
+      if (c == ' ' || c == '\t') ind.push_back(c);
+      else break;
+    }
+    return ind;
+  };
+
+  auto parse = [&](auto&& self, char stop) -> std::string {
+    std::string out;
+    out.reserve(256);
+
+    bool in_str = false;
+    bool esc = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+
+    while (i < s.size()) {
+      const char c = s[i];
+
+      if (!in_str && !in_line_comment && !in_block_comment && stop != 0 && c == stop) {
+        ++i;
+        break;
+      }
+
+      if (in_line_comment) {
+        out.push_back(c);
+        ++i;
+        if (c == '\n') in_line_comment = false;
+        continue;
+      }
+
+      if (in_block_comment) {
+        out.push_back(c);
+        ++i;
+        if (c == '*' && i < s.size() && s[i] == '/') {
+          out.push_back('/');
+          ++i;
+          in_block_comment = false;
+        }
+        continue;
+      }
+
+      if (in_str) {
+        out.push_back(c);
+        ++i;
+        if (esc) {
+          esc = false;
+          continue;
+        }
+        if (c == '\\') {
+          esc = true;
+          continue;
+        }
+        if (c == '\'') in_str = false;
+        continue;
+      }
+
+      if (c == '\'') {
+        in_str = true;
+        esc = false;
+        out.push_back(c);
+        ++i;
+        continue;
+      }
+
+      if (c == '-' && i + 1 < s.size() && s[i + 1] == '-') {
+        in_line_comment = true;
+        out.push_back('-');
+        out.push_back('-');
+        i += 2;
+        continue;
+      }
+
+      if (c == '/' && i + 1 < s.size() && s[i + 1] == '*') {
+        in_block_comment = true;
+        out.push_back('/');
+        out.push_back('*');
+        i += 2;
+        continue;
+      }
+
+      if (c == '(') {
+        const std::string indent = current_line_indent(out);
+        out.push_back('(');
+        ++i;
+
+        std::string inner = self(self, ')');
+        const std::string_view inner_trim = trim_view_ascii_spaces(std::string_view(inner));
+        const bool looks_query = looks_like_query_block(inner_trim);
+        const auto inner_parts = looks_query ? std::vector<BoolPart>() : split_bool_ops_top_level(inner_trim);
+
+        if (!looks_query && inner_parts.size() > 1) {
+          const std::string inner_indent = indent + "    ";
+          out.push_back('\n');
+          out.append(format_bool_expr(inner_trim, inner_indent));
+          out.push_back('\n');
+          out.append(indent);
+        } else if (!looks_query && !inner_trim.empty() && inner_trim.size() > threshold) {
+          const std::string inner_indent = indent + "    ";
+          out.push_back('\n');
+          out.append(inner_indent);
+          out.append(inner_trim);
+          out.push_back('\n');
+          out.append(indent);
+        } else {
+          out.append(inner);
+        }
+
+        out.push_back(')');
+        continue;
+      }
+
+      out.push_back(c);
+      ++i;
+    }
+
+    return out;
+  };
+
+  i = 0;
+  std::string out = parse(parse, 0);
+  return out;
+}
+
+static std::string reindent_bool_expressions(std::string s) {
+  std::string out;
+  out.reserve(s.size() + 256);
+
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    const size_t nl = s.find('\n', pos);
+    const bool has_nl = (nl != std::string::npos);
+    const size_t end = has_nl ? nl : s.size();
+    const std::string_view line = std::string_view(s).substr(pos, end - pos);
+
+    size_t ind_len = 0;
+    while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+    const std::string_view indent = line.substr(0, ind_len);
+    const std::string_view trimmed = line.substr(ind_len);
+
+    const bool skip = trimmed.empty() ||
+                      trimmed.rfind("WHERE", 0) == 0 ||
+                      trimmed.rfind("HAVING", 0) == 0 ||
+                      trimmed.rfind("PREWHERE", 0) == 0 ||
+                      trimmed.rfind("AND ", 0) == 0 ||
+                      trimmed.rfind("OR ", 0) == 0 ||
+                      trimmed.front() == ')' ||
+                      trimmed.front() == ',';
+
+    if (skip) {
+      out.append(line);
+    } else {
+      const auto parts = split_bool_ops_top_level(trimmed);
+      if (parts.size() > 1) {
+        out.append(format_bool_expr(trimmed, std::string(indent)));
+      } else {
+        out.append(line);
+      }
+    }
+
+    if (has_nl) out.push_back('\n');
+    pos = has_nl ? (nl + 1) : (s.size() + 1);
+  }
+
+  return out;
+}
+
 static std::string postprocess_format_query(std::string s, size_t threshold) {
   // Rule 2: If SELECT has a single (long) expression, put it on the next line.
   if (s.rfind("SELECT ", 0) == 0 && s.find('\n') == std::string::npos) {
@@ -610,7 +1665,7 @@ static std::string postprocess_format_query(std::string s, size_t threshold) {
       if (!has_top_level_comma(expr) && (expr_end - expr_beg) > threshold) {
         std::string out;
         out.reserve(s.size() + 8);
-        out.append("SELECT\n  ");
+        out.append("SELECT\n    ");
         out.append(trim_ascii_spaces(expr));
         out.append(s.substr(expr_end));
         s.swap(out);
@@ -709,7 +1764,7 @@ static std::string postprocess_format_query(std::string s, size_t threshold) {
         if (ic != ' ' && ic != '\t') { base_indent.clear(); break; }
       }
     }
-    const std::string arg_indent = base_indent + "  ";
+    const std::string arg_indent = base_indent + "    ";
 
     out.append("CAST(\n");
     for (size_t k = 0; k < args.size(); ++k) {
@@ -730,6 +1785,11 @@ static std::string postprocess_format_query(std::string s, size_t threshold) {
     i = j + 1;
   }
 
+  out = reindent_where_and_join(std::move(out));
+  out = cascade_select_lists(std::move(out), threshold);
+  out = align_simple_as_in_select(std::move(out));
+  out = format_bool_in_parentheses(std::move(out), threshold);
+  out = reindent_bool_expressions(std::move(out));
   return out;
 }
 
