@@ -612,17 +612,56 @@
     let forceFull = true;
     let lastInputType = "";
     let lastDataLen = 0;
+    let prevLineCount = 1;
+    let gutterText = "";
+
+    const countNewlines = (s) => {
+      let n = 0;
+      for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n += 1;
+      return n;
+    };
+
+    const buildLineNumbersText = (lines) => {
+      const out = new Array(lines);
+      for (let i = 0; i < lines; i++) out[i] = String(i + 1);
+      return out.join("\n");
+    };
+
+    const setGutterLines = (lines, allowIncremental) => {
+      if (!gutter) return;
+      const next = Math.max(1, Number(lines) | 0);
+      if (next === prevLineCount && gutterText) return;
+
+      if (allowIncremental && gutterText) {
+        const delta = next - prevLineCount;
+        if (delta > 0 && delta <= 16) {
+          let t = gutterText;
+          for (let i = prevLineCount + 1; i <= next; i++) t += `\n${i}`;
+          gutterText = t;
+        } else if (delta < 0 && -delta <= 16) {
+          let t = gutterText;
+          for (let k = 0; k < -delta; k++) {
+            const j = t.lastIndexOf("\n");
+            if (j < 0) {
+              t = "1";
+              break;
+            }
+            t = t.slice(0, j);
+          }
+          gutterText = t;
+        } else {
+          gutterText = buildLineNumbersText(next);
+        }
+      } else {
+        gutterText = buildLineNumbersText(next);
+      }
+
+      prevLineCount = next;
+      gutter.textContent = gutterText;
+    };
 
     const render = () => {
       pre.innerHTML = tokens.map((t) => t.html).join("");
-      if (gutter) {
-        const s = prevText;
-        let lines = 1;
-        for (let i = 0; i < s.length; i++) if (s[i] === "\n") lines += 1;
-        const out = [];
-        for (let i = 1; i <= lines; i++) out.push(String(i));
-        gutter.textContent = out.join("\n");
-      }
     };
 
     const syncScroll = () => {
@@ -634,6 +673,7 @@
     const fullUpdate = (nextText) => {
       prevText = String(nextText ?? "");
       tokens = lexAll(prevText);
+      setGutterLines(1 + countNewlines(prevText), false);
       render();
       syncScroll();
     };
@@ -673,6 +713,10 @@
         fullUpdate(s);
         return;
       }
+
+      const nlOld = countNewlines(old.slice(start, endOld));
+      const nlNew = countNewlines(s.slice(start, endNew));
+      if (nlOld !== nlNew) setGutterLines(prevLineCount + (nlNew - nlOld), true);
 
       const scanStart = Math.max(0, start - 1);
       const r = scanPartial(old, s, tokens, scanStart, endNew, endOld);
