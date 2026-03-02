@@ -138,7 +138,21 @@
       return { updated_at_ms: obj.updated_at_ms, items: obj.items.map((x) => String(x || "")) };
     },
 
+    readMetaRaw(hostId, type) {
+      const key = storage.metaKey(hostId, type);
+      const obj = safeReadJson(key, null);
+      if (!obj || typeof obj !== "object") return null;
+      if (typeof obj.updated_at_ms !== "number" || !Array.isArray(obj.items)) return null;
+      return { updated_at_ms: obj.updated_at_ms, items: obj.items };
+    },
+
     writeMeta(hostId, type, updatedAtMs, items) {
+      const key = storage.metaKey(hostId, type);
+      const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
+      safeWriteJson(key, payload);
+    },
+
+    writeMetaRaw(hostId, type, updatedAtMs, items) {
       const key = storage.metaKey(hostId, type);
       const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
       safeWriteJson(key, payload);

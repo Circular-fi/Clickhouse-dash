@@ -20,6 +20,7 @@
     if (kind === "str") return `<span class="tok-str">${x}</span>`;
     if (kind === "com") return `<span class="tok-com">${x}</span>`;
     if (kind === "kw") return `<span class="tok-kw">${x}</span>`;
+    if (kind === "fn") return `<span class="tok-fn">${x}</span>`;
     return x;
   };
 
@@ -35,11 +36,6 @@
       "order",
       "limit",
       "join",
-      "inner",
-      "left",
-      "right",
-      "full",
-      "cross",
       "on",
       "as",
       "and",
@@ -54,6 +50,20 @@
     ].map((x) => x.toLowerCase())
   );
 
+  const ws = String.raw`(?:\s+|/\*[\s\S]*?\*/|--[^\n]*\n|#[^\n]*\n)+`;
+  const keywordPatterns = [
+    new RegExp(String.raw`\bGROUP${ws}BY\b`, "gi"),
+    new RegExp(String.raw`\bORDER${ws}BY\b`, "gi"),
+    new RegExp(String.raw`\bUNION${ws}ALL\b`, "gi"),
+    new RegExp(String.raw`\bLEFT${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bRIGHT${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bINNER${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bFULL${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bCROSS${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bARRAY${ws}JOIN\b`, "gi"),
+    new RegExp(String.raw`\bLEFT${ws}ARRAY${ws}JOIN\b`, "gi"),
+  ];
+
   const getKeywordSet = () => {
     const st = ns.state;
     if (!st || !st.selectedHostId || !st.meta || !st.meta.hosts) return null;
@@ -62,10 +72,83 @@
     return kw && kw.set instanceof Set ? kw.set : null;
   };
 
+  const getFunctionMeta = () => {
+    const st = ns.state;
+    if (!st || !st.selectedHostId || !st.meta || !st.meta.hosts) return null;
+    const hostMeta = st.meta.hosts[String(st.selectedHostId)] || null;
+    const fn = hostMeta && hostMeta.functions ? hostMeta.functions : null;
+    if (!fn || !(fn.ci instanceof Set) || !(fn.cs instanceof Set)) return null;
+    return fn;
+  };
+
+  const skipWsAndComments = (s, pos) => {
+    let i = pos;
+    while (i < s.length) {
+      const c = s[i];
+      const nx = i + 1 < s.length ? s[i + 1] : "";
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+        i += 1;
+        continue;
+      }
+      if (c === "-" && nx === "-") {
+        i += 2;
+        while (i < s.length && s[i] !== "\n") i += 1;
+        continue;
+      }
+      if (c === "#") {
+        i += 1;
+        while (i < s.length && s[i] !== "\n") i += 1;
+        continue;
+      }
+      if (c === "/" && nx === "*") {
+        i += 2;
+        while (i + 1 < s.length && !(s[i] === "*" && s[i + 1] === "/")) i += 1;
+        i = i + 2 <= s.length ? i + 2 : s.length;
+        continue;
+      }
+      break;
+    }
+    return i;
+  };
+
+  const findPatternRanges = (s) => {
+    const ranges = [];
+    for (const re of keywordPatterns) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(s))) {
+        ranges.push({ start: m.index, end: m.index + m[0].length });
+        if (m[0].length === 0) re.lastIndex += 1;
+      }
+    }
+    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged = [];
+    for (const r of ranges) {
+      const last = merged[merged.length - 1];
+      if (!last || r.start > last.end) merged.push({ start: r.start, end: r.end });
+      else last.end = Math.max(last.end, r.end);
+    }
+    return merged;
+  };
+
   const tokenizePlain = (text, base) => {
     const s = String(text ?? "");
     const kwSet = getKeywordSet();
+    const fnMeta = getFunctionMeta();
     if (!s) return [{ start: base, end: base + s.length, kind: "plain", html: wrapHtml(s, "plain") }];
+
+    const patterns = findPatternRanges(s);
+    if (patterns.length) {
+      const out = [];
+      let cur = 0;
+      for (const r of patterns) {
+        if (r.start > cur) out.push(...tokenizePlain(s.slice(cur, r.start), base + cur));
+        out.push({ start: base + r.start, end: base + r.end, kind: "kw", html: wrapHtml(s.slice(r.start, r.end), "kw") });
+        cur = r.end;
+      }
+      if (cur < s.length) out.push(...tokenizePlain(s.slice(cur), base + cur));
+      return out;
+    }
 
     const out = [];
     let i = 0;
@@ -96,9 +179,20 @@
       const word = s.slice(i, j);
       const isCommon = commonKeywords.has(word.toLowerCase());
       const isKw = isCommon || (kwSet && kwSet.has(word));
-      if (isKw) {
+
+      let isFn = false;
+      if (fnMeta) {
+        const next = skipWsAndComments(s, j);
+        if (next < s.length && s[next] === "(") {
+          const w = word;
+          if (fnMeta.cs.has(w)) isFn = true;
+          else if (fnMeta.ci.has(w.toLowerCase())) isFn = true;
+        }
+      }
+
+      if (isKw || isFn) {
         push(segStart, i, "plain");
-        push(i, j, "kw");
+        push(i, j, isFn ? "fn" : "kw");
         segStart = j;
       }
       i = j;
@@ -525,9 +619,9 @@
         const s = prevText;
         let lines = 1;
         for (let i = 0; i < s.length; i++) if (s[i] === "\n") lines += 1;
-        let out = "";
-        for (let i = 1; i <= lines; i++) out += String(i) + (i === lines ? "" : "\n");
-        gutter.textContent = out;
+        const out = [];
+        for (let i = 1; i <= lines; i++) out.push(String(i));
+        gutter.textContent = out.join("\n");
       }
     };
 

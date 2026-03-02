@@ -70,6 +70,7 @@
   --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
   --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
   --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
+  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
 }
 
 @media (prefers-color-scheme: light) {
@@ -414,6 +415,10 @@ body {
 
 .tok-kw {
   color: var(--sqlKeyword);
+}
+
+.tok-fn {
+  color: var(--sqlFunction);
 }
 
 #queryTextArea::placeholder {
