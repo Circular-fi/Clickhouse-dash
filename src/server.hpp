@@ -31,7 +31,7 @@ struct AppConfig {
   // How many result rows to stream before truncating (0 = unlimited)
   int result_preview_row_limit = 0;
 
-  // /api/meta
+  // /api/version
   std::string version_semver = "dev";
   std::string version_git_sha = "unknown";
   std::string version_build_time = "unknown";
@@ -47,6 +47,7 @@ public:
 private:
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_api_meta(const httplib::Request& req, httplib::Response& res);
+  void handle_api_version(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);
   void handle_api_health(const httplib::Request& req, httplib::Response& res);
@@ -65,6 +66,15 @@ private:
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;
+
+  struct MetaCacheEntry {
+    int64_t fetched_at_ms = 0;
+    int64_t updated_at_ms = 0;
+    std::vector<std::string> items;
+  };
+
+  std::mutex meta_mu_;
+  std::unordered_map<std::string, std::unordered_map<std::string, MetaCacheEntry>> meta_cache_;
 };
 
 } // namespace chdash

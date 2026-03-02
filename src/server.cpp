@@ -6,6 +6,9 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <clickhouse/columns/string.h>
+#include <clickhouse/block.h>
+
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -41,6 +44,30 @@ static std::string gen_query_id() {
 static int64_t now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+static std::vector<std::string> split_csv(std::string_view s) {
+  auto trim_local = [](std::string_view in) -> std::string_view {
+    size_t a = 0;
+    while (a < in.size() && (in[a] == ' ' || in[a] == '\t' || in[a] == '\r' || in[a] == '\n')) ++a;
+    size_t b = in.size();
+    while (b > a && (in[b - 1] == ' ' || in[b - 1] == '\t' || in[b - 1] == '\r' || in[b - 1] == '\n')) --b;
+    return in.substr(a, b - a);
+  };
+
+  std::vector<std::string> out;
+  size_t i = 0;
+  while (i < s.size()) {
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == ',')) ++i;
+    if (i >= s.size()) break;
+    size_t j = i;
+    while (j < s.size() && s[j] != ',') ++j;
+    std::string v = std::string(trim_local(s.substr(i, j - i)));
+    if (!v.empty()) out.push_back(std::move(v));
+    i = j + 1;
+  }
+  out.erase(std::unique(out.begin(), out.end()), out.end());
+  return out;
 }
 
 static int64_t now_unix_sec() {
@@ -1836,6 +1863,7 @@ Server::Server(AppConfig cfg)
   });
 
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
+  http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
   http_.Get("/api/meta", [&](const auto& req, auto& res) { handle_api_meta(req, res); });
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });
@@ -1901,7 +1929,7 @@ void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
   json_error(res, 503, "db_unhealthy", "one or more ClickHouse hosts are unhealthy");
 }
 
-void Server::handle_api_meta(const httplib::Request&, httplib::Response& res) {
+void Server::handle_api_version(const httplib::Request&, httplib::Response& res) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -1911,6 +1939,205 @@ void Server::handle_api_meta(const httplib::Request&, httplib::Response& res) {
   w.Key("build_time"); w.String(cfg_.version_build_time.c_str());
   w.EndObject();
   res.status = 200;
+  res.set_content(sb.GetString(), "application/json");
+}
+
+void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res) {
+  const auto host_it = req.params.find("host_id");
+  if (host_it == req.params.end() || host_it->second.empty()) {
+    return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  }
+  const std::string host_id = host_it->second;
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) {
+    return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  }
+
+  std::vector<std::string> types;
+  const auto types_it = req.params.find("types");
+  if (types_it == req.params.end() || types_it->second.empty()) {
+    types.push_back("keywords");
+  } else {
+    types = split_csv(types_it->second);
+  }
+  if (types.empty()) {
+    return json_error(res, 400, "missing_types", "Missing types.");
+  }
+
+  const int64_t generated_at = now_ms();
+  const int64_t ttl_ms = 10 * 60 * 1000;
+
+  struct TypeResult {
+    bool ok = false;
+    bool stale = false;
+    int64_t updated_at_ms = 0;
+    std::vector<std::string> items;
+    std::string error_code;
+    std::string error_message;
+  };
+
+  std::unordered_map<std::string, TypeResult> results;
+  results.reserve(types.size());
+
+  for (const auto& t : types) {
+    results.emplace(t, TypeResult{});
+  }
+
+  std::unordered_map<std::string, MetaCacheEntry> cached;
+  {
+    std::lock_guard<std::mutex> lk(meta_mu_);
+    auto hit = meta_cache_.find(host_id);
+    if (hit != meta_cache_.end()) cached = hit->second;
+  }
+
+  auto get_cached = [&](const std::string& type) -> std::optional<MetaCacheEntry> {
+    auto it = cached.find(type);
+    if (it == cached.end()) return std::nullopt;
+    return it->second;
+  };
+
+  auto set_cache = [&](const std::string& type, MetaCacheEntry e) {
+    std::lock_guard<std::mutex> lk(meta_mu_);
+    meta_cache_[host_id][type] = std::move(e);
+  };
+
+  std::unordered_map<std::string, bool> should_fetch;
+  should_fetch.reserve(types.size());
+  for (const auto& type : types) {
+    const auto ce = get_cached(type);
+    const bool fresh = ce && (generated_at - ce->fetched_at_ms) <= ttl_ms;
+    should_fetch[type] = !fresh;
+    if (fresh) {
+      auto& r = results[type];
+      r.ok = true;
+      r.stale = false;
+      r.updated_at_ms = ce->updated_at_ms;
+      r.items = ce->items;
+    }
+  }
+
+  std::string client_err;
+  std::shared_ptr<clickhouse::Client> client;
+  for (const auto& type : types) {
+    if (!should_fetch[type]) continue;
+    if (type != "keywords") {
+      auto& r = results[type];
+      r.ok = false;
+      r.error_code = "unknown_type";
+      r.error_message = "Unknown metadata type.";
+      continue;
+    }
+
+    if (!client) {
+      client = make_client_from_uri(
+        host->system_uri,
+        std::chrono::seconds(3),
+        std::chrono::seconds(3),
+        std::chrono::seconds(3),
+        &client_err
+      );
+      if (!client) {
+        auto& r = results[type];
+        r.ok = false;
+        r.error_code = "host_down";
+        r.error_message = "Could not connect to host.";
+        continue;
+      }
+    }
+
+    try {
+      std::vector<std::string> items;
+      client->Select("SELECT keyword FROM system.keywords", [&items](const clickhouse::Block& block) {
+        if (block.GetColumnCount() < 1) return;
+        const auto col = block[0]->As<clickhouse::ColumnString>();
+        if (!col) return;
+        const size_t n = col->Size();
+        for (size_t i = 0; i < n; ++i) {
+          const auto sv = col->At(i);
+          items.emplace_back(sv.data(), sv.size());
+        }
+      });
+
+      std::sort(items.begin(), items.end());
+      items.erase(std::unique(items.begin(), items.end()), items.end());
+
+      MetaCacheEntry e;
+      e.fetched_at_ms = generated_at;
+      e.updated_at_ms = generated_at;
+      e.items = items;
+      set_cache(type, e);
+
+      auto& r = results[type];
+      r.ok = true;
+      r.stale = false;
+      r.updated_at_ms = e.updated_at_ms;
+      r.items = std::move(items);
+    } catch (const std::exception& e) {
+      auto& r = results[type];
+      r.ok = false;
+      r.error_code = "clickhouse_error";
+      r.error_message = e.what();
+      const auto ce = get_cached(type);
+      if (ce) {
+        r.ok = true;
+        r.stale = true;
+        r.updated_at_ms = ce->updated_at_ms;
+        r.items = ce->items;
+      }
+    }
+  }
+
+  bool any_ok = false;
+  for (const auto& [_, r] : results) {
+    if (r.ok) { any_ok = true; break; }
+  }
+
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("version"); w.Int(1);
+  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("generated_at_ms"); w.Int64(generated_at);
+
+  w.Key("data");
+  w.StartObject();
+  for (const auto& type : types) {
+    const auto it = results.find(type);
+    if (it == results.end()) continue;
+    const auto& r = it->second;
+    if (!r.ok) continue;
+    w.Key(type.c_str());
+    w.StartObject();
+    w.Key("updated_at_ms"); w.Int64(r.updated_at_ms);
+    if (r.stale) { w.Key("stale"); w.Bool(true); }
+    w.Key("items");
+    w.StartArray();
+    for (const auto& s : r.items) w.String(s.c_str());
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndObject();
+
+  w.Key("errors");
+  w.StartArray();
+  for (const auto& type : types) {
+    const auto it = results.find(type);
+    if (it == results.end()) continue;
+    const auto& r = it->second;
+    if (r.ok && !r.stale) continue;
+    if (r.error_code.empty()) continue;
+    w.StartObject();
+    w.Key("type"); w.String(type.c_str());
+    w.Key("error_code"); w.String(r.error_code.c_str());
+    w.Key("message"); w.String(r.error_message.c_str());
+    if (r.stale) { w.Key("stale_used"); w.Bool(true); }
+    w.EndObject();
+  }
+  w.EndArray();
+
+  w.EndObject();
+
+  res.status = any_ok ? 200 : 503;
   res.set_content(sb.GetString(), "application/json");
 }
 
