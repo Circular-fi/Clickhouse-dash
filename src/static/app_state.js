@@ -9,6 +9,7 @@
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
+  const META_PREFIX = "chdash.meta.v1.";
   const HISTORY_MAX_ENTRIES = 100;
 
   const safeRead = (key) => {
@@ -52,6 +53,7 @@
     HISTORY_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
+    META_PREFIX,
 
     getSavedThemeMode() {
       const v = safeRead(THEME_STORAGE_KEY);
@@ -121,6 +123,26 @@
     saveEditorSql(sqlText) {
       safeWrite(EDITOR_STORAGE_KEY, String(sqlText ?? ""));
     },
+
+    metaKey(hostId, type) {
+      const h = String(hostId || "");
+      const t = String(type || "");
+      return `${META_PREFIX}${h}.${t}`;
+    },
+
+    readMeta(hostId, type) {
+      const key = storage.metaKey(hostId, type);
+      const obj = safeReadJson(key, null);
+      if (!obj || typeof obj !== "object") return null;
+      if (typeof obj.updated_at_ms !== "number" || !Array.isArray(obj.items)) return null;
+      return { updated_at_ms: obj.updated_at_ms, items: obj.items.map((x) => String(x || "")) };
+    },
+
+    writeMeta(hostId, type, updatedAtMs, items) {
+      const key = storage.metaKey(hostId, type);
+      const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
+      safeWriteJson(key, payload);
+    },
   };
 
   const runOpts = storage.loadRunOptions();
@@ -142,6 +164,9 @@
     cancelToken: null,
 
     lastRunMode: "single",
+
+    meta: { version: 1, hosts: Object.create(null) },
+    highlightCtrl: null,
   };
 
   ns.storage = storage;

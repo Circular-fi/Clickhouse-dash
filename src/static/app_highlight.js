@@ -19,7 +19,92 @@
     const x = escapeHtml(raw);
     if (kind === "str") return `<span class="tok-str">${x}</span>`;
     if (kind === "com") return `<span class="tok-com">${x}</span>`;
+    if (kind === "kw") return `<span class="tok-kw">${x}</span>`;
     return x;
+  };
+
+  const commonKeywords = new Set(
+    [
+      "with",
+      "select",
+      "from",
+      "where",
+      "group",
+      "by",
+      "having",
+      "order",
+      "limit",
+      "join",
+      "inner",
+      "left",
+      "right",
+      "full",
+      "cross",
+      "on",
+      "as",
+      "and",
+      "or",
+      "not",
+      "in",
+      "is",
+      "null",
+      "distinct",
+      "union",
+      "all"
+    ].map((x) => x.toLowerCase())
+  );
+
+  const getKeywordSet = () => {
+    const st = ns.state;
+    if (!st || !st.selectedHostId || !st.meta || !st.meta.hosts) return null;
+    const hostMeta = st.meta.hosts[String(st.selectedHostId)] || null;
+    const kw = hostMeta && hostMeta.keywords ? hostMeta.keywords : null;
+    return kw && kw.set instanceof Set ? kw.set : null;
+  };
+
+  const tokenizePlain = (text, base) => {
+    const s = String(text ?? "");
+    const kwSet = getKeywordSet();
+    if (!s) return [{ start: base, end: base + s.length, kind: "plain", html: wrapHtml(s, "plain") }];
+
+    const out = [];
+    let i = 0;
+    let segStart = 0;
+    const isWordChar = (c) => {
+      const code = c.charCodeAt(0);
+      return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
+    };
+    const isWordStart = (c) => {
+      const code = c.charCodeAt(0);
+      return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
+    };
+
+    const push = (a, b, kind) => {
+      if (b <= a) return;
+      const raw = s.slice(a, b);
+      out.push({ start: base + a, end: base + b, kind, html: wrapHtml(raw, kind) });
+    };
+
+    while (i < s.length) {
+      const c = s[i];
+      if (!isWordStart(c)) {
+        i += 1;
+        continue;
+      }
+      let j = i + 1;
+      while (j < s.length && isWordChar(s[j])) j += 1;
+      const word = s.slice(i, j);
+      const isCommon = commonKeywords.has(word.toLowerCase());
+      const isKw = isCommon || (kwSet && kwSet.has(word));
+      if (isKw) {
+        push(segStart, i, "plain");
+        push(i, j, "kw");
+        segStart = j;
+      }
+      i = j;
+    }
+    push(segStart, s.length, "plain");
+    return out;
   };
 
   const lexAll = (text) => {
@@ -37,7 +122,9 @@
         segStart = end;
         return;
       }
-      out.push({ start: segStart, end, kind: segKind, html: wrapHtml(s.slice(segStart, end), segKind) });
+      const raw = s.slice(segStart, end);
+      if (segKind === "plain") out.push(...tokenizePlain(raw, segStart));
+      else out.push({ start: segStart, end, kind: segKind, html: wrapHtml(raw, segKind) });
       segStart = end;
     };
 
@@ -200,7 +287,9 @@
         segStart = end;
         return;
       }
-      out.push({ start: segStart, end, kind: segKind, html: wrapHtml(s.slice(segStart, end), segKind) });
+      const raw = s.slice(segStart, end);
+      if (segKind === "plain") out.push(...tokenizePlain(raw, segStart));
+      else out.push({ start: segStart, end, kind: segKind, html: wrapHtml(raw, segKind) });
       segStart = end;
     };
 
@@ -401,11 +490,18 @@
     const parent = ta.parentNode;
     if (!parent) return null;
     parent.insertBefore(wrap, ta);
+    const gutter = document.createElement("pre");
+    gutter.className = "editorGutter";
+    gutter.setAttribute("aria-hidden", "true");
+    gutter.style.tabSize = String(tabSize);
+    gutter.style.MozTabSize = String(tabSize);
+
+    wrap.appendChild(gutter);
     wrap.appendChild(pre);
     wrap.appendChild(ta);
 
     if (ta.dataset) ta.dataset.hlAttached = "1";
-    return { wrap, pre };
+    return { wrap, pre, gutter };
   };
 
   const attach = (ta) => {
@@ -413,6 +509,7 @@
 
     const overlay = createOverlay(ta);
     const pre = overlay ? overlay.pre : ta.parentNode && ta.parentNode.querySelector(".editorHighlight");
+    const gutter = overlay ? overlay.gutter : ta.parentNode && ta.parentNode.querySelector(".editorGutter");
     if (!pre) return null;
 
     let prevText = String(ta.value || "");
@@ -424,11 +521,20 @@
 
     const render = () => {
       pre.innerHTML = tokens.map((t) => t.html).join("");
+      if (gutter) {
+        const s = prevText;
+        let lines = 1;
+        for (let i = 0; i < s.length; i++) if (s[i] === "") lines += 1;
+        let out = "";
+        for (let i = 1; i <= lines; i++) out += i + (i === lines ? "" : "");
+        gutter.textContent = out;
+      }
     };
 
     const syncScroll = () => {
       pre.scrollTop = ta.scrollTop;
       pre.scrollLeft = ta.scrollLeft;
+      if (gutter) gutter.scrollTop = ta.scrollTop;
     };
 
     const fullUpdate = (nextText) => {

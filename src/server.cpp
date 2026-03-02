@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <random>
 #include <sstream>
@@ -1597,6 +1598,63 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
 
       if (c == '(') {
         const std::string indent = current_line_indent(out);
+
+        auto last_ident_before_paren = [&](const std::string& buf) -> std::string {
+          size_t p = buf.size();
+          while (p > 0) {
+            const char cc = buf[p - 1];
+            if (cc == ' ' || cc == '\t' || cc == '\n' || cc == '\r') {
+              --p;
+              continue;
+            }
+            break;
+          }
+          const size_t end = p;
+          while (p > 0) {
+            const char cc = buf[p - 1];
+            if ((cc >= 'A' && cc <= 'Z') || (cc >= 'a' && cc <= 'z') || cc == '_') {
+              --p;
+              continue;
+            }
+            break;
+          }
+          if (p >= end) return std::string();
+          return std::string(buf.substr(p, end - p));
+        };
+
+        auto reindent_multiline = [&](std::string_view txt, const std::string& target_indent) -> std::string {
+          std::vector<std::string_view> lines;
+          size_t pos = 0;
+          while (pos <= txt.size()) {
+            const size_t nl = txt.find('\n', pos);
+            const bool has = nl != std::string_view::npos;
+            const size_t end = has ? nl : txt.size();
+            lines.push_back(txt.substr(pos, end - pos));
+            if (!has) break;
+            pos = nl + 1;
+          }
+
+          size_t min_ws = std::numeric_limits<size_t>::max();
+          for (const auto& ln : lines) {
+            size_t k = 0;
+            while (k < ln.size() && (ln[k] == ' ' || ln[k] == '\t')) ++k;
+            if (k == ln.size()) continue;
+            min_ws = std::min(min_ws, k);
+          }
+          if (min_ws == std::numeric_limits<size_t>::max()) min_ws = 0;
+
+          std::string r;
+          r.reserve(txt.size() + lines.size() * target_indent.size() + 8);
+          for (size_t li = 0; li < lines.size(); ++li) {
+            std::string_view ln = lines[li];
+            if (ln.size() >= min_ws) ln = ln.substr(min_ws);
+            r.append(target_indent);
+            r.append(ln);
+            if (li + 1 < lines.size()) r.push_back('\n');
+          }
+          return r;
+        };
+
         out.push_back('(');
         ++i;
 
@@ -1618,6 +1676,17 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
           out.append(inner_trim);
           out.push_back('\n');
           out.append(indent);
+        } else if (looks_query && inner_trim.find('\n') != std::string_view::npos) {
+          const std::string prev = last_ident_before_paren(out.substr(0, out.size() - 1));
+          if (prev == "IN") {
+            const std::string inner_indent = indent + "    ";
+            out.push_back('\n');
+            out.append(reindent_multiline(inner_trim, inner_indent));
+            out.push_back('\n');
+            out.append(indent);
+          } else {
+            out.append(inner);
+          }
         } else {
           out.append(inner);
         }

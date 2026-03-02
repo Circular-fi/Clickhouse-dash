@@ -17,7 +17,7 @@
   async function loadMeta() {
     if (!dom.versionBadge) return;
     try {
-      const resp = await fetch("api/meta", { cache: "no-store" });
+      const resp = await fetch("api/version", { cache: "no-store" });
       if (!resp.ok) {
         dom.versionBadge.textContent = "meta: error";
         return;
@@ -375,7 +375,17 @@
     const current = String(dom.queryTextArea.value || "");
     if (!current.trim() && storage.loadEditorSql) {
       const saved = String(storage.loadEditorSql() || "");
-      if (saved.trim()) dom.queryTextArea.value = saved;
+      if (saved.trim()) {
+        if (util && typeof util.replaceTextAreaValue === "function") {
+          util.replaceTextAreaValue(dom.queryTextArea, saved);
+        } else {
+          dom.queryTextArea.value = saved;
+        }
+        requestAnimationFrame(() => {
+          const ctrl = ns.state && ns.state.highlightCtrl;
+          if (ctrl && typeof ctrl.refresh === "function") ctrl.refresh();
+        });
+      }
     }
 
     if (storage.saveEditorSql) {
@@ -550,7 +560,8 @@
     });
 
     if (ns.highlight && typeof ns.highlight.attach === "function") {
-      ns.highlight.attach(dom.queryTextArea);
+      const ctrl = ns.highlight.attach(dom.queryTextArea);
+      if (ns.state) ns.state.highlightCtrl = ctrl || null;
     }
   }
 

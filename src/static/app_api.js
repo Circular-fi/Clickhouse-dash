@@ -36,6 +36,26 @@
     return payload;
   }
 
+  async function getMeta(hostId, types) {
+    if (!hostId) throw new Error("No host selected.");
+    const arr = Array.isArray(types) ? types.filter((x) => x) : [];
+    const typesCsv = arr.length ? arr.map((x) => String(x)).join(",") : "keywords";
+    const qs = new URLSearchParams({ host_id: String(hostId), types: typesCsv }).toString();
+    const response = await fetch(`api/meta?${qs}`, { cache: "no-store" });
+    const payload = await readJsonBody(response);
+
+    if (!response.ok) {
+      const code = payload && payload.error_code ? String(payload.error_code) : "";
+      const msg = payload && payload.message ? String(payload.message) : `Request failed with status ${response.status}`;
+      const err = new Error(code ? `${code}: ${msg}` : msg);
+      err.code = code || null;
+      err.payload = payload;
+      throw err;
+    }
+
+    return payload;
+  }
+
   async function formatSqls(hostId, sqls) {
     if (!hostId) throw new Error("No host selected.");
     if (!Array.isArray(sqls)) throw new Error("formatSqls expects an array.");
@@ -79,5 +99,5 @@
     return !!(payload && payload.ok);
   }
 
-  ns.api = { formatSqls, runSql, cancelQuery };
+  ns.api = { formatSqls, runSql, cancelQuery, getMeta };
 })();

@@ -69,6 +69,7 @@
 
   --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
   --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
+  --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
 }
 
 @media (prefers-color-scheme: light) {
@@ -324,6 +325,7 @@ body {
 }
 
 .editorWrap {
+  --gutterW: 3.2rem;
   position: relative;
   width: 100%;
   height: 100%;
@@ -335,11 +337,34 @@ body {
   background: var(--inputBg);
 }
 
+
+.editorGutter {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--gutterW);
+  margin: 0;
+  padding: 0.9rem 0.55rem;
+  border-radius: var(--radiusSm) 0 0 var(--radiusSm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow: hidden;
+  user-select: none;
+  text-align: right;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  background: color-mix(in srgb, var(--inputBg) 92%, var(--panelBg));
+  border-right: 1px solid var(--border);
+}
 .editorHighlight {
   position: absolute;
   inset: 0;
   margin: 0;
   padding: 0.9rem;
+  padding-left: calc(0.9rem + var(--gutterW));
   border-radius: var(--radiusSm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
@@ -371,6 +396,7 @@ body {
   background: transparent;
   border: 0;
   color: transparent;
+  padding-left: calc(0.9rem + var(--gutterW));
 }
 
 .editorInput::placeholder {
@@ -384,6 +410,10 @@ body {
 
 .tok-com {
   color: var(--sqlComment);
+}
+
+.tok-kw {
+  color: var(--sqlKeyword);
 }
 
 #queryTextArea::placeholder {
