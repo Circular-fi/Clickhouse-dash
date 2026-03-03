@@ -183,6 +183,7 @@
   const state = {
     hostsSnapshot: null,
     selectedHostId: storage.getStoredHostId(),
+    apiOnline: true,
 
     runOptAutoFormat: runOpts.autoFormat,
     runOptMultiQuery: runOpts.multiQuery,

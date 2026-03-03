@@ -73,27 +73,39 @@
 
   function applyHostPickerUi() {
     const snap = state.hostsSnapshot;
-    if (!snap) return;
+    const apiOnline = state.apiOnline !== false;
 
-    const hosts = Array.isArray(snap.hosts) ? snap.hosts : [];
-    const selected = hosts.find((h) => h && String(h.id) === String(state.selectedHostId));
+    const hosts = snap && Array.isArray(snap.hosts) ? snap.hosts : [];
+    const selected = state.selectedHostId ? hosts.find((h) => h && String(h.id) === String(state.selectedHostId)) : null;
 
     const healthy = !!(selected && selected.healthy);
     const pingMs = selected && selected.ping_ms != null ? Number(selected.ping_ms) : null;
     const label = selected ? String(selected.label || selected.id) : (state.selectedHostId || "Host");
 
-    if (dom.hostPickerText) dom.hostPickerText.textContent = label;
+    if (dom.hostPickerText) dom.hostPickerText.textContent = apiOnline ? label : `${label} (API offline)`;
 
     if (dom.hostPickerDot) {
-      dom.hostPickerDot.classList.toggle("hostDot--good", healthy);
-      dom.hostPickerDot.classList.toggle("hostDot--bad", !healthy);
+      const good = apiOnline && healthy;
+      dom.hostPickerDot.classList.toggle("hostDot--good", good);
+      dom.hostPickerDot.classList.toggle("hostDot--bad", !good);
     }
 
     if (dom.hostPickerPing) {
-      if (healthy && pingMs != null && Number.isFinite(pingMs)) dom.hostPickerPing.textContent = formatPingMsLabel(pingMs);
-      else dom.hostPickerPing.textContent = healthy ? "-" : "down";
+      if (!apiOnline) {
+        dom.hostPickerPing.textContent = "-";
+      } else if (healthy && pingMs != null && Number.isFinite(pingMs)) {
+        dom.hostPickerPing.textContent = formatPingMsLabel(pingMs);
+      } else {
+        dom.hostPickerPing.textContent = healthy ? "-" : "down";
+      }
+    }
+
+    if (dom.hostPickerButton) {
+      dom.hostPickerButton.disabled = !apiOnline;
+      if (!apiOnline) closeHostMenu();
     }
   }
+
 
   function closeHostMenu() {
     if (!dom.hostPickerMenu || !dom.hostPickerButton) return;
@@ -141,7 +153,8 @@
     for (const h of hosts) {
       if (!h || !h.id) continue;
       const id = String(h.id);
-      if (state.selectedHostId && id === String(state.selectedHostId)) continue;
+      const isSelected = state.selectedHostId && id === String(state.selectedHostId);
+      if (isSelected) continue;
 
       const label = String(h.label || h.id);
       const healthy = !!h.healthy;
@@ -152,7 +165,7 @@
       btn.className = "pickerOption";
       btn.setAttribute("role", "option");
       btn.setAttribute("data-id", id);
-      btn.setAttribute("aria-selected", "false");
+      btn.setAttribute("aria-selected", String(!!isSelected));
 
       const dot = document.createElement("span");
       dot.className = `hostDot ${healthy ? "hostDot--good" : "hostDot--bad"}`;
@@ -171,7 +184,7 @@
       btn.appendChild(meta);
 
       btn.addEventListener("click", () => {
-        setSelectedHostId(id);
+        if (!isSelected) setSelectedHostId(id);
         renderHostPicker(state.hostsSnapshot || snapshot);
         closeHostMenu();
       });
@@ -182,39 +195,132 @@
     applyHostPickerUi();
   }
 
+  function setApiOnline(online) {
+    const next = online !== false;
+    if (state.apiOnline === next) return;
+    state.apiOnline = next;
+    applyHostPickerUi();
+    const run = ns.run;
+    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
+  }
+
   function startHostsSse() {
     if (!dom.hostPicker) return;
 
+    const pollMs = 5000;
+    let es = null;
+    let pollTimer = 0;
+    let reconnectTimer = 0;
+    let hasSnapshot = false;
+
     const useSnapshot = (snap) => {
+      if (!snap || !Array.isArray(snap.hosts)) return;
+      hasSnapshot = true;
       state.hostsSnapshot = snap;
       renderHostPicker(snap);
+      setApiOnline(true);
     };
 
-    try {
-      const es = new EventSource("api/hosts/stream");
+    const closeStream = () => {
+      if (!es) return;
+      try {
+        es.close();
+      } catch {
+        return;
+      } finally {
+        es = null;
+      }
+    };
+
+    const stopPoll = () => {
+      if (!pollTimer) return;
+      clearTimeout(pollTimer);
+      pollTimer = 0;
+    };
+
+    const stopReconnect = () => {
+      if (!reconnectTimer) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = 0;
+    };
+
+    const fetchHostsOnce = async () => {
+      try {
+        const r = await fetch("api/hosts", { cache: "no-store" });
+        if (!r.ok) return false;
+        const data = await r.json();
+        useSnapshot(data);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const schedulePoll = () => {
+      if (pollTimer) return;
+      pollTimer = setTimeout(async () => {
+        pollTimer = 0;
+        const ok = await fetchHostsOnce();
+        if (!ok) setApiOnline(false);
+        if (ok) ensureStream();
+        if (!es) schedulePoll();
+      }, pollMs);
+    };
+
+    const scheduleReconnect = () => {
+      if (reconnectTimer || !hasSnapshot || es) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = 0;
+        ensureStream();
+      }, pollMs);
+    };
+
+    const ensureStream = () => {
+      if (es || !hasSnapshot) return;
+      stopReconnect();
+
+      let next = null;
+      try {
+        next = new EventSource("api/hosts/stream");
+      } catch {
+        schedulePoll();
+        scheduleReconnect();
+        return;
+      }
+
+      es = next;
+
       es.addEventListener("hosts", (ev) => {
         const data = safelyParseJson(ev.data);
         if (!data) return;
         useSnapshot(data);
       });
-      es.onerror = () => {
-        es.close();
-        fetch("api/hosts", { cache: "no-store" })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => {
-            if (data) useSnapshot(data);
-          })
-          .catch(() => {});
+
+      es.onopen = () => {
+        setApiOnline(true);
+        stopPoll();
       };
-    } catch {
-      fetch("api/hosts", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data) useSnapshot(data);
-        })
-        .catch(() => {});
-    }
+
+      es.onerror = () => {
+        closeStream();
+        schedulePoll();
+        scheduleReconnect();
+      };
+    };
+
+    const boot = async () => {
+      const ok = await fetchHostsOnce();
+      if (!ok) {
+        setApiOnline(false);
+        schedulePoll();
+        return;
+      }
+      ensureStream();
+    };
+
+    boot();
   }
+
 
   function getResolvedTheme(mode) {
     if (mode === "dark" || mode === "light") return mode;
@@ -770,5 +876,5 @@
     startHostsSse();
   }
 
-  ns.ui = { init, setSelectedHostId, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi };
+  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi };
 })();

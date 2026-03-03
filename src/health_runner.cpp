@@ -95,27 +95,44 @@ bool HealthRunner::all_healthy() const {
 void HealthRunner::loop() {
   using namespace std::chrono;
 
-  // Create one system client per host.
-  {
-    std::lock_guard<std::mutex> lk(mu_);
-    for (auto& c : ctx_) {
+  while (!stop_.load(std::memory_order_relaxed)) {
+    const auto tick_start = steady_clock::now();
+    const int64_t ts = now_ms();
+
+    struct InitJob {
+      size_t idx;
+      std::string id;
+      std::string uri;
+    };
+
+    std::vector<InitJob> init;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      for (size_t i = 0; i < ctx_.size(); ++i) {
+        const auto& c = ctx_[i];
+        if (c.client) continue;
+        init.push_back(InitJob{i, c.spec.id, c.spec.system_uri});
+      }
+    }
+
+    for (const auto& j : init) {
       std::string err;
-      c.client = make_client_from_uri(
-        c.spec.system_uri,
+      auto client = make_client_from_uri(
+        j.uri,
         milliseconds(settings_.timeout_ms),
         milliseconds(settings_.timeout_ms),
         milliseconds(settings_.timeout_ms),
         &err
       );
-      if (!c.client) {
-        std::cerr << "[health] host=" << c.spec.id << " client init error: " << err << "\n";
+      if (!client) {
+        std::cerr << "[health] host=" << j.id << " client init error: " << err << "\n";
+        continue;
+      }
+      std::lock_guard<std::mutex> lk(mu_);
+      if (j.idx < ctx_.size() && !ctx_[j.idx].client) {
+        ctx_[j.idx].client = std::move(client);
       }
     }
-  }
-
-  while (!stop_.load(std::memory_order_relaxed)) {
-    const auto tick_start = steady_clock::now();
-    const int64_t ts = now_ms();
 
     // Ping each host concurrently (one client per host).
     struct PingRes {
@@ -125,36 +142,47 @@ void HealthRunner::loop() {
       std::string err;
     };
 
-    std::vector<std::future<PingRes>> futs;
+    struct PingJob {
+      std::string id;
+      std::shared_ptr<clickhouse::Client> client;
+    };
+
+    std::vector<PingJob> jobs;
     {
       std::lock_guard<std::mutex> lk(mu_);
-      futs.reserve(ctx_.size());
+      jobs.reserve(ctx_.size());
       for (auto& c : ctx_) {
-        futs.push_back(std::async(std::launch::async, [&c]() -> PingRes {
-          PingRes r;
-          r.id = c.spec.id;
-          r.ok = false;
-          r.ping_ms = -1;
-          if (!c.client) {
-            r.err = "no client";
-            return r;
-          }
-          try {
-            auto t0 = std::chrono::steady_clock::now();
-            c.client->Ping();
-            auto t1 = std::chrono::steady_clock::now();
-            r.ok = true;
-            r.ping_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-            return r;
-          } catch (const std::exception& e) {
-            r.err = e.what();
-            try {
-              c.client->ResetConnection();
-            } catch (...) {}
-            return r;
-          }
-        }));
+        jobs.push_back(PingJob{c.spec.id, c.client});
       }
+    }
+
+    std::vector<std::future<PingRes>> futs;
+    futs.reserve(jobs.size());
+    for (const auto& j : jobs) {
+      futs.push_back(std::async(std::launch::async, [j]() -> PingRes {
+        PingRes r;
+        r.id = j.id;
+        r.ok = false;
+        r.ping_ms = -1;
+        if (!j.client) {
+          r.err = "no client";
+          return r;
+        }
+        try {
+          auto t0 = std::chrono::steady_clock::now();
+          j.client->Ping();
+          auto t1 = std::chrono::steady_clock::now();
+          r.ok = true;
+          r.ping_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+          return r;
+        } catch (const std::exception& e) {
+          r.err = e.what();
+          try {
+            j.client->ResetConnection();
+          } catch (...) {}
+          return r;
+        }
+      }));
     }
 
     // Apply results

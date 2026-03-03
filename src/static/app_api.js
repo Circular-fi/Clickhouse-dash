@@ -4,6 +4,18 @@
   const ns = window.ChDash;
   if (!ns) return;
 
+  function setApiOnline(online) {
+    const next = online !== false;
+    const ui = ns.ui;
+    if (ui && typeof ui.setApiOnline === "function") {
+      ui.setApiOnline(next);
+      return;
+    }
+    if (ns.state) ns.state.apiOnline = next;
+    const run = ns.run;
+    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
+  }
+
   async function readJsonBody(response) {
     const text = await response.text();
     if (!text) return {};
@@ -15,12 +27,20 @@
   }
 
   async function postJson(url, body) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        cache: "no-store",
+      });
+    } catch (e) {
+      setApiOnline(false);
+      throw e;
+    }
+
+    setApiOnline(true);
 
     const payload = await readJsonBody(response);
 
@@ -41,7 +61,15 @@
     const arr = Array.isArray(types) ? types.filter((x) => x) : [];
     const typesCsv = arr.length ? arr.map((x) => String(x)).join(",") : "keywords";
     const qs = new URLSearchParams({ host_id: String(hostId), types: typesCsv }).toString();
-    const response = await fetch(`api/meta?${qs}`, { cache: "no-store" });
+    let response;
+    try {
+      response = await fetch(`api/meta?${qs}`, { cache: "no-store" });
+    } catch (e) {
+      setApiOnline(false);
+      throw e;
+    }
+
+    setApiOnline(true);
     const payload = await readJsonBody(response);
 
     if (!response.ok) {

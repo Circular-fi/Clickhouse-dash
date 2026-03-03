@@ -451,12 +451,14 @@
 
   function updateActionButtons() {
     const busy = state.isRunning || state.isFormatting;
-    if (dom.runButton) dom.runButton.disabled = busy;
-    if (dom.runMenuButton) dom.runMenuButton.disabled = busy;
-    if (dom.formatButton) dom.formatButton.disabled = busy;
+    const offline = state.apiOnline === false;
+
+    if (dom.runButton) dom.runButton.disabled = busy || offline;
+    if (dom.runMenuButton) dom.runMenuButton.disabled = busy || offline;
+    if (dom.formatButton) dom.formatButton.disabled = busy || offline;
 
     if (dom.cancelButton) {
-      dom.cancelButton.disabled = state.isFormatting;
+      dom.cancelButton.disabled = state.isFormatting || (offline && state.isRunning);
       dom.cancelButton.textContent = state.isRunning ? "Cancel" : "Clear";
     }
   }
@@ -884,6 +886,11 @@ function streamQuery(streamUrl, agg, sink) {
 
   async function handleRun() {
     if (state.isRunning || state.isFormatting) return;
+    if (state.apiOnline === false) {
+      results.setError("API is offline.");
+      results.setStatus("error");
+      return;
+    }
 
     results.clearResultsStack();
     results.clearLiveResults();
@@ -1072,6 +1079,11 @@ function streamQuery(streamUrl, agg, sink) {
 
   async function handleFormat() {
     if (state.isRunning || state.isFormatting) return;
+    if (state.apiOnline === false) {
+      results.setError("API is offline.");
+      results.setStatus("error");
+      return;
+    }
 
     results.setError("");
     const hostId = getSelectedHostId();

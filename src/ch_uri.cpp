@@ -7,6 +7,18 @@
 namespace chdash {
 namespace {
 
+static bool is_ascii_space(char c) {
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+static std::string trim_ascii(std::string_view s) {
+  size_t b = 0;
+  while (b < s.size() && is_ascii_space(s[b])) ++b;
+  size_t e = s.size();
+  while (e > b && is_ascii_space(s[e - 1])) --e;
+  return std::string(s.substr(b, e - b));
+}
+
 static std::string to_lower(std::string s) {
   for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   return s;
@@ -196,7 +208,8 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   std::chrono::milliseconds send_timeout,
   std::string* err
 ) {
-  auto pu = parse_clickhouse_uri(uri, err);
+  const std::string u = trim_ascii(uri);
+  auto pu = parse_clickhouse_uri(u, err);
   if (!pu) return std::nullopt;
 
   clickhouse::ClientOptions opt;

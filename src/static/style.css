@@ -456,6 +456,7 @@ body {
   display: flex;
   gap: 0.625rem;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .runSplit {
@@ -932,6 +933,7 @@ button.button:not(:disabled):hover {
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 850;
+  margin-right: 0.4rem;
 }
 
 .panel__title, .panel__meta{
@@ -1106,9 +1108,11 @@ button.button:not(:disabled):hover {
   .metricColumn > .metricCompact:nth-child(2) {
     grid-column: span 1;
   }
+}
 
-  .panel--query {
-    height: 100%;
+@media (max-width: 55rem) {
+  .editorWrap {
+    min-height: calc(100% - 6.25rem);
   }
 }
 
@@ -1456,12 +1460,13 @@ button.button:not(:disabled):hover {
 }
 
 .pickerOption {
-  width: 100%;
+  width: calc(100% + 2px);
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: -1px;
   height: 2.2rem;
-  padding: 0 2.35rem 0 0.65rem;
+  padding: 0.56rem 2.35rem 0.56rem 0.8rem;
   border-radius: 0.7rem;
   border: 1px solid transparent;
   background: transparent;
@@ -1494,6 +1499,11 @@ button.button:not(:disabled):hover {
   -webkit-mask-size: 16px 16px;
   mask-size: 16px 16px;
 }
+
+.button:disabled >.picker__button::after {
+  display: None;
+}
+
 
 .picker__button[aria-expanded="true"]::after {
   transform: translateY(-50%) rotate(180deg);
@@ -1545,10 +1555,6 @@ button.button:not(:disabled):hover {
   text-overflow: ellipsis;
 }
 
-.picker__chev {
-  display: none;
-}
-
 .picker__menu {
   position: absolute;
   left: 0;
@@ -1561,8 +1567,6 @@ button.button:not(:disabled):hover {
   top: 100%;
   margin-top: -1px;
   z-index: 70;
-
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
 
   border-radius: var(--radiusSm);
   border: 1px solid var(--borderStrong);
