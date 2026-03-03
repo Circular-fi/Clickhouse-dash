@@ -270,8 +270,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 2rem),
-    var(--panelBg);
+    linear-gradient(180deg, rgb(26 52 152 / 7%), transparent 2rem), var(--panelBg);
   box-shadow: var(--shadow1);
   padding: 0.9rem;
   min-width: 0;
@@ -1041,6 +1040,29 @@ button.button:not(:disabled):hover {
   white-space: pre;
 }
 
+.resultTable tbody td.resultTable__gaugeCell {
+  position: relative;
+}
+
+.resultTable tbody td.resultTable__gaugeCell::before {
+  content: "";
+  position: absolute;
+  left: 0.35rem;
+  right: 0.35rem;
+  top: 0.22rem;
+  bottom: 0.22rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  transform-origin: left;
+  transform: scaleX(var(--gaugeScale, 0));
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.resultTable tbody td.resultTable__gaugeCell .resultTable__cellText {
+  position: relative;
+  z-index: 1;
+}
 
 .resultTable tbody tr:hover td {
   background: var(--rowHover);
