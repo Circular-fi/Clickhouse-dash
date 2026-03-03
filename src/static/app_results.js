@@ -337,11 +337,23 @@
     return JSON.stringify(typed, null, pretty ? 2 : 0);
   }
 
+  function setCellTextFlat(td, text) {
+    const s = text == null ? "" : String(text);
+    if (s.indexOf("\n") !== -1 || s.indexOf("\r") !== -1) {
+      td.textContent = s.replace(/[\r\n]+/g, " ");
+      td.title = s;
+    } else {
+      td.textContent = s;
+    }
+  }
+
   function setResultColumnsText() {
     if (!dom.resultColumnsText) return;
     const n = resultColumns.length || 0;
     util.setText(dom.resultColumnsText, `${n} ${n === 1 ? "column" : "columns"}`);
-  }  function extractFiniteNumber(raw) {
+  }
+
+  function extractFiniteNumber(raw) {
     if (raw === null || raw === undefined) return null;
     if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
     const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
@@ -394,14 +406,12 @@
     const scale = computeGaugeScale(n, maxPosArr[colIndex] || 0, maxAbsArr[colIndex] || 0);
     const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
     td.style.setProperty("--gaugeFill", fill);
-    td.textContent = text;
+    setCellTextFlat(td, text);
   }
 
   function refreshLiveGauges() {
     gaugeDirty = false;
   }
-
-
 
   function isScalarNumericType(typeAst) {
     if (!typeAst || typeAst.kind !== "Scalar") return false;
@@ -553,14 +563,14 @@
         const td = document.createElement("td");
         const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
         if (gaugeNumericCols[columnIndex]) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
-        else td.textContent = text;
+        else setCellTextFlat(td, text);
         tr.appendChild(td);
       }
       return;
     }
 
     const td = document.createElement("td");
-    td.textContent = String(row ?? "");
+    setCellTextFlat(td, row ?? "");
     td.colSpan = Math.max(1, resultColumns.length);
     tr.appendChild(td);
   }
@@ -934,13 +944,10 @@
 
     copyBtn.addEventListener("click", async () => {
       const text = copyText == null ? "" : String(copyText);
-      // Optimistic UI: flash immediately so the user gets feedback even if
-      // clipboard permissions cause delays.
       util.flashButtonText(copyBtn, { copiedText: "Copied" });
       try {
         await util.copyTextToClipboard(text);
       } catch {
-        // If copy fails, show a brief error then revert.
         util.flashButtonText(copyBtn, { copiedText: "Copy failed", durationMs: 1500 });
       }
     });
@@ -985,7 +992,6 @@
     dom.copyJsonButton && (dom.copyJsonButton.disabled = true);
   }
 
-  
   // --- Multiquery streaming panels (Query x/n) ---
   // These helpers let app_run route streaming table meta/rows into a per-query panel,
   // while keeping the single-query live renderer unchanged.
@@ -1029,7 +1035,6 @@
     ensureResultsStack();
     if (!resultsStackElement) return null;
 
-    // Collapse previous active panel if requested
     if (autoToggle && activeMultiqueryPanel) {
       setBlockExpandedLocal(activeMultiqueryPanel, false);
     }
@@ -1079,7 +1084,6 @@
       setBlockExpandedLocal(blockObj, expanded);
     });
 
-    // Clone the live tableWrap template so structure/classes match 1:1.
     const wrap = dom.liveResultsWrap || (dom.resultsPanel ? dom.resultsPanel.querySelector(".tableWrap") : null);
     let wrapClone = null;
     if (wrap) {
@@ -1093,7 +1097,6 @@
     resultsStackElement.appendChild(block);
     setResultsVisible(true);
 
-    // local state for copy/meta
     const local = {
       columns: [],
       types: [],
@@ -1117,10 +1120,11 @@
       metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
     }
 
-    // Allow the runner to override the meta text at the end (e.g., include status/elapsed/cpu).
     function setMetaTextLocal(text) {
       metaSpan.textContent = String(text ?? "");
-    }    function resetLocalGaugeState() {
+    }
+
+    function resetLocalGaugeState() {
       local.gaugeNumericCols = local.typeAsts.map(isScalarNumericType);
       local.gaugeMaxPos = new Array(local.gaugeNumericCols.length).fill(0);
       local.gaugeMaxAbs = new Array(local.gaugeNumericCols.length).fill(0);
@@ -1148,10 +1152,8 @@
     }
 
     function refreshLocalGauges() {
-        local.gaugeDirty = false;
-      }
-
-
+      local.gaugeDirty = false;
+    }
 
     let localScheduledFullRender = false;
     let localFullRenderRafId = 0;
@@ -1221,14 +1223,14 @@
           const td = document.createElement("td");
           const text = row[i] == null ? "" : String(row[i]);
           if (local.gaugeNumericCols[i]) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
-          else td.textContent = text;
+          else setCellTextFlat(td, text);
           tr.appendChild(td);
         }
         return;
       }
 
       const td = document.createElement("td");
-      td.textContent = row == null ? "" : String(row);
+      setCellTextFlat(td, row);
       td.colSpan = Math.max(1, local.columns.length);
       tr.appendChild(td);
     }
@@ -1275,7 +1277,6 @@
       updateLocalSortIndicators();
       renderLocalTableFull();
     }
-
 
     function renderTableMetaLocal(columns, types) {
       local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
@@ -1359,7 +1360,6 @@
     }
 
     function buildCopyJsonTextLocal() {
-      // Keep same behavior as live: rows are array-of-arrays; we stringify that.
       return JSON.stringify(local.allRows, null, 2);
     }
 
@@ -1377,7 +1377,6 @@
 
     copyBtn.addEventListener("click", async () => {
       const text = buildCopyJsonTextLocal();
-      // Optimistic UI feedback.
       util.flashButtonText(copyBtn, { copiedText: "Copied" });
       try {
         await util.copyTextToClipboard(text);
@@ -1386,7 +1385,6 @@
       }
     });
 
-    // Mark as active and expanded
     activeMultiqueryPanel = blockObj;
     if (autoToggle) setBlockExpandedLocal(blockObj, true);
 
@@ -1399,7 +1397,12 @@
       buildCopyJsonText: buildCopyJsonTextLocal,
       setError: setErrorLocal,
       getErrorText: () => local.errorText,
-      takeErrorText: () => { const t = local.errorText; local.errorText = ""; setErrorLocal(""); return t; },
+      takeErrorText: () => {
+        const t = local.errorText;
+        local.errorText = "";
+        setErrorLocal("");
+        return t;
+      },
       setMetaText: setMetaTextLocal,
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
@@ -1417,7 +1420,9 @@
     if (sink && typeof sink.finalize === "function") sink.finalize({ expandedByDefault });
   }
 
-ns.results = { beginMultiqueryPanel, endMultiqueryPanel,
+  ns.results = {
+    beginMultiqueryPanel,
+    endMultiqueryPanel,
     clearLiveResults,
     clearResultsStack,
     setError,

@@ -1004,28 +1004,24 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {
-  left: 0;
+  left: 0px;
   z-index: 3;
   background: var(--panel);
 }
 
+.resultTable__rowIndex {
+  width: 6ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .resultTable:not(.resultTable--vertical) tbody td.resultTable__stickyLeft {
   position: sticky;
-  left: 0;
+  left: 0px;
   z-index: 1;
   background: var(--panel);
 }
 
-.resultTable:not(.resultTable--vertical) tbody tr:hover td.resultTable__stickyLeft {
-  background: var(--rowHover);
-}
-
-.resultTable__rowIndex {
-  width: 1%;
-  min-width: 2.1rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 
 .resultTable thead th.resultTable__rowIndex {
   padding: 0.55rem 0.45rem;
