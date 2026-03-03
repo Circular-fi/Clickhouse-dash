@@ -338,13 +338,18 @@
   }
 
   function setCellTextFlat(td, text) {
-    const s = text == null ? "" : String(text);
-    if (s.indexOf("\n") !== -1 || s.indexOf("\r") !== -1) {
-      td.textContent = s.replace(/[\r\n]+/g, " ");
-      td.title = s;
-    } else {
-      td.textContent = s;
-    }
+    let s = "";
+    if (text === null || text === undefined) s = "";
+    else if (typeof text === "string") s = text;
+    else if (typeof text === "number" || typeof text === "boolean" || typeof text === "bigint") s = String(text);
+    else if (typeof text === "object") {
+      try { s = JSON.stringify(text); } catch { s = String(text); }
+    } else s = String(text);
+
+    const flat = s.replace(/\s+/g, " ").trim();
+    td.textContent = flat;
+    if (flat !== s && s.trim()) td.title = s;
+    else td.removeAttribute("title");
   }
 
   function setResultColumnsText() {
