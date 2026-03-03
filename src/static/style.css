@@ -70,7 +70,7 @@
   --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
   --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
   --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
-  --sqlFunction: color-mix(in srgb, #a78bfa 75%, var(--text));
+  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
 }
 
 @media (prefers-color-scheme: light) {
@@ -206,7 +206,9 @@ html[data-theme="light"] {
 
 html {
   font-size: 16px;
-  scrollbar-gutter: stable;
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollThumb) var(--scrollTrack);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -308,7 +310,7 @@ body {
   width: 100%;
   height: 100%;
   min-height: calc(100% - 3.25rem);
-  resize: vertical;
+  resize: none;
   padding: 0.9rem;
   border-radius: var(--radiusSm);
   border: 1px solid var(--border);
@@ -323,6 +325,12 @@ body {
   tab-size: 4;
   -moz-tab-size: 4;
   overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollThumb) var(--scrollTrack);
+}
+
+#queryTextArea:not(.editorInput) {
+  resize: vertical;
 }
 
 .editorWrap {

@@ -66,6 +66,9 @@
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") {
       state.highlightCtrl.refresh();
     }
+    if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") {
+      state.editorSizeCtrl.apply(state.selectedHostId);
+    }
   }
 
   function applyHostPickerUi() {
@@ -630,6 +633,59 @@
     if (ns.highlight && typeof ns.highlight.attach === "function") {
       const ctrl = ns.highlight.attach(dom.queryTextArea);
       if (ns.state) ns.state.highlightCtrl = ctrl || null;
+    }
+
+    if (storage && typeof storage.loadEditorHeight === "function" && typeof storage.saveEditorHeight === "function") {
+      const getTarget = () => {
+        const ta = dom.queryTextArea;
+        if (!ta) return null;
+        if (ta.closest) return ta.closest(".editorWrap") || ta;
+        const p = ta.parentNode;
+        if (p && p.classList && p.classList.contains("editorWrap")) return p;
+        return ta;
+      };
+
+      let lastSaved = null;
+      let scheduled = 0;
+
+      const apply = (hostId) => {
+        const target = getTarget();
+        if (!target) return;
+        const h = storage.loadEditorHeight(hostId);
+        if (h && Number.isFinite(h)) {
+          const v = Math.round(h);
+          target.style.height = `${v}px`;
+          lastSaved = v;
+        }
+      };
+
+      const save = () => {
+        scheduled = 0;
+        const target = getTarget();
+        if (!target || !target.style || !target.style.height) return;
+        const v = Math.round(target.getBoundingClientRect().height);
+        if (!Number.isFinite(v) || v <= 0) return;
+        if (lastSaved === v) return;
+        lastSaved = v;
+        storage.saveEditorHeight(state.selectedHostId, v);
+      };
+
+      apply(state.selectedHostId);
+
+      if (typeof ResizeObserver === "function") {
+        try {
+          const ro = new ResizeObserver(() => {
+            if (scheduled) return;
+            scheduled = requestAnimationFrame(save);
+          });
+          const t = getTarget();
+          if (t) ro.observe(t);
+        } catch {
+          null;
+        }
+      }
+
+      state.editorSizeCtrl = { apply };
     }
 
     dom.queryTextArea.addEventListener("focus", () => {

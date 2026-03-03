@@ -9,6 +9,7 @@
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
+  const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1.";
   const META_PREFIX = "chdash.meta.v1.";
   const HISTORY_MAX_ENTRIES = 100;
 
@@ -53,6 +54,7 @@
     HISTORY_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
+    EDITOR_HEIGHT_PREFIX,
     META_PREFIX,
 
     getSavedThemeMode() {
@@ -124,6 +126,23 @@
       safeWrite(EDITOR_STORAGE_KEY, String(sqlText ?? ""));
     },
 
+    editorHeightKey(hostId) {
+      const h = String(hostId || "");
+      return `${EDITOR_HEIGHT_PREFIX}${h}`;
+    },
+
+    loadEditorHeight(hostId) {
+      const raw = safeRead(storage.editorHeightKey(hostId));
+      const v = raw != null ? Number(raw) : NaN;
+      return Number.isFinite(v) && v > 0 ? v : null;
+    },
+
+    saveEditorHeight(hostId, heightPx) {
+      const v = Number(heightPx);
+      if (!Number.isFinite(v) || v <= 0) return;
+      safeWrite(storage.editorHeightKey(hostId), String(Math.round(v)));
+    },
+
     metaKey(hostId, type) {
       const h = String(hostId || "");
       const t = String(type || "");
@@ -181,6 +200,7 @@
 
     meta: { version: 1, hosts: Object.create(null) },
     highlightCtrl: null,
+    editorSizeCtrl: null,
   };
 
   ns.storage = storage;
