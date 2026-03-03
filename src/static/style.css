@@ -965,6 +965,75 @@ button.button:not(:disabled):hover {
   white-space: nowrap;
 }
 
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable {
+  cursor: pointer;
+  padding-right: 1.9rem;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
+  content: "↕";
+  position: absolute;
+  margin-left: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1rem;
+  text-align: center;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable:hover::after {
+  opacity: 0.8;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
+  content: "▲";
+  opacity: 0.9;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
+  content: "▼";
+  opacity: 0.9;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {
+  left: 0;
+  z-index: 3;
+  background: var(--tableBg);
+}
+
+.resultTable:not(.resultTable--vertical) tbody td.resultTable__stickyLeft {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--tableBg);
+}
+
+.resultTable:not(.resultTable--vertical) tbody tr:hover td.resultTable__stickyLeft {
+  background: var(--rowHover);
+}
+
+.resultTable__rowIndex {
+  width: 1%;
+  min-width: 2.35rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.resultTable thead th.resultTable__rowIndex {
+  padding: 0.55rem 0.5rem;
+  padding-right: 1.45rem;
+}
+
+.resultTable:not(.resultTable--vertical) thead th.resultTable__rowIndex.resultTable__thSortable::after {
+  right: 0.35rem;
+}
+
+.resultTable tbody td.resultTable__rowIndex {
+  padding: 0.45rem 0.5rem;
+}
+
 .resultTable tbody td {
   padding: 0.625rem 0.75rem;
   border: 1px solid var(--rowDivider);

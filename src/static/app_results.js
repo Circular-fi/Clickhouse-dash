@@ -22,6 +22,13 @@
 
   let isVerticalResults = false;
 
+  let rowIndexCounter = 0;
+  let sortKey = null;
+  let sortDir = "";
+  let scheduledFullRender = false;
+  let fullRenderRafId = 0;
+  let fullRenderToken = 0;
+
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
     dom.resultsPanel.classList.toggle("is-hidden", !visible);
@@ -73,6 +80,15 @@
     resultTypeAsts = [];
     pendingRows = [];
     allResultRows = [];
+    rowIndexCounter = 0;
+    sortKey = null;
+    sortDir = "";
+    scheduledFullRender = false;
+    fullRenderToken++;
+    if (fullRenderRafId) {
+      cancelAnimationFrame(fullRenderRafId);
+      fullRenderRafId = 0;
+    }
     currentStatusValue = "";
     lastErrorMessage = "";
 
@@ -318,6 +334,219 @@
     util.setText(dom.resultColumnsText, `${n} ${n === 1 ? "column" : "columns"}`);
   }
 
+
+  function isScalarNumericType(typeAst) {
+    if (!typeAst || typeAst.kind !== "Scalar") return false;
+    const name = String(typeAst.name ?? "");
+    if (/^(?:U?Int)(?:8|16|32|64|128|256)$/.test(name)) return true;
+    if (/^Float(?:32|64)$/.test(name)) return true;
+    if (/^Decimal(?:32|64|128|256)?\(/.test(name)) return true;
+    return false;
+  }
+
+  function normalizeNumericForSort(raw) {
+    if (raw === null || raw === undefined) return { t: "z", v: null };
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) return { t: "z", v: null };
+      return { t: "n", v: raw };
+    }
+    const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
+    if (!s) return { t: "z", v: null };
+    if (/^[+-]?\d+$/.test(s)) {
+      try {
+        return { t: "bi", v: BigInt(s) };
+      } catch {
+        return { t: "s", v: s.toLowerCase() };
+      }
+    }
+    if (NUMERIC_RE.test(s)) {
+      const n = Number(s);
+      if (Number.isFinite(n)) return { t: "n", v: n };
+    }
+    return { t: "s", v: s.toLowerCase() };
+  }
+
+  function compareNumericForSort(a, b) {
+    const na = normalizeNumericForSort(a);
+    const nb = normalizeNumericForSort(b);
+
+    if (na.t === "z" && nb.t === "z") return 0;
+    if (na.t === "z") return 1;
+    if (nb.t === "z") return -1;
+
+    if (na.t === "bi" && nb.t === "bi") return na.v < nb.v ? -1 : na.v > nb.v ? 1 : 0;
+
+    if (na.t === "n" && nb.t === "n") return na.v < nb.v ? -1 : na.v > nb.v ? 1 : 0;
+
+    if (na.t === "bi" && nb.t === "n") {
+      if (Number.isSafeInteger(nb.v)) {
+        const bbi = BigInt(nb.v);
+        return na.v < bbi ? -1 : na.v > bbi ? 1 : 0;
+      }
+      const an = Number(na.v);
+      if (Number.isFinite(an)) return an < nb.v ? -1 : an > nb.v ? 1 : 0;
+    }
+
+    if (na.t === "n" && nb.t === "bi") {
+      if (Number.isSafeInteger(na.v)) {
+        const abi = BigInt(na.v);
+        return abi < nb.v ? -1 : abi > nb.v ? 1 : 0;
+      }
+      const bn = Number(nb.v);
+      if (Number.isFinite(bn)) return na.v < bn ? -1 : na.v > bn ? 1 : 0;
+    }
+
+    const sa = na.t === "bi" ? na.v.toString() : String(na.v);
+    const sb = nb.t === "bi" ? nb.v.toString() : String(nb.v);
+
+    if (sa.length !== sb.length) return sa.length < sb.length ? -1 : 1;
+    if (sa < sb) return -1;
+    if (sa > sb) return 1;
+    return 0;
+  }
+
+  function compareTextForSort(a, b) {
+    const sa = String(a ?? "");
+    const sb = String(b ?? "");
+    const la = sa.toLowerCase();
+    const lb = sb.toLowerCase();
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    if (sa < sb) return -1;
+    if (sa > sb) return 1;
+    return 0;
+  }
+
+  function isLiveSortActive() {
+    return sortKey !== null && !!sortDir;
+  }
+
+  function getLiveSortMode(key) {
+    if (key === -1) return "numeric";
+    return isScalarNumericType(resultTypeAsts[key] || null) ? "numeric" : "text";
+  }
+
+  function nextLiveSortDir(key) {
+    const mode = getLiveSortMode(key);
+    if (sortKey !== key) return mode === "numeric" ? "desc" : "asc";
+    if (mode === "numeric") {
+      if (sortDir === "desc") return "asc";
+      if (sortDir === "asc") return "";
+      return "desc";
+    }
+    if (sortDir === "asc") return "desc";
+    if (sortDir === "desc") return "";
+    return "asc";
+  }
+
+  function updateLiveSortIndicators() {
+    if (!dom.resultTableHead) return;
+    const ths = dom.resultTableHead.querySelectorAll("th.resultTable__thSortable");
+    for (const th of ths) {
+      const k = Number(th.dataset.sortKey || "");
+      if (sortKey !== null && sortDir && k === sortKey) th.dataset.sort = sortDir;
+      else th.removeAttribute("data-sort");
+    }
+  }
+
+  function buildLiveViewRows() {
+    const rows = allResultRows.slice();
+    if (!isLiveSortActive()) return rows;
+    const key = sortKey;
+    const dir = sortDir;
+    const mode = getLiveSortMode(key);
+    const numeric = mode === "numeric";
+    rows.sort((a, b) => {
+      const av = key === -1 ? a.__chdashRowIndex : a[key];
+      const bv = key === -1 ? b.__chdashRowIndex : b[key];
+
+      let cmp = 0;
+      if (numeric) cmp = compareNumericForSort(av, bv);
+      else {
+        const as = key === -1 ? String(av ?? "") : formatCellForDisplay(av, key, false);
+        const bs = key === -1 ? String(bv ?? "") : formatCellForDisplay(bv, key, false);
+        cmp = compareTextForSort(as, bs);
+      }
+
+      if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
+      return dir === "desc" ? -cmp : cmp;
+    });
+    return rows;
+  }
+
+  function appendLiveRowCells(tr, row) {
+    const tdIndex = document.createElement("td");
+    tdIndex.className = "resultTable__rowIndex resultTable__stickyLeft";
+    tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
+    tr.appendChild(tdIndex);
+
+    if (Array.isArray(row)) {
+      for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
+        const td = document.createElement("td");
+        td.textContent = formatCellForDisplay(row[columnIndex], columnIndex, false);
+        tr.appendChild(td);
+      }
+      return;
+    }
+
+    const td = document.createElement("td");
+    td.textContent = String(row ?? "");
+    td.colSpan = Math.max(1, resultColumns.length);
+    tr.appendChild(td);
+  }
+
+  function renderLiveTableFull() {
+    if (isVerticalResults) return;
+    if (!dom.resultTableBody) return;
+
+    pendingRows.length = 0;
+    scheduledFlush = false;
+    if (flushRafId) {
+      cancelAnimationFrame(flushRafId);
+      flushRafId = 0;
+    }
+
+    const tbody = dom.resultTableBody;
+    tbody.innerHTML = "";
+
+    const rows = buildLiveViewRows();
+    const token = ++fullRenderToken;
+
+    const renderBatch = (offset) => {
+      if (token !== fullRenderToken) return;
+      const frag = document.createDocumentFragment();
+      const end = Math.min(rows.length, offset + flushBatchSize);
+      for (let i = offset; i < end; i++) {
+        const tr = document.createElement("tr");
+        appendLiveRowCells(tr, rows[i]);
+        frag.appendChild(tr);
+      }
+      tbody.appendChild(frag);
+      if (end < rows.length) requestAnimationFrame(() => renderBatch(end));
+    };
+
+    renderBatch(0);
+  }
+
+  function scheduleLiveTableFullRender() {
+    if (scheduledFullRender) return;
+    scheduledFullRender = true;
+    fullRenderRafId = requestAnimationFrame(() => {
+      scheduledFullRender = false;
+      fullRenderRafId = 0;
+      renderLiveTableFull();
+    });
+  }
+
+  function setLiveSort(key) {
+    if (isVerticalResults) return;
+    const nextDir = nextLiveSortDir(key);
+    sortKey = nextDir ? key : null;
+    sortDir = nextDir || "";
+    updateLiveSortIndicators();
+    renderLiveTableFull();
+  }
+
   function renderTableMeta(columns, types) {
     resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
     resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
@@ -327,15 +556,37 @@
     setResultColumnsText();
     clearTable();
 
+    rowIndexCounter = 0;
+    sortKey = null;
+    sortDir = "";
+    scheduledFullRender = false;
+    fullRenderToken++;
+    if (fullRenderRafId) {
+      cancelAnimationFrame(fullRenderRafId);
+      fullRenderRafId = 0;
+    }
+
     if (!dom.resultTableHead) return;
     const tr = document.createElement("tr");
+
+    const thIndex = document.createElement("th");
+    thIndex.textContent = "#";
+    thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
+    thIndex.dataset.sortKey = "-1";
+    thIndex.addEventListener("click", () => setLiveSort(-1));
+    tr.appendChild(thIndex);
+
     for (let i = 0; i < resultColumns.length; i++) {
       const th = document.createElement("th");
       th.textContent = resultColumns[i];
       if (resultTypes[i]) th.title = resultTypes[i];
+      th.classList.add("resultTable__thSortable");
+      th.dataset.sortKey = String(i);
+      th.addEventListener("click", () => setLiveSort(i));
       tr.appendChild(th);
     }
     dom.resultTableHead.appendChild(tr);
+    updateLiveSortIndicators();
     setResultsVisible(true);
   }
 
@@ -357,6 +608,11 @@
       return;
     }
 
+    if (isLiveSortActive()) {
+      pendingRows.length = 0;
+      return;
+    }
+
     if (pendingRows.length === 0) return;
     if (!dom.resultTableBody) return;
 
@@ -366,19 +622,7 @@
     for (let i = 0; i < toRender; i++) {
       const row = pendingRows.shift();
       const tr = document.createElement("tr");
-
-      if (Array.isArray(row)) {
-        for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
-          const td = document.createElement("td");
-          td.textContent = formatCellForDisplay(row[columnIndex], columnIndex, false);
-          tr.appendChild(td);
-        }
-      } else {
-        const td = document.createElement("td");
-        td.textContent = String(row);
-        tr.appendChild(td);
-      }
-
+      appendLiveRowCells(tr, row);
       frag.appendChild(tr);
     }
 
@@ -390,8 +634,11 @@
     if (!Array.isArray(rowsChunk)) return;
     for (const row of rowsChunk) {
       if (!Array.isArray(row)) continue;
+      rowIndexCounter++;
+      row.__chdashRowIndex = rowIndexCounter;
       allResultRows.push(row);
-      enqueueRowForRender(row);
+      if (isLiveSortActive()) scheduleLiveTableFullRender();
+      else enqueueRowForRender(row);
     }
     setResultsVisible(true);
     updateCopyButtonState();
@@ -402,6 +649,12 @@
 
     isVerticalResults = true;
     pendingRows.length = 0;
+    scheduledFullRender = false;
+    fullRenderToken++;
+    if (fullRenderRafId) {
+      cancelAnimationFrame(fullRenderRafId);
+      fullRenderRafId = 0;
+    }
     scheduledFlush = false;
     if (flushRafId) {
       cancelAnimationFrame(flushRafId);
@@ -464,10 +717,10 @@
 
     if (scheduledFlush || pendingRows.length) flushPendingRows();
 
-    const td = dom.resultTableBody.querySelector("tr td");
+    const td = dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)");
     if (!td) {
       requestAnimationFrame(() => {
-        const td2 = dom.resultTableBody ? dom.resultTableBody.querySelector("tr td") : null;
+        const td2 = dom.resultTableBody ? dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)") : null;
         if (td2) td2.textContent = formatCellForDisplay(raw, 0, true);
       });
       return;
@@ -477,6 +730,7 @@
 
   function finalizeAfterDone() {
     if (scheduledFlush || pendingRows.length) flushPendingRows();
+    if (!isVerticalResults && isLiveSortActive()) scheduleLiveTableFullRender();
     maybeSwitchToVerticalSingleRow();
     maybePrettifySingleRowComplexCells();
   }
@@ -768,7 +1022,11 @@
     const local = {
       columns: [],
       types: [],
+      typeAsts: [],
       allRows: [],
+      rowIndexCounter: 0,
+      sortKey: null,
+      sortDir: "",
       errorText: "",
       wrap: wrapClone,
       errorBanner: ensureLocalErrorBanner(body),
@@ -785,47 +1043,203 @@
       metaSpan.textContent = String(text ?? "");
     }
 
+    let localScheduledFullRender = false;
+    let localFullRenderRafId = 0;
+    let localFullRenderToken = 0;
+
+    function isLocalSortActive() {
+      return local.sortKey !== null && !!local.sortDir;
+    }
+
+    function getLocalSortMode(key) {
+      if (key === -1) return "numeric";
+      return isScalarNumericType(local.typeAsts[key] || null) ? "numeric" : "text";
+    }
+
+    function nextLocalSortDir(key) {
+      const mode = getLocalSortMode(key);
+      if (local.sortKey !== key) return mode === "numeric" ? "desc" : "asc";
+      if (mode === "numeric") {
+        if (local.sortDir === "desc") return "asc";
+        if (local.sortDir === "asc") return "";
+        return "desc";
+      }
+      if (local.sortDir === "asc") return "desc";
+      if (local.sortDir === "desc") return "";
+      return "asc";
+    }
+
+    function updateLocalSortIndicators() {
+      if (!local.wrap) return;
+      const ths = local.wrap.querySelectorAll("thead th.resultTable__thSortable");
+      for (const th of ths) {
+        const k = Number(th.dataset.sortKey || "");
+        if (local.sortKey !== null && local.sortDir && k === local.sortKey) th.dataset.sort = local.sortDir;
+        else th.removeAttribute("data-sort");
+      }
+    }
+
+    function buildLocalViewRows() {
+      const rows = local.allRows.slice();
+      if (!isLocalSortActive()) return rows;
+      const key = local.sortKey;
+      const dir = local.sortDir;
+      const mode = getLocalSortMode(key);
+      const numeric = mode === "numeric";
+      rows.sort((a, b) => {
+        const av = key === -1 ? a.__chdashRowIndex : a[key];
+        const bv = key === -1 ? b.__chdashRowIndex : b[key];
+
+        let cmp = 0;
+        if (numeric) cmp = compareNumericForSort(av, bv);
+        else cmp = compareTextForSort(String(av ?? ""), String(bv ?? ""));
+
+        if (cmp === 0) cmp = (a.__chdashRowIndex || 0) - (b.__chdashRowIndex || 0);
+        return dir === "desc" ? -cmp : cmp;
+      });
+      return rows;
+    }
+
+    function appendLocalRowCells(tr, row) {
+      const tdIndex = document.createElement("td");
+      tdIndex.className = "resultTable__rowIndex resultTable__stickyLeft";
+      tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
+      tr.appendChild(tdIndex);
+
+      if (Array.isArray(row)) {
+        for (let i = 0; i < local.columns.length; i++) {
+          const td = document.createElement("td");
+          td.textContent = row[i] == null ? "" : String(row[i]);
+          tr.appendChild(td);
+        }
+        return;
+      }
+
+      const td = document.createElement("td");
+      td.textContent = row == null ? "" : String(row);
+      td.colSpan = Math.max(1, local.columns.length);
+      tr.appendChild(td);
+    }
+
+    function renderLocalTableFull() {
+      if (!local.wrap) return;
+      const { tbody } = findTablePartsIn(local.wrap);
+      if (!tbody) return;
+
+      tbody.innerHTML = "";
+      const rows = buildLocalViewRows();
+      const token = ++localFullRenderToken;
+
+      const renderBatch = (offset) => {
+        if (token !== localFullRenderToken) return;
+        const frag = document.createDocumentFragment();
+        const end = Math.min(rows.length, offset + flushBatchSize);
+        for (let i = offset; i < end; i++) {
+          const tr = document.createElement("tr");
+          appendLocalRowCells(tr, rows[i]);
+          frag.appendChild(tr);
+        }
+        tbody.appendChild(frag);
+        if (end < rows.length) requestAnimationFrame(() => renderBatch(end));
+      };
+
+      renderBatch(0);
+    }
+
+    function scheduleLocalTableFullRender() {
+      if (localScheduledFullRender) return;
+      localScheduledFullRender = true;
+      localFullRenderRafId = requestAnimationFrame(() => {
+        localScheduledFullRender = false;
+        localFullRenderRafId = 0;
+        renderLocalTableFull();
+      });
+    }
+
+    function setLocalSort(key) {
+      const nextDir = nextLocalSortDir(key);
+      local.sortKey = nextDir ? key : null;
+      local.sortDir = nextDir || "";
+      updateLocalSortIndicators();
+      renderLocalTableFull();
+    }
+
+
     function renderTableMetaLocal(columns, types) {
       local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
       local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+      local.typeAsts = local.types.map(parseChType);
       local.allRows.length = 0;
+      local.rowIndexCounter = 0;
+      local.sortKey = null;
+      local.sortDir = "";
+      localScheduledFullRender = false;
+      localFullRenderToken++;
+      if (localFullRenderRafId) {
+        cancelAnimationFrame(localFullRenderRafId);
+        localFullRenderRafId = 0;
+      }
       if (!local.wrap) return;
       resetTableMode();
       clearTableIn(local.wrap);
       const { thead } = findTablePartsIn(local.wrap);
       if (!thead) return;
       const tr = document.createElement("tr");
+
+      const thIndex = document.createElement("th");
+      thIndex.textContent = "#";
+      thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
+      thIndex.dataset.sortKey = "-1";
+      thIndex.addEventListener("click", () => setLocalSort(-1));
+      tr.appendChild(thIndex);
+
       for (let i = 0; i < local.columns.length; i++) {
         const th = document.createElement("th");
         th.textContent = local.columns[i];
         if (local.types[i]) th.title = local.types[i];
+        th.classList.add("resultTable__thSortable");
+        th.dataset.sortKey = String(i);
+        th.addEventListener("click", () => setLocalSort(i));
         tr.appendChild(th);
       }
       thead.appendChild(tr);
+      updateLocalSortIndicators();
       updateMetaText();
     }
 
     function appendRowsLocal(rowsChunk) {
       if (!Array.isArray(rowsChunk)) return;
-      local.allRows.push(...rowsChunk);
-      if (!local.wrap) return;
+      if (!local.wrap) {
+        for (const row of rowsChunk) {
+          local.rowIndexCounter++;
+          if (row && typeof row === "object") row.__chdashRowIndex = local.rowIndexCounter;
+          local.allRows.push(row);
+        }
+        updateMetaText();
+        return;
+      }
       const { tbody } = findTablePartsIn(local.wrap);
       if (!tbody) return;
+
+      const shouldFullRender = isLocalSortActive();
+
+      const frag = shouldFullRender ? null : document.createDocumentFragment();
+
       for (const row of rowsChunk) {
+        local.rowIndexCounter++;
+        if (row && typeof row === "object") row.__chdashRowIndex = local.rowIndexCounter;
+        local.allRows.push(row);
+
+        if (shouldFullRender) continue;
+
         const tr = document.createElement("tr");
-        if (Array.isArray(row)) {
-          for (let i = 0; i < row.length; i++) {
-            const td = document.createElement("td");
-            td.textContent = row[i] == null ? "" : String(row[i]);
-            tr.appendChild(td);
-          }
-        } else {
-          const td = document.createElement("td");
-          td.textContent = row == null ? "" : String(row);
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
+        appendLocalRowCells(tr, row);
+        frag.appendChild(tr);
       }
+
+      if (shouldFullRender) scheduleLocalTableFullRender();
+      else tbody.appendChild(frag);
+
       updateMetaText();
     }
 
