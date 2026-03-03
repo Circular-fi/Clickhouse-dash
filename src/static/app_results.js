@@ -346,7 +346,7 @@
     if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
     const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
     if (!s) return null;
-    if (!NUMERIC_RE.test(s)) return null;
+    if (s.length > 2 && s[0] === "0" && (s[1] === "x" || s[1] === "X")) return null;
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
   }
@@ -392,34 +392,14 @@
     td.classList.add("resultTable__gaugeCell");
     const n = extractFiniteNumber(raw);
     const scale = computeGaugeScale(n, maxPosArr[colIndex] || 0, maxAbsArr[colIndex] || 0);
-    td.style.setProperty("--gaugeScale", scale ? scale.toFixed(6) : "0");
-    const span = document.createElement("span");
-    span.className = "resultTable__cellText";
-    span.textContent = text;
-    td.appendChild(span);
+    const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
+    td.style.setProperty("--gaugeFill", fill);
+    td.textContent = text;
   }
 
   function refreshLiveGauges() {
-    if (isVerticalResults || !gaugeDirty || !dom.resultTableBody) return;
-    const rows = buildLiveViewRows();
-    const trs = dom.resultTableBody.querySelectorAll("tr");
-    const count = Math.min(trs.length, rows.length);
-    for (let r = 0; r < count; r++) {
-      const row = rows[r];
-      if (!Array.isArray(row)) continue;
-      const tr = trs[r];
-      for (let c = 0; c < gaugeNumericCols.length; c++) {
-        if (!gaugeNumericCols[c]) continue;
-        const td = tr.children[c + 1];
-        if (!td || !td.classList.contains("resultTable__gaugeCell")) continue;
-        const n = extractFiniteNumber(row[c]);
-        const scale = computeGaugeScale(n, gaugeMaxPos[c] || 0, gaugeMaxAbs[c] || 0);
-        td.style.setProperty("--gaugeScale", scale ? scale.toFixed(6) : "0");
-      }
-    }
     gaugeDirty = false;
   }
-
 
 
 
@@ -825,8 +805,6 @@
     if (!isVerticalResults && isLiveSortActive()) {
       renderLiveTableFull();
       gaugeDirty = false;
-    } else {
-      refreshLiveGauges();
     }
     maybeSwitchToVerticalSingleRow();
     maybePrettifySingleRowComplexCells();
@@ -1170,27 +1148,8 @@
     }
 
     function refreshLocalGauges() {
-      if (!local.wrap || !local.gaugeDirty) return;
-      const { tbody } = findTablePartsIn(local.wrap);
-      if (!tbody) return;
-      const rows = buildLocalViewRows();
-      const trs = tbody.querySelectorAll("tr");
-      const count = Math.min(trs.length, rows.length);
-      for (let r = 0; r < count; r++) {
-        const row = rows[r];
-        if (!Array.isArray(row)) continue;
-        const tr = trs[r];
-        for (let c = 0; c < local.gaugeNumericCols.length; c++) {
-          if (!local.gaugeNumericCols[c]) continue;
-          const td = tr.children[c + 1];
-          if (!td || !td.classList.contains("resultTable__gaugeCell")) continue;
-          const n = extractFiniteNumber(row[c]);
-          const scale = computeGaugeScale(n, local.gaugeMaxPos[c] || 0, local.gaugeMaxAbs[c] || 0);
-          td.style.setProperty("--gaugeScale", scale ? scale.toFixed(6) : "0");
-        }
+        local.gaugeDirty = false;
       }
-      local.gaugeDirty = false;
-    }
 
 
 
@@ -1446,7 +1405,6 @@
       finalize: ({ expandedByDefault = false } = {}) => {
         if (local.wrap && local.gaugeDirty) {
           if (isLocalSortActive()) renderLocalTableFull();
-          else refreshLocalGauges();
           local.gaugeDirty = false;
         }
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);

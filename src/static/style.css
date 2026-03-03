@@ -964,6 +964,9 @@ button.button:not(:disabled):hover {
   white-space: nowrap;
 }
 
+.resultTable thead th {
+  background: var(--theadBg);
+}
 
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable {
   cursor: pointer;
@@ -973,7 +976,7 @@ button.button:not(:disabled):hover {
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
   content: "↕";
   position: absolute;
-  margin-left: 0.4rem;
+  right: 0.55rem;
   top: 50%;
   transform: translateY(-50%);
   width: 1rem;
@@ -999,14 +1002,14 @@ button.button:not(:disabled):hover {
 .resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {
   left: 0;
   z-index: 3;
-  background: var(--tableBg);
+  background: var(--panel);
 }
 
 .resultTable:not(.resultTable--vertical) tbody td.resultTable__stickyLeft {
   position: sticky;
   left: 0;
   z-index: 1;
-  background: var(--tableBg);
+  background: var(--panel);
 }
 
 .resultTable:not(.resultTable--vertical) tbody tr:hover td.resultTable__stickyLeft {
@@ -1015,13 +1018,13 @@ button.button:not(:disabled):hover {
 
 .resultTable__rowIndex {
   width: 1%;
-  min-width: 2.35rem;
+  min-width: 2.1rem;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 .resultTable thead th.resultTable__rowIndex {
-  padding: 0.55rem 0.5rem;
+  padding: 0.55rem 0.45rem;
   padding-right: 1.45rem;
 }
 
@@ -1030,7 +1033,16 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable tbody td.resultTable__rowIndex {
-  padding: 0.45rem 0.5rem;
+  padding: 0.45rem 0.45rem;
+}
+
+.resultTable tbody td.resultTable__gaugeCell {
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
+  background-repeat: no-repeat;
+  background-origin: content-box;
+  background-clip: content-box;
+  background-size: var(--gaugeFill, 0%) 100%;
+  opacity: 1;
 }
 
 .resultTable tbody td {
@@ -1040,29 +1052,6 @@ button.button:not(:disabled):hover {
   white-space: pre;
 }
 
-.resultTable tbody td.resultTable__gaugeCell {
-  position: relative;
-}
-
-.resultTable tbody td.resultTable__gaugeCell::before {
-  content: "";
-  position: absolute;
-  left: 0.35rem;
-  right: 0.35rem;
-  top: 0.22rem;
-  bottom: 0.22rem;
-  border-radius: 0.25rem;
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-  transform-origin: left;
-  transform: scaleX(var(--gaugeScale, 0));
-  opacity: 0.35;
-  pointer-events: none;
-}
-
-.resultTable tbody td.resultTable__gaugeCell .resultTable__cellText {
-  position: relative;
-  z-index: 1;
-}
 
 .resultTable tbody tr:hover td {
   background: var(--rowHover);
@@ -1718,3 +1707,11 @@ button.button:not(:disabled):hover {
 .jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
 .jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
 .jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
+
+.resultTable tbody tr:hover td.resultTable__gaugeCell {
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
+  background-repeat: no-repeat;
+  background-origin: content-box;
+  background-clip: content-box;
+  background-size: var(--gaugeFill, 0%) 100%;
+}
