@@ -337,7 +337,7 @@ body {
 }
 
 .editorWrap {
-  --gutterW: 3.2rem;
+  --gutterW: 6ch;
   position: relative;
   width: 100%;
   height: 100%;
@@ -980,7 +980,7 @@ button.button:not(:disabled):hover {
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
   content: "↕";
   position: absolute;
-  right: 0.55rem;
+  margin-left: 0.4rem;
   top: 50%;
   transform: translateY(-50%);
   width: 1rem;
