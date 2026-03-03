@@ -331,7 +331,7 @@
 
   function formatCellForDisplay(raw, colIndex, pretty = false) {
     const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
-    if (typed === null || typed === undefined) return "";
+    if (typed === null || typed === undefined) return "null";
     if (typeof typed === "string") return typed;
     if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
     return JSON.stringify(typed, null, pretty ? 2 : 0);
@@ -339,7 +339,7 @@
 
   function setCellTextFlat(td, text) {
     let s = "";
-    if (text === null || text === undefined) s = "";
+    if (text === null || text === undefined) s = "null";
     else if (typeof text === "string") s = text;
     else if (typeof text === "number" || typeof text === "boolean" || typeof text === "bigint") s = String(text);
     else if (typeof text === "object") {
