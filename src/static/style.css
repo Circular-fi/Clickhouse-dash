@@ -953,7 +953,8 @@ button.button:not(:disabled):hover {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.8125rem;
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .resultTable thead th {
@@ -1048,10 +1049,10 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable tbody td {
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--rowDivider);
-  vertical-align: top;
-  white-space: pre;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--rowDivider);
+    vertical-align: middle;
+    white-space: pre;
 }
 
 
