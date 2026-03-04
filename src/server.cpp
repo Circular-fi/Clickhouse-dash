@@ -1560,17 +1560,18 @@ static std::string align_simple_as_in_select(std::string s) {
   std::vector<Group> groups;
   groups.reserve(8);
 
-  auto add = [&](size_t idx, size_t ind_len, size_t as_col) {
+  auto add = [&](size_t idx, size_t ind_len, size_t expr_end_col) {
+    const size_t target = expr_end_col + 1;
     for (auto& g : groups) {
       if (g.ind_len != ind_len) continue;
       g.idxs.push_back(idx);
-      g.target_as_col = std::max(g.target_as_col, as_col);
+      g.target_as_col = std::max(g.target_as_col, target);
       return;
     }
     Group g;
     g.ind_len = ind_len;
     g.idxs.push_back(idx);
-    g.target_as_col = as_col;
+    g.target_as_col = target;
     groups.push_back(std::move(g));
   };
 
@@ -1587,9 +1588,12 @@ static std::string align_simple_as_in_select(std::string s) {
         size_t ws_start = ind_len + as_pos;
         while (ws_start > 0 && (line[ws_start - 1] == ' ' || line[ws_start - 1] == '\t')) --ws_start;
 
-        if (as_idx == g.target_as_col) continue;
+        const size_t cap = g.ind_len + 80;
+        const size_t target_col = (g.target_as_col > cap) ? cap : g.target_as_col;
 
-        const size_t pad = (g.target_as_col > ws_start) ? (g.target_as_col - ws_start) : 1;
+        if (as_idx == target_col) continue;
+
+        const size_t pad = (target_col > ws_start) ? (target_col - ws_start) : 1;
         line = line.substr(0, ws_start) + std::string(pad, ' ') + line.substr(as_idx);
       }
     }
@@ -1619,7 +1623,11 @@ static std::string align_simple_as_in_select(std::string s) {
 
     size_t ind_len2 = 0;
     size_t as_pos = 0;
-    if (is_alias_as(line, ind_len2, as_pos)) add(i, ind_len2, ind_len2 + as_pos + 1);
+    if (is_alias_as(line, ind_len2, as_pos)) {
+      size_t ws_start = ind_len2 + as_pos;
+      while (ws_start > 0 && (line[ws_start - 1] == ' ' || line[ws_start - 1] == '\t')) --ws_start;
+      add(i, ind_len2, ws_start);
+    }
   }
   flush();
 
@@ -2191,16 +2199,37 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     const size_t call_len = call_end - name_beg;
     std::string_view inner = std::string_view(s).substr(name_end + 1, j - (name_end + 1));
     auto args = split_top_level(inner, ',');
-    if (args.size() < 2 || call_len <= threshold) {
-      out.append(s.substr(name_beg, call_len));
-      i = call_end;
+    const bool long_call = (call_len > threshold);
+    const bool multi_arg = (args.size() >= 2);
+    const bool single_arg = (args.size() == 1);
+
+    if (!long_call) {
+      out.append(s.substr(name_beg, name_end - name_beg + 1));
+      i = name_end + 1;
       continue;
     }
 
     const size_t nl_count = count_top_level_newlines(inner);
-    if (nl_count >= args.size() - 1) {
-      out.append(s.substr(name_beg, call_len));
-      i = call_end;
+    const bool already_one_per_line = multi_arg && (nl_count >= args.size() - 1);
+    if (already_one_per_line) {
+      out.append(s.substr(name_beg, name_end - name_beg + 1));
+      i = name_end + 1;
+      continue;
+    }
+
+    std::string_view inner_trim = trim_view_ascii_spaces(inner);
+    bool starts_with_ident_call = false;
+    if (!inner_trim.empty() && is_ident_start(inner_trim.front())) {
+      size_t p = 1;
+      while (p < inner_trim.size() && is_ident_char(inner_trim[p])) ++p;
+      while (p < inner_trim.size() && (inner_trim[p] == ' ' || inner_trim[p] == '\t')) ++p;
+      if (p < inner_trim.size() && inner_trim[p] == '(') starts_with_ident_call = true;
+    }
+
+    const bool should_format = (multi_arg) || (single_arg && starts_with_ident_call);
+    if (!should_format) {
+      out.append(s.substr(name_beg, name_end - name_beg + 1));
+      i = name_end + 1;
       continue;
     }
 
@@ -2218,7 +2247,7 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     }
     const std::string arg_indent = base_indent + "    ";
 
-  auto format_paren_list_arg = [&](const std::string& a, const std::string& indent) -> std::optional<std::string> {
+    auto format_paren_list_arg = [&](const std::string& a, const std::string& indent) -> std::optional<std::string> {
     if (a.size() < 2 || a.front() != '(' || a.back() != ')') return std::nullopt;
     if (a.find('\n') == std::string::npos && a.size() <= threshold) return std::nullopt;
     std::string_view inner = std::string_view(a).substr(1, a.size() - 2);
@@ -2253,6 +2282,7 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     out.push_back('\n');
     for (size_t k = 0; k < args.size(); ++k) {
       std::string a = trim_ascii_spaces(args[k]);
+      a = reindent_function_args(std::move(a), threshold);
       if (auto formatted = format_paren_list_arg(a, arg_indent)) {
         out.append(*formatted);
       } else if (a.find('\n') != std::string::npos) {
@@ -2406,10 +2436,10 @@ static std::string postprocess_format_query(std::string s, size_t threshold) {
 
   out = reindent_where_and_join(std::move(out));
   out = cascade_select_lists(std::move(out), threshold);
-  out = align_simple_as_in_select(std::move(out));
   out = format_bool_in_parentheses(std::move(out), threshold);
   out = reindent_function_args(std::move(out), threshold);
   out = reindent_bool_expressions(std::move(out));
+  out = align_simple_as_in_select(std::move(out));
   return out;
 }
 

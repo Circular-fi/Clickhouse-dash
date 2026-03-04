@@ -530,10 +530,11 @@
       const start = ta.selectionStart;
       const end = ta.selectionEnd;
       try {
+        const before = String(ta.value || "");
         ta.focus();
         ta.setSelectionRange(start, end);
         const ok = document.execCommand && document.execCommand("insertText", false, nextText);
-        if (ok) return { start, end };
+        if (ok || String(ta.value || "") !== before) return { start, end };
       } catch {
         null;
       }
@@ -636,8 +637,9 @@
 
         const od = outdentLine(line);
         if (od.removed === 0) return;
-        ta.setRangeText(od.line, ls, le, "preserve");
-        dispatchInputEvent(ta);
+        ta.selectionStart = ls;
+        ta.selectionEnd = le;
+        replaceSelectionText(ta, od.line);
         const nextPos = Math.max(ls, start - od.removed);
         ta.selectionStart = nextPos;
         ta.selectionEnd = nextPos;
@@ -690,8 +692,9 @@
       const newStart = start + shiftFor(startRel, includeEquals);
       const newEnd = end + shiftFor(endRel, includeEquals);
 
-      ta.setRangeText(newBlock, blockStart, blockEnd, "preserve");
-      dispatchInputEvent(ta);
+      ta.selectionStart = blockStart;
+      ta.selectionEnd = blockEnd;
+      replaceSelectionText(ta, newBlock);
       ta.selectionStart = Math.max(blockStart, newStart);
       ta.selectionEnd = Math.max(blockStart, newEnd);
     });

@@ -1412,7 +1412,7 @@
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
         if (local.wrap && local.gaugeDirty) {
-          if (isLocalSortActive()) renderLocalTableFull();
+          renderLocalTableFull();
           local.gaugeDirty = false;
         }
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
