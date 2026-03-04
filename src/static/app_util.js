@@ -144,6 +144,19 @@
   function replaceTextAreaValue(textAreaEl, nextValue) {
     if (!textAreaEl) return;
     const v = String(nextValue ?? "");
+
+    const dispatchInputEvent = () => {
+      try {
+        textAreaEl.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {
+        try {
+          textAreaEl.dispatchEvent(new Event("input"));
+        } catch {
+          null;
+        }
+      }
+    };
+
     try {
       textAreaEl.focus();
       textAreaEl.setSelectionRange(0, textAreaEl.value.length);
@@ -154,8 +167,10 @@
     }
     try {
       textAreaEl.setRangeText(v, 0, textAreaEl.value.length, "end");
+      dispatchInputEvent();
     } catch {
       textAreaEl.value = v;
+      dispatchInputEvent();
     }
   }
 

@@ -491,6 +491,19 @@
   function initEditor() {
     if (!dom.queryTextArea) return;
 
+    const dispatchInputEvent = (el) => {
+      if (!el || typeof el.dispatchEvent !== "function") return;
+      try {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {
+        try {
+          el.dispatchEvent(new Event("input"));
+        } catch {
+          null;
+        }
+      }
+    };
+
     const current = String(dom.queryTextArea.value || "");
     if (!current.trim() && storage.loadEditorSql) {
       const saved = String(storage.loadEditorSql() || "");
@@ -526,6 +539,7 @@
       }
       try {
         ta.setRangeText(nextText, start, end, "end");
+        dispatchInputEvent(ta);
         return { start, end };
       } catch {
         null;
@@ -535,6 +549,7 @@
       const pos = start + nextText.length;
       ta.selectionStart = pos;
       ta.selectionEnd = pos;
+      dispatchInputEvent(ta);
       return { start, end };
     };
 
@@ -622,6 +637,7 @@
         const od = outdentLine(line);
         if (od.removed === 0) return;
         ta.setRangeText(od.line, ls, le, "preserve");
+        dispatchInputEvent(ta);
         const nextPos = Math.max(ls, start - od.removed);
         ta.selectionStart = nextPos;
         ta.selectionEnd = nextPos;
@@ -675,6 +691,7 @@
       const newEnd = end + shiftFor(endRel, includeEquals);
 
       ta.setRangeText(newBlock, blockStart, blockEnd, "preserve");
+      dispatchInputEvent(ta);
       ta.selectionStart = Math.max(blockStart, newStart);
       ta.selectionEnd = Math.max(blockStart, newEnd);
     });
@@ -717,6 +734,7 @@
         }
         // Fallback if execCommand isn't available
         ta.setRangeText("\t", deleteFrom, start, "end");
+        dispatchInputEvent(ta);
       }
     });
 
