@@ -476,8 +476,7 @@
 
   async function handleCopyLiveJson() {
     if (!dom.copyJsonButton) return;
-    const copyText = perQuerySink && perQuerySink.buildCopyJsonText ? perQuerySink.buildCopyJsonText() : results.buildCopyJsonText();
-    // Optimistic UI so feedback is visible even if clipboard permissions delay/fail.
+    const copyText = results && typeof results.buildCopyJsonText === "function" ? results.buildCopyJsonText() : "";
     util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     try {
       await util.copyTextToClipboard(copyText);
