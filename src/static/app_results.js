@@ -33,6 +33,8 @@
   let gaugeMaxPos = [];
   let gaugeMaxAbs = [];
   let gaugeDirty = false;
+  let numericMaxScale = [];
+  let numericDirty = false;
 
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
@@ -87,6 +89,8 @@
     gaugeMaxPos = [];
     gaugeMaxAbs = [];
     gaugeDirty = false;
+    numericMaxScale = [];
+    numericDirty = false;
     pendingRows = [];
     allResultRows = [];
     rowIndexCounter = 0;
@@ -337,6 +341,14 @@
     return JSON.stringify(typed, null, pretty ? 2 : 0);
   }
 
+  function formatCellForDisplayWithTypes(raw, colIndex, pretty, typeAsts) {
+    const typed = coerceDeepTyped(raw, (typeAsts && typeAsts[colIndex]) || null);
+    if (typed === null || typed === undefined) return "null";
+    if (typeof typed === "string") return typed;
+    if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
+    return JSON.stringify(typed, null, pretty ? 2 : 0);
+  }
+
   function setCellTextFlat(td, text) {
     let s = "";
     if (text === null || text === undefined) s = "null";
@@ -383,13 +395,69 @@
     gaugeMaxPos = new Array(gaugeNumericCols.length).fill(0);
     gaugeMaxAbs = new Array(gaugeNumericCols.length).fill(0);
     gaugeDirty = false;
+    numericMaxScale = new Array(gaugeNumericCols.length).fill(0);
+    numericDirty = false;
+  }
+
+  function extractDecimalScale(raw) {
+    if (raw === null || raw === undefined) return 0;
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) return 0;
+      const s = String(raw);
+      if (s.includes("e") || s.includes("E")) return 0;
+      const dot = s.indexOf(".");
+      return dot >= 0 ? Math.max(0, s.length - dot - 1) : 0;
+    }
+    if (typeof raw !== "string") return 0;
+    const s = raw.trim();
+    if (!s) return 0;
+    if (s.includes("e") || s.includes("E")) return 0;
+    const m = s.match(/^[+-]?(?:\d+)?\.(\d+)$/);
+    return m ? m[1].length : 0;
+  }
+
+  function formatNumericWithScale(raw, scale) {
+    if (raw === null || raw === undefined) return "null";
+    if (!scale) return String(raw);
+    if (typeof raw === "number") {
+      if (!Number.isFinite(raw)) return String(raw);
+      try {
+        return raw.toFixed(scale);
+      } catch {
+        return String(raw);
+      }
+    }
+    if (typeof raw !== "string") return String(raw);
+    const s0 = raw.trim();
+    if (!s0) return s0;
+    if (!NUMERIC_RE.test(s0)) return s0;
+    if (s0.includes("e") || s0.includes("E")) return s0;
+    const dot = s0.indexOf(".");
+    if (dot < 0) return s0 + "." + "0".repeat(scale);
+    const head = s0.slice(0, dot);
+    const tail = s0.slice(dot + 1);
+    if (tail.length >= scale) return s0;
+    return head + "." + tail + "0".repeat(scale - tail.length);
+  }
+
+  function formatNumericCellText(raw, colIndex, scaleArr) {
+    const scale = (scaleArr && scaleArr[colIndex]) || 0;
+    return formatNumericWithScale(raw, scale);
   }
 
   function updateLiveGaugeMaximaFromRow(row) {
     if (!Array.isArray(row) || gaugeNumericCols.length === 0) return;
     let changed = false;
+    let scaleChanged = false;
     for (let i = 0; i < gaugeNumericCols.length; i++) {
       if (!gaugeNumericCols[i]) continue;
+
+      const scale = extractDecimalScale(row[i]);
+      if (scale > (numericMaxScale[i] || 0)) {
+        numericMaxScale[i] = scale;
+        scaleChanged = true;
+      }
+
       const n = extractFiniteNumber(row[i]);
       if (n === null) continue;
       const abs = Math.abs(n);
@@ -403,10 +471,12 @@
       }
     }
     if (changed) gaugeDirty = true;
+    if (scaleChanged) numericDirty = true;
   }
 
   function setGaugeCell(td, raw, colIndex, text, maxPosArr, maxAbsArr) {
     td.classList.add("resultTable__gaugeCell");
+    td.classList.add("resultTable__numeric");
     const n = extractFiniteNumber(raw);
     const scale = computeGaugeScale(n, maxPosArr[colIndex] || 0, maxAbsArr[colIndex] || 0);
     const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
@@ -566,9 +636,14 @@
     if (Array.isArray(row)) {
       for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
         const td = document.createElement("td");
-        const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
-        if (gaugeNumericCols[columnIndex]) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
-        else setCellTextFlat(td, text);
+        if (gaugeNumericCols[columnIndex]) {
+          const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
+          setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
+        } else {
+          const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
+          if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("resultTable__numeric");
+          setCellTextFlat(td, text);
+        }
         tr.appendChild(td);
       }
       return;
@@ -817,9 +892,10 @@
 
   function finalizeAfterDone() {
     if (scheduledFlush || pendingRows.length) flushPendingRows();
-    if (!isVerticalResults && isLiveSortActive()) {
+    if (!isVerticalResults && (isLiveSortActive() || gaugeDirty || numericDirty)) {
       renderLiveTableFull();
       gaugeDirty = false;
+      numericDirty = false;
     }
     maybeSwitchToVerticalSingleRow();
     maybePrettifySingleRowComplexCells();
@@ -1117,6 +1193,9 @@
       gaugeMaxPos: [],
       gaugeMaxAbs: [],
       gaugeDirty: false,
+      numericMaxScale: [],
+      numericDirty: false,
+      isVertical: false,
     };
 
     function updateMetaText() {
@@ -1134,13 +1213,23 @@
       local.gaugeMaxPos = new Array(local.gaugeNumericCols.length).fill(0);
       local.gaugeMaxAbs = new Array(local.gaugeNumericCols.length).fill(0);
       local.gaugeDirty = false;
+      local.numericMaxScale = new Array(local.gaugeNumericCols.length).fill(0);
+      local.numericDirty = false;
     }
 
     function updateLocalGaugeMaximaFromRow(row) {
       if (!Array.isArray(row) || local.gaugeNumericCols.length === 0) return;
       let changed = false;
+      let scaleChanged = false;
       for (let i = 0; i < local.gaugeNumericCols.length; i++) {
         if (!local.gaugeNumericCols[i]) continue;
+
+        const scale = extractDecimalScale(row[i]);
+        if (scale > (local.numericMaxScale[i] || 0)) {
+          local.numericMaxScale[i] = scale;
+          scaleChanged = true;
+        }
+
         const n = extractFiniteNumber(row[i]);
         if (n === null) continue;
         const abs = Math.abs(n);
@@ -1154,6 +1243,7 @@
         }
       }
       if (changed) local.gaugeDirty = true;
+      if (scaleChanged) local.numericDirty = true;
     }
 
     function refreshLocalGauges() {
@@ -1226,9 +1316,14 @@
       if (Array.isArray(row)) {
         for (let i = 0; i < local.columns.length; i++) {
           const td = document.createElement("td");
-          const text = row[i] == null ? "" : String(row[i]);
-          if (local.gaugeNumericCols[i]) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
-          else setCellTextFlat(td, text);
+          if (local.gaugeNumericCols[i]) {
+            const text = formatNumericCellText(row[i], i, local.numericMaxScale);
+            setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
+          } else {
+            const text = row[i] == null ? "" : String(row[i]);
+            if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("resultTable__numeric");
+            setCellTextFlat(td, text);
+          }
           tr.appendChild(td);
         }
         return;
@@ -1265,6 +1360,61 @@
       renderBatch(0);
     }
 
+    function resetTableModeLocal() {
+      local.isVertical = false;
+      if (!local.wrap) return;
+      const { table } = findTablePartsIn(local.wrap);
+      if (table) table.classList.remove("resultTable--vertical");
+    }
+
+    function renderVerticalSingleRowLocal(row) {
+      if (!local.wrap) return;
+      const { thead, tbody, table } = findTablePartsIn(local.wrap);
+      if (!thead || !tbody || !table) return;
+
+      local.isVertical = true;
+      table.classList.add("resultTable--vertical");
+
+      const headRow = document.createElement("tr");
+      const th1 = document.createElement("th");
+      th1.textContent = "Column";
+      const th2 = document.createElement("th");
+      th2.textContent = "Value";
+      headRow.appendChild(th1);
+      headRow.appendChild(th2);
+
+      thead.innerHTML = "";
+      thead.appendChild(headRow);
+
+      tbody.innerHTML = "";
+      const frag = document.createDocumentFragment();
+
+      for (let i = 0; i < local.columns.length; i++) {
+        const tr = document.createElement("tr");
+
+        const th = document.createElement("th");
+        const colName = String(local.columns[i] ?? "");
+        th.textContent = colName;
+        th.title = colName;
+
+        const td = document.createElement("td");
+        td.textContent = formatCellForDisplayWithTypes(Array.isArray(row) ? row[i] : null, i, true, local.typeAsts);
+
+        tr.appendChild(th);
+        tr.appendChild(td);
+        frag.appendChild(tr);
+      }
+
+      tbody.appendChild(frag);
+    }
+
+    function maybeSwitchToVerticalSingleRowLocal() {
+      if (local.isVertical) return;
+      if (!Array.isArray(local.columns) || local.columns.length < 2) return;
+      if (!Array.isArray(local.allRows) || local.allRows.length !== 1) return;
+      renderVerticalSingleRowLocal(local.allRows[0]);
+    }
+
     function scheduleLocalTableFullRender() {
       if (localScheduledFullRender) return;
       localScheduledFullRender = true;
@@ -1299,7 +1449,7 @@
         localFullRenderRafId = 0;
       }
       if (!local.wrap) return;
-      resetTableMode();
+      resetTableModeLocal();
       clearTableIn(local.wrap);
       const { thead } = findTablePartsIn(local.wrap);
       if (!thead) return;
@@ -1411,10 +1561,12 @@
       setMetaText: setMetaTextLocal,
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
-        if (local.wrap && local.gaugeDirty) {
+        if (local.wrap && !local.isVertical && (local.gaugeDirty || local.numericDirty)) {
           renderLocalTableFull();
           local.gaugeDirty = false;
+          local.numericDirty = false;
         }
+        maybeSwitchToVerticalSingleRowLocal();
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
       },
     };

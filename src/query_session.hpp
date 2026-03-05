@@ -126,6 +126,7 @@ private:
 
   int64_t user_time_us_total_ = 0;
   int64_t system_time_us_total_ = 0;
+  int64_t real_time_us_total_ = 0;
 
   int64_t current_mem_bytes_ = -1;
   int64_t peak_mem_bytes_ = -1;
@@ -140,6 +141,8 @@ private:
   std::chrono::steady_clock::time_point last_sample_at_{};
   std::chrono::steady_clock::time_point last_sample_cpu_at_{};
   int64_t last_sample_cpu_total_us_ = 0;
+  std::chrono::steady_clock::time_point last_sample_rt_at_{};
+  int64_t last_sample_rt_total_us_ = 0;
 
   std::condition_variable cv_;
   std::deque<std::string> sse_chunks_;

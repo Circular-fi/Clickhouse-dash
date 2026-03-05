@@ -1561,7 +1561,7 @@ static std::string align_simple_as_in_select(std::string s) {
   groups.reserve(8);
 
   auto add = [&](size_t idx, size_t ind_len, size_t expr_end_col) {
-    const size_t target = expr_end_col + 1;
+    const size_t target = expr_end_col + 2;
     for (auto& g : groups) {
       if (g.ind_len != ind_len) continue;
       g.idxs.push_back(idx);
@@ -1732,6 +1732,60 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
     return out;
   };
 
+  auto fix_query_select_lists = [&](std::string block) -> std::string {
+    std::vector<std::string> ls;
+    ls.reserve(64);
+
+    size_t p = 0;
+    while (true) {
+      const size_t nl = block.find('\n', p);
+      if (nl == std::string::npos) {
+        ls.push_back(block.substr(p));
+        break;
+      }
+      ls.push_back(block.substr(p, nl - p));
+      p = nl + 1;
+      if (p > block.size()) break;
+      if (p == block.size()) {
+        ls.push_back(std::string());
+        break;
+      }
+    }
+
+    for (size_t i = 0; i < ls.size(); ++i) {
+      const std::string& line = ls[i];
+      size_t ind_len = 0;
+      while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
+      std::string_view trimmed(line.data() + ind_len, line.size() - ind_len);
+      if (trimmed != "SELECT") continue;
+
+      const std::string sel_indent = line.substr(0, ind_len);
+      const std::string item_indent = sel_indent + "    ";
+
+      size_t j = i + 1;
+      for (; j < ls.size(); ++j) {
+        const std::string& l2 = ls[j];
+        size_t ind2 = 0;
+        while (ind2 < l2.size() && (l2[ind2] == ' ' || l2[ind2] == '\t')) ++ind2;
+        std::string_view t2(l2.data() + ind2, l2.size() - ind2);
+
+        if (t2.rfind("FROM", 0) == 0 && ind2 == ind_len) break;
+        if (t2.empty()) continue;
+        if (ind2 <= ind_len) ls[j] = item_indent + std::string(t2);
+      }
+
+      i = j;
+    }
+
+    std::string out;
+    out.reserve(block.size() + 64);
+    for (size_t k = 0; k < ls.size(); ++k) {
+      out.append(ls[k]);
+      if (k + 1 < ls.size()) out.push_back('\n');
+    }
+    return out;
+  };
+
   auto parse = [&](auto&& self, char stop) -> std::string {
     std::string out;
     out.reserve(256);
@@ -1841,7 +1895,9 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
             const std::string inner_indent = indent + "    ";
             out.push_back('\n');
             if (inner_trim.find('\n') != std::string_view::npos) {
-              out.append(reindent_multiline(inner_trim, inner_indent));
+              std::string q = reindent_multiline(inner_trim, inner_indent);
+              q = fix_query_select_lists(std::move(q));
+              out.append(q);
             } else {
               out.append(inner_indent);
               out.append(inner_trim);

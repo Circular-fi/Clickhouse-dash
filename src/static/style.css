@@ -1048,6 +1048,11 @@ button.button:not(:disabled):hover {
   opacity: 1;
 }
 
+.resultTable:not(.resultTable--vertical) tbody td.resultTable__numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .resultTable tbody td {
     padding: 0.2rem 0.4rem;
     border: 1px solid var(--rowDivider);

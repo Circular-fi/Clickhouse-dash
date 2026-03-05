@@ -270,9 +270,17 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   if (thr_cur == 0 && saw_profile_events_) {
     thr_cur = 1;
   }
-  threads_inst_ = thr_cur;
-  threads_peak_ = std::max<int64_t>(threads_peak_, thr_cur);
 
+  int64_t thr_est = 0;
+  if (last_sample_rt_at_.time_since_epoch().count() != 0) {
+    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_sample_rt_at_).count();
+    const int64_t d_rt = real_time_us_total_ - last_sample_rt_total_us_;
+    if (dt_us > 0 && d_rt >= 0) {
+      thr_est = std::max<int64_t>(thr_est, (d_rt + dt_us / 2) / dt_us);
+    }
+  }
+  last_sample_rt_at_ = now;
+  last_sample_rt_total_us_ = real_time_us_total_;
   // CPU instant (centi-percent) from delta CPU us / delta wall us.
   const int64_t cpu_total_us = user_time_us_total_ + system_time_us_total_;
   int64_t cpu_centi = -1;
@@ -281,6 +289,7 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
     const int64_t d_cpu = cpu_total_us - last_sample_cpu_total_us_;
     if (dt_us > 0 && d_cpu >= 0) {
       cpu_centi = static_cast<int64_t>((__int128)d_cpu * 10000 / dt_us);
+      thr_est = std::max<int64_t>(thr_est, (d_cpu + dt_us / 2) / dt_us);
     } else {
       cpu_centi = 0;
     }
@@ -288,8 +297,16 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   last_sample_cpu_at_ = now;
   last_sample_cpu_total_us_ = cpu_total_us;
 
+  if (thr_est > 0) {
+    if (thr_est > 4096) thr_est = 4096;
+    thr_cur = std::max<int64_t>(thr_cur, thr_est);
+  }
+
+  threads_inst_ = thr_cur;
+  threads_peak_ = std::max<int64_t>(threads_peak_, thr_cur);
+
   const int64_t elapsed_ms = ms_since(started_at_, now);
-  samples_.push_back(SamplePoint{elapsed_ms, read_bytes_total_, cpu_centi, current_mem_bytes_, threads_inst_});
+  samples_.push_back(SamplePoint{elapsed_ms, read_bytes_total_, cpu_centi, current_mem_bytes_, thr_cur});
   if (samples_.size() > 5000) {
     samples_.pop_front();
   }
@@ -322,6 +339,18 @@ static bool icontains(std::string_view hay, std::string_view needle) {
     if (ok) return true;
   }
   return false;
+}
+
+static bool iequals_ascii(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    char x = a[i];
+    char y = b[i];
+    if (x >= 'A' && x <= 'Z') x = char(x - 'A' + 'a');
+    if (y >= 'A' && y <= 'Z') y = char(y - 'A' + 'a');
+    if (x != y) return false;
+  }
+  return true;
 }
 
 
@@ -459,19 +488,44 @@ void QuerySession::run_query() {
       }
       if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return true;
 
-      // Keep this flexible: server/client may omit/reorder columns.
       int idx_name = -1;
       int idx_value = -1;
       int idx_thread = -1;
 
       for (size_t i = 0; i < b.GetColumnCount(); ++i) {
         const auto& cn = b.GetColumnName(i);
-        if (cn == "name" || cn == "event" || cn == "ProfileEvent") idx_name = static_cast<int>(i);
-        else if (cn == "value" || cn == "Value") idx_value = static_cast<int>(i);
-        else if (cn == "thread_id" || cn == "thread" || cn == "ThreadId") idx_thread = static_cast<int>(i);
+        if (iequals_ascii(cn, "name") || iequals_ascii(cn, "event") || iequals_ascii(cn, "profileevent") || iequals_ascii(cn, "profile_event")) idx_name = static_cast<int>(i);
+        else if (iequals_ascii(cn, "value")) idx_value = static_cast<int>(i);
+        else if (iequals_ascii(cn, "thread_id") || iequals_ascii(cn, "thread") || iequals_ascii(cn, "threadid")) idx_thread = static_cast<int>(i);
       }
 
-      // Fallbacks by type.
+      if (idx_name < 0) {
+        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+          const auto& cn = b.GetColumnName(i);
+          if (b[i]->As<clickhouse::ColumnString>() && !icontains(cn, "host") && (icontains(cn, "event") || icontains(cn, "name"))) {
+            idx_name = static_cast<int>(i);
+            break;
+          }
+        }
+      }
+      if (idx_value < 0) {
+        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+          const auto& cn = b.GetColumnName(i);
+          if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "value")) {
+            idx_value = static_cast<int>(i);
+            break;
+          }
+        }
+      }
+      if (idx_thread < 0) {
+        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+          const auto& cn = b.GetColumnName(i);
+          if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "thread")) {
+            idx_thread = static_cast<int>(i);
+            break;
+          }
+        }
+      }
       if (idx_name < 0) {
         for (size_t i = 0; i < b.GetColumnCount(); ++i) {
           if (b[i]->As<clickhouse::ColumnString>()) { idx_name = static_cast<int>(i); break; }
@@ -519,6 +573,8 @@ void QuerySession::run_query() {
           self->user_time_us_total_ += v;
         } else if (name == "SystemTimeMicroseconds" || name == "OSSystemTimeMicroseconds") {
           self->system_time_us_total_ += v;
+        } else if (name == "RealTimeMicroseconds") {
+          self->real_time_us_total_ += v;
         }
 
         // Memory: mimic the Go implementation (substring match; best-effort).
