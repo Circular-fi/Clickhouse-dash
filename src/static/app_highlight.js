@@ -62,7 +62,17 @@
     new RegExp(String.raw`\bCROSS${ws}JOIN\b`, "gi"),
     new RegExp(String.raw`\bARRAY${ws}JOIN\b`, "gi"),
     new RegExp(String.raw`\bLEFT${ws}ARRAY${ws}JOIN\b`, "gi"),
-  ];
+  ].sort((a, b) => b.source.length - a.source.length);
+
+  const isWordChar = (c) => {
+    const code = c.charCodeAt(0);
+    return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
+  };
+
+  const isWordStart = (c) => {
+    const code = c.charCodeAt(0);
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
+  };
 
   const getKeywordSet = () => {
     const st = ns.state;
@@ -153,14 +163,6 @@
     const out = [];
     let i = 0;
     let segStart = 0;
-    const isWordChar = (c) => {
-      const code = c.charCodeAt(0);
-      return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
-    };
-    const isWordStart = (c) => {
-      const code = c.charCodeAt(0);
-      return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_";
-    };
 
     const push = (a, b, kind) => {
       if (b <= a) return;
@@ -366,6 +368,8 @@
     const rescanStart = idx >= 0 ? prevTokens[idx].start : 0;
     const prefix = idx > 0 ? prevTokens.slice(0, idx) : [];
 
+    const fnMeta = getFunctionMeta();
+
     const s = String(newText ?? "");
     const old = String(prevText ?? "");
     const delta = s.length - old.length;
@@ -401,10 +405,36 @@
       segStart = at;
     };
 
+    const isWordCharAt = (str, pos) => {
+      if (pos < 0 || pos >= str.length) return false;
+      const c = str[pos];
+      return c ? isWordChar(c) : false;
+    };
+
+    const isInsideWord = (str, pos) => isWordCharAt(str, pos - 1) && isWordCharAt(str, pos);
+
+    const isFnBoundary = (str, pos) => {
+      if (!fnMeta) return false;
+      if (!isWordCharAt(str, pos - 1) || isWordCharAt(str, pos)) return false;
+      let a = pos - 1;
+      for (let k = 0; k < 256 && a > 0; k++) {
+        if (!isWordCharAt(str, a - 1)) break;
+        a -= 1;
+      }
+      const word = str.slice(a, pos);
+      if (!word || !isWordStart(word[0])) return false;
+      if (!(fnMeta.cs.has(word) || fnMeta.ci.has(word.toLowerCase()))) return false;
+      const next = skipWsAndComments(str, pos);
+      return next < str.length && str[next] === "(";
+    };
+
     const canSyncAt = (posNew) => {
       if (posNew < syncNewBase) return false;
       if (mode !== "plain") return false;
       const posPrev = syncPrevBase + (posNew - syncNewBase);
+      if (posPrev < 0 || posPrev > old.length) return false;
+      if (isInsideWord(s, posNew) || isInsideWord(old, posPrev)) return false;
+      if (isFnBoundary(s, posNew)) return false;
       const j = findTokenIndex(prevTokens, posPrev);
       if (j < 0) return false;
       const t = prevTokens[j];
@@ -614,6 +644,78 @@
     let lastDataLen = 0;
     let prevLineCount = 1;
     let gutterText = "";
+    let errorLc = null;
+
+    const computeErrorRange = (text, loc) => {
+      if (!loc) return null;
+      const line1 = Number(loc.line) | 0;
+      const col1 = Number(loc.col) | 0;
+      if (line1 <= 0 || col1 <= 0) return null;
+
+      let i = 0;
+      let line = 1;
+      while (line < line1 && i < text.length) {
+        if (text.charCodeAt(i) === 10) line += 1;
+        i += 1;
+      }
+      if (line !== line1) return null;
+
+      const lineStart = i;
+      while (i < text.length && text.charCodeAt(i) !== 10) i += 1;
+      const lineEnd = i;
+      const lineLen = lineEnd - lineStart;
+      if (lineLen <= 0) return null;
+
+      const col0 = Math.max(0, Math.min(col1 - 1, lineLen));
+      let pos = lineStart + col0;
+      if (pos === lineEnd) pos = lineEnd - 1;
+
+      const isW = (p) => {
+        if (p < lineStart || p >= lineEnd) return false;
+        const c = text[p];
+        return c ? isWordChar(c) : false;
+      };
+
+      let p = pos;
+      if (!isW(p)) {
+        if (isW(p - 1)) p = p - 1;
+        else if (isW(p + 1)) p = p + 1;
+      }
+
+      if (isW(p)) {
+        let from = p;
+        while (from > lineStart && isW(from - 1)) from -= 1;
+        let to = p + 1;
+        while (to < lineEnd && isW(to)) to += 1;
+        if (to > from) return { from, to };
+      }
+
+      let from = pos;
+      let to = Math.min(from + 1, lineEnd);
+      if (to <= from) return null;
+      return { from, to };
+    };
+
+    const renderWithError = (range) => {
+      const msg = errorLc && errorLc.message ? String(errorLc.message) : "";
+      const title = msg ? ` title="${escapeHtml(msg)}"` : "";
+      const out = [];
+      const from = range.from;
+      const to = range.to;
+      for (const t of tokens) {
+        if (to <= t.start || from >= t.end) {
+          out.push(t.html);
+          continue;
+        }
+        const raw = prevText.slice(t.start, t.end);
+        const a = Math.max(0, from - t.start);
+        const b = Math.max(0, Math.min(raw.length, to - t.start));
+        if (a > 0) out.push(wrapHtml(raw.slice(0, a), t.kind));
+        out.push(`<span class="tok-err"${title}>${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
+        if (b < raw.length) out.push(wrapHtml(raw.slice(b), t.kind));
+      }
+      pre.innerHTML = out.join("");
+    };
 
     const countNewlines = (s) => {
       let n = 0;
@@ -661,7 +763,16 @@
     };
 
     const render = () => {
-      pre.innerHTML = tokens.map((t) => t.html).join("");
+      if (!errorLc) {
+        pre.innerHTML = tokens.map((t) => t.html).join("");
+        return;
+      }
+      const range = computeErrorRange(prevText, errorLc);
+      if (!range) {
+        pre.innerHTML = tokens.map((t) => t.html).join("");
+        return;
+      }
+      renderWithError(range);
     };
 
     const syncScroll = () => {
@@ -682,7 +793,11 @@
       const old = prevText;
       const s = String(nextText ?? "");
 
-      if (s === old) return;
+      if (s === old) {
+        render();
+        syncScroll();
+        return;
+      }
 
       let start = 0;
       const minLen = Math.min(old.length, s.length);
@@ -718,10 +833,32 @@
       const nlNew = countNewlines(s.slice(start, endNew));
       if (nlOld !== nlNew) setGutterLines(prevLineCount + (nlNew - nlOld), true);
 
-      const scanStart = Math.max(0, start - 1);
+      let scanStart = Math.max(0, start - 1);
+      for (let k = 0; k < 256 && scanStart > 0; k++) {
+        const c = s[scanStart - 1];
+        if (!c || !isWordChar(c)) break;
+        scanStart -= 1;
+      }
       const r = scanPartial(old, s, tokens, scanStart, endNew, endOld);
+      const nextTokens = r.tokens;
+      let sane = nextTokens.length > 0 && nextTokens[0].start === 0;
+      if (sane) {
+        let cur = 0;
+        for (const t of nextTokens) {
+          if (t.start !== cur || t.end < t.start) {
+            sane = false;
+            break;
+          }
+          cur = t.end;
+        }
+        if (cur !== s.length) sane = false;
+      }
       prevText = s;
-      tokens = r.tokens;
+      if (!sane) {
+        fullUpdate(s);
+        return;
+      }
+      tokens = nextTokens;
       render();
       syncScroll();
     };
@@ -756,11 +893,29 @@
       forceFull = true;
       lastInputType = "insertFromDrop";
     });
-    ta.addEventListener("input", schedule);
+    ta.addEventListener("input", () => {
+      if (errorLc) errorLc = null;
+      schedule();
+    });
 
     fullUpdate(prevText);
 
-    return { refresh: () => fullUpdate(String(ta.value || "")) };
+    return {
+      refresh: () => fullUpdate(String(ta.value || "")),
+      setError: (loc) => {
+        if (!loc || typeof loc !== "object") return;
+        const line = Number(loc.line) | 0;
+        const col = Number(loc.col) | 0;
+        if (line <= 0 || col <= 0) return;
+        errorLc = { line, col, message: loc.message ? String(loc.message) : "" };
+        schedule();
+      },
+      clearError: () => {
+        if (!errorLc) return;
+        errorLc = null;
+        schedule();
+      },
+    };
   };
 
   ns.highlight = { attach };

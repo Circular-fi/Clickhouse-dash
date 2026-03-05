@@ -432,6 +432,12 @@ body {
   color: var(--sqlFunction);
 }
 
+.tok-err {
+  text-decoration: underline wavy #e11d48;
+  text-decoration-thickness: 0.125rem;
+  text-underline-offset: 0.2rem;
+}
+
 #queryTextArea::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
 }

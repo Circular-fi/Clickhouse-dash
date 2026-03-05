@@ -491,19 +491,6 @@
   function initEditor() {
     if (!dom.queryTextArea) return;
 
-    const dispatchInputEvent = (el) => {
-      if (!el || typeof el.dispatchEvent !== "function") return;
-      try {
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-      } catch {
-        try {
-          el.dispatchEvent(new Event("input"));
-        } catch {
-          null;
-        }
-      }
-    };
-
     const current = String(dom.queryTextArea.value || "");
     if (!current.trim() && storage.loadEditorSql) {
       const saved = String(storage.loadEditorSql() || "");
@@ -530,17 +517,15 @@
       const start = ta.selectionStart;
       const end = ta.selectionEnd;
       try {
-        const before = String(ta.value || "");
         ta.focus();
         ta.setSelectionRange(start, end);
         const ok = document.execCommand && document.execCommand("insertText", false, nextText);
-        if (ok || String(ta.value || "") !== before) return { start, end };
+        if (ok) return { start, end };
       } catch {
         null;
       }
       try {
         ta.setRangeText(nextText, start, end, "end");
-        dispatchInputEvent(ta);
         return { start, end };
       } catch {
         null;
@@ -550,7 +535,6 @@
       const pos = start + nextText.length;
       ta.selectionStart = pos;
       ta.selectionEnd = pos;
-      dispatchInputEvent(ta);
       return { start, end };
     };
 
@@ -637,9 +621,7 @@
 
         const od = outdentLine(line);
         if (od.removed === 0) return;
-        ta.selectionStart = ls;
-        ta.selectionEnd = le;
-        replaceSelectionText(ta, od.line);
+        ta.setRangeText(od.line, ls, le, "preserve");
         const nextPos = Math.max(ls, start - od.removed);
         ta.selectionStart = nextPos;
         ta.selectionEnd = nextPos;
@@ -692,9 +674,7 @@
       const newStart = start + shiftFor(startRel, includeEquals);
       const newEnd = end + shiftFor(endRel, includeEquals);
 
-      ta.selectionStart = blockStart;
-      ta.selectionEnd = blockEnd;
-      replaceSelectionText(ta, newBlock);
+      ta.setRangeText(newBlock, blockStart, blockEnd, "preserve");
       ta.selectionStart = Math.max(blockStart, newStart);
       ta.selectionEnd = Math.max(blockStart, newEnd);
     });
@@ -737,7 +717,6 @@
         }
         // Fallback if execCommand isn't available
         ta.setRangeText("\t", deleteFrom, start, "end");
-        dispatchInputEvent(ta);
       }
     });
 
@@ -897,5 +876,17 @@
     startHostsSse();
   }
 
-  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi };
+  function setEditorError(loc) {
+    const ctrl = state && state.highlightCtrl ? state.highlightCtrl : null;
+    if (!ctrl || typeof ctrl.setError !== "function") return;
+    ctrl.setError(loc);
+  }
+
+  function clearEditorError() {
+    const ctrl = state && state.highlightCtrl ? state.highlightCtrl : null;
+    if (!ctrl || typeof ctrl.clearError !== "function") return;
+    ctrl.clearError();
+  }
+
+  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi, setEditorError, clearEditorError };
 })();

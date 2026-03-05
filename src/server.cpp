@@ -116,6 +116,217 @@ static void json_error(httplib::Response& res, int status, const std::string& co
   res.set_content(sb.GetString(), "application/json");
 }
 
+struct ChErrorLoc {
+  int position = -1;
+  int line = -1;
+  int column = -1;
+};
+
+static ChErrorLoc parse_ch_error_loc(std::string_view msg) {
+  ChErrorLoc loc;
+
+  auto read_int_after = [&](std::string_view key) -> int {
+    const size_t p = msg.find(key);
+    if (p == std::string_view::npos) return -1;
+    size_t i = p + key.size();
+    // skip non-digits (defensive)
+    while (i < msg.size() && (msg[i] < '0' || msg[i] > '9')) ++i;
+    if (i >= msg.size() || msg[i] < '0' || msg[i] > '9') return -1;
+    int v = 0;
+    while (i < msg.size() && msg[i] >= '0' && msg[i] <= '9') {
+      v = v * 10 + int(msg[i] - '0');
+      ++i;
+    }
+    return v;
+  };
+
+  // Typical ClickHouse syntax error:
+  // "failed at position 19 (...) (line 2, col 6): ..."
+  loc.position = read_int_after("position ");
+  loc.line = read_int_after("(line ");
+  loc.column = read_int_after("col ");
+  return loc;
+}
+
+static void json_error_ex(
+    httplib::Response& res,
+    int status,
+    const std::string& code,
+    const std::string& message,
+    int index,
+    const ChErrorLoc& loc
+) {
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("error_code"); w.String(code.c_str(), (rapidjson::SizeType)code.size());
+  w.Key("message"); w.String(message.c_str(), (rapidjson::SizeType)message.size());
+  if (index >= 0) { w.Key("index"); w.Int(index); }
+  if (loc.position >= 0) { w.Key("position"); w.Int(loc.position); }
+  if (loc.line >= 0) { w.Key("line"); w.Int(loc.line); }
+  if (loc.column >= 0) { w.Key("column"); w.Int(loc.column); }
+  w.EndObject();
+  res.status = status;
+  res.set_header("Content-Type", "application/json");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+
+
+
+struct ClickHouseErrorLocation {
+  bool has_code = false;
+  int code = 0;
+
+  bool has_position = false;
+  int position = 0;
+
+  bool has_line_col = false;
+  int line = 0;   // 1-based
+  int col = 0;    // 1-based
+
+  bool has_near = false;
+  std::string near;
+};
+
+static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg) {
+  ClickHouseErrorLocation out;
+
+  // Strip common prefix that we add in some call sites.
+  auto ltrim = [](std::string_view s) {
+    size_t i = 0;
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) ++i;
+    return s.substr(i);
+  };
+  msg = ltrim(msg);
+  if (msg.rfind("exception:", 0) == 0) {
+    msg = msg.substr(std::string_view("exception:").size());
+    msg = ltrim(msg);
+  }
+
+  auto parse_int_at = [&](size_t pos, int & value) -> bool {
+    if (pos >= msg.size() || !std::isdigit(static_cast<unsigned char>(msg[pos]))) return false;
+    long v = 0;
+    while (pos < msg.size() && std::isdigit(static_cast<unsigned char>(msg[pos]))) {
+      v = v * 10 + (msg[pos] - '0');
+      if (v > 1'000'000'000) break;
+      ++pos;
+    }
+    value = static_cast<int>(v);
+    return true;
+  };
+
+  // Code: 62.
+  if (auto p = msg.find("Code:"); p != std::string_view::npos) {
+    size_t i = p + 5;
+    while (i < msg.size() && (msg[i] == ' ' || msg[i] == '\t')) ++i;
+    int v = 0;
+    if (parse_int_at(i, v)) {
+      out.has_code = true;
+      out.code = v;
+    }
+  }
+
+  // failed at position 19
+  if (auto p = msg.find("position "); p != std::string_view::npos) {
+    size_t i = p + std::string_view("position ").size();
+    int v = 0;
+    if (parse_int_at(i, v)) {
+      out.has_position = true;
+      out.position = v;
+
+      // Often ClickHouse prints the token in parentheses right after: (db)
+      // Example: failed at position 19 (db) (line 2, col 6)
+      auto open = msg.find('(', i);
+      if (open != std::string_view::npos) {
+        auto close = msg.find(')', open + 1);
+        if (close != std::string_view::npos && close > open + 1) {
+          // Heuristic: ignore (line ...), keep only the short token.
+          std::string_view inner = msg.substr(open + 1, close - (open + 1));
+          inner = ltrim(inner);
+          if (!inner.empty() && inner.rfind("line ", 0) != 0 && inner.find(' ') == std::string_view::npos && inner.size() <= 64) {
+            out.has_near = true;
+            out.near.assign(inner.data(), inner.size());
+          }
+        }
+      }
+    }
+  }
+
+  // (line 2, col 6)
+  if (auto p = msg.find("(line "); p != std::string_view::npos) {
+    size_t i = p + std::string_view("(line ").size();
+    int line = 0;
+    if (parse_int_at(i, line)) {
+      // find "col"
+      auto colp = msg.find("col", i);
+      if (colp != std::string_view::npos) {
+        size_t j = colp + 3;
+        while (j < msg.size() && (msg[j] == ' ' || msg[j] == '\t')) ++j;
+        int col = 0;
+        if (parse_int_at(j, col)) {
+          out.has_line_col = true;
+          out.line = line;
+          out.col = col;
+        }
+      }
+    }
+  }
+
+  // Fallback: if we didn't find a (token) after position, try to grab "...): <token>." (very common).
+  if (!out.has_near) {
+    if (auto p = msg.find("): "); p != std::string_view::npos) {
+      size_t i = p + 3;
+      // token ends at first whitespace or punctuation '.' ',' ')'\n
+      size_t j = i;
+      while (j < msg.size()) {
+        char c = msg[j];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '.' || c == ',' || c == ')' ) break;
+        ++j;
+      }
+      if (j > i) {
+        std::string_view tok = msg.substr(i, j - i);
+        if (tok.size() <= 64) {
+          out.has_near = true;
+          out.near.assign(tok.data(), tok.size());
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+static void json_error_with_loc(
+    httplib::Response& res,
+    int status,
+    const std::string& code,
+    const std::string& message,
+    const ClickHouseErrorLocation* loc
+) {
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("error_code"); w.String(code.c_str(), (rapidjson::SizeType)code.size());
+  w.Key("message"); w.String(message.c_str(), (rapidjson::SizeType)message.size());
+  if (loc) {
+    w.Key("clickhouse");
+    w.StartObject();
+    if (loc->has_code) { w.Key("code"); w.Int(loc->code); }
+    if (loc->has_position) { w.Key("position"); w.Int(loc->position); }
+    if (loc->has_line_col) {
+      w.Key("line"); w.Int(loc->line);
+      w.Key("col"); w.Int(loc->col);
+    }
+    if (loc->has_near) { w.Key("near"); w.String(loc->near.c_str()); }
+    w.EndObject();
+  }
+  w.EndObject();
+  res.status = status;
+  res.set_header("Content-Type", "application/json");
+  res.set_content(sb.GetString(), "application/json");
+}
+
 static bool parse_json_body(const httplib::Request& req, rapidjson::Document& doc) {
   doc.Parse(req.body.c_str());
   return !doc.HasParseError() && doc.IsObject();
@@ -397,7 +608,7 @@ static std::optional<std::string> try_format_query(
         });
 
     } catch (const std::exception& e) {
-        if (err_log) *err_log = std::string("exception: ") + e.what();
+        if (err_log) *err_log = std::string(e.what());
         return std::nullopt;
     }
 
@@ -3069,7 +3280,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       std::string pretty;
       std::string err;
       if (!format_one(arr[i].GetString(), &pretty, &err)) {
-        return json_error(res, 200, "format_failed", std::to_string(i));
+        ChErrorLoc loc = parse_ch_error_loc(err);
+        return json_error_ex(res, 422, "format_failed", err, (int)i, loc);
       }
       w.String(pretty.c_str());
     }
@@ -3088,7 +3300,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   std::string pretty;
   std::string err;
   if (!format_one(doc["sql"].GetString(), &pretty, &err)) {
-    return json_error(res, 422, "format_failed", err);
+    const auto loc = parse_clickhouse_error_location(err);
+    const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
+    return json_error_with_loc(res, 422, "format_failed", err, locp);
   }
 
   rapidjson::StringBuffer sb;

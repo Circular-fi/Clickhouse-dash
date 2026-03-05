@@ -597,6 +597,8 @@
       }
     }
 
+    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
+
     storage.addHistoryEntry({
       ts_ms: Date.now(),
       host_id: hostId,
@@ -623,8 +625,236 @@
     return `${code}: ${clean || "Format failed."}`;
   }
 
+  function parseLineColFromText(text) {
+    const s = String(text || "");
+    let m = s.match(/\(\s*line\s+(\d+)\s*,\s*col\s+(\d+)\s*\)/i);
+    if (!m) m = s.match(/\bline\s+(\d+)\s*,\s*col\s+(\d+)\b/i);
+    if (!m) return null;
+    const line = Number(m[1]) | 0;
+    const col = Number(m[2]) | 0;
+    if (line <= 0 || col <= 0) return null;
+    return { line, col };
+  }
+
+  function extractFormatErrorLocation(err) {
+    const payload = err && err.payload ? err.payload : null;
+    const loc = payload && payload.location && typeof payload.location === "object" ? payload.location : null;
+    if (loc) {
+      const line = Number(loc.line) | 0;
+      const col = Number(loc.col) | 0;
+      if (line > 0 && col > 0) return { line, col };
+    }
+    if (payload) {
+      const line = Number(payload.line) | 0;
+      const col = Number(payload.col != null ? payload.col : payload.column) | 0;
+      if (line > 0 && col > 0) return { line, col };
+    }
+    const msg = payload && payload.message ? String(payload.message) : err instanceof Error ? String(err.message || "") : "";
+    return parseLineColFromText(msg);
+  }
+
+function splitSqlStatementsWithRanges(sqlText) {
+  const s = String(sqlText || "");
+  const out = [];
+  let buf = "";
+  let bufStart = 0;
+
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  const isWs = (c) => c === " " || c === "\t" || c === "\n" || c === "\r";
+
+  const pushStmt = (rawStmt, startPos) => {
+    const norm = sql.normalizeStatementText(rawStmt);
+    if (!norm) return;
+    let a = 0;
+    while (a < rawStmt.length && isWs(rawStmt[a])) a += 1;
+    let b = rawStmt.length;
+    while (b > a && isWs(rawStmt[b - 1])) b -= 1;
+    out.push({ text: norm, start: startPos + a, end: startPos + b });
+  };
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const nx = i + 1 < s.length ? s[i + 1] : "";
+
+    if (inLineComment) {
+      buf += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (inBlockComment) {
+      buf += ch;
+      if (ch === "*" && nx === "/") {
+        buf += nx;
+        i++;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingle) {
+      buf += ch;
+      if (ch === "\\") {
+        if (nx) {
+          buf += nx;
+          i++;
+        }
+        continue;
+      }
+      if (ch === "'" && nx === "'") {
+        buf += nx;
+        i++;
+        continue;
+      }
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+
+    if (inDouble) {
+      buf += ch;
+      if (ch === "\\") {
+        if (nx) {
+          buf += nx;
+          i++;
+        }
+        continue;
+      }
+      if (ch === "\"") inDouble = false;
+      continue;
+    }
+
+    if (inBacktick) {
+      buf += ch;
+      if (ch === "`") inBacktick = false;
+      continue;
+    }
+
+    if (ch === "-" && nx === "-") {
+      buf += ch + nx;
+      i++;
+      inLineComment = true;
+      continue;
+    }
+
+    if (ch === "#") {
+      buf += ch;
+      inLineComment = true;
+      continue;
+    }
+
+    if (ch === "/" && nx === "*") {
+      buf += ch + nx;
+      i++;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (ch === "'") {
+      buf += ch;
+      inSingle = true;
+      continue;
+    }
+
+    if (ch === "\"") {
+      buf += ch;
+      inDouble = true;
+      continue;
+    }
+
+    if (ch === "`") {
+      buf += ch;
+      inBacktick = true;
+      continue;
+    }
+
+    if (ch === ";") {
+      pushStmt(buf, bufStart);
+      buf = "";
+      bufStart = i + 1;
+      continue;
+    }
+
+    buf += ch;
+  }
+
+  pushStmt(buf, bufStart);
+  return out;
+}
+
+function lineColToOffset(text, line1, col1) {
+  const s = String(text || "");
+  const line = Math.max(1, Number(line1) | 0);
+  const col = Math.max(1, Number(col1) | 0);
+
+  let ln = 1;
+  let lineStart = 0;
+  for (let i = 0; i < s.length && ln < line; i++) {
+    if (s[i] === "\n") {
+      ln += 1;
+      lineStart = i + 1;
+    }
+  }
+
+  let lineEnd = s.indexOf("\n", lineStart);
+  if (lineEnd < 0) lineEnd = s.length;
+
+  let off = lineStart + (col - 1);
+  if (off > lineEnd) off = lineEnd;
+  if (off < 0) off = 0;
+  if (off > s.length) off = s.length;
+  return off;
+}
+
+function offsetToLineCol(text, pos0) {
+  const s = String(text || "");
+  const pos = Math.max(0, Math.min(Number(pos0) | 0, s.length));
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < pos; i++) {
+    if (s[i] === "\n") {
+      line += 1;
+      col = 1;
+    } else {
+      col += 1;
+    }
+  }
+  return { line, col };
+}
+
+function mapStatementLocToEditorLoc(editorText, statementIndex, loc) {
+  const raw = String(editorText || "");
+  let trimStart = 0;
+  while (trimStart < raw.length && (raw[trimStart] === " " || raw[trimStart] === "\t" || raw[trimStart] === "\n" || raw[trimStart] === "\r")) trimStart += 1;
+  let trimEnd = raw.length;
+  while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
+
+  const trimmed = raw.slice(trimStart, trimEnd);
+  const spans = splitSqlStatementsWithRanges(trimmed);
+  const idx = Number(statementIndex) | 0;
+  if (idx < 0 || idx >= spans.length) return null;
+
+  const span = spans[idx];
+  const offStmt = lineColToOffset(span.text, loc.line, loc.col);
+  const offDoc = trimStart + span.start + offStmt;
+  return offsetToLineCol(raw, offDoc);
+}
+
+
   function showFormatFailure(err) {
     const msg = buildFormatErrorText(err);
+    const payload = err && err.payload ? err.payload : null;
+    const idx = payload && payload.index != null ? (Number(payload.index) | 0) : -1;
+    let loc = extractFormatErrorLocation(err);
+    if (loc && idx >= 0 && dom.queryTextArea) {
+      const mapped = mapStatementLocToEditorLoc(dom.queryTextArea.value, idx, loc);
+      if (mapped) loc = mapped;
+    }
+    if (ui && typeof ui.setEditorError === "function" && loc) ui.setEditorError({ line: loc.line, col: loc.col, message: msg });
     results.clearResultsStack();
     results.clearLiveResults();
     results.setError(msg);
