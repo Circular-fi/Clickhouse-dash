@@ -392,7 +392,17 @@
             break;
           }
         }
-        appendSpan("tok-str", s.slice(i, j));
+        let k = j;
+        while (k < s.length) {
+          const ck = s[k];
+          if (ck === " " || ck === "\n" || ck === "\r" || ck === "\t") {
+            k++;
+            continue;
+          }
+          break;
+        }
+        const cls = k < s.length && s[k] === ":" ? "tok-kw" : "tok-str";
+        appendSpan(cls, s.slice(i, j));
         i = j;
         continue;
       }
@@ -435,25 +445,116 @@
     td.appendChild(frag);
   }
 
+  function stringifyCompactJson(value) {
+    const maxInlineChars = 90;
+    const maxInlineItems = 8;
+    const indentStep = 2;
+
+    function scalar(v) {
+      if (v === null) return "null";
+      if (typeof v === "string") return JSON.stringify(v);
+      if (typeof v === "number") return Number.isFinite(v) ? String(v) : JSON.stringify(v);
+      if (typeof v === "boolean") return v ? "true" : "false";
+      return JSON.stringify(v);
+    }
+
+    function formatInline(v) {
+      if (v === null || typeof v !== "object") return scalar(v);
+
+      if (Array.isArray(v)) {
+        if (v.length > maxInlineItems) return null;
+        const parts = new Array(v.length);
+        for (let i = 0; i < v.length; i++) {
+          const t = formatInline(v[i]);
+          if (t === null) return null;
+          parts[i] = t;
+        }
+        const out = `[${parts.join(", ")}]`;
+        return out.length <= maxInlineChars ? out : null;
+      }
+
+      const keys = Object.keys(v);
+      if (keys.length > maxInlineItems) return null;
+      const parts = [];
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const t = formatInline(v[k]);
+        if (t === null) return null;
+        parts.push(`${JSON.stringify(k)}: ${t}`);
+      }
+      const out = `{${parts.join(", ")}}`;
+      return out.length <= maxInlineChars ? out : null;
+    }
+
+    function formatMultiline(v, indent) {
+      const one = formatInline(v);
+      if (one !== null) return one;
+
+      if (v === null || typeof v !== "object") return scalar(v);
+
+      const pad = " ".repeat(indent);
+      const padIn = " ".repeat(indent + indentStep);
+
+      if (Array.isArray(v)) {
+        if (v.length === 0) return "[]";
+        const items = v.map((x) => formatMultiline(x, indent + indentStep));
+        const lines = ["["];
+        for (let i = 0; i < items.length; i++) {
+          const itemLines = items[i].split("\n");
+          itemLines[0] = padIn + itemLines[0];
+          if (i < items.length - 1) itemLines[itemLines.length - 1] += ",";
+          lines.push(itemLines.join("\n"));
+        }
+        lines.push(pad + "]");
+        return lines.join("\n");
+      }
+
+      const keys = Object.keys(v);
+      if (keys.length === 0) return "{}";
+
+      const lines = ["{"];
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const valText = formatMultiline(v[k], indent + indentStep);
+        const valLines = valText.split("\n");
+        valLines[0] = `${padIn}${JSON.stringify(k)}: ${valLines[0]}`;
+        if (i < keys.length - 1) valLines[valLines.length - 1] += ",";
+        lines.push(valLines.join("\n"));
+      }
+      lines.push(pad + "}");
+      return lines.join("\n");
+    }
+
+    return formatMultiline(value, 0);
+  }
+
   function setVerticalValueCell(td, raw, colIndex) {
     const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
 
+    function setScalar(cls, text) {
+      td.textContent = "";
+      const el = document.createElement("span");
+      el.className = cls;
+      el.textContent = text;
+      td.appendChild(el);
+    }
+
     if (typed === null || typed === undefined) {
-      td.textContent = "null";
+      setScalar("tok-kw", "null");
       return;
     }
     if (typeof typed === "string") {
-      td.textContent = typed;
+      setScalar("tok-str", typed);
       return;
     }
     if (typeof typed === "number" || typeof typed === "boolean") {
-      td.textContent = String(typed);
+      setScalar(typeof typed === "number" ? "tok-fn" : "tok-kw", String(typed));
       return;
     }
 
     let jsonText = "";
     try {
-      jsonText = JSON.stringify(typed, null, 2);
+      jsonText = stringifyCompactJson(typed);
     } catch {
       td.textContent = String(typed);
       return;
