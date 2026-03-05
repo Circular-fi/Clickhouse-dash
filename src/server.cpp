@@ -6,6 +6,8 @@
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <cctype>
+
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -294,21 +296,96 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     }
   }
 
+  // Extra heuristics for errors that don't include (line,col) or explicit position,
+  // but do include an identifier + the failing query in the message.
+  // Example: "Unknown table expression identifier 'system.foo' ... in scope SELECT ... system.foo"
+  if (!out.has_near) {
+    auto grab_quoted_after = [&](std::string_view key) -> std::string_view {
+      const size_t p = msg.find(key);
+      if (p == std::string_view::npos) return {};
+      size_t i = p + key.size();
+      const size_t q = msg.find('\'', i);
+      if (q == std::string_view::npos) return {};
+      const size_t r = msg.find('\'', q + 1);
+      if (r == std::string_view::npos || r <= q + 1) return {};
+      return msg.substr(q + 1, r - (q + 1));
+    };
+
+    std::string_view ident = grab_quoted_after("identifier");
+    if (ident.empty()) ident = grab_quoted_after("Identifier");
+    if (!ident.empty() && ident.size() <= 128) {
+      out.has_near = true;
+      out.near.assign(ident.data(), ident.size());
+    }
+  }
+
+  // If we have "in scope <SQL>" and a near token, compute best-effort 1-based
+  // position/line/col so the frontend can underline it.
+  if ((!out.has_position || !out.has_line_col) && out.has_near) {
+    constexpr std::string_view scope_kw = "in scope ";
+    if (auto p = msg.find(scope_kw); p != std::string_view::npos) {
+      std::string_view scope = msg.substr(p + scope_kw.size());
+      while (!scope.empty() && (scope.back() == ' ' || scope.back() == '\n' || scope.back() == '\r' || scope.back() == '\t' || scope.back() == '.')) {
+        scope.remove_suffix(1);
+      }
+
+      size_t idx = scope.find(std::string_view(out.near));
+      if (idx == std::string_view::npos) {
+        // Try quoted occurrence.
+        const std::string q = "'" + out.near + "'";
+        idx = scope.find(q);
+        if (idx != std::string_view::npos) idx += 1; // point at the token, not the quote
+      }
+
+      if (idx != std::string_view::npos) {
+        if (!out.has_position) {
+          out.has_position = true;
+          out.position = static_cast<int>(idx) + 1;
+        }
+        if (!out.has_line_col) {
+          int line = 1;
+          int col = 1;
+          for (size_t k = 0; k < idx; ++k) {
+            if (scope[k] == '\n') {
+              ++line;
+              col = 1;
+            } else {
+              ++col;
+            }
+          }
+          out.has_line_col = true;
+          out.line = line;
+          out.col = col;
+        }
+      }
+    }
+  }
+
+
   return out;
 }
 
-static void json_error_with_loc(
-    httplib::Response& res,
-    int status,
+static std::string build_error_payload_json_with_loc(
     const std::string& code,
     const std::string& message,
-    const ClickHouseErrorLocation* loc
+    const ClickHouseErrorLocation* loc,
+    const std::string* query_id
 ) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("error_code"); w.String(code.c_str(), (rapidjson::SizeType)code.size());
-  w.Key("message"); w.String(message.c_str(), (rapidjson::SizeType)message.size());
+
+  if (query_id && !query_id->empty()) {
+    w.Key("query_id");
+    w.String(query_id->c_str(), (rapidjson::SizeType)query_id->size());
+  }
+
+  w.Key("error_code");
+  w.String(code.c_str(), (rapidjson::SizeType)code.size());
+
+  w.Key("message");
+  w.String(message.c_str(), (rapidjson::SizeType)message.size());
+
   if (loc) {
     w.Key("clickhouse");
     w.StartObject();
@@ -321,10 +398,22 @@ static void json_error_with_loc(
     if (loc->has_near) { w.Key("near"); w.String(loc->near.c_str()); }
     w.EndObject();
   }
+
   w.EndObject();
+  return sb.GetString();
+}
+
+static void json_error_with_loc(
+    httplib::Response& res,
+    int status,
+    const std::string& code,
+    const std::string& message,
+    const ClickHouseErrorLocation* loc
+) {
+  const std::string payload = build_error_payload_json_with_loc(code, message, loc, nullptr);
   res.status = status;
   res.set_header("Content-Type", "application/json");
-  res.set_content(sb.GetString(), "application/json");
+  res.set_content(payload, "application/json");
 }
 
 static bool parse_json_body(const httplib::Request& req, rapidjson::Document& doc) {
@@ -629,6 +718,56 @@ static std::string trim_ascii_spaces(std::string_view in) {
   size_t e = in.size();
   while (e > b && is_ascii_space(in[e - 1])) --e;
   return std::string(in.substr(b, e - b));
+}
+
+static std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view chunk) {
+  // We only rewrite the SSE error event payload.
+  if (chunk.rfind("event: error\n", 0) != 0) return std::nullopt;
+
+  const size_t data_pos = chunk.find("data:");
+  if (data_pos == std::string_view::npos) return std::nullopt;
+
+  size_t json_beg = data_pos + std::string_view("data:").size();
+  if (json_beg < chunk.size() && chunk[json_beg] == ' ') ++json_beg;
+
+  const size_t json_end = chunk.find('\n', json_beg);
+  if (json_end == std::string_view::npos || json_end <= json_beg) return std::nullopt;
+
+  const std::string json = trim_ascii_spaces(chunk.substr(json_beg, json_end - json_beg));
+
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  if (doc.HasParseError() || !doc.IsObject()) return std::nullopt;
+
+  if (!doc.HasMember("message") || !doc["message"].IsString()) return std::nullopt;
+  const std::string msg = doc["message"].GetString();
+
+  std::string qid;
+  if (doc.HasMember("query_id") && doc["query_id"].IsString()) {
+    qid = doc["query_id"].GetString();
+  }
+
+  const auto loc = parse_clickhouse_error_location(msg);
+  const ClickHouseErrorLocation* locp =
+      (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
+
+  // Normalize JSON fields so the frontend can reuse the same parser as /api/format errors
+  // (plus query_id).
+  const std::string err_code =
+      (doc.HasMember("error_code") && doc["error_code"].IsString())
+          ? std::string(doc["error_code"].GetString())
+          : std::string("query_failed");
+
+  const std::string payload =
+      build_error_payload_json_with_loc(err_code, msg, locp, qid.empty() ? nullptr : &qid);
+
+  std::string out;
+  out.reserve(chunk.size() + 128);
+  out.append("event: error\n");
+  out.append("data: ");
+  out.append(payload);
+  out.append("\n\n");
+  return out;
 }
 
 static bool is_ident_char(char c) {
@@ -3438,6 +3577,9 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         std::string produced;
         st->session->wait_pop_sse_chunk(produced, 0);
         if (!produced.empty()) {
+          if (auto rew = maybe_rewrite_error_sse_chunk(produced)) {
+            produced = std::move(*rew);
+          }
           sink.write(produced.data(), produced.size());
           return true;
         }
@@ -3466,6 +3608,9 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
 
         const bool cont = st->session->wait_pop_sse_chunk(produced, 30);
         if (!produced.empty()) {
+          if (auto rew = maybe_rewrite_error_sse_chunk(produced)) {
+            produced = std::move(*rew);
+          }
           sink.write(produced.data(), produced.size());
           return true;
         }

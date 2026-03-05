@@ -36,6 +36,9 @@
   let numericMaxScale = [];
   let numericDirty = false;
 
+  let liveGaugesEnabled = false;
+  let liveGaugesPainted = false;
+
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
     dom.resultsPanel.classList.toggle("is-hidden", !visible);
@@ -91,6 +94,8 @@
     gaugeDirty = false;
     numericMaxScale = [];
     numericDirty = false;
+    liveGaugesEnabled = false;
+    liveGaugesPainted = false;
     pendingRows = [];
     allResultRows = [];
     rowIndexCounter = 0;
@@ -330,8 +335,7 @@
       return coerceDeep(v);
     }
 
-    if (isScalarNumericType(typeAst)) return coerceNumberLike(v);
-    return v;
+    return isScalarNumericType(typeAst) ? coerceNumberLike(v) : v;
   }
 
   function formatCellForDisplay(raw, colIndex, pretty = false) {
@@ -348,7 +352,115 @@
     if (typeof typed === "string") return typed;
     if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
     return JSON.stringify(typed, null, pretty ? 2 : 0);
+  }  function renderJsonHighlightedInto(td, jsonText) {
+    td.textContent = "";
+    const frag = document.createDocumentFragment();
+
+    function appendText(t) {
+      if (!t) return;
+      frag.appendChild(document.createTextNode(t));
+    }
+
+    function appendSpan(cls, t) {
+      const el = document.createElement("span");
+      el.className = cls;
+      el.textContent = t;
+      frag.appendChild(el);
+    }
+
+    const s = String(jsonText ?? "");
+    let i = 0;
+
+    while (i < s.length) {
+      const ch = s[i];
+
+      if (ch === '"') {
+        let j = i + 1;
+        let esc = false;
+        for (; j < s.length; j++) {
+          const cj = s[j];
+          if (esc) {
+            esc = false;
+            continue;
+          }
+          if (cj === "\\") {
+            esc = true;
+            continue;
+          }
+          if (cj === '"') {
+            j++;
+            break;
+          }
+        }
+        appendSpan("tok-str", s.slice(i, j));
+        i = j;
+        continue;
+      }
+
+      if ((ch >= "0" && ch <= "9") || ch === "-") {
+        const m = s.slice(i).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+        if (m && m[0]) {
+          appendSpan("tok-fn", m[0]);
+          i += m[0].length;
+          continue;
+        }
+      }
+
+      if (ch === "t" && s.startsWith("true", i)) {
+        appendSpan("tok-kw", "true");
+        i += 4;
+        continue;
+      }
+      if (ch === "f" && s.startsWith("false", i)) {
+        appendSpan("tok-kw", "false");
+        i += 5;
+        continue;
+      }
+      if (ch === "n" && s.startsWith("null", i)) {
+        appendSpan("tok-kw", "null");
+        i += 4;
+        continue;
+      }
+
+      if (ch === "{" || ch === "}" || ch === "[" || ch === "]" || ch === "," || ch === ":") {
+        appendSpan("tok-com", ch);
+        i++;
+        continue;
+      }
+
+      appendText(ch);
+      i++;
+    }
+
+    td.appendChild(frag);
   }
+
+  function setVerticalValueCell(td, raw, colIndex) {
+    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
+
+    if (typed === null || typed === undefined) {
+      td.textContent = "null";
+      return;
+    }
+    if (typeof typed === "string") {
+      td.textContent = typed;
+      return;
+    }
+    if (typeof typed === "number" || typeof typed === "boolean") {
+      td.textContent = String(typed);
+      return;
+    }
+
+    let jsonText = "";
+    try {
+      jsonText = JSON.stringify(typed, null, 2);
+    } catch {
+      td.textContent = String(typed);
+      return;
+    }
+    renderJsonHighlightedInto(td, jsonText);
+  }
+
 
   function setCellTextFlat(td, text) {
     let s = "";
@@ -398,6 +510,8 @@
     gaugeDirty = false;
     numericMaxScale = new Array(gaugeNumericCols.length).fill(0);
     numericDirty = false;
+    liveGaugesEnabled = false;
+    liveGaugesPainted = false;
   }
 
   function extractDecimalScale(raw) {
@@ -639,7 +753,11 @@
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex]) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
-          setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
+          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
+          else {
+            td.classList.add("resultTable__numeric");
+            setCellTextFlat(td, text);
+          }
         } else {
           const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
           if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("resultTable__numeric");
@@ -850,7 +968,7 @@
       th.title = colName;
 
       const td = document.createElement("td");
-      td.textContent = formatCellForDisplay(Array.isArray(row) ? row[i] : null, i, true);
+      setVerticalValueCell(td, Array.isArray(row) ? row[i] : null, i);
 
       tr.appendChild(th);
       tr.appendChild(td);
@@ -893,10 +1011,16 @@
 
   function finalizeAfterDone() {
     if (scheduledFlush || pendingRows.length) flushPendingRows();
-    if (!isVerticalResults && (isLiveSortActive() || gaugeDirty || numericDirty)) {
+
+    if (!liveGaugesEnabled) liveGaugesEnabled = true;
+    const hasGaugeCols = Array.isArray(gaugeNumericCols) && gaugeNumericCols.some(Boolean);
+    const needFinalGaugeRender = !isVerticalResults && hasGaugeCols && allResultRows.length > 0 && !liveGaugesPainted;
+
+    if (!isVerticalResults && (isLiveSortActive() || gaugeDirty || numericDirty || needFinalGaugeRender)) {
       renderLiveTableFull();
       gaugeDirty = false;
       numericDirty = false;
+      if (liveGaugesEnabled && hasGaugeCols) liveGaugesPainted = true;
     }
     maybeSwitchToVerticalSingleRow();
     maybePrettifySingleRowComplexCells();
@@ -1197,6 +1321,8 @@
       numericMaxScale: [],
       numericDirty: false,
       isVertical: false,
+      gaugesEnabled: false,
+      gaugesPainted: false,
     };
 
     function updateMetaText() {
@@ -1216,6 +1342,8 @@
       local.gaugeDirty = false;
       local.numericMaxScale = new Array(local.gaugeNumericCols.length).fill(0);
       local.numericDirty = false;
+      local.gaugesEnabled = false;
+      local.gaugesPainted = false;
     }
 
     function updateLocalGaugeMaximaFromRow(row) {
@@ -1319,7 +1447,11 @@
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i]) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
-            setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
+            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
+            else {
+              td.classList.add("resultTable__numeric");
+              setCellTextFlat(td, text);
+            }
           } else {
             const text = row[i] == null ? "" : String(row[i]);
             if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("resultTable__numeric");
@@ -1562,10 +1694,15 @@
       setMetaText: setMetaTextLocal,
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
-        if (local.wrap && !local.isVertical && (local.gaugeDirty || local.numericDirty)) {
+        if (!local.gaugesEnabled) local.gaugesEnabled = true;
+        const hasGaugeCols = Array.isArray(local.gaugeNumericCols) && local.gaugeNumericCols.some(Boolean);
+        const needFinalGaugeRender = local.wrap && !local.isVertical && hasGaugeCols && local.allRows.length > 0 && !local.gaugesPainted;
+
+        if (local.wrap && !local.isVertical && (local.gaugeDirty || local.numericDirty || needFinalGaugeRender)) {
           renderLocalTableFull();
           local.gaugeDirty = false;
           local.numericDirty = false;
+          if (local.gaugesEnabled && hasGaugeCols) local.gaugesPainted = true;
         }
         maybeSwitchToVerticalSingleRowLocal();
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
