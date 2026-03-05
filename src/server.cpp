@@ -319,6 +319,25 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     }
   }
 
+  // Extra heuristics for errors that quote identifiers with backticks.
+  // Example: "Unknown expression identifier `tt` ... in scope SELECT tt ..."
+  if (!out.has_near) {
+    size_t q = msg.find('`');
+    while (q != std::string_view::npos) {
+      const size_t r = msg.find('`', q + 1);
+      if (r == std::string_view::npos) break;
+      if (r > q + 1) {
+        std::string_view tok = msg.substr(q + 1, r - (q + 1));
+        if (tok.size() <= 128 && tok.find_first_of(" \t\r\n`") == std::string_view::npos) {
+          out.has_near = true;
+          out.near.assign(tok.data(), tok.size());
+          break;
+        }
+      }
+      q = msg.find('`', q + 1);
+    }
+  }
+
   // If we have "in scope <SQL>" and a near token, compute best-effort 1-based
   // position/line/col so the frontend can underline it.
   if ((!out.has_position || !out.has_line_col) && out.has_near) {

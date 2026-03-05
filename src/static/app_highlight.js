@@ -698,7 +698,6 @@
 
     const renderWithError = (range) => {
       const msg = errorLc && errorLc.message ? String(errorLc.message) : "";
-      const title = msg ? ` title="${escapeHtml(msg)}"` : "";
       const out = [];
       const from = range.from;
       const to = range.to;
@@ -711,7 +710,7 @@
         const a = Math.max(0, from - t.start);
         const b = Math.max(0, Math.min(raw.length, to - t.start));
         if (a > 0) out.push(wrapHtml(raw.slice(0, a), t.kind));
-        out.push(`<span class="tok-err"${title}>${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
+        out.push(`<span class="tok-err">${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
         if (b < raw.length) out.push(wrapHtml(raw.slice(b), t.kind));
       }
       pre.innerHTML = out.join("");
