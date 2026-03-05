@@ -330,7 +330,8 @@
       return coerceDeep(v);
     }
 
-    return coerceNumberLike(v);
+    if (isScalarNumericType(typeAst)) return coerceNumberLike(v);
+    return v;
   }
 
   function formatCellForDisplay(raw, colIndex, pretty = false) {
