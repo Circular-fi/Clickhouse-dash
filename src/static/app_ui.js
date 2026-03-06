@@ -926,5 +926,17 @@
     startHostsSse();
   }
 
-  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi };
+  function setEditorError(loc) {
+    const ctrl = state && state.highlightCtrl;
+    if (!ctrl || typeof ctrl.setError !== "function") return;
+    ctrl.setError(loc);
+  }
+
+  function clearEditorError() {
+    const ctrl = state && state.highlightCtrl;
+    if (!ctrl || typeof ctrl.clearError !== "function") return;
+    ctrl.clearError();
+  }
+
+  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi, setEditorError, clearEditorError };
 })();

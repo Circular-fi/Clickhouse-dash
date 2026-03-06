@@ -635,13 +635,11 @@
   }
 
   function buildFormatErrorText(err) {
-    const payload = err && err.payload ? err.payload : null;
-    const code = payload && payload.error_code ? String(payload.error_code) : err && err.code ? String(err.code) : "";
-    const msg = payload && payload.message ? String(payload.message) : err instanceof Error ? String(err.message || "") : String(err || "");
-    const clean = msg.trim();
-    if (!code) return clean || "Format failed.";
-    if (clean.toLowerCase().startsWith(code.toLowerCase() + ":")) return clean;
-    return `${code}: ${clean || "Format failed."}`;
+    const payload = util.normalizeApiErrorPayload(err && err.payload ? err.payload : null, {
+      error_code: "format_failed",
+      message: err instanceof Error ? String(err.message || "Format failed.") : "Format failed.",
+    });
+    return util.buildApiErrorText(payload, "Format failed.");
   }
 
   function parseLineColFromText(text) {
@@ -1021,12 +1019,16 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
 
 
   function showFormatFailure(err) {
-    const msg = buildFormatErrorText(err);
+    const payload = util.normalizeApiErrorPayload(err && err.payload ? err.payload : null, {
+      error_code: "format_failed",
+      message: err instanceof Error ? String(err.message || "Format failed.") : "Format failed.",
+    });
+    const msg = util.buildApiErrorText(payload, "Format failed.");
 
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
-    updateActionButtons();    const payload = err && err.payload ? err.payload : null;
+    updateActionButtons();
     const editorText = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
     applyEditorErrorDecoration(editorText, null, payload, msg);
     results.clearResultsStack();
@@ -1145,10 +1147,11 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         const data = parseSseJson(ev);
         if (!data) return;
         sseErrorEventReceived = true;
-        const msg = data && data.message ? String(data.message) : "Query error.";
+        const payload = util.normalizeApiErrorPayload(data, { error_code: "query_failed", message: "Query error." });
+        const msg = util.buildApiErrorText(payload, "Query error.");
         const editorText = ctx && typeof ctx.editorText === "string" ? ctx.editorText : (dom.queryTextArea ? String(dom.queryTextArea.value || "") : "");
         const statementIndex = ctx && ctx.statementIndex != null ? ctx.statementIndex : null;
-        applyEditorErrorDecoration(editorText, statementIndex, data, msg);
+        applyEditorErrorDecoration(editorText, statementIndex, payload, msg);
         streamSink.setError(msg);
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
@@ -1218,7 +1221,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           return;
         }
 
-        streamSink.setError("Connection lost.");
+        const payload = util.normalizeApiErrorPayload(null, { error_code: "stream_error", message: "Connection lost." });
+        streamSink.setError(util.buildApiErrorText(payload, "Connection lost."));
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
         if (agg) agg.terminal = true;

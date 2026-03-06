@@ -442,6 +442,12 @@ body {
   color: var(--sqlNull);
 }
 
+.tok-err {
+  text-decoration: underline wavy #e11d48;
+  text-decoration-thickness: 0.08rem;
+  text-underline-offset: 0.2rem;
+}
+
 #queryTextArea::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
   opacity: 0;
@@ -1716,7 +1722,6 @@ button.button:not(:disabled):hover {
   border-bottom: 0px;
 }
 
-
 .jsonPretty {
   margin: 0;
   padding: 0;
@@ -1739,4 +1744,8 @@ button.button:not(:disabled):hover {
   background-origin: content-box;
   background-clip: content-box;
   background-size: var(--gaugeFill, 0%) 100%;
+}
+
+.resultsStack__toggle {
+  width: 3rem;
 }

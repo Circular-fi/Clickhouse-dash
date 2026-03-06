@@ -3,6 +3,7 @@
 #include "health_runner.hpp"
 #include "jwt.hpp"
 #include "query_session.hpp"
+#include "stale_cache.hpp"
 
 #include <httplib.h>
 
@@ -75,18 +76,8 @@ private:
     std::vector<MetaFunction> items;
   };
 
-  struct MetaCacheEntry {
-    uint64_t fetched_at_ms = 0;
-    bool has_value = false;
-    bool stale = false;
-    std::string error_code;
-    std::string error_message;
-    MetaKeywords keywords;
-    MetaFunctions functions;
-  };
-
-  std::mutex meta_mu_;
-  std::unordered_map<std::string, MetaCacheEntry> meta_cache_;
+  StaleCache<std::string, MetaKeywords> meta_keywords_cache_;
+  StaleCache<std::string, MetaFunctions> meta_functions_cache_;
 
   AppConfig cfg_;
   httplib::Server http_;

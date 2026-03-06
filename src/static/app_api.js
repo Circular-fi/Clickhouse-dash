@@ -4,6 +4,8 @@
   const ns = window.ChDash;
   if (!ns) return;
 
+  const { util } = ns;
+
   function setApiOnline(online) {
     const next = online !== false;
     const ui = ns.ui;
@@ -37,7 +39,12 @@
       });
     } catch (e) {
       setApiOnline(false);
-      throw e;
+      const norm = util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." });
+      const msg = util.buildApiErrorText(norm, "Network error.");
+      const err = new Error(msg);
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
     }
 
     setApiOnline(true);
@@ -45,11 +52,11 @@
     const payload = await readJsonBody(response);
 
     if (!response.ok) {
-      const code = payload && payload.error_code ? String(payload.error_code) : "";
-      const msg = payload && payload.message ? String(payload.message) : `Request failed with status ${response.status}`;
-      const err = new Error(code ? `${code}: ${msg}` : msg);
-      err.code = code || null;
-      err.payload = payload;
+      const norm = util.buildApiErrorFromResponse(response.status, payload);
+      const msg = util.buildApiErrorText(norm, `Request failed with status ${response.status}`);
+      const err = new Error(msg);
+      err.code = norm.error_code;
+      err.payload = norm;
       throw err;
     }
 
@@ -66,18 +73,23 @@
       response = await fetch(`api/meta?${qs}`, { cache: "no-store" });
     } catch (e) {
       setApiOnline(false);
-      throw e;
+      const norm = util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." });
+      const msg = util.buildApiErrorText(norm, "Network error.");
+      const err = new Error(msg);
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
     }
 
     setApiOnline(true);
     const payload = await readJsonBody(response);
 
     if (!response.ok) {
-      const code = payload && payload.error_code ? String(payload.error_code) : "";
-      const msg = payload && payload.message ? String(payload.message) : `Request failed with status ${response.status}`;
-      const err = new Error(code ? `${code}: ${msg}` : msg);
-      err.code = code || null;
-      err.payload = payload;
+      const norm = util.buildApiErrorFromResponse(response.status, payload);
+      const msg = util.buildApiErrorText(norm, `Request failed with status ${response.status}`);
+      const err = new Error(msg);
+      err.code = norm.error_code;
+      err.payload = norm;
       throw err;
     }
 
@@ -90,17 +102,13 @@
 
     const payload = await postJson("api/format", { host_id: hostId, sqls });
 
-    if (payload && payload.error_code) {
-      const code = String(payload.error_code || "format_failed");
-      const msg = payload && payload.message ? `Format failed. Query n°${String(payload.message)}` : "Format failed.";
-      const err = new Error(`${code}: ${msg} test`);
-      err.code = code;
-      err.payload = payload;
-      throw err;
-    }
-
     if (!payload || !Array.isArray(payload.formatted_sqls)) {
-      throw new Error("Invalid format response.");
+      const norm = util.normalizeApiErrorPayload(payload, { error_code: "invalid_json", message: "Invalid format response." });
+      const msg = util.buildApiErrorText(norm, "Invalid format response.");
+      const err = new Error(msg);
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
     }
 
     return payload.formatted_sqls.map((s) => String(s || ""));

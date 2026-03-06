@@ -196,6 +196,52 @@
     }
   }
 
+  function normalizeApiErrorPayload(payload, fallback) {
+    const fb = fallback && typeof fallback === "object" ? fallback : {};
+    const p = payload && typeof payload === "object" ? payload : null;
+
+    const codeRaw = p && p.error_code != null ? p.error_code : fb.error_code;
+    const msgRaw = p && p.message != null ? p.message : fb.message;
+    const error_code = String(codeRaw != null ? codeRaw : "http_error");
+    const message = String(msgRaw != null ? msgRaw : "Request failed.");
+
+    const out = { error_code, message };
+
+    const idxRaw = p && p.index != null ? p.index : fb.index;
+    if (idxRaw != null && Number.isFinite(Number(idxRaw))) out.index = Number(idxRaw) | 0;
+
+    const qidRaw = p && p.query_id != null ? p.query_id : fb.query_id;
+    if (typeof qidRaw === "string" && qidRaw) out.query_id = qidRaw;
+
+    const chRaw = p && p.clickhouse && typeof p.clickhouse === "object" ? p.clickhouse : (fb.clickhouse && typeof fb.clickhouse === "object" ? fb.clickhouse : null);
+    if (chRaw) {
+      const ch = {};
+      if (chRaw.code != null && Number.isFinite(Number(chRaw.code))) ch.code = Number(chRaw.code) | 0;
+      if (chRaw.position != null && Number.isFinite(Number(chRaw.position))) ch.position = Number(chRaw.position);
+      if (chRaw.line != null && Number.isFinite(Number(chRaw.line))) ch.line = Number(chRaw.line) | 0;
+      if (chRaw.col != null && Number.isFinite(Number(chRaw.col))) ch.col = Number(chRaw.col) | 0;
+      if (typeof chRaw.near === "string" && chRaw.near) ch.near = chRaw.near;
+      if (Object.keys(ch).length) out.clickhouse = ch;
+    }
+
+    return out;
+  }
+
+  function buildApiErrorText(payload, fallbackText) {
+    const norm = normalizeApiErrorPayload(payload, { error_code: "http_error", message: fallbackText != null ? String(fallbackText) : "Request failed." });
+    const code = String(norm.error_code || "").trim();
+    const msg = String(norm.message || "").trim();
+    if (!code) return msg;
+    if (msg.toLowerCase().startsWith(code.toLowerCase() + ":")) return msg;
+    return `${code}: ${msg}`;
+  }
+
+  function buildApiErrorFromResponse(responseStatus, payload) {
+    const st = Number(responseStatus);
+    const msg = Number.isFinite(st) ? `Request failed with status ${st}` : "Request failed.";
+    return normalizeApiErrorPayload(payload, { error_code: "http_error", message: msg });
+  }
+
   ns.util = {
     setText,
     setMetricText,
@@ -208,5 +254,8 @@
     formatSeconds,
     formatBytes,
     replaceTextAreaValue,
+    normalizeApiErrorPayload,
+    buildApiErrorText,
+    buildApiErrorFromResponse,
   };
 })();

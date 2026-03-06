@@ -39,6 +39,13 @@ if (CHDASH_BUILD_APP)
   add_executable(chdash
     main.cpp
     server.cpp
+    api_error.cpp
+    api_hosts.cpp
+    api_meta.cpp
+    api_format.cpp
+    api_query.cpp
+    api_query_stream.cpp
+    query_sql_store.cpp
     query_session.cpp
     hcl.cpp
     jwt.cpp
