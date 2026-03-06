@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 500);
+  cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 10000);
   cfg.health.interval_ms = envi("HEALTH_INTERVAL_MS", 5000);
   cfg.health.timeout_ms = envi("HEALTH_TIMEOUT_MS", 800);
 

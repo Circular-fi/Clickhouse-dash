@@ -21,6 +21,8 @@
     if (kind === "com") return `<span class="tok-com">${x}</span>`;
     if (kind === "kw") return `<span class="tok-kw">${x}</span>`;
     if (kind === "fn") return `<span class="tok-fn">${x}</span>`;
+    if (kind === "num") return `<span class="tok-num">${x}</span>`;
+    if (kind === "null") return `<span class="tok-null">${x}</span>`;
     return x;
   };
 
@@ -172,6 +174,52 @@
 
     while (i < s.length) {
       const c = s[i];
+
+      if (c === "`") {
+        let j = i + 1;
+        while (j < s.length && s[j] !== "`") j += 1;
+        const hasClose = j < s.length;
+        if (!hasClose) {
+          i += 1;
+          continue;
+        }
+        const end = j + 1;
+        const inner = s.slice(i + 1, j);
+
+        let isFn = false;
+        if (fnMeta && hasClose) {
+          const next = skipWsAndComments(s, end);
+          if (next < s.length && s[next] === "(") {
+            if (fnMeta.cs.has(inner)) isFn = true;
+            else if (fnMeta.ci.has(inner.toLowerCase())) isFn = true;
+          }
+        }
+
+        if (isFn) {
+          push(segStart, i, "plain");
+          push(i, i + 1, "plain");
+          push(i + 1, j, "fn");
+          push(j, j + 1, "plain");
+          segStart = end;
+        }
+
+        i = end;
+        continue;
+      }
+
+      if ((c >= "0" && c <= "9") || (c === "-" && i + 1 < s.length && s[i + 1] >= "0" && s[i + 1] <= "9")) {
+        if (i === 0 || !isWordChar(s[i - 1])) {
+          const m = s.slice(i).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
+          if (m && m[0]) {
+            push(segStart, i, "plain");
+            push(i, i + m[0].length, "num");
+            segStart = i + m[0].length;
+            i = segStart;
+            continue;
+          }
+        }
+      }
+
       if (!isWordStart(c)) {
         i += 1;
         continue;
@@ -179,8 +227,10 @@
       let j = i + 1;
       while (j < s.length && isWordChar(s[j])) j += 1;
       const word = s.slice(i, j);
-      const isCommon = commonKeywords.has(word.toLowerCase());
+      const wLower = word.toLowerCase();
+      const isCommon = commonKeywords.has(wLower);
       const isKw = isCommon || (kwSet && kwSet.has(word));
+      const isNull = isKw && wLower === "null";
 
       let isFn = false;
       if (fnMeta) {
@@ -194,7 +244,7 @@
 
       if (isKw || isFn) {
         push(segStart, i, "plain");
-        push(i, j, isFn ? "fn" : "kw");
+        push(i, j, isFn ? "fn" : isNull ? "null" : "kw");
         segStart = j;
       }
       i = j;
@@ -290,16 +340,6 @@
         continue;
       }
 
-      if (mode === "bq") {
-        if (c === "`") {
-          i += 1;
-          close(i);
-          continue;
-        }
-        i += 1;
-        continue;
-      }
-
       if (c === "-" && nx === "-") {
         open("lc", "com", i);
         i += 2;
@@ -331,8 +371,9 @@
       }
 
       if (c === "`") {
-        open("bq", "str", i);
         i += 1;
+        while (i < s.length && s[i] !== "`") i += 1;
+        if (i < s.length) i += 1;
         continue;
       }
 
@@ -413,6 +454,46 @@
 
     const isInsideWord = (str, pos) => isWordCharAt(str, pos - 1) && isWordCharAt(str, pos);
 
+    const scanFnNameBefore = (str, pos) => {
+      let p = pos;
+      while (p > 0) {
+        const c = str[p - 1];
+        if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+          p -= 1;
+          continue;
+        }
+        break;
+      }
+      if (p <= 0) return null;
+      if (str[p - 1] === "`") {
+        let a = p - 2;
+        for (let k = 0; k < 512 && a >= 0; k++) {
+          if (str[a] === "`") return { word: str.slice(a + 1, p - 1) };
+          a -= 1;
+        }
+        return null;
+      }
+      if (!isWordCharAt(str, p - 1)) return null;
+      let a = p - 1;
+      for (let k = 0; k < 512 && a > 0; k++) {
+        if (!isWordCharAt(str, a - 1)) break;
+        a -= 1;
+      }
+      const word = str.slice(a, p);
+      return { word };
+    };
+
+    const isFnCallGap = (str, pos) => {
+      if (!fnMeta) return false;
+      const next = skipWsAndComments(str, pos);
+      if (next >= str.length || str[next] !== "(") return false;
+      const w = scanFnNameBefore(str, pos);
+      if (!w || !w.word || !isWordStart(w.word[0])) return false;
+      const name = w.word;
+      if (fnMeta.cs.has(name)) return true;
+      return fnMeta.ci.has(name.toLowerCase());
+    };
+
     const isFnBoundary = (str, pos) => {
       if (!fnMeta) return false;
       if (!isWordCharAt(str, pos - 1) || isWordCharAt(str, pos)) return false;
@@ -434,7 +515,7 @@
       const posPrev = syncPrevBase + (posNew - syncNewBase);
       if (posPrev < 0 || posPrev > old.length) return false;
       if (isInsideWord(s, posNew) || isInsideWord(old, posPrev)) return false;
-      if (isFnBoundary(s, posNew)) return false;
+      if (isFnCallGap(s, posNew) || isFnCallGap(old, posPrev)) return false;
       const j = findTokenIndex(prevTokens, posPrev);
       if (j < 0) return false;
       const t = prevTokens[j];
@@ -505,18 +586,6 @@
         continue;
       }
 
-      if (mode === "bq") {
-        if (c === "`") {
-          i += 1;
-          close(i);
-          sync = canSyncAt(i) || sync;
-          if (sync) break;
-          continue;
-        }
-        i += 1;
-        continue;
-      }
-
       if (c === "-" && nx === "-") {
         open("lc", "com", i);
         i += 2;
@@ -548,8 +617,9 @@
       }
 
       if (c === "`") {
-        open("bq", "str", i);
         i += 1;
+        while (i < s.length && s[i] !== "`") i += 1;
+        if (i < s.length) i += 1;
         continue;
       }
 
@@ -878,7 +948,31 @@
         if (!c || !isWordChar(c)) break;
         scanStart -= 1;
       }
-      const r = scanPartial(old, s, tokens, scanStart, endNew, endOld);
+      if (scanStart > 0 && s[scanStart - 1] === "`") scanStart -= 1;
+      let syncNewBase = endNew;
+      let syncOldBase = endOld;
+      while (syncNewBase < s.length && syncOldBase < old.length && s[syncNewBase] === old[syncOldBase] && isWordChar(s[syncNewBase])) {
+        syncNewBase += 1;
+        syncOldBase += 1;
+      }
+      if (syncNewBase < s.length && syncOldBase < old.length && s[syncNewBase] === "`" && old[syncOldBase] === "`") {
+        syncNewBase += 1;
+        syncOldBase += 1;
+      }
+      while (syncNewBase < s.length && syncOldBase < old.length && s[syncNewBase] === old[syncOldBase]) {
+        const c = s[syncNewBase];
+        if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+          syncNewBase += 1;
+          syncOldBase += 1;
+          continue;
+        }
+        break;
+      }
+      if (syncNewBase < s.length && syncOldBase < old.length && s[syncNewBase] === "(" && old[syncOldBase] === "(") {
+        syncNewBase += 1;
+        syncOldBase += 1;
+      }
+      const r = scanPartial(old, s, tokens, scanStart, syncNewBase, syncOldBase);
       const nextTokens = r.tokens;
       let sane = nextTokens.length > 0 && nextTokens[0].start === 0;
       if (sane) {

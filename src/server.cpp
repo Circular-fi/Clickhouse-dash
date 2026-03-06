@@ -206,6 +206,9 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     msg = ltrim(msg);
   }
 
+  const bool has_explicit_position_marker = (msg.find("position ") != std::string_view::npos);
+  const bool has_explicit_linecol_marker = (msg.find("(line ") != std::string_view::npos);
+
   auto parse_int_at = [&](size_t pos, int & value) -> bool {
     if (pos >= msg.size() || !std::isdigit(static_cast<unsigned char>(msg[pos]))) return false;
     long v = 0;
@@ -296,10 +299,9 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     }
   }
 
-  // Extra heuristics for errors that don't include (line,col) or explicit position,
-  // but do include an identifier + the failing query in the message.
-  // Example: "Unknown table expression identifier 'system.foo' ... in scope SELECT ... system.foo"
-  if (!out.has_near) {
+  // Prefer the unknown identifier that ClickHouse quotes in the message.
+  // Example: "Unknown table expression identifier 'system.foo' ..."
+  {
     auto grab_quoted_after = [&](std::string_view key) -> std::string_view {
       const size_t p = msg.find(key);
       if (p == std::string_view::npos) return {};
@@ -319,28 +321,47 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     }
   }
 
-  // Extra heuristics for errors that quote identifiers with backticks.
-  // Example: "Unknown expression identifier `tt` ... in scope SELECT tt ..."
-  if (!out.has_near) {
-    size_t q = msg.find('`');
-    while (q != std::string_view::npos) {
-      const size_t r = msg.find('`', q + 1);
-      if (r == std::string_view::npos) break;
-      if (r > q + 1) {
-        std::string_view tok = msg.substr(q + 1, r - (q + 1));
-        if (tok.size() <= 128 && tok.find_first_of(" \t\r\n`") == std::string_view::npos) {
-          out.has_near = true;
-          out.near.assign(tok.data(), tok.size());
-          break;
+  // Prefer the unknown identifier quoted with backticks right after the word "identifier".
+  // Example: "Unknown expression or function identifier `numer` ..."
+  {
+    auto find_backticked_after_key = [&](std::string_view key) -> std::string_view {
+      const size_t p = msg.find(key);
+      if (p == std::string_view::npos) return {};
+      size_t i = p + key.size();
+      while (i < msg.size() && (msg[i] == ' ' || msg[i] == '\t')) ++i;
+      if (i >= msg.size() || msg[i] != '`') return {};
+      const size_t r = msg.find('`', i + 1);
+      if (r == std::string_view::npos || r <= i + 1) return {};
+      return msg.substr(i + 1, r - (i + 1));
+    };
+
+    std::string_view tok = find_backticked_after_key("identifier");
+    if (tok.empty()) tok = find_backticked_after_key("Identifier");
+    if (!tok.empty() && tok.size() <= 128 && tok.find_first_of(" \t\r\n`") == std::string_view::npos) {
+      out.has_near = true;
+      out.near.assign(tok.data(), tok.size());
+    } else if (!out.has_near) {
+      // Fallback: pick the first sensible backticked token anywhere in the message.
+      size_t q = msg.find('`');
+      while (q != std::string_view::npos) {
+        const size_t r = msg.find('`', q + 1);
+        if (r == std::string_view::npos) break;
+        if (r > q + 1) {
+          std::string_view t = msg.substr(q + 1, r - (q + 1));
+          if (t.size() <= 128 && t.find_first_of(" \t\r\n`") == std::string_view::npos) {
+            out.has_near = true;
+            out.near.assign(t.data(), t.size());
+            break;
+          }
         }
+        q = msg.find('`', q + 1);
       }
-      q = msg.find('`', q + 1);
     }
   }
 
-  // If we have "in scope <SQL>" and a near token, compute best-effort 1-based
-  // position/line/col so the frontend can underline it.
-  if ((!out.has_position || !out.has_line_col) && out.has_near) {
+  // If ClickHouse didn't provide explicit position/line/col, but we have "in scope <SQL>"
+  // and a `near` token, compute best-effort 1-based position/line/col so the frontend can underline it.
+  if (out.has_near && (!has_explicit_position_marker || !has_explicit_linecol_marker)) {
     constexpr std::string_view scope_kw = "in scope ";
     if (auto p = msg.find(scope_kw); p != std::string_view::npos) {
       std::string_view scope = msg.substr(p + scope_kw.size());
@@ -357,11 +378,11 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
       }
 
       if (idx != std::string_view::npos) {
-        if (!out.has_position) {
+        if (!has_explicit_position_marker) {
           out.has_position = true;
           out.position = static_cast<int>(idx) + 1;
         }
-        if (!out.has_line_col) {
+        if (!has_explicit_linecol_marker) {
           int line = 1;
           int col = 1;
           for (size_t k = 0; k < idx; ++k) {

@@ -410,7 +410,7 @@
       if ((ch >= "0" && ch <= "9") || ch === "-") {
         const m = s.slice(i).match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/);
         if (m && m[0]) {
-          appendSpan("tok-fn", m[0]);
+          appendSpan("tok-num", m[0]);
           i += m[0].length;
           continue;
         }
@@ -427,7 +427,7 @@
         continue;
       }
       if (ch === "n" && s.startsWith("null", i)) {
-        appendSpan("tok-kw", "null");
+        appendSpan("tok-null", "null");
         i += 4;
         continue;
       }
@@ -679,7 +679,7 @@
     }
 
     if (typed === null || typed === undefined) {
-      setScalar("tok-kw", "null");
+      setScalar("tok-null", "null");
       return;
     }
     if (typeof typed === "string") {
@@ -687,7 +687,7 @@
       return;
     }
     if (typeof typed === "number" || typeof typed === "boolean") {
-      setScalar(typeof typed === "number" ? "tok-fn" : "tok-kw", String(typed));
+      setScalar(typeof typed === "number" ? "tok-num" : "tok-kw", String(typed));
       return;
     }
 

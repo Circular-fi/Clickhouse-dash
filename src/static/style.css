@@ -71,6 +71,8 @@
   --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
   --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
   --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
+  --sqlNumber: color-mix(in srgb, #34d399 70%, var(--text));
+  --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
 }
 
 @media (prefers-color-scheme: light) {
@@ -432,10 +434,12 @@ body {
   color: var(--sqlFunction);
 }
 
-.tok-err {
-  text-decoration: underline wavy #e11d48;
-  text-decoration-thickness: 0.08rem;
-  text-underline-offset: 0.2rem;
+.tok-num {
+  color: var(--sqlNumber);
+}
+
+.tok-null {
+  color: var(--sqlNull);
 }
 
 #queryTextArea::placeholder {

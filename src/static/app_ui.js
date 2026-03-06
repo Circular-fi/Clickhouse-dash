@@ -491,9 +491,40 @@
   function initEditor() {
     if (!dom.queryTextArea) return;
 
+    const editorDraftKey = "chdash.editor.draft.v2";
+
+    const loadEditorDraft = () => {
+      try {
+        return sessionStorage.getItem(editorDraftKey);
+      } catch {
+        return null;
+      }
+    };
+
+    const saveEditorDraft = (text) => {
+      try {
+        sessionStorage.setItem(editorDraftKey, String(text || ""));
+      } catch {
+        null;
+      }
+    };
+
+    const dispatchInputEvent = (el) => {
+      if (!el || typeof el.dispatchEvent !== "function") return;
+      try {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch {
+        try {
+          el.dispatchEvent(new Event("input"));
+        } catch {
+          null;
+        }
+      }
+    };
+
     const current = String(dom.queryTextArea.value || "");
-    if (!current.trim() && storage.loadEditorSql) {
-      const saved = String(storage.loadEditorSql() || "");
+    if (!current.trim()) {
+      const saved = String(loadEditorDraft() || "");
       if (saved.trim()) {
         if (util && typeof util.replaceTextAreaValue === "function") {
           util.replaceTextAreaValue(dom.queryTextArea, saved);
@@ -507,25 +538,30 @@
       }
     }
 
-    if (storage.saveEditorSql) {
-      dom.queryTextArea.addEventListener("input", () => {
-        storage.saveEditorSql(dom.queryTextArea.value);
-      });
-    }
+    let draftSaveTimer = 0;
+    dom.queryTextArea.addEventListener("input", () => {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(() => {
+        draftSaveTimer = 0;
+        saveEditorDraft(dom.queryTextArea.value);
+      }, 200);
+    });
 
     const replaceSelectionText = (ta, nextText) => {
       const start = ta.selectionStart;
       const end = ta.selectionEnd;
       try {
+        const before = String(ta.value || "");
         ta.focus();
         ta.setSelectionRange(start, end);
         const ok = document.execCommand && document.execCommand("insertText", false, nextText);
-        if (ok) return { start, end };
+        if (ok || String(ta.value || "") !== before) return { start, end };
       } catch {
         null;
       }
       try {
         ta.setRangeText(nextText, start, end, "end");
+        dispatchInputEvent(ta);
         return { start, end };
       } catch {
         null;
@@ -535,6 +571,7 @@
       const pos = start + nextText.length;
       ta.selectionStart = pos;
       ta.selectionEnd = pos;
+      dispatchInputEvent(ta);
       return { start, end };
     };
 
@@ -621,7 +658,9 @@
 
         const od = outdentLine(line);
         if (od.removed === 0) return;
-        ta.setRangeText(od.line, ls, le, "preserve");
+        ta.selectionStart = ls;
+        ta.selectionEnd = le;
+        replaceSelectionText(ta, od.line);
         const nextPos = Math.max(ls, start - od.removed);
         ta.selectionStart = nextPos;
         ta.selectionEnd = nextPos;
@@ -674,7 +713,9 @@
       const newStart = start + shiftFor(startRel, includeEquals);
       const newEnd = end + shiftFor(endRel, includeEquals);
 
-      ta.setRangeText(newBlock, blockStart, blockEnd, "preserve");
+      ta.selectionStart = blockStart;
+      ta.selectionEnd = blockEnd;
+      replaceSelectionText(ta, newBlock);
       ta.selectionStart = Math.max(blockStart, newStart);
       ta.selectionEnd = Math.max(blockStart, newEnd);
     });
@@ -717,6 +758,7 @@
         }
         // Fallback if execCommand isn't available
         ta.setRangeText("\t", deleteFrom, start, "end");
+        dispatchInputEvent(ta);
       }
     });
 
@@ -876,17 +918,5 @@
     startHostsSse();
   }
 
-  function setEditorError(loc) {
-    const ctrl = state && state.highlightCtrl ? state.highlightCtrl : null;
-    if (!ctrl || typeof ctrl.setError !== "function") return;
-    ctrl.setError(loc);
-  }
-
-  function clearEditorError() {
-    const ctrl = state && state.highlightCtrl ? state.highlightCtrl : null;
-    if (!ctrl || typeof ctrl.clearError !== "function") return;
-    ctrl.clearError();
-  }
-
-  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi, setEditorError, clearEditorError };
+  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi };
 })();
