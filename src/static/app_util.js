@@ -145,6 +145,22 @@
     if (!textAreaEl) return;
     const v = String(nextValue ?? "");
 
+    const prevTop = Number.isFinite(textAreaEl.scrollTop) ? textAreaEl.scrollTop : 0;
+    const prevLeft = Number.isFinite(textAreaEl.scrollLeft) ? textAreaEl.scrollLeft : 0;
+
+    const restoreView = () => {
+      const maxTop = Math.max(0, textAreaEl.scrollHeight - textAreaEl.clientHeight);
+      const maxLeft = Math.max(0, textAreaEl.scrollWidth - textAreaEl.clientWidth);
+      textAreaEl.scrollTop = Math.min(Math.max(0, prevTop), maxTop);
+      textAreaEl.scrollLeft = Math.min(Math.max(0, prevLeft), maxLeft);
+      const end = textAreaEl.value.length;
+      try {
+        textAreaEl.setSelectionRange(end, end);
+      } catch {
+        null;
+      }
+    };
+
     const dispatchInputEvent = () => {
       try {
         textAreaEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -158,18 +174,24 @@
     };
 
     try {
+      const before = String(textAreaEl.value ?? "");
       textAreaEl.focus();
-      textAreaEl.setSelectionRange(0, textAreaEl.value.length);
+      textAreaEl.setSelectionRange(0, before.length);
       const ok = document.execCommand && document.execCommand("insertText", false, v);
-      if (ok) return;
+      if (ok || String(textAreaEl.value ?? "") !== before) {
+        restoreView();
+        return;
+      }
     } catch {
       null;
     }
     try {
       textAreaEl.setRangeText(v, 0, textAreaEl.value.length, "end");
+      restoreView();
       dispatchInputEvent();
     } catch {
       textAreaEl.value = v;
+      restoreView();
       dispatchInputEvent();
     }
   }

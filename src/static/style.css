@@ -444,6 +444,11 @@ body {
 
 #queryTextArea::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
+  opacity: 0;
+}
+
+html.is-ready #queryTextArea::placeholder {
+  opacity: 1;
 }
 
 .panel_bottom {

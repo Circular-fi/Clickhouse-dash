@@ -915,6 +915,8 @@
       return;
     }
 
+    if (dom.root && dom.root.classList) dom.root.classList.add("is-ready");
+
     startHostsSse();
   }
 

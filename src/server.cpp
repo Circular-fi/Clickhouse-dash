@@ -20,10 +20,18 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 
 namespace chdash {
 
 namespace {
+
+// Keep the original (trimmed) SQL for each query_id so we can compute accurate
+// line/column locations for errors in SSE events. ClickHouse often prints
+// "in scope <query>" with whitespace normalized to a single line, which makes
+// line/col from that string misleading when the user submitted multi-line SQL.
+static std::mutex g_query_sql_mu;
+static std::unordered_map<std::string, std::string> g_query_sql;
 
 static std::string gen_query_id() {
   static thread_local std::mt19937_64 rng{std::random_device{}()};
@@ -191,7 +199,94 @@ struct ClickHouseErrorLocation {
   std::string near;
 };
 
-static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg) {
+static bool is_sql_word_char(char c) {
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+}
+
+static std::optional<size_t> find_ident_outside_strings_comments(std::string_view sql, std::string_view ident) {
+  if (ident.empty()) return std::nullopt;
+
+  bool in_str = false;
+  bool esc = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+
+  for (size_t i = 0; i + ident.size() <= sql.size(); ++i) {
+    const char c = sql[i];
+
+    if (in_line_comment) {
+      if (c == '\n') in_line_comment = false;
+      continue;
+    }
+    if (in_block_comment) {
+      if (c == '*' && i + 1 < sql.size() && sql[i + 1] == '/') {
+        in_block_comment = false;
+        ++i;
+      }
+      continue;
+    }
+
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+
+    if (c == '-' && i + 1 < sql.size() && sql[i + 1] == '-') {
+      in_line_comment = true;
+      ++i;
+      continue;
+    }
+    if (c == '/' && i + 1 < sql.size() && sql[i + 1] == '*') {
+      in_block_comment = true;
+      ++i;
+      continue;
+    }
+
+    if (sql.substr(i, ident.size()) == ident) {
+      const char prev = (i == 0) ? ' ' : sql[i - 1];
+      const char next = (i + ident.size() < sql.size()) ? sql[i + ident.size()] : ' ';
+      if (!is_sql_word_char(prev) && !is_sql_word_char(next)) return i;
+    }
+  }
+  return std::nullopt;
+}
+
+static void compute_line_col_from_index(std::string_view sql, size_t idx, int& line, int& col) {
+  if (idx > sql.size()) idx = sql.size();
+  line = 1;
+  col = 1;
+  for (size_t i = 0; i < idx; ++i) {
+    const char c = sql[i];
+    if (c == '\r') {
+      if (i + 1 < sql.size() && sql[i + 1] == '\n') ++i;
+      ++line;
+      col = 1;
+      continue;
+    }
+    if (c == '\n') {
+      ++line;
+      col = 1;
+      continue;
+    }
+    ++col;
+  }
+}
+
+static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, std::string_view original_sql = {}) {
   ClickHouseErrorLocation out;
 
   // Strip common prefix that we add in some call sites.
@@ -359,43 +454,65 @@ static ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view 
     }
   }
 
-  // If ClickHouse didn't provide explicit position/line/col, but we have "in scope <SQL>"
-  // and a `near` token, compute best-effort 1-based position/line/col so the frontend can underline it.
-  if (out.has_near && (!has_explicit_position_marker || !has_explicit_linecol_marker)) {
-    constexpr std::string_view scope_kw = "in scope ";
-    if (auto p = msg.find(scope_kw); p != std::string_view::npos) {
-      std::string_view scope = msg.substr(p + scope_kw.size());
-      while (!scope.empty() && (scope.back() == ' ' || scope.back() == '\n' || scope.back() == '\r' || scope.back() == '\t' || scope.back() == '.')) {
-        scope.remove_suffix(1);
+  // If ClickHouse didn't provide explicit position/line/col, compute best-effort
+  // locations so the frontend can underline the token.
+  //
+  // IMPORTANT: prefer mapping to the *original* SQL (with newlines/tabs preserved)
+  // if the caller provided it. ClickHouse often prints "in scope <SQL>" with
+  // whitespace normalized to a single line, which makes line/col misleading for
+  // multi-line queries.
+  if ((!has_explicit_position_marker || !has_explicit_linecol_marker)) {
+    if (!original_sql.empty()) {
+      // If we already have a position (from ClickHouse), derive line/col from the original SQL.
+      if (out.has_position && !out.has_line_col) {
+        const size_t idx0 = (out.position > 0) ? static_cast<size_t>(out.position - 1) : 0;
+        int line = 1, col = 1;
+        compute_line_col_from_index(original_sql, idx0, line, col);
+        out.has_line_col = true;
+        out.line = line;
+        out.col = col;
       }
 
-      size_t idx = scope.find(std::string_view(out.near));
-      if (idx == std::string_view::npos) {
-        // Try quoted occurrence.
-        const std::string q = "'" + out.near + "'";
-        idx = scope.find(q);
-        if (idx != std::string_view::npos) idx += 1; // point at the token, not the quote
-      }
-
-      if (idx != std::string_view::npos) {
-        if (!has_explicit_position_marker) {
+      // Otherwise, if we have a token, find it in the original SQL.
+      if (out.has_near && !out.has_position) {
+        if (auto idx = find_ident_outside_strings_comments(original_sql, out.near)) {
           out.has_position = true;
-          out.position = static_cast<int>(idx) + 1;
-        }
-        if (!has_explicit_linecol_marker) {
-          int line = 1;
-          int col = 1;
-          for (size_t k = 0; k < idx; ++k) {
-            if (scope[k] == '\n') {
-              ++line;
-              col = 1;
-            } else {
-              ++col;
-            }
-          }
+          out.position = static_cast<int>(*idx) + 1; // 1-based
+          int line = 1, col = 1;
+          compute_line_col_from_index(original_sql, *idx, line, col);
           out.has_line_col = true;
           out.line = line;
           out.col = col;
+        }
+      }
+    } else {
+      // Fallback: use the "in scope" query text from ClickHouse.
+      if (out.has_near) {
+        constexpr std::string_view scope_kw = "in scope ";
+        if (auto p = msg.find(scope_kw); p != std::string_view::npos) {
+          std::string_view scope = msg.substr(p + scope_kw.size());
+          while (!scope.empty() && (scope.back() == ' ' || scope.back() == '\n' || scope.back() == '\r' || scope.back() == '\t' || scope.back() == '.')) {
+            scope.remove_suffix(1);
+          }
+
+          size_t idx = scope.find(std::string_view(out.near));
+          if (idx == std::string_view::npos) {
+            const std::string q = "'" + out.near + "'";
+            idx = scope.find(q);
+            if (idx != std::string_view::npos) idx += 1;
+          }
+
+          if (idx != std::string_view::npos) {
+            if (!has_explicit_position_marker) {
+              out.has_position = true;
+              out.position = static_cast<int>(idx) + 1;
+            }
+            if (!has_explicit_linecol_marker) {
+              out.has_line_col = true;
+              out.line = 1;
+              out.col = static_cast<int>(idx) + 1;
+            }
+          }
         }
       }
     }
@@ -502,6 +619,7 @@ static std::string build_keepalive_json(const std::string& qid) {
 struct StreamState {
   std::shared_ptr<QuerySession> session;
   std::string query_id;
+  std::string sql;  // original (trimmed) sql, for accurate error locations
 
   std::chrono::steady_clock::time_point last_publish{};
   std::chrono::steady_clock::time_point last_keepalive{};
@@ -760,7 +878,7 @@ static std::string trim_ascii_spaces(std::string_view in) {
   return std::string(in.substr(b, e - b));
 }
 
-static std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view chunk) {
+static std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view chunk, std::string_view original_sql) {
   // We only rewrite the SSE error event payload.
   if (chunk.rfind("event: error\n", 0) != 0) return std::nullopt;
 
@@ -787,7 +905,7 @@ static std::optional<std::string> maybe_rewrite_error_sse_chunk(std::string_view
     qid = doc["query_id"].GetString();
   }
 
-  const auto loc = parse_clickhouse_error_location(msg);
+  const auto loc = parse_clickhouse_error_location(msg, original_sql);
   const ClickHouseErrorLocation* locp =
       (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
 
@@ -3479,7 +3597,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   std::string pretty;
   std::string err;
   if (!format_one(doc["sql"].GetString(), &pretty, &err)) {
-    const auto loc = parse_clickhouse_error_location(err);
+    const std::string sql_trimmed = trim_sql(doc["sql"].GetString());
+    const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
     const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
     return json_error_with_loc(res, 422, "format_failed", err, locp);
   }
@@ -3530,6 +3649,12 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   }
 
   const std::string qid = gen_query_id();
+
+  // Remember the original (trimmed) SQL for better error location mapping in SSE.
+  {
+    std::lock_guard<std::mutex> lk(g_query_sql_mu);
+    g_query_sql[qid] = sql;
+  }
 
   // 1) Create session + start execution.
   std::string client_err;
@@ -3597,6 +3722,11 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   auto st = std::make_shared<StreamState>();
   st->session = session;
   st->query_id = qid;
+  {
+    std::lock_guard<std::mutex> lk(g_query_sql_mu);
+    auto it = g_query_sql.find(qid);
+    if (it != g_query_sql.end()) st->sql = it->second;
+  }
   st->local_chunks.push_back(sse_json_event("meta", build_meta_json(qid)));
 
   Server* self = this;
@@ -3617,7 +3747,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         std::string produced;
         st->session->wait_pop_sse_chunk(produced, 0);
         if (!produced.empty()) {
-          if (auto rew = maybe_rewrite_error_sse_chunk(produced)) {
+          if (auto rew = maybe_rewrite_error_sse_chunk(produced, st->sql)) {
             produced = std::move(*rew);
           }
           sink.write(produced.data(), produced.size());
@@ -3641,6 +3771,10 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
               std::lock_guard<std::mutex> lk(self->mu_);
               self->sessions_.erase(st->query_id);
             }
+            {
+              std::lock_guard<std::mutex> lk(g_query_sql_mu);
+              g_query_sql.erase(st->query_id);
+            }
             return false;
           }
           return true;
@@ -3648,7 +3782,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
 
         const bool cont = st->session->wait_pop_sse_chunk(produced, 30);
         if (!produced.empty()) {
-          if (auto rew = maybe_rewrite_error_sse_chunk(produced)) {
+          if (auto rew = maybe_rewrite_error_sse_chunk(produced, st->sql)) {
             produced = std::move(*rew);
           }
           sink.write(produced.data(), produced.size());
@@ -3668,6 +3802,10 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
             std::lock_guard<std::mutex> lk(self->mu_);
             self->sessions_.erase(st->query_id);
           }
+          {
+            std::lock_guard<std::mutex> lk(g_query_sql_mu);
+            g_query_sql.erase(st->query_id);
+          }
           return false;
         }
 
@@ -3681,9 +3819,11 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return cont;
       },
-      [session](bool success) {
+      [session, qid](bool success) {
         if (!success) {
           session->request_cancel();
+          std::lock_guard<std::mutex> lk(g_query_sql_mu);
+          g_query_sql.erase(qid);
         }
       });
 }
@@ -3740,6 +3880,11 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
   } catch (const std::exception& e) {
     // Spec: minimal response, log details in backend.
     std::cerr << "[cancel] host=" << host_id << " qid=" << qid << " error: " << e.what() << "\n";
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(g_query_sql_mu);
+    g_query_sql.erase(qid);
   }
 
   res.status = 200;
