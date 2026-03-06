@@ -432,7 +432,7 @@
         continue;
       }
 
-      if (ch === "{" || ch === "}" || ch === "[" || ch === "]" || ch === "," || ch === ":") {
+      if (ch === "{" || ch === "}" || ch === "[" || ch === "]" || ch === "(" || ch === ")" || ch === "," || ch === ":") {
         appendSpan("tok-com", ch);
         i++;
         continue;
@@ -528,8 +528,147 @@
     return formatMultiline(value, 0);
   }
 
+  function stringifyCompactValue(value, typeAst) {
+    const maxInlineChars = 90;
+    const maxInlineItems = 8;
+    const indentStep = 2;
+
+    function scalar(v) {
+      if (v === null || v === undefined) return "null";
+      if (typeof v === "string") return JSON.stringify(v);
+      if (typeof v === "number") return Number.isFinite(v) ? String(v) : JSON.stringify(v);
+      if (typeof v === "boolean") return v ? "true" : "false";
+      return JSON.stringify(v);
+    }
+
+    function tupleElems(v, t) {
+      if (!t || t.kind !== "Tuple") return null;
+      const fields = Array.isArray(t.fields) ? t.fields : [];
+      if (fields.length === 0) return [];
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const out = new Array(fields.length);
+        for (let i = 0; i < fields.length; i++) {
+          const f = fields[i];
+          out[i] = v[f.name];
+        }
+        return out;
+      }
+      if (Array.isArray(v)) return v;
+      return null;
+    }
+
+    function formatInline(v, t) {
+      if (t && t.kind === "Tuple") {
+        const elems = tupleElems(v, t);
+        if (!elems) return null;
+        if (elems.length > maxInlineItems) return null;
+        const parts = new Array(elems.length);
+        for (let i = 0; i < elems.length; i++) {
+          const subT = t.fields && t.fields[i] ? t.fields[i].type : null;
+          const sub = formatInline(elems[i], subT);
+          if (sub === null) return null;
+          parts[i] = sub;
+        }
+        const out = `(${parts.join(", ")})`;
+        return out.length <= maxInlineChars ? out : null;
+      }
+
+      if (v === null || v === undefined || typeof v !== "object") return scalar(v);
+
+      if (Array.isArray(v)) {
+        if (v.length > maxInlineItems) return null;
+        const parts = new Array(v.length);
+        const innerT = t && t.kind === "Array" ? t.inner : null;
+        for (let i = 0; i < v.length; i++) {
+          const sub = formatInline(v[i], innerT);
+          if (sub === null) return null;
+          parts[i] = sub;
+        }
+        const out = `[${parts.join(", ")}]`;
+        return out.length <= maxInlineChars ? out : null;
+      }
+
+      const keys = Object.keys(v);
+      if (keys.length > maxInlineItems) return null;
+      const parts = [];
+      const valT = t && t.kind === "Map" ? t.value : null;
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const sub = formatInline(v[k], valT);
+        if (sub === null) return null;
+        parts.push(`${JSON.stringify(k)}: ${sub}`);
+      }
+      const out = `{${parts.join(", ")}}`;
+      return out.length <= maxInlineChars ? out : null;
+    }
+
+    function formatMultiline(v, t, indent) {
+      const one = formatInline(v, t);
+      if (one !== null) return one;
+
+      if (t && t.kind === "Tuple") {
+        const elems = tupleElems(v, t);
+        if (!elems) return scalar(v);
+        if (elems.length === 0) return "()";
+
+        const pad = " ".repeat(indent);
+        const padIn = " ".repeat(indent + indentStep);
+        const lines = ["("];
+        for (let i = 0; i < elems.length; i++) {
+          const subT = t.fields && t.fields[i] ? t.fields[i].type : null;
+          const valText = formatMultiline(elems[i], subT, indent + indentStep);
+          const valLines = valText.split("\n");
+          valLines[0] = padIn + valLines[0];
+          if (i < elems.length - 1) valLines[valLines.length - 1] += ",";
+          lines.push(valLines.join("\n"));
+        }
+        lines.push(pad + ")");
+        return lines.join("\n");
+      }
+
+      if (v === null || v === undefined || typeof v !== "object") return scalar(v);
+
+      const pad = " ".repeat(indent);
+      const padIn = " ".repeat(indent + indentStep);
+
+      if (Array.isArray(v)) {
+        if (v.length === 0) return "[]";
+        const innerT = t && t.kind === "Array" ? t.inner : null;
+        const items = v.map((x) => formatMultiline(x, innerT, indent + indentStep));
+        const lines = ["["];
+        for (let i = 0; i < items.length; i++) {
+          const itemLines = items[i].split("\n");
+          itemLines[0] = padIn + itemLines[0];
+          if (i < items.length - 1) itemLines[itemLines.length - 1] += ",";
+          lines.push(itemLines.join("\n"));
+        }
+        lines.push(pad + "]");
+        return lines.join("\n");
+      }
+
+      const keys = Object.keys(v);
+      if (keys.length === 0) return "{}";
+      const valT = t && t.kind === "Map" ? t.value : null;
+
+      const lines = ["{"];
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const valText = formatMultiline(v[k], valT, indent + indentStep);
+        const valLines = valText.split("\n");
+        valLines[0] = `${padIn}${JSON.stringify(k)}: ${valLines[0]}`;
+        if (i < keys.length - 1) valLines[valLines.length - 1] += ",";
+        lines.push(valLines.join("\n"));
+      }
+      lines.push(pad + "}");
+      return lines.join("\n");
+    }
+
+    return formatMultiline(value, typeAst, 0);
+  }
+
   function setVerticalValueCell(td, raw, colIndex) {
-    const typed = coerceDeepTyped(raw, resultTypeAsts[colIndex] || null);
+    const typeAst = resultTypeAsts[colIndex] || null;
+    const typed = coerceDeepTyped(raw, typeAst);
 
     function setScalar(cls, text) {
       td.textContent = "";
@@ -554,7 +693,7 @@
 
     let jsonText = "";
     try {
-      jsonText = stringifyCompactJson(typed);
+      jsonText = stringifyCompactValue(typed, typeAst);
     } catch {
       td.textContent = String(typed);
       return;

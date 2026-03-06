@@ -652,6 +652,17 @@
       const col1 = Number(loc.col) | 0;
       if (line1 <= 0 || col1 <= 0) return null;
 
+      const nearRaw = typeof loc.near === "string" ? loc.near : "";
+      const near = (() => {
+        const s = String(nearRaw || "");
+        if (s.length >= 2) {
+          const a = s[0];
+          const b = s[s.length - 1];
+          if ((a === "`" && b === "`") || (a === "'" && b === "'") || (a === '"' && b === '"')) return s.slice(1, -1);
+        }
+        return s;
+      })();
+
       let i = 0;
       let line = 1;
       while (line < line1 && i < text.length) {
@@ -669,6 +680,34 @@
       const col0 = Math.max(0, Math.min(col1 - 1, lineLen));
       let pos = lineStart + col0;
       if (pos === lineEnd) pos = lineEnd - 1;
+
+      if (near) {
+        const tryAt = (p) => {
+          if (p < lineStart || p >= lineEnd) return null;
+          if (p + near.length > lineEnd) return null;
+          if (text.slice(p, p + near.length) === near) return { from: p, to: p + near.length };
+          return null;
+        };
+
+        const direct = tryAt(pos) || tryAt(pos - 1) || tryAt(pos + 1);
+        if (direct) return direct;
+
+        let best = null;
+        let bestDist = Infinity;
+        let k = lineStart;
+        while (k < lineEnd) {
+          const idx = text.indexOf(near, k);
+          if (idx < 0 || idx >= lineEnd) break;
+          const dist = Math.abs(idx - pos);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { from: idx, to: Math.min(idx + near.length, lineEnd) };
+            if (dist === 0) break;
+          }
+          k = idx + 1;
+        }
+        if (best) return best;
+      }
 
       const isW = (p) => {
         if (p < lineStart || p >= lineEnd) return false;
@@ -690,14 +729,15 @@
         if (to > from) return { from, to };
       }
 
-      let from = pos;
-      let to = Math.min(from + 1, lineEnd);
+      const from = pos;
+      const to = Math.min(from + 1, lineEnd);
       if (to <= from) return null;
       return { from, to };
     };
 
     const renderWithError = (range) => {
       const msg = errorLc && errorLc.message ? String(errorLc.message) : "";
+      const title = msg ? ` title="${escapeHtml(msg)}"` : "";
       const out = [];
       const from = range.from;
       const to = range.to;
@@ -710,7 +750,7 @@
         const a = Math.max(0, from - t.start);
         const b = Math.max(0, Math.min(raw.length, to - t.start));
         if (a > 0) out.push(wrapHtml(raw.slice(0, a), t.kind));
-        out.push(`<span class="tok-err">${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
+        out.push(`<span class="tok-err"${title}>${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
         if (b < raw.length) out.push(wrapHtml(raw.slice(b), t.kind));
       }
       pre.innerHTML = out.join("");
@@ -906,7 +946,8 @@
         const line = Number(loc.line) | 0;
         const col = Number(loc.col) | 0;
         if (line <= 0 || col <= 0) return;
-        errorLc = { line, col, message: loc.message ? String(loc.message) : "" };
+        const near = typeof loc.near === "string" ? loc.near : "";
+        errorLc = { line, col, near, message: loc.message ? String(loc.message) : "" };
         schedule();
       },
       clearError: () => {

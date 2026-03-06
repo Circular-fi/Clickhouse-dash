@@ -474,7 +474,7 @@
     return state.selectedHostId;
   }
 
-  async function handleCopyLiveJson() {
+    async function handleCopyLiveJson() {
     if (!dom.copyJsonButton) return;
     const copyText = results && typeof results.buildCopyJsonText === "function" ? results.buildCopyJsonText() : "";
     util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
@@ -843,17 +843,168 @@ function mapStatementLocToEditorLoc(editorText, statementIndex, loc) {
   return offsetToLineCol(raw, offDoc);
 }
 
+function normalizeNear(near) {
+  const s = typeof near === "string" ? near : "";
+  if (s.length >= 2) {
+    const a = s[0];
+    const b = s[s.length - 1];
+    if ((a === "`" && b === "`") || (a === "'" && b === "'") || (a === '"' && b === '"')) return s.slice(1, -1);
+  }
+  return s;
+}
+
+function findNearOffset(text, near) {
+  const s = String(text || "");
+  const n = normalizeNear(near);
+  if (!n) return null;
+  const idx = s.lastIndexOf(n);
+  if (idx < 0) return null;
+  return idx;
+}
+
+function guessPositionOffset(text, position, near) {
+  const s = String(text || "");
+  const p = Number(position);
+  if (!Number.isFinite(p)) return null;
+
+  const n = normalizeNear(near);
+  const p0 = Math.max(0, Math.min((p | 0), s.length));
+  const p1 = Math.max(0, Math.min(((p | 0) - 1), s.length));
+
+  if (n) {
+    if (p1 >= 0 && p1 + n.length <= s.length && s.slice(p1, p1 + n.length) === n) return p1;
+    if (p0 >= 0 && p0 + n.length <= s.length && s.slice(p0, p0 + n.length) === n) return p0;
+  }
+
+  if ((p | 0) >= 1 && (p | 0) <= s.length + 1) return p1;
+  return p0;
+}
+
+function extractClickhouseInfo(payload, fallbackMsg) {
+  const p = payload && typeof payload === "object" ? payload : null;
+  const ch = p && p.clickhouse && typeof p.clickhouse === "object" ? p.clickhouse : null;
+
+  const near = ch && typeof ch.near === "string" ? ch.near : (p && typeof p.near === "string" ? p.near : "");
+  const idxRaw = p && p.index != null ? p.index : (ch && ch.index != null ? ch.index : null);
+  const index = idxRaw != null && Number.isFinite(Number(idxRaw)) ? (Number(idxRaw) | 0) : -1;
+
+  const lineRaw = ch && ch.line != null ? ch.line : (p && p.line != null ? p.line : null);
+  const colRaw = ch && ch.col != null ? ch.col : (p && (p.col != null ? p.col : p.column));
+  let line = lineRaw != null ? (Number(lineRaw) | 0) : 0;
+  let col = colRaw != null ? (Number(colRaw) | 0) : 0;
+
+  const posRaw = ch && ch.position != null ? ch.position : (p && p.position != null ? p.position : null);
+  const position = posRaw != null && Number.isFinite(Number(posRaw)) ? Number(posRaw) : null;
+
+  if (line <= 0 || col <= 0) {
+    const msg = fallbackMsg != null ? String(fallbackMsg) : (p && p.message ? String(p.message) : "");
+    const parsed = parseLineColFromText(msg);
+    if (parsed) {
+      line = parsed.line;
+      col = parsed.col;
+    }
+  }
+
+  return { line, col, position, near, index };
+}
+
+function mapStatementPosToEditorLoc(editorText, statementIndex, position, near) {
+  const raw = String(editorText || "");
+  let trimStart = 0;
+  while (trimStart < raw.length && (raw[trimStart] === " " || raw[trimStart] === "\t" || raw[trimStart] === "\n" || raw[trimStart] === "\r")) trimStart += 1;
+  let trimEnd = raw.length;
+  while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
+
+  const trimmed = raw.slice(trimStart, trimEnd);
+  const spans = splitSqlStatementsWithRanges(trimmed);
+  const idx = Number(statementIndex) | 0;
+  if (idx < 0 || idx >= spans.length) return null;
+
+  const span = spans[idx];
+  const offStmt = guessPositionOffset(span.text, position, near);
+  if (offStmt == null) return null;
+  const offDoc = trimStart + span.start + offStmt;
+  return offsetToLineCol(raw, offDoc);
+}
+
+function mapStatementNearToEditorLoc(editorText, statementIndex, near) {
+  const raw = String(editorText || "");
+  let trimStart = 0;
+  while (trimStart < raw.length && (raw[trimStart] === " " || raw[trimStart] === "\t" || raw[trimStart] === "\n" || raw[trimStart] === "\r")) trimStart += 1;
+  let trimEnd = raw.length;
+  while (trimEnd > trimStart && (raw[trimEnd - 1] === " " || raw[trimEnd - 1] === "\t" || raw[trimEnd - 1] === "\n" || raw[trimEnd - 1] === "\r")) trimEnd -= 1;
+
+  const trimmed = raw.slice(trimStart, trimEnd);
+  const spans = splitSqlStatementsWithRanges(trimmed);
+  const idx = Number(statementIndex) | 0;
+  if (idx < 0 || idx >= spans.length) return null;
+
+  const span = spans[idx];
+  const offStmt = findNearOffset(span.text, near);
+  if (offStmt == null) return null;
+  const offDoc = trimStart + span.start + offStmt;
+  return offsetToLineCol(raw, offDoc);
+}
+
+function resolveEditorErrorLocation(editorText, statementIndexHint, payload, msg) {
+  const info = extractClickhouseInfo(payload, msg);
+  const editor = String(editorText || "");
+  const idx = statementIndexHint != null && Number.isFinite(Number(statementIndexHint)) ? (Number(statementIndexHint) | 0) : info.index;
+
+  if (idx >= 0) {
+    if (info.line > 0 && info.col > 0) {
+      const mapped = mapStatementLocToEditorLoc(editor, idx, { line: info.line, col: info.col });
+      if (mapped) return { line: mapped.line, col: mapped.col, near: info.near };
+    }
+    if (info.position != null) {
+      const mapped = mapStatementPosToEditorLoc(editor, idx, info.position, info.near);
+      if (mapped) return { line: mapped.line, col: mapped.col, near: info.near };
+    }
+    if (info.near) {
+      const mapped = mapStatementNearToEditorLoc(editor, idx, info.near);
+      if (mapped) return { line: mapped.line, col: mapped.col, near: info.near };
+    }
+    const parsed = parseLineColFromText(msg);
+    if (parsed) {
+      const mapped = mapStatementLocToEditorLoc(editor, idx, parsed);
+      if (mapped) return { line: mapped.line, col: mapped.col, near: info.near };
+    }
+    return null;
+  }
+
+  if (info.line > 0 && info.col > 0) return { line: info.line, col: info.col, near: info.near };
+  if (info.position != null) {
+    const off = guessPositionOffset(editor, info.position, info.near);
+    if (off != null) {
+      const lc = offsetToLineCol(editor, off);
+      return { line: lc.line, col: lc.col, near: info.near };
+    }
+  }
+  if (info.near) {
+    const off = findNearOffset(editor, info.near);
+    if (off != null) {
+      const lc = offsetToLineCol(editor, off);
+      return { line: lc.line, col: lc.col, near: info.near };
+    }
+  }
+  const parsed = parseLineColFromText(msg);
+  if (parsed) return { line: parsed.line, col: parsed.col, near: info.near };
+  return null;
+}
+
+function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg) {
+  if (!ui || typeof ui.setEditorError !== "function") return;
+  const loc = resolveEditorErrorLocation(editorText, statementIndexHint, payload, msg);
+  if (!loc) return;
+  ui.setEditorError({ line: loc.line, col: loc.col, near: loc.near, message: msg });
+}
+
 
   function showFormatFailure(err) {
     const msg = buildFormatErrorText(err);
     const payload = err && err.payload ? err.payload : null;
-    const idx = payload && payload.index != null ? (Number(payload.index) | 0) : -1;
-    let loc = extractFormatErrorLocation(err);
-    if (loc && idx >= 0 && dom.queryTextArea) {
-      const mapped = mapStatementLocToEditorLoc(dom.queryTextArea.value, idx, loc);
-      if (mapped) loc = mapped;
-    }
-    if (ui && typeof ui.setEditorError === "function" && loc) ui.setEditorError({ line: loc.line, col: loc.col, message: msg });
+    const editorText = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
+    applyEditorErrorDecoration(editorText, null, payload, msg);
     results.clearResultsStack();
     results.clearLiveResults();
     results.setError(msg);
@@ -927,7 +1078,7 @@ function makeStreamSink(sink) {
   return api;
 }
 
-function streamQuery(streamUrl, agg, sink) {
+function streamQuery(streamUrl, agg, sink, ctx) {
     return new Promise((resolve) => {
       const streamSink = makeStreamSink(sink);
       let doneReceived = false;
@@ -971,6 +1122,9 @@ function streamQuery(streamUrl, agg, sink) {
         if (!data) return;
         sseErrorEventReceived = true;
         const msg = data && data.message ? String(data.message) : "Query error.";
+        const editorText = ctx && typeof ctx.editorText === "string" ? ctx.editorText : (dom.queryTextArea ? String(dom.queryTextArea.value || "") : "");
+        const statementIndex = ctx && ctx.statementIndex != null ? ctx.statementIndex : null;
+        applyEditorErrorDecoration(editorText, statementIndex, data, msg);
         streamSink.setError(msg);
         streamSink.setStatus("error");
         lockProgressIndeterminate = true;
@@ -1080,7 +1234,7 @@ function streamQuery(streamUrl, agg, sink) {
     return parts.join(" · ");
   }
 
-  async function runOneStatement(statement, sink, streamSink = null) {
+  async function runOneStatement(statement, sink, ctx = null) {
     resetMetrics();
     setProgressIndeterminate(true);
 
@@ -1097,7 +1251,7 @@ function streamQuery(streamUrl, agg, sink) {
     state.cancelRequested = false;
 
     const agg = createStatementAgg();
-    const done = await streamQuery(streamUrl, agg, sink);
+    const done = await streamQuery(streamUrl, agg, sink, ctx);
 
     let finalStatus = done && done.status ? String(done.status) : "done";
     // normalize spelling
@@ -1127,6 +1281,7 @@ function streamQuery(streamUrl, agg, sink) {
     setQueryIdText(null);
 
     results.setError("");
+    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
     ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: false });
 
     const hostId = getSelectedHostId();
@@ -1179,8 +1334,8 @@ function streamQuery(streamUrl, agg, sink) {
         const formattedStatements = await formatEditorSql();
         statements = formattedStatements;
       }
+      const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
-      console.log('here', statements.length);
 
       storage.addHistoryEntry({
         ts_ms: Date.now(),
@@ -1190,7 +1345,7 @@ function streamQuery(streamUrl, agg, sink) {
       });
 
       if (statements.length === 1) {
-        await runOneStatement(statements[0]);
+        await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 });
         resetLiveMetrics()
         if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
         return;
@@ -1219,7 +1374,7 @@ function streamQuery(streamUrl, agg, sink) {
         let done = null;
         let agg = null;
         try {
-          const out = await runOneStatement(stmt, perQuerySink);
+          const out = await runOneStatement(stmt, perQuerySink, { editorText: editorTextForErrors, statementIndex: i });
           done = out.done;
           agg = out.agg;
         } catch (err) {
@@ -1315,6 +1470,7 @@ function streamQuery(streamUrl, agg, sink) {
     }
 
     results.setError("");
+    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
     const hostId = getSelectedHostId();
     if (!hostId) {
       results.setError("No host selected.");
@@ -1326,6 +1482,7 @@ function streamQuery(streamUrl, agg, sink) {
 
     try {
       await formatEditorSql();
+      if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
     } catch (err) {
       showFormatFailure(err);
     } finally {
@@ -1343,6 +1500,7 @@ function streamQuery(streamUrl, agg, sink) {
       state.activeQueryId = null;
       state.lastRunMode = "single";
       results.setMultiqueryMode(false);
+      if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
       results.clearResultsStack();
       results.clearLiveResults();
       resetMetrics();
