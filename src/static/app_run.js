@@ -449,13 +449,23 @@
     }
   }
 
+  function isFormatLocked() {
+    const ta = dom.queryTextArea;
+    if (!ta) return false;
+    if (!state.lastFormatOk) return false;
+    const hostId = state.selectedHostId ? String(state.selectedHostId) : null;
+    if (!hostId) return false;
+    if (state.lastFormatHostId && String(state.lastFormatHostId) !== hostId) return false;
+    return String(ta.value || "") === String(state.lastFormatEditorValue || "");
+  }
+
   function updateActionButtons() {
     const busy = state.isRunning || state.isFormatting;
     const offline = state.apiOnline === false;
 
     if (dom.runButton) dom.runButton.disabled = busy || offline;
     if (dom.runMenuButton) dom.runMenuButton.disabled = busy || offline;
-    if (dom.formatButton) dom.formatButton.disabled = busy || offline;
+    if (dom.formatButton) dom.formatButton.disabled = busy || offline || isFormatLocked();
 
     if (dom.cancelButton) {
       dom.cancelButton.disabled = state.isFormatting || (offline && state.isRunning);
@@ -509,6 +519,11 @@
     const raw = ta ? ta.value : "";
     const trimmed = String(raw || "").trim();
     if (!trimmed) throw new Error("Nothing to format.");
+
+    if (state.lastFormatOk && String(state.lastFormatHostId || "") === String(hostId || "") && String(state.lastFormatEditorValue || "") === String(raw || "")) {
+      const st = sql.splitSqlStatements(trimmed);
+      return st.map(sql.normalizeStatementText).filter(Boolean);
+    }
 
     const statements = sql.splitSqlStatements(trimmed);
     if (!statements.length) throw new Error("Nothing to format.");
@@ -604,6 +619,11 @@
       sql_raw: trimmed,
       sql_formatted: joinedTabified,
     });
+
+    state.lastFormatOk = true;
+    state.lastFormatHostId = hostId;
+    state.lastFormatEditorValue = ta ? String(ta.value || "") : joinedTabified;
+    updateActionButtons();
 
     return normalized;
   }
@@ -1002,7 +1022,11 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
 
   function showFormatFailure(err) {
     const msg = buildFormatErrorText(err);
-    const payload = err && err.payload ? err.payload : null;
+
+    state.lastFormatOk = false;
+    state.lastFormatHostId = null;
+    state.lastFormatEditorValue = null;
+    updateActionButtons();    const payload = err && err.payload ? err.payload : null;
     const editorText = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
     applyEditorErrorDecoration(editorText, null, payload, msg);
     results.clearResultsStack();
@@ -1542,6 +1566,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     updateActionButtons();
     initCharts();
 
+    if (dom.queryTextArea) dom.queryTextArea.addEventListener("input", updateActionButtons);
     if (dom.runButton) dom.runButton.addEventListener("click", handleRun);
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
     if (dom.cancelButton) dom.cancelButton.addEventListener("click", handleCancelOrClear);

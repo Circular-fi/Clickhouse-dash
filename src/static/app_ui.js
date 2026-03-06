@@ -6,6 +6,12 @@
 
   const { dom, state, storage, util } = ns;
 
+  (() => {
+    const mode = storage && typeof storage.getSavedThemeMode === "function" ? storage.getSavedThemeMode() : null;
+    if (mode === "dark" || mode === "light") dom.root.dataset.theme = mode;
+    else if (mode === "system") delete dom.root.dataset.theme;
+  })();
+
   function safelyParseJson(text) {
     try {
       return JSON.parse(text);
