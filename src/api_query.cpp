@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "http_json.hpp"
 #include "query_sql_store.hpp"
 #include "sql_util.hpp"
 #include "time_util.hpp"

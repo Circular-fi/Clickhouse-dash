@@ -40,6 +40,7 @@ if (CHDASH_BUILD_APP)
     main.cpp
     server.cpp
     api_error.cpp
+    http_json.cpp
     api_hosts.cpp
     api_meta.cpp
     api_format.cpp

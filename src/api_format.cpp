@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "http_json.hpp"
 #include "sql_util.hpp"
 
 #include <rapidjson/stringbuffer.h>

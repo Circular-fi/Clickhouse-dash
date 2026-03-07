@@ -1,5 +1,6 @@
 #include "api_error.hpp"
 
+#include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -22,11 +23,6 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
   res.status = status;
   res.set_header("Content-Type", "application/json");
   res.set_content(sb.GetString(), "application/json");
-}
-
-bool parse_json_body(const httplib::Request& req, rapidjson::Document& doc) {
-  doc.Parse(req.body.c_str());
-  return !doc.HasParseError() && doc.IsObject();
 }
 
 namespace {

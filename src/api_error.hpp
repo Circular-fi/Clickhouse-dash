@@ -6,8 +6,6 @@
 #include <string>
 #include <string_view>
 
-#include <rapidjson/document.h>
-
 namespace chdash {
 
 struct ClickHouseErrorLocation {
@@ -24,8 +22,6 @@ struct ClickHouseErrorLocation {
   bool has_near = false;
   std::string near;
 };
-
-bool parse_json_body(const httplib::Request& req, rapidjson::Document& doc);
 
 void json_error(httplib::Response& res, int status, std::string_view code, std::string_view message);
 
