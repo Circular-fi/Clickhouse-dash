@@ -722,16 +722,7 @@
       const col1 = Number(loc.col) | 0;
       if (line1 <= 0 || col1 <= 0) return null;
 
-      const nearRaw = typeof loc.near === "string" ? loc.near : "";
-      const near = (() => {
-        const s = String(nearRaw || "");
-        if (s.length >= 2) {
-          const a = s[0];
-          const b = s[s.length - 1];
-          if ((a === "`" && b === "`") || (a === "'" && b === "'") || (a === '"' && b === '"')) return s.slice(1, -1);
-        }
-        return s;
-      })();
+      const near = typeof loc.near === "string" ? String(loc.near) : "";
 
       let i = 0;
       let line = 1;
@@ -751,38 +742,102 @@
       let pos = lineStart + col0;
       if (pos === lineEnd) pos = lineEnd - 1;
 
-      if (near) {
-        const tryAt = (p) => {
-          if (p < lineStart || p >= lineEnd) return null;
-          if (p + near.length > lineEnd) return null;
-          if (text.slice(p, p + near.length) === near) return { from: p, to: p + near.length };
-          return null;
+      const findQuotedRangeAt = (p) => {
+        if (p < lineStart || p >= lineEnd) return null;
+        const isEsc = (q, i) => {
+          if (i <= lineStart) return false;
+          const prev = text[i - 1];
+          if (prev === "\\") return true;
+          return false;
         };
 
-        const direct = tryAt(pos) || tryAt(pos - 1) || tryAt(pos + 1);
-        if (direct) return direct;
-
-        let best = null;
-        let bestDist = Infinity;
-        let k = lineStart;
-        while (k < lineEnd) {
-          const idx = text.indexOf(near, k);
-          if (idx < 0 || idx >= lineEnd) break;
-          const dist = Math.abs(idx - pos);
-          if (dist < bestDist) {
-            bestDist = dist;
-            best = { from: idx, to: Math.min(idx + near.length, lineEnd) };
-            if (dist === 0) break;
+        let i0 = lineStart;
+        while (i0 < lineEnd) {
+          const q = text[i0];
+          if (q !== "'" && q !== '"' && q !== "`") {
+            i0 += 1;
+            continue;
           }
-          k = idx + 1;
+
+          const start = i0;
+          let i = i0 + 1;
+          while (i < lineEnd) {
+            if (text[i] === q && !isEsc(q, i)) {
+              if (q === "'" && i + 1 < lineEnd && text[i + 1] === "'") {
+                i += 2;
+                continue;
+              }
+              const end = i + 1;
+              if (p >= start && p < end) return { from: start, to: end };
+              i0 = end;
+              break;
+            }
+            i += 1;
+          }
+          if (i >= lineEnd) {
+            if (p >= start) return { from: start, to: lineEnd };
+            return null;
+          }
         }
-        if (best) return best;
+        return null;
+      };
+
+      const quoted = findQuotedRangeAt(pos);
+      if (quoted) return quoted;
+
+      if (near) {
+        const hasWord = /[A-Za-z0-9_]/.test(near);
+        if (!hasWord) {
+          const q2 = findQuotedRangeAt(pos - 1) || findQuotedRangeAt(pos + 1);
+          if (q2) return q2;
+        } else {
+          const tryAt = (p) => {
+            if (p < lineStart || p >= lineEnd) return null;
+            if (p + near.length > lineEnd) return null;
+            if (text.slice(p, p + near.length) === near) return { from: p, to: p + near.length };
+            return null;
+          };
+
+          const direct = tryAt(pos) || tryAt(pos - 1) || tryAt(pos + 1);
+          if (direct) return direct;
+
+          let best = null;
+          let bestDist = Infinity;
+          let k = lineStart;
+          while (k < lineEnd) {
+            const idx = text.indexOf(near, k);
+            if (idx < 0 || idx >= lineEnd) break;
+            const dist = Math.abs(idx - pos);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = { from: idx, to: Math.min(idx + near.length, lineEnd) };
+              if (dist === 0) break;
+            }
+            k = idx + 1;
+          }
+          if (best) return best;
+        }
       }
 
       const isW = (p) => {
         if (p < lineStart || p >= lineEnd) return false;
         const c = text[p];
         return c ? isWordChar(c) : false;
+      };
+
+      const isStop = (c) => {
+        if (!c) return true;
+        if (c === ";") return true;
+        if (c === "(" || c === ")") return true;
+        if (c === "[" || c === "]") return true;
+        if (c === "{" || c === "}") return true;
+        if (c === "," || c === ":") return true;
+        if (c === ".") return true;
+        if (c === "+" || c === "-" || c === "*" || c === "/" || c === "%") return true;
+        if (c === "=" || c === "<" || c === ">" || c === "!" || c === "&" || c === "|" || c === "^" || c === "~") return true;
+        if (c === "?") return true;
+        if (c === "\n" || c === "\r" || c === "\t" || c === " ") return true;
+        return false;
       };
 
       let p = pos;
@@ -797,6 +852,17 @@
         let to = p + 1;
         while (to < lineEnd && isW(to)) to += 1;
         if (to > from) return { from, to };
+      }
+
+      if (!isW(p)) {
+        const c = text[p];
+        if (!isStop(c)) {
+          let a = p;
+          while (a > lineStart && !isStop(text[a - 1])) a -= 1;
+          let b = p + 1;
+          while (b < lineEnd && !isStop(text[b])) b += 1;
+          if (b > a) return { from: a, to: b };
+        }
       }
 
       const from = pos;

@@ -44,6 +44,8 @@ if (CHDASH_BUILD_APP)
     api_hosts.cpp
     api_meta.cpp
     api_format.cpp
+    format_clickhouse.cpp
+    format_postprocess.cpp
     api_query.cpp
     api_query_stream.cpp
     query_sql_store.cpp

@@ -14,6 +14,8 @@ namespace clickhouse { class Client; }
 
 namespace chdash {
 
+int normalize_health_interval_ms(int interval_ms);
+
 struct HostSpec {
   std::string id;         // stable id used by frontend (stored in localStorage)
   std::string label;      // display name

@@ -38,6 +38,47 @@
 
   let liveGaugesEnabled = false;
   let liveGaugesPainted = false;
+  let liveWrapHold = null;
+
+  function applyLiveWrapHold() {
+    const hold = liveWrapHold;
+    if (!hold) return;
+    const wrap = hold.wrap;
+    const spacer = hold.spacer;
+    if (!wrap || !spacer) {
+      liveWrapHold = null;
+      return;
+    }
+    const spacerH = spacer.parentNode ? spacer.offsetHeight : 0;
+    const contentH = Math.max(0, wrap.scrollHeight - spacerH);
+    const need = Math.max(0, hold.targetScrollHeight - contentH);
+    if (need <= 0) {
+      if (spacer.parentNode) spacer.remove();
+      liveWrapHold = null;
+      return;
+    }
+    spacer.style.height = `${need}px`;
+    if (!spacer.parentNode) wrap.appendChild(spacer);
+  }
+
+  function setLiveWrapHold(targetScrollHeight) {
+    const wrap = dom.liveResultsWrap;
+    const target = Number(targetScrollHeight) || 0;
+    if (!wrap || target <= 0) {
+      if (liveWrapHold && liveWrapHold.spacer && liveWrapHold.spacer.parentNode) liveWrapHold.spacer.remove();
+      liveWrapHold = null;
+      return;
+    }
+    if (!liveWrapHold || liveWrapHold.wrap !== wrap) {
+      const spacer = document.createElement("div");
+      spacer.className = "resultsScrollHold";
+      spacer.setAttribute("aria-hidden", "true");
+      liveWrapHold = { wrap, spacer, targetScrollHeight: target };
+    } else {
+      liveWrapHold.targetScrollHeight = target;
+    }
+    applyLiveWrapHold();
+  }
 
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
@@ -85,6 +126,8 @@
   }
 
   function clearLiveResults() {
+    const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
+    const preservedWrapScrollHeight = dom.liveResultsWrap ? dom.liveResultsWrap.scrollHeight : 0;
     resultColumns = [];
     resultTypes = [];
     resultTypeAsts = [];
@@ -119,12 +162,15 @@
     resetTableMode();
     clearTable();
 
+    setLiveWrapHold(preservedWrapScrollHeight);
+
     if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
     setError("");
     updateCopyButtonState();
 
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
     if (resultsStackElement && resultsStackElement.childElementCount > 0) setResultsVisible(true);
+    else if (wasResultsVisible) setResultsVisible(true);
     else setResultsVisible(false);
   }
 
@@ -1108,6 +1154,7 @@
     dom.resultTableHead.appendChild(tr);
     updateLiveSortIndicators();
     setResultsVisible(true);
+    applyLiveWrapHold();
   }
 
   function enqueueRowForRender(row) {
@@ -1148,6 +1195,7 @@
 
     dom.resultTableBody.appendChild(frag);
     if (pendingRows.length > 0) scheduleFlush();
+    applyLiveWrapHold();
   }
 
   function appendRows(rowsChunk) {
@@ -1163,6 +1211,7 @@
     }
     setResultsVisible(true);
     updateCopyButtonState();
+    applyLiveWrapHold();
   }
 
   function renderVerticalSingleRow(row) {

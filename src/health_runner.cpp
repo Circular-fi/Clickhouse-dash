@@ -4,6 +4,7 @@
 
 #include <clickhouse/client.h>
 
+#include <algorithm>
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -17,6 +18,8 @@ static int64_t now_ms() {
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
   : hosts_(std::move(hosts)), settings_(settings) {
+
+  if (settings_.interval_ms > 600 * 1000) settings_.interval_ms = 600 * 1000;
 
   // Initialize snapshot with all hosts non-healthy.
   std::lock_guard<std::mutex> lk(mu_);
@@ -210,7 +213,17 @@ void HealthRunner::loop() {
 
     // Sleep until next interval.
     const auto elapsed = duration_cast<milliseconds>(steady_clock::now() - tick_start);
-    const auto wait_ms = milliseconds(settings_.interval_ms) - elapsed;
+    int effective_interval_ms = settings_.interval_ms;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      for (const auto& c : ctx_) {
+        if (!c.client) {
+          effective_interval_ms = std::min(effective_interval_ms, 1000);
+          break;
+        }
+      }
+    }
+    const auto wait_ms = milliseconds(effective_interval_ms) - elapsed;
     if (wait_ms.count() > 0) {
       const auto step = milliseconds(50);
       auto remaining = wait_ms;

@@ -62,13 +62,8 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
 
-  if (health_) {
-    HostsSnapshot hs = health_->snapshot();
-    for (const auto& h : hs.hosts) {
-      if (h.id == host_id && !h.healthy) {
-        return json_error(res, 503, "host_down", "Selected host is down.");
-      }
-    }
+  if (!is_host_healthy(health_.get(), host_id)) {
+    return json_error(res, 503, "host_down", "Selected host is down.");
   }
 
   const std::string qid = gen_query_id();

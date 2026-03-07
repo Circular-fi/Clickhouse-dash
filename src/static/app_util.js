@@ -145,6 +145,24 @@
     if (!textAreaEl) return;
     const v = String(nextValue ?? "");
 
+    const wasActive = document.activeElement === textAreaEl;
+    const isMostlyVisible = (() => {
+      try {
+        const r = textAreaEl.getBoundingClientRect();
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (!(vh > 0) || !(r.height > 0)) return false;
+        if (r.bottom <= 0 || r.top >= vh) return false;
+        const visTop = Math.max(0, r.top);
+        const visBottom = Math.min(vh, r.bottom);
+        const vis = Math.max(0, visBottom - visTop);
+        return vis / r.height >= 0.95;
+      } catch {
+        return false;
+      }
+    })();
+
+    const allowFocus = wasActive || isMostlyVisible;
+
     const prevTop = Number.isFinite(textAreaEl.scrollTop) ? textAreaEl.scrollTop : 0;
     const prevLeft = Number.isFinite(textAreaEl.scrollLeft) ? textAreaEl.scrollLeft : 0;
 
@@ -153,11 +171,13 @@
       const maxLeft = Math.max(0, textAreaEl.scrollWidth - textAreaEl.clientWidth);
       textAreaEl.scrollTop = Math.min(Math.max(0, prevTop), maxTop);
       textAreaEl.scrollLeft = Math.min(Math.max(0, prevLeft), maxLeft);
-      const end = textAreaEl.value.length;
-      try {
-        textAreaEl.setSelectionRange(end, end);
-      } catch {
-        null;
+      if (document.activeElement === textAreaEl) {
+        const end = textAreaEl.value.length;
+        try {
+          textAreaEl.setSelectionRange(end, end);
+        } catch {
+          null;
+        }
       }
     };
 
@@ -175,12 +195,29 @@
 
     try {
       const before = String(textAreaEl.value ?? "");
-      textAreaEl.focus();
-      textAreaEl.setSelectionRange(0, before.length);
-      const ok = document.execCommand && document.execCommand("insertText", false, v);
-      if (ok || String(textAreaEl.value ?? "") !== before) {
-        restoreView();
-        return;
+      if (allowFocus) {
+        const winX = window.scrollX;
+        const winY = window.scrollY;
+        try {
+          textAreaEl.focus({ preventScroll: true });
+        } catch {
+          try {
+            textAreaEl.focus();
+          } catch {
+            null;
+          }
+        }
+        try {
+          window.scrollTo(winX, winY);
+        } catch {
+          null;
+        }
+        textAreaEl.setSelectionRange(0, before.length);
+        const ok = document.execCommand && document.execCommand("insertText", false, v);
+        if (ok || String(textAreaEl.value ?? "") !== before) {
+          restoreView();
+          return;
+        }
       }
     } catch {
       null;

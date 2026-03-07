@@ -11,7 +11,7 @@ services:
     environment:
         CH_HOSTS: |
           health {
-            interval_ms = 500000000
+            interval_ms = 5000
             timeout_ms  = 800
           }
           clickhouse {

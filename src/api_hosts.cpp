@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "sse_util.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <deque>
 #include <thread>
@@ -61,12 +62,14 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
   struct HostsStreamState {
     uint64_t last_version = 0;
     std::chrono::steady_clock::time_point last_keepalive{};
+    std::chrono::steady_clock::time_point last_hosts_emit{};
     std::deque<std::string> local_chunks;
   };
 
   auto st = std::make_shared<HostsStreamState>();
   st->last_version = health_->version();
   st->local_chunks.push_back(sse_json_event("hosts", build_hosts_json(health_->snapshot())));
+  st->last_hosts_emit = std::chrono::steady_clock::now();
 
   HealthRunner* runner = health_.get();
 
@@ -80,13 +83,28 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
           return true;
         }
 
+        const int interval_ms = runner->snapshot().interval_ms;
+        const int emit_every_ms = std::min(15000, std::max(1000, interval_ms));
+        const int wait_ms = emit_every_ms;
+
         uint64_t new_ver = st->last_version;
-        const bool changed = runner->wait_for_update(st->last_version, 15000, &new_ver);
+        const bool changed = runner->wait_for_update(st->last_version, wait_ms, &new_ver);
         if (changed) {
           st->last_version = new_ver;
           const auto ev = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+          st->last_hosts_emit = std::chrono::steady_clock::now();
           sink.write(ev.data(), ev.size());
           return true;
+        }
+
+        {
+          const auto now = std::chrono::steady_clock::now();
+          if (st->last_hosts_emit.time_since_epoch().count() == 0 || now - st->last_hosts_emit >= std::chrono::milliseconds(emit_every_ms)) {
+            st->last_hosts_emit = now;
+            const auto ev = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+            sink.write(ev.data(), ev.size());
+            return true;
+          }
         }
 
         const auto now = std::chrono::steady_clock::now();

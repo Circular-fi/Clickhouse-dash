@@ -198,6 +198,7 @@ int main(int argc, char** argv) {
   cfg.result_preview_row_limit = envi("RESULT_PREVIEW_ROW_LIMIT", 10000);
   cfg.health.interval_ms = envi("HEALTH_INTERVAL_MS", 5000);
   cfg.health.timeout_ms = envi("HEALTH_TIMEOUT_MS", 800);
+  if (cfg.health.interval_ms > 600 * 1000) cfg.health.interval_ms = 600 * 1000;
 
   // Version info (compile-time).
 #ifdef CHDASH_SEMVER
