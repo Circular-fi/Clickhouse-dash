@@ -7,7 +7,6 @@
   const { dom, util } = ns;
 
   let resultsStackElement = null;
-  let resultsStackHoldElement = null;
 
   let resultColumns = [];
   let resultTypes = [];
@@ -115,6 +114,7 @@
     updateCopyButtonState();
   }
 
+
   function clearTable() {
     if (dom.resultTableHead) dom.resultTableHead.innerHTML = "";
     if (dom.resultTableBody) dom.resultTableBody.innerHTML = "";
@@ -177,8 +177,6 @@
 
   function ensureResultsStack() {
     if (resultsStackElement || !dom.resultsPanel) return;
-    if (resultsStackHoldElement && resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
-    resultsStackHoldElement = null;
     resultsStackElement = document.createElement("div");
     resultsStackElement.className = "resultsStack";
     const header = dom.resultsPanel.querySelector(".panel__header");
@@ -186,49 +184,10 @@
     dom.resultsPanel.insertBefore(resultsStackElement, anchor);
   }
 
-  function clearResultsStack(opts = null) {
-    const preserveScroll = !!(opts && opts.preserveScroll);
-
-    if (!resultsStackElement) {
-      if (!preserveScroll && resultsStackHoldElement && resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
-      if (!preserveScroll) resultsStackHoldElement = null;
-      return;
-    }
-
-    if (!preserveScroll) {
-      resultsStackElement.remove();
-      resultsStackElement = null;
-      return;
-    }
-
-    const parent = resultsStackElement.parentNode;
-    if (!parent) {
-      resultsStackElement = null;
-      return;
-    }
-
-    const rect = resultsStackElement.getBoundingClientRect();
-    const h = Math.max(0, Math.ceil(rect.height));
-    if (h <= 0) {
-      resultsStackElement.remove();
-      resultsStackElement = null;
-      return;
-    }
-
-    const spacer = resultsStackHoldElement || document.createElement("div");
-    spacer.className = "resultsStack";
-    spacer.setAttribute("aria-hidden", "true");
-    spacer.style.height = `${h}px`;
-
-    parent.replaceChild(spacer, resultsStackElement);
-    resultsStackHoldElement = spacer;
+  function clearResultsStack() {
+    if (!resultsStackElement) return;
+    resultsStackElement.remove();
     resultsStackElement = null;
-  }
-
-  function releaseResultsStackHold() {
-    if (!resultsStackHoldElement) return;
-    if (resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
-    resultsStackHoldElement = null;
   }
 
   function removeIds(root) {
@@ -1155,7 +1114,6 @@
   }
 
   function renderTableMeta(columns, types) {
-    releaseResultsStackHold();
     resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
     resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
     resultTypeAsts = resultTypes.map(parseChType);
@@ -1242,7 +1200,6 @@
   }
 
   function appendRows(rowsChunk) {
-    releaseResultsStackHold();
     if (!Array.isArray(rowsChunk)) return;
     for (const row of rowsChunk) {
       if (!Array.isArray(row)) continue;
@@ -1412,6 +1369,58 @@
     return JSON.stringify(objects, null, 2);
   }
 
+  function csvEscapeField(value) {
+    const s = String(value ?? "");
+    if (!s) return "";
+    const needsQuote = s.includes(",") || s.includes("\n") || s.includes("\r") || s.includes("\"") || /^\s|\s$/.test(s);
+    if (!needsQuote) return s;
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
+  function buildCopyCsvText() {
+    const st = String(currentStatusValue || "").toLowerCase();
+    const err = String(lastErrorMessage || "").trim();
+
+    if (err && ["error", "canceled", "cancelled"].includes(st)) return err;
+
+    const cols = Array.isArray(resultColumns) ? resultColumns : [];
+    const hasCols = cols.length > 0;
+    const header = hasCols ? cols.map((c) => csvEscapeField(String(c ?? ""))).join(",") : "";
+
+    const rows = Array.isArray(allResultRows) ? allResultRows : [];
+    if (!rows.length) return header;
+
+    const lines = [];
+    if (header) lines.push(header);
+
+    for (const row of rows) {
+      if (Array.isArray(row)) {
+        const parts = [];
+        for (let i = 0; i < cols.length; i++) {
+          parts.push(csvEscapeField(formatCellForDisplay(row[i], i, false)));
+        }
+        lines.push(parts.join(","));
+        continue;
+      }
+
+      if (cols.length <= 1) {
+        lines.push(csvEscapeField(formatCellForDisplay(row, 0, false)));
+        continue;
+      }
+
+      const parts = new Array(cols.length);
+      for (let i = 0; i < cols.length; i++) parts[i] = "";
+      lines.push(parts.join(","));
+    }
+
+    return lines.join("\n");
+  }
+
+  function buildCopyText(format) {
+    const v = String(format || "json").toLowerCase();
+    return v === "csv" ? buildCopyCsvText() : buildCopyJsonText();
+  }
+
   function updateCopyButtonState() {
     if (!dom.copyJsonButton) return;
 
@@ -1423,7 +1432,11 @@
     const st = String(currentStatusValue || "").toLowerCase();
     const finishedLike = ["finished", "done", "error", "canceled", "cancelled", "result_limit_reached"].includes(st);
 
-    dom.copyJsonButton.disabled = !(hasError || hasRows || finishedLike);
+    const disabled = !(hasError || hasRows || finishedLike);
+
+    dom.copyJsonButton.disabled = disabled;
+    if (dom.copyMenuButton) dom.copyMenuButton.disabled = disabled;
+    if (dom.copyCsvButton) dom.copyCsvButton.disabled = disabled;
   }
 
   function getRowCount() {
@@ -1432,6 +1445,132 @@
 
   function getColCount() {
     return Array.isArray(resultColumns) ? resultColumns.length : 0;
+  }
+
+  async function copyTextWithFlash(btn, text) {
+    const v = text == null ? "" : String(text);
+    util.flashButtonText(btn, { copiedText: "Copied" });
+    try {
+      await util.copyTextToClipboard(v);
+    } catch {
+      util.flashButtonText(btn, { copiedText: "Copy failed", durationMs: 1500 });
+    }
+  }
+
+  function createCopySplitSmall({ getJsonText, getCsvText }) {
+    const split = document.createElement("div");
+    split.className = "runSplit copySplit";
+
+    const buttons = document.createElement("div");
+    buttons.className = "runSplit__buttons";
+
+    const mainBtn = document.createElement("button");
+    mainBtn.type = "button";
+    mainBtn.className = "button button--small resultsStack__copy runSplit__main";
+    mainBtn.textContent = "Copy JSON";
+
+    const menuBtn = document.createElement("button");
+    menuBtn.type = "button";
+    menuBtn.className = "button button--small runSplit__toggle";
+    menuBtn.setAttribute("aria-haspopup", "menu");
+    menuBtn.setAttribute("aria-expanded", "false");
+    menuBtn.title = "Copy options";
+
+    buttons.appendChild(mainBtn);
+    buttons.appendChild(menuBtn);
+
+    const menu = document.createElement("div");
+    menu.className = "runMenu copyMenu";
+    menu.setAttribute("role", "menu");
+    menu.tabIndex = -1;
+    menu.hidden = true;
+
+    const csvBtn = document.createElement("button");
+    csvBtn.type = "button";
+    csvBtn.className = "runMenu__opt";
+    csvBtn.setAttribute("role", "menuitem");
+
+    const csvText = document.createElement("span");
+    csvText.className = "runMenu__optText";
+    csvText.textContent = "Copy CSV";
+    csvBtn.appendChild(csvText);
+
+    menu.appendChild(csvBtn);
+
+    split.appendChild(buttons);
+    split.appendChild(menu);
+
+    let onDocClick = null;
+    let onKey = null;
+
+    const isOpen = () => split.classList.contains("is-open");
+
+    const cleanup = () => {
+      if (onDocClick) document.removeEventListener("click", onDocClick);
+      if (onKey) document.removeEventListener("keydown", onKey);
+      onDocClick = null;
+      onKey = null;
+    };
+
+    const openMenu = () => {
+      if (!menu.hidden) return;
+      menu.hidden = false;
+      menuBtn.setAttribute("aria-expanded", "true");
+      requestAnimationFrame(() => split.classList.add("is-open"));
+      try {
+        menu.focus({ preventScroll: true });
+      } catch {
+        null;
+      }
+      onDocClick = (ev) => {
+        const t = ev.target;
+        if (t instanceof Node && !split.contains(t)) closeMenu();
+      };
+      onKey = (ev) => {
+        if (ev.key === "Escape") closeMenu({ immediate: true });
+      };
+      document.addEventListener("click", onDocClick);
+      document.addEventListener("keydown", onKey);
+    };
+
+    const closeMenu = ({ immediate = false } = {}) => {
+      menuBtn.setAttribute("aria-expanded", "false");
+      split.classList.remove("is-open");
+      if (immediate) {
+        menu.hidden = true;
+        cleanup();
+        return;
+      }
+      setTimeout(() => {
+        if (!isOpen()) {
+          menu.hidden = true;
+          cleanup();
+        }
+      }, 160);
+    };
+
+    menuBtn.addEventListener("click", () => {
+      if (menu.hidden) openMenu();
+      else closeMenu();
+    });
+
+    mainBtn.addEventListener("click", async () => {
+      const text = typeof getJsonText === "function" ? getJsonText() : "";
+      await copyTextWithFlash(mainBtn, text);
+    });
+
+    csvBtn.addEventListener("click", async () => {
+      closeMenu({ immediate: true });
+      const text = typeof getCsvText === "function" ? getCsvText() : "";
+      await copyTextWithFlash(mainBtn, text);
+    });
+
+    return { el: split, mainBtn, menuBtn, menu, csvBtn, setDisabled: (v) => {
+      const disabled = !!v;
+      mainBtn.disabled = disabled;
+      menuBtn.disabled = disabled;
+      if (disabled) closeMenu({ immediate: true });
+    } };
   }
 
   function pushResultsBlock(title, metaText, copyText, { expandedByDefault = false, errorText = "" } = {}) {
@@ -1458,11 +1597,16 @@
       right.appendChild(m);
     }
 
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "button button--small resultsStack__copy";
-    copyBtn.textContent = "Copy JSON";
-    right.appendChild(copyBtn);
+    const copyPayload = copyText && typeof copyText === "object" && !Array.isArray(copyText) ? copyText : { json: copyText };
+    const copyCtrl = createCopySplitSmall({
+      getJsonText: () => (copyPayload && copyPayload.json != null ? String(copyPayload.json) : ""),
+      getCsvText: () => {
+        if (copyPayload && copyPayload.csv != null) return String(copyPayload.csv);
+        if (copyPayload && copyPayload.json != null) return String(copyPayload.json);
+        return "";
+      },
+    });
+    right.appendChild(copyCtrl.el);
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -1479,16 +1623,6 @@
     toggle.addEventListener("click", () => {
       body.hidden = !body.hidden;
       toggle.textContent = body.hidden ? "Show" : "Hide";
-    });
-
-    copyBtn.addEventListener("click", async () => {
-      const text = copyText == null ? "" : String(copyText);
-      util.flashButtonText(copyBtn, { copiedText: "Copied" });
-      try {
-        await util.copyTextToClipboard(text);
-      } catch {
-        util.flashButtonText(copyBtn, { copiedText: "Copy failed", durationMs: 1500 });
-      }
     });
 
     const err = String(errorText || "").trim();
@@ -1515,7 +1649,7 @@
   function setMultiqueryMode(enabled) {
     if (!dom.resultsPanel) return;
     dom.resultsPanel.classList.toggle("is-multiquery", !!enabled);
-    if (dom.copyJsonButton) dom.copyJsonButton.hidden = !!enabled;
+    if (dom.copySplit) dom.copySplit.hidden = !!enabled;
     if (dom.copyJsonToast) dom.copyJsonToast.hidden = true;
     if (dom.resultColumnsText) dom.resultColumnsText.hidden = !!enabled;
   }
@@ -1525,10 +1659,12 @@
     const hasBlocks = !!(resultsStackElement && resultsStackElement.childElementCount > 0);
     dom.liveResultsWrap.hidden = hasBlocks;
     if (hasBlocks) {
-      if (dom.copyJsonButton) dom.copyJsonButton.hidden = true;
+      if (dom.copySplit) dom.copySplit.hidden = true;
       if (dom.resultColumnsText) dom.resultColumnsText.hidden = true;
     }
-    dom.copyJsonButton && (dom.copyJsonButton.disabled = true);
+    if (dom.copyJsonButton) dom.copyJsonButton.disabled = true;
+    if (dom.copyMenuButton) dom.copyMenuButton.disabled = true;
+    if (dom.copyCsvButton) dom.copyCsvButton.disabled = true;
   }
 
   // --- Multiquery streaming panels (Query x/n) ---
@@ -1599,11 +1735,11 @@
     metaSpan.textContent = "";
     right.appendChild(metaSpan);
 
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "button button--small resultsStack__copy";
-    copyBtn.textContent = "Copy JSON";
-    right.appendChild(copyBtn);
+    const copyCtrl = createCopySplitSmall({
+      getJsonText: () => buildCopyTextLocal("json"),
+      getCsvText: () => buildCopyTextLocal("csv"),
+    });
+    right.appendChild(copyCtrl.el);
 
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
@@ -1658,10 +1794,17 @@
       gaugesPainted: false,
     };
 
+    function updateCopyEnabledLocal() {
+      const hasError = String(local.errorText || "").trim().length > 0;
+      const hasRows = Array.isArray(local.allRows) && local.allRows.length > 0;
+      copyCtrl.setDisabled(!(hasError || hasRows));
+    }
+
     function updateMetaText() {
       const r = local.allRows.length;
       const c = local.columns.length;
       metaSpan.textContent = c ? `${r} row${r === 1 ? "" : "s"} ${c} column${c === 1 ? "" : "s"}` : `${r} row${r === 1 ? "" : "s"}`;
+      updateCopyEnabledLocal();
     }
 
     function setMetaTextLocal(text) {
@@ -1900,7 +2043,6 @@
     }
 
     function renderTableMetaLocal(columns, types) {
-      releaseResultsStackHold();
       local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
       local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
       local.typeAsts = local.types.map(parseChType);
@@ -1944,7 +2086,6 @@
     }
 
     function appendRowsLocal(rowsChunk) {
-      releaseResultsStackHold();
       if (!Array.isArray(rowsChunk)) return;
       if (!local.wrap) {
         for (const row of rowsChunk) {
@@ -1986,8 +2127,50 @@
       return JSON.stringify(local.allRows, null, 2);
     }
 
+    function buildCopyCsvTextLocal() {
+      const err = String(local.errorText || "").trim();
+      if (err && (!Array.isArray(local.allRows) || local.allRows.length === 0)) return err;
+
+      const cols = Array.isArray(local.columns) ? local.columns : [];
+      const header = cols.length ? cols.map((c) => csvEscapeField(String(c ?? ""))).join(",") : "";
+
+      const rows = Array.isArray(local.allRows) ? local.allRows : [];
+      if (!rows.length) return header;
+
+      const lines = [];
+      if (header) lines.push(header);
+
+      for (const row of rows) {
+        if (Array.isArray(row)) {
+          const parts = [];
+          for (let i = 0; i < cols.length; i++) {
+            parts.push(csvEscapeField(formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts)));
+          }
+          lines.push(parts.join(","));
+          continue;
+        }
+
+        if (cols.length <= 1) {
+          lines.push(csvEscapeField(formatCellForDisplayWithTypes(row, 0, false, local.typeAsts)));
+          continue;
+        }
+
+        const parts = new Array(cols.length);
+        for (let i = 0; i < cols.length; i++) parts[i] = "";
+        lines.push(parts.join(","));
+      }
+
+      return lines.join("\n");
+    }
+
+    function buildCopyTextLocal(format) {
+      const v = String(format || "json").toLowerCase();
+      return v === "csv" ? buildCopyCsvTextLocal() : buildCopyJsonTextLocal();
+    }
+
     function setErrorLocal(message) {
       local.errorText = String(message || "").trim();
+      updateCopyEnabledLocal();
       if (!local.errorBanner) return;
       if (local.errorText) {
         local.errorBanner.hidden = false;
@@ -1998,15 +2181,7 @@
       }
     }
 
-    copyBtn.addEventListener("click", async () => {
-      const text = buildCopyJsonTextLocal();
-      util.flashButtonText(copyBtn, { copiedText: "Copied" });
-      try {
-        await util.copyTextToClipboard(text);
-      } catch {
-        util.flashButtonText(copyBtn, { copiedText: "Copy failed", durationMs: 1500 });
-      }
-    });
+    updateCopyEnabledLocal();
 
     activeMultiqueryPanel = blockObj;
     if (autoToggle) setBlockExpandedLocal(blockObj, true);
@@ -2063,6 +2238,8 @@
     appendRows,
     finalizeAfterDone,
     buildCopyJsonText,
+    buildCopyCsvText,
+    buildCopyText,
     getRowCount,
     getColCount,
     pushResultsBlock,

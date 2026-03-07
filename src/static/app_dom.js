@@ -63,6 +63,10 @@
 
     resultsPanel: byId("resultsPanel") || document.querySelector(".panel--results"),
     resultColumnsText: byId("resultColumnsText"),
+    copySplit: byId("copySplit"),
+    copyMenuButton: byId("copyMenuButton"),
+    copyMenu: byId("copyMenu"),
+    copyCsvButton: byId("copyCsvButton"),
     copyJsonButton: byId("copyJsonButton"),
     copyJsonToast: byId("copyJsonToast"),
     errorBanner: byId("errorBanner"),

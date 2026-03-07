@@ -2,6 +2,8 @@
 
 namespace chdash {
 
+static std::string reindent_function_args(std::string s, size_t threshold);
+
 static std::string normalize_create_table_column_list_indent(std::string s) {
   if (s.find("CREATE TABLE") == std::string::npos) return s;
 
@@ -791,6 +793,84 @@ static std::string align_simple_as_in_select(std::string s) {
   std::vector<Group> groups;
   groups.reserve(8);
 
+  auto split_long_alias_line = [&](size_t& i, size_t ind_len, size_t as_pos) {
+    size_t ws_start = ind_len + as_pos;
+    while (ws_start > 0 && (lines[i][ws_start - 1] == ' ' || lines[i][ws_start - 1] == '\t')) --ws_start;
+
+    const size_t cap = ind_len + 80;
+    if (ws_start <= cap) return;
+    if (lines[i].find("if(") == std::string::npos && lines[i].find("multiIf(") == std::string::npos) return;
+
+    const size_t forced_threshold = (cap > ind_len + 1) ? (cap - ind_len - 1) : 0;
+    std::string rewritten = reindent_function_args(lines[i], forced_threshold);
+    if (rewritten.find('\n') == std::string::npos) return;
+
+    std::vector<std::string> parts;
+    parts.reserve(8);
+    size_t p = 0;
+    while (p <= rewritten.size()) {
+      const size_t nl = rewritten.find('\n', p);
+      const bool has_nl = (nl != std::string::npos);
+      const size_t end = has_nl ? nl : rewritten.size();
+      parts.push_back(rewritten.substr(p, end - p));
+      p = has_nl ? (nl + 1) : (rewritten.size() + 1);
+    }
+
+    const size_t base_i = i;
+
+    lines[i] = std::move(parts[0]);
+    if (parts.size() > 1) {
+      lines.insert(lines.begin() + static_cast<long>(i) + 1, parts.begin() + 1, parts.end());
+    }
+
+    size_t start_idx = base_i;
+    size_t end_idx = base_i + parts.size();
+
+    for (int pass = 0; pass < 2; ++pass) {
+      bool changed = false;
+      for (size_t j = start_idx; j + 1 < end_idx; ++j) {
+        std::string& ln = lines[j];
+        if (ln.size() <= 80) continue;
+        if (ln.find("if(") == std::string::npos && ln.find("multiIf(") == std::string::npos && ln.find("ifNull(") == std::string::npos) continue;
+
+        size_t ln_ind = 0;
+        while (ln_ind < ln.size() && (ln[ln_ind] == ' ' || ln[ln_ind] == '	')) ++ln_ind;
+        const size_t thr = (80 > ln_ind + 1) ? (80 - ln_ind - 1) : 0;
+
+        std::string_view t(ln.data() + ln_ind, ln.size() - ln_ind);
+        std::string rw = reindent_function_args(std::string(t), thr);
+        if (rw.find('\n') == std::string::npos) continue;
+
+        std::vector<std::string> parts2;
+        parts2.reserve(8);
+        size_t p2 = 0;
+        while (p2 <= rw.size()) {
+          const size_t nl2 = rw.find('\n', p2);
+          const bool has_nl2 = (nl2 != std::string::npos);
+          const size_t end2 = has_nl2 ? nl2 : rw.size();
+          parts2.push_back(rw.substr(p2, end2 - p2));
+          p2 = has_nl2 ? (nl2 + 1) : (rw.size() + 1);
+        }
+
+        const std::string prefix = ln.substr(0, ln_ind);
+        for (auto& x : parts2) x = prefix + x;
+
+        ln = std::move(parts2[0]);
+        if (parts2.size() > 1) {
+          lines.insert(lines.begin() + static_cast<long>(j) + 1, parts2.begin() + 1, parts2.end());
+          const size_t added = parts2.size() - 1;
+          end_idx += added;
+          j += added;
+        }
+
+        changed = true;
+      }
+      if (!changed) break;
+    }
+
+    i = end_idx - 1;
+  };
+
   auto add = [&](size_t idx, size_t ind_len, size_t expr_end_col) {
     const size_t target = expr_end_col + 2;
     for (auto& g : groups) {
@@ -855,9 +935,14 @@ static std::string align_simple_as_in_select(std::string s) {
     size_t ind_len2 = 0;
     size_t as_pos = 0;
     if (is_alias_as(line, ind_len2, as_pos)) {
-      size_t ws_start = ind_len2 + as_pos;
-      while (ws_start > 0 && (line[ws_start - 1] == ' ' || line[ws_start - 1] == '\t')) --ws_start;
-      add(i, ind_len2, ws_start);
+      split_long_alias_line(i, ind_len2, as_pos);
+      const std::string& line2 = lines[i];
+      size_t ind_len3 = 0;
+      size_t as_pos2 = 0;
+      if (!is_alias_as(line2, ind_len3, as_pos2)) continue;
+      size_t ws_start = ind_len3 + as_pos2;
+      while (ws_start > 0 && (line2[ws_start - 1] == ' ' || line2[ws_start - 1] == '\t')) --ws_start;
+      add(i, ind_len3, ws_start);
     }
   }
   flush();

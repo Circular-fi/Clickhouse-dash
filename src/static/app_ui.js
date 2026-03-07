@@ -135,7 +135,6 @@
 
   function renderHostPicker(snapshot) {
     if (!dom.hostPickerMenu) return;
-    if (dom.hostPicker) dom.hostPicker.classList.remove("is-pending");
     const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
 
     if (!state.selectedHostId) {
@@ -390,6 +389,39 @@
     if (!dom.themeSelectMenu) return;
     if (isThemeMenuOpen()) closeThemeMenu();
     else openThemeMenu();
+  }
+
+  function isCopyMenuOpen() {
+    return !!(dom.copySplit && dom.copySplit.classList.contains("is-open"));
+  }
+
+  function openCopyMenu() {
+    if (!dom.copyMenu || !dom.copyMenuButton || !dom.copySplit) return;
+    dom.copyMenu.hidden = false;
+    dom.copyMenuButton.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => {
+      dom.copySplit.classList.add("is-open");
+    });
+    dom.copyMenu.focus({ preventScroll: true });
+  }
+
+  function closeCopyMenu({ immediate = false } = {}) {
+    if (!dom.copyMenu || !dom.copyMenuButton || !dom.copySplit) return;
+    dom.copyMenuButton.setAttribute("aria-expanded", "false");
+    dom.copySplit.classList.remove("is-open");
+    if (immediate) {
+      dom.copyMenu.hidden = true;
+      return;
+    }
+    setTimeout(() => {
+      if (!isCopyMenuOpen()) dom.copyMenu.hidden = true;
+    }, 160);
+  }
+
+  function toggleCopyMenu() {
+    if (!dom.copyMenu) return;
+    if (dom.copyMenu.hidden) openCopyMenu();
+    else closeCopyMenu();
   }
 
   function openRunMenu() {
@@ -881,6 +913,9 @@
       if (dom.themeSelect && dom.themeSelectMenu && isThemeMenuOpen()) {
         if (t instanceof Node && !dom.themeSelect.contains(t)) closeThemeMenu();
       }
+      if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
+        if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
+      }
     });
 
     document.addEventListener("keydown", (ev) => {
@@ -888,6 +923,7 @@
         closeRunMenu({ immediate: true });
         closeHostMenu();
         closeThemeMenu({ immediate: true });
+        closeCopyMenu({ immediate: true });
         if (dom.historyPanel) dom.historyPanel.hidden = true;
       }
     });
@@ -907,6 +943,9 @@
         });
       }
     }
+
+    if (dom.copyMenuButton) dom.copyMenuButton.addEventListener("click", toggleCopyMenu);
+    if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", () => closeCopyMenu({ immediate: true }));
 
     const themeMode = storage.getSavedThemeMode();
     applyTheme(themeMode);

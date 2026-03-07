@@ -4,16 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ClickHouse Dash</title>
-  <script>
-    (() => {
-      try {
-        const mode = localStorage.getItem("chdash.theme");
-        if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
-      } catch {
-        return;
-      }
-    })();
-  </script>
   <link rel="stylesheet" href="./static/style.css" />
   <link rel="icon" href="./static/images/logo.svg" type="image/svg+xml">
   <link rel="alternate icon" href="./static/images/favicon.ico" sizes="any">
@@ -33,7 +23,7 @@
     </div>
 
     <div class="appHeader__right">
-      <div id="hostPicker" class="picker is-pending" aria-label="Target host">
+      <div id="hostPicker" class="picker" aria-label="Target host">
         <button
           id="hostPickerButton"
           class="button picker__button"
@@ -198,9 +188,24 @@
         <div class="panel__title">Results</div>
         <div class="panel__meta">
           <span class="metaItem" id="resultColumnsText">-</span>
-          <button id="copyJsonButton" class="button button--small resultsStack__copy" type="button" disabled>
-            Copy JSON
-          </button>
+          <div id="copySplit" class="runSplit copySplit">
+            <div class="runSplit__buttons">
+              <button id="copyJsonButton" class="button button--small resultsStack__copy runSplit__main" type="button" disabled>Copy JSON</button>
+              <button
+                id="copyMenuButton"
+                class="button button--small runSplit__toggle"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                title="Copy options">
+                </button>
+            </div>
+            <div id="copyMenu" class="runMenu copyMenu" role="menu" tabindex="-1" hidden>
+              <button id="copyCsvButton" class="runMenu__opt" type="button" role="menuitem">
+                <span class="runMenu__optText">Copy CSV</span>
+              </button>
+            </div>
+          </div>
           <span id="copyJsonToast" class="copyToast" hidden>Copied</span>
         </div>
       </div>

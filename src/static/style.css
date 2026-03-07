@@ -39,7 +39,7 @@
   --radiusSm: 0.8rem;
   --radiusPill: 999rem;
 
-  --panelBg: rgba(15, 22, 35, 0.88);
+  --panelBg: rgba(15, 22, 35, 1);
 
   --panel: #0f1623;
   --panelTopSheen: rgba(255, 255, 255, 0.04);
@@ -103,7 +103,7 @@
     --panelTopSheen: rgba(2, 6, 23, 0.03);
 
     --pillBg: rgba(255, 255, 255, 0.72);
-    --inputBg: rgba(255, 255, 255, 0.88);
+    --inputBg: rgba(255, 255, 255, 1);
     --tableBg: rgba(255, 255, 255, 0.84);
     --theadBg: rgba(255, 255, 255, 0.92);
 
@@ -112,7 +112,7 @@
     --scrollThumbHover: rgba(15, 23, 42, 0.24);
     --scrollThumbBorder: rgba(255, 255, 255, 0.92);
 
-    --buttonBg: rgba(255, 255, 255, 0.88);
+    --buttonBg: rgba(255, 255, 255, 1);
     --buttonBgHover: rgba(255, 255, 255, 0.94);
     --buttonBorder: rgba(15, 23, 42, 0.14);
     --buttonBorderHover: rgba(15, 23, 42, 0.22);
@@ -137,7 +137,7 @@ html[data-theme="dark"] {
   --muted: #9aa4b2;
   --text: #e6edf3;
 
-  --panelBg: rgba(15, 22, 35, 0.88);
+  --panelBg: rgba(15, 22, 35, 1);
 
   --panel: #0f1623;
   --panelTopSheen: rgba(255, 255, 255, 0.04);
@@ -185,7 +185,7 @@ html[data-theme="light"] {
   --panelTopSheen: rgba(2, 6, 23, 0.03);
 
   --pillBg: rgba(255, 255, 255, 0.72);
-  --inputBg: rgba(255, 255, 255, 0.88);
+  --inputBg: rgba(255, 255, 255, 1);
   --tableBg: rgba(255, 255, 255, 0.84);
   --theadBg: rgba(255, 255, 255, 0.92);
 
@@ -194,7 +194,7 @@ html[data-theme="light"] {
   --scrollThumbHover: rgba(15, 23, 42, 0.24);
   --scrollThumbBorder: rgba(255, 255, 255, 0.92);
 
-  --buttonBg: rgba(255, 255, 255, 0.88);
+  --buttonBg: rgba(255, 255, 255, 1);
   --buttonBgHover: rgba(255, 255, 255, 0.94);
   --buttonBorder: rgba(15, 23, 42, 0.14);
   --buttonBorderHover: rgba(15, 23, 42, 0.22);
@@ -497,9 +497,9 @@ html.is-ready #queryTextArea::placeholder {
 .runSplit__toggle {
   width: 2.2rem;
   padding: 0;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 0;
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-left: 0 !important;
   position: relative;
   font-size: 0;
 }
@@ -543,9 +543,9 @@ html.is-ready #queryTextArea::placeholder {
   width: max-content;
   max-width: min(26rem, 90vw);
   border-radius: 0.75rem 0px 0.75rem 0.75rem;
-  border: 1px solid var(--border);
-  background-color: var(--panel);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--buttonBorder);
+  background-color: var(--buttonBg);
+  box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
   padding: 0.35rem;
   display: flex;
   flex-direction: column;
@@ -926,7 +926,7 @@ button.button:not(:disabled):hover {
   overflow-anchor: none;
 }
 
-.panel--results.is-multiquery #copyJsonButton,
+.panel--results.is-multiquery #copySplit,
 .panel--results.is-multiquery #copyJsonToast,
 .panel--results.is-multiquery #resultColumnsText {
   display: none;
@@ -935,7 +935,28 @@ button.button:not(:disabled):hover {
 #copyJsonButton,
 .resultsStack__copy {
   min-inline-size: 5.5rem;
+  padding-right: 0rem;
 }
+
+.copySplit.is-open .runMenu,
+.runSplit.is-open #copyMenu.runMenu {
+    border-top-left-radius: 0;
+    border-top: 0px;
+}
+
+.copyMenu .runMenu__opt,
+#copyMenu .runMenu__opt {
+  margin-top: -0.5rem;
+  margin-left: 0.2rem;
+    
+}
+
+.copyMenu .runMenu__opt .runMenu__optText,
+#copyMenu .runMenu__opt .runMenu__optText {
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
 
 
 .panel__header {
@@ -1278,7 +1299,7 @@ button.button:not(:disabled):hover {
   justify-content: flex-start;
 
   height: 2rem;
-  padding: 0 0.65rem;
+  padding: 0 0.9rem;
 
   border-radius: 0.7rem;
   border: 1px solid transparent;
@@ -1716,6 +1737,23 @@ button.button:not(:disabled):hover {
   border-radius: 0px 0.75rem  0.75rem 0px;
   width: 0.4rem;
   border-left: 0px;
+}
+
+.copySplit > .runSplit__buttons > .runSplit__main {
+  border-right: 0px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.copySplit > .runSplit__buttons > .runSplit__toggle {
+  width: 0.4rem;
+}
+
+.copySplit.is-open > .runSplit__buttons > .runSplit__main,
+.copySplit.is-open > .runSplit__buttons > .runSplit__toggle {
+  border-bottom: 1px solid transparent;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
 }
 
 .runSplit.is-open > .runSplit__buttons > #runButton {

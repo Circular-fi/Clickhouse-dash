@@ -484,14 +484,25 @@
     return state.selectedHostId;
   }
 
-    async function handleCopyLiveJson() {
+  async function handleCopyLiveJson() {
     if (!dom.copyJsonButton) return;
-    const copyText = results && typeof results.buildCopyJsonText === "function" ? results.buildCopyJsonText() : "";
+    const copyText = results && typeof results.buildCopyText === "function" ? results.buildCopyText("json") : "";
     util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     try {
       await util.copyTextToClipboard(copyText);
     } catch {
       util.flashButtonText(dom.copyJsonButton, { copiedText: "Copy failed", durationMs: 1500 });
+    }
+  }
+
+  async function handleCopyLiveCsv() {
+    if (!dom.copyCsvButton) return;
+    const copyText = results && typeof results.buildCopyText === "function" ? results.buildCopyText("csv") : "";
+    util.flashButtonText(dom.copyJsonButton || dom.copyCsvButton, { copiedText: "Copied" });
+    try {
+      await util.copyTextToClipboard(copyText);
+    } catch {
+      util.flashButtonText(dom.copyJsonButton || dom.copyCsvButton, { copiedText: "Copy failed", durationMs: 1500 });
     }
   }
 
@@ -1318,19 +1329,10 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       return;
     }
 
-    const winX = window.scrollX;
-    const winY = window.scrollY;
-
     results.clearResultsStack();
     results.clearLiveResults();
     resetMetrics();
     setQueryIdText(null);
-
-    const restoreWindowScroll = () => {
-      if (winY > 0 && window.scrollY < 4) window.scrollTo(winX, winY);
-    };
-    queueMicrotask(restoreWindowScroll);
-    requestAnimationFrame(restoreWindowScroll);
 
     results.setError("");
     if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
@@ -1363,6 +1365,11 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.setStatus("error");
       return;
     }
+
+    results.clearResultsStack();
+    results.clearLiveResults();
+    resetMetrics();
+    setQueryIdText(null);
     setQueryStatusText("running");
 
     if (statements.length > 1) {
@@ -1471,7 +1478,10 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           results.endMultiqueryPanel(perQuerySink, { expandedByDefault, metaText });
         } else {
           // Backward-compatible path: snapshot from the global live renderer
-          const copyText = results.buildCopyJsonText();
+          const copyText = {
+            json: results.buildCopyJsonText(),
+            csv: typeof results.buildCopyCsvText === "function" ? results.buildCopyCsvText() : results.buildCopyJsonText(),
+          };
           const errorText = results.takeErrorText();
           results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
         }
@@ -1594,6 +1604,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
     if (dom.cancelButton) dom.cancelButton.addEventListener("click", handleCancelOrClear);
     if (dom.copyJsonButton) dom.copyJsonButton.addEventListener("click", handleCopyLiveJson);
+    if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", handleCopyLiveCsv);
   }
 
   ns.run = { init, handleRun, handleFormat, handleCancelOrClear, updateActionButtons };

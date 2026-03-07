@@ -617,7 +617,28 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     const size_t call_len = call_end - name_beg;
     std::string_view inner = std::string_view(s).substr(name_end + 1, j - (name_end + 1));
     auto args = split_top_level(inner, ',');
-    const bool long_call = (call_len > threshold);
+
+    auto ieq = [](std::string_view a, std::string_view b) -> bool {
+      if (a.size() != b.size()) return false;
+      for (size_t k = 0; k < a.size(); ++k) {
+        const char ca = a[k];
+        const char cb = b[k];
+        const char la = (ca >= 'A' && ca <= 'Z') ? static_cast<char>(ca - 'A' + 'a') : ca;
+        const char lb = (cb >= 'A' && cb <= 'Z') ? static_cast<char>(cb - 'A' + 'a') : cb;
+        if (la != lb) return false;
+      }
+      return true;
+    };
+
+    size_t eff_threshold = threshold;
+    if (ieq(name, "if") || ieq(name, "multiif") || ieq(name, "ifnull")) {
+      size_t line_start = out.rfind('\n');
+      line_start = (line_start == std::string::npos) ? 0 : (line_start + 1);
+      const size_t col = out.size() - line_start;
+      eff_threshold = (threshold > col) ? (threshold - col) : 0;
+    }
+
+    const bool long_call = (call_len > eff_threshold);
     const bool multi_arg = (args.size() >= 2);
     const bool single_arg = (args.size() == 1);
 
