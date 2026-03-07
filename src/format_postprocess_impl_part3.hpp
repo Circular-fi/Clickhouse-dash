@@ -631,7 +631,7 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     };
 
     size_t eff_threshold = threshold;
-    if (ieq(name, "if") || ieq(name, "multiif") || ieq(name, "ifnull")) {
+    {
       size_t line_start = out.rfind('\n');
       line_start = (line_start == std::string::npos) ? 0 : (line_start + 1);
       const size_t col = out.size() - line_start;
@@ -721,7 +721,38 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     out.push_back('\n');
     for (size_t k = 0; k < args.size(); ++k) {
       std::string a = trim_ascii_spaces(args[k]);
-      a = reindent_function_args(std::move(a), threshold);
+      size_t nested_threshold = threshold;
+      {
+        std::string_view at = trim_view_ascii_spaces(std::string_view(a));
+        auto looks_like_call = [&](std::string_view x) -> bool {
+          if (x.empty()) return false;
+          if (x.front() == '`') {
+            const size_t e = x.find('`', 1);
+            if (e == std::string_view::npos) return false;
+            size_t p = e + 1;
+            while (p < x.size() && (x[p] == ' ' || x[p] == '\t')) ++p;
+            return (p < x.size() && x[p] == '(');
+          }
+          if (!is_ident_start(x.front())) return false;
+          size_t p = 1;
+          while (p < x.size() && is_ident_char(x[p])) ++p;
+          while (p < x.size() && x[p] == '.') {
+            ++p;
+            if (p >= x.size() || !is_ident_start(x[p])) return false;
+            ++p;
+            while (p < x.size() && is_ident_char(x[p])) ++p;
+          }
+          while (p < x.size() && (x[p] == ' ' || x[p] == '\t')) ++p;
+          return (p < x.size() && x[p] == '(');
+        };
+        if (looks_like_call(at)) {
+          const size_t col = arg_indent.size();
+          nested_threshold = (threshold > col) ? (threshold - col) : 0;
+          if (nested_threshold > 56) nested_threshold = 56;
+        }
+      }
+
+      a = reindent_function_args(std::move(a), nested_threshold);
       if (auto formatted = format_paren_list_arg(a, arg_indent)) {
         out.append(*formatted);
       } else if (a.find('\n') != std::string::npos) {

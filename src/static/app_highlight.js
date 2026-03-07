@@ -93,6 +93,38 @@
     return fn;
   };
 
+  const aggFnCache = new WeakMap();
+
+  const getAggregateFnSets = (fnMeta) => {
+    if (!fnMeta || !(fnMeta.meta instanceof Map)) return { ci: null, cs: null };
+    const cached = aggFnCache.get(fnMeta);
+    if (cached) return cached;
+    const ci = new Set();
+    const cs = new Set();
+    for (const it of fnMeta.meta.values()) {
+      if (!it || !it.is_aggregate) continue;
+      if (it.case_insensitive) ci.add(String(it.name || "").toLowerCase());
+      else cs.add(String(it.name || ""));
+    }
+    const res = { ci, cs };
+    aggFnCache.set(fnMeta, res);
+    return res;
+  };
+
+  const isFnName = (fnMeta, name) => {
+    if (!fnMeta || !name) return false;
+    if (fnMeta.cs.has(name)) return true;
+    if (fnMeta.ci.has(String(name).toLowerCase())) return true;
+
+    if (name.length > 5 && name.endsWith("State")) {
+      const base = name.slice(0, -5);
+      const agg = getAggregateFnSets(fnMeta);
+      if (agg.cs && agg.cs.has(base)) return true;
+      if (agg.ci && agg.ci.has(base.toLowerCase())) return true;
+    }
+    return false;
+  };
+
   const skipWsAndComments = (s, pos) => {
     let i = pos;
     while (i < s.length) {
@@ -190,8 +222,7 @@
         if (fnMeta && hasClose) {
           const next = skipWsAndComments(s, end);
           if (next < s.length && s[next] === "(") {
-            if (fnMeta.cs.has(inner)) isFn = true;
-            else if (fnMeta.ci.has(inner.toLowerCase())) isFn = true;
+            if (isFnName(fnMeta, inner)) isFn = true;
           }
         }
 
@@ -236,9 +267,7 @@
       if (fnMeta) {
         const next = skipWsAndComments(s, j);
         if (next < s.length && s[next] === "(") {
-          const w = word;
-          if (fnMeta.cs.has(w)) isFn = true;
-          else if (fnMeta.ci.has(w.toLowerCase())) isFn = true;
+          if (isFnName(fnMeta, word)) isFn = true;
         }
       }
 
@@ -490,8 +519,7 @@
       const w = scanFnNameBefore(str, pos);
       if (!w || !w.word || !isWordStart(w.word[0])) return false;
       const name = w.word;
-      if (fnMeta.cs.has(name)) return true;
-      return fnMeta.ci.has(name.toLowerCase());
+      return isFnName(fnMeta, name);
     };
 
     const isFnBoundary = (str, pos) => {
@@ -504,7 +532,7 @@
       }
       const word = str.slice(a, pos);
       if (!word || !isWordStart(word[0])) return false;
-      if (!(fnMeta.cs.has(word) || fnMeta.ci.has(word.toLowerCase()))) return false;
+      if (!isFnName(fnMeta, word)) return false;
       const next = skipWsAndComments(str, pos);
       return next < str.length && str[next] === "(";
     };
