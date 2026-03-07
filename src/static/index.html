@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ClickHouse Dash</title>
+  <script>
+    (() => {
+      try {
+        const mode = localStorage.getItem("chdash.theme");
+        if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
+      } catch {
+        return;
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="./static/style.css" />
   <link rel="icon" href="./static/images/logo.svg" type="image/svg+xml">
   <link rel="alternate icon" href="./static/images/favicon.ico" sizes="any">
@@ -23,7 +33,7 @@
     </div>
 
     <div class="appHeader__right">
-      <div id="hostPicker" class="picker" aria-label="Target host">
+      <div id="hostPicker" class="picker is-pending" aria-label="Target host">
         <button
           id="hostPickerButton"
           class="button picker__button"

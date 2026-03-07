@@ -135,6 +135,7 @@
 
   function renderHostPicker(snapshot) {
     if (!dom.hostPickerMenu) return;
+    if (dom.hostPicker) dom.hostPicker.classList.remove("is-pending");
     const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
 
     if (!state.selectedHostId) {

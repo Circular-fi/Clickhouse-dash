@@ -1476,6 +1476,11 @@ button.button:not(:disabled):hover {
   position: relative;
 }
 
+.picker.is-pending {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .picker__button {
   position: relative;
   display: inline-flex;
