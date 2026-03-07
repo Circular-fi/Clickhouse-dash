@@ -9,7 +9,7 @@
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
-  const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1.";
+  const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
   const META_PREFIX = "chdash.meta.v1.";
   const HISTORY_MAX_ENTRIES = 100;
 
@@ -24,6 +24,22 @@
   const safeWrite = (key, value) => {
     try {
       localStorage.setItem(key, value);
+    } catch {
+      return;
+    }
+  };
+
+  const safeReadSession = (key) => {
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+
+  const safeWriteSession = (key, value) => {
+    try {
+      sessionStorage.setItem(key, value);
     } catch {
       return;
     }
@@ -127,12 +143,11 @@
     },
 
     editorHeightKey(hostId) {
-      const h = String(hostId || "");
-      return `${EDITOR_HEIGHT_PREFIX}${h}`;
+      return EDITOR_HEIGHT_PREFIX;
     },
 
     loadEditorHeight(hostId) {
-      const raw = safeRead(storage.editorHeightKey(hostId));
+      const raw = safeReadSession(storage.editorHeightKey(hostId));
       const v = raw != null ? Number(raw) : NaN;
       return Number.isFinite(v) && v > 0 ? v : null;
     },
@@ -140,7 +155,7 @@
     saveEditorHeight(hostId, heightPx) {
       const v = Number(heightPx);
       if (!Number.isFinite(v) || v <= 0) return;
-      safeWrite(storage.editorHeightKey(hostId), String(Math.round(v)));
+      safeWriteSession(storage.editorHeightKey(hostId), String(Math.round(v)));
     },
 
     metaKey(hostId, type) {

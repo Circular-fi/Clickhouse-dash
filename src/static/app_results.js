@@ -7,6 +7,7 @@
   const { dom, util } = ns;
 
   let resultsStackElement = null;
+  let resultsStackHoldElement = null;
 
   let resultColumns = [];
   let resultTypes = [];
@@ -176,6 +177,8 @@
 
   function ensureResultsStack() {
     if (resultsStackElement || !dom.resultsPanel) return;
+    if (resultsStackHoldElement && resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
+    resultsStackHoldElement = null;
     resultsStackElement = document.createElement("div");
     resultsStackElement.className = "resultsStack";
     const header = dom.resultsPanel.querySelector(".panel__header");
@@ -183,10 +186,49 @@
     dom.resultsPanel.insertBefore(resultsStackElement, anchor);
   }
 
-  function clearResultsStack() {
-    if (!resultsStackElement) return;
-    resultsStackElement.remove();
+  function clearResultsStack(opts = null) {
+    const preserveScroll = !!(opts && opts.preserveScroll);
+
+    if (!resultsStackElement) {
+      if (!preserveScroll && resultsStackHoldElement && resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
+      if (!preserveScroll) resultsStackHoldElement = null;
+      return;
+    }
+
+    if (!preserveScroll) {
+      resultsStackElement.remove();
+      resultsStackElement = null;
+      return;
+    }
+
+    const parent = resultsStackElement.parentNode;
+    if (!parent) {
+      resultsStackElement = null;
+      return;
+    }
+
+    const rect = resultsStackElement.getBoundingClientRect();
+    const h = Math.max(0, Math.ceil(rect.height));
+    if (h <= 0) {
+      resultsStackElement.remove();
+      resultsStackElement = null;
+      return;
+    }
+
+    const spacer = resultsStackHoldElement || document.createElement("div");
+    spacer.className = "resultsStack";
+    spacer.setAttribute("aria-hidden", "true");
+    spacer.style.height = `${h}px`;
+
+    parent.replaceChild(spacer, resultsStackElement);
+    resultsStackHoldElement = spacer;
     resultsStackElement = null;
+  }
+
+  function releaseResultsStackHold() {
+    if (!resultsStackHoldElement) return;
+    if (resultsStackHoldElement.parentNode) resultsStackHoldElement.remove();
+    resultsStackHoldElement = null;
   }
 
   function removeIds(root) {
@@ -1113,6 +1155,7 @@
   }
 
   function renderTableMeta(columns, types) {
+    releaseResultsStackHold();
     resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
     resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
     resultTypeAsts = resultTypes.map(parseChType);
@@ -1199,6 +1242,7 @@
   }
 
   function appendRows(rowsChunk) {
+    releaseResultsStackHold();
     if (!Array.isArray(rowsChunk)) return;
     for (const row of rowsChunk) {
       if (!Array.isArray(row)) continue;
@@ -1856,6 +1900,7 @@
     }
 
     function renderTableMetaLocal(columns, types) {
+      releaseResultsStackHold();
       local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
       local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
       local.typeAsts = local.types.map(parseChType);
@@ -1899,6 +1944,7 @@
     }
 
     function appendRowsLocal(rowsChunk) {
+      releaseResultsStackHold();
       if (!Array.isArray(rowsChunk)) return;
       if (!local.wrap) {
         for (const row of rowsChunk) {

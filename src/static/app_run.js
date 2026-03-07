@@ -1318,10 +1318,19 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       return;
     }
 
+    const winX = window.scrollX;
+    const winY = window.scrollY;
+
     results.clearResultsStack();
     results.clearLiveResults();
     resetMetrics();
     setQueryIdText(null);
+
+    const restoreWindowScroll = () => {
+      if (winY > 0 && window.scrollY < 4) window.scrollTo(winX, winY);
+    };
+    queueMicrotask(restoreWindowScroll);
+    requestAnimationFrame(restoreWindowScroll);
 
     results.setError("");
     if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
@@ -1354,11 +1363,6 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.setStatus("error");
       return;
     }
-
-    results.clearResultsStack();
-    results.clearLiveResults();
-    resetMetrics();
-    setQueryIdText(null);
     setQueryStatusText("running");
 
     if (statements.length > 1) {

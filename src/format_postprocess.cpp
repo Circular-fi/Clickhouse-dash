@@ -147,6 +147,7 @@ std::string postprocess_format_query(std::string s, size_t threshold) {
   out = reindent_function_args(std::move(out), threshold);
   out = reindent_bool_expressions(std::move(out));
   out = align_simple_as_in_select(std::move(out));
+  out = normalize_create_table_column_list_indent(std::move(out));
   return out;
 }
 

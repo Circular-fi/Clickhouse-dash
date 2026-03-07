@@ -923,6 +923,7 @@ button.button:not(:disabled):hover {
 .panel--results {
   grid-column: 1 / -1;
   padding-bottom: 1rem;
+  overflow-anchor: none;
 }
 
 .panel--results.is-multiquery #copyJsonButton,
