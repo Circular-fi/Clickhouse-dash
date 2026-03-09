@@ -25,6 +25,14 @@
     historyButton: byId("historyButton"),
     historyPanel: byId("historyPanel"),
 
+    saveButton: byId("saveButton"),
+    savePanel: byId("savePanel"),
+    saveNameInput: byId("saveNameInput"),
+    saveConfirmButton: byId("saveConfirmButton"),
+
+    savedButton: byId("savedButton"),
+    savedQueriesPanel: byId("savedQueriesPanel"),
+
     hostPicker: byId("hostPicker"),
     hostPickerButton: byId("hostPickerButton"),
     hostPickerMenu: byId("hostPickerMenu"),

@@ -7,6 +7,7 @@
   const THEME_STORAGE_KEY = "chdash.theme";
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
+  const SAVED_QUERIES_STORAGE_KEY = "chdash.savedQueries.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
@@ -68,6 +69,7 @@
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,
+    SAVED_QUERIES_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
     EDITOR_HEIGHT_PREFIX,
@@ -131,6 +133,29 @@
         if (deduped.length >= HISTORY_MAX_ENTRIES) break;
       }
       storage.saveHistory(deduped);
+    },
+
+    loadSavedQueries() {
+      const arr = safeReadJson(SAVED_QUERIES_STORAGE_KEY, []);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(
+        (x) => x && typeof x === "object" && typeof x.name === "string" && typeof x.sql_raw === "string"
+      );
+    },
+
+    saveSavedQueries(items) {
+      safeWriteJson(SAVED_QUERIES_STORAGE_KEY, Array.isArray(items) ? items : []);
+    },
+
+    addSavedQuery(entry) {
+      const items = storage.loadSavedQueries().filter((x) => x.name !== entry.name);
+      items.unshift(entry);
+      storage.saveSavedQueries(items);
+    },
+
+    deleteSavedQuery(name) {
+      const items = storage.loadSavedQueries().filter((x) => x.name !== name);
+      storage.saveSavedQueries(items);
     },
 
     loadEditorSql() {

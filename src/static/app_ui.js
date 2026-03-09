@@ -527,6 +527,61 @@
     dom.historyPanel.hidden = !willShow;
   }
 
+  function renderSavedQueriesPanel() {
+    if (!dom.savedQueriesPanel) return;
+    const items = storage.loadSavedQueries();
+    dom.savedQueriesPanel.innerHTML = "";
+
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "savedEmpty";
+      empty.textContent = "No saved queries yet";
+      dom.savedQueriesPanel.appendChild(empty);
+      return;
+    }
+
+    for (const it of items) {
+      const row = document.createElement("div");
+      row.className = "savedItem";
+
+      const loadBtn = document.createElement("button");
+      loadBtn.type = "button";
+      loadBtn.className = "savedItem__load";
+
+      loadBtn.textContent = it.name;
+
+      loadBtn.addEventListener("click", () => {
+        if (it.host_id) setSelectedHostId(String(it.host_id));
+        if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(it.sql_formatted || it.sql_raw || ""));
+        dom.savedQueriesPanel.hidden = true;
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "button button--small button--danger savedItem__delete";
+      delBtn.title = "Delete saved query";
+      delBtn.textContent = "✕";
+
+      delBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        storage.deleteSavedQuery(it.name);
+        renderSavedQueriesPanel();
+      });
+
+      row.appendChild(loadBtn);
+      row.appendChild(delBtn);
+      dom.savedQueriesPanel.appendChild(row);
+    }
+  }
+
+  function toggleSaved() {
+    if (!dom.savedQueriesPanel) return;
+    const isHidden = dom.savedQueriesPanel.hidden;
+    if (dom.savePanel) dom.savePanel.hidden = true;
+    if (isHidden) renderSavedQueriesPanel();
+    dom.savedQueriesPanel.hidden = !isHidden;
+  }
+
   function initEditor() {
     if (!dom.queryTextArea) return;
 
@@ -916,6 +971,22 @@
       if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
         if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
       }
+      if (dom.historyPanel && !dom.historyPanel.hidden) {
+        const insideHistory = dom.historyButton?.contains(t) || dom.historyPanel.contains(t);
+        if (t instanceof Node && !insideHistory) dom.historyPanel.hidden = true;
+      }
+      if (dom.savePanel && !dom.savePanel.hidden) {
+        const insideSave = dom.saveButton?.contains(t) || dom.savePanel.contains(t);
+        if (t instanceof Node && !insideSave) {
+          dom.savePanel.hidden = true;
+          if (dom.saveNameInput) dom.saveNameInput.value = "";
+        }
+      }
+      if (dom.savedQueriesPanel && !dom.savedQueriesPanel.hidden) {
+        const insideLoad = (dom.savedButton && dom.savedButton.contains(t)) ||
+                           dom.savedQueriesPanel.contains(t);
+        if (t instanceof Node && !insideLoad) dom.savedQueriesPanel.hidden = true;
+      }
     });
 
     document.addEventListener("keydown", (ev) => {
@@ -925,10 +996,58 @@
         closeThemeMenu({ immediate: true });
         closeCopyMenu({ immediate: true });
         if (dom.historyPanel) dom.historyPanel.hidden = true;
+        if (dom.savedQueriesPanel) dom.savedQueriesPanel.hidden = true;
+        if (dom.savePanel) dom.savePanel.hidden = true;
+        if (dom.saveNameInput) dom.saveNameInput.value = "";
       }
     });
 
     if (dom.historyButton) dom.historyButton.addEventListener("click", toggleHistory);
+    if (dom.savedButton) dom.savedButton.addEventListener("click", toggleSaved);
+
+    const commitSave = () => {
+      const sql = dom.queryTextArea?.value.trim();
+      if (!sql) {
+        dom.savePanel && (dom.savePanel.hidden = true);
+        return;
+      }
+      const name = dom.saveNameInput?.value.trim();
+      if (!name) return;
+      storage.addSavedQuery({
+        name,
+        ts_ms: Date.now(),
+        host_id: state.selectedHostId || "",
+        sql_raw: sql,
+        sql_formatted: sql,
+      });
+      if (dom.savePanel) dom.savePanel.hidden = true;
+    };
+
+    const updateSaveButtonState = () => {
+      if (dom.saveButton) dom.saveButton.disabled = !dom.queryTextArea?.value.trim();
+    };
+    updateSaveButtonState();
+    dom.queryTextArea?.addEventListener("input", updateSaveButtonState);
+
+    dom.saveButton?.addEventListener("click", () => {
+      if (!dom.savePanel) return;
+      const isHidden = dom.savePanel.hidden;
+      if (dom.savedQueriesPanel) dom.savedQueriesPanel.hidden = true;
+      dom.savePanel.hidden = !isHidden;
+      if (isHidden) {
+        dom.saveNameInput && (dom.saveNameInput.value = "");
+        dom.saveNameInput?.focus();
+      }
+    });
+
+    dom.saveNameInput?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        commitSave();
+      }
+    });
+
+    dom.saveConfirmButton?.addEventListener("click", commitSave);
 
     if (dom.themeSelectButton) dom.themeSelectButton.addEventListener("click", toggleThemeMenu);
     if (dom.themeSelectMenu) {

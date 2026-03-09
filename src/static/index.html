@@ -110,9 +110,23 @@
           <button id="formatButton" class="button" type="button">Format</button>
           <button id="cancelButton" class="button" disabled>Clear</button>
 
-          <div class="historyMenu">
+          <div class="popoverMenu">
             <button id="historyButton" class="button" type="button">History</button>
-            <div id="historyPanel" class="historyPanel" hidden></div>
+            <div id="historyPanel" class="popoverPanel" hidden></div>
+          </div>
+
+          <div class="popoverMenu" id="saveMenu">
+            <button id="saveButton" class="button" type="button">Save</button>
+            <div id="savePanel" class="popoverPanel" hidden>
+              <div class="savePanel">
+                <input id="saveNameInput" class="savePanel__input" type="text" placeholder="Query name…" autocomplete="off" spellcheck="false" />
+                <button id="saveConfirmButton" class="button button--primary" type="button">Save</button>
+              </div>
+            </div>
+          </div>
+          <div class="popoverMenu">
+            <button id="savedButton" class="button" type="button">Load</button>
+            <div id="savedQueriesPanel" class="popoverPanel" hidden></div>
           </div>
         </div>
       </div>

@@ -2,8 +2,8 @@
 
 A real-time ClickHouse query dashboard with live metrics.
 
-Backend: **C++17** (clickhouse-cpp + cpp-httplib + rapidjson)  
-Frontend: **Vanilla JS + Canvas**  
+Backend: **C++17** (clickhouse-cpp + cpp-httplib + rapidjson)
+Frontend: **Vanilla JS + Canvas**
 Transport: **Server-Sent Events (SSE)**
 
 ---
@@ -169,7 +169,7 @@ Artifacts include the binary and (if present) `src/static/`.
 
 ---
 
-## ✅ TODO / Roadmap 
+## ✅ TODO / Roadmap
 
 ### Query workflow
 
