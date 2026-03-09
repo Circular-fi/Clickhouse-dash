@@ -29,10 +29,10 @@
   --accent: #1d4ed8;
   --accentBorder: #2563eb;
 
-  --shadow1:
-    0 0.0625rem 0 rgba(255, 255, 255, 0.03), 0 0.75rem 2rem rgba(0, 0, 0, 0.35);
-  --shadow2:
-    0 0.0625rem 0 rgba(255, 255, 255, 0.03), 0 1.1rem 3rem rgba(0, 0, 0, 0.45);
+  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
+    0 0.75rem 2rem rgba(0, 0, 0, 0.35);
+  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
+    0 1.1rem 3rem rgba(0, 0, 0, 0.45);
   --ring: 0 0 0 0.1875rem rgba(37, 99, 235, 0.22);
 
   --radius: 0.95rem;
@@ -91,11 +91,9 @@
     --accent: rgba(37, 99, 235, 0.14);
     --accentBorder: #2563eb;
 
-    --shadow1:
-      0 0.0625rem 0 rgba(255, 255, 255, 0.55),
+    --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
       0 0.75rem 2rem rgba(2, 6, 23, 0.08);
-    --shadow2:
-      0 0.0625rem 0 rgba(255, 255, 255, 0.55),
+    --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
       0 1.1rem 3rem rgba(2, 6, 23, 0.12);
     --ring: 0 0 0 0.1875rem rgba(37, 99, 235, 0.2);
 
@@ -224,33 +222,18 @@ body {
   margin: 0;
   padding: 0;
   background:
-    radial-gradient(
-      60rem 35rem at 15% -10%,
-      rgba(29, 78, 216, 0.16),
-      transparent 55%
-    ),
-    radial-gradient(
-      55rem 40rem at 85% 0%,
-      rgba(37, 99, 235, 0.1),
-      transparent 55%
-    ),
+    radial-gradient(60rem 35rem at 15% -10%, rgba(29, 78, 216, 0.16), transparent 55%),
+    radial-gradient(55rem 40rem at 85% 0%, rgba(37, 99, 235, 0.10), transparent 55%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22vh),
     var(--bg);
   color: var(--text);
-  font-family:
-    "Inter",
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    Helvetica,
-    Arial;
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial;
   overflow-x: hidden;
   min-height: 100vh;
 }
 body {
-  overflow-y: hidden;
+      overflow-y: hidden;
 }
 
 * {
@@ -288,12 +271,12 @@ body {
   align-items: start;
 }
 
+
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background:
-    linear-gradient(180deg, rgb(26 52 152 / 7%), transparent 2rem),
-    var(--panelBg);
+    linear-gradient(180deg, rgb(26 52 152 / 7%), transparent 2rem), var(--panelBg);
   box-shadow: var(--shadow1);
   padding: 0.9rem;
   min-width: 0;
@@ -324,9 +307,8 @@ body {
 }
 
 .statusPill__value--mono {
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 }
 
 #queryTextArea {
@@ -339,13 +321,12 @@ body {
   border: 1px solid var(--border);
   background: var(--inputBg);
   color: var(--text);
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   font-size: 0.8125rem;
   line-height: 1.6;
   outline: none;
-  white-space: pre; /* ou pre-wrap si tu veux le wrap */
+  white-space: pre;           /* ou pre-wrap si tu veux le wrap */
   tab-size: 4;
   -moz-tab-size: 4;
   overflow-wrap: anywhere;
@@ -370,6 +351,7 @@ body {
   background: var(--inputBg);
 }
 
+
 .editorGutter {
   position: absolute;
   inset: 0 auto 0 0;
@@ -377,9 +359,8 @@ body {
   margin: 0;
   padding: 0.9rem 0.55rem;
   border-radius: var(--radiusSm) 0 0 var(--radiusSm);
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   font-size: 0.8125rem;
   line-height: 1.6;
   white-space: pre;
@@ -399,9 +380,8 @@ body {
   padding: 0.9rem;
   padding-left: calc(0.9rem + var(--gutterW));
   border-radius: var(--radiusSm);
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   font-size: 0.8125rem;
   line-height: 1.6;
   white-space: pre;
@@ -535,11 +515,11 @@ html.is-ready #queryTextArea::placeholder {
   background-color: var(--themeSelectArrow);
   opacity: 0.95;
   pointer-events: none;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E");
+  -webkit-mask-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E');
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E");
+  mask-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208l4%204%204-4%22/%3E%3C/svg%3E');
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: contain;
@@ -548,6 +528,7 @@ html.is-ready #queryTextArea::placeholder {
 .runSplit.is-open .runSplit__toggle::after {
   transform: translate(-50%, -50%) rotate(180deg);
 }
+
 
 .runSplit__toggle:disabled {
   border-left: 0;
@@ -576,10 +557,7 @@ html.is-ready #queryTextArea::placeholder {
   transform-origin: top right;
   visibility: hidden;
   pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s linear 140ms;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
 }
 
 .runSplit.is-open .runMenu {
@@ -587,10 +565,7 @@ html.is-ready #queryTextArea::placeholder {
   transform: translateY(0) scaleY(1);
   visibility: visible;
   pointer-events: auto;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
 }
 
 .runMenu__opt {
@@ -684,13 +659,12 @@ html[data-theme="light"] .runMenu__opt:hover {
   gap: 10px;
 }
 
+
 .resultsStack__meta {
   opacity: 0.78;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* .resultsStack__body {
@@ -731,8 +705,7 @@ button.button:not(:disabled):hover {
 
 .button--primary {
   border-color: rgba(37, 99, 235, 0.6);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 60%),
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 60%),
     var(--accent);
   box-shadow: 0 0.75rem 1.6rem rgba(29, 78, 216, 0.18);
 }
@@ -745,15 +718,13 @@ button.button:not(:disabled):hover {
 
 .button--primary:not(:disabled):hover {
   border-color: rgba(37, 99, 235, 0.6) !important;
-  background:
-    linear-gradient(180deg, rgba(120, 120, 120, 0.08), transparent 60%),
+  background: linear-gradient(180deg, rgba(120, 120, 120, 0.08), transparent 60%),
     var(--accent);
 }
 
 .button--danger {
   border-color: rgba(239, 68, 68, 0.62);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 60%),
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 60%),
     rgba(239, 68, 68, 0.72);
   box-shadow: 0 0.55rem 1.2rem rgba(239, 68, 68, 0.12);
 }
@@ -765,6 +736,7 @@ button.button:not(:disabled):hover {
 #cancelButton {
   min-width: 4.2rem;
 }
+
 
 .metricColumn {
   display: grid;
@@ -858,6 +830,7 @@ button.button:not(:disabled):hover {
 .metricCompact__unit_4 {
   width: 4ch;
 }
+
 
 .metricCompact__sub {
   margin-top: 0.2rem;
@@ -967,14 +940,15 @@ button.button:not(:disabled):hover {
 
 .copySplit.is-open .runMenu,
 .runSplit.is-open #copyMenu.runMenu {
-  border-top-left-radius: 0;
-  border-top: 0px;
+    border-top-left-radius: 0;
+    border-top: 0px;
 }
 
 .copyMenu .runMenu__opt,
 #copyMenu .runMenu__opt {
   margin-top: -0.5rem;
   margin-left: 0.2rem;
+    
 }
 
 .copyMenu .runMenu__opt .runMenu__optText,
@@ -982,6 +956,8 @@ button.button:not(:disabled):hover {
   font-size: 0.6875rem;
   font-weight: 650;
 }
+
+
 
 .panel__header {
   display: flex;
@@ -1003,8 +979,7 @@ button.button:not(:disabled):hover {
   margin-right: 0.4rem;
 }
 
-.panel__title,
-.panel__meta {
+.panel__title, .panel__meta{
   display: inline;
 }
 
@@ -1048,9 +1023,7 @@ button.button:not(:disabled):hover {
   padding-right: 1.9rem;
 }
 
-.resultTable:not(.resultTable--vertical)
-  thead
-  th.resultTable__thSortable::after {
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
   content: "↕";
   position: absolute;
   margin-left: 0.4rem;
@@ -1062,22 +1035,16 @@ button.button:not(:disabled):hover {
   pointer-events: none;
 }
 
-.resultTable:not(.resultTable--vertical)
-  thead
-  th.resultTable__thSortable:hover::after {
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable:hover::after {
   opacity: 0.8;
 }
 
-.resultTable:not(.resultTable--vertical)
-  thead
-  th.resultTable__thSortable[data-sort="asc"]::after {
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
   content: "▲";
   opacity: 0.9;
 }
 
-.resultTable:not(.resultTable--vertical)
-  thead
-  th.resultTable__thSortable[data-sort="desc"]::after {
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
   content: "▼";
   opacity: 0.9;
 }
@@ -1101,14 +1068,13 @@ button.button:not(:disabled):hover {
   background: var(--panel);
 }
 
+
 .resultTable thead th.resultTable__rowIndex {
   padding: 0.55rem 0.45rem;
   padding-right: 1.45rem;
 }
 
-.resultTable:not(.resultTable--vertical)
-  thead
-  th.resultTable__rowIndex.resultTable__thSortable::after {
+.resultTable:not(.resultTable--vertical) thead th.resultTable__rowIndex.resultTable__thSortable::after {
   right: 0.35rem;
 }
 
@@ -1117,11 +1083,7 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable tbody td.resultTable__gaugeCell {
-  background-image: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--accentBorder) 16%, transparent),
-    color-mix(in srgb, var(--accentBorder) 16%, transparent)
-  );
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
   background-repeat: no-repeat;
   background-origin: content-box;
   background-clip: content-box;
@@ -1135,11 +1097,12 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable tbody td {
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--rowDivider);
-  vertical-align: middle;
-  white-space: pre;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--rowDivider);
+    vertical-align: middle;
+    white-space: pre;
 }
+
 
 .resultTable tbody tr:hover td {
   background: var(--rowHover);
@@ -1208,7 +1171,7 @@ button.button:not(:disabled):hover {
 
 .resultTable.resultTable--vertical thead th:first-child,
 .resultTable.resultTable--vertical tbody th {
-  width: 14rem; /* "serré" à gauche */
+  width: 14rem;           /* "serré" à gauche */
   max-width: 14rem;
   text-align: left;
   white-space: nowrap;
@@ -1239,6 +1202,7 @@ button.button:not(:disabled):hover {
   background: var(--rowHover);
 }
 
+
 /* --- Custom Theme Dropdown --- */
 .themeSelect {
   position: relative;
@@ -1250,10 +1214,7 @@ button.button:not(:disabled):hover {
   padding-right: 2.35rem;
   width: 6rem;
   z-index: 2;
-  transition:
-    border-radius 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .themeSelect__button::after {
@@ -1283,6 +1244,7 @@ button.button:not(:disabled):hover {
   transform: translateY(-50%) rotate(180deg);
 }
 
+
 .themeSelect__button:focus-visible {
   outline: none;
   border-color: var(--accentBorder);
@@ -1299,17 +1261,18 @@ button.button:not(:disabled):hover {
   box-sizing: border-box;
 
   top: 100%;
-  margin-top: -1px; /* chevauche pile la bordure du bouton */
+  margin-top: -1px;           /* chevauche pile la bordure du bouton */
   z-index: 70;
 
   padding: 0.05rem 0.35rem 0.35rem 0.35rem;
 
   border-radius: var(--radiusSm);
   border: 1px solid var(--borderStrong);
-  border-top: 0; /* supprime la ligne entre bouton et menu */
+  border-top: 0;              /* supprime la ligne entre bouton et menu */
 
   background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
+    var(--panel);
 
   /* shadow qui “tombe” vers le bas (peu/pas de blur au-dessus) */
   box-shadow:
@@ -1324,12 +1287,10 @@ button.button:not(:disabled):hover {
   transform: translateY(-6px) scaleY(0.98);
   visibility: hidden;
   pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s linear 140ms;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
   will-change: transform, opacity;
 }
+
 
 .themeSelect__option {
   width: 100%;
@@ -1369,9 +1330,7 @@ button.button:not(:disabled):hover {
 }
 
 @supports not (color: color-mix(in srgb, white 50%, black)) {
-  :root {
-    --themeSelectArrow: var(--muted);
-  }
+  :root { --themeSelectArrow: var(--muted); }
 }
 
 .themeSelect__menu {
@@ -1380,27 +1339,23 @@ button.button:not(:disabled):hover {
   transform: translateY(-6px) scaleY(0.98);
   visibility: hidden;
   pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s linear 140ms;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
 }
+
 
 .themeSelect.themeSelect--open .themeSelect__menu {
   opacity: 1;
   transform: translateY(0) scaleY(1);
   visibility: visible;
   pointer-events: auto;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
 
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   background: var(--panel);
   box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
 }
+
 
 .themeSelect.themeSelect--open .themeSelect__button {
   border-bottom-left-radius: 0;
@@ -1416,13 +1371,20 @@ button.button:not(:disabled):hover {
 
 .themeSelect.themeSelect--open .themeSelect__button {
   background:
-    linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+    linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
+    var(--panel);
 }
+
 
 .themeSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
   display: none;
+  
 }
+
+
+
+
 
 /* optionnel : respecte "reduce motion" */
 @media (prefers-reduced-motion: reduce) {
@@ -1548,10 +1510,7 @@ button.button:not(:disabled):hover {
   white-space: nowrap;
   padding-right: 2.35rem;
   min-width: 14rem;
-  transition:
-    border-radius 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .pickerOption {
@@ -1595,9 +1554,10 @@ button.button:not(:disabled):hover {
   mask-size: 16px 16px;
 }
 
-.button:disabled > .picker__button::after {
+.button:disabled >.picker__button::after {
   display: None;
 }
+
 
 .picker__button[aria-expanded="true"]::after {
   transform: translateY(-50%) rotate(180deg);
@@ -1615,6 +1575,7 @@ button.button:not(:disabled):hover {
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }
+
 
 /* Host picker: when only one host, render as static info (no dropdown affordance) */
 .picker.is-static .picker__button {
@@ -1640,8 +1601,7 @@ button.button:not(:disabled):hover {
   display: none;
 }
 
-.picker__text,
-.pickerOption__label {
+.picker__text, .pickerOption__label {
   flex: 1;
   max-width: 220px;
   min-width: 0;
@@ -1677,6 +1637,7 @@ button.button:not(:disabled):hover {
   border-top-right-radius: 0;
 }
 
+
 .pickerOption:hover {
   background: var(--rowHover);
 }
@@ -1686,12 +1647,11 @@ button.button:not(:disabled):hover {
   border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
 }
 
+
 .pickerOption__meta {
   opacity: 0.75;
   font-variant-numeric: tabular-nums;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .hostDot {
@@ -1713,14 +1673,11 @@ button.button:not(:disabled):hover {
 .hostPing {
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.popoverMenu {
-  position: relative;
-}
+/* ---- Popover shared base ---- */
+.popoverMenu { position: relative; }
 .popoverPanel {
   position: absolute;
   right: 0;
@@ -1731,46 +1688,9 @@ button.button:not(:disabled):hover {
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--panel);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.22);
   padding: 8px;
   z-index: 60;
-}
-
-.historyItem {
-  width: 100%;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-}
-.historyItem:hover {
-  border-color: var(--border);
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
-}
-
-.historyItem__title {
-  opacity: 0.8;
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-
-.historyItem__sql {
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  font-size: 12px;
-  opacity: 0.95;
-  white-space: pre-wrap;
-  max-height: 3.6em;
-  overflow: hidden;
-}
-
-.historyEmpty {
-  padding: 10px;
-  opacity: 0.7;
 }
 
 /* ---- Save name panel ---- */
@@ -1843,13 +1763,48 @@ button.button:not(:disabled):hover {
   opacity: 0.7;
 }
 
+.historyItem {
+  width: 100%;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.historyItem:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.historyItem__title {
+  opacity: 0.8;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.historyItem__sql {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  opacity: 0.95;
+  white-space: pre-wrap;
+  max-height: 3.6em;
+  overflow: hidden;
+}
+
+.historyEmpty {
+  padding: 10px;
+  opacity: 0.7;
+}
+
 #runButton {
   border-radius: 0.75rem 0px 0px 0.75rem;
   border-right: 0px;
 }
 
 #runMenuButton {
-  border-radius: 0px 0.75rem 0.75rem 0px;
+  border-radius: 0px 0.75rem  0.75rem 0px;
   width: 0.4rem;
   border-left: 0px;
 }
@@ -1886,36 +1841,19 @@ button.button:not(:disabled):hover {
   padding: 0;
   white-space: pre;
   tab-size: 2;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 0.88em;
   line-height: 1.35;
 }
 
-.jsonPretty .jKey {
-  color: var(--accentBorder);
-}
-.jsonPretty .jStr {
-  color: color-mix(in srgb, var(--text) 78%, #22c55e);
-}
-.jsonPretty .jNum {
-  color: color-mix(in srgb, var(--text) 78%, #f59e0b);
-}
-.jsonPretty .jBool {
-  color: color-mix(in srgb, var(--text) 78%, #a78bfa);
-}
-.jsonPretty .jNull {
-  color: color-mix(in srgb, var(--muted) 70%, var(--text));
-  font-style: italic;
-}
+.jsonPretty .jKey { color: var(--accentBorder); }
+.jsonPretty .jStr { color: color-mix(in srgb, var(--text) 78%, #22c55e); }
+.jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
+.jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
+.jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
 
 .resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--accentBorder) 16%, transparent),
-    color-mix(in srgb, var(--accentBorder) 16%, transparent)
-  );
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
   background-repeat: no-repeat;
   background-origin: content-box;
   background-clip: content-box;
