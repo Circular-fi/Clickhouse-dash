@@ -71,6 +71,7 @@
     return {
       ts_ms: entry.ts_ms,
       sql_raw: entry.sql_raw,
+      sql_formatted: typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw,
       host_id: entry.host_id == null ? null : String(entry.host_id),
     };
   };
@@ -81,7 +82,9 @@
     return {
       name: entry.name,
       sql_raw: entry.sql_raw,
-      created_at_ms: typeof entry.created_at_ms === "number" ? entry.created_at_ms : Date.now(),
+      sql_formatted: typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw,
+      host_id: entry.host_id == null ? null : String(entry.host_id),
+      created_at_ms: typeof entry.created_at_ms === "number" ? entry.created_at_ms : typeof entry.ts_ms === "number" ? entry.ts_ms : Date.now(),
     };
   };
 

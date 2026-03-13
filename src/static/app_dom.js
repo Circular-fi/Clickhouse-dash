@@ -27,9 +27,8 @@
     queryLibraryMenuButton: byId("queryLibraryMenuButton"),
     queryLibraryMenu: byId("queryLibraryMenu"),
     queryLibraryContent: byId("queryLibraryContent"),
+    queryLibraryTabSaved: byId("queryLibraryTabSaved"),
     queryLibraryTabHistory: byId("queryLibraryTabHistory"),
-    queryLibraryTabSave: byId("queryLibraryTabSave"),
-    queryLibraryTabLoad: byId("queryLibraryTabLoad"),
 
     hostPicker: byId("hostPicker"),
     hostPickerButton: byId("hostPickerButton"),
