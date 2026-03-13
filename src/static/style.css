@@ -54,7 +54,7 @@
   --scrollThumbHover: rgba(148, 163, 184, 0.28);
   --scrollThumbBorder: rgba(11, 15, 20, 0.85);
 
-  --buttonBg: rgba(17, 26, 42, 0.85);
+  --buttonBg: rgba(17, 26, 42, 1);
   --buttonBgHover: rgba(17, 26, 42, 0.92);
   --buttonBorder: rgba(148, 163, 184, 0.18);
   --buttonBorderHover: rgba(148, 163, 184, 0.28);
@@ -152,7 +152,7 @@ html[data-theme="dark"] {
   --scrollThumbHover: rgba(148, 163, 184, 0.28);
   --scrollThumbBorder: rgba(11, 15, 20, 0.85);
 
-  --buttonBg: rgba(17, 26, 42, 0.85);
+  --buttonBg: rgba(17, 26, 42, 1);
   --buttonBgHover: rgba(17, 26, 42, 0.92);
   --buttonBorder: rgba(148, 163, 184, 0.18);
   --buttonBorderHover: rgba(148, 163, 184, 0.28);
@@ -625,6 +625,62 @@ html[data-theme="light"] .runMenu__opt:hover {
   flex: 1 1 auto;
   text-align: left;
   font-weight: 600;
+}
+
+.queryLibrary > .runSplit__buttons > .runSplit__main {
+  border-radius: 0.75rem 0px 0px 0.75rem;
+  border-right: 0px;
+}
+
+#queryLibraryMenuButton {
+  width: 0.4rem;
+  border-left: 0;
+}
+
+.queryLibraryMenu {
+  min-width: min(30rem, calc(100vw - 24px));
+  max-width: min(36rem, calc(100vw - 24px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.queryLibraryMenu__tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.queryLibraryMenu__tab {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.queryLibraryMenu__tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="light"] .queryLibraryMenu__tab:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.queryLibraryMenu__tab[aria-selected="true"] {
+  border-color: var(--buttonBorder);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.queryLibraryMenu__content {
+  padding: 0.35rem;
+  max-height: min(60vh, 28rem);
+  overflow: auto;
 }
 
 .resultsStack {
@@ -1676,12 +1732,12 @@ button.button:not(:disabled):hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* ---- History popover ---- */
-.historyMenu { position: relative; }
-.historyPanel {
+/* ---- Popover shared base ---- */
+.popoverMenu { position: relative; }
+.popoverPanel {
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 8px);
   width: min(520px, calc(100vw - 24px));
   max-height: 60vh;
   overflow: auto;
@@ -1691,6 +1747,76 @@ button.button:not(:disabled):hover {
   box-shadow: 0 18px 50px rgba(0,0,0,0.22);
   padding: 8px;
   z-index: 60;
+}
+
+/* ---- Save name panel ---- */
+#savePanel.popoverPanel {
+  width: auto;
+}
+
+/* ---- Load (saved queries) panel ---- */
+#savedQueriesPanel.popoverPanel {
+  width: min(280px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.savePanel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.savePanel__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+  color: var(--text);
+  font-size: 0.875rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.savePanel__input:focus {
+  border-color: var(--accentBorder);
+}
+
+/* ---- Saved queries popover ---- */
+.savedItem {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.savedItem__load {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.savedItem__load:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.savedItem__delete {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.savedEmpty {
+  padding: 10px;
+  opacity: 0.7;
 }
 
 .historyItem {
@@ -1750,7 +1876,9 @@ button.button:not(:disabled):hover {
 }
 
 .copySplit.is-open > .runSplit__buttons > .runSplit__main,
-.copySplit.is-open > .runSplit__buttons > .runSplit__toggle {
+.copySplit.is-open > .runSplit__buttons > .runSplit__toggle,
+.queryLibrary.is-open > .runSplit__buttons > .runSplit__main,
+.queryLibrary.is-open > .runSplit__buttons > .runSplit__toggle {
   border-bottom: 1px solid transparent;
   border-bottom-left-radius: 0px;
   border-bottom-right-radius: 0px;

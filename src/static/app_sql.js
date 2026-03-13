@@ -135,7 +135,7 @@
     const parts = Array.isArray(statements) ? statements.map(normalizeStatementText).filter(Boolean) : [];
     if (parts.length === 0) return "";
     if (parts.length === 1) return parts[0];
-    return parts.join(";\n\n\n");
+    return parts.join(";\n\n");
   }
 
   ns.sql = { normalizeStatementText, splitSqlStatements, joinSqlStatements };

@@ -481,16 +481,42 @@
     }
   }
 
-  function renderHistoryPanel() {
-    if (!dom.historyPanel) return;
+  let queryLibraryMode = "save";
+
+  function isQueryLibraryOpen() {
+    return !!(dom.queryLibrary && dom.queryLibrary.classList.contains("is-open"));
+  }
+
+  function focusQueryLibrarySaveInput() {
+    const input = dom.queryLibraryContent?.querySelector(".savePanel__input");
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    if (typeof input.select === "function") input.select();
+  }
+
+  function closeQueryLibraryMenu({ immediate = false } = {}) {
+    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton || !dom.queryLibraryMenuButton) return;
+    dom.queryLibraryButton.setAttribute("aria-expanded", "false");
+    dom.queryLibraryMenuButton.setAttribute("aria-expanded", "false");
+    dom.queryLibrary.classList.remove("is-open");
+    if (immediate) {
+      dom.queryLibraryMenu.hidden = true;
+      return;
+    }
+    setTimeout(() => {
+      if (!isQueryLibraryOpen()) dom.queryLibraryMenu.hidden = true;
+    }, 160);
+  }
+
+  function renderHistoryContent(target) {
     const items = storage.loadHistory();
-    dom.historyPanel.innerHTML = "";
+    target.innerHTML = "";
 
     if (!items.length) {
       const empty = document.createElement("div");
       empty.className = "historyEmpty";
       empty.textContent = "No history yet";
-      dom.historyPanel.appendChild(empty);
+      target.appendChild(empty);
       return;
     }
 
@@ -513,18 +539,169 @@
       btn.addEventListener("click", () => {
         if (it.host_id) setSelectedHostId(String(it.host_id));
         if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(it.sql_formatted || it.sql_raw || ""));
-        dom.historyPanel.hidden = true;
+        closeQueryLibraryMenu({ immediate: true });
       });
 
-      dom.historyPanel.appendChild(btn);
+      target.appendChild(btn);
     }
   }
 
-  function toggleHistory() {
-    if (!dom.historyPanel) return;
-    const willShow = dom.historyPanel.hidden;
-    if (willShow) renderHistoryPanel();
-    dom.historyPanel.hidden = !willShow;
+  function renderSaveContent(target) {
+    target.innerHTML = "";
+
+    const wrap = document.createElement("div");
+    wrap.className = "savePanel";
+
+    const input = document.createElement("input");
+    input.className = "savePanel__input";
+    input.type = "text";
+    input.placeholder = "Query name…";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button button--primary";
+    button.textContent = "Save";
+
+    const list = document.createElement("div");
+
+    const renderSavedItems = () => {
+      const items = storage.loadSavedQueries();
+      list.innerHTML = "";
+
+      if (!items.length) {
+        const empty = document.createElement("div");
+        empty.className = "savedEmpty";
+        empty.textContent = "No saved queries yet";
+        list.appendChild(empty);
+        return;
+      }
+
+      for (const it of items) {
+        const row = document.createElement("div");
+        row.className = "savedItem";
+
+        const loadBtn = document.createElement("button");
+        loadBtn.type = "button";
+        loadBtn.className = "savedItem__load";
+        loadBtn.textContent = it.name;
+
+        loadBtn.addEventListener("click", () => {
+          if (it.host_id) setSelectedHostId(String(it.host_id));
+          if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(it.sql_formatted || it.sql_raw || ""));
+          closeQueryLibraryMenu({ immediate: true });
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "button button--small button--danger savedItem__delete";
+        delBtn.title = "Delete saved query";
+        delBtn.textContent = "✕";
+
+        delBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          storage.deleteSavedQuery(it.name);
+          renderSavedItems();
+        });
+
+        row.appendChild(loadBtn);
+        row.appendChild(delBtn);
+        list.appendChild(row);
+      }
+    };
+
+    const updateSaveState = () => {
+      const sql = String(dom.queryTextArea?.value || "").trim();
+      const name = String(input.value || "").trim();
+      button.disabled = !sql || !name;
+    };
+
+    const commitSave = () => {
+      const sql = String(dom.queryTextArea?.value || "").trim();
+      const name = String(input.value || "").trim();
+      if (!sql || !name) return;
+      storage.addSavedQuery({
+        name,
+        ts_ms: Date.now(),
+        host_id: state.selectedHostId || "",
+        sql_raw: sql,
+        sql_formatted: sql,
+      });
+      input.value = "";
+      updateSaveState();
+      renderSavedItems();
+      requestAnimationFrame(focusQueryLibrarySaveInput);
+    };
+
+    input.addEventListener("input", updateSaveState);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      commitSave();
+    });
+    button.addEventListener("click", commitSave);
+
+    wrap.appendChild(input);
+    wrap.appendChild(button);
+    target.appendChild(wrap);
+    target.appendChild(list);
+
+    renderSavedItems();
+    updateSaveState();
+    requestAnimationFrame(focusQueryLibrarySaveInput);
+  }
+
+  function renderQueryLibraryMenu() {
+    if (!dom.queryLibraryContent) return;
+
+    const tabs = [dom.queryLibraryTabSave, dom.queryLibraryTabHistory];
+    for (const tab of tabs) {
+      if (!tab) continue;
+      const mode = tab.getAttribute("data-mode");
+      tab.setAttribute("aria-selected", String(mode === queryLibraryMode));
+    }
+
+    if (queryLibraryMode === "history") {
+      renderHistoryContent(dom.queryLibraryContent);
+      return;
+    }
+
+    renderSaveContent(dom.queryLibraryContent);
+  }
+
+  function openQueryLibraryMenu(mode = queryLibraryMode) {
+    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton || !dom.queryLibraryMenuButton) return;
+    queryLibraryMode = mode === "history" ? "history" : "save";
+    renderQueryLibraryMenu();
+    dom.queryLibraryMenu.hidden = false;
+    dom.queryLibraryButton.setAttribute("aria-expanded", "true");
+    dom.queryLibraryMenuButton.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => {
+      dom.queryLibrary.classList.add("is-open");
+    });
+    dom.queryLibraryMenu.focus({ preventScroll: true });
+  }
+
+  function setQueryLibraryMode(mode) {
+    const next = mode === "history" ? "history" : "save";
+    if (queryLibraryMode === next) return;
+    queryLibraryMode = next;
+    renderQueryLibraryMenu();
+  }
+
+  function toggleQueryLibraryMenu(mode = queryLibraryMode) {
+    const next = mode === "history" ? "history" : "save";
+    if (!dom.queryLibraryMenu) return;
+    if (dom.queryLibraryMenu.hidden) {
+      openQueryLibraryMenu(next);
+      return;
+    }
+    if (queryLibraryMode !== next) {
+      setQueryLibraryMode(next);
+      return;
+    }
+    closeQueryLibraryMenu();
   }
 
   function initEditor() {
@@ -916,6 +1093,9 @@
       if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
         if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
       }
+      if (dom.queryLibrary && dom.queryLibraryMenu && !dom.queryLibraryMenu.hidden) {
+        if (t instanceof Node && !dom.queryLibrary.contains(t)) closeQueryLibraryMenu();
+      }
     });
 
     document.addEventListener("keydown", (ev) => {
@@ -924,11 +1104,20 @@
         closeHostMenu();
         closeThemeMenu({ immediate: true });
         closeCopyMenu({ immediate: true });
-        if (dom.historyPanel) dom.historyPanel.hidden = true;
+        closeQueryLibraryMenu({ immediate: true });
       }
     });
 
-    if (dom.historyButton) dom.historyButton.addEventListener("click", toggleHistory);
+    dom.queryLibraryButton?.addEventListener("click", () => toggleQueryLibraryMenu());
+    dom.queryLibraryMenuButton?.addEventListener("click", () => toggleQueryLibraryMenu());
+    dom.queryLibraryTabSave?.addEventListener("click", () => {
+      if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("save");
+      else setQueryLibraryMode("save");
+    });
+    dom.queryLibraryTabHistory?.addEventListener("click", () => {
+      if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("history");
+      else setQueryLibraryMode("history");
+    });
 
     if (dom.themeSelectButton) dom.themeSelectButton.addEventListener("click", toggleThemeMenu);
     if (dom.themeSelectMenu) {

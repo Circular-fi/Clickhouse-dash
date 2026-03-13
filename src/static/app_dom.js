@@ -22,8 +22,14 @@
     cancelButton: byId("cancelButton"),
     clearButton: byId("clearButton"),
 
-    historyButton: byId("historyButton"),
-    historyPanel: byId("historyPanel"),
+    queryLibrary: byId("queryLibrary"),
+    queryLibraryButton: byId("queryLibraryButton"),
+    queryLibraryMenuButton: byId("queryLibraryMenuButton"),
+    queryLibraryMenu: byId("queryLibraryMenu"),
+    queryLibraryContent: byId("queryLibraryContent"),
+    queryLibraryTabHistory: byId("queryLibraryTabHistory"),
+    queryLibraryTabSave: byId("queryLibraryTabSave"),
+    queryLibraryTabLoad: byId("queryLibraryTabLoad"),
 
     hostPicker: byId("hostPicker"),
     hostPickerButton: byId("hostPickerButton"),

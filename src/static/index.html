@@ -110,9 +110,25 @@
           <button id="formatButton" class="button" type="button">Format</button>
           <button id="cancelButton" class="button" disabled>Clear</button>
 
-          <div class="historyMenu">
-            <button id="historyButton" class="button" type="button">History</button>
-            <div id="historyPanel" class="historyPanel" hidden></div>
+          <div id="queryLibrary" class="runSplit queryLibrary">
+            <div class="runSplit__buttons">
+              <button id="queryLibraryButton" class="button runSplit__main" type="button" aria-haspopup="menu" aria-expanded="false">Queries</button>
+              <button
+                id="queryLibraryMenuButton"
+                class="button runSplit__toggle"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                title="Query actions">
+                </button>
+            </div>
+            <div id="queryLibraryMenu" class="runMenu queryLibraryMenu" role="dialog" aria-label="Query actions" tabindex="-1" hidden>
+              <div class="queryLibraryMenu__tabs" role="tablist" aria-label="Query actions">
+                <button id="queryLibraryTabSave" class="queryLibraryMenu__tab" type="button" role="tab" data-mode="save" aria-selected="true">Saved</button>
+                <button id="queryLibraryTabHistory" class="queryLibraryMenu__tab" type="button" role="tab" data-mode="history" aria-selected="false">History</button>
+              </div>
+              <div id="queryLibraryContent" class="queryLibraryMenu__content"></div>
+            </div>
           </div>
         </div>
       </div>

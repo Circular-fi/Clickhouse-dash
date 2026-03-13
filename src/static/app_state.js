@@ -7,6 +7,7 @@
   const THEME_STORAGE_KEY = "chdash.theme";
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
+  const SAVED_QUERIES_STORAGE_KEY = "chdash.savedQueries.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
@@ -64,10 +65,31 @@
     }
   };
 
+  const normalizeHistoryEntry = (entry) => {
+    if (!entry || typeof entry !== "object") return null;
+    if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
+    return {
+      ts_ms: entry.ts_ms,
+      sql_raw: entry.sql_raw,
+      host_id: entry.host_id == null ? null : String(entry.host_id),
+    };
+  };
+
+  const normalizeSavedQueryEntry = (entry) => {
+    if (!entry || typeof entry !== "object") return null;
+    if (typeof entry.name !== "string" || typeof entry.sql_raw !== "string") return null;
+    return {
+      name: entry.name,
+      sql_raw: entry.sql_raw,
+      created_at_ms: typeof entry.created_at_ms === "number" ? entry.created_at_ms : Date.now(),
+    };
+  };
+
   const storage = {
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,
+    SAVED_QUERIES_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
     EDITOR_HEIGHT_PREFIX,
@@ -107,19 +129,20 @@
     loadHistory() {
       const arr = safeReadJson(HISTORY_STORAGE_KEY, []);
       if (!Array.isArray(arr)) return [];
-      return arr
-        .filter((x) => x && typeof x === "object" && typeof x.ts_ms === "number" && typeof x.sql_raw === "string")
-        .slice(0, HISTORY_MAX_ENTRIES);
+      return arr.map(normalizeHistoryEntry).filter(Boolean).slice(0, HISTORY_MAX_ENTRIES);
     },
 
     saveHistory(items) {
-      const trimmed = Array.isArray(items) ? items.slice(0, HISTORY_MAX_ENTRIES) : [];
-      safeWriteJson(HISTORY_STORAGE_KEY, trimmed);
+      const normalized = Array.isArray(items) ? items.map(normalizeHistoryEntry).filter(Boolean) : [];
+      safeWriteJson(HISTORY_STORAGE_KEY, normalized.slice(0, HISTORY_MAX_ENTRIES));
     },
 
     addHistoryEntry(entry) {
+      const normalizedEntry = normalizeHistoryEntry(entry);
+      if (!normalizedEntry) return;
+
       const items = storage.loadHistory();
-      items.unshift(entry);
+      items.unshift(normalizedEntry);
 
       const seen = new Set();
       const deduped = [];
@@ -131,6 +154,30 @@
         if (deduped.length >= HISTORY_MAX_ENTRIES) break;
       }
       storage.saveHistory(deduped);
+    },
+
+    loadSavedQueries() {
+      const arr = safeReadJson(SAVED_QUERIES_STORAGE_KEY, []);
+      if (!Array.isArray(arr)) return [];
+      return arr.map(normalizeSavedQueryEntry).filter(Boolean);
+    },
+
+    saveSavedQueries(items) {
+      const normalized = Array.isArray(items) ? items.map(normalizeSavedQueryEntry).filter(Boolean) : [];
+      safeWriteJson(SAVED_QUERIES_STORAGE_KEY, normalized);
+    },
+
+    addSavedQuery(entry) {
+      const normalizedEntry = normalizeSavedQueryEntry(entry);
+      if (!normalizedEntry) return;
+      const items = storage.loadSavedQueries().filter((x) => x.name !== normalizedEntry.name);
+      items.unshift(normalizedEntry);
+      storage.saveSavedQueries(items);
+    },
+
+    deleteSavedQuery(name) {
+      const items = storage.loadSavedQueries().filter((x) => x.name !== name);
+      storage.saveSavedQueries(items);
     },
 
     loadEditorSql() {
