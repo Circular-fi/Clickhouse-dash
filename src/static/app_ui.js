@@ -615,9 +615,8 @@
   }
 
   function closeQueryLibraryMenu({ immediate = false } = {}) {
-    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton || !dom.queryLibraryMenuButton) return;
+    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton) return;
     dom.queryLibraryButton.setAttribute("aria-expanded", "false");
-    dom.queryLibraryMenuButton.setAttribute("aria-expanded", "false");
     dom.queryLibrary.classList.remove("is-open");
     if (immediate) {
       dom.queryLibraryMenu.hidden = true;
@@ -781,12 +780,11 @@
   }
 
   function openQueryLibraryMenu(mode = queryLibraryMode) {
-    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton || !dom.queryLibraryMenuButton) return;
+    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton) return;
     queryLibraryMode = mode === "history" ? "history" : "saved";
     renderQueryLibraryMenu();
     dom.queryLibraryMenu.hidden = false;
     dom.queryLibraryButton.setAttribute("aria-expanded", "true");
-    dom.queryLibraryMenuButton.setAttribute("aria-expanded", "true");
     requestAnimationFrame(() => {
       dom.queryLibrary.classList.add("is-open");
     });
@@ -1219,7 +1217,6 @@
     });
 
     dom.queryLibraryButton?.addEventListener("click", () => toggleQueryLibraryMenu());
-    dom.queryLibraryMenuButton?.addEventListener("click", () => toggleQueryLibraryMenu());
     dom.queryLibraryTabSaved?.addEventListener("click", () => {
       if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("saved");
       else setQueryLibraryMode("saved");

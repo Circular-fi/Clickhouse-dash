@@ -110,18 +110,13 @@
           <button id="formatButton" class="button" type="button">Format</button>
           <button id="cancelButton" class="button" disabled>Clear</button>
 
-          <div id="queryLibrary" class="runSplit queryLibrary">
-            <div class="runSplit__buttons">
-              <button id="queryLibraryButton" class="button runSplit__main" type="button" aria-haspopup="menu" aria-expanded="false">Queries</button>
-              <button
-                id="queryLibraryMenuButton"
-                class="button runSplit__toggle"
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                title="Query actions">
-                </button>
-            </div>
+          <div id="queryLibrary" class="themeSelect queryLibrary" aria-label="Query actions">
+            <button
+              id="queryLibraryButton"
+              class="button themeSelect__button queryLibrary__button"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false">Queries</button>
             <div id="queryLibraryMenu" class="runMenu queryLibraryMenu" role="dialog" aria-label="Query actions" tabindex="-1" hidden>
               <div class="queryLibraryMenu__tabs" role="tablist" aria-label="Query actions">
                 <button id="queryLibraryTabSaved" class="queryLibraryMenu__tab" type="button" role="tab" data-mode="saved" aria-selected="true">Saved</button>

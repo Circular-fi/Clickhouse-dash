@@ -24,7 +24,6 @@
 
     queryLibrary: byId("queryLibrary"),
     queryLibraryButton: byId("queryLibraryButton"),
-    queryLibraryMenuButton: byId("queryLibraryMenuButton"),
     queryLibraryMenu: byId("queryLibraryMenu"),
     queryLibraryContent: byId("queryLibraryContent"),
     queryLibraryTabSaved: byId("queryLibraryTabSaved"),
