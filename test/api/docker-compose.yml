@@ -1,44 +1,32 @@
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
-    container_name: format-test-clickhouse
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    environment:
+      CLICKHOUSE_USER: test
+      CLICKHOUSE_PASSWORD: test
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok."]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 10s
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+      test: ["CMD-SHELL", "clickhouse-client --user test --password test --query 'SELECT 1' | grep -q '1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
 
-  format-tests:
+  update-sql-raw:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: ./test/api/Dockerfile
+    container_name: api-tests-format
+    command: ["python", "/tests/main.py", "update-raw"]
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: test
+      CLICKHOUSE_PASSWORD: test
+      CLICKHOUSE_RAW_DIR: /tests/artifacts/sql_raw
+    volumes:
+      - ./format/sql:/tests/format/sql:ro
+      - ./format/sql_raw:/tests/artifacts/sql_raw
     depends_on:
       clickhouse:
         condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      API_BASE_URL: ${API_BASE_URL:-http://host.docker.internal:8080}
-      API_HEALTH_PATH: ${API_HEALTH_PATH:-/api/health}
-      API_TIMEOUT_SECONDS: ${API_TIMEOUT_SECONDS:-20}
-      API_READY_TIMEOUT_SECONDS: ${API_READY_TIMEOUT_SECONDS:-120}
-      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
-      CLICKHOUSE_TIMEOUT_SECONDS: ${CLICKHOUSE_TIMEOUT_SECONDS:-20}
-      CLICKHOUSE_READY_TIMEOUT_SECONDS: ${CLICKHOUSE_READY_TIMEOUT_SECONDS:-120}
-      CLICKHOUSE_RAW_DIR: /artifacts/sql_raw
-      UPDATE_EXPECTED_SQL: ${UPDATE_EXPECTED_SQL:-0}
-      ASSERT_CLICKHOUSE_SUCCESS: ${ASSERT_CLICKHOUSE_SUCCESS:-1}
-    volumes:
-      - ./format/sql:/tests/format/sql
-      - ./artifacts/sql_raw:/artifacts/sql_raw
-    command: ["python", "/tests/main.py"]

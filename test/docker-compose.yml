@@ -38,9 +38,11 @@ services:
     build:
       context: ../
       dockerfile: ./test/api/Dockerfile
-      target: api-tests
+    container_name: api-tests
     environment:
       API_BASE_URL: http://clickhouse-dash:8080
+      API_HEALTH_PATH: /api/health
+      TEST_ARTIFACTS_DIR: /tests/artifacts
     depends_on:
       clickhouse-dash:
         condition: service_healthy

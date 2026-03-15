@@ -1,3 +1,4 @@
+import difflib
 import os
 import time
 from pathlib import Path
@@ -5,22 +6,24 @@ from pathlib import Path
 import pytest
 import requests
 
-BASE_URL = os.environ.get("API_BASE_URL", "http://host.docker.internal:8080").rstrip("/")
+BASE_URL = os.environ.get("API_BASE_URL", "http://clickhouse-dash:8080").rstrip("/")
 HEALTH_PATH = os.environ.get("API_HEALTH_PATH", "/api/health")
-TIMEOUT_SECONDS = int(os.environ.get("API_TIMEOUT_SECONDS", "20"))
-READY_TIMEOUT_SECONDS = int(os.environ.get("API_READY_TIMEOUT_SECONDS", "120"))
+TIMEOUT_SECONDS = int(os.environ.get("API_TIMEOUT_SECONDS", "10"))
+READY_TIMEOUT_SECONDS = int(os.environ.get("API_READY_TIMEOUT_SECONDS", "90"))
+
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
-CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
-CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
-CLICKHOUSE_TIMEOUT_SECONDS = int(os.environ.get("CLICKHOUSE_TIMEOUT_SECONDS", "20"))
-CLICKHOUSE_READY_TIMEOUT_SECONDS = int(os.environ.get("CLICKHOUSE_READY_TIMEOUT_SECONDS", "120"))
-UPDATE_EXPECTED_SQL = os.environ.get("UPDATE_EXPECTED_SQL", "0") == "1"
-ASSERT_CLICKHOUSE_SUCCESS = os.environ.get("ASSERT_CLICKHOUSE_SUCCESS", "1") == "1"
-RAW_DIR = Path(os.environ.get("CLICKHOUSE_RAW_DIR", "/artifacts/sql_raw"))
-SQL_DIR = Path(__file__).with_name("sql")
+CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
+CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "test")
+CLICKHOUSE_TIMEOUT_SECONDS = int(os.environ.get("CLICKHOUSE_TIMEOUT_SECONDS", "10"))
+RAW_DIR = Path(
+    os.environ.get("CLICKHOUSE_RAW_DIR", str(Path(__file__).with_name("sql_raw")))
+)
+SQL_DIR = Path(os.environ.get("EXPECTED_SQL_DIR", str(Path(__file__).with_name("sql"))))
+ARTIFACTS_DIR = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tests/artifacts"))
+FAIL_DIR = ARTIFACTS_DIR / "format_failures"
 
 
-def wait_for_api_ready():
+def wait_for_api_ready() -> None:
     deadline = time.time() + READY_TIMEOUT_SECONDS
     last_error = None
     url = f"{BASE_URL}{HEALTH_PATH}"
@@ -33,189 +36,171 @@ def wait_for_api_ready():
                     return
                 last_error = f"health payload not ready: {payload}"
             else:
-                last_error = f"health status={response.status_code} body={response.text}"
+                last_error = (
+                    f"health status={response.status_code} body={response.text}"
+                )
         except requests.RequestException as exc:
             last_error = str(exc)
         time.sleep(1)
     raise RuntimeError(f"API did not become ready: {last_error}")
 
 
-def clickhouse_request(method: str, path: str = "/", *, params=None, data=None):
-    url = f"{CLICKHOUSE_URL}{path}"
-    return requests.request(
-        method,
-        url,
-        params=params,
-        data=data,
-        timeout=CLICKHOUSE_TIMEOUT_SECONDS,
-        auth=(CLICKHOUSE_USER, CLICKHOUSE_PASSWORD) if CLICKHOUSE_PASSWORD else None,
-    )
-
-
-def wait_for_clickhouse_ready():
-    deadline = time.time() + CLICKHOUSE_READY_TIMEOUT_SECONDS
-    last_error = None
-    while time.time() < deadline:
-        try:
-            response = clickhouse_request("GET", "/ping")
-            if response.status_code == 200 and response.text.strip() == "Ok.":
-                return
-            last_error = f"ping status={response.status_code} body={response.text}"
-        except requests.RequestException as exc:
-            last_error = str(exc)
-        time.sleep(1)
-    raise RuntimeError(f"ClickHouse did not become ready: {last_error}")
-
-
 @pytest.fixture(scope="session", autouse=True)
-def services_ready():
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
+def api_ready() -> None:
     wait_for_api_ready()
-    wait_for_clickhouse_ready()
 
 
-def iter_sql_files():
-    return sorted(SQL_DIR.glob("*.sql"))
+def normalize_sql_file_content(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
 
 
 def load_sql_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return normalize_sql_file_content(path.read_text(encoding="utf-8"))
 
 
-def compact_sql(text: str) -> str:
-    out = []
-    in_string = False
-    in_line_comment = False
-    in_block_comment = False
-    pending_space = False
-    i = 0
-    n = len(text)
-
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
-
-        if in_string:
-            out.append(c)
-            if c == "'":
-                if nxt == "'":
-                    out.append(nxt)
-                    i += 2
-                    continue
-                in_string = False
-            i += 1
-            continue
-
-        if in_line_comment:
-            out.append(c)
-            if c == "\n":
-                in_line_comment = False
-                pending_space = False
-            i += 1
-            continue
-
-        if in_block_comment:
-            out.append(c)
-            if c == "*" and nxt == "/":
-                out.append(nxt)
-                i += 2
-                in_block_comment = False
-                continue
-            i += 1
-            continue
-
-        if c == "'":
-            if pending_space and out and out[-1] not in (" ", "\n"):
-                out.append(" ")
-            pending_space = False
-            out.append(c)
-            in_string = True
-            i += 1
-            continue
-
-        if c == "-" and nxt == "-":
-            if pending_space and out and out[-1] not in (" ", "\n"):
-                out.append(" ")
-            pending_space = False
-            out.append(c)
-            out.append(nxt)
-            in_line_comment = True
-            i += 2
-            continue
-
-        if c == "/" and nxt == "*":
-            if pending_space and out and out[-1] not in (" ", "\n"):
-                out.append(" ")
-            pending_space = False
-            out.append(c)
-            out.append(nxt)
-            in_block_comment = True
-            i += 2
-            continue
-
-        if c.isspace():
-            pending_space = True
-            i += 1
-            continue
-
-        if pending_space and out and out[-1] not in (" ", "\n", "(", "[", ","):
-            out.append(" ")
-        pending_space = False
-        out.append(c)
-        i += 1
-
-    return "".join(out).strip()
+def write_sql_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(normalize_sql_file_content(text), encoding="utf-8")
 
 
-def normalize_fixture_text(text: str) -> str:
-    return text.replace("\r\n", "\n")
+def escape_clickhouse_string(value: str) -> str:
+    escaped = []
+    for char in value:
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == "'":
+            escaped.append("\\'")
+        elif char == "\n":
+            escaped.append("\\n")
+        elif char == "\r":
+            escaped.append("\\r")
+        elif char == "\t":
+            escaped.append("\\t")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
 
 
-def fetch_clickhouse_syntax(sql: str):
-    query = f"EXPLAIN SYNTAX {sql}"
-    return clickhouse_request(
-        "POST",
-        "/",
-        params={"default_format": "TabSeparatedRaw"},
+def fetch_clickhouse_raw_formatted_sql(sql_text: str) -> str:
+    escaped_sql = escape_clickhouse_string(sql_text)
+    query = f"SELECT formatQuery('{escaped_sql}') AS query FORMAT TSVRaw"
+    response = requests.post(
+        f"{CLICKHOUSE_URL}/",
+        params={"database": "default"},
         data=query.encode("utf-8"),
+        auth=(CLICKHOUSE_USER, CLICKHOUSE_PASSWORD),
+        timeout=CLICKHOUSE_TIMEOUT_SECONDS,
     )
+    response.raise_for_status()
+    return normalize_sql_file_content(response.text)
 
 
-def write_raw_sql(path: Path, text: str):
+def iter_expected_sql_files() -> list[Path]:
+    return sorted(SQL_DIR.glob("*.sql"))
+
+
+def require_expected_sql_files() -> list[Path]:
+    files = iter_expected_sql_files()
+    if not files:
+        raise SystemExit(f"no .sql files found in {SQL_DIR}")
+    return files
+
+
+def require_raw_sql_path(expected_sql_path: Path) -> Path:
+    raw_path = RAW_DIR / expected_sql_path.name
+    if not raw_path.exists():
+        raise SystemExit(
+            f"missing raw sql file for {expected_sql_path.name}: {raw_path}"
+        )
+    return raw_path
+
+
+def update_sql_raw_from_clickhouse() -> int:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    for sql_path in require_expected_sql_files():
+        raw_sql = fetch_clickhouse_raw_formatted_sql(load_sql_text(sql_path))
+        raw_path = RAW_DIR / sql_path.name
+        write_sql_text(raw_path, raw_sql)
+        print(f"updated {raw_path}")
+    return 0
 
 
-@pytest.mark.parametrize("sql_path", iter_sql_files(), ids=lambda path: path.stem)
-def test_format_sql_roundtrip(sql_path):
-    expected_sql = load_sql_text(sql_path)
+def unified_sql_diff(expected_sql: str, actual_sql: str, file_name: str) -> str:
+    diff_lines = list(
+        difflib.unified_diff(
+            expected_sql.split("\n"),
+            actual_sql.split("\n"),
+            fromfile=f"{file_name}:expected",
+            tofile=f"{file_name}:actual",
+            lineterm="",
+            n=2,
+        )
+    )
+    return "\n".join(diff_lines)
+
+
+def write_failure_artifacts(
+    expected_sql_path: Path,
+    input_sql: str,
+    expected_sql: str,
+    actual_sql: str,
+) -> tuple[Path, Path, Path]:
+    FAIL_DIR.mkdir(parents=True, exist_ok=True)
+    input_path = FAIL_DIR / f"{expected_sql_path.stem}.input.sql"
+    expected_path = FAIL_DIR / f"{expected_sql_path.stem}.expected.sql"
+    actual_path = FAIL_DIR / f"{expected_sql_path.stem}.actual.sql"
+    write_sql_text(input_path, input_sql)
+    write_sql_text(expected_path, expected_sql)
+    write_sql_text(actual_path, actual_sql)
+    return input_path, expected_path, actual_path
+
+
+@pytest.mark.parametrize(
+    "expected_sql_path", require_expected_sql_files(), ids=lambda path: path.stem
+)
+def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
+    raw_sql_path = require_raw_sql_path(expected_sql_path)
+    input_sql = load_sql_text(raw_sql_path)
+    expected_sql = load_sql_text(expected_sql_path)
+
     response = requests.post(
         f"{BASE_URL}/api/format",
         json={
             "host_id": "local",
-            "sql": compact_sql(expected_sql),
+            "sql": input_sql,
         },
         timeout=TIMEOUT_SECONDS,
     )
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 200, (
+        f"{expected_sql_path.name}: status={response.status_code} body={response.text}"
+    )
+
     payload = response.json()
-    formatted_sql = payload.get("formatted_sql")
-    assert isinstance(formatted_sql, str), payload
+    formatted_sql = normalize_sql_file_content(payload.get("formatted_sql", ""))
 
-    if UPDATE_EXPECTED_SQL:
-        updated_sql = normalize_fixture_text(formatted_sql)
-        if expected_sql != updated_sql:
-            sql_path.write_text(updated_sql, encoding="utf-8")
-            expected_sql = updated_sql
+    if formatted_sql == expected_sql:
+        return
 
-    assert formatted_sql == expected_sql, payload
+    input_path, expected_path, actual_path = write_failure_artifacts(
+        expected_sql_path=expected_sql_path,
+        input_sql=input_sql,
+        expected_sql=expected_sql,
+        actual_sql=formatted_sql,
+    )
+    diff = unified_sql_diff(expected_sql, formatted_sql, expected_sql_path.name)
+    if not diff:
+        diff = "(no unified diff available)"
 
-    ch_response = fetch_clickhouse_syntax(formatted_sql)
-    raw_path = RAW_DIR / f"{sql_path.stem}.sql"
-    write_raw_sql(raw_path, ch_response.text)
-
-    if ASSERT_CLICKHOUSE_SUCCESS:
-        assert ch_response.status_code == 200, (
-            f"ClickHouse syntax explain failed for {sql_path.name}:\n{ch_response.text}"
+    pytest.fail(
+        "\n".join(
+            [
+                f"format mismatch: {expected_sql_path.name}",
+                f"input:    {input_path}",
+                f"expected: {expected_path}",
+                f"actual:   {actual_path}",
+                "",
+                diff,
+            ]
         )
+    )
