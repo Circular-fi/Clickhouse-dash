@@ -1349,6 +1349,33 @@
     renderVerticalSingleRow(allResultRows[0]);
   }
 
+  function simplifySingleValueTable() {
+    if (!dom.resultTableHead || !dom.resultTableBody) return null;
+
+    const headRow = document.createElement("tr");
+    const th = document.createElement("th");
+    const colName = String((Array.isArray(resultColumns) && resultColumns[0]) ?? "");
+    th.textContent = colName;
+    th.title = resultTypes[0] || colName;
+    headRow.appendChild(th);
+
+    dom.resultTableHead.innerHTML = "";
+    dom.resultTableHead.appendChild(headRow);
+
+    let tr = dom.resultTableBody.querySelector("tr");
+    if (!tr) {
+      tr = document.createElement("tr");
+      dom.resultTableBody.appendChild(tr);
+    }
+
+    let td = tr.querySelector("td:not(.resultTable__rowIndex)");
+    if (!td) td = document.createElement("td");
+
+    tr.innerHTML = "";
+    tr.appendChild(td);
+    return td;
+  }
+
   function maybeRenderSingleRowValueCell() {
     if (isVerticalResults) return;
     if (!Array.isArray(resultColumns) || resultColumns.length !== 1) return;
@@ -1360,20 +1387,18 @@
 
     if (scheduledFlush || pendingRows.length) flushPendingRows();
 
-    const apply = (cell) => {
+    const apply = () => {
+      const cell = simplifySingleValueTable();
       if (!cell) return;
       renderSingleValueCell(cell, raw, 0, resultTypeAsts);
     };
 
     const td = dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)");
     if (!td) {
-      requestAnimationFrame(() => {
-        const td2 = dom.resultTableBody ? dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)") : null;
-        apply(td2);
-      });
+      requestAnimationFrame(() => apply());
       return;
     }
-    apply(td);
+    apply();
   }
 
   function finalizeAfterDone() {
@@ -2101,6 +2126,35 @@
       renderVerticalSingleRowLocal(local.allRows[0]);
     }
 
+    function simplifySingleValueTableLocal() {
+      if (!local.wrap) return null;
+      const { thead, tbody } = findTablePartsIn(local.wrap);
+      if (!thead || !tbody) return null;
+
+      const headRow = document.createElement("tr");
+      const th = document.createElement("th");
+      const colName = String((Array.isArray(local.columns) && local.columns[0]) ?? "");
+      th.textContent = colName;
+      th.title = local.types[0] || colName;
+      headRow.appendChild(th);
+
+      thead.innerHTML = "";
+      thead.appendChild(headRow);
+
+      let tr = tbody.querySelector("tr");
+      if (!tr) {
+        tr = document.createElement("tr");
+        tbody.appendChild(tr);
+      }
+
+      let td = tr.querySelector("td:not(.resultTable__rowIndex)");
+      if (!td) td = document.createElement("td");
+
+      tr.innerHTML = "";
+      tr.appendChild(td);
+      return td;
+    }
+
     function maybeRenderSingleRowValueCellLocal() {
       if (local.isVertical) return;
       if (!Array.isArray(local.columns) || local.columns.length !== 1) return;
@@ -2111,8 +2165,16 @@
       if (!tbody) return;
       const row = local.allRows[0];
       const raw = Array.isArray(row) ? row[0] : row;
+      const apply = () => {
+        const td = simplifySingleValueTableLocal();
+        if (td) renderSingleValueCell(td, raw, 0, local.typeAsts);
+      };
       const td = tbody.querySelector("tr td:not(.resultTable__rowIndex)");
-      if (td) renderSingleValueCell(td, raw, 0, local.typeAsts);
+      if (!td) {
+        requestAnimationFrame(() => apply());
+        return;
+      }
+      apply();
     }
 
     function scheduleLocalTableFullRender() {
