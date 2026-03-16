@@ -9,7 +9,13 @@ def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "test"
 
     if mode == "test":
-        return pytest.main(["-q", "/tests/format/check_format.py"])
+        return pytest.main(
+            [
+                "-q",
+                "/tests/format/check_format.py",
+                "/tests/query_types/check_query_types.py",
+            ]
+        )
 
     if mode == "update-raw":
         return update_sql_raw_from_clickhouse()
