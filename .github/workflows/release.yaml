@@ -6,11 +6,17 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Build (${{ matrix.goos }} ${{ matrix.goarch }})
+    permissions:
+      contents: read
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -140,6 +146,8 @@ jobs:
     name: Publish GitHub Release assets
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

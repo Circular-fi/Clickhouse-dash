@@ -31,12 +31,84 @@
 #include <string>
 #include <string_view>
 
+#include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
 namespace chdash {
 
 namespace detail {
+
+inline bool is_valid_utf8(std::string_view s) {
+  size_t i = 0;
+  while (i < s.size()) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    if (c <= 0x7F) {
+      ++i;
+      continue;
+    }
+    if ((c >> 5) == 0x6) {
+      if (i + 1 >= s.size()) return false;
+      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+      if ((c1 & 0xC0) != 0x80 || c < 0xC2) return false;
+      i += 2;
+      continue;
+    }
+    if ((c >> 4) == 0xE) {
+      if (i + 2 >= s.size()) return false;
+      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+      unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
+      if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) return false;
+      if (c == 0xE0 && c1 < 0xA0) return false;
+      if (c == 0xED && c1 >= 0xA0) return false;
+      i += 3;
+      continue;
+    }
+    if ((c >> 3) == 0x1E) {
+      if (i + 3 >= s.size()) return false;
+      unsigned char c1 = static_cast<unsigned char>(s[i + 1]);
+      unsigned char c2 = static_cast<unsigned char>(s[i + 2]);
+      unsigned char c3 = static_cast<unsigned char>(s[i + 3]);
+      if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) return false;
+      if (c == 0xF0 && c1 < 0x90) return false;
+      if (c > 0xF4) return false;
+      if (c == 0xF4 && c1 >= 0x90) return false;
+      i += 4;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool starts_with_ci(std::string_view s, std::string_view pfx) {
+  if (s.size() < pfx.size()) return false;
+  for (size_t i = 0; i < pfx.size(); ++i) {
+    char a = s[i];
+    char b = pfx[i];
+    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+    if (a != b) return false;
+  }
+  return true;
+}
+
+inline std::string bytes_to_hex(std::string_view s) {
+  static const char* hex = "0123456789abcdef";
+  std::string out;
+  out.resize(s.size() * 2);
+  for (size_t i = 0; i < s.size(); ++i) {
+    unsigned char c = static_cast<unsigned char>(s[i]);
+    out[i * 2] = hex[(c >> 4) & 0x0F];
+    out[i * 2 + 1] = hex[c & 0x0F];
+  }
+  return out;
+}
+
+inline bool column_is_stringish(const clickhouse::ColumnRef& col) {
+  const auto code = col->Type()->GetCode();
+  return code == clickhouse::Type::String || code == clickhouse::Type::FixedString;
+}
 
 inline void writer_string(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view s) {
   w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
@@ -374,6 +446,42 @@ inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
 // Encode a single cell value (one column at one row) as JSON.
 inline void write_cell_json(rapidjson::Writer<rapidjson::StringBuffer>& w, const clickhouse::ColumnRef& col, size_t row) {
   detail::write_column_value(w, col, row);
+}
+
+inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>& w,
+                                     const clickhouse::ColumnRef& col,
+                                     size_t row,
+                                     const std::string& declared_type) {
+  if (detail::starts_with_ci(declared_type, "json") || detail::starts_with_ci(declared_type, "object('json')")) {
+    if (detail::column_is_stringish(col)) {
+      const auto sv = col->GetItem(row).get<std::string_view>();
+      if (detail::is_valid_utf8(sv)) {
+        rapidjson::Document d;
+        d.Parse(sv.data(), sv.size());
+        if (!d.HasParseError()) {
+          d.Accept(w);
+          return;
+        }
+      }
+      detail::writer_string(w, sv);
+      return;
+    }
+  }
+
+  if (detail::starts_with_ci(declared_type, "aggregatefunction(")) {
+    if (detail::column_is_stringish(col)) {
+      const auto sv = col->GetItem(row).get<std::string_view>();
+      if (detail::is_valid_utf8(sv) && sv.find('\0') == std::string_view::npos) {
+        detail::writer_string(w, sv);
+      } else {
+        const auto hex = detail::bytes_to_hex(sv);
+        detail::writer_string(w, hex);
+      }
+      return;
+    }
+  }
+
+  write_cell_json(w, col, row);
 }
 
 // Encode one row of a block as a JSON object, with field names == ClickHouse column names.

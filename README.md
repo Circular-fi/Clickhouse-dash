@@ -2,6 +2,10 @@
 
 A real-time ClickHouse query dashboard with live metrics.
 
+[![CI](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml)
+[![Release](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml)
+
 Backend: **C++17** (clickhouse-cpp + cpp-httplib + rapidjson)  
 Frontend: **Vanilla JS + Canvas**  
 Transport: **Server-Sent Events (SSE)**
@@ -80,7 +84,7 @@ If your ClickHouse server/role overrides this setting, CPU/RAM/Threads may stay 
 
 ```
 cd test
-docker-compose up --build
+docker compose up --build
 ```
 
 Open:
@@ -162,34 +166,38 @@ clickhouse {
 
 A tag push creates GitHub release assets automatically:
 
-- `.github/workflows/release.yml`
+- `.github/workflows/release.yaml`
 - Trigger: tags matching `v*`
 
-Artifacts include the binary and (if present) `src/static/`.
+Artifacts include release tarballs and checksums.
 
 ---
 
 ## ✅ TODO / Roadmap 
 
-### Query workflow
-
-* [ ] SQL auto-format (button + optional format-on-run)
-
-### UI / UX
-
-* [ ] Better rendering: nicer editor + pretty JSON + collapse long cells
-
 ### Data explorer
 
 * [ ] Databases/Tables page (sizes + sort/filter)
-* [ ] MV/Buffer dependency graph (click to inspect)
+* [ ] MV/Buffer dependency graph 
 
 ### Perf / Ops
 
 * [ ] Query perf tracking (CPU/RAM/threads + top queries)
-* [ ] Cluster perf overview (per-host if possible)
+* [ ] Cluster perf overview
 
 ---
+
+## 🤝 Contributing
+
+See `CONTRIBUTING.md` for local development, testing, and pull request guidelines.
+
+## 🔐 Security
+
+See `SECURITY.md` for responsible disclosure guidance.
+
+## 💬 Support
+
+See `SUPPORT.md` for support and issue reporting guidance.
 
 ## 📝 License
 

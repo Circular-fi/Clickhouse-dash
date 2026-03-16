@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/SCcagg5/Clickhouse-dash/blob/main/SECURITY.md
+    about: Please use a private channel for security issues.
+  - name: Support
+    url: https://github.com/SCcagg5/Clickhouse-dash/blob/main/SUPPORT.md
+    about: Read support guidance before opening an issue.

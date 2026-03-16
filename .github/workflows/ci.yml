@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+    tags-ignore:
+      - 'v*'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Build and run integration tests
+        run: |
+          docker compose -f test/docker-compose.yml up \
+            --build \
+            --abort-on-container-exit \
+            --exit-code-from api-tests
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker compose -f test/docker-compose.yml ps -a > artifacts/compose-ps.txt || true
+          docker compose -f test/docker-compose.yml logs --no-color > artifacts/compose.log || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: artifacts
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f test/docker-compose.yml down -v --remove-orphans || true

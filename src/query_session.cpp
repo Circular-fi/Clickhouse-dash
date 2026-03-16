@@ -353,6 +353,156 @@ static bool iequals_ascii(std::string_view a, std::string_view b) {
   return true;
 }
 
+static std::string trim_copy(std::string s) {
+  auto is_ws = [](char ch) {
+    return ch == ' ' || ch == 9 || ch == 10 || ch == 13;
+  };
+  while (!s.empty() && is_ws(s.front())) s.erase(s.begin());
+  while (!s.empty() && is_ws(s.back())) s.pop_back();
+  return s;
+}
+
+static std::string strip_trailing_semicolon_copy(std::string s) {
+  s = trim_copy(std::move(s));
+  if (!s.empty() && s.back() == ';') {
+    s.pop_back();
+    s = trim_copy(std::move(s));
+  }
+  return s;
+}
+
+enum class ResultTransportMode {
+  Passthrough,
+  Stringify,
+  Opaque,
+};
+
+struct ResultColumnPlan {
+  std::string original_type;
+  std::string transport_type;
+  ResultTransportMode mode = ResultTransportMode::Passthrough;
+};
+
+static const char* transport_mode_name(ResultTransportMode mode) {
+  switch (mode) {
+    case ResultTransportMode::Passthrough: return "passthrough";
+    case ResultTransportMode::Stringify: return "stringify";
+    case ResultTransportMode::Opaque: return "opaque";
+  }
+  return "passthrough";
+}
+
+static bool unwrap_outer_type(std::string_view type, std::string_view outer_name, std::string_view* inner_out) {
+  if (type.size() <= outer_name.size() + 2) return false;
+  if (!iequals_ascii(type.substr(0, outer_name.size()), outer_name)) return false;
+  if (type[outer_name.size()] != '(' || type.back() != ')') return false;
+
+  int depth = 0;
+  for (size_t i = outer_name.size(); i < type.size(); ++i) {
+    const char ch = type[i];
+    if (ch == '(') depth++;
+    else if (ch == ')') {
+      depth--;
+      if (depth == 0 && i != type.size() - 1) return false;
+    }
+  }
+  if (depth != 0) return false;
+
+  if (inner_out) {
+    *inner_out = type.substr(outer_name.size() + 1, type.size() - outer_name.size() - 2);
+  }
+  return true;
+}
+
+static bool is_top_level_nullable_type(std::string_view type) {
+  std::string_view inner;
+  return unwrap_outer_type(type, "Nullable", &inner);
+}
+
+static bool has_json_like_type(std::string_view type) {
+  return icontains(type, "JSON") || icontains(type, "Dynamic") || icontains(type, "Object(");
+}
+
+static bool has_256_bit_int_type(std::string_view type) {
+  return icontains(type, "UInt256") || icontains(type, "Int256");
+}
+
+static bool has_aggregate_function_type(std::string_view type) {
+  return icontains(type, "AggregateFunction(");
+}
+
+static ResultTransportMode classify_result_transport(std::string_view type) {
+  if (has_aggregate_function_type(type)) return ResultTransportMode::Opaque;
+  if (has_256_bit_int_type(type) || has_json_like_type(type)) return ResultTransportMode::Stringify;
+  return ResultTransportMode::Passthrough;
+}
+
+static std::string quote_ident(std::string_view ident) {
+  std::string out;
+  out.reserve(ident.size() + 2);
+  out.push_back('`');
+  for (char ch : ident) {
+    if (ch == '`') out += "``";
+    else out.push_back(ch);
+  }
+  out.push_back('`');
+  return out;
+}
+
+static std::string build_projected_expr(const std::string& col_name, const ResultColumnPlan& plan) {
+  const std::string ref = std::string("_q.") + quote_ident(col_name);
+  const std::string alias = quote_ident(col_name);
+  const bool nullable = is_top_level_nullable_type(plan.original_type);
+
+  if (plan.mode == ResultTransportMode::Passthrough) {
+    return ref + " AS " + alias;
+  }
+
+  std::string converted;
+  if (plan.mode == ResultTransportMode::Opaque) {
+    converted = "toString(" + ref + ")";
+  } else if (has_256_bit_int_type(plan.original_type) && !has_json_like_type(plan.original_type)) {
+    converted = "toString(" + ref + ")";
+  } else {
+    converted = "toJSONString(" + ref + ")";
+  }
+
+  if (nullable) {
+    converted = "if(isNull(" + ref + "), CAST(NULL AS Nullable(String)), " + converted + ")";
+  }
+  return converted + " AS " + alias;
+}
+
+static std::string build_transport_wrapper_sql(
+  const std::string& original_sql,
+  const std::vector<std::pair<std::string, ResultColumnPlan>>& columns,
+  bool* used_wrapper_out = nullptr
+) {
+  bool needs_wrapper = false;
+  for (const auto& kv : columns) {
+    if (kv.second.mode != ResultTransportMode::Passthrough) {
+      needs_wrapper = true;
+      break;
+    }
+  }
+  if (used_wrapper_out) *used_wrapper_out = needs_wrapper;
+  if (!needs_wrapper || columns.empty()) {
+    return original_sql;
+  }
+
+  std::ostringstream oss;
+  oss << "SELECT\n";
+  for (size_t i = 0; i < columns.size(); ++i) {
+    oss << "    " << build_projected_expr(columns[i].first, columns[i].second);
+    if (i + 1 < columns.size()) oss << ",";
+    oss << "\n";
+  }
+  oss << "FROM\n(\n";
+  oss << strip_trailing_semicolon_copy(original_sql) << "\n";
+  oss << ") AS _q";
+  return oss.str();
+}
+
 
 void QuerySession::run_query() {
   try {
@@ -363,11 +513,11 @@ void QuerySession::run_query() {
     try {
       if (!database_.empty()) client_query_->Execute("USE " + database_);
     } catch (...) {}
-    std::string sql_trim = sql_;
-    while (!sql_trim.empty() && (sql_trim.front()==' ' || sql_trim.front()=='\t' || sql_trim.front()=='\n' || sql_trim.front()=='\r')) sql_trim.erase(sql_trim.begin());
+    const std::string sql_trim = trim_copy(sql_);
 
+    const bool is_wrappable_select = starts_with_ci(sql_trim, "select") || starts_with_ci(sql_trim, "with");
     const bool is_select_like =
-      starts_with_ci(sql_trim, "select") || starts_with_ci(sql_trim, "with") || starts_with_ci(sql_trim, "show") || starts_with_ci(sql_trim, "describe") || starts_with_ci(sql_trim, "explain");
+      is_wrappable_select || starts_with_ci(sql_trim, "show") || starts_with_ci(sql_trim, "describe") || starts_with_ci(sql_trim, "explain");
 
     if (!is_select_like) {
       client_query_->Execute(sql_);
@@ -412,17 +562,9 @@ void QuerySession::run_query() {
     // To let the frontend display Tuple / Array(Tuple(...)) as objects with field names, we
     // prefetch verbose column types from the server via DESCRIBE (SELECT ...).
     std::unordered_map<std::string, std::string> described_types;
+    std::vector<std::string> described_column_order;
     try {
-      std::string ds = sql_;
-      // Trim and drop a trailing semicolon (DESCRIBE ( ... ) doesn't accept it).
-      auto ltrim = [](std::string& s) {
-        while (!s.empty() && (s.front()==' ' || s.front()=='\t' || s.front()=='\n' || s.front()=='\r')) s.erase(s.begin());
-      };
-      auto rtrim = [](std::string& s) {
-        while (!s.empty() && (s.back()==' ' || s.back()=='\t' || s.back()=='\n' || s.back()=='\r')) s.pop_back();
-      };
-      ltrim(ds); rtrim(ds);
-      if (!ds.empty() && ds.back() == ';') { ds.pop_back(); rtrim(ds); }
+      std::string ds = strip_trailing_semicolon_copy(sql_);
 
       clickhouse::Query dq("DESCRIBE (" + ds + ")");
       dq.OnData([&](const clickhouse::Block& b) {
@@ -445,7 +587,11 @@ void QuerySession::run_query() {
         for (size_t r = 0; r < b.GetRowCount(); ++r) {
           const std::string_view n = c_name->At(r);
           const std::string_view t = c_type->At(r);
-          described_types[std::string(n)] = normalize_type_string(std::string(t));
+          const std::string name(n);
+          if (described_types.find(name) == described_types.end()) {
+            described_column_order.push_back(name);
+          }
+          described_types[name] = normalize_type_string(std::string(t));
         }
       });
 
@@ -454,7 +600,27 @@ void QuerySession::run_query() {
       // Best-effort: if DESCRIBE fails (e.g. invalid SQL), fall back to clickhouse-cpp types.
     }
 
-    clickhouse::Query q(sql_, query_id_);
+    std::vector<std::pair<std::string, ResultColumnPlan>> result_plan;
+    result_plan.reserve(described_column_order.size());
+    for (const auto& name : described_column_order) {
+      auto it = described_types.find(name);
+      if (it == described_types.end()) continue;
+      ResultColumnPlan plan;
+      plan.original_type = it->second;
+      plan.mode = classify_result_transport(it->second);
+      plan.transport_type = (plan.mode == ResultTransportMode::Passthrough)
+        ? it->second
+        : (is_top_level_nullable_type(it->second) ? std::string("Nullable(String)") : std::string("String"));
+      result_plan.push_back({name, std::move(plan)});
+    }
+
+    bool used_transport_wrapper = false;
+    std::string effective_sql = sql_;
+    if (is_wrappable_select && !result_plan.empty()) {
+      effective_sql = build_transport_wrapper_sql(sql_, result_plan, &used_transport_wrapper);
+    }
+
+    clickhouse::Query q(effective_sql, query_id_);
 
     // Ensure ClickHouse actually sends ProfileEvents packets to the client (native TCP).
     // Otherwise CPU/RAM/thread stats will stay empty.
@@ -622,6 +788,23 @@ void QuerySession::run_query() {
           const auto& name = block.GetColumnName(i);
           auto it = described_types.find(name);
           if (it != described_types.end()) {
+            const ResultTransportMode mode = classify_result_transport(it->second);
+            const std::string transport_type = (mode == ResultTransportMode::Passthrough)
+              ? it->second
+              : (is_top_level_nullable_type(it->second) ? std::string("Nullable(String)") : std::string("String"));
+            w.String(transport_type.c_str(), (rapidjson::SizeType)transport_type.size());
+          } else {
+            const auto& tn = block[i]->Type()->GetName();
+            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+          }
+        }
+        w.EndArray();
+        w.Key("original_types");
+        w.StartArray();
+        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+          const auto& name = block.GetColumnName(i);
+          auto it = described_types.find(name);
+          if (it != described_types.end()) {
             const auto& tn = it->second;
             w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
           } else {
@@ -630,6 +813,19 @@ void QuerySession::run_query() {
           }
         }
         w.EndArray();
+        w.Key("transport_modes");
+        w.StartArray();
+        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+          const auto& name = block.GetColumnName(i);
+          auto it = described_types.find(name);
+          const char* mode_name = "passthrough";
+          if (it != described_types.end()) {
+            mode_name = transport_mode_name(classify_result_transport(it->second));
+          }
+          w.String(mode_name);
+        }
+        w.EndArray();
+        w.Key("used_transport_wrapper"); w.Bool(used_transport_wrapper);
         w.EndObject();
         push_sse_json_event("result_meta", sb.GetString());
         meta_sent = true;

@@ -1,0 +1,11 @@
+# Default owners
+* @SCcagg5
+
+# CI and repository settings
+.github/** @SCcagg5
+
+# Source code
+src/** @SCcagg5
+
+# Tests
+test/** @SCcagg5

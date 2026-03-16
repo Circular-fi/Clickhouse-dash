@@ -27,7 +27,6 @@ WITH
                     SELECT col_2
                     FROM cte_1
                 )
-            
         GROUP BY col_2
         HAVING col_10 > 0.1
     ),
