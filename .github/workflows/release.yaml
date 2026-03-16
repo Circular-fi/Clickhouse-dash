@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -50,11 +50,11 @@ jobs:
 
       - name: Set up QEMU
         if: matrix.goos == 'linux'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
         if: matrix.goos == 'linux'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build (Linux via Dockerfile target=production, cached)
         if: matrix.goos == 'linux'
@@ -86,7 +86,7 @@ jobs:
 
       - name: Cache CMake deps (macOS)
         if: matrix.goos == 'darwin'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             build/_deps
@@ -136,7 +136,7 @@ jobs:
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chdash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
           path: ${{ steps.package.outputs.tar }}
@@ -150,7 +150,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
 
