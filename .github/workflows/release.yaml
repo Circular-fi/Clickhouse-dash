@@ -136,7 +136,7 @@ jobs:
           echo "tar=$TAR" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chdash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
           path: ${{ steps.package.outputs.tar }}
