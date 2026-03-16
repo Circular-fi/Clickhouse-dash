@@ -902,6 +902,12 @@
     dom.queryTextArea.addEventListener("keydown", (e) => {
       const key = e.key;
       if (e.isComposing) return;
+      if ((e.ctrlKey || e.metaKey) && key === "Enter") {
+        e.preventDefault();
+        const run = ns.run;
+        if (run && typeof run.handleRun === "function") run.handleRun();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (key === "`" || key === "\"" || key === "'") {
