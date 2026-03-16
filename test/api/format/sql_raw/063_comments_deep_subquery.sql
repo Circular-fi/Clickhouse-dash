@@ -12,11 +12,12 @@ FROM
             entity_key,
             metric_value
         FROM anon.metrics_store
-        WHERE (event_date >= toDate('2026-01-01')) AND has(tag_values, 'priority')
+        WHERE (event_date >= toDate('2026-01-01'))  -- nested filter comment
+        AND has(tag_values, 'priority')
     ) AS inner_src
     GROUP BY inner_src.entity_key
 ) AS outer_src
-WHERE (outer_src.metric_value > 0) AND (outer_src.entity_key != '')
+WHERE (outer_src.metric_value > 0) AND (outer_src.entity_key != '')  -- outer filter comment
 ORDER BY
     outer_src.metric_value DESC,
     outer_src.entity_key ASC

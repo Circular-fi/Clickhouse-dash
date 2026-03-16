@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 namespace chdash {
 
 static bool is_ascii_space(char c) {
@@ -95,27 +97,149 @@ static bool contains_token_outside_strings(std::string_view s, std::string_view 
   return false;
 }
 
-static std::string pretty_array_arg(std::string_view arr_expr, const std::string& base_indent) {
-  // Only rewrite when it clearly looks like a "complex" array (outer arrays of tuples, etc.).
-  // Simple arrays like ['a','b'] are intentionally kept inline.
-  std::string t = trim_ascii_spaces(arr_expr);
-  if (t.size() < 2 || t.front() != '[' || t.back() != ']') return t;
+static std::string pretty_array_arg(std::string_view arr_expr, const std::string& base_indent);
 
-  // Heuristic: array contains tuple(...) outside strings.
-  const bool has_tuple =
-      contains_token_outside_strings(t, "tuple(") || contains_token_outside_strings(t, "Tuple(");
-  if (!has_tuple) return t;
+static bool looks_like_tuple_item(std::string_view s) {
+  const std::string t = trim_ascii_spaces(s);
+  if (t.size() < 2 || t.front() != '(' || t.back() != ')') return false;
+
+  bool in_str = false;
+  bool esc = false;
+  int par = 0;
+  bool has_top_level_comma = false;
+  for (size_t i = 0; i < t.size(); ++i) {
+    const char c = t[i];
+    if (in_str) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c == '\\') {
+        esc = true;
+        continue;
+      }
+      if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == ',' && par == 1) has_top_level_comma = true;
+  }
+
+  return has_top_level_comma;
+}
+
+static std::string reindent_multiline_item(std::string_view block, const std::string& indent) {
+  size_t min_ws = std::numeric_limits<size_t>::max();
+  size_t p = 0;
+  while (p < block.size()) {
+    size_t nl = block.find('\n', p);
+    if (nl == std::string_view::npos) nl = block.size();
+    std::string_view line = block.substr(p, nl - p);
+    size_t k = 0;
+    while (k < line.size() && (line[k] == ' ' || line[k] == '\t')) ++k;
+    if (k < line.size()) min_ws = std::min(min_ws, k);
+    p = (nl < block.size()) ? (nl + 1) : block.size();
+  }
+  if (min_ws == std::numeric_limits<size_t>::max()) min_ws = 0;
+
+  std::string out;
+  out.reserve(block.size() + indent.size() * 8 + 16);
+  p = 0;
+  while (p < block.size()) {
+    size_t nl = block.find('\n', p);
+    if (nl == std::string_view::npos) nl = block.size();
+    std::string_view line = block.substr(p, nl - p);
+    size_t k = 0;
+    while (k < line.size() && (line[k] == ' ' || line[k] == '\t')) ++k;
+    line = line.substr(std::min(k, min_ws));
+    out.append(indent);
+    out.append(line);
+    if (nl < block.size()) out.push_back('\n');
+    p = (nl < block.size()) ? (nl + 1) : block.size();
+  }
+  return out;
+}
+
+static std::string format_tuple_item(std::string_view tuple_expr, const std::string& base_indent) {
+  std::string t = trim_ascii_spaces(tuple_expr);
+  if (!looks_like_tuple_item(t)) return t;
 
   const std::string_view inner(t.data() + 1, t.size() - 2);
   auto items = split_top_level(inner, ',');
   if (items.size() <= 1) return t;
+
+  bool simple_inline = (t.size() <= 56);
+  for (const auto& raw_item : items) {
+    const std::string it = trim_ascii_spaces(raw_item);
+    if (it.find('\n') != std::string::npos ||
+        (it.size() >= 2 && it.front() == '[' && it.back() == ']') ||
+        looks_like_tuple_item(it) || contains_token_outside_strings(it, "tuple(") ||
+        contains_token_outside_strings(it, "Tuple(")) {
+      simple_inline = false;
+      break;
+    }
+  }
+  if (simple_inline) return t;
+
+  const std::string item_indent = base_indent + "    ";
+  std::ostringstream oss;
+  oss << base_indent << "(\n";
+  for (size_t i = 0; i < items.size(); ++i) {
+    std::string it = trim_ascii_spaces(items[i]);
+    if (it.size() >= 2 && it.front() == '[' && it.back() == ']') {
+      oss << pretty_array_arg(it, item_indent);
+    } else if (it.find('\n') != std::string::npos) {
+      oss << reindent_multiline_item(it, item_indent);
+    } else {
+      oss << item_indent << it;
+    }
+    if (i + 1 < items.size()) oss << ",";
+    oss << "\n";
+  }
+  oss << base_indent << ")";
+  return oss.str();
+}
+
+static std::string pretty_array_arg(std::string_view arr_expr, const std::string& base_indent) {
+  std::string t = trim_ascii_spaces(arr_expr);
+  if (t.size() < 2 || t.front() != '[' || t.back() != ']') return t;
+
+  const std::string_view inner(t.data() + 1, t.size() - 2);
+  auto items = split_top_level(inner, ',');
+  if (items.empty()) return t;
+
+  bool has_complex_item = false;
+  for (const auto& raw_item : items) {
+    const std::string item = trim_ascii_spaces(raw_item);
+    if (item.find('\n') != std::string::npos || looks_like_tuple_item(item) ||
+        (item.size() >= 2 && item.front() == '[' && item.back() == ']') ||
+        contains_token_outside_strings(item, "tuple(") || contains_token_outside_strings(item, "Tuple(")) {
+      has_complex_item = true;
+      break;
+    }
+  }
+  if (!has_complex_item) return t;
 
   const std::string item_indent = base_indent + "    ";
   std::ostringstream oss;
   oss << base_indent << "[\n";
   for (size_t i = 0; i < items.size(); ++i) {
     std::string it = trim_ascii_spaces(items[i]);
-    oss << item_indent << it;
+    if (looks_like_tuple_item(it)) {
+      std::string formatted = format_tuple_item(it, item_indent);
+      if (formatted.find('\n') == std::string::npos) oss << item_indent << formatted;
+      else oss << formatted;
+    } else if (it.find('\n') != std::string::npos) {
+      oss << reindent_multiline_item(it, item_indent);
+    } else {
+      oss << item_indent << it;
+    }
     if (i + 1 < items.size()) oss << ",";
     oss << "\n";
   }
@@ -303,6 +427,7 @@ static std::vector<BoolPart> split_bool_ops_top_level(std::string_view s) {
   bool in_block_comment = false;
 
   int par = 0, br = 0, cr = 0;
+  bool in_lambda = false;
   std::string next_op;
 
   auto flush = [&](size_t pos) {
@@ -372,6 +497,17 @@ static std::vector<BoolPart> split_bool_ops_top_level(std::string_view s) {
     else if (c == ']' && br > 0) --br;
     else if (c == '{') ++cr;
     else if (c == '}' && cr > 0) --cr;
+
+    if (!in_lambda && par == 0 && br == 0 && cr == 0 && c == '-' && i + 1 < s.size() && s[i + 1] == '>') {
+      in_lambda = true;
+      ++i;
+      continue;
+    }
+
+    if (in_lambda) {
+      if (par == 0 && br == 0 && cr == 0 && c == ',') in_lambda = false;
+      continue;
+    }
 
     if (par != 0 || br != 0 || cr != 0) continue;
 

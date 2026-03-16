@@ -15,6 +15,90 @@
 
 namespace chdash {
 
+namespace {
+
+bool contains_sql_comments(std::string_view s) {
+  bool in_str = false;
+  bool esc = false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
+    if (in_str) {
+      if (esc) esc = false;
+      else if (c == '\\') esc = true;
+      else if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if ((c == '-' && n == '-') || (c == '/' && n == '*') || c == '#') return true;
+  }
+  return false;
+}
+
+bool has_top_level_values_insert(std::string_view s) {
+  auto is_ident = [](char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_';
+  };
+  auto ieq = [](char a, char b) {
+    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
+    return a == b;
+  };
+  auto match_kw = [&](size_t pos, std::string_view kw) {
+    if (pos + kw.size() > s.size()) return false;
+    for (size_t i = 0; i < kw.size(); ++i) {
+      if (!ieq(s[pos + i], kw[i])) return false;
+    }
+    const char prev = (pos == 0) ? '\0' : s[pos - 1];
+    const char next = (pos + kw.size() < s.size()) ? s[pos + kw.size()] : '\0';
+    if (prev && is_ident(prev)) return false;
+    if (next && is_ident(next)) return false;
+    return true;
+  };
+
+  bool in_str = false;
+  bool esc = false;
+  int par = 0;
+  int br = 0;
+  int brc = 0;
+  bool seen_insert = false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (in_str) {
+      if (esc) esc = false;
+      else if (c == '\\') esc = true;
+      else if (c == '\'') in_str = false;
+      continue;
+    }
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      continue;
+    }
+    if (c == '(') ++par;
+    else if (c == ')' && par > 0) --par;
+    else if (c == '[') ++br;
+    else if (c == ']' && br > 0) --br;
+    else if (c == '{') ++brc;
+    else if (c == '}' && brc > 0) --brc;
+
+    if (par == 0 && br == 0 && brc == 0) {
+      if (!seen_insert && match_kw(i, "INSERT")) seen_insert = true;
+      else if (seen_insert && match_kw(i, "VALUES")) return true;
+      else if (seen_insert && match_kw(i, "SELECT")) return false;
+      else if (seen_insert && match_kw(i, "FORMAT")) return false;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+
 void Server::handle_api_format(const httplib::Request& req, httplib::Response& res) {
   rapidjson::Document doc;
   if (!parse_json_body(req, doc)) {
@@ -40,6 +124,12 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       if (err) *err = "Missing SQL text.";
       return false;
     }
+    const bool preserve_original_surface = contains_sql_comments(sql) || has_top_level_values_insert(sql);
+    if (preserve_original_surface) {
+      if (out_pretty) *out_pretty = postprocess_format_query(sql, 80);
+      return true;
+    }
+
     std::string fmt_err;
     const auto formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
     if (!formatted.has_value()) {

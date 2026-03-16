@@ -1,4 +1,5 @@
 import difflib
+import json
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,9 @@ BASE_URL = os.environ.get("API_BASE_URL", "http://clickhouse-dash:8080").rstrip(
 HEALTH_PATH = os.environ.get("API_HEALTH_PATH", "/api/health")
 TIMEOUT_SECONDS = int(os.environ.get("API_TIMEOUT_SECONDS", "10"))
 READY_TIMEOUT_SECONDS = int(os.environ.get("API_READY_TIMEOUT_SECONDS", "90"))
+REQUEST_RETRIES = int(os.environ.get("API_REQUEST_RETRIES", "2"))
+RETRY_DELAY_SECONDS = float(os.environ.get("API_RETRY_DELAY_SECONDS", "0.5"))
+INTER_TEST_DELAY_SECONDS = float(os.environ.get("API_INTER_TEST_DELAY_SECONDS", "0"))
 
 CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
@@ -21,15 +25,20 @@ RAW_DIR = Path(
 SQL_DIR = Path(os.environ.get("EXPECTED_SQL_DIR", str(Path(__file__).with_name("sql"))))
 ARTIFACTS_DIR = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tests/artifacts"))
 FAIL_DIR = ARTIFACTS_DIR / "format_failures"
+CRASH_DIR = ARTIFACTS_DIR / "api_crash"
+
+SESSION = requests.Session()
+SESSION.headers.update({"Connection": "close"})
 
 
 def wait_for_api_ready() -> None:
     deadline = time.time() + READY_TIMEOUT_SECONDS
     last_error = None
     url = f"{BASE_URL}{HEALTH_PATH}"
+
     while time.time() < deadline:
         try:
-            response = requests.get(url, timeout=TIMEOUT_SECONDS)
+            response = SESSION.get(url, timeout=TIMEOUT_SECONDS)
             if response.status_code == 200:
                 payload = response.json()
                 if payload.get("ok") is True:
@@ -42,6 +51,7 @@ def wait_for_api_ready() -> None:
         except requests.RequestException as exc:
             last_error = str(exc)
         time.sleep(1)
+
     raise RuntimeError(f"API did not become ready: {last_error}")
 
 
@@ -61,6 +71,11 @@ def load_sql_text(path: Path) -> str:
 def write_sql_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(normalize_sql_file_content(text), encoding="utf-8")
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text.rstrip("\n"), encoding="utf-8")
 
 
 def escape_clickhouse_string(value: str) -> str:
@@ -84,7 +99,7 @@ def escape_clickhouse_string(value: str) -> str:
 def fetch_clickhouse_raw_formatted_sql(sql_text: str) -> str:
     escaped_sql = escape_clickhouse_string(sql_text)
     query = f"SELECT formatQuery('{escaped_sql}') AS query FORMAT TSVRaw"
-    response = requests.post(
+    response = SESSION.post(
         f"{CLICKHOUSE_URL}/",
         params={"database": "default"},
         data=query.encode("utf-8"),
@@ -155,6 +170,93 @@ def write_failure_artifacts(
     return input_path, expected_path, actual_path
 
 
+def probe_api_health() -> tuple[bool, str]:
+    url = f"{BASE_URL}{HEALTH_PATH}"
+    try:
+        response = SESSION.get(url, timeout=TIMEOUT_SECONDS)
+        body = response.text
+        if response.headers.get("content-type", "").startswith("application/json"):
+            try:
+                body = json.dumps(response.json(), ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        return response.status_code == 200, f"status={response.status_code}\n{body}"
+    except requests.RequestException as exc:
+        return False, f"health request failed: {exc}"
+
+
+def write_crash_artifacts(expected_sql_path: Path, input_sql: str, note: str) -> Path:
+    CRASH_DIR.mkdir(parents=True, exist_ok=True)
+    crash_prefix = CRASH_DIR / expected_sql_path.stem
+    write_sql_text(crash_prefix.with_suffix(".input.sql"), input_sql)
+    write_text(crash_prefix.with_suffix(".diagnostic.txt"), note)
+    return crash_prefix
+
+
+def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
+    url = f"{BASE_URL}/api/format"
+    last_error = None
+
+    for attempt in range(REQUEST_RETRIES + 1):
+        try:
+            response = SESSION.post(
+                url,
+                json={
+                    "host_id": "local",
+                    "sql": input_sql,
+                },
+                timeout=TIMEOUT_SECONDS,
+            )
+
+            if response.status_code != 200:
+                last_error = f"status={response.status_code}\nbody={response.text}"
+            else:
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    last_error = f"invalid json response: {exc}\nbody={response.text}"
+                else:
+                    return normalize_sql_file_content(payload.get("formatted_sql", ""))
+
+        except requests.RequestException as exc:
+            last_error = str(exc)
+
+        if attempt < REQUEST_RETRIES:
+            time.sleep(RETRY_DELAY_SECONDS)
+
+    health_ok, health_note = probe_api_health()
+    diagnostic = "\n\n".join(
+        [
+            f"format request failed for {expected_sql_path.name}",
+            f"last_error:\n{last_error or '(none)'}",
+            f"health_ok={health_ok}",
+            f"health_probe:\n{health_note}",
+        ]
+    )
+    crash_prefix = write_crash_artifacts(expected_sql_path, input_sql, diagnostic)
+
+    if not health_ok:
+        pytest.exit(
+            "\n".join(
+                [
+                    f"API became unhealthy while testing {expected_sql_path.name}",
+                    f"input:      {crash_prefix.with_suffix('.input.sql')}",
+                    f"diagnostic: {crash_prefix.with_suffix('.diagnostic.txt')}",
+                ]
+            )
+        )
+
+    pytest.fail(
+        "\n".join(
+            [
+                f"API request failed for {expected_sql_path.name}",
+                f"input:      {crash_prefix.with_suffix('.input.sql')}",
+                f"diagnostic: {crash_prefix.with_suffix('.diagnostic.txt')}",
+            ]
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "expected_sql_path", require_expected_sql_files(), ids=lambda path: path.stem
 )
@@ -163,21 +265,10 @@ def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
     input_sql = load_sql_text(raw_sql_path)
     expected_sql = load_sql_text(expected_sql_path)
 
-    response = requests.post(
-        f"{BASE_URL}/api/format",
-        json={
-            "host_id": "local",
-            "sql": input_sql,
-        },
-        timeout=TIMEOUT_SECONDS,
-    )
+    formatted_sql = call_format_api(expected_sql_path, input_sql)
 
-    assert response.status_code == 200, (
-        f"{expected_sql_path.name}: status={response.status_code} body={response.text}"
-    )
-
-    payload = response.json()
-    formatted_sql = normalize_sql_file_content(payload.get("formatted_sql", ""))
+    if INTER_TEST_DELAY_SECONDS > 0:
+        time.sleep(INTER_TEST_DELAY_SECONDS)
 
     if formatted_sql == expected_sql:
         return

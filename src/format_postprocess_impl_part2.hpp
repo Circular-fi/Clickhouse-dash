@@ -341,13 +341,59 @@ static std::string reindent_where_and_join(std::string s) {
     const auto parts = split_bool_ops_top_level(expr);
     const bool multiline = (expr.find('\n') != std::string_view::npos);
 
-    out.append(clause_indent);
-    out.append(clause_kw);
+    auto starts_with_call = [](std::string_view t) {
+      t = trim_view_ascii_spaces(t);
+      if (t.empty()) return false;
+      if ((t.front() >= 'A' && t.front() <= 'Z') || (t.front() >= 'a' && t.front() <= 'z') || t.front() == '_') {
+        size_t p = 1;
+        while (p < t.size() && is_ident_char(t[p])) ++p;
+        while (p < t.size() && (t[p] == ' ' || t[p] == '\t')) ++p;
+        return p < t.size() && t[p] == '(';
+      }
+      return false;
+    };
+
+    auto emit_multiline_preserved = [&](std::string_view block) {
+      size_t p = 0;
+      bool first = true;
+      while (p <= block.size()) {
+        const size_t nl = block.find('\n', p);
+        const bool has_nl = (nl != std::string_view::npos);
+        const size_t end = has_nl ? nl : block.size();
+        const std::string_view raw_line = block.substr(p, end - p);
+        const std::string_view t = trim_view_ascii_spaces(raw_line);
+        if (!t.empty()) {
+          if (first) {
+            out.append(clause_indent);
+            out.append(clause_kw);
+            out.push_back(' ');
+            out.append(t);
+            out.push_back('\n');
+            first = false;
+          } else {
+            const bool is_close = (t == ")" || t == "]" || t == "}");
+            out.append(clause_indent);
+            out.append(is_close ? "    " : "        ");
+            out.append(t);
+            out.push_back('\n');
+          }
+        }
+        if (!has_nl) break;
+        p = nl + 1;
+      }
+    };
+
     if (parts.size() <= 1 && !multiline) {
+      out.append(clause_indent);
+      out.append(clause_kw);
       out.push_back(' ');
       out.append(expr);
       out.push_back('\n');
+    } else if (parts.size() <= 1 && multiline && (starts_with_call(expr) || find_token_outside_strings(expr, " IN (") != std::string_view::npos)) {
+      emit_multiline_preserved(expr);
     } else {
+      out.append(clause_indent);
+      out.append(clause_kw);
       out.push_back('\n');
       out.append(format_bool_expr(expr, clause_indent + "    "));
       out.push_back('\n');
@@ -789,7 +835,8 @@ static std::string align_simple_as_in_select(std::string s) {
     size_t target_as_col = 0;
   };
 
-  bool in_select = false;
+  enum class BlockKind { None, Select, With };
+  BlockKind block = BlockKind::None;
   std::vector<Group> groups;
   groups.reserve(8);
 
@@ -872,7 +919,7 @@ static std::string align_simple_as_in_select(std::string s) {
   };
 
   auto add = [&](size_t idx, size_t ind_len, size_t expr_end_col) {
-    const size_t target = expr_end_col + 2;
+    const size_t target = expr_end_col + (block == BlockKind::With ? 1 : 2);
     for (auto& g : groups) {
       if (g.ind_len != ind_len) continue;
       g.idxs.push_back(idx);
@@ -899,8 +946,7 @@ static std::string align_simple_as_in_select(std::string s) {
         size_t ws_start = ind_len + as_pos;
         while (ws_start > 0 && (line[ws_start - 1] == ' ' || line[ws_start - 1] == '\t')) --ws_start;
 
-        const size_t cap = g.ind_len + 80;
-        const size_t target_col = (g.target_as_col > cap) ? cap : g.target_as_col;
+        const size_t target_col = g.target_as_col;
 
         if (as_idx == target_col) continue;
 
@@ -917,17 +963,31 @@ static std::string align_simple_as_in_select(std::string s) {
     while (ind_len < line.size() && (line[ind_len] == ' ' || line[ind_len] == '\t')) ++ind_len;
     std::string_view trimmed(line.data() + ind_len, line.size() - ind_len);
 
-    if (!in_select && (trimmed == "SELECT" || trimmed.rfind("SELECT ", 0) == 0)) {
+    if (trimmed == "WITH") {
       flush();
-      in_select = true;
+      block = BlockKind::With;
       continue;
     }
-    if (in_select && trimmed.rfind("FROM", 0) == 0) {
+    if (block == BlockKind::With && (trimmed == "SELECT" || trimmed.rfind("SELECT ", 0) == 0)) {
       flush();
-      in_select = false;
+      block = BlockKind::Select;
       continue;
     }
-    if (!in_select) {
+    if (block == BlockKind::None && (trimmed == "SELECT" || trimmed.rfind("SELECT ", 0) == 0)) {
+      flush();
+      block = BlockKind::Select;
+      continue;
+    }
+    if (block == BlockKind::Select && trimmed.rfind("FROM", 0) == 0) {
+      flush();
+      block = BlockKind::None;
+      continue;
+    }
+    if (block == BlockKind::With && (trimmed == "(" || starts_with(trimmed, ") AS "))) {
+      flush();
+      continue;
+    }
+    if (block == BlockKind::None) {
       flush();
       continue;
     }

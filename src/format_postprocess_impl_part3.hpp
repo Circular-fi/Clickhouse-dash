@@ -253,13 +253,11 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
           out.append(indent);
         } else if (looks_query) {
           const std::string prev = last_ident_before_paren(std::string_view(out).substr(0, out.size() - 1));
-          if (iequals_ascii(prev, "IN")) {
+          if (iequals_ascii(prev, "IN") || iequals_ascii(prev, "exists")) {
             const std::string inner_indent = indent + "    ";
             out.push_back('\n');
             if (inner_trim.find('\n') != std::string_view::npos) {
-              std::string q = reindent_multiline(inner_trim, inner_indent);
-              q = fix_query_select_lists(std::move(q));
-              out.append(q);
+              out.append(reindent_multiline(inner_trim, inner_indent));
             } else {
               out.append(inner_indent);
               out.append(inner_trim);
@@ -286,6 +284,139 @@ static std::string format_bool_in_parentheses(std::string s, size_t threshold) {
 
   i = 0;
   std::string out = parse(parse, 0);
+  return out;
+}
+
+static std::string reindent_multiline_call_blocks(std::string s) {
+  std::vector<std::string> lines;
+  lines.reserve(64);
+  size_t p = 0;
+  while (p <= s.size()) {
+    const size_t nl = s.find('\n', p);
+    const bool has_nl = (nl != std::string::npos);
+    const size_t end = has_nl ? nl : s.size();
+    lines.push_back(s.substr(p, end - p));
+    p = has_nl ? (nl + 1) : (s.size() + 1);
+  }
+
+  auto line_indent = [](std::string_view line) -> size_t {
+    size_t n = 0;
+    while (n < line.size() && (line[n] == ' ' || line[n] == '\t')) ++n;
+    return n;
+  };
+
+  auto is_call_open = [&](std::string_view line) -> bool {
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+    if (line.empty() || line.back() != '(') return false;
+    line.remove_suffix(1);
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+    if (line.empty()) return false;
+
+    std::string_view trimmed = trim_view_ascii_spaces(line);
+    if (trimmed.rfind("WHERE ", 0) == 0 || trimmed.rfind("PREWHERE ", 0) == 0 || trimmed.rfind("HAVING ", 0) == 0 || trimmed.rfind("ON ", 0) == 0) {
+      return false;
+    }
+    if (trimmed.size() >= 4 && trimmed.substr(trimmed.size() - 4) == "OVER") {
+      return false;
+    }
+
+    const char c = line.back();
+    return is_ident_char(c) || c == '`';
+  };
+
+  auto paren_delta = [](std::string_view line) -> int {
+    bool in_str = false;
+    bool esc = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    int delta = 0;
+    for (size_t i = 0; i < line.size(); ++i) {
+      const char c = line[i];
+      if (in_line_comment) break;
+      if (in_block_comment) {
+        if (c == '*' && i + 1 < line.size() && line[i + 1] == '/') {
+          in_block_comment = false;
+          ++i;
+        }
+        continue;
+      }
+      if (in_str) {
+        if (esc) {
+          esc = false;
+          continue;
+        }
+        if (c == '\\') {
+          esc = true;
+          continue;
+        }
+        if (c == '\'') in_str = false;
+        continue;
+      }
+      if (c == '\'') {
+        in_str = true;
+        esc = false;
+        continue;
+      }
+      if (c == '-' && i + 1 < line.size() && line[i + 1] == '-') {
+        in_line_comment = true;
+        ++i;
+        continue;
+      }
+      if (c == '/' && i + 1 < line.size() && line[i + 1] == '*') {
+        in_block_comment = true;
+        ++i;
+        continue;
+      }
+      if (c == '(') ++delta;
+      else if (c == ')') --delta;
+    }
+    return delta;
+  };
+
+  for (size_t i = 0; i + 1 < lines.size(); ++i) {
+    if (!is_call_open(lines[i])) continue;
+
+    int depth = paren_delta(lines[i]);
+    if (depth <= 0) continue;
+
+    size_t j = i + 1;
+    for (; j < lines.size(); ++j) {
+      depth += paren_delta(lines[j]);
+      if (depth == 0) break;
+    }
+    if (j >= lines.size() || j == i + 1) continue;
+
+    const size_t open_indent = line_indent(lines[i]);
+    const std::string desired_indent(open_indent + 4, ' ');
+
+    size_t min_ws = std::numeric_limits<size_t>::max();
+    for (size_t k = i + 1; k < j; ++k) {
+      std::string_view line = lines[k];
+      size_t ind = line_indent(line);
+      std::string_view trimmed = line.substr(ind);
+      if (trimmed.empty()) continue;
+      min_ws = std::min(min_ws, ind);
+    }
+    if (min_ws == std::numeric_limits<size_t>::max()) min_ws = open_indent + 4;
+
+    for (size_t k = i + 1; k < j; ++k) {
+      std::string_view line = lines[k];
+      size_t ind = line_indent(line);
+      std::string_view trimmed = line.substr(std::min(ind, min_ws));
+      lines[k] = desired_indent + std::string(trimmed);
+    }
+
+    const size_t close_ind = line_indent(lines[j]);
+    lines[j] = std::string(open_indent, ' ') + std::string(lines[j].substr(close_ind));
+    i = j;
+  }
+
+  std::string out;
+  out.reserve(s.size() + 64);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    out.append(lines[i]);
+    if (i + 1 < lines.size()) out.push_back('\n');
+  }
   return out;
 }
 
@@ -618,6 +749,14 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     std::string_view inner = std::string_view(s).substr(name_end + 1, j - (name_end + 1));
     auto args = split_top_level(inner, ',');
 
+    size_t next_non_ws = call_end;
+    while (next_non_ws < s.size() && (s[next_non_ws] == ' ' || s[next_non_ws] == '\t')) ++next_non_ws;
+    if (next_non_ws < s.size() && s[next_non_ws] == '(') {
+      out.append(s.substr(name_beg, call_end - name_beg));
+      i = call_end;
+      continue;
+    }
+
     auto ieq = [](std::string_view a, std::string_view b) -> bool {
       if (a.size() != b.size()) return false;
       for (size_t k = 0; k < a.size(); ++k) {
@@ -636,6 +775,7 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
       line_start = (line_start == std::string::npos) ? 0 : (line_start + 1);
       const size_t col = out.size() - line_start;
       eff_threshold = (threshold > col) ? (threshold - col) : 0;
+      if (eff_threshold < 32) eff_threshold = 32;
     }
 
     const bool long_call = (call_len > eff_threshold);
@@ -665,7 +805,8 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
       if (p < inner_trim.size() && inner_trim[p] == '(') starts_with_ident_call = true;
     }
 
-    const bool should_format = (multi_arg) || (single_arg && starts_with_ident_call);
+    const bool single_arg_bracket = single_arg && !inner_trim.empty() && (inner_trim.front() == "["[0] || inner_trim.front() == "("[0]);
+    const bool should_format = multi_arg || (single_arg && (starts_with_ident_call || single_arg_bracket));
     if (!should_format) {
       out.append(s.substr(name_beg, name_end - name_beg + 1));
       i = name_end + 1;
@@ -677,10 +818,26 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     std::string base_indent;
     if (line_start < out.size()) {
       base_indent = out.substr(line_start);
+      bool only_ws = true;
       for (char ic : base_indent) {
         if (ic != ' ' && ic != '\t') {
-          base_indent.clear();
+          only_ws = false;
           break;
+        }
+      }
+      if (!only_ws) {
+        size_t ws = 0;
+        while (ws < base_indent.size() && (base_indent[ws] == ' ' || base_indent[ws] == '\t')) ++ws;
+        const std::string_view tr = trim_view_ascii_spaces(base_indent);
+        const bool is_bool_prefix =
+            (tr.size() >= 6 && iequals_ascii(tr.substr(0, 6), "WHERE ")) ||
+            (tr.size() >= 9 && iequals_ascii(tr.substr(0, 9), "PREWHERE ")) ||
+            (tr.size() >= 4 && iequals_ascii(tr.substr(0, 4), "AND ")) ||
+            (tr.size() >= 3 && iequals_ascii(tr.substr(0, 3), "OR "));
+        if (is_bool_prefix) {
+          base_indent.assign(ws + 4, ' ');
+        } else {
+          base_indent.clear();
         }
       }
     }
@@ -721,6 +878,21 @@ static std::string reindent_function_args(std::string s, size_t threshold) {
     out.push_back('\n');
     for (size_t k = 0; k < args.size(); ++k) {
       std::string a = trim_ascii_spaces(args[k]);
+
+      const size_t arrow = a.find("->");
+      if (arrow != std::string::npos) {
+        const std::string lhs = trim_ascii_spaces(std::string_view(a).substr(0, arrow));
+        const std::string_view body = trim_view_ascii_spaces(std::string_view(a).substr(arrow + 2));
+        const auto parts = split_bool_ops_top_level(body);
+        if (parts.size() > 1) {
+          std::string lambda = lhs + " -> " + trim_ascii_spaces(parts[0].text);
+          for (size_t pi = 1; pi < parts.size(); ++pi) {
+            lambda += "\n" + arg_indent + "    " + std::string(parts[pi].op) + " " + trim_ascii_spaces(parts[pi].text);
+          }
+          a.swap(lambda);
+        }
+      }
+
       size_t nested_threshold = threshold;
       {
         std::string_view at = trim_view_ascii_spaces(std::string_view(a));
