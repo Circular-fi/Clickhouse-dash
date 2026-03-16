@@ -14,7 +14,7 @@ WITH
                     arrayFilter(x -> x.scope = 'TEST_123456', column_2.nested)
                 )
             ) AS rebate_x
-        FROM database.table
+        FROM database_1.table_1
     )
 SELECT
     tipshare,

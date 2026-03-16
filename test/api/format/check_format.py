@@ -19,9 +19,6 @@ CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstr
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "test")
 CLICKHOUSE_TIMEOUT_SECONDS = int(os.environ.get("CLICKHOUSE_TIMEOUT_SECONDS", "10"))
-RAW_DIR = Path(
-    os.environ.get("CLICKHOUSE_RAW_DIR", str(Path(__file__).with_name("sql_raw")))
-)
 SQL_DIR = Path(os.environ.get("EXPECTED_SQL_DIR", str(Path(__file__).with_name("sql"))))
 ARTIFACTS_DIR = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tests/artifacts"))
 FAIL_DIR = ARTIFACTS_DIR / "format_failures"
@@ -64,8 +61,34 @@ def normalize_sql_file_content(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
 
 
+def trim_sql_input(text: str) -> str:
+    lines = normalize_sql_file_content(text).split("\n")
+    trimmed_lines = [line.rstrip() for line in lines]
+
+    while trimmed_lines and trimmed_lines[0] == "":
+        trimmed_lines.pop(0)
+    while trimmed_lines and trimmed_lines[-1] == "":
+        trimmed_lines.pop()
+
+    collapsed_lines = []
+    previous_blank = False
+
+    for line in trimmed_lines:
+        is_blank = line == ""
+        if is_blank and previous_blank:
+            continue
+        collapsed_lines.append(line)
+        previous_blank = is_blank
+
+    return "\n".join(collapsed_lines)
+
+
 def load_sql_text(path: Path) -> str:
     return normalize_sql_file_content(path.read_text(encoding="utf-8"))
+
+
+def load_trimmed_sql_text(path: Path) -> str:
+    return trim_sql_input(path.read_text(encoding="utf-8"))
 
 
 def write_sql_text(path: Path, text: str) -> None:
@@ -119,25 +142,6 @@ def require_expected_sql_files() -> list[Path]:
     if not files:
         raise SystemExit(f"no .sql files found in {SQL_DIR}")
     return files
-
-
-def require_raw_sql_path(expected_sql_path: Path) -> Path:
-    raw_path = RAW_DIR / expected_sql_path.name
-    if not raw_path.exists():
-        raise SystemExit(
-            f"missing raw sql file for {expected_sql_path.name}: {raw_path}"
-        )
-    return raw_path
-
-
-def update_sql_raw_from_clickhouse() -> int:
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    for sql_path in require_expected_sql_files():
-        raw_sql = fetch_clickhouse_raw_formatted_sql(load_sql_text(sql_path))
-        raw_path = RAW_DIR / sql_path.name
-        write_sql_text(raw_path, raw_sql)
-        print(f"updated {raw_path}")
-    return 0
 
 
 def unified_sql_diff(expected_sql: str, actual_sql: str, file_name: str) -> str:
@@ -261,8 +265,7 @@ def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
     "expected_sql_path", require_expected_sql_files(), ids=lambda path: path.stem
 )
 def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
-    raw_sql_path = require_raw_sql_path(expected_sql_path)
-    input_sql = load_sql_text(raw_sql_path)
+    input_sql = load_trimmed_sql_text(expected_sql_path)
     expected_sql = load_sql_text(expected_sql_path)
 
     formatted_sql = call_format_api(expected_sql_path, input_sql)

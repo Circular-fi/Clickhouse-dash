@@ -1,7 +1,0 @@
-SELECT
-    entity_group,
-    quantilesExactExclusive(0.5, 0.9, 0.99)(metric_value) AS metric_quantiles,
-    arrayReduce('sum', groupArray(metric_value)) AS grouped_metric_sum
-FROM anon.grouped_metrics
-GROUP BY entity_group
-ORDER BY entity_group ASC

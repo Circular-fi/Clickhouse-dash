@@ -1,9 +1,0 @@
-SELECT
-    entity_key,
-    metric_value
-FROM anon.metrics_store
-FINAL
-SAMPLE 1 / 10
-WHERE metric_value > 0
-ORDER BY metric_value DESC
-LIMIT 20

@@ -2,8 +2,6 @@ import sys
 
 import pytest
 
-from format.check_format import update_sql_raw_from_clickhouse
-
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "test"
@@ -16,9 +14,6 @@ def main() -> int:
                 "/tests/query_types/check_query_types.py",
             ]
         )
-
-    if mode == "update-raw":
-        return update_sql_raw_from_clickhouse()
 
     raise SystemExit(f"unknown mode: {mode}")
 

@@ -328,7 +328,7 @@ bool looks_like_query(string_view s) {
 bool contains_top_level_comment(string_view s) {
   ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
-    if (!st.in_str && !st.in_backtick) {
+    if (is_top_level(st)) {
       const char c = s[i];
       const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
       if (c == '#' || (c == '-' && n == '-') || (c == '/' && n == '*')) return true;
@@ -754,6 +754,40 @@ string Formatter::format_from_clause(string_view body) {
 string Formatter::format_table_source(string_view s) {
   const string text = trim_ascii_spaces(s);
   if (auto nested = format_parenthesized_query(text); !nested.empty()) return nested;
+  auto normalize_simple_table_identifier = [](string_view value) -> string {
+    const string raw = trim_ascii_spaces(value);
+    if (raw.empty() || raw.find_first_of(" \t\n\r") != string::npos) return {};
+    vector<string> parts;
+    size_t i = 0;
+    while (i < raw.size()) {
+      if (raw[i] == '`') {
+        const size_t end = raw.find('`', i + 1);
+        if (end == string::npos || end == i + 1) return {};
+        parts.push_back(string(raw.substr(i + 1, end - i - 1)));
+        i = end + 1;
+      } else {
+        const size_t start = i;
+        while (i < raw.size() && raw[i] != '.') {
+          if (!is_ident_char(raw[i])) return {};
+          ++i;
+        }
+        if (i == start) return {};
+        parts.push_back(string(raw.substr(start, i - start)));
+      }
+      if (i == raw.size()) break;
+      if (raw[i] != '.') return {};
+      ++i;
+      if (i == raw.size()) return {};
+    }
+    if (parts.empty()) return {};
+    string out;
+    for (size_t j = 0; j < parts.size(); ++j) {
+      if (j) out.push_back('.');
+      out += parts[j];
+    }
+    return out == raw ? string() : out;
+  };
+  if (const string simple = normalize_simple_table_identifier(text); !simple.empty()) return simple;
   return collapse_whitespace(cleanup_surface(text));
 }
 
@@ -1021,13 +1055,80 @@ string Formatter::format_function_call(string_view expr) {
   const auto args = split_top_level(inner, ',');
   const bool lambda_fn = iequals_ascii(name, "arrayMap") || iequals_ascii(name, "arrayFilter") || iequals_ascii(name, "arrayExists") ||
                          iequals_ascii(name, "arrayAll") || iequals_ascii(name, "arrayCount");
-  if (args.size() <= 1 && !iequals_ascii(name, "arrayJoin")) return {};
+  const bool single_arg_wrapper = args.size() == 1 && !iequals_ascii(name, "arrayJoin");
+  if (args.empty() && !iequals_ascii(name, "arrayJoin")) return {};
+
+  auto contains_top_level_binary_op = [](string_view value) {
+    ScanState st;
+    for (size_t i = 0; i < value.size(); ++i) {
+      if (is_top_level(st)) {
+        const char c = value[i];
+        if (c == '+' || c == '*' || c == '/') return true;
+        if (c == '-') {
+          const char next = (i + 1 < value.size()) ? value[i + 1] : '\0';
+          if (next != '>' && next != '-') return true;
+        }
+      }
+      step_scan(st, value, i);
+    }
+    return false;
+  };
+
+  auto split_long_binary_expression = [](string_view value) -> string {
+    ScanState st;
+    for (size_t i = 0; i < value.size(); ++i) {
+      if (is_top_level(st) && value[i] == '/') {
+        const string lhs = trim_ascii_spaces(value.substr(0, i));
+        const string rhs = trim_ascii_spaces(value.substr(i + 1));
+        if (!lhs.empty() && !rhs.empty()) return lhs + "\n/ " + rhs;
+      }
+      step_scan(st, value, i);
+    }
+    return {};
+  };
+
+  auto dedent_after_first_line = [](string_view value) -> string {
+    const size_t first_nl = value.find('\n');
+    if (first_nl == string_view::npos) return string(value);
+    vector<string> lines;
+    size_t start = first_nl + 1;
+    size_t min_indent = static_cast<size_t>(-1);
+    while (start <= value.size()) {
+      const size_t nl = value.find('\n', start);
+      const size_t stop = (nl == string_view::npos) ? value.size() : nl;
+      const string line = string(value.substr(start, stop - start));
+      lines.push_back(line);
+      const string trimmed = trim_ascii_spaces(line);
+      if (!trimmed.empty()) {
+        size_t indent = 0;
+        while (indent < line.size() && line[indent] == ' ') ++indent;
+        min_indent = std::min(min_indent, indent);
+      }
+      if (nl == string_view::npos) break;
+      start = nl + 1;
+    }
+    if (min_indent == static_cast<size_t>(-1) || min_indent == 0) return string(value);
+    string out = string(value.substr(0, first_nl + 1));
+    for (size_t i = 0; i < lines.size(); ++i) {
+      size_t cut = 0;
+      while (cut < min_indent && cut < lines[i].size() && lines[i][cut] == ' ') ++cut;
+      out += lines[i].substr(cut);
+      if (i + 1 < lines.size()) out += '\n';
+    }
+    return out;
+  };
 
   bool multiline = iequals_ascii(name, "multiIf") || iequals_ascii(name, "map") || iequals_ascii(name, "dictGet") ||
-                   iequals_ascii(name, "dictGetOrDefault") || iequals_ascii(name, "arrayZip") || looks_like_query(inner) || s.size() > threshold;
+                   iequals_ascii(name, "dictGetOrDefault") || iequals_ascii(name, "arrayZip") || looks_like_query(inner) ||
+                   (!single_arg_wrapper && s.size() > threshold);
   if (!multiline && iequals_ascii(name, "arrayJoin") && !args.empty() && contains_heavy_structure(args.front())) multiline = true;
   if (!multiline && iequals_ascii(name, "mapContains") && !args.empty() && contains_heavy_structure(args.front())) multiline = true;
   if (!multiline && (iequals_ascii(name, "arrayMap") || iequals_ascii(name, "arrayFilter") || iequals_ascii(name, "arrayExists")) && args.size() >= 2 && contains_heavy_structure(args[1])) multiline = true;
+  if (!multiline && single_arg_wrapper) {
+    const string single = trim_ascii_spaces(args.front());
+    if (single.find('\n') != string::npos) multiline = true;
+    else if ((s.size() > threshold || (s.size() + 4 > threshold && contains_top_level_binary_op(single))) && (contains_heavy_structure(single) || contains_top_level_binary_op(single))) multiline = true;
+  }
 
   if (!multiline && lambda_fn && !args.empty()) {
     const int arrow = find_top_level_arrow(args.front());
@@ -1047,6 +1148,13 @@ string Formatter::format_function_call(string_view expr) {
   if (!multiline) return {};
   vector<string> rendered;
   for (const auto& arg : args) rendered.push_back(format_expression(arg));
+  if (single_arg_wrapper && rendered.size() == 1) {
+    string single = dedent_after_first_line(rendered.front());
+    if (single.find('\n') == string::npos && (s.size() > threshold || (s.size() + 4 > threshold && contains_top_level_binary_op(single)))) {
+      if (const string split = split_long_binary_expression(single); !split.empty()) single = split;
+    }
+    return name + "(\n" + indent_block(single, 4) + "\n)";
+  }
   string out = name + "(\n";
   if (iequals_ascii(name, "multiIf") && rendered.size() >= 3) {
     for (size_t i = 0; i + 1 < rendered.size(); i += 2) {
@@ -1067,8 +1175,19 @@ string Formatter::format_function_call(string_view expr) {
     return out;
   }
   for (size_t i = 0; i < rendered.size(); ++i) {
-    out += indent_block(rendered[i], 4);
-    if (i + 1 < rendered.size()) out += ',';
+    string item = rendered[i];
+    bool attached_comment = false;
+    if (i + 1 < rendered.size() && starts_with_ci(trim_ascii_spaces(rendered[i + 1]), "--")) {
+      const string next = trim_ascii_spaces(rendered[i + 1]);
+      const size_t nl = next.find('\n');
+      if (nl != string::npos) {
+        item += ", " + trim_ascii_spaces(next.substr(0, nl));
+        rendered[i + 1] = trim_ascii_spaces(next.substr(nl + 1));
+        attached_comment = true;
+      }
+    }
+    out += indent_block(item, 4);
+    if (!attached_comment && i + 1 < rendered.size()) out += ',';
     out += '\n';
   }
   out += ')';
