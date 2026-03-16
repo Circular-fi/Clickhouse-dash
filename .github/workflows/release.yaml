@@ -54,7 +54,7 @@ jobs:
 
       - name: Set up Buildx
         if: matrix.goos == 'linux'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build (Linux via Dockerfile target=production, cached)
         if: matrix.goos == 'linux'
