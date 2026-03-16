@@ -97,7 +97,7 @@
       0 1.1rem 3rem rgba(2, 6, 23, 0.12);
     --ring: 0 0 0 0.1875rem rgba(37, 99, 235, 0.2);
 
-    --panelBg: rgba(255, 255, 255, 0.9);
+    --panelBg: rgba(255, 255, 255, 1);
 
     --panel: #ffffff;
     --panelTopSheen: rgba(2, 6, 23, 0.03);
@@ -179,7 +179,7 @@ html[data-theme="light"] {
   --accent: rgba(37, 99, 235, 0.14);
   --accentBorder: #2563eb;
 
-  --panelBg: rgba(255, 255, 255, 0.9);
+  --panelBg: rgba(255, 255, 255, 1);
 
   --panel: #ffffff;
   --panelTopSheen: rgba(2, 6, 23, 0.03);
@@ -370,7 +370,8 @@ body {
   user-select: none;
   text-align: right;
   color: color-mix(in srgb, var(--muted) 78%, transparent);
-  background: color-mix(in srgb, var(--inputBg) 92%, var(--panelBg));
+  background: var(--panelBg);    
+  z-index: 2;
   border-right: 1px solid var(--border);
 }
 .editorHighlight {

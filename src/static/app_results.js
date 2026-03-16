@@ -390,7 +390,7 @@
     if (typed === null || typed === undefined) return "null";
     if (typeof typed === "string") return typed;
     if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
-    return JSON.stringify(typed, null, pretty ? 2 : 0);
+    return JSON.stringify(typed, null, pretty ? 4 : 0);
   }
 
   function formatCellForDisplayWithTypes(raw, colIndex, pretty, typeAsts) {
@@ -398,8 +398,76 @@
     if (typed === null || typed === undefined) return "null";
     if (typeof typed === "string") return typed;
     if (typeof typed === "number" || typeof typed === "boolean") return String(typed);
-    return JSON.stringify(typed, null, pretty ? 2 : 0);
-  }  function renderJsonHighlightedInto(td, jsonText) {
+    return JSON.stringify(typed, null, pretty ? 4 : 0);
+  }
+
+  function decodeEscapedDisplayText(value) {
+    if (typeof value !== "string") return value;
+    if (!/\\/.test(value)) return value;
+
+    return value.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|n|r|t|\\|\")/g, (m, token) => {
+      if (token === "n") return "\n";
+      if (token === "r") return "\r";
+      if (token === "t") return "\t";
+      if (token === '"') return '"';
+      if (token === "\\") return "\\";
+      if (token[0] === "u") {
+        try { return String.fromCharCode(parseInt(token.slice(1), 16)); } catch { return m; }
+      }
+      if (token[0] === "x") {
+        try { return String.fromCharCode(parseInt(token.slice(1), 16)); } catch { return m; }
+      }
+      return m;
+    });
+  }
+
+  function setCellTextPreserve(td, text) {
+    let s = "";
+    if (text === null || text === undefined) s = "null";
+    else if (typeof text === "string") s = decodeEscapedDisplayText(text);
+    else if (typeof text === "number" || typeof text === "boolean" || typeof text === "bigint") s = String(text);
+    else if (typeof text === "object") {
+      try { s = JSON.stringify(text, null, 4); } catch { s = String(text); }
+    } else s = String(text);
+
+    td.textContent = s;
+    td.removeAttribute("title");
+  }
+
+  function renderSingleValueCell(td, raw, colIndex, typeAsts) {
+    const typed = coerceDeepTyped(raw, (typeAsts && typeAsts[colIndex]) || null);
+
+    function setScalar(cls, text) {
+      td.textContent = "";
+      const el = document.createElement("span");
+      el.className = cls;
+      el.textContent = text;
+      td.appendChild(el);
+    }
+
+    if (typed === null || typed === undefined) {
+      setScalar("tok-null", "null");
+      return;
+    }
+    if (typeof typed === "string") {
+      const decoded = decodeEscapedDisplayText(typed);
+      const reparsed = parseJsonStringIfLikely(decoded);
+      if (reparsed && typeof reparsed === "object") {
+        renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
+        return;
+      }
+      setCellTextPreserve(td, decoded);
+      return;
+    }
+    if (typeof typed === "number" || typeof typed === "boolean") {
+      setScalar(typeof typed === "number" ? "tok-num" : "tok-kw", String(typed));
+      return;
+    }
+
+    renderJsonHighlightedInto(td, JSON.stringify(typed, null, 4));
+  }
+
+  function renderJsonHighlightedInto(td, jsonText) {
     td.textContent = "";
     const frag = document.createDocumentFragment();
 
@@ -730,7 +798,13 @@
       return;
     }
     if (typeof typed === "string") {
-      setScalar("tok-str", typed);
+      const decoded = decodeEscapedDisplayText(typed);
+      const reparsed = parseJsonStringIfLikely(decoded);
+      if (reparsed && typeof reparsed === "object") {
+        renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
+        return;
+      }
+      setCellTextPreserve(td, decoded);
       return;
     }
     if (typeof typed === "number" || typeof typed === "boolean") {
@@ -1275,7 +1349,7 @@
     renderVerticalSingleRow(allResultRows[0]);
   }
 
-  function maybePrettifySingleRowComplexCells() {
+  function maybeRenderSingleRowValueCell() {
     if (isVerticalResults) return;
     if (!Array.isArray(resultColumns) || resultColumns.length !== 1) return;
     if (!Array.isArray(allResultRows) || allResultRows.length !== 1) return;
@@ -1283,20 +1357,23 @@
 
     const row = allResultRows[0];
     const raw = Array.isArray(row) ? row[0] : row;
-    const typed = coerceDeepTyped(raw, resultTypeAsts[0] || null);
-    if (!typed || typeof typed !== "object") return;
 
     if (scheduledFlush || pendingRows.length) flushPendingRows();
+
+    const apply = (cell) => {
+      if (!cell) return;
+      renderSingleValueCell(cell, raw, 0, resultTypeAsts);
+    };
 
     const td = dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)");
     if (!td) {
       requestAnimationFrame(() => {
         const td2 = dom.resultTableBody ? dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)") : null;
-        if (td2) td2.textContent = formatCellForDisplay(raw, 0, true);
+        apply(td2);
       });
       return;
     }
-    td.textContent = formatCellForDisplay(raw, 0, true);
+    apply(td);
   }
 
   function finalizeAfterDone() {
@@ -1313,7 +1390,7 @@
       if (liveGaugesEnabled && hasGaugeCols) liveGaugesPainted = true;
     }
     maybeSwitchToVerticalSingleRow();
-    maybePrettifySingleRowComplexCells();
+    maybeRenderSingleRowValueCell();
   }
 
   function buildCopyValue(value) {
@@ -2007,7 +2084,7 @@
         th.title = colName;
 
         const td = document.createElement("td");
-        td.textContent = formatCellForDisplayWithTypes(Array.isArray(row) ? row[i] : null, i, true, local.typeAsts);
+        renderSingleValueCell(td, Array.isArray(row) ? row[i] : null, i, local.typeAsts);
 
         tr.appendChild(th);
         tr.appendChild(td);
@@ -2022,6 +2099,20 @@
       if (!Array.isArray(local.columns) || local.columns.length < 2) return;
       if (!Array.isArray(local.allRows) || local.allRows.length !== 1) return;
       renderVerticalSingleRowLocal(local.allRows[0]);
+    }
+
+    function maybeRenderSingleRowValueCellLocal() {
+      if (local.isVertical) return;
+      if (!Array.isArray(local.columns) || local.columns.length !== 1) return;
+      if (!Array.isArray(local.allRows) || local.allRows.length !== 1) return;
+      if (!local.wrap) return;
+
+      const { tbody } = findTablePartsIn(local.wrap);
+      if (!tbody) return;
+      const row = local.allRows[0];
+      const raw = Array.isArray(row) ? row[0] : row;
+      const td = tbody.querySelector("tr td:not(.resultTable__rowIndex)");
+      if (td) renderSingleValueCell(td, raw, 0, local.typeAsts);
     }
 
     function scheduleLocalTableFullRender() {
@@ -2215,6 +2306,7 @@
           if (local.gaugesEnabled && hasGaugeCols) local.gaugesPainted = true;
         }
         maybeSwitchToVerticalSingleRowLocal();
+        maybeRenderSingleRowValueCellLocal();
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
       },
     };
