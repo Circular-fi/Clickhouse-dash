@@ -1,4 +1,4 @@
-FROM alpine:3.20 AS toolchain
+FROM alpine:3.23 AS toolchain
 WORKDIR /work
 
 RUN apk add --no-cache \
@@ -49,7 +49,7 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
  && strip /work/build/chdash \
  && cp /work/build/chdash /work/chdash
 
-FROM alpine:3.20 AS dev
+FROM alpine:3.23 AS dev
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 COPY --from=dev-builder /work/chdash /chdash
 COPY src/static /static
