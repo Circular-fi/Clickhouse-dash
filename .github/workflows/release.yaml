@@ -50,7 +50,7 @@ jobs:
 
       - name: Set up QEMU
         if: matrix.goos == 'linux'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
         if: matrix.goos == 'linux'
