@@ -103,6 +103,8 @@ cmake --build build --target chdash
 ./build/chdash
 ```
 
+The default build embeds the frontend assets into the binary. In the dev Docker image, filesystem assets are served from the image itself; there is no runtime `STATIC_DIR` override anymore.
+
 ---
 
 ## ⚙️ Configuration
@@ -111,22 +113,12 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---:|---|
-| `CHDASH_LISTEN` | `0.0.0.0:8080` | Listen address (`host:port`) |
-| `LISTEN_HOST` | `0.0.0.0` | Used if `CHDASH_LISTEN` not set |
-| `LISTEN_PORT` | `8080` | Used if `CHDASH_LISTEN` not set |
-| `PORT` | (none) | Fallback port (platform) |
-| `STATIC_DIR` | `./static` | Directory for `index.html`, `app.js`, `style.css`, fonts |
-| `CH_HOSTS` | (none) | Multi-host HCL config (recommended) |
-| `CH_URL` | (none) | `host:port` or `tcp://host:port` |
-| `CH_HOST` | `clickhouse` | ClickHouse host |
-| `CH_PORT` | `9000` | ClickHouse native TCP port |
-| `CH_TLS` | `false` | Use TLS for native TCP |
-| `CH_TLS_PORT` | `9440` | TLS native TCP port |
-| `CH_USER` | `default` | ClickHouse user |
-| `CH_PASS` / `CH_PASSWORD` | (empty) | ClickHouse password |
-| `RESULT_PREVIEW_ROW_LIMIT` | `500` | Max rows returned to the browser |
-| `HEALTH_INTERVAL_MS` | `5000` | Host health polling interval (ms) when `CH_HOSTS` omits `health` |
-| `HEALTH_TIMEOUT_MS` | `800` | Ping timeout (ms) when `CH_HOSTS` omits `health` |
+| `LISTEN_HOST` | `0.0.0.0` | HTTP listen host |
+| `LISTEN_PORT` | `8080` | HTTP listen port |
+| `CH_HOSTS` | (required) | Multi-host HCL config |
+| `RESULT_PREVIEW_ROW_LIMIT` | `10000` | Max rows returned to the browser |
+
+Health settings now live inside `CH_HOSTS` via an optional `health { ... }` block.
 
 ### Example `CH_HOSTS`
 

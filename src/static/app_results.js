@@ -309,6 +309,7 @@
     const innerTuple = unwrap("Tuple");
     if (innerTuple) {
       const parts = splitTopLevel(innerTuple, ",");
+      let hasNamedFields = false;
       const fields = parts.map((part, idx) => {
         let depth = 0;
         let splitAt = -1;
@@ -327,12 +328,13 @@
           const maybeName = stripIdentifierQuotes(maybeNameRaw);
           const rest = part.slice(splitAt).trim();
           if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(maybeName) && rest) {
-            return { name: maybeName, type: parseChType(rest) };
+            hasNamedFields = true;
+            return { name: maybeName, type: parseChType(rest), named: true };
           }
         }
-        return { name: `_${idx}`, type: parseChType(part) };
+        return { name: `_${idx}`, type: parseChType(part), named: false };
       });
-      return { kind: "Tuple", fields };
+      return { kind: "Tuple", fields, named: hasNamedFields };
     }
 
     return { kind: "Scalar", name: s };
@@ -345,9 +347,14 @@
     if (v === null || v === undefined) return v;
 
     if (typeAst.kind === "Tuple") {
+      const fields = Array.isArray(typeAst.fields) ? typeAst.fields : [];
+      const isNamedTuple = !!typeAst.named;
+
       if (Array.isArray(v)) {
+        if (!isNamedTuple) {
+          return v.map((item, i) => coerceDeepTyped(item, fields[i] ? fields[i].type : null));
+        }
         const out = {};
-        const fields = Array.isArray(typeAst.fields) ? typeAst.fields : [];
         for (let i = 0; i < fields.length; i++) {
           const f = fields[i];
           out[String(f.name ?? `_${i}`)] = coerceDeepTyped(v[i], f.type);
@@ -355,6 +362,14 @@
         return out;
       }
       if (v && typeof v === "object") {
+        if (!isNamedTuple) {
+          const keys = Object.keys(v);
+          const synthetic = fields.length > 0 && fields.every((f, i) => String(f.name ?? `_${i}`) === `_${i}`);
+          if (synthetic && keys.every((k) => /^_\d+$/.test(k))) {
+            return fields.map((f, i) => coerceDeepTyped(v[`_${i}`], f.type));
+          }
+          return Array.isArray(v) ? v.map(coerceDeep) : Object.values(v).map(coerceDeep);
+        }
         const out = {};
         for (const [k, val] of Object.entries(v)) out[k] = coerceDeep(val);
         return out;
@@ -812,14 +827,11 @@
       return;
     }
 
-    let jsonText = "";
     try {
-      jsonText = stringifyCompactValue(typed, typeAst);
+      renderJsonHighlightedInto(td, JSON.stringify(typed, null, 4));
     } catch {
       td.textContent = String(typed);
-      return;
     }
-    renderJsonHighlightedInto(td, jsonText);
   }
 
 
@@ -2031,7 +2043,7 @@
               setCellTextFlat(td, text);
             }
           } else {
-            const text = row[i] == null ? "" : String(row[i]);
+            const text = formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts);
             if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("resultTable__numeric");
             setCellTextFlat(td, text);
           }

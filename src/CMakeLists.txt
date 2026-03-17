@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
 option(CHDASH_BUILD_APP "Build chdash executable" ON)
 
+set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
+set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
+set(CHDASH_BUILD_TIME_VALUE "unknown" CACHE STRING "Build time embedded in the binary")
+
 include(FetchContent)
 
 set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -121,6 +125,12 @@ if (CHDASH_BUILD_APP)
     ${clickhouse_cpp_SOURCE_DIR}
     ${httplib_SOURCE_DIR}
     ${rapidjson_SOURCE_DIR}/include
+  )
+
+  target_compile_definitions(chdash PRIVATE
+    CHDASH_SEMVER="${CHDASH_SEMVER_VALUE}"
+    CHDASH_GIT_SHA="${CHDASH_GIT_SHA_VALUE}"
+    CHDASH_BUILD_TIME="${CHDASH_BUILD_TIME_VALUE}"
   )
 
   set(THREADS_PREFER_PTHREAD_FLAG ON)

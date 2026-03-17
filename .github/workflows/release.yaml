@@ -39,14 +39,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Compute version (strip leading v)
+      - name: Compute build metadata
         id: vars
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
+          GIT_SHA="${GITHUB_SHA}"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "git_sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "build_time=$BUILD_TIME" >> "$GITHUB_OUTPUT"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "GIT_SHA=$GIT_SHA" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         if: matrix.goos == 'linux'
@@ -69,6 +75,9 @@ jobs:
             --platform "linux/${{ matrix.goarch }}" \
             -f test/Dockerfile \
             --target production \
+            --build-arg CHDASH_SEMVER="${VERSION}" \
+            --build-arg CHDASH_GIT_SHA="${GIT_SHA}" \
+            --build-arg CHDASH_BUILD_TIME="${BUILD_TIME}" \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --output "type=local,dest=build_out" \
@@ -110,6 +119,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCHDASH_EMBED_STATIC=ON \
+            -DCHDASH_SEMVER_VALUE="${VERSION}" \
+            -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
+            -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
             "${EXTRA[@]}"
 
       - name: Build (macOS)

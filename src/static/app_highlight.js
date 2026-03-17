@@ -694,7 +694,25 @@
   };
 
   const createOverlay = (ta) => {
-    if (!ta || ta.dataset && ta.dataset.hlAttached === "1") return null;
+    if (!ta) return null;
+
+    const existingWrap = ta.closest ? ta.closest(".editorWrap") : null;
+    const existingPre = existingWrap ? existingWrap.querySelector(".editorHighlight") : null;
+    const existingGutter = existingWrap ? existingWrap.querySelector(".editorGutter") : null;
+
+    if (existingWrap && existingPre && existingGutter) {
+      ta.classList.add("editorInput");
+      ta.style.tabSize = String(tabSize);
+      ta.style.MozTabSize = String(tabSize);
+      existingPre.style.tabSize = String(tabSize);
+      existingPre.style.MozTabSize = String(tabSize);
+      existingGutter.style.tabSize = String(tabSize);
+      existingGutter.style.MozTabSize = String(tabSize);
+      if (ta.dataset) ta.dataset.hlAttached = "1";
+      return { wrap: existingWrap, pre: existingPre, gutter: existingGutter };
+    }
+
+    if (ta.dataset && ta.dataset.hlAttached === "1") return null;
 
     const wrap = document.createElement("div");
     wrap.className = "editorWrap";

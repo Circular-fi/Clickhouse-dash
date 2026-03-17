@@ -30,7 +30,7 @@ static std::vector<uint8_t> random_bytes(size_t n) {
   return out;
 }
 
-static bool try_serve_fs(const std::string& static_dir, const httplib::Request& req, httplib::Response& res) {
+static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   std::string path = req.path;
   if (path.empty() || path == "/") path = "/index.html";
 
@@ -42,7 +42,7 @@ static bool try_serve_fs(const std::string& static_dir, const httplib::Request& 
   if (rel.find("..") != std::string::npos) return false;
   if (rel.find('\\') != std::string::npos) return false;
 
-  std::filesystem::path full = std::filesystem::path(static_dir) / rel;
+  std::filesystem::path full = std::filesystem::path("./static") / rel;
   std::error_code ec;
   if (!std::filesystem::is_regular_file(full, ec)) return false;
 
@@ -64,14 +64,14 @@ Server::Server(AppConfig cfg)
   if (health_) health_->start();
 
   http_.Get("/", [&](const auto& req, auto& res) {
-    if (!try_serve_embedded(req, res) && !try_serve_fs(cfg_.static_dir, req, res)) {
+    if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
       res.status = 404;
       res.set_content("index.html not found", "text/plain");
     }
   });
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
-    if (!try_serve_embedded(req, res) && !try_serve_fs(cfg_.static_dir, req, res)) {
+    if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
       res.status = 404;
       res.set_content("asset not found", "text/plain");
     }

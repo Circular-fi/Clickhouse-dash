@@ -18,9 +18,6 @@ namespace chdash {
 struct AppConfig {
   std::string listen = "0.0.0.0:8080";
 
-  // Directory that contains the frontend assets (index.html, app.js, style.css, fonts/...).
-  // In the provided repo layout this is typically: ./static
-  std::string static_dir = "./static";
 
   // ClickHouse hosts (multi-host).
   // Each HostSpec contains a runner_uri and a system_uri.
