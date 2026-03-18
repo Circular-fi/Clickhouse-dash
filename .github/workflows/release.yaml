@@ -83,9 +83,9 @@ jobs:
             --output "type=local,dest=build_out" \
             .
 
-          test -f build_out/chdash
-          chmod +x build_out/chdash
-          file build_out/chdash || true
+          test -f build_out/app/chdash
+          chmod +x build_out/app/chdash
+          file build_out/app/chdash || true
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
@@ -136,7 +136,7 @@ jobs:
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
           if [ "${{ matrix.goos }}" = "linux" ]; then
-            BIN="build_out/chdash"
+            BIN="build_out/app/chdash"
           else
             BIN="build/chdash"
           fi
