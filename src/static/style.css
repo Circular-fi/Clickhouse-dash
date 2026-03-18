@@ -548,6 +548,7 @@ html.is-ready #queryTextArea::placeholder {
   background-color: var(--buttonBg);
   box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
   padding: 0.35rem;
+  padding-left: 0;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -747,7 +748,7 @@ html[data-theme="light"] .queryLibraryMenu__tab:hover {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: color-mix(in srgb, var(--panel) 86%, transparent);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .resultsStack__header {
@@ -775,9 +776,6 @@ html[data-theme="light"] .queryLibraryMenu__tab:hover {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-/* .resultsStack__body {
-  padding: 10px 12px;
-} */
 
 .resultsStack__body > .tableWrap {
   margin-top: 0px;
