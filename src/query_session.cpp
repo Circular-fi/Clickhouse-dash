@@ -91,16 +91,21 @@ static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 }
 
+static std::string sql_quote_string(std::string_view s);
+
+
 QuerySession::QuerySession(
   std::string query_id,
   std::string sql,
   std::string database,
   std::shared_ptr<clickhouse::Client> client_for_query,
+  std::shared_ptr<clickhouse::Client> client_for_stats,
   int result_preview_row_limit
 ) : query_id_(std::move(query_id)),
     sql_(std::move(sql)),
     database_(std::move(database)),
     client_query_(std::move(client_for_query)),
+    client_stats_(std::move(client_for_stats)),
     result_preview_row_limit_(result_preview_row_limit) {}
 
 QuerySession::~QuerySession() {
@@ -148,8 +153,6 @@ SessionSnapshot QuerySession::snapshot() const {
   s.system_time_us_total = system_time_us_total_;
   s.current_mem_bytes = current_mem_bytes_;
   s.peak_mem_bytes = peak_mem_bytes_;
-  // Best-effort "current threads" estimation: count thread IDs that produced events recently.
-  // Mirrors the Go implementation: activity window = 2 seconds.
   const auto now = std::chrono::steady_clock::now();
   int64_t thr_cur = 0;
   const auto window = std::chrono::seconds(2);
@@ -157,11 +160,10 @@ SessionSnapshot QuerySession::snapshot() const {
     if (now - kv.second <= window) thr_cur++;
   }
   if (thr_cur == 0 && saw_profile_events_) {
-    // Some servers omit per-thread IDs (or set them to 0). Still report at least 1 thread.
     thr_cur = 1;
   }
-  s.threads_inst = thr_cur;
-  s.threads_peak = std::max<int64_t>(threads_peak_, thr_cur);
+  s.threads_inst = std::max<int64_t>(thr_cur, threads_inst_);
+  s.threads_peak = std::max<int64_t>(threads_peak_, s.threads_inst);
   s.elapsed_ms = ms_since(started_at_, finished_at_);
   return s;
 }
@@ -174,8 +176,6 @@ std::vector<SamplePoint> QuerySession::drain_samples(size_t max_points) {
     return out;
   }
 
-  // Drop old points if we accumulated too many (e.g. lots of result_rows events
-  // and fewer tick publishes). Keep only the most recent `max_points`.
   while (samples_.size() > max_points) {
     samples_.pop_front();
   }
@@ -257,6 +257,75 @@ void QuerySession::finish_error(const std::string& message) {
   cv_.notify_all();
 }
 
+void QuerySession::refresh_stats_from_query_log_best_effort() {
+  auto client = client_stats_ ? client_stats_ : client_query_;
+  if (!client) return;
+
+  const std::string sql =
+    "SELECT toUInt64(read_rows) AS read_rows, toUInt64(read_bytes) AS read_bytes, "
+    "toInt64(memory_usage) AS memory_usage, toInt64(peak_threads_usage) AS peak_threads_usage "
+    "FROM system.query_log "
+    "WHERE query_id = " + sql_quote_string(query_id_) + " "
+    "ORDER BY event_time_microseconds DESC "
+    "LIMIT 1";
+
+  uint64_t log_read_rows = 0;
+  uint64_t log_read_bytes = 0;
+  int64_t log_memory_usage = -1;
+  int64_t log_peak_threads_usage = -1;
+
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    try {
+      client->Execute("SYSTEM FLUSH LOGS query_log");
+    } catch (...) {
+    }
+
+    bool found = false;
+    try {
+      clickhouse::Query q(sql);
+      q.OnData([&](const clickhouse::Block& b) {
+        if (b.GetRowCount() == 0 || b.GetColumnCount() < 4) return;
+
+        auto c_read_rows = b[0]->As<clickhouse::ColumnUInt64>();
+        auto c_read_bytes = b[1]->As<clickhouse::ColumnUInt64>();
+        auto c_memory_i64 = b[2]->As<clickhouse::ColumnInt64>();
+        auto c_memory_u64 = b[2]->As<clickhouse::ColumnUInt64>();
+        auto c_threads_i64 = b[3]->As<clickhouse::ColumnInt64>();
+        auto c_threads_u64 = b[3]->As<clickhouse::ColumnUInt64>();
+        if (!c_read_rows || !c_read_bytes || (!c_memory_i64 && !c_memory_u64) || (!c_threads_i64 && !c_threads_u64)) return;
+
+        log_read_rows = c_read_rows->At(0);
+        log_read_bytes = c_read_bytes->At(0);
+        log_memory_usage = c_memory_i64 ? c_memory_i64->At(0) : static_cast<int64_t>(c_memory_u64->At(0));
+        log_peak_threads_usage = c_threads_i64 ? c_threads_i64->At(0) : static_cast<int64_t>(c_threads_u64->At(0));
+        found = true;
+      });
+      client->Select(q);
+    } catch (...) {
+    }
+
+    if (found) {
+      std::lock_guard<std::mutex> lk(mu_);
+      read_rows_total_ = std::max<uint64_t>(read_rows_total_, log_read_rows);
+      read_bytes_total_ = std::max<uint64_t>(read_bytes_total_, log_read_bytes);
+      total_rows_to_read_ = std::max<uint64_t>(total_rows_to_read_, read_rows_total_);
+      if (log_memory_usage >= 0) {
+        current_mem_bytes_ = std::max<int64_t>(current_mem_bytes_, log_memory_usage);
+        peak_mem_bytes_ = std::max<int64_t>(peak_mem_bytes_, log_memory_usage);
+      }
+      if (log_peak_threads_usage >= 0) {
+        threads_inst_ = std::max<int64_t>(threads_inst_, log_peak_threads_usage);
+        threads_peak_ = std::max<int64_t>(threads_peak_, log_peak_threads_usage);
+      }
+      return;
+    }
+
+    if (attempt + 1 < 5) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+  }
+}
+
 void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::time_point& now) {
   if (last_sample_at_.time_since_epoch().count() != 0 && now - last_sample_at_ < std::chrono::milliseconds(10)) {
     return;
@@ -311,6 +380,7 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
     samples_.pop_front();
   }
 }
+
 
 static bool starts_with_ci(const std::string& s, const char* pfx) {
   const size_t n = std::strlen(pfx);
@@ -369,6 +439,18 @@ static std::string strip_trailing_semicolon_copy(std::string s) {
     s = trim_copy(std::move(s));
   }
   return s;
+}
+
+static std::string sql_quote_string(std::string_view s) {
+  std::string out;
+  out.reserve(s.size() + 2);
+  out.push_back('\'');
+  for (char ch : s) {
+    out.push_back(ch);
+    if (ch == '\'') out.push_back('\'');
+  }
+  out.push_back('\'');
+  return out;
 }
 
 enum class ResultTransportMode {
@@ -551,6 +633,7 @@ void QuerySession::run_query() {
         wrote_rows_total_ = 1;
       }
 
+      refresh_stats_from_query_log_best_effort();
       finish_ok();
       return;
     }
@@ -877,10 +960,12 @@ void QuerySession::run_query() {
 
     client_query_->Select(q);
 
+    refresh_stats_from_query_log_best_effort();
     finish_ok();
 
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
+    refresh_stats_from_query_log_best_effort();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
     } else if (msg == "result_limit_reached") {

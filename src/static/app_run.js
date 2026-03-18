@@ -412,6 +412,9 @@
     running: 20,
     canceling: 30,
     done: 40,
+    finished: 40,
+    "limit reached": 40,
+    result_limit_reached: 40,
     canceled: 50,
     error: 60,
   };
@@ -420,7 +423,8 @@
     if (!value) return "-";
     const v = String(value).toLowerCase();
     if (v === "cancelled") return "canceled";
-    if (v === "finished" || v === "success") return "done";
+    if (v === "success") return "done";
+    if (v === "result_limit_reached") return "limit reached";
     return v;
   }
 
