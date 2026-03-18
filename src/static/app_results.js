@@ -30,8 +30,8 @@
   let fullRenderToken = 0;
 
   let gaugeNumericCols = [];
-  let gaugeMin = [];
-  let gaugeMax = [];
+  let gaugeMaxPos = [];
+  let gaugeMaxAbs = [];
   let gaugeDirty = false;
   let numericMaxScale = [];
   let numericDirty = false;
@@ -44,39 +44,30 @@
     const hold = liveWrapHold;
     if (!hold) return;
     const wrap = hold.wrap;
-    const spacer = hold.spacer;
-    if (!wrap || !spacer) {
+    if (!wrap) {
       liveWrapHold = null;
       return;
     }
-    const spacerH = spacer.parentNode ? spacer.offsetHeight : 0;
-    const contentH = Math.max(0, wrap.scrollHeight - spacerH);
-    const need = Math.max(0, hold.targetScrollHeight - contentH);
-    if (need <= 0) {
-      if (spacer.parentNode) spacer.remove();
+    const table = dom.resultTableHead ? dom.resultTableHead.closest("table") : null;
+    const contentH = table ? table.offsetHeight : 0;
+    if (contentH >= hold.targetHeight) {
+      wrap.style.minHeight = "";
       liveWrapHold = null;
       return;
     }
-    spacer.style.height = `${need}px`;
-    if (!spacer.parentNode) wrap.appendChild(spacer);
+    wrap.style.minHeight = `${hold.targetHeight}px`;
   }
 
-  function setLiveWrapHold(targetScrollHeight) {
+  function setLiveWrapHold(targetHeight) {
     const wrap = dom.liveResultsWrap;
-    const target = Number(targetScrollHeight) || 0;
+    const target = Number(targetHeight) || 0;
     if (!wrap || target <= 0) {
-      if (liveWrapHold && liveWrapHold.spacer && liveWrapHold.spacer.parentNode) liveWrapHold.spacer.remove();
+      if (liveWrapHold && liveWrapHold.wrap) liveWrapHold.wrap.style.minHeight = "";
       liveWrapHold = null;
       return;
     }
-    if (!liveWrapHold || liveWrapHold.wrap !== wrap) {
-      const spacer = document.createElement("div");
-      spacer.className = "resultsScrollHold";
-      spacer.setAttribute("aria-hidden", "true");
-      liveWrapHold = { wrap, spacer, targetScrollHeight: target };
-    } else {
-      liveWrapHold.targetScrollHeight = target;
-    }
+    if (!liveWrapHold || liveWrapHold.wrap !== wrap) liveWrapHold = { wrap, targetHeight: target };
+    else liveWrapHold.targetHeight = target;
     applyLiveWrapHold();
   }
 
@@ -128,13 +119,13 @@
 
   function clearLiveResults() {
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
-    const preservedWrapScrollHeight = dom.liveResultsWrap ? dom.liveResultsWrap.scrollHeight : 0;
+    const preservedWrapHeight = dom.liveResultsWrap ? dom.liveResultsWrap.offsetHeight : 0;
     resultColumns = [];
     resultTypes = [];
     resultTypeAsts = [];
     gaugeNumericCols = [];
-    gaugeMin = [];
-    gaugeMax = [];
+    gaugeMaxPos = [];
+    gaugeMaxAbs = [];
     gaugeDirty = false;
     numericMaxScale = [];
     numericDirty = false;
@@ -163,7 +154,7 @@
     resetTableMode();
     clearTable();
 
-    setLiveWrapHold(preservedWrapScrollHeight);
+    setLiveWrapHold(preservedWrapHeight);
 
     if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
     setError("");
@@ -866,17 +857,10 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  function computeGaugeScale(n, min, max) {
-    if (n === null || n === undefined) return 0;
-    let ratio = 0;
-    if (min < 0) {
-      const range = max - min;
-      if (!(range > 0)) return 0;
-      ratio = (n - min) / range;
-    } else {
-      if (!(max > 0)) return 0;
-      ratio = n / max;
-    }
+  function computeGaugeScale(n, maxPos, maxAbs) {
+    const base = maxPos > 0 ? maxPos : maxAbs;
+    if (!(base > 0) || n === null || n === undefined) return 0;
+    let ratio = Math.abs(n) / base;
     if (!Number.isFinite(ratio) || ratio <= 0) return 0;
     if (ratio > 1) ratio = 1;
     if (ratio < 0.001) ratio = 0.001;
@@ -885,8 +869,8 @@
 
   function resetLiveGaugeState() {
     gaugeNumericCols = resultTypeAsts.map(isScalarNumericType);
-    gaugeMin = new Array(gaugeNumericCols.length).fill(Infinity);
-    gaugeMax = new Array(gaugeNumericCols.length).fill(-Infinity);
+    gaugeMaxPos = new Array(gaugeNumericCols.length).fill(0);
+    gaugeMaxAbs = new Array(gaugeNumericCols.length).fill(0);
     gaugeDirty = false;
     numericMaxScale = new Array(gaugeNumericCols.length).fill(0);
     numericDirty = false;
@@ -955,12 +939,13 @@
 
       const n = extractFiniteNumber(row[i]);
       if (n === null) continue;
-      if (n < gaugeMin[i]) {
-        gaugeMin[i] = n;
+      const abs = Math.abs(n);
+      if (abs > gaugeMaxAbs[i]) {
+        gaugeMaxAbs[i] = abs;
         changed = true;
       }
-      if (n > gaugeMax[i]) {
-        gaugeMax[i] = n;
+      if (n > gaugeMaxPos[i]) {
+        gaugeMaxPos[i] = n;
         changed = true;
       }
     }
@@ -968,11 +953,11 @@
     if (scaleChanged) numericDirty = true;
   }
 
-  function setGaugeCell(td, raw, colIndex, text, minArr, maxArr) {
+  function setGaugeCell(td, raw, colIndex, text, maxPosArr, maxAbsArr) {
     td.classList.add("resultTable__gaugeCell");
     td.classList.add("resultTable__numeric");
     const n = extractFiniteNumber(raw);
-    const scale = computeGaugeScale(n, minArr[colIndex], maxArr[colIndex]);
+    const scale = computeGaugeScale(n, maxPosArr[colIndex] || 0, maxAbsArr[colIndex] || 0);
     const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
     td.style.setProperty("--gaugeFill", fill);
     setCellTextFlat(td, text);
@@ -1132,7 +1117,7 @@
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex]) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
-          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMin, gaugeMax);
+          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
           else {
             td.classList.add("resultTable__numeric");
             setCellTextFlat(td, text);
@@ -1904,8 +1889,8 @@
       wrap: wrapClone,
       errorBanner: ensureLocalErrorBanner(body),
       gaugeNumericCols: [],
-      gaugeMin: [],
-      gaugeMax: [],
+      gaugeMaxPos: [],
+      gaugeMaxAbs: [],
       gaugeDirty: false,
       numericMaxScale: [],
       numericDirty: false,
@@ -1933,8 +1918,8 @@
 
     function resetLocalGaugeState() {
       local.gaugeNumericCols = local.typeAsts.map(isScalarNumericType);
-      local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(Infinity);
-      local.gaugeMax = new Array(local.gaugeNumericCols.length).fill(-Infinity);
+      local.gaugeMaxPos = new Array(local.gaugeNumericCols.length).fill(0);
+      local.gaugeMaxAbs = new Array(local.gaugeNumericCols.length).fill(0);
       local.gaugeDirty = false;
       local.numericMaxScale = new Array(local.gaugeNumericCols.length).fill(0);
       local.numericDirty = false;
@@ -1957,12 +1942,13 @@
 
         const n = extractFiniteNumber(row[i]);
         if (n === null) continue;
-        if (n < local.gaugeMin[i]) {
-          local.gaugeMin[i] = n;
+        const abs = Math.abs(n);
+        if (abs > local.gaugeMaxAbs[i]) {
+          local.gaugeMaxAbs[i] = abs;
           changed = true;
         }
-        if (n > local.gaugeMax[i]) {
-          local.gaugeMax[i] = n;
+        if (n > local.gaugeMaxPos[i]) {
+          local.gaugeMaxPos[i] = n;
           changed = true;
         }
       }
@@ -2042,7 +2028,7 @@
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i]) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
-            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMin, local.gaugeMax);
+            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
             else {
               td.classList.add("resultTable__numeric");
               setCellTextFlat(td, text);
