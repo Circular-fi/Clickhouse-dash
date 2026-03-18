@@ -1603,20 +1603,24 @@ button.button:not(:disabled):hover {
 
 .picker__button {
   position: relative;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
   align-items: center;
-  gap: 8px;
+  column-gap: 10px;
   white-space: nowrap;
-  padding-right: 2.35rem;
-  min-width: 14rem;
+  width: 18.6rem;
+  min-width: 18.6rem;
+  max-width: 18.6rem;
+  padding: 0 2.35rem 0 0.8rem;
   transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .pickerOption {
   width: calc(100% + 2px);
-  display: flex;
+  display: grid;
+  grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
   align-items: center;
-  gap: 10px;
+  column-gap: 10px;
   margin-left: -1px;
   height: 2.2rem;
   padding: 0.56rem 2.35rem 0.56rem 0.8rem;
@@ -1700,12 +1704,16 @@ button.button:not(:disabled):hover {
   display: none;
 }
 
-.picker__text, .pickerOption__label {
-  flex: 1;
-  max-width: 220px;
+.picker__text,
+.pickerOption__label {
   min-width: 0;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 100%;
+  text-align: left;
+  justify-self: start;
+  padding-left: 0.5rem;
 }
 
 .picker__menu {
@@ -1747,10 +1755,20 @@ button.button:not(:disabled):hover {
 }
 
 
+.pickerOption__version,
+.pickerOption__meta {
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+
+.pickerOption__version {
+  opacity: 0.62;
+}
+
 .pickerOption__meta {
   opacity: 0.75;
-  font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 .hostDot {
@@ -1769,10 +1787,24 @@ button.button:not(:disabled):hover {
   background: rgba(239, 68, 68, 0.95);
 }
 
+.hostVersion {
+  width: 100%;
+  opacity: 0.62;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+}
+
 .hostPing {
+  width: 100%;
+  text-align: right;
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: inherit;
 }
 
 /* ---- Popover shared base ---- */

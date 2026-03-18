@@ -33,6 +33,7 @@
     hostPickerButton: byId("hostPickerButton"),
     hostPickerMenu: byId("hostPickerMenu"),
     hostPickerText: byId("hostPickerText"),
+    hostPickerVersion: byId("hostPickerVersion"),
     hostPickerDot: byId("hostPickerDot"),
     hostPickerPing: byId("hostPickerPing"),
 

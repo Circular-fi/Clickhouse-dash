@@ -46,6 +46,8 @@ struct HostHealth {
   bool healthy = false;
   int64_t ping_ms = -1;
   int64_t checked_at_ms = 0;
+  std::string clickhouse_version;
+  int64_t version_checked_at_ms = 0;
   HostSystemTables system_tables;
 };
 

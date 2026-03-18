@@ -19,6 +19,7 @@ static int64_t now_ms() {
 
 
 static constexpr int64_t kSystemTablesRefreshMs = 30000;
+static constexpr int64_t kHostVersionRefreshMs = 30000;
 
 static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
   HostSystemTables out;
@@ -50,6 +51,25 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
 
   out.logs_table_available = out.query_log;
   out.flamegraph_tables_available = out.trace_log || out.processors_profile_log || out.jemalloc_profile_text || out.query_thread_log;
+  return out;
+}
+
+static std::string detect_host_version(clickhouse::Client* client) {
+  std::string out;
+  if (!client) return out;
+  try {
+    client->Select(
+      "SELECT version()",
+      [&](const clickhouse::Block& b) {
+        if (!out.empty() || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
+        auto col = b[0]->As<clickhouse::ColumnString>();
+        if (!col) return;
+        out = std::string(col->At(0));
+      }
+    );
+  } catch (...) {
+    return std::string();
+  }
   return out;
 }
 
@@ -192,8 +212,14 @@ void HealthRunner::loop() {
       std::shared_ptr<clickhouse::Client> client;
     };
 
+    struct VersionJob {
+      std::string id;
+      std::shared_ptr<clickhouse::Client> client;
+    };
+
     std::vector<PingJob> jobs;
     std::vector<CapsJob> caps_jobs;
+    std::vector<VersionJob> version_jobs;
     {
       std::lock_guard<std::mutex> lk(mu_);
       jobs.reserve(ctx_.size());
@@ -201,6 +227,9 @@ void HealthRunner::loop() {
         jobs.push_back(PingJob{c.spec.id, c.client});
         if (c.client && (c.last.system_tables.checked_at_ms == 0 || (ts - c.last.system_tables.checked_at_ms) >= kSystemTablesRefreshMs)) {
           caps_jobs.push_back(CapsJob{c.spec.id, c.client});
+        }
+        if (c.client && (c.last.version_checked_at_ms == 0 || (ts - c.last.version_checked_at_ms) >= kHostVersionRefreshMs)) {
+          version_jobs.push_back(VersionJob{c.spec.id, c.client});
         }
       }
     }
@@ -252,6 +281,20 @@ void HealthRunner::loop() {
       caps_results.emplace_back(j.id, detect_system_tables(j.client.get(), ts));
     }
 
+    std::vector<std::pair<std::string, std::string>> version_results;
+    version_results.reserve(version_jobs.size());
+    for (const auto& j : version_jobs) {
+      bool ping_ok = false;
+      for (const auto& r : ping_results) {
+        if (r.id == j.id) {
+          ping_ok = r.ok;
+          break;
+        }
+      }
+      if (!ping_ok) continue;
+      version_results.emplace_back(j.id, detect_host_version(j.client.get()));
+    }
+
     // Apply results
     {
       std::lock_guard<std::mutex> lk(mu_);
@@ -271,6 +314,14 @@ void HealthRunner::loop() {
         for (auto& c : ctx_) {
           if (c.spec.id != item.first) continue;
           c.last.system_tables = item.second;
+          break;
+        }
+      }
+      for (const auto& item : version_results) {
+        for (auto& c : ctx_) {
+          if (c.spec.id != item.first) continue;
+          c.last.version_checked_at_ms = ts;
+          if (!item.second.empty()) c.last.clickhouse_version = item.second;
           break;
         }
       }

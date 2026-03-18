@@ -87,8 +87,10 @@
     const healthy = !!(selected && selected.healthy);
     const pingMs = selected && selected.ping_ms != null ? Number(selected.ping_ms) : null;
     const label = selected ? String(selected.label || selected.id) : (state.selectedHostId || "Host");
+    const hostVersion = selected && selected.clickhouse_version != null ? String(selected.clickhouse_version) : "";
 
     if (dom.hostPickerText) dom.hostPickerText.textContent = apiOnline ? label : `${label} (API offline)`;
+    if (dom.hostPickerVersion) dom.hostPickerVersion.textContent = hostVersion || "";
 
     if (dom.hostPickerDot) {
       const good = apiOnline && healthy;
@@ -108,6 +110,7 @@
 
     if (dom.hostPickerButton) {
       dom.hostPickerButton.disabled = !apiOnline;
+      dom.hostPickerButton.title = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
       if (!apiOnline) closeHostMenu();
     }
   }
@@ -181,12 +184,17 @@
       text.className = "pickerOption__label";
       text.textContent = label;
 
+      const version = document.createElement("span");
+      version.className = "pickerOption__version";
+      version.textContent = h.clickhouse_version != null ? String(h.clickhouse_version) : "";
+
       const meta = document.createElement("span");
       meta.className = "pickerOption__meta";
       meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? formatPingMsLabel(pingMs) : (healthy ? "-" : "down");
 
       btn.appendChild(dot);
       btn.appendChild(text);
+      btn.appendChild(version);
       btn.appendChild(meta);
 
       btn.addEventListener("click", () => {
