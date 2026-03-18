@@ -1164,5 +1164,9 @@
     };
   };
 
-  ns.highlight = { attach };
+  function toHtml(text) {
+    return lexAll(String(text ?? "")).map((t) => t.html).join("");
+  }
+
+  ns.highlight = { attach, toHtml };
 })();

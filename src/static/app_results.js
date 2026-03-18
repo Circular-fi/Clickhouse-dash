@@ -44,30 +44,39 @@
     const hold = liveWrapHold;
     if (!hold) return;
     const wrap = hold.wrap;
-    if (!wrap) {
+    const spacer = hold.spacer;
+    if (!wrap || !spacer) {
       liveWrapHold = null;
       return;
     }
-    const table = dom.resultTableHead ? dom.resultTableHead.closest("table") : null;
-    const contentH = table ? table.offsetHeight : 0;
-    if (contentH >= hold.targetHeight) {
-      wrap.style.minHeight = "";
+    const spacerH = spacer.parentNode ? spacer.offsetHeight : 0;
+    const contentH = Math.max(0, wrap.scrollHeight - spacerH);
+    const need = Math.max(0, hold.targetScrollHeight - contentH);
+    if (need <= 0) {
+      if (spacer.parentNode) spacer.remove();
       liveWrapHold = null;
       return;
     }
-    wrap.style.minHeight = `${hold.targetHeight}px`;
+    spacer.style.height = `${need}px`;
+    if (!spacer.parentNode) wrap.appendChild(spacer);
   }
 
-  function setLiveWrapHold(targetHeight) {
+  function setLiveWrapHold(targetScrollHeight) {
     const wrap = dom.liveResultsWrap;
-    const target = Number(targetHeight) || 0;
+    const target = Number(targetScrollHeight) || 0;
     if (!wrap || target <= 0) {
-      if (liveWrapHold && liveWrapHold.wrap) liveWrapHold.wrap.style.minHeight = "";
+      if (liveWrapHold && liveWrapHold.spacer && liveWrapHold.spacer.parentNode) liveWrapHold.spacer.remove();
       liveWrapHold = null;
       return;
     }
-    if (!liveWrapHold || liveWrapHold.wrap !== wrap) liveWrapHold = { wrap, targetHeight: target };
-    else liveWrapHold.targetHeight = target;
+    if (!liveWrapHold || liveWrapHold.wrap !== wrap) {
+      const spacer = document.createElement("div");
+      spacer.className = "resultsScrollHold";
+      spacer.setAttribute("aria-hidden", "true");
+      liveWrapHold = { wrap, spacer, targetScrollHeight: target };
+    } else {
+      liveWrapHold.targetScrollHeight = target;
+    }
     applyLiveWrapHold();
   }
 
@@ -119,7 +128,7 @@
 
   function clearLiveResults() {
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
-    const preservedWrapHeight = dom.liveResultsWrap ? dom.liveResultsWrap.offsetHeight : 0;
+    const preservedWrapScrollHeight = dom.liveResultsWrap ? dom.liveResultsWrap.scrollHeight : 0;
     resultColumns = [];
     resultTypes = [];
     resultTypeAsts = [];
@@ -154,7 +163,7 @@
     resetTableMode();
     clearTable();
 
-    setLiveWrapHold(preservedWrapHeight);
+    setLiveWrapHold(preservedWrapScrollHeight);
 
     if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
     setError("");
@@ -440,6 +449,31 @@
     td.removeAttribute("title");
   }
 
+  function isSqlCreateLikeText(text) {
+    const s = String(text ?? "");
+    return /\n/.test(s) && /^\s*(?:CREATE|ATTACH)\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW|DATABASE|DICTIONARY|FUNCTION)\b/i.test(s);
+  }
+
+  function setStringCellHighlighted(td, text) {
+    const s = decodeEscapedDisplayText(text);
+    const reparsed = parseJsonStringIfLikely(s);
+    if (reparsed && typeof reparsed === "object") {
+      renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
+      return;
+    }
+    if (isSqlCreateLikeText(s) && ns.highlight && typeof ns.highlight.toHtml === "function") {
+      td.innerHTML = ns.highlight.toHtml(s);
+      td.removeAttribute("title");
+      return;
+    }
+    td.textContent = "";
+    const el = document.createElement("span");
+    el.className = "tok-str";
+    el.textContent = s;
+    td.appendChild(el);
+    td.removeAttribute("title");
+  }
+
   function renderSingleValueCell(td, raw, colIndex, typeAsts) {
     const typed = coerceDeepTyped(raw, (typeAsts && typeAsts[colIndex]) || null);
 
@@ -456,13 +490,7 @@
       return;
     }
     if (typeof typed === "string") {
-      const decoded = decodeEscapedDisplayText(typed);
-      const reparsed = parseJsonStringIfLikely(decoded);
-      if (reparsed && typeof reparsed === "object") {
-        renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
-        return;
-      }
-      setCellTextPreserve(td, decoded);
+      setStringCellHighlighted(td, typed);
       return;
     }
     if (typeof typed === "number" || typeof typed === "boolean") {
@@ -804,13 +832,7 @@
       return;
     }
     if (typeof typed === "string") {
-      const decoded = decodeEscapedDisplayText(typed);
-      const reparsed = parseJsonStringIfLikely(decoded);
-      if (reparsed && typeof reparsed === "object") {
-        renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
-        return;
-      }
-      setCellTextPreserve(td, decoded);
+      setStringCellHighlighted(td, typed);
       return;
     }
     if (typeof typed === "number" || typeof typed === "boolean") {
