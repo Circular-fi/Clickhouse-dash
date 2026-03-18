@@ -71,6 +71,19 @@ static void load_hosts_from_hcl(chdash::AppConfig& cfg, const std::string& hcl_s
 }
 
 int main(int argc, char** argv) {
+  if (argc > 1) {
+    const std::string arg1 = argv[1];
+    if (arg1 == "--version" || arg1 == "-v") {
+#ifdef CHDASH_SEMVER
+      const char* version = CHDASH_SEMVER;
+#else
+      const char* version = "dev";
+#endif
+      std::cout << "clickhouse-dash " << version << std::endl;
+      return 0;
+    }
+  }
+
   chdash::AppConfig cfg;
 
   const std::string host = envs("LISTEN_HOST", "0.0.0.0");

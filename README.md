@@ -101,9 +101,12 @@ Requirements: CMake >= 3.20, a C++17 compiler, Ninja.
 cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target chdash
 ./build/chdash
+./build/chdash --version
 ```
 
 The default build embeds the frontend assets into the binary. In the dev Docker image, filesystem assets are served from the image itself; there is no runtime `STATIC_DIR` override anymore.
+
+`--version` and `-v` print the compiled version and exit without starting the server.
 
 ---
 
