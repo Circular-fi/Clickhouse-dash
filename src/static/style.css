@@ -713,7 +713,9 @@ html[data-theme="light"] .queryLibraryMenu__tab:hover {
   padding: 0.5rem;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .queryLibrary.is-open > .queryLibrary__button {
@@ -1838,10 +1840,15 @@ button.button:not(:disabled):hover {
 }
 
 .savePanel {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   gap: 8px;
   align-items: center;
   flex-shrink: 0;
+  padding-bottom: 2px;
+  background: var(--panel);
 }
 
 .savePanel__input {
@@ -1864,13 +1871,14 @@ button.button:not(:disabled):hover {
 /* ---- Query library popover ---- */
 .queryLibraryPanel {
   min-height: 0;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .queryLibraryList {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
