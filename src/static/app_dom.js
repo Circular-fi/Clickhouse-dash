@@ -10,6 +10,7 @@
     root: document.documentElement,
 
     queryTextArea: byId("queryTextArea"),
+    editorCopyButton: byId("editorCopyButton"),
 
     runSplit: byId("runSplit"),
     runButton: byId("runButton"),

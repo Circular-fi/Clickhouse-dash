@@ -316,20 +316,24 @@ body {
   height: 100%;
   min-height: calc(100% - 3.25rem);
   resize: none;
-  padding: 0.9rem;
+  box-sizing: border-box;
+  padding: 14px;
   border-radius: var(--radiusSm);
   border: 1px solid var(--border);
   background: var(--inputBg);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
   outline: none;
   white-space: pre;           /* ou pre-wrap si tu veux le wrap */
   tab-size: 4;
   -moz-tab-size: 4;
   overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollThumb) var(--scrollTrack);
 }
@@ -357,12 +361,15 @@ body {
   inset: 0 auto 0 0;
   width: var(--gutterW);
   margin: 0;
-  padding: 0.9rem 0.55rem;
+  box-sizing: border-box;
+  padding: 14px 9px;
   border-radius: var(--radiusSm) 0 0 var(--radiusSm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
   white-space: pre;
   tab-size: 4;
   -moz-tab-size: 4;
@@ -378,13 +385,17 @@ body {
   position: absolute;
   inset: 0;
   margin: 0;
-  padding: 0.9rem;
-  padding-left: calc(0.9rem + var(--gutterW));
+  box-sizing: border-box;
+  padding: 14px;
+  padding-right: 52px;
+  padding-left: calc(14px + var(--gutterW));
   border-radius: var(--radiusSm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
   white-space: pre;
   tab-size: 4;
   -moz-tab-size: 4;
@@ -411,7 +422,52 @@ body {
   background: transparent;
   border: 0;
   color: transparent;
-  padding-left: calc(0.9rem + var(--gutterW));
+  padding-right: 52px;
+  padding-left: calc(14px + var(--gutterW));
+}
+
+.editorCopyButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.editorCopyButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.editorCopyButton:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.editorCopyButton__icon {
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 16px 16px;
+  mask-size: 16px 16px;
+}
+
+.editorCopyButton.is-copied .editorCopyButton__icon {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .editorInput::placeholder {

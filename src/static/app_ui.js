@@ -850,6 +850,35 @@
     closeQueryLibraryMenu();
   }
 
+  function initEditorCopyButton() {
+    if (!dom.editorCopyButton || !dom.queryTextArea) return;
+
+    let copyTimer = 0;
+
+    const sync = () => {
+      dom.editorCopyButton.disabled = !String(dom.queryTextArea.value || "").trim();
+    };
+
+    dom.editorCopyButton.addEventListener("click", async () => {
+      const text = String(dom.queryTextArea.value || "");
+      if (!text.trim()) return;
+      try {
+        await util.copyTextToClipboard(text);
+        dom.editorCopyButton.classList.add("is-copied");
+        if (copyTimer) clearTimeout(copyTimer);
+        copyTimer = window.setTimeout(() => {
+          dom.editorCopyButton.classList.remove("is-copied");
+          copyTimer = 0;
+        }, 1200);
+      } catch {
+        null;
+      }
+    });
+
+    sync();
+    dom.queryTextArea.addEventListener("input", sync);
+  }
+
   function initEditor() {
     if (!dom.queryTextArea) return;
 
@@ -1216,6 +1245,7 @@
 
     loadMeta();
     initEditor();
+    initEditorCopyButton();
 
     if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) {
       ns.meta.hydrateFromStorage(state.selectedHostId);
