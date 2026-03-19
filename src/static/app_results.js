@@ -38,46 +38,55 @@
 
   let liveGaugesEnabled = false;
   let liveGaugesPainted = false;
-  let liveWrapHold = null;
+  let liveBodyHold = null;
 
-  function applyLiveWrapHold() {
-    const hold = liveWrapHold;
+  function getDocumentScrollHeight() {
+    const bodyH = document.body ? document.body.scrollHeight : 0;
+    const rootH = document.documentElement ? document.documentElement.scrollHeight : 0;
+    return Math.max(bodyH, rootH);
+  }
+
+  function applyLiveBodyHold() {
+    const hold = liveBodyHold;
     if (!hold) return;
-    const wrap = hold.wrap;
+    const body = document.body;
     const spacer = hold.spacer;
-    if (!wrap || !spacer) {
-      liveWrapHold = null;
+    if (!body || !spacer) {
+      if (spacer && spacer.parentNode) spacer.remove();
+      liveBodyHold = null;
       return;
     }
     const spacerH = spacer.parentNode ? spacer.offsetHeight : 0;
-    const contentH = Math.max(0, wrap.scrollHeight - spacerH);
-    const need = Math.max(0, hold.targetScrollHeight - contentH);
+    const contentH = Math.max(0, getDocumentScrollHeight() - spacerH);
+    const viewportMax = Math.max(0, window.innerHeight || 0);
+    const target = viewportMax > 0 ? Math.min(hold.targetScrollHeight, contentH + viewportMax) : hold.targetScrollHeight;
+    const need = Math.max(0, target - contentH);
     if (need <= 0) {
       if (spacer.parentNode) spacer.remove();
-      liveWrapHold = null;
+      liveBodyHold = null;
       return;
     }
     spacer.style.height = `${need}px`;
-    if (!spacer.parentNode) wrap.appendChild(spacer);
+    if (!spacer.parentNode) body.appendChild(spacer);
   }
 
-  function setLiveWrapHold(targetScrollHeight) {
-    const wrap = dom.liveResultsWrap;
+  function setLiveBodyHold(targetScrollHeight) {
+    const body = document.body;
     const target = Number(targetScrollHeight) || 0;
-    if (!wrap || target <= 0) {
-      if (liveWrapHold && liveWrapHold.spacer && liveWrapHold.spacer.parentNode) liveWrapHold.spacer.remove();
-      liveWrapHold = null;
+    if (!body || target <= 0) {
+      if (liveBodyHold && liveBodyHold.spacer && liveBodyHold.spacer.parentNode) liveBodyHold.spacer.remove();
+      liveBodyHold = null;
       return;
     }
-    if (!liveWrapHold || liveWrapHold.wrap !== wrap) {
+    if (!liveBodyHold) {
       const spacer = document.createElement("div");
       spacer.className = "resultsScrollHold";
       spacer.setAttribute("aria-hidden", "true");
-      liveWrapHold = { wrap, spacer, targetScrollHeight: target };
+      liveBodyHold = { spacer, targetScrollHeight: target };
     } else {
-      liveWrapHold.targetScrollHeight = target;
+      liveBodyHold.targetScrollHeight = target;
     }
-    applyLiveWrapHold();
+    applyLiveBodyHold();
   }
 
   function setResultsVisible(visible) {
@@ -128,7 +137,7 @@
 
   function clearLiveResults() {
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
-    const preservedWrapScrollHeight = dom.liveResultsWrap ? dom.liveResultsWrap.scrollHeight : 0;
+    const preservedBodyScrollHeight = getDocumentScrollHeight();
     resultColumns = [];
     resultTypes = [];
     resultTypeAsts = [];
@@ -163,7 +172,7 @@
     resetTableMode();
     clearTable();
 
-    setLiveWrapHold(preservedWrapScrollHeight);
+    setLiveBodyHold(preservedBodyScrollHeight);
 
     if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
     setError("");
@@ -1137,7 +1146,7 @@
     if (Array.isArray(row)) {
       for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
         const td = document.createElement("td");
-        if (gaugeNumericCols[columnIndex]) {
+        if (gaugeNumericCols[columnIndex] && allResultRows.length > 1) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
           if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
           else {
@@ -1254,7 +1263,7 @@
     dom.resultTableHead.appendChild(tr);
     updateLiveSortIndicators();
     setResultsVisible(true);
-    applyLiveWrapHold();
+    applyLiveBodyHold();
   }
 
   function enqueueRowForRender(row) {
@@ -1295,7 +1304,7 @@
 
     dom.resultTableBody.appendChild(frag);
     if (pendingRows.length > 0) scheduleFlush();
-    applyLiveWrapHold();
+    applyLiveBodyHold();
   }
 
   function appendRows(rowsChunk) {
@@ -1311,7 +1320,7 @@
     }
     setResultsVisible(true);
     updateCopyButtonState();
-    applyLiveWrapHold();
+    applyLiveBodyHold();
   }
 
   function renderVerticalSingleRow(row) {
@@ -1430,7 +1439,7 @@
     if (scheduledFlush || pendingRows.length) flushPendingRows();
 
     if (!liveGaugesEnabled) liveGaugesEnabled = true;
-    const hasGaugeCols = Array.isArray(gaugeNumericCols) && gaugeNumericCols.some(Boolean);
+    const hasGaugeCols = allResultRows.length > 1 && Array.isArray(gaugeNumericCols) && gaugeNumericCols.some(Boolean);
     const needFinalGaugeRender = !isVerticalResults && hasGaugeCols && allResultRows.length > 0 && !liveGaugesPainted;
 
     if (!isVerticalResults && (isLiveSortActive() || gaugeDirty || numericDirty || needFinalGaugeRender)) {
@@ -2048,7 +2057,7 @@
       if (Array.isArray(row)) {
         for (let i = 0; i < local.columns.length; i++) {
           const td = document.createElement("td");
-          if (local.gaugeNumericCols[i]) {
+          if (local.gaugeNumericCols[i] && local.allRows.length > 1) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
             if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
             else {
@@ -2383,7 +2392,7 @@
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
         if (!local.gaugesEnabled) local.gaugesEnabled = true;
-        const hasGaugeCols = Array.isArray(local.gaugeNumericCols) && local.gaugeNumericCols.some(Boolean);
+        const hasGaugeCols = local.allRows.length > 1 && Array.isArray(local.gaugeNumericCols) && local.gaugeNumericCols.some(Boolean);
         const needFinalGaugeRender = local.wrap && !local.isVertical && hasGaugeCols && local.allRows.length > 0 && !local.gaugesPainted;
 
         if (local.wrap && !local.isVertical && (local.gaugeDirty || local.numericDirty || needFinalGaugeRender)) {

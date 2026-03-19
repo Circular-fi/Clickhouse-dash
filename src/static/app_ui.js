@@ -769,6 +769,14 @@
     requestAnimationFrame(focusQueryLibrarySaveInput);
   }
 
+  function updateQueryLibraryMenuHeight() {
+    if (!dom.queryLibraryMenu || !dom.queryLibraryButton || dom.queryLibraryMenu.hidden) return;
+    const rect = dom.queryLibraryButton.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const available = Math.max(0, Math.floor(viewportHeight - rect.bottom - 12));
+    dom.queryLibraryMenu.style.maxHeight = `${available}px`;
+  }
+
   function renderQueryLibraryMenu() {
     if (!dom.queryLibraryContent) return;
 
@@ -792,9 +800,11 @@
     queryLibraryMode = mode === "history" ? "history" : "saved";
     renderQueryLibraryMenu();
     dom.queryLibraryMenu.hidden = false;
+    updateQueryLibraryMenuHeight();
     dom.queryLibraryButton.setAttribute("aria-expanded", "true");
     requestAnimationFrame(() => {
       dom.queryLibrary.classList.add("is-open");
+      updateQueryLibraryMenuHeight();
     });
     dom.queryLibraryMenu.focus({ preventScroll: true });
   }
@@ -804,6 +814,7 @@
     if (queryLibraryMode === next) return;
     queryLibraryMode = next;
     renderQueryLibraryMenu();
+    updateQueryLibraryMenuHeight();
   }
 
   function toggleQueryLibraryMenu(mode = queryLibraryMode) {
@@ -1228,6 +1239,10 @@
         closeCopyMenu({ immediate: true });
         closeQueryLibraryMenu({ immediate: true });
       }
+    });
+
+    window.addEventListener("resize", () => {
+      if (!dom.queryLibraryMenu?.hidden) updateQueryLibraryMenuHeight();
     });
 
     dom.queryLibraryButton?.addEventListener("click", () => toggleQueryLibraryMenu());
