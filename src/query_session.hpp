@@ -66,6 +66,7 @@ public:
     std::string sql,
     std::string database,
     std::shared_ptr<clickhouse::Client> client_for_query,
+    std::shared_ptr<clickhouse::Client> client_for_stats,
     int result_preview_row_limit
   );
 
@@ -99,12 +100,14 @@ private:
   void finish_ok();
   void finish_error(const std::string& message);
   void finish_canceled();
+  void refresh_stats_from_query_log_best_effort();
 
   std::string query_id_;
   std::string sql_;
   std::string database_;
 
   std::shared_ptr<clickhouse::Client> client_query_;
+  std::shared_ptr<clickhouse::Client> client_stats_;
 
   const int result_preview_row_limit_ = 0;
 

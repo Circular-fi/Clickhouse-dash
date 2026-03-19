@@ -81,7 +81,16 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
     return json_error(res, 503, "host_down", "Could not connect to host.");
   }
 
-  auto session = std::make_shared<QuerySession>(qid, sql, "", client_query, cfg_.result_preview_row_limit);
+  std::string stats_client_err;
+  auto client_stats = make_client_from_uri(
+    host->system_uri.empty() ? host->runner_uri : host->system_uri,
+    std::chrono::seconds(5),
+    std::chrono::seconds(5),
+    std::chrono::seconds(5),
+    &stats_client_err
+  );
+
+  auto session = std::make_shared<QuerySession>(qid, sql, "", client_query, client_stats, cfg_.result_preview_row_limit);
   {
     std::lock_guard<std::mutex> lk(mu_);
     sessions_[qid] = session;

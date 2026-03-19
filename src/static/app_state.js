@@ -88,6 +88,8 @@
     };
   };
 
+  const normalizeSavedQueryName = (name) => String(name || "").trim().toLocaleLowerCase();
+
   const storage = {
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
@@ -172,10 +174,13 @@
 
     addSavedQuery(entry) {
       const normalizedEntry = normalizeSavedQueryEntry(entry);
-      if (!normalizedEntry) return;
-      const items = storage.loadSavedQueries().filter((x) => x.name !== normalizedEntry.name);
+      if (!normalizedEntry) return false;
+      const normalizedName = normalizeSavedQueryName(normalizedEntry.name);
+      const items = storage.loadSavedQueries();
+      if (items.some((x) => normalizeSavedQueryName(x.name) === normalizedName)) return false;
       items.unshift(normalizedEntry);
       storage.saveSavedQueries(items);
+      return true;
     },
 
     deleteSavedQuery(name) {

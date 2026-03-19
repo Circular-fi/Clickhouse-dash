@@ -87,8 +87,10 @@
     const healthy = !!(selected && selected.healthy);
     const pingMs = selected && selected.ping_ms != null ? Number(selected.ping_ms) : null;
     const label = selected ? String(selected.label || selected.id) : (state.selectedHostId || "Host");
+    const hostVersion = selected && selected.clickhouse_version != null ? String(selected.clickhouse_version) : "";
 
     if (dom.hostPickerText) dom.hostPickerText.textContent = apiOnline ? label : `${label} (API offline)`;
+    if (dom.hostPickerVersion) dom.hostPickerVersion.textContent = hostVersion || "";
 
     if (dom.hostPickerDot) {
       const good = apiOnline && healthy;
@@ -108,6 +110,7 @@
 
     if (dom.hostPickerButton) {
       dom.hostPickerButton.disabled = !apiOnline;
+      dom.hostPickerButton.title = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
       if (!apiOnline) closeHostMenu();
     }
   }
@@ -181,12 +184,17 @@
       text.className = "pickerOption__label";
       text.textContent = label;
 
+      const version = document.createElement("span");
+      version.className = "pickerOption__version";
+      version.textContent = h.clickhouse_version != null ? String(h.clickhouse_version) : "";
+
       const meta = document.createElement("span");
       meta.className = "pickerOption__meta";
       meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? formatPingMsLabel(pingMs) : (healthy ? "-" : "down");
 
       btn.appendChild(dot);
       btn.appendChild(text);
+      btn.appendChild(version);
       btn.appendChild(meta);
 
       btn.addEventListener("click", () => {
@@ -512,6 +520,10 @@
     return `${value.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
   }
 
+  function normalizeSavedQueryName(name) {
+    return String(name || "").trim().toLocaleLowerCase();
+  }
+
   function activateQueryLibraryItem(item) {
     if (item.host_id) setSelectedHostId(String(item.host_id));
     if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(item.sql_formatted || item.sql_raw || ""));
@@ -676,31 +688,42 @@
     const input = document.createElement("input");
     input.className = "savePanel__input";
     input.type = "text";
-    input.placeholder = "Query name…";
+    input.placeholder = "Search or save query…";
     input.autocomplete = "off";
     input.spellcheck = false;
 
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "button button--primary";
+    button.className = "button button--primary savePanel__button";
     button.textContent = "Save";
 
     const list = document.createElement("div");
     list.className = "queryLibraryList";
 
+    const hasDuplicateSavedName = (name) => {
+      const normalizedName = normalizeSavedQueryName(name);
+      if (!normalizedName) return false;
+      return storage.loadSavedQueries().some((it) => normalizeSavedQueryName(it.name) === normalizedName);
+    };
+
     const renderSavedList = () => {
       const savedItems = storage.loadSavedQueries();
+      const search = normalizeSavedQueryName(input.value);
       list.innerHTML = "";
 
-      if (!savedItems.length) {
+      const filteredItems = search
+        ? savedItems.filter((it) => normalizeSavedQueryName(it.name).includes(search))
+        : savedItems;
+
+      if (!filteredItems.length) {
         const empty = document.createElement("div");
         empty.className = "queryLibraryEmpty";
-        empty.textContent = "No saved queries yet";
+        empty.textContent = savedItems.length ? "No matching saved queries" : "No saved queries yet";
         list.appendChild(empty);
         return;
       }
 
-      for (const it of savedItems) {
+      for (const it of filteredItems) {
         const sqlText = String(it.sql_formatted || it.sql_raw || "");
         list.appendChild(createQueryLibraryItem({
           title: String(it.name || "Untitled query"),
@@ -713,6 +736,7 @@
           onDelete: () => {
             storage.deleteSavedQuery(it.name);
             renderSavedList();
+            updateSaveState();
           },
           deleteLabel: `Delete ${it.name}`,
         }));
@@ -722,13 +746,13 @@
     const updateSaveState = () => {
       const currentSql = String(dom.queryTextArea?.value || "").trim();
       const name = String(input.value || "").trim();
-      button.disabled = !currentSql || !name;
+      button.disabled = !currentSql || !name || hasDuplicateSavedName(name);
     };
 
     const commitSave = () => {
       const currentSql = String(dom.queryTextArea?.value || "").trim();
       const name = String(input.value || "").trim();
-      if (!currentSql || !name) return;
+      if (!currentSql || !name || hasDuplicateSavedName(name)) return;
       storage.addSavedQuery({
         name,
         created_at_ms: Date.now(),
@@ -737,12 +761,15 @@
         sql_formatted: currentSql,
       });
       input.value = "";
-      updateSaveState();
       renderSavedList();
+      updateSaveState();
       requestAnimationFrame(focusQueryLibrarySaveInput);
     };
 
-    input.addEventListener("input", updateSaveState);
+    input.addEventListener("input", () => {
+      renderSavedList();
+      updateSaveState();
+    });
     input.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter") return;
       ev.preventDefault();
@@ -756,9 +783,17 @@
     wrap.appendChild(list);
     target.appendChild(wrap);
 
-    updateSaveState();
     renderSavedList();
+    updateSaveState();
     requestAnimationFrame(focusQueryLibrarySaveInput);
+  }
+
+  function updateQueryLibraryMenuHeight() {
+    if (!dom.queryLibraryMenu || !dom.queryLibraryButton || dom.queryLibraryMenu.hidden) return;
+    const rect = dom.queryLibraryButton.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const available = Math.max(0, Math.floor(viewportHeight - rect.bottom - 12));
+    dom.queryLibraryMenu.style.maxHeight = `${available}px`;
   }
 
   function renderQueryLibraryMenu() {
@@ -784,9 +819,11 @@
     queryLibraryMode = mode === "history" ? "history" : "saved";
     renderQueryLibraryMenu();
     dom.queryLibraryMenu.hidden = false;
+    updateQueryLibraryMenuHeight();
     dom.queryLibraryButton.setAttribute("aria-expanded", "true");
     requestAnimationFrame(() => {
       dom.queryLibrary.classList.add("is-open");
+      updateQueryLibraryMenuHeight();
     });
     dom.queryLibraryMenu.focus({ preventScroll: true });
   }
@@ -796,6 +833,7 @@
     if (queryLibraryMode === next) return;
     queryLibraryMode = next;
     renderQueryLibraryMenu();
+    updateQueryLibraryMenuHeight();
   }
 
   function toggleQueryLibraryMenu(mode = queryLibraryMode) {
@@ -1220,6 +1258,10 @@
         closeCopyMenu({ immediate: true });
         closeQueryLibraryMenu({ immediate: true });
       }
+    });
+
+    window.addEventListener("resize", () => {
+      if (!dom.queryLibraryMenu?.hidden) updateQueryLibraryMenuHeight();
     });
 
     dom.queryLibraryButton?.addEventListener("click", () => toggleQueryLibraryMenu());

@@ -8,12 +8,69 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <string_view>
 
 namespace chdash {
 
 static int64_t now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+
+static constexpr int64_t kSystemTablesRefreshMs = 30000;
+static constexpr int64_t kHostVersionRefreshMs = 30000;
+
+static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
+  HostSystemTables out;
+  out.checked = true;
+  out.checked_at_ms = ts_ms;
+  if (!client) return out;
+
+  try {
+    client->Select(
+      "SELECT name FROM system.tables WHERE database = 'system' AND name IN "
+      "('query_log', 'query_thread_log', 'trace_log', 'processors_profile_log', 'jemalloc_profile_text')",
+      [&](const clickhouse::Block& b) {
+        if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
+        auto col = b[0]->As<clickhouse::ColumnString>();
+        if (!col) return;
+        for (size_t i = 0; i < b.GetRowCount(); ++i) {
+          const std::string_view sv = col->At(i);
+          if (sv == "query_log") out.query_log = true;
+          else if (sv == "query_thread_log") out.query_thread_log = true;
+          else if (sv == "trace_log") out.trace_log = true;
+          else if (sv == "processors_profile_log") out.processors_profile_log = true;
+          else if (sv == "jemalloc_profile_text") out.jemalloc_profile_text = true;
+        }
+      }
+    );
+  } catch (...) {
+    return out;
+  }
+
+  out.logs_table_available = out.query_log;
+  out.flamegraph_tables_available = out.trace_log || out.processors_profile_log || out.jemalloc_profile_text || out.query_thread_log;
+  return out;
+}
+
+static std::string detect_host_version(clickhouse::Client* client) {
+  std::string out;
+  if (!client) return out;
+  try {
+    client->Select(
+      "SELECT version()",
+      [&](const clickhouse::Block& b) {
+        if (!out.empty() || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
+        auto col = b[0]->As<clickhouse::ColumnString>();
+        if (!col) return;
+        out = std::string(col->At(0));
+      }
+    );
+  } catch (...) {
+    return std::string();
+  }
+  return out;
 }
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
@@ -150,12 +207,30 @@ void HealthRunner::loop() {
       std::shared_ptr<clickhouse::Client> client;
     };
 
+    struct CapsJob {
+      std::string id;
+      std::shared_ptr<clickhouse::Client> client;
+    };
+
+    struct VersionJob {
+      std::string id;
+      std::shared_ptr<clickhouse::Client> client;
+    };
+
     std::vector<PingJob> jobs;
+    std::vector<CapsJob> caps_jobs;
+    std::vector<VersionJob> version_jobs;
     {
       std::lock_guard<std::mutex> lk(mu_);
       jobs.reserve(ctx_.size());
       for (auto& c : ctx_) {
         jobs.push_back(PingJob{c.spec.id, c.client});
+        if (c.client && (c.last.system_tables.checked_at_ms == 0 || (ts - c.last.system_tables.checked_at_ms) >= kSystemTablesRefreshMs)) {
+          caps_jobs.push_back(CapsJob{c.spec.id, c.client});
+        }
+        if (c.client && (c.last.version_checked_at_ms == 0 || (ts - c.last.version_checked_at_ms) >= kHostVersionRefreshMs)) {
+          version_jobs.push_back(VersionJob{c.spec.id, c.client});
+        }
       }
     }
 
@@ -188,11 +263,42 @@ void HealthRunner::loop() {
       }));
     }
 
+    std::vector<PingRes> ping_results;
+    ping_results.reserve(futs.size());
+    for (auto& f : futs) ping_results.push_back(f.get());
+
+    std::vector<std::pair<std::string, HostSystemTables>> caps_results;
+    caps_results.reserve(caps_jobs.size());
+    for (const auto& j : caps_jobs) {
+      bool ping_ok = false;
+      for (const auto& r : ping_results) {
+        if (r.id == j.id) {
+          ping_ok = r.ok;
+          break;
+        }
+      }
+      if (!ping_ok) continue;
+      caps_results.emplace_back(j.id, detect_system_tables(j.client.get(), ts));
+    }
+
+    std::vector<std::pair<std::string, std::string>> version_results;
+    version_results.reserve(version_jobs.size());
+    for (const auto& j : version_jobs) {
+      bool ping_ok = false;
+      for (const auto& r : ping_results) {
+        if (r.id == j.id) {
+          ping_ok = r.ok;
+          break;
+        }
+      }
+      if (!ping_ok) continue;
+      version_results.emplace_back(j.id, detect_host_version(j.client.get()));
+    }
+
     // Apply results
     {
       std::lock_guard<std::mutex> lk(mu_);
-      for (auto& f : futs) {
-        PingRes r = f.get();
+      for (const auto& r : ping_results) {
         for (auto& c : ctx_) {
           if (c.spec.id != r.id) continue;
           c.last.checked_at_ms = ts;
@@ -201,6 +307,21 @@ void HealthRunner::loop() {
           if (!r.ok) {
             std::cerr << "[health] host=" << c.spec.id << " down: " << r.err << "\n";
           }
+          break;
+        }
+      }
+      for (const auto& item : caps_results) {
+        for (auto& c : ctx_) {
+          if (c.spec.id != item.first) continue;
+          c.last.system_tables = item.second;
+          break;
+        }
+      }
+      for (const auto& item : version_results) {
+        for (auto& c : ctx_) {
+          if (c.spec.id != item.first) continue;
+          c.last.version_checked_at_ms = ts;
+          if (!item.second.empty()) c.last.clickhouse_version = item.second;
           break;
         }
       }
