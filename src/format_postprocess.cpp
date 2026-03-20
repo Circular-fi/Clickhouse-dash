@@ -123,6 +123,39 @@ string indent_after_first_line(string_view s, size_t spaces) {
   return string(s.substr(0, pos + 1)) + indent_block(s.substr(pos + 1), spaces);
 }
 
+string dedent_multiline_item(string_view s) {
+  if (s.find('\n') == string_view::npos) return string(s);
+
+  vector<string> lines;
+  size_t start = 0;
+  while (start <= s.size()) {
+    const size_t nl = s.find('\n', start);
+    const size_t end = (nl == string::npos) ? s.size() : nl;
+    lines.push_back(string(s.substr(start, end - start)));
+    if (nl == string::npos) break;
+    start = nl + 1;
+  }
+
+  size_t min_indent = static_cast<size_t>(-1);
+  for (size_t i = 1; i < lines.size(); ++i) {
+    const string& line = lines[i];
+    if (trim_ascii_spaces(line).empty()) continue;
+    size_t indent = 0;
+    while (indent < line.size() && line[indent] == ' ') ++indent;
+    min_indent = std::min(min_indent, indent);
+  }
+
+  if (min_indent == static_cast<size_t>(-1) || min_indent == 0) return join_lines(lines);
+
+  for (size_t i = 1; i < lines.size(); ++i) {
+    size_t cut = 0;
+    while (cut < min_indent && cut < lines[i].size() && lines[i][cut] == ' ') ++cut;
+    lines[i].erase(0, cut);
+  }
+
+  return join_lines(lines);
+}
+
 struct ScanState {
   bool in_str = false;
   bool in_backtick = false;
@@ -918,6 +951,7 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
         item += " AS " + alias;
       }
     }
+    item = dedent_multiline_item(item);
     if (i + 1 < parsed.size()) item += ',';
     const size_t nl = item.find('\n');
     if (!lines.empty() && starts_with_ci(trim_ascii_spaces(item), "--") && nl != string::npos && !lines.back().empty() && lines.back().back() == ',') {
