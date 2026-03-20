@@ -475,6 +475,34 @@ static string format_alias_identifier(string_view alias) {
   return quoted;
 }
 
+struct AliasParts {
+  string name;
+  string comment;
+};
+
+static AliasParts split_alias_identifier_and_comment(string_view alias) {
+  ScanState st;
+  size_t comment_pos = alias.size();
+  for (size_t i = 0; i < alias.size(); ++i) {
+    const char c = alias[i];
+    const char n = (i + 1 < alias.size()) ? alias[i + 1] : '\0';
+    if (is_top_level(st)) {
+      if ((c == '-' && n == '-') || c == '#') {
+        comment_pos = i;
+        break;
+      }
+      if (c == '/' && n == '*') {
+        comment_pos = i;
+        break;
+      }
+    }
+    step_scan(st, alias, i);
+  }
+  const string name = trim_ascii_spaces(alias.substr(0, comment_pos));
+  const string comment = (comment_pos == alias.size()) ? string() : trim_ascii_spaces(alias.substr(comment_pos));
+  return {name, comment};
+}
+
 struct Formatter {
   explicit Formatter(size_t threshold_) : threshold(threshold_) {}
 
@@ -838,7 +866,15 @@ string Formatter::format_parenthesized_query(string_view s) {
   const string inner = unwrap_outer_parens(base);
   if (inner.empty() || !looks_like_query(inner)) return {};
   string out = "(\n" + indent_block(format_statement(inner), 4) + "\n)";
-  if (!alias.empty()) out += " AS " + format_alias_identifier(alias);
+  if (!alias.empty()) {
+    const auto [alias_name, alias_comment] = split_alias_identifier_and_comment(alias);
+    if (!alias_name.empty()) {
+      out += " AS " + format_alias_identifier(alias_name);
+    } else {
+      out += " AS";
+    }
+    if (!alias_comment.empty()) out += " " + alias_comment;
+  }
   return out;
 }
 
@@ -894,35 +930,57 @@ string Formatter::format_with_item_block(const vector<string>& items) {
   vector<string> lines;
   for (size_t i = 0; i < parsed.size(); ++i) {
     string item;
+    string alias_comment;
     if (parsed[i].scalar_query) {
       string rendered = format_statement(parsed[i].query);
       if (items.size() == 1 && starts_with_ci(rendered, "SELECT ") && rendered.find('\n') != string::npos) {
         rendered = expand_nested_select_head(rendered);
       }
-      const string scalar_alias = format_alias_identifier(parsed[i].alias);
-      item = "(\n" + indent_block(rendered, 4) + "\n) AS " + scalar_alias;
+      if (!parsed[i].alias.empty()) {
+        const auto [alias_name, alias_comment_raw] = split_alias_identifier_and_comment(parsed[i].alias);
+        alias_comment = alias_comment_raw;
+        if (!alias_name.empty()) {
+          const string scalar_alias = format_alias_identifier(alias_name);
+          item = "(\n" + indent_block(rendered, 4) + "\n) AS " + scalar_alias;
+        } else {
+          item = "(\n" + indent_block(rendered, 4) + "\n) AS";
+        }
+      } else {
+        item = "(\n" + indent_block(rendered, 4) + "\n)";
+      }
     } else if (parsed[i].named_query) {
       item = parsed[i].expr + " AS\n(\n" + indent_block(format_statement(parsed[i].query), 4) + "\n)";
     } else {
       item = parsed[i].expr;
       if (!parsed[i].alias.empty()) {
-        const string alias = format_alias_identifier(parsed[i].alias);
+        const auto [alias_name, alias_comment_raw] = split_alias_identifier_and_comment(parsed[i].alias);
+        alias_comment = alias_comment_raw;
         if (can_align) {
           const size_t gap = (width > last_line_length(item) ? width - last_line_length(item) : 0);
           size_t extra = (width <= 40) ? 4 : 1;
           if (width > 80 && gap > 0) ++extra;
-          item += string(gap + extra, ' ') + "AS " + alias;
+          if (!alias_name.empty()) {
+            const string alias = format_alias_identifier(alias_name);
+            item += string(gap + extra, ' ') + "AS " + alias;
+          } else {
+            item += string(gap + extra, ' ') + "AS";
+          }
         } else {
-          item += " AS " + alias;
+          if (!alias_name.empty()) {
+            const string alias = format_alias_identifier(alias_name);
+            item += " AS " + alias;
+          } else {
+            item += " AS";
+          }
         }
       }
     }
     if (i + 1 < parsed.size()) item += ',';
+    if (!alias_comment.empty()) item += " " + alias_comment;
     lines.push_back(item);
   }
   return join_lines(lines);
 }
-
 string Formatter::format_item_block(const vector<string>& items, bool align_alias) {
   vector<std::pair<string, string>> parsed;
   size_t width = 0;
@@ -944,15 +1002,32 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
   vector<string> lines;
   for (size_t i = 0; i < parsed.size(); ++i) {
     string item = parsed[i].first;
+    string alias_comment;
     if (!parsed[i].second.empty()) {
-      const string alias = format_alias_identifier(parsed[i].second);
-      if (can_align) item += string((width > last_line_length(item) ? width - last_line_length(item) : 0) + 2, ' ') + "AS " + alias;
-      else {
-        item += " AS " + alias;
+      const auto [alias_name, alias_comment_raw] = split_alias_identifier_and_comment(parsed[i].second);
+      alias_comment = alias_comment_raw;
+      if (can_align) {
+        const size_t gap = (width > last_line_length(item) ? width - last_line_length(item) : 0);
+        size_t extra = (width <= 40) ? 4 : 1;
+        if (width > 80 && gap > 0) ++extra;
+        if (!alias_name.empty()) {
+          const string alias = format_alias_identifier(alias_name);
+          item += string(gap + extra, ' ') + "AS " + alias;
+        } else {
+          item += string(gap + extra, ' ') + "AS";
+        }
+      } else {
+        if (!alias_name.empty()) {
+          const string alias = format_alias_identifier(alias_name);
+          item += " AS " + alias;
+        } else {
+          item += " AS";
+        }
       }
     }
     item = dedent_multiline_item(item);
     if (i + 1 < parsed.size()) item += ',';
+    if (!alias_comment.empty()) item += " " + alias_comment;
     const size_t nl = item.find('\n');
     if (!lines.empty() && starts_with_ci(trim_ascii_spaces(item), "--") && nl != string::npos && !lines.back().empty() && lines.back().back() == ',') {
       lines.back() += " " + trim_ascii_spaces(item.substr(0, nl));
@@ -963,7 +1038,6 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
   }
   return join_lines(lines);
 }
-
 string Formatter::format_simple_item_block(const vector<string>& items) {
   vector<string> lines;
   for (size_t i = 0; i < items.size(); ++i) {
