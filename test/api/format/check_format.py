@@ -90,6 +90,30 @@ def load_sql_text(path: Path) -> str:
 def load_trimmed_sql_text(path: Path) -> str:
     return trim_sql_input(path.read_text(encoding="utf-8"))
 
+def load_sql_fixture(path: Path) -> tuple[str, str]:
+    text = normalize_sql_file_content(path.read_text(encoding="utf-8"))
+    sections = {"input": [], "expected": []}
+    current = "expected"
+    has_marker = False
+    for line in text.split("\n"):
+        marker = line.strip().upper()
+        if marker == "-- INPUT":
+            current = "input"
+            has_marker = True
+            continue
+        if marker in {"-- EXPECTED", "-- OUTPUT"}:
+            current = "expected"
+            has_marker = True
+            continue
+        sections[current].append(line)
+    if not has_marker:
+        return trim_sql_input(text), text
+    if not sections["input"]:
+        raise ValueError(f"{path}: missing -- INPUT section in fixture")
+    input_section = "\n".join(sections["input"])
+    expected_section = "\n".join(sections["expected"])
+    return trim_sql_input(input_section), normalize_sql_file_content(expected_section)
+
 
 def write_sql_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,8 +289,7 @@ def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
     "expected_sql_path", require_expected_sql_files(), ids=lambda path: path.stem
 )
 def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
-    input_sql = load_trimmed_sql_text(expected_sql_path)
-    expected_sql = load_sql_text(expected_sql_path)
+    input_sql, expected_sql = load_sql_fixture(expected_sql_path)
 
     formatted_sql = call_format_api(expected_sql_path, input_sql)
 

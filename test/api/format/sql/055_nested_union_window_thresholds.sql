@@ -15,10 +15,10 @@ FROM
             ORDER BY
                 union_src.metric_value DESC,
                 union_src.entity_key ASC
-        ) AS metric_rank,
+        ) AS `metric_rank`,
         sum(union_src.metric_value) OVER (
             PARTITION BY union_src.entity_group
-        ) AS group_total_metric_value
+        ) AS `group_total_metric_value`
     FROM
     (
         SELECT
@@ -34,8 +34,8 @@ FROM
             metric_value
         FROM anon.metrics_store
         WHERE event_date = toDate('2026-01-02')
-    ) AS union_src
-) AS ranked_src
+    ) AS `union_src`
+) AS `ranked_src`
 WHERE
     ranked_src.metric_rank <= 3
     AND ranked_src.group_total_metric_value > 0

@@ -1,6 +1,6 @@
 SELECT
-    tupleElement(pair_item, 1) AS entity_key,
-    tupleElement(pair_item, 2) AS score_value
+    tupleElement(pair_item, 1) AS `entity_key`,
+    tupleElement(pair_item, 2) AS `score_value`
 FROM
 (
     SELECT
@@ -10,7 +10,7 @@ FROM
                 ('key_b', 20),
                 ('key_c', 30)
             ]
-        ) AS pair_item
+        ) AS `pair_item`
 )
 ORDER BY
     score_value DESC,

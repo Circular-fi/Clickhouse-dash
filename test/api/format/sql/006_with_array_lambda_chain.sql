@@ -1,8 +1,8 @@
 WITH
-    ['value_alpha', 'value_beta', 'value_gamma', 'value_delta'] AS raw_values,
-    arrayMap(item -> lowerUTF8(item), raw_values)               AS normalized_values,
-    arrayFilter(item -> length(item) > 10, normalized_values)   AS filtered_values
+    ['value_alpha', 'value_beta', 'value_gamma', 'value_delta'] AS `raw_values`,
+    arrayMap(item -> lowerUTF8(item), raw_values)               AS `normalized_values`,
+    arrayFilter(item -> length(item) > 10, normalized_values)   AS `filtered_values`
 SELECT
     normalized_values,
     filtered_values,
-    arrayStringConcat(filtered_values, ', ') AS joined_values
+    arrayStringConcat(filtered_values, ', ') AS `joined_values`

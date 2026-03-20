@@ -23,13 +23,13 @@ FROM
                 ORDER BY
                     metric_value DESC,
                     entity_key ASC
-            ) AS metric_rank
+            ) AS `metric_rank`
         FROM anon.metrics_store
         PREWHERE event_date >= toDate('2026-01-01')
         WHERE metric_ratio > 0
-    ) AS ranked_src
+    ) AS `ranked_src`
     WHERE ranked_src.metric_rank <= 10
-) AS filtered_src
+) AS `filtered_src`
 ORDER BY
     filtered_src.entity_group ASC,
     filtered_src.metric_value DESC,

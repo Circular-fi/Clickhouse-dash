@@ -443,3 +443,21 @@ Consistency across the repository matters more than local stylistic preference.
 The roundtrip test sends each file from `sql_raw/` to `/api/format` and compares the response to the matching file in `sql/`.
 
 All `.sql` files are normalized without a trailing newline.
+## Input/Expected fixtures
+
+When a formatter fixture needs to describe a transformation (for example, when the API changes one form of SQL into another), keep both the raw submission and the expected formatted output in the same file.
+
+Use the `-- INPUT` and `-- EXPECTED` markers (case-insensitive) to delimit the two sections:
+
+```sql
+-- INPUT
+SELECT entity_key AS entity_key_alias
+FROM anon.metrics_store AS base_src
+
+-- EXPECTED
+SELECT
+    entity_key AS `entity_key_alias`
+FROM anon.metrics_store AS `base_src`
+```
+
+`-- OUTPUT` may be used in place of `-- EXPECTED`. The `check_format.py` helper trims the input section before sending it to `/api/format` and normalizes the expected section for comparison. If no markers are present, the entire `.sql` file is treated as both the input (trimmed) and the expected output, so existing fixtures remain compatible.
