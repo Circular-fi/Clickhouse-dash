@@ -435,14 +435,16 @@ Use this mental model when formatting:
 When in doubt, choose the formatting that makes two queries with the same structure look the same.
 Consistency across the repository matters more than local stylistic preference.
 
-## Test Data Layout
+## Test Fixtures
 
-- `sql_raw/` contains the raw ClickHouse output used as formatter input.
-- `sql/` contains the expected final formatted SQL returned by the API.
+- All fixtures live under `test/api/format/sql/`.
+- When a fixture is idempotent, the file acts as both the formatter input (after trimming) and the expected output.
+- When a fixture documents a transformation (for example, alias quoting), keep both the raw submission and the expected formatted output in the same file with `-- INPUT` / `-- EXPECTED` sections.
 
-The roundtrip test sends each file from `sql_raw/` to `/api/format` and compares the response to the matching file in `sql/`.
+The roundtrip test iterates over every `.sql` file in this directory, parses the sections, feeds the input to `/api/format`, and compares the response to the normalized expected section.
 
 All `.sql` files are normalized without a trailing newline.
+
 ## Input/Expected fixtures
 
 When a formatter fixture needs to describe a transformation (for example, when the API changes one form of SQL into another), keep both the raw submission and the expected formatted output in the same file.

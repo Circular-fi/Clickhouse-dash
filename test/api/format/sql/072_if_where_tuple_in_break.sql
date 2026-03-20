@@ -1,3 +1,21 @@
+-- INPUT
+SELECT
+    column_1,
+    if(
+        column_2 = 1 AND column_3 > 10000,
+        toUInt64((column_4 / column_3) * 1000) / 10,
+        NULL
+    ) AS column_9
+FROM database_1.table_1
+WHERE
+    column_5 >= now() - toIntervalHour(24 * 1)
+    AND column_6 = 'xxxxxxxx'
+    AND (
+        concat('', substring(hex(base58Decode(column_7)), 7, 2)),
+        column_9
+    ) IN tuple(('xxxxxxxx', 70.5))
+
+-- EXPECTED
 SELECT
     column_1,
     if(
