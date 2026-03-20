@@ -76,8 +76,8 @@ SELECT
     metrics_src.total_metric_value,
     grouped_averages.avg_total_metric_value,
     metrics_src.total_metric_value - grouped_averages.avg_total_metric_value AS `metric_delta`
-FROM grouped_metrics AS `metrics_src`
-INNER JOIN grouped_averages AS `grouped_averages`
+FROM grouped_metrics AS metrics_src
+INNER JOIN grouped_averages AS grouped_averages
     ON metrics_src.entity_group = grouped_averages.entity_group
 WHERE
     metrics_src.total_metric_value > grouped_averages.avg_total_metric_value

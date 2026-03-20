@@ -23,7 +23,7 @@ SELECT
     left_src.entity_key,
     left_src.metric_value,
     right_src.latest_event_date
-FROM anon.entity_metrics AS `left_src`
+FROM anon.entity_metrics AS left_src
 INNER JOIN
 (
     SELECT

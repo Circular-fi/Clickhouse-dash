@@ -14,7 +14,7 @@ ENGINE = Buffer
 )
 
 -- EXPECTED
-CREATE TABLE database_1.table_1 AS `database_1`.table_2
+CREATE TABLE database_1.table_1 AS database_1.table_2
 ENGINE = Buffer
 (
     'database_1',

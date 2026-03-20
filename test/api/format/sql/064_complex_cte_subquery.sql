@@ -47,7 +47,7 @@ LIMIT 10
 WITH
     cte_1 AS
     (
-        SELECT col_1 AS `col_2`
+        SELECT col_1 AS col_2
         FROM schema_1.table_1
         WHERE
             col_3 = 'value_1'

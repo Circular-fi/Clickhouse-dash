@@ -34,7 +34,7 @@ SELECT
     user_id,
     date,
     consumed
-FROM anon.user_credits_consumption AS `c`
+FROM anon.user_credits_consumption AS c
 PREWHERE date >= min_plan_date
 WHERE arrayExists(
         p -> (
