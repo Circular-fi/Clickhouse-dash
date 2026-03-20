@@ -1,0 +1,59 @@
+name: Build Rust queue binary
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config musl-tools
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          targets: ${{ matrix.target }}
+
+      - name: Build queue binary
+        run: |
+          cargo build --release --target "${{ matrix.target }}" --manifest-path queue/Cargo.toml
+
+      - name: Package artifact
+        run: |
+          QUEUE_BIN="queue/target/${{ matrix.target }}/release/queue"
+          if [ ! -f "$QUEUE_BIN" ]; then
+            echo "queue binary not found at $QUEUE_BIN" >&2
+            exit 1
+          fi
+          mkdir -p artifacts
+          cp "$QUEUE_BIN" artifacts/queue
+          tar -C artifacts -czf "queue-${{ matrix.target }}.tar.gz" queue
+          ls -l "queue-${{ matrix.target }}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: queue-${{ matrix.target }}
+          path: queue-${{ matrix.target }}.tar.gz
+          if-no-files-found: error

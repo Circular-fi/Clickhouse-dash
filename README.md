@@ -168,6 +168,34 @@ Artifacts include release tarballs and checksums.
 
 ---
 
+
+## 🛠️ Queue worker (Rust)
+
+A dedicated `queue` worker is now built by `.github/workflows/rust-queue-build.yml`. The workflow compiles the crate for both `x86_64-unknown-linux-gnu` (Debian/Ubuntu compatible) and `x86_64-unknown-linux-musl` (fully static) and uploads a tarball per target named `queue-<target>.tar.gz`.
+
+### Install artifacts
+
+1. Download the artifact that matches your target (the workflow uploads them into the release assets for each run).
+2. Extract and install:
+
+   ```bash
+   curl -L https://github.com/SCcagg5/Clickhouse-dash/releases/latest/download/queue-x86_64-unknown-linux-musl.tar.gz -o /tmp/queue.tar.gz
+   tar -xzf /tmp/queue.tar.gz -C /tmp
+   sudo install -m755 /tmp/queue /usr/local/bin/queue
+   ```
+
+3. Inspect `queue --help` and keep a configuration file (e.g. `/etc/queue/config.toml`) ready.
+
+### Cron usage
+
+Deploy the worker through cron by pointing it at the config you want to run. Adjust the PATH, target, and schedule as needed:
+
+```
+PATH=/usr/local/bin:/usr/bin:/bin /usr/local/bin/queue --config /etc/queue/config.toml >> /var/log/queue.log 2>&1
+```
+
+Replace the artifact name above with `queue-x86_64-unknown-linux-gnu.tar.gz` if you need the Debian-flavored build.
+
 ## ✅ TODO / Roadmap 
 
 ### Data explorer
