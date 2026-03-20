@@ -24,9 +24,9 @@ WITH
             col_3 = 'value_3'
             AND col_4 >= fn_1('value_3')
             AND col_2 IN (
-                    SELECT col_2
-                    FROM cte_1
-                )
+                SELECT col_2
+                FROM cte_1
+            )
         GROUP BY col_2
         HAVING col_10 > 0.1
     ),

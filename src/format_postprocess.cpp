@@ -1263,7 +1263,7 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
             rendered = expand_nested_select_head(rendered);
             return left + " " + string(op) + "\n(\n" + indent_block(rendered, 4) + "\n)";
           }
-          return left + " " + string(op) + " (\n" + indent_block(rendered, 8) + "\n    )";
+          return left + " " + string(op) + " (\n" + indent_block(rendered, 4) + "\n)";
         }
       }
     }
@@ -1332,6 +1332,11 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
   if (auto inner = unwrap_outer_parens(s); !inner.empty()) {
     if (find_top_level_keyword(inner, "AND") >= 0 || find_top_level_keyword(inner, "OR") >= 0) {
       string nested = format_bool_expr(inner);
+      if (nested.find(" IN (\n") != string::npos || nested.find(" GLOBAL IN (\n") != string::npos) {
+        string grouped = "(\n" + indent_block(nested, 4) + "\n)";
+        if (!comment.empty()) grouped += " " + comment;
+        return grouped;
+      }
       vector<string> nested_lines;
       size_t nested_start = 0;
       while (nested_start <= nested.size()) {
