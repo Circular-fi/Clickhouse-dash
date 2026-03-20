@@ -1283,12 +1283,31 @@ string Formatter::format_in_literal(string_view expr) {
         const string left = trim_ascii_spaces(expr.substr(0, i));
         const string right = trim_ascii_spaces(expr.substr(i + op.size()));
         if (left.empty() || right.empty()) continue;
+
+        const size_t wrap_threshold = std::min<size_t>(threshold, 80);
+        const string compact = left + " " + string(op) + " " + right;
+
+        if (right.size() >= 2 && right.front() == '[' && right.back() == ']') {
+          const string right_body = trim_ascii_spaces(right.substr(1, right.size() - 2));
+          const auto right_items = split_top_level(right_body, ',');
+          const bool should_wrap_array = right.find('\n') != string::npos ||
+                                        (right_items.size() > 1 && compact.size() > wrap_threshold);
+          if (should_wrap_array) {
+            string rendered_right = "[\n";
+            for (size_t j = 0; j < right_items.size(); ++j) {
+              rendered_right += "    " + format_expression(right_items[j]);
+              if (j + 1 < right_items.size()) rendered_right += ',';
+              rendered_right += '\n';
+            }
+            rendered_right += ']';
+            return left + " " + string(op) + " " + rendered_right;
+          }
+        }
+
         const string right_inner = unwrap_outer_parens(right);
         if (!right_inner.empty() && looks_like_query(right_inner)) continue;
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
-        const string compact = left + " " + string(op) + " " + right;
-        const size_t wrap_threshold = std::min<size_t>(threshold, 80);
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};
         const auto left_items = split_top_level(left_inner, ',');
         string rendered_left = "(\n";
