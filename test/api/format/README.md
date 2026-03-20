@@ -249,11 +249,15 @@ FROM (
 
 ### IN subquery
 
+For `IN (` / `GLOBAL IN (` subqueries, keep fixture-48 canonical indentation:
+- subquery body indented by 8 spaces from the clause line
+- closing `)` aligned at 4 spaces
+
 ```sql
 WHERE entity_key IN (
-    SELECT entity_key
-    FROM anon.reference_table
-)
+        SELECT entity_key
+        FROM anon.reference_table
+    )
 ```
 
 ### EXISTS subquery

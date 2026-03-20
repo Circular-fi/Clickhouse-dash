@@ -1332,6 +1332,11 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
   if (auto inner = unwrap_outer_parens(s); !inner.empty()) {
     if (find_top_level_keyword(inner, "AND") >= 0 || find_top_level_keyword(inner, "OR") >= 0) {
       string nested = format_bool_expr(inner);
+      if (nested.find(" IN (\n") != string::npos || nested.find(" GLOBAL IN (\n") != string::npos) {
+        string grouped = "(\n" + indent_block(nested, 4) + "\n)";
+        if (!comment.empty()) grouped += " " + comment;
+        return grouped;
+      }
       vector<string> nested_lines;
       size_t nested_start = 0;
       while (nested_start <= nested.size()) {
