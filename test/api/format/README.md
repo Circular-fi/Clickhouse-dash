@@ -199,14 +199,10 @@ WHERE
 
 ### USING joins
 
-Apply `USING` formatting by key count:
-
-- Single-key `USING` should stay compact, without parentheses.
-- Multi-key `USING` should keep parenthesized key lists.
+Keep simple `USING` joins compact.
 
 ```sql
-LEFT JOIN anon.reference_table USING entity_key
-LEFT JOIN anon.reference_table USING (entity_key, entity_group)
+LEFT JOIN anon.reference_table USING (entity_key)
 ```
 
 ### ON joins
@@ -253,11 +249,15 @@ FROM (
 
 ### IN subquery
 
+For `IN (` / `GLOBAL IN (` subqueries, keep fixture-48 canonical indentation:
+- subquery body indented by 8 spaces from the clause line
+- closing `)` aligned at 4 spaces
+
 ```sql
 WHERE entity_key IN (
-    SELECT entity_key
-    FROM anon.reference_table
-)
+        SELECT entity_key
+        FROM anon.reference_table
+    )
 ```
 
 ### EXISTS subquery

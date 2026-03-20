@@ -1263,7 +1263,7 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
             rendered = expand_nested_select_head(rendered);
             return left + " " + string(op) + "\n(\n" + indent_block(rendered, 4) + "\n)";
           }
-          return left + " " + string(op) + " (\n" + indent_block(rendered, 4) + "\n)";
+          return left + " " + string(op) + " (\n" + indent_block(rendered, 8) + "\n    )";
         }
       }
     }
