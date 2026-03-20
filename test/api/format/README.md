@@ -199,10 +199,14 @@ WHERE
 
 ### USING joins
 
-Keep simple `USING` joins compact.
+Apply `USING` formatting by key count:
+
+- Single-key `USING` should stay compact, without parentheses.
+- Multi-key `USING` should keep parenthesized key lists.
 
 ```sql
-LEFT JOIN anon.reference_table USING (entity_key)
+LEFT JOIN anon.reference_table USING entity_key
+LEFT JOIN anon.reference_table USING (entity_key, entity_group)
 ```
 
 ### ON joins
