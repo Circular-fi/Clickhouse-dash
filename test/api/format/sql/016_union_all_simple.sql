@@ -1,13 +1,13 @@
 SELECT
     entity_key,
     metric_value,
-    'source_a' AS source_name
+    'source_a' AS `source_name`
 FROM anon.source_a_metrics
 UNION ALL
 SELECT
     entity_key,
     metric_value,
-    'source_b' AS source_name
+    'source_b' AS `source_name`
 FROM anon.source_b_metrics
 ORDER BY
     source_name ASC,

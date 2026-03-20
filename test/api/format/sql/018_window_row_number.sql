@@ -7,7 +7,7 @@ SELECT
         ORDER BY
             metric_value DESC,
             entity_key ASC
-    ) AS group_rank
+    ) AS `group_rank`
 FROM anon.grouped_metrics
 ORDER BY
     entity_group ASC,

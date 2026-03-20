@@ -6,5 +6,5 @@ SELECT
             / unamed_func_3(column_1, 1400000)
         ),
         NULL
-    ) AS data
+    ) AS `data`
 FROM database_1.table_1

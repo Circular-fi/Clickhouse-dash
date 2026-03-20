@@ -1,7 +1,7 @@
 WITH
     cte_1 AS
     (
-        SELECT col_1 AS col_2
+        SELECT col_1 AS `col_2`
         FROM schema_1.table_1
         WHERE
             col_3 = 'value_1'
@@ -16,9 +16,9 @@ WITH
     (
         SELECT
             col_2,
-            agg_fn_2(col_7)  AS col_8,
-            agg_fn_3(col_9)  AS col_10,
-            count()          AS col_11
+            agg_fn_2(col_7)  AS `col_8`,
+            agg_fn_3(col_9)  AS `col_10`,
+            count()          AS `col_11`
         FROM schema_1.table_2
         WHERE
             col_3 = 'value_3'
@@ -33,10 +33,10 @@ WITH
     (
         SELECT max(col_11)
         FROM cte_2
-    ) AS col_12
+    ) AS `col_12`
 SELECT
     *,
-    (col_10 / col_8) * 100 AS col_13
+    (col_10 / col_8) * 100 AS `col_13`
 FROM cte_2
 WHERE col_11 >= ((col_12 * 2) / 3)
 ORDER BY col_10 / col_8 DESC

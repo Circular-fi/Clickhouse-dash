@@ -6,7 +6,7 @@ SELECT
         PARTITION BY entity_key
         ORDER BY event_date ASC
         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS running_metric_value
+    ) AS `running_metric_value`
 FROM anon.daily_metrics
 ORDER BY
     entity_key ASC,
