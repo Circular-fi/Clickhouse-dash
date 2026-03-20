@@ -724,7 +724,26 @@ string Formatter::format_clause(string_view kw, string_view body) {
 }
 
 vector<std::pair<string, string>> Formatter::split_joins(string_view s) const {
-  static const char* join_kws[] = {"LEFT ARRAY JOIN", "ARRAY JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN", "JOIN"};
+  static const char* join_kws[] = {
+      "LEFT ARRAY JOIN",
+      "ARRAY JOIN",
+      "FULL OUTER JOIN",
+      "LEFT OUTER JOIN",
+      "RIGHT OUTER JOIN",
+      "ANY LEFT JOIN",
+      "ANY RIGHT JOIN",
+      "ANY INNER JOIN",
+      "ALL LEFT JOIN",
+      "ALL RIGHT JOIN",
+      "ALL INNER JOIN",
+      "ASOF LEFT JOIN",
+      "ASOF INNER JOIN",
+      "INNER JOIN",
+      "LEFT JOIN",
+      "RIGHT JOIN",
+      "FULL JOIN",
+      "CROSS JOIN",
+      "JOIN"};
   vector<std::pair<string, string>> parts;
   size_t start = 0;
   bool found = false;
