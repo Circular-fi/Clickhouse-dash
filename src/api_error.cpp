@@ -214,7 +214,7 @@ ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, st
       size_t j = i;
       while (j < msg.size()) {
         char c = msg[j];
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '.' || c == ',' || c == ')') break;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' || c == ')') break;
         ++j;
       }
       if (j > i) {

@@ -222,3 +222,25 @@ def assert_query_stream_ok(case_name: str, sql: str) -> None:
 )
 def test_query_stream_supports_native_edge_types(case_name: str, sql: str) -> None:
     assert_query_stream_ok(case_name, sql)
+
+
+def test_query_error_preserves_dotted_field_name_in_location() -> None:
+    sql = "SELECT missing.field FROM system.one"
+    _, events = run_query_and_collect_events(sql)
+
+    error_event = next((event for event in events if event["event"] == "error"), None)
+    assert error_event is not None, f"expected error event, got: {json.dumps(events, ensure_ascii=False, indent=2)}"
+
+    payload = error_event.get("data") or {}
+    clickhouse = payload.get("clickhouse") if isinstance(payload.get("clickhouse"), dict) else {}
+    near = clickhouse.get("near") if isinstance(clickhouse, dict) else None
+
+    assert isinstance(near, str) and near, (
+        "expected clickhouse.near in error payload\n"
+        f"payload={json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
+    assert near == "missing.field", (
+        "expected full dotted field name in clickhouse.near\n"
+        f"near={near!r}\n"
+        f"payload={json.dumps(payload, ensure_ascii=False, indent=2)}"
+    )
