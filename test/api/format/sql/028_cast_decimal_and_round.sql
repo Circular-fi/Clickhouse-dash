@@ -9,7 +9,7 @@ FROM anon.amount_events
 -- EXPECTED
 SELECT
     entity_key,
-    CAST(raw_amount, 'Decimal(18, 6)')                   AS `amount_decimal`,
-    roundBankers(CAST(raw_amount, 'Decimal(18, 6)'), 2)  AS `amount_rounded`,
-    toString(CAST(raw_amount, 'Decimal(18, 6)'))         AS `amount_string`
+    CAST(raw_amount, 'Decimal(18, 6)')                  AS `amount_decimal`,
+    roundBankers(CAST(raw_amount, 'Decimal(18, 6)'), 2) AS `amount_rounded`,
+    toString(CAST(raw_amount, 'Decimal(18, 6)'))        AS `amount_string`
 FROM anon.amount_events
