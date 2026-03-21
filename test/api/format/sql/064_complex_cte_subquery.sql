@@ -62,9 +62,9 @@ WITH
     (
         SELECT
             col_2,
-            agg_fn_2(col_7)    AS `col_8`,
-            agg_fn_3(col_9)    AS `col_10`,
-            count()            AS `col_11`
+            agg_fn_2(col_7)  AS `col_8`,
+            agg_fn_3(col_9)  AS `col_10`,
+            count()          AS `col_11`
         FROM schema_1.table_2
         WHERE
             col_3 = 'value_3'
