@@ -917,6 +917,12 @@
       return { from, to };
     };
 
+    const trailingLineSentinelHtml = () => (prevText.endsWith("\n") ? '<span class="editorTrailingLineSentinel" aria-hidden="true">&#8203;</span>' : "");
+
+    const setMirrorHtml = (html) => {
+      pre.innerHTML = String(html || "") + trailingLineSentinelHtml();
+    };
+
     const renderWithError = (range) => {
       const msg = errorLc && errorLc.message ? String(errorLc.message) : "";
       const title = msg ? ` title="${escapeHtml(msg)}"` : "";
@@ -935,7 +941,7 @@
         out.push(`<span class="tok-err"${title}>${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
         if (b < raw.length) out.push(wrapHtml(raw.slice(b), t.kind));
       }
-      pre.innerHTML = out.join("");
+      setMirrorHtml(out.join(""));
     };
 
     const countNewlines = (s) => {
@@ -985,12 +991,12 @@
 
     const render = () => {
       if (!errorLc) {
-        pre.innerHTML = tokens.map((t) => t.html).join("");
+        setMirrorHtml(tokens.map((t) => t.html).join(""));
         return;
       }
       const range = computeErrorRange(prevText, errorLc);
       if (!range) {
-        pre.innerHTML = tokens.map((t) => t.html).join("");
+        setMirrorHtml(tokens.map((t) => t.html).join(""));
         return;
       }
       renderWithError(range);
