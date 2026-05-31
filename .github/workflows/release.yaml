@@ -108,14 +108,10 @@ jobs:
           - runner: macos-latest
             goos: darwin
             goarch: amd64
-            zig_target: ""
-            cmake_processor: x86_64
 
           - runner: macos-latest
             goos: darwin
             goarch: arm64
-            zig_target: ""
-            cmake_processor: arm64
 
     steps:
       - name: Checkout
@@ -129,6 +125,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           VERSION="${{ needs.prepare.outputs.version }}"
           GIT_SHA="$(git rev-parse HEAD)"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -146,7 +143,10 @@ jobs:
           echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
           echo "BUILD_DIR=${BUILD_DIR}" >> "${GITHUB_ENV}"
           echo "FETCHCONTENT_DIR=${FETCHCONTENT_DIR}" >> "${GITHUB_ENV}"
-          echo "ZIG_TARGET=${{ matrix.zig_target }}" >> "${GITHUB_ENV}"
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            echo "ZIG_TARGET=${{ matrix.zig_target }}" >> "${GITHUB_ENV}"
+          fi
 
       - name: Install deps (Linux)
         if: matrix.goos == 'linux'
@@ -161,16 +161,16 @@ jobs:
             file \
             git \
             ninja-build \
-            pkg-config
+            python3
 
-      - name: Set up Zig for Linux musl builds
+      - name: Set up Zig (Linux musl toolchain)
         if: matrix.goos == 'linux'
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
           cache-key: chdash-zig-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.zig_target }}
 
-      - name: Create Zig musl toolchain
+      - name: Create Zig musl CMake toolchain (Linux)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
@@ -203,6 +203,7 @@ jobs:
           exec zig ranlib "$@"
           EOF
 
+          sed -i 's/^          //' "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
           chmod +x "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
 
           TOOLCHAIN_FILE="${TOOLS_DIR}/zig-musl-toolchain.cmake"
@@ -219,14 +220,16 @@ jobs:
           set(CMAKE_POSITION_INDEPENDENT_CODE OFF CACHE BOOL "" FORCE)
           set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")
           EOF
+          sed -i 's/^          //' "${TOOLCHAIN_FILE}"
 
           echo "ZIG_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}" >> "${GITHUB_ENV}"
+          echo "Created ${TOOLCHAIN_FILE}"
 
-      - name: Cache CMake FetchContent deps
+      - name: Cache FetchContent deps (Linux)
+        if: matrix.goos == 'linux'
         uses: actions/cache@v5
         with:
-          path: |
-            ${{ steps.vars.outputs.fetchcontent_dir }}
+          path: ${{ steps.vars.outputs.fetchcontent_dir }}
           key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
           restore-keys: |
             cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-
@@ -241,7 +244,6 @@ jobs:
 
           cmake -S src -B "${BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCMAKE_TOOLCHAIN_FILE="${ZIG_TOOLCHAIN_FILE}" \
             -DCHDASH_EMBED_STATIC=ON \
             -DCHDASH_SEMVER_VALUE="${VERSION}" \
@@ -250,7 +252,42 @@ jobs:
             -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}"
 
           echo "CMake compiler selection:"
-          grep -E 'CMAKE_(CXX_)?COMPILER(:|=)' "${BUILD_DIR}/CMakeCache.txt" || true
+          grep -E 'CMAKE_(C|CXX)_COMPILER(:|=)' "${BUILD_DIR}/CMakeCache.txt" || true
+
+      - name: Patch RapidJSON for Clang/libc++ (Linux musl)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RAPIDJSON_DOCUMENT="${FETCHCONTENT_DIR}/rapidjson-src/include/rapidjson/document.h"
+          test -f "${RAPIDJSON_DOCUMENT}"
+
+          python3 - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          path = Path(os.environ["FETCHCONTENT_DIR"]) / "rapidjson-src/include/rapidjson/document.h"
+          text = path.read_text()
+
+          old = "GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }"
+          new = "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;"
+
+          if new in text:
+              print(f"RapidJSON already patched: {path}")
+          elif old in text:
+              path.write_text(text.replace(old, new, 1))
+              print(f"Patched RapidJSON GenericStringRef assignment: {path}")
+          else:
+              print("Could not find expected RapidJSON assignment operator to patch", file=sys.stderr)
+              for i, line in enumerate(text.splitlines(), start=1):
+                  if "GenericStringRef& operator=" in line:
+                      print(f"{i}: {line}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+          grep -n 'GenericStringRef& operator=' "${RAPIDJSON_DOCUMENT}"
 
       - name: Build (Linux musl static, no Docker)
         if: matrix.goos == 'linux'
@@ -268,34 +305,21 @@ jobs:
 
           BIN="${BUILD_DIR}/chdash"
           test -f "${BIN}"
-          chmod +x "${BIN}"
 
           file "${BIN}"
 
           if readelf -l "${BIN}" | grep -q 'INTERP'; then
-            echo "ERROR: ${BIN} has a dynamic interpreter; it is not fully static."
-            readelf -l "${BIN}"
+            echo "ERROR: Linux binary has an ELF interpreter, so it is dynamically linked."
+            readelf -l "${BIN}" | sed -n '/INTERP/,+2p'
             exit 1
           fi
 
-          if ! file "${BIN}" | grep -qi 'statically linked'; then
-            echo "ERROR: file(1) does not report a statically linked binary."
-            file "${BIN}"
+          LDD_OUT="$(ldd "${BIN}" 2>&1 || true)"
+          echo "${LDD_OUT}"
+          if ! grep -qi 'not a dynamic executable' <<< "${LDD_OUT}"; then
+            echo "ERROR: Linux binary is not fully static."
             exit 1
           fi
-
-          set +e
-          LDD_OUTPUT="$(ldd "${BIN}" 2>&1)"
-          LDD_CODE=$?
-          set -e
-          echo "${LDD_OUTPUT}"
-
-          if [ "${LDD_CODE}" -eq 0 ]; then
-            echo "ERROR: ldd succeeded; binary is probably dynamically linked."
-            exit 1
-          fi
-
-          echo "Static musl check passed for ${BIN}"
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
@@ -303,13 +327,20 @@ jobs:
           brew update
           brew install ninja cmake
 
+      - name: Cache CMake deps (macOS)
+        if: matrix.goos == 'darwin'
+        uses: actions/cache@v5
+        with:
+          path: |
+            build/_deps
+            build/CMakeCache.txt
+          key: cmake-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
+
       - name: Configure (macOS)
         if: matrix.goos == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
-
-          rm -rf "${BUILD_DIR}"
 
           EXTRA=()
           if [ "${{ matrix.goarch }}" = "amd64" ]; then
@@ -318,20 +349,18 @@ jobs:
             EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
           fi
 
-          cmake -S src -B "${BUILD_DIR}" -G Ninja \
+          cmake -S src -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCHDASH_EMBED_STATIC=ON \
             -DCHDASH_SEMVER_VALUE="${VERSION}" \
             -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
             -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
-            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}" \
             "${EXTRA[@]}"
 
       - name: Build (macOS)
         if: matrix.goos == 'darwin'
-        shell: bash
-        run: cmake --build "${BUILD_DIR}" --target chdash -- -j2
+        run: cmake --build build --target chdash -- -j2
 
       - name: Package
         id: package
@@ -339,12 +368,17 @@ jobs:
         run: |
           set -euo pipefail
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
-          BIN="${BUILD_DIR}/chdash"
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            BIN="${BUILD_DIR}/chdash"
+          else
+            BIN="build/chdash"
+          fi
 
           test -f "${BIN}"
+          rm -rf pkg
           mkdir -p pkg
           cp "${BIN}" pkg/chdash
-          chmod +x pkg/chdash
           tar -C pkg -czf "${TAR}" chdash
           echo "tar=${TAR}" >> "${GITHUB_OUTPUT}"
 
@@ -375,46 +409,44 @@ jobs:
           set -euo pipefail
           mkdir -p out
           find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
+          (cd out && sha256sum *.tar.gz > SHA256SUMS)
           ls -la out
 
       - name: Verify Linux release assets before publishing
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends binutils file
 
           shopt -s nullglob
           linux_assets=(out/*_linux_*.tar.gz)
+
           if [ "${#linux_assets[@]}" -eq 0 ]; then
-            echo "ERROR: no Linux assets found."
+            echo "ERROR: no Linux assets found"
             exit 1
           fi
 
           for asset in "${linux_assets[@]}"; do
             echo "Checking ${asset}"
             tmp="$(mktemp -d)"
-            tar -xzf "${asset}" -C "${tmp}"
+            tar -C "${tmp}" -xzf "${asset}"
             test -f "${tmp}/chdash"
             file "${tmp}/chdash"
 
             if readelf -l "${tmp}/chdash" | grep -q 'INTERP'; then
-              echo "ERROR: ${asset} contains a dynamically linked Linux binary."
-              readelf -l "${tmp}/chdash"
+              echo "ERROR: ${asset} contains a dynamically linked binary"
+              readelf -l "${tmp}/chdash" | sed -n '/INTERP/,+2p'
               exit 1
             fi
 
-            if ! file "${tmp}/chdash" | grep -qi 'statically linked'; then
-              echo "ERROR: ${asset} does not look statically linked according to file(1)."
-              file "${tmp}/chdash"
+            LDD_OUT="$(ldd "${tmp}/chdash" 2>&1 || true)"
+            echo "${LDD_OUT}"
+            if ! grep -qi 'not a dynamic executable' <<< "${LDD_OUT}"; then
+              echo "ERROR: ${asset} is not fully static"
               exit 1
             fi
 
             rm -rf "${tmp}"
           done
-
-          (cd out && sha256sum *.tar.gz > SHA256SUMS)
-          ls -la out
 
       - name: Publish Release (generated notes)
         uses: softprops/action-gh-release@v3
