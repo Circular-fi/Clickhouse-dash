@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, ex: v2.7.10"
+        required: true
+        type: string
   push:
     tags:
       - "v*"
