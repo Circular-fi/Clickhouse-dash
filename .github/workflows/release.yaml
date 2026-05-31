@@ -93,10 +93,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04
             goos: linux
             goarch: amd64
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04-arm
             goos: linux
             goarch: arm64
 
@@ -122,75 +122,69 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           GIT_SHA="$(git rev-parse HEAD)"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_DIR="build-${{ matrix.goos }}-${{ matrix.goarch }}"
+
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "git_sha=${GIT_SHA}" >> "${GITHUB_OUTPUT}"
           echo "build_time=${BUILD_TIME}" >> "${GITHUB_OUTPUT}"
+          echo "build_dir=${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
+
           echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           echo "GIT_SHA=${GIT_SHA}" >> "${GITHUB_ENV}"
           echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
+          echo "BUILD_DIR=${BUILD_DIR}" >> "${GITHUB_ENV}"
 
-      - name: Set up QEMU
-        if: matrix.goos == 'linux'
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Buildx
-        if: matrix.goos == 'linux'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build (Linux via Dockerfile target=production, cached)
+      - name: Install deps (Linux)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-
-          rm -rf build_out
-          mkdir -p build_out
-
-          docker buildx build \
-            --platform "linux/${{ matrix.goarch }}" \
-            -f test/Dockerfile \
-            --target production \
-            --build-arg CHDASH_SEMVER="${VERSION}" \
-            --build-arg CHDASH_GIT_SHA="${GIT_SHA}" \
-            --build-arg CHDASH_BUILD_TIME="${BUILD_TIME}" \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
-            --output "type=local,dest=build_out" \
-            .
-
-          test -f build_out/app/chdash
-          chmod +x build_out/app/chdash
-          file build_out/app/chdash || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            git \
+            lld \
+            ninja-build
 
       - name: Install deps (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.goos == 'darwin'
+        shell: bash
         run: |
+          set -euo pipefail
           brew update
           brew install ninja cmake
 
-      - name: Cache CMake deps (macOS)
-        if: matrix.goos == 'darwin'
+      - name: Cache CMake FetchContent deps
         uses: actions/cache@v5
         with:
           path: |
-            build/_deps
-            build/CMakeCache.txt
-          key: cmake-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
+            ${{ steps.vars.outputs.build_dir }}/_deps
+          key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
+          restore-keys: |
+            cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      - name: Configure (macOS)
-        if: matrix.goos == 'darwin'
+      - name: Configure
         shell: bash
         run: |
           set -euo pipefail
 
           EXTRA=()
-          if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
-          else
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            EXTRA+=("-DCMAKE_EXE_LINKER_FLAGS=-s -fuse-ld=lld -static-libstdc++ -static-libgcc")
           fi
 
-          cmake -S src -B build -G Ninja \
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            if [ "${{ matrix.goarch }}" = "amd64" ]; then
+              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+            else
+              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
+            fi
+          fi
+
+          cmake -S src -B "${BUILD_DIR}" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCHDASH_EMBED_STATIC=ON \
@@ -199,9 +193,22 @@ jobs:
             -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
             "${EXTRA[@]}"
 
-      - name: Build (macOS)
-        if: matrix.goos == 'darwin'
-        run: cmake --build build --target chdash -- -j2
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "${BUILD_DIR}" --target chdash -- -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Inspect binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${BUILD_DIR}/chdash"
+          chmod +x "${BUILD_DIR}/chdash"
+          file "${BUILD_DIR}/chdash" || true
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            ldd "${BUILD_DIR}/chdash" || true
+          fi
 
       - name: Package
         id: package
@@ -209,12 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
-
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            BIN="build_out/app/chdash"
-          else
-            BIN="build/chdash"
-          fi
+          BIN="${BUILD_DIR}/chdash"
 
           test -f "${BIN}"
           mkdir -p pkg
