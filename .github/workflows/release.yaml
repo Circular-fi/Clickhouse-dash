@@ -96,16 +96,26 @@ jobs:
           - runner: ubuntu-22.04
             goos: linux
             goarch: amd64
+            zig_target: x86_64-linux-musl
+            cmake_processor: x86_64
+
           - runner: ubuntu-22.04-arm
             goos: linux
             goarch: arm64
+            zig_target: aarch64-linux-musl
+            cmake_processor: aarch64
 
           - runner: macos-latest
             goos: darwin
             goarch: amd64
+            zig_target: ""
+            cmake_processor: x86_64
+
           - runner: macos-latest
             goos: darwin
             goarch: arm64
+            zig_target: ""
+            cmake_processor: arm64
 
     steps:
       - name: Checkout
@@ -123,16 +133,20 @@ jobs:
           GIT_SHA="$(git rev-parse HEAD)"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           BUILD_DIR="build-${{ matrix.goos }}-${{ matrix.goarch }}"
+          FETCHCONTENT_DIR="${PWD}/.cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}"
 
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "git_sha=${GIT_SHA}" >> "${GITHUB_OUTPUT}"
           echo "build_time=${BUILD_TIME}" >> "${GITHUB_OUTPUT}"
           echo "build_dir=${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "fetchcontent_dir=${FETCHCONTENT_DIR}" >> "${GITHUB_OUTPUT}"
 
           echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           echo "GIT_SHA=${GIT_SHA}" >> "${GITHUB_ENV}"
           echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
           echo "BUILD_DIR=${BUILD_DIR}" >> "${GITHUB_ENV}"
+          echo "FETCHCONTENT_DIR=${FETCHCONTENT_DIR}" >> "${GITHUB_ENV}"
+          echo "ZIG_TARGET=${{ matrix.zig_target }}" >> "${GITHUB_ENV}"
 
       - name: Install deps (Linux)
         if: matrix.goos == 'linux'
@@ -141,47 +155,167 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
+            binutils \
             ca-certificates \
             cmake \
+            file \
             git \
-            lld \
-            ninja-build
+            ninja-build \
+            pkg-config
 
-      - name: Install deps (macOS)
-        if: matrix.goos == 'darwin'
+      - name: Set up Zig for Linux musl builds
+        if: matrix.goos == 'linux'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+          cache-key: chdash-zig-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.zig_target }}
+
+      - name: Create Zig musl toolchain
+        if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-          brew update
-          brew install ninja cmake
+
+          TOOLS_DIR="${PWD}/.github-build-tools/${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${TOOLS_DIR}"
+
+          cat > "${TOOLS_DIR}/zig-cc" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig cc -target "${ZIG_TARGET}" -static "$@"
+          EOF
+
+          cat > "${TOOLS_DIR}/zig-cxx" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig c++ -target "${ZIG_TARGET}" -static "$@"
+          EOF
+
+          cat > "${TOOLS_DIR}/zig-ar" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig ar "$@"
+          EOF
+
+          cat > "${TOOLS_DIR}/zig-ranlib" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig ranlib "$@"
+          EOF
+
+          chmod +x "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
+
+          TOOLCHAIN_FILE="${TOOLS_DIR}/zig-musl-toolchain.cmake"
+          cat > "${TOOLCHAIN_FILE}" <<EOF
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR ${{ matrix.cmake_processor }})
+          set(CMAKE_C_COMPILER "${TOOLS_DIR}/zig-cc")
+          set(CMAKE_CXX_COMPILER "${TOOLS_DIR}/zig-cxx")
+          set(CMAKE_AR "${TOOLS_DIR}/zig-ar")
+          set(CMAKE_RANLIB "${TOOLS_DIR}/zig-ranlib")
+          set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+          set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(CMAKE_POSITION_INDEPENDENT_CODE OFF CACHE BOOL "" FORCE)
+          set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")
+          EOF
+
+          echo "ZIG_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}" >> "${GITHUB_ENV}"
 
       - name: Cache CMake FetchContent deps
         uses: actions/cache@v5
         with:
           path: |
-            ${{ steps.vars.outputs.build_dir }}/_deps
+            ${{ steps.vars.outputs.fetchcontent_dir }}
           key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
           restore-keys: |
             cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      - name: Configure
+      - name: Configure (Linux musl static, no Docker)
+        if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
 
-          EXTRA=()
+          rm -rf "${BUILD_DIR}"
 
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            EXTRA+=("-DCMAKE_EXE_LINKER_FLAGS=-s -fuse-ld=lld -static-libstdc++ -static-libgcc")
+          cmake -S src -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_TOOLCHAIN_FILE="${ZIG_TOOLCHAIN_FILE}" \
+            -DCHDASH_EMBED_STATIC=ON \
+            -DCHDASH_SEMVER_VALUE="${VERSION}" \
+            -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
+            -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}"
+
+          echo "CMake compiler selection:"
+          grep -E 'CMAKE_(CXX_)?COMPILER(:|=)' "${BUILD_DIR}/CMakeCache.txt" || true
+
+      - name: Build (Linux musl static, no Docker)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "${BUILD_DIR}" --target chdash -- -j"$(getconf _NPROCESSORS_ONLN)"
+          strip "${BUILD_DIR}/chdash" || true
+
+      - name: Verify static Linux binary
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BIN="${BUILD_DIR}/chdash"
+          test -f "${BIN}"
+          chmod +x "${BIN}"
+
+          file "${BIN}"
+
+          if readelf -l "${BIN}" | grep -q 'INTERP'; then
+            echo "ERROR: ${BIN} has a dynamic interpreter; it is not fully static."
+            readelf -l "${BIN}"
+            exit 1
           fi
 
-          if [ "${{ matrix.goos }}" = "darwin" ]; then
-            if [ "${{ matrix.goarch }}" = "amd64" ]; then
-              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
-            else
-              EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
-            fi
+          if ! file "${BIN}" | grep -qi 'statically linked'; then
+            echo "ERROR: file(1) does not report a statically linked binary."
+            file "${BIN}"
+            exit 1
+          fi
+
+          set +e
+          LDD_OUTPUT="$(ldd "${BIN}" 2>&1)"
+          LDD_CODE=$?
+          set -e
+          echo "${LDD_OUTPUT}"
+
+          if [ "${LDD_CODE}" -eq 0 ]; then
+            echo "ERROR: ldd succeeded; binary is probably dynamically linked."
+            exit 1
+          fi
+
+          echo "Static musl check passed for ${BIN}"
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install ninja cmake
+
+      - name: Configure (macOS)
+        if: matrix.goos == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${BUILD_DIR}"
+
+          EXTRA=()
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+          else
+            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
           fi
 
           cmake -S src -B "${BUILD_DIR}" -G Ninja \
@@ -191,24 +325,13 @@ jobs:
             -DCHDASH_SEMVER_VALUE="${VERSION}" \
             -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
             -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}" \
             "${EXTRA[@]}"
 
-      - name: Build
+      - name: Build (macOS)
+        if: matrix.goos == 'darwin'
         shell: bash
-        run: |
-          set -euo pipefail
-          cmake --build "${BUILD_DIR}" --target chdash -- -j"$(getconf _NPROCESSORS_ONLN)"
-
-      - name: Inspect binary
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f "${BUILD_DIR}/chdash"
-          chmod +x "${BUILD_DIR}/chdash"
-          file "${BUILD_DIR}/chdash" || true
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            ldd "${BUILD_DIR}/chdash" || true
-          fi
+        run: cmake --build "${BUILD_DIR}" --target chdash -- -j2
 
       - name: Package
         id: package
@@ -221,6 +344,7 @@ jobs:
           test -f "${BIN}"
           mkdir -p pkg
           cp "${BIN}" pkg/chdash
+          chmod +x pkg/chdash
           tar -C pkg -czf "${TAR}" chdash
           echo "tar=${TAR}" >> "${GITHUB_OUTPUT}"
 
@@ -251,6 +375,44 @@ jobs:
           set -euo pipefail
           mkdir -p out
           find dist -type f -name "*.tar.gz" -exec cp {} out/ \;
+          ls -la out
+
+      - name: Verify Linux release assets before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils file
+
+          shopt -s nullglob
+          linux_assets=(out/*_linux_*.tar.gz)
+          if [ "${#linux_assets[@]}" -eq 0 ]; then
+            echo "ERROR: no Linux assets found."
+            exit 1
+          fi
+
+          for asset in "${linux_assets[@]}"; do
+            echo "Checking ${asset}"
+            tmp="$(mktemp -d)"
+            tar -xzf "${asset}" -C "${tmp}"
+            test -f "${tmp}/chdash"
+            file "${tmp}/chdash"
+
+            if readelf -l "${tmp}/chdash" | grep -q 'INTERP'; then
+              echo "ERROR: ${asset} contains a dynamically linked Linux binary."
+              readelf -l "${tmp}/chdash"
+              exit 1
+            fi
+
+            if ! file "${tmp}/chdash" | grep -qi 'statically linked'; then
+              echo "ERROR: ${asset} does not look statically linked according to file(1)."
+              file "${tmp}/chdash"
+              exit 1
+            fi
+
+            rm -rf "${tmp}"
+          done
+
           (cd out && sha256sum *.tar.gz > SHA256SUMS)
           ls -la out
 
