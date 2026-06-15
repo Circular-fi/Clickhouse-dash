@@ -46,6 +46,7 @@
 
   --pillBg: rgba(11, 15, 20, 0.52);
   --inputBg: rgba(11, 15, 20, 0.72);
+  --editorSolidBg: #0c1118;
   --tableBg: rgba(11, 15, 20, 0.68);
   --theadBg: rgba(11, 15, 20, 0.9);
 
@@ -104,6 +105,7 @@
 
     --pillBg: rgba(255, 255, 255, 0.72);
     --inputBg: rgba(255, 255, 255, 1);
+  --editorSolidBg: #ffffff;
     --tableBg: rgba(255, 255, 255, 0.84);
     --theadBg: rgba(255, 255, 255, 0.92);
 
@@ -144,6 +146,7 @@ html[data-theme="dark"] {
 
   --pillBg: rgba(11, 15, 20, 0.52);
   --inputBg: rgba(11, 15, 20, 0.72);
+  --editorSolidBg: #0c1118;
   --tableBg: rgba(11, 15, 20, 0.68);
   --theadBg: rgba(11, 15, 20, 0.9);
 
@@ -186,6 +189,7 @@ html[data-theme="light"] {
 
   --pillBg: rgba(255, 255, 255, 0.72);
   --inputBg: rgba(255, 255, 255, 1);
+  --editorSolidBg: #ffffff;
   --tableBg: rgba(255, 255, 255, 0.84);
   --theadBg: rgba(255, 255, 255, 0.92);
 
@@ -313,7 +317,7 @@ body {
 
 #queryTextArea {
   width: 100%;
-  height: 100%;
+  height: var(--initialEditorHeight, 100%);
   min-height: calc(100% - 3.25rem);
   resize: none;
   box-sizing: border-box;
@@ -346,7 +350,7 @@ body {
   --gutterW: 6ch;
   position: relative;
   width: 100%;
-  height: 100%;
+  height: var(--initialEditorHeight, 100%);
   min-height: calc(100% - 3.25rem);
   resize: vertical;
   overflow: hidden;
@@ -387,7 +391,7 @@ body {
   margin: 0;
   box-sizing: border-box;
   padding: 14px;
-  padding-right: 52px;
+  padding-right: 84px;
   padding-left: calc(14px + var(--gutterW));
   border-radius: var(--radiusSm);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
@@ -399,9 +403,15 @@ body {
   white-space: pre;
   tab-size: 4;
   -moz-tab-size: 4;
-  overflow: hidden;
+  overflow: auto;
+  scrollbar-width: none;
   overflow-wrap: anywhere;
   color: var(--text);
+}
+
+.editorHighlight::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .editorInput {
@@ -429,7 +439,7 @@ body {
 .editorCopyButton {
   position: absolute;
   top: 10px;
-  right: 10px;
+  right: 42px;
   z-index: 4;
   display: inline-flex;
   align-items: center;
@@ -449,6 +459,125 @@ body {
 .editorCopyButton:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.editorAutocompleteControl {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.editorAutocompleteControl__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.editorAutocompleteControl__button:hover,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button {
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+
+.editorAutocompleteControl__gear {
+  width: 15px;
+  height: 15px;
+  display: block;
+  background: currentColor;
+  opacity: 0.86;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23000' d='M8.77 1.13h2.46l.44 2.05c.46.14.9.32 1.3.54l1.76-1.14 1.74 1.74-1.14 1.76c.22.41.4.84.54 1.3l2.05.44v2.46l-2.05.44c-.14.46-.32.9-.54 1.3l1.14 1.76-1.74 1.74-1.76-1.14c-.41.22-.84.4-1.3.54l-.44 2.05H8.77l-.44-2.05c-.46-.14-.9-.32-1.3-.54l-1.76 1.14-1.74-1.74 1.14-1.76c-.22-.41-.4-.84-.54-1.3l-2.05-.44V7.82l2.05-.44c.14-.46.32-.9.54-1.3L3.53 4.32l1.74-1.74 1.76 1.14c.41-.22.84-.4 1.3-.54l.44-2.05ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23000' d='M8.77 1.13h2.46l.44 2.05c.46.14.9.32 1.3.54l1.76-1.14 1.74 1.74-1.14 1.76c.22.41.4.84.54 1.3l2.05.44v2.46l-2.05.44c-.14.46-.32.9-.54 1.3l1.14 1.76-1.74 1.74-1.76-1.14c-.41.22-.84.4-1.3.54l-.44 2.05H8.77l-.44-2.05c-.46-.14-.9-.32-1.3-.54l-1.76 1.14-1.74-1.74 1.14-1.76c-.22-.41-.4-.84-.54-1.3l-2.05-.44V7.82l2.05-.44c.14-.46.32-.9.54-1.3L3.53 4.32l1.74-1.74 1.76 1.14c.41-.22.84-.4 1.3-.54l.44-2.05ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__gear {
+  opacity: 1;
+}
+
+.editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 0.58;
+}
+
+.editorAutocompleteControl__menu {
+  position: absolute;
+  top: 34px;
+  right: 0;
+  min-width: 9.8rem;
+  padding: 0.28rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 12px;
+  background: var(--menuBg, var(--panelBg));
+  box-shadow: 0 1rem 2.4rem color-mix(in srgb, #000 26%, transparent);
+}
+
+.editorAutocompleteControl__menu[hidden] {
+  display: none !important;
+}
+
+.editorAutocompleteControl__title {
+  padding: 0.34rem 0.48rem 0.24rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.editorAutocompleteControl__opt {
+  display: flex;
+  align-items: center;
+  gap: 0.46rem;
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 0.42rem 0.52rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 720;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editorAutocompleteControl__opt:hover {
+  background: var(--buttonHoverBg);
+}
+
+.editorAutocompleteControl__check {
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 0.28rem;
+  border: 1px solid var(--buttonBorder);
+  background: var(--inputBg);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--panelBg) 90%, transparent);
+}
+
+.editorAutocompleteControl__opt.is-checked .editorAutocompleteControl__check {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--buttonBorder));
+}
+
+.editorAutocompleteControl__text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .editorCopyButton__icon {
@@ -2137,4 +2266,517 @@ html[data-theme="light"] .queryLibraryItem__delete:hover {
 
 .resultsStack__toggle {
   width: 3rem;
+}
+
+/* Performance and editor alignment fixes.
+   Keep textarea and syntax overlay on the exact same monospace layout.
+   Large result sets are virtualized against the main page scroll, not a
+   separate vertical scroll inside the result table. */
+#queryTextArea,
+.editorInput,
+.editorHighlight,
+.editorGutter {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 21px;
+  letter-spacing: 0;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+.editorInput {
+  overflow: auto;
+}
+
+.editorHighlight {
+  pointer-events: none;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.editorHighlight::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.tableWrap {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.tableWrap--virtual {
+  overflow-anchor: none;
+}
+
+.resultTable__spacerRow td {
+  background: transparent !important;
+  pointer-events: none;
+}
+
+.resultTable:not(.resultTable--vertical) tbody td {
+  max-width: 34rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.autocompleteMenu {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  min-width: min(22rem, calc(100vw - 1rem));
+  max-width: min(86vw, 74rem);
+  max-height: min(calc((1.62rem * 8) + 2.2rem), calc(100vh - 1rem));
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 14%, transparent) transparent;
+  padding: 0.24rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 0.72rem;
+  background: var(--buttonBg);
+  box-shadow: 0 1.1rem 1.9rem -1.1rem rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.autocompleteMenu[hidden] {
+  display: none !important;
+}
+.autocompleteMenu::-webkit-scrollbar {
+  width: 0.22rem;
+  height: 0.22rem;
+}
+
+.autocompleteMenu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.autocompleteMenu::-webkit-scrollbar-thumb {
+  border-radius: 999rem;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.autocompleteMenu::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 24%, transparent);
+}
+
+
+.autocompleteItem {
+  display: grid;
+  grid-template-columns: 2.55rem minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.28rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.46rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.2rem 0.24rem;
+  min-height: 1.48rem;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.autocompleteItem:hover,
+.autocompleteItem[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+}
+
+html[data-theme="light"] .autocompleteItem:hover,
+html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 8%, transparent);
+}
+
+.autocompleteItem__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.08rem;
+}
+
+.autocompleteItem__labelText {
+  display: inline-block;
+  min-width: max-content;
+  padding-right: 2rem;
+  transform: translateX(0);
+}
+
+.autocompleteItem__labelName {
+  display: inline;
+}
+
+.autocompleteItem__source {
+  display: inline;
+  margin-left: 0.42rem;
+  color: color-mix(in srgb, var(--muted) 76%, transparent);
+  font-size: 0.82em;
+  font-weight: 650;
+}
+
+.autocompleteItem__labelText::after {
+  content: "";
+}
+
+.autocompleteItem__label.is-overflowing .autocompleteItem__labelText::after {
+  content: attr(data-marquee);
+  padding-left: 2rem;
+}
+
+.autocompleteItem:hover .autocompleteItem__label.is-overflowing .autocompleteItem__labelText,
+.autocompleteItem[aria-selected="true"] .autocompleteItem__label.is-overflowing .autocompleteItem__labelText {
+  animation: autocompleteLabelScroll var(--ac-label-duration, 8s) linear infinite;
+}
+
+@keyframes autocompleteLabelScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(calc(-1 * var(--ac-label-shift, 0px))); }
+}
+
+.autocompleteItem__badges {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.18rem;
+  min-width: 0;
+  max-width: min(24rem, 42vw);
+  overflow: hidden;
+}
+
+.autocompleteItem__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  block-size: 1.02rem;
+  border-radius: 999rem;
+  border: 1px solid color-mix(in srgb, var(--ac-badge-color, var(--muted)) 26%, transparent);
+  background: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 12%, transparent);
+  color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 72%, var(--text) 28%);
+  font-size: 0.56rem;
+  font-weight: 880;
+  letter-spacing: 0.028em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.autocompleteItem__badge--type {
+  inline-size: 2.55rem;
+  flex: 0 0 2.55rem;
+  --ac-badge-color: var(--sqlKeyword);
+}
+
+.autocompleteItem__badge--meta {
+  inline-size: auto;
+  min-inline-size: 2.2rem;
+  max-inline-size: 16rem;
+  flex: 0 1 auto;
+  padding-inline: 0.42rem;
+  --ac-badge-color: var(--muted);
+}
+
+.autocompleteItem__badge--function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--keyword.autocompleteItem__badge--type { --ac-badge-color: var(--sqlKeyword); }
+.autocompleteItem__badge--column.autocompleteItem__badge--type { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--table.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--database.autocompleteItem__badge--type { --ac-badge-color: var(--accentBorder); }
+.autocompleteItem__badge--table_function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--data_type.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--setting.autocompleteItem__badge--type { --ac-badge-color: var(--muted); }
+.autocompleteItem__badge--format.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+
+.autocompleteItem__badge--function.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--column.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--table.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--data_type.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--setting.autocompleteItem__badge--meta { --ac-badge-color: var(--muted); }
+
+.autocompleteItem__badge--tag-agg { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--tag-user,
+.autocompleteItem__badge--tag-sql_udf,
+.autocompleteItem__badge--tag-exec_udf,
+.autocompleteItem__badge--tag-wasm_udf { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--tag-alias { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--tag-cte { --ac-badge-color: var(--sqlKeyword); }
+.autocompleteItem__badge--tag-lowcard { --ac-badge-color: var(--sqlKeyword); }
+.autocompleteItem__badge--tag-nullable { --ac-badge-color: var(--muted); }
+.autocompleteItem__badge--tag-array { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--tag-tuple { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--tag-map { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--tag-system,
+.autocompleteItem__badge--tag-mt,
+.autocompleteItem__badge--tag-replmt { --ac-badge-color: var(--sqlNumber); }
+
+
+.autocompleteMore {
+  position: sticky;
+  bottom: 0;
+  margin: 0.16rem -0.24rem -0.24rem;
+  padding: 0.24rem 0.66rem 0.24rem;
+  border-top: 1px solid color-mix(in srgb, var(--buttonBorder) 70%, transparent);
+  background: var(--buttonBg);
+  box-shadow: 0 -0.35rem 0.55rem var(--buttonBg);
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.66rem;
+  font-weight: 760;
+  text-align: right;
+}
+
+
+/* Keep native editor scrollbars visible while the ghost layer is active.
+   The ghost layer is inset from the scrollbar gutter instead of covering or
+   hiding the native scrollbar, which avoids the split scrollbar artefact. */
+
+.autocompleteGhost {
+  position: absolute;
+  inset: 0 18px 18px 0;
+  z-index: 5;
+  pointer-events: none;
+  white-space: pre;
+  color: var(--text);
+  opacity: 1;
+  overflow: hidden;
+  contain: strict;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
+.autocompleteGhost[hidden] {
+  display: none !important;
+}
+
+.autocompleteGhost__replacement,
+.autocompleteGhost__line {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  white-space: pre;
+  overflow: hidden;
+  background: var(--editorSolidBg, var(--panelBg));
+  color: var(--text);
+  line-height: inherit;
+}
+
+.autocompleteGhost__line {
+  box-shadow: none;
+  z-index: 1;
+}
+
+
+.autocompleteGhost__line > span,
+.autocompleteGhost__line * {
+  display: inline;
+  font: inherit;
+  line-height: inherit !important;
+  letter-spacing: inherit;
+  vertical-align: baseline;
+}
+
+.autocompleteGhost__context {
+  display: inline;
+  opacity: 1;
+}
+
+.autocompleteGhost__missing {
+  position: static;
+  opacity: 0.32;
+  color: var(--text);
+  text-shadow: none;
+}
+
+.autocompleteGhost__typed {
+  display: inline;
+  opacity: 1;
+}
+
+
+html[data-theme="light"] .autocompleteItem__badge {
+  border-color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 28%, transparent);
+  background: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 12%, white 88%);
+  color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 54%, black 46%);
+}
+
+.editorTrailingNewline {
+  visibility: hidden;
+}
+
+/* Editor options polish: icon-only controls, no button chrome. */
+.editorCopyButton,
+.editorAutocompleteControl__button {
+  border: 0 !important;
+  outline: none;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  transition: color 120ms ease, opacity 120ms ease, transform 80ms ease;
+}
+
+.editorCopyButton:hover:not(:disabled),
+.editorAutocompleteControl__button:hover,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button {
+  background: transparent !important;
+  color: var(--text);
+}
+
+.editorCopyButton:focus,
+.editorCopyButton:focus-visible,
+.editorAutocompleteControl__button:focus,
+.editorAutocompleteControl__button:focus-visible {
+  outline: none;
+  box-shadow: none !important;
+}
+
+.editorCopyButton__icon,
+.editorAutocompleteControl__gear {
+  opacity: 0.78;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.editorCopyButton:hover:not(:disabled) .editorCopyButton__icon,
+.editorCopyButton.is-copied .editorCopyButton__icon,
+.editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__gear {
+  opacity: 1;
+}
+
+.editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 0.56;
+}
+
+/* Centered gear mask with a true centered hole. */
+.editorAutocompleteControl__gear {
+  width: 15px;
+  height: 15px;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' clip-rule='evenodd' d='M10.85 2.5h2.3l.5 2.36c.46.13.9.31 1.31.54l2.02-1.32 1.63 1.63-1.32 2.02c.23.41.41.85.54 1.31l2.36.5v2.3l-2.36.5c-.13.46-.31.9-.54 1.31l1.32 2.02-1.63 1.63-2.02-1.32c-.41.23-.85.41-1.31.54l-.5 2.36h-2.3l-.5-2.36a6.76 6.76 0 0 1-1.31-.54L7.02 17.3l-1.63-1.63 1.32-2.02a6.76 6.76 0 0 1-.54-1.31l-2.36-.5v-2.3l2.36-.5c.13-.46.31-.9.54-1.31L5.39 5.71l1.63-1.63L9.04 5.4c.41-.23.85-.41 1.31-.54l.5-2.36ZM12 14.95a2.95 2.95 0 1 0 0-5.9 2.95 2.95 0 0 0 0 5.9Z'/%3E%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' fill-rule='evenodd' clip-rule='evenodd' d='M10.85 2.5h2.3l.5 2.36c.46.13.9.31 1.31.54l2.02-1.32 1.63 1.63-1.32 2.02c.23.41.41.85.54 1.31l2.36.5v2.3l-2.36.5c-.13.46-.31.9-.54 1.31l1.32 2.02-1.63 1.63-2.02-1.32c-.41.23-.85.41-1.31.54l-.5 2.36h-2.3l-.5-2.36a6.76 6.76 0 0 1-1.31-.54L7.02 17.3l-1.63-1.63 1.32-2.02a6.76 6.76 0 0 1-.54-1.31l-2.36-.5v-2.3l2.36-.5c.13-.46.31-.9.54-1.31L5.39 5.71l1.63-1.63L9.04 5.4c.41-.23.85-.41 1.31-.54l.5-2.36ZM12 14.95a2.95 2.95 0 1 0 0-5.9 2.95 2.95 0 0 0 0 5.9Z'/%3E%3C/svg%3E") !important;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.editorWrap.is-copy-button-hidden .editorCopyButton {
+  display: none !important;
+}
+
+.editorWrap.is-line-numbers-hidden {
+  --gutterW: 0px;
+}
+
+.editorWrap.is-line-numbers-hidden .editorGutter {
+  display: none !important;
+}
+
+.editorWrap.is-line-numbers-hidden .editorHighlight,
+.editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
+  padding-left: 14px;
+}
+
+
+/* Editor options: store the gear icon the same way as the copy icon: inline SVG mask in CSS. */
+.editorAutocompleteControl__gear {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20viewBox=%220%200%2024%2024%22%20fill=%22none%22%20xmlns=%22http://www.w3.org/2000/svg%22%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill=%22#000%22/%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill=%22#000%22/%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill=%22#000%22/%3E%20%3C/svg%3E") !important;
+  mask-image: url("data:image/svg+xml,%3Csvg%20viewBox=%220%200%2024%2024%22%20fill=%22none%22%20xmlns=%22http://www.w3.org/2000/svg%22%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill=%22#000%22/%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill=%22#000%22/%3E%20%3Cpath%20fill-rule=%22evenodd%22%20clip-rule=%22evenodd%22%20d=%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill=%22#000%22/%3E%20%3C/svg%3E") !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+}
+
+
+/* Final gear icon override: same storage model as copy icon, but with a fully URL-encoded SVG.
+   The previous inline mask used raw # in fill colors, which breaks data-URI parsing in CSS. */
+.editorAutocompleteControl__gear {
+  display: block !important;
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 16px !important;
+  background: currentColor !important;
+  background-color: currentColor !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") center / 16px 16px no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") center / 16px 16px no-repeat !important;
+}
+
+/* Keep the editor options gear visually stable regardless of autocomplete state.
+   The checked state is shown inside the menu, not by dimming the gear trigger. */
+.editorAutocompleteControl__button,
+.editorAutocompleteControl__button.has-disabled-autocomplete {
+  color: color-mix(in srgb, var(--muted) 82%, transparent) !important;
+}
+
+.editorAutocompleteControl__button:hover,
+.editorAutocompleteControl__button.has-disabled-autocomplete:hover,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete {
+  color: var(--text) !important;
+}
+
+.editorAutocompleteControl__button .editorAutocompleteControl__gear,
+.editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 0.78 !important;
+}
+
+.editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl__button.has-disabled-autocomplete:hover .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__gear,
+.editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
+  opacity: 1 !important;
+}
+
+
+
+/* Pre-paint restored editor height. index.html sets --initialEditorHeight before style.css loads. */
+html.chdash-has-initial-editor-height .editorWrap {
+  height: var(--initialEditorHeight) !important;
+}
+
+/* The editor options trigger is now present in HTML so the gear is painted before JS hydrates. */
+.editorAutocompleteControl {
+  z-index: 4;
+}
+
+/* Pre-paint editor option classes.
+   index.html sets these on <html> before style.css loads, so disabled editor
+   controls do not flash during page reload before app_autocomplete.js hydrates. */
+html.chdash-copy-button-hidden .editorCopyButton,
+.editorWrap.is-copy-button-hidden .editorCopyButton {
+  display: none !important;
+}
+
+html.chdash-line-numbers-hidden .editorWrap,
+.editorWrap.is-line-numbers-hidden {
+  --gutterW: 0px;
+}
+
+html.chdash-line-numbers-hidden .editorGutter,
+.editorWrap.is-line-numbers-hidden .editorGutter {
+  display: none !important;
+}
+
+html.chdash-line-numbers-hidden .editorHighlight,
+html.chdash-line-numbers-hidden #queryTextArea.editorInput,
+.editorWrap.is-line-numbers-hidden .editorHighlight,
+.editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
+  padding-left: 14px;
 }
