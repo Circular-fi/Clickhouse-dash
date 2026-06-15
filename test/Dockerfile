@@ -2,7 +2,7 @@ ARG CHDASH_SEMVER=dev
 ARG CHDASH_GIT_SHA=unknown
 ARG CHDASH_BUILD_TIME=unknown
 
-FROM alpine:3.20 AS toolchain
+FROM alpine:3.24 AS toolchain
 WORKDIR /work
 
 RUN apk add --no-cache \
@@ -65,7 +65,7 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
  && strip /work/build/chdash \
  && cp /work/build/chdash /work/chdash
 
-FROM alpine:3.20 AS dev
+FROM alpine:3.24 AS dev
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=dev-builder /work/chdash /app/chdash
