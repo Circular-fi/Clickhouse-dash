@@ -11,6 +11,7 @@
 
     queryTextArea: byId("queryTextArea"),
     editorCopyButton: byId("editorCopyButton"),
+    autocompleteMenu: byId("autocompleteMenu"),
 
     runSplit: byId("runSplit"),
     runButton: byId("runButton"),

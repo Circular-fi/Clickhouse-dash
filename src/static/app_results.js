@@ -20,6 +20,15 @@
   let flushRafId = 0;
   const flushBatchSize = 400;
 
+  // DOM virtualization: rendering thousands of rows x dozens of columns creates
+  // hundreds of thousands of <td> nodes and makes scrolling/sorting very costly.
+  // Keep all rows in memory for copy/export/sort, but only mount rows visible
+  // in the main page viewport. The results table itself must not become a
+  // separate vertical scroll container.
+  const virtualRowThreshold = 500;
+  const virtualOverscanRows = 18;
+  const virtualDefaultRowHeight = 32;
+
   let isVerticalResults = false;
 
   let rowIndexCounter = 0;
@@ -28,6 +37,14 @@
   let scheduledFullRender = false;
   let fullRenderRafId = 0;
   let fullRenderToken = 0;
+
+  let isVirtualResults = false;
+  let virtualViewRows = [];
+  let virtualRowHeight = virtualDefaultRowHeight;
+  let virtualLastStart = -1;
+  let virtualLastEnd = -1;
+  let virtualScrollRafId = 0;
+  let virtualScrollAttached = false;
 
   let gaugeNumericCols = [];
   let gaugeMaxPos = [];
@@ -160,6 +177,17 @@
       cancelAnimationFrame(fullRenderRafId);
       fullRenderRafId = 0;
     }
+    isVirtualResults = false;
+    virtualViewRows = [];
+    virtualRowHeight = virtualDefaultRowHeight;
+    virtualLastStart = -1;
+    virtualLastEnd = -1;
+    if (virtualScrollRafId) {
+      cancelAnimationFrame(virtualScrollRafId);
+      virtualScrollRafId = 0;
+    }
+    if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
+
     currentStatusValue = "";
     lastErrorMessage = "";
 
@@ -1113,8 +1141,8 @@
   }
 
   function buildLiveViewRows() {
+    if (!isLiveSortActive()) return allResultRows;
     const rows = allResultRows.slice();
-    if (!isLiveSortActive()) return rows;
     const key = sortKey;
     const dir = sortDir;
     const mode = getLiveSortMode(key);
@@ -1169,6 +1197,106 @@
     tr.appendChild(td);
   }
 
+  function createVirtualSpacerRow(heightPx) {
+    const tr = document.createElement("tr");
+    tr.className = "resultTable__spacerRow";
+    tr.setAttribute("aria-hidden", "true");
+    const td = document.createElement("td");
+    td.colSpan = Math.max(1, resultColumns.length + 1);
+    td.style.height = `${Math.max(0, Math.round(heightPx))}px`;
+    td.style.padding = "0";
+    td.style.border = "0";
+    td.style.lineHeight = "0";
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function scheduleVirtualRender() {
+    if (!isVirtualResults || virtualScrollRafId) return;
+    virtualScrollRafId = requestAnimationFrame(() => {
+      virtualScrollRafId = 0;
+      renderVirtualRows(false);
+    });
+  }
+
+  function getPageScrollTop() {
+    return Math.max(0, window.pageYOffset || document.documentElement?.scrollTop || document.body?.scrollTop || 0);
+  }
+
+  function getElementPageTop(el) {
+    if (!el || !el.getBoundingClientRect) return 0;
+    return el.getBoundingClientRect().top + getPageScrollTop();
+  }
+
+  function getPageVirtualRange(rowsLength, rowH, bodyTop) {
+    const viewportH = Math.max(rowH, window.innerHeight || document.documentElement?.clientHeight || rowH * 12);
+    const viewportTop = getPageScrollTop();
+    const viewportBottom = viewportTop + viewportH;
+
+    let start = Math.max(0, Math.floor((viewportTop - bodyTop) / rowH) - virtualOverscanRows);
+    let end = Math.min(rowsLength, Math.ceil((viewportBottom - bodyTop) / rowH) + virtualOverscanRows);
+
+    if (end <= start) {
+      const visibleCount = Math.ceil(viewportH / rowH) + virtualOverscanRows * 2;
+      if (viewportBottom < bodyTop) {
+        start = 0;
+        end = Math.min(rowsLength, visibleCount);
+      } else {
+        end = rowsLength;
+        start = Math.max(0, end - visibleCount);
+      }
+    }
+
+    return { start, end };
+  }
+
+  function ensureVirtualScrollListener() {
+    if (virtualScrollAttached) return;
+    virtualScrollAttached = true;
+    window.addEventListener("scroll", scheduleVirtualRender, { passive: true });
+    window.addEventListener("resize", scheduleVirtualRender, { passive: true });
+  }
+
+  function renderVirtualRows(force) {
+    if (!isVirtualResults || isVerticalResults || !dom.resultTableBody) return;
+
+    const rows = Array.isArray(virtualViewRows) ? virtualViewRows : [];
+    const rowH = Math.max(18, Number(virtualRowHeight) || virtualDefaultRowHeight);
+    const tbody = dom.resultTableBody;
+    const bodyTop = getElementPageTop(tbody);
+    const { start, end } = getPageVirtualRange(rows.length, rowH, bodyTop);
+
+    if (!force && start === virtualLastStart && end === virtualLastEnd) return;
+    virtualLastStart = start;
+    virtualLastEnd = end;
+
+    const frag = document.createDocumentFragment();
+
+    if (start > 0) frag.appendChild(createVirtualSpacerRow(start * rowH));
+
+    for (let i = start; i < end; i++) {
+      const tr = document.createElement("tr");
+      appendLiveRowCells(tr, rows[i]);
+      frag.appendChild(tr);
+    }
+
+    if (end < rows.length) frag.appendChild(createVirtualSpacerRow((rows.length - end) * rowH));
+
+    tbody.innerHTML = "";
+    tbody.appendChild(frag);
+
+    const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
+    if (firstRow) {
+      const h = firstRow.getBoundingClientRect().height;
+      if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 2) {
+        virtualRowHeight = h;
+        virtualLastStart = -1;
+        virtualLastEnd = -1;
+        scheduleVirtualRender();
+      }
+    }
+  }
+
   function renderLiveTableFull() {
     if (isVerticalResults) return;
     if (!dom.resultTableBody) return;
@@ -1180,10 +1308,28 @@
       flushRafId = 0;
     }
 
+    const rows = buildLiveViewRows();
+
+    if (rows.length > virtualRowThreshold && dom.liveResultsWrap) {
+      isVirtualResults = true;
+      virtualViewRows = rows;
+      virtualLastStart = -1;
+      virtualLastEnd = -1;
+      dom.liveResultsWrap.classList.add("tableWrap--virtual");
+      ensureVirtualScrollListener();
+      renderVirtualRows(true);
+      return;
+    }
+
+    isVirtualResults = false;
+    virtualViewRows = [];
+    virtualLastStart = -1;
+    virtualLastEnd = -1;
+    if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
+
     const tbody = dom.resultTableBody;
     tbody.innerHTML = "";
 
-    const rows = buildLiveViewRows();
     const token = ++fullRenderToken;
 
     const renderBatch = (offset) => {
@@ -1240,6 +1386,16 @@
       cancelAnimationFrame(fullRenderRafId);
       fullRenderRafId = 0;
     }
+    isVirtualResults = false;
+    virtualViewRows = [];
+    virtualRowHeight = virtualDefaultRowHeight;
+    virtualLastStart = -1;
+    virtualLastEnd = -1;
+    if (virtualScrollRafId) {
+      cancelAnimationFrame(virtualScrollRafId);
+      virtualScrollRafId = 0;
+    }
+    if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
 
     if (!dom.resultTableHead) return;
     const tr = document.createElement("tr");
@@ -1292,6 +1448,12 @@
     if (pendingRows.length === 0) return;
     if (!dom.resultTableBody) return;
 
+    if (isVirtualResults || allResultRows.length > virtualRowThreshold) {
+      pendingRows.length = 0;
+      scheduleLiveTableFullRender();
+      return;
+    }
+
     const frag = document.createDocumentFragment();
     const toRender = Math.min(flushBatchSize, pendingRows.length);
 
@@ -1315,7 +1477,7 @@
       row.__chdashRowIndex = rowIndexCounter;
       updateLiveGaugeMaximaFromRow(row);
       allResultRows.push(row);
-      if (isLiveSortActive()) scheduleLiveTableFullRender();
+      if (isLiveSortActive() || isVirtualResults || allResultRows.length > virtualRowThreshold) scheduleLiveTableFullRender();
       else enqueueRowForRender(row);
     }
     setResultsVisible(true);
@@ -1928,6 +2090,13 @@
       isVertical: false,
       gaugesEnabled: false,
       gaugesPainted: false,
+      isVirtual: false,
+      virtualViewRows: [],
+      virtualRowHeight: virtualDefaultRowHeight,
+      virtualLastStart: -1,
+      virtualLastEnd: -1,
+      virtualScrollRafId: 0,
+      virtualScrollAttached: false,
     };
 
     function updateCopyEnabledLocal() {
@@ -2028,8 +2197,8 @@
     }
 
     function buildLocalViewRows() {
+      if (!isLocalSortActive()) return local.allRows;
       const rows = local.allRows.slice();
-      if (!isLocalSortActive()) return rows;
       const key = local.sortKey;
       const dir = local.sortDir;
       const mode = getLocalSortMode(key);
@@ -2080,13 +2249,98 @@
       tr.appendChild(td);
     }
 
+    function createLocalVirtualSpacerRow(heightPx) {
+      const tr = document.createElement("tr");
+      tr.className = "resultTable__spacerRow";
+      tr.setAttribute("aria-hidden", "true");
+      const td = document.createElement("td");
+      td.colSpan = Math.max(1, local.columns.length + 1);
+      td.style.height = `${Math.max(0, Math.round(heightPx))}px`;
+      td.style.padding = "0";
+      td.style.border = "0";
+      td.style.lineHeight = "0";
+      tr.appendChild(td);
+      return tr;
+    }
+
+    function renderLocalVirtualRows(force) {
+      if (!local.isVirtual || local.isVertical || !local.wrap) return;
+      const { tbody } = findTablePartsIn(local.wrap);
+      if (!tbody) return;
+
+      const rows = Array.isArray(local.virtualViewRows) ? local.virtualViewRows : [];
+      const rowH = Math.max(18, Number(local.virtualRowHeight) || virtualDefaultRowHeight);
+      const bodyTop = getElementPageTop(tbody);
+      const { start, end } = getPageVirtualRange(rows.length, rowH, bodyTop);
+
+      if (!force && start === local.virtualLastStart && end === local.virtualLastEnd) return;
+      local.virtualLastStart = start;
+      local.virtualLastEnd = end;
+
+      const frag = document.createDocumentFragment();
+      if (start > 0) frag.appendChild(createLocalVirtualSpacerRow(start * rowH));
+      for (let i = start; i < end; i++) {
+        const tr = document.createElement("tr");
+        appendLocalRowCells(tr, rows[i]);
+        frag.appendChild(tr);
+      }
+      if (end < rows.length) frag.appendChild(createLocalVirtualSpacerRow((rows.length - end) * rowH));
+
+      tbody.innerHTML = "";
+      tbody.appendChild(frag);
+
+      const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
+      if (firstRow) {
+        const h = firstRow.getBoundingClientRect().height;
+        if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 2) {
+          local.virtualRowHeight = h;
+          local.virtualLastStart = -1;
+          local.virtualLastEnd = -1;
+          scheduleLocalVirtualRender();
+        }
+      }
+    }
+
+    function scheduleLocalVirtualRender() {
+      if (!local.isVirtual || local.virtualScrollRafId) return;
+      local.virtualScrollRafId = requestAnimationFrame(() => {
+        local.virtualScrollRafId = 0;
+        renderLocalVirtualRows(false);
+      });
+    }
+
+    function ensureLocalVirtualScrollListener() {
+      if (local.virtualScrollAttached) return;
+      local.virtualScrollAttached = true;
+      window.addEventListener("scroll", scheduleLocalVirtualRender, { passive: true });
+      window.addEventListener("resize", scheduleLocalVirtualRender, { passive: true });
+    }
+
     function renderLocalTableFull() {
       if (!local.wrap) return;
       const { tbody } = findTablePartsIn(local.wrap);
       if (!tbody) return;
 
-      tbody.innerHTML = "";
       const rows = buildLocalViewRows();
+
+      if (rows.length > virtualRowThreshold) {
+        local.isVirtual = true;
+        local.virtualViewRows = rows;
+        local.virtualLastStart = -1;
+        local.virtualLastEnd = -1;
+        local.wrap.classList.add("tableWrap--virtual");
+        ensureLocalVirtualScrollListener();
+        renderLocalVirtualRows(true);
+        return;
+      }
+
+      local.isVirtual = false;
+      local.virtualViewRows = [];
+      local.virtualLastStart = -1;
+      local.virtualLastEnd = -1;
+      local.wrap.classList.remove("tableWrap--virtual");
+
+      tbody.innerHTML = "";
       const token = ++localFullRenderToken;
 
       const renderBatch = (offset) => {
@@ -2244,6 +2498,16 @@
         cancelAnimationFrame(localFullRenderRafId);
         localFullRenderRafId = 0;
       }
+      local.isVirtual = false;
+      local.virtualViewRows = [];
+      local.virtualRowHeight = virtualDefaultRowHeight;
+      local.virtualLastStart = -1;
+      local.virtualLastEnd = -1;
+      if (local.virtualScrollRafId) {
+        cancelAnimationFrame(local.virtualScrollRafId);
+        local.virtualScrollRafId = 0;
+      }
+      if (local.wrap) local.wrap.classList.remove("tableWrap--virtual");
       if (!local.wrap) return;
       resetTableModeLocal();
       clearTableIn(local.wrap);
@@ -2287,7 +2551,7 @@
       const { tbody } = findTablePartsIn(local.wrap);
       if (!tbody) return;
 
-      const shouldFullRender = isLocalSortActive();
+      const shouldFullRender = isLocalSortActive() || local.isVirtual || (local.allRows.length + rowsChunk.length > virtualRowThreshold);
 
       const frag = shouldFullRender ? null : document.createDocumentFragment();
 

@@ -8,6 +8,19 @@
   const clientTtlMs = 30 * 60 * 1000;
   const refreshPollMs = 5 * 60 * 1000;
 
+  const baseTypes = [
+    "keywords",
+    "functions",
+    "databases",
+    "tables",
+    "columns",
+    "table_functions",
+    "formats",
+    "settings",
+    "data_types",
+  ];
+
+  const rawTypes = new Set(baseTypes.filter((t) => t !== "keywords"));
   const inflight = new Map();
 
   function normalizeType(t) {
@@ -22,6 +35,56 @@
     return root.hosts[h];
   }
 
+  function normalizeCatalogItem(raw) {
+    if (raw == null) return null;
+    if (typeof raw === "string") {
+      const name = String(raw || "");
+      return name ? { name } : null;
+    }
+    if (typeof raw !== "object") return null;
+    const item = {
+      name: String(raw.name || ""),
+      database: raw.database == null ? "" : String(raw.database),
+      table: raw.table == null ? "" : String(raw.table),
+      type: raw.type == null ? "" : String(raw.type),
+      detail: raw.detail == null ? "" : String(raw.detail),
+      parent: raw.parent == null ? "" : String(raw.parent),
+    };
+    return item.name ? item : null;
+  }
+
+  function rebuildAutocompleteIndexes(hostMeta) {
+    if (!hostMeta) return;
+
+    const tables = Array.isArray(hostMeta.tables?.items) ? hostMeta.tables.items : [];
+    const columns = Array.isArray(hostMeta.columns?.items) ? hostMeta.columns.items : [];
+
+    const tablesByDatabase = new Map();
+    for (const t of tables) {
+      const db = String(t.database || "");
+      const key = db.toLowerCase();
+      if (!tablesByDatabase.has(key)) tablesByDatabase.set(key, []);
+      tablesByDatabase.get(key).push(t);
+    }
+
+    const columnsByTable = new Map();
+    for (const c of columns) {
+      const db = String(c.database || "");
+      const table = String(c.table || "");
+      const key = `${db}.${table}`.toLowerCase();
+      if (!columnsByTable.has(key)) columnsByTable.set(key, []);
+      columnsByTable.get(key).push(c);
+    }
+
+    hostMeta.autocomplete = { tablesByDatabase, columnsByTable };
+  }
+
+  function notifyMetaChanged(hostId) {
+    if (String(state.selectedHostId || "") !== String(hostId)) return;
+    if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
+    if (ns.autocomplete && typeof ns.autocomplete.refresh === "function") ns.autocomplete.refresh();
+  }
+
   function applyKeywords(hostId, payload) {
     const data = payload && payload.data && payload.data.keywords ? payload.data.keywords : null;
     if (!data || !Array.isArray(data.items)) return;
@@ -30,11 +93,8 @@
     storage.writeMeta(hostId, "keywords", updatedAt, items);
 
     const hostMeta = getHostMeta(hostId);
-    hostMeta.keywords = { updated_at_ms: updatedAt, set: new Set(items) };
-
-    if (state.highlightCtrl && String(state.selectedHostId || "") === String(hostId)) {
-      state.highlightCtrl.refresh();
-    }
+    hostMeta.keywords = { updated_at_ms: updatedAt, items, set: new Set(items) };
+    notifyMetaChanged(hostId);
   }
 
   function applyFunctions(hostId, payload) {
@@ -49,6 +109,8 @@
         name: String(x.name || ""),
         is_aggregate: Boolean(x.is_aggregate),
         case_insensitive: Boolean(x.case_insensitive),
+        is_user_defined: Boolean(x.is_user_defined),
+        origin: x.origin == null ? "" : String(x.origin),
       }))
       .filter((x) => x.name);
 
@@ -63,16 +125,26 @@
       if (it.case_insensitive) ci.add(it.name.toLowerCase());
       else cs.add(it.name);
     }
-    hostMeta.functions = { updated_at_ms: updatedAt, ci, cs, meta };
+    hostMeta.functions = { updated_at_ms: updatedAt, items, ci, cs, meta };
+    notifyMetaChanged(hostId);
+  }
 
-    if (state.highlightCtrl && String(state.selectedHostId || "") === String(hostId)) {
-      state.highlightCtrl.refresh();
-    }
+  function applyCatalog(hostId, type, payload) {
+    const data = payload && payload.data && payload.data[type] ? payload.data[type] : null;
+    if (!data || !Array.isArray(data.items)) return;
+    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
+    const items = data.items.map(normalizeCatalogItem).filter(Boolean);
+    storage.writeMetaRaw(hostId, type, updatedAt, items);
+
+    const hostMeta = getHostMeta(hostId);
+    hostMeta[type] = { updated_at_ms: updatedAt, items };
+    rebuildAutocompleteIndexes(hostMeta);
+    notifyMetaChanged(hostId);
   }
 
   function readClientUpdatedAt(hostId, type) {
     const t = normalizeType(type);
-    const v = t === "functions" ? storage.readMetaRaw(hostId, t) : storage.readMeta(hostId, t);
+    const v = rawTypes.has(t) ? storage.readMetaRaw(hostId, t) : storage.readMeta(hostId, t);
     return v && typeof v.updated_at_ms === "number" ? v.updated_at_ms : 0;
   }
 
@@ -84,14 +156,18 @@
   }
 
   async function fetchAndStore(hostId, types) {
-    const key = `${hostId}::${types.join(",")}`;
+    const normalizedTypes = types.map(normalizeType).filter(Boolean);
+    const key = `${hostId}::${normalizedTypes.join(",")}`;
     if (inflight.has(key)) return inflight.get(key);
 
     const p = (async () => {
-      const payload = await api.getMeta(hostId, types);
-      const tset = new Set(types);
+      const payload = await api.getMeta(hostId, normalizedTypes);
+      const tset = new Set(normalizedTypes);
       if (tset.has("keywords")) applyKeywords(hostId, payload);
       if (tset.has("functions")) applyFunctions(hostId, payload);
+      for (const t of baseTypes) {
+        if (t !== "keywords" && t !== "functions" && tset.has(t)) applyCatalog(hostId, t, payload);
+      }
       return payload;
     })()
       .catch(() => null)
@@ -104,8 +180,7 @@
   function maybeRefreshOnUserAction() {
     const hostId = state.selectedHostId;
     if (!hostId) return;
-    const types = ["keywords", "functions"].map(normalizeType);
-    const need = types.filter((t) => shouldRefresh(hostId, t));
+    const need = baseTypes.filter((t) => shouldRefresh(hostId, t));
     if (!need.length) return;
     fetchAndStore(String(hostId), need);
   }
@@ -113,38 +188,57 @@
   function maybeRefreshOnLoad() {
     const hostId = state.selectedHostId;
     if (!hostId) return;
-    const types = ["keywords", "functions"].map(normalizeType);
-    const need = types.filter((t) => shouldRefresh(hostId, t));
+    const need = baseTypes.filter((t) => shouldRefresh(hostId, t));
     if (!need.length) return;
     fetchAndStore(String(hostId), need);
+  }
+
+  function hydrateFunctions(hostMeta, raw) {
+    const ci = new Set();
+    const cs = new Set();
+    const meta = new Map();
+    const items = [];
+    for (const rawItem of raw.items) {
+      if (!rawItem || typeof rawItem !== "object") continue;
+      const name = String(rawItem.name || "");
+      if (!name) continue;
+      const it = {
+        name,
+        is_aggregate: Boolean(rawItem.is_aggregate),
+        case_insensitive: Boolean(rawItem.case_insensitive),
+        is_user_defined: Boolean(rawItem.is_user_defined),
+        origin: rawItem.origin == null ? "" : String(rawItem.origin),
+      };
+      items.push(it);
+      meta.set(name, it);
+      if (it.case_insensitive) ci.add(name.toLowerCase());
+      else cs.add(name);
+    }
+    hostMeta.functions = { updated_at_ms: raw.updated_at_ms, items, ci, cs, meta };
   }
 
   function hydrateFromStorage(hostId) {
     const h = String(hostId || "");
     if (!h) return;
+    const hostMeta = getHostMeta(h);
+
     const kw = storage.readMeta(h, "keywords");
     if (kw && Array.isArray(kw.items) && kw.items.length) {
-      const hostMeta = getHostMeta(h);
-      hostMeta.keywords = { updated_at_ms: kw.updated_at_ms, set: new Set(kw.items.map((x) => String(x || "")).filter((x) => x)) };
+      const items = kw.items.map((x) => String(x || "")).filter((x) => x);
+      hostMeta.keywords = { updated_at_ms: kw.updated_at_ms, items, set: new Set(items) };
     }
 
     const fn = storage.readMetaRaw(h, "functions");
-    if (fn && Array.isArray(fn.items) && fn.items.length) {
-      const hostMeta = getHostMeta(h);
-      const ci = new Set();
-      const cs = new Set();
-      const meta = new Map();
-      for (const raw of fn.items) {
-        if (!raw || typeof raw !== "object") continue;
-        const name = String(raw.name || "");
-        if (!name) continue;
-        const it = { name, is_aggregate: Boolean(raw.is_aggregate), case_insensitive: Boolean(raw.case_insensitive) };
-        meta.set(name, it);
-        if (it.case_insensitive) ci.add(name.toLowerCase());
-        else cs.add(name);
-      }
-      hostMeta.functions = { updated_at_ms: fn.updated_at_ms, ci, cs, meta };
+    if (fn && Array.isArray(fn.items) && fn.items.length) hydrateFunctions(hostMeta, fn);
+
+    for (const t of baseTypes) {
+      if (t === "keywords" || t === "functions") continue;
+      const raw = storage.readMetaRaw(h, t);
+      if (!raw || !Array.isArray(raw.items) || !raw.items.length) continue;
+      hostMeta[t] = { updated_at_ms: raw.updated_at_ms, items: raw.items.map(normalizeCatalogItem).filter(Boolean) };
     }
+
+    rebuildAutocompleteIndexes(hostMeta);
   }
 
   if (state && state.selectedHostId) hydrateFromStorage(state.selectedHostId);
@@ -156,5 +250,5 @@
     }
   }, refreshPollMs);
 
-  ns.meta = { maybeRefreshOnUserAction, maybeRefreshOnLoad, hydrateFromStorage };
+  ns.meta = { maybeRefreshOnUserAction, maybeRefreshOnLoad, hydrateFromStorage, fetchAndStore };
 })();

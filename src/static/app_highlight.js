@@ -917,10 +917,12 @@
       return { from, to };
     };
 
-    const trailingLineSentinelHtml = () => (prevText.endsWith("\n") ? '<span class="editorTrailingLineSentinel" aria-hidden="true">&#8203;</span>' : "");
-
-    const setMirrorHtml = (html) => {
-      pre.innerHTML = String(html || "") + trailingLineSentinelHtml();
+    const withTrailingNewlineSentinel = (html) => {
+      // A textarea displays an extra empty visual line when the value ends with a newline.
+      // Some browsers collapse the final empty line in the overlay <pre>, which
+      // creates a one-line drift when scrolled all the way to the bottom.
+      if (!prevText.endsWith("\n")) return html;
+      return `${html}<span class="editorTrailingNewline">&nbsp;</span>`;
     };
 
     const renderWithError = (range) => {
@@ -941,7 +943,7 @@
         out.push(`<span class="tok-err"${title}>${wrapHtml(raw.slice(a, b), t.kind)}</span>`);
         if (b < raw.length) out.push(wrapHtml(raw.slice(b), t.kind));
       }
-      setMirrorHtml(out.join(""));
+      pre.innerHTML = withTrailingNewlineSentinel(out.join(""));
     };
 
     const countNewlines = (s) => {
@@ -991,21 +993,61 @@
 
     const render = () => {
       if (!errorLc) {
-        setMirrorHtml(tokens.map((t) => t.html).join(""));
+        pre.innerHTML = withTrailingNewlineSentinel(tokens.map((t) => t.html).join(""));
         return;
       }
       const range = computeErrorRange(prevText, errorLc);
       if (!range) {
-        setMirrorHtml(tokens.map((t) => t.html).join(""));
+        pre.innerHTML = withTrailingNewlineSentinel(tokens.map((t) => t.html).join(""));
         return;
       }
       renderWithError(range);
     };
 
+    let lastOverlayScrollbarX = -1;
+
+    const syncOverlayMetrics = () => {
+      const cs = getComputedStyle(ta);
+      const borderY = (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0);
+      const scrollbarX = Math.max(0, Math.round(ta.offsetHeight - ta.clientHeight - borderY));
+      if (scrollbarX === lastOverlayScrollbarX) return;
+      lastOverlayScrollbarX = scrollbarX;
+
+      // The textarea max scrollTop increases when a horizontal scrollbar is present.
+      // The overlay scrollbar is hidden, so its max scrollTop would otherwise be
+      // smaller and it gets clamped near the bottom, creating a half-line drift.
+      // Keep the same visible box and add the scrollbar height to overlay scrollHeight.
+      const pad = scrollbarX ? `${scrollbarX}px` : "";
+      pre.style.bottom = "0px";
+      pre.style.paddingBottom = pad;
+      if (gutter) {
+        gutter.style.bottom = "0px";
+        gutter.style.paddingBottom = pad;
+      }
+    };
+
     const syncScroll = () => {
-      pre.scrollTop = ta.scrollTop;
-      pre.scrollLeft = ta.scrollLeft;
-      if (gutter) gutter.scrollTop = ta.scrollTop;
+      syncOverlayMetrics();
+      const top = ta.scrollTop;
+      const left = ta.scrollLeft;
+      pre.scrollTop = top;
+      // If the browser still clamps because of sub-pixel scrollbar metrics, grow the
+      // invisible bottom pad by the missing delta and retry once.
+      if (Math.abs(pre.scrollTop - top) > 1) {
+        const currentPad = Number.parseFloat(pre.style.paddingBottom || "0") || 0;
+        pre.style.paddingBottom = `${Math.ceil(currentPad + Math.max(0, top - pre.scrollTop))}px`;
+        pre.scrollTop = top;
+      }
+      pre.scrollLeft = left;
+      if (gutter) {
+        gutter.scrollTop = top;
+        if (Math.abs(gutter.scrollTop - top) > 1) {
+          const currentPad = Number.parseFloat(gutter.style.paddingBottom || "0") || 0;
+          gutter.style.paddingBottom = `${Math.ceil(currentPad + Math.max(0, top - gutter.scrollTop))}px`;
+          gutter.scrollTop = top;
+        }
+        gutter.scrollLeft = 0;
+      }
     };
 
     const fullUpdate = (nextText) => {
@@ -1128,7 +1170,10 @@
       requestAnimationFrame(update);
     };
 
-    ta.addEventListener("scroll", syncScroll);
+    ta.addEventListener("scroll", syncScroll, { passive: true });
+    ta.addEventListener("select", syncScroll);
+    ta.addEventListener("keyup", syncScroll);
+    ta.addEventListener("mouseup", syncScroll);
     ta.addEventListener("beforeinput", (e) => {
       lastInputType = String(e.inputType || "");
       lastDataLen = typeof e.data === "string" ? e.data.length : 0;

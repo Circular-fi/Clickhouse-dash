@@ -50,6 +50,7 @@
       "app_api.js",
       "app_meta.js",
       "app_highlight.js",
+      "app_autocomplete.js",
       "app_results.js",
       "app_ui.js",
       "app_run.js",

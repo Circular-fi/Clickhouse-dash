@@ -626,13 +626,39 @@ string Formatter::format_select_like(string_view s) {
     }
   }
 
-  static const char* clauses[] = {"FROM", "SAMPLE", "PREWHERE", "WHERE", "GROUP BY", "HAVING", "ORDER BY", "LIMIT BY", "LIMIT", "SETTINGS"};
+  static const char* clauses[] = {
+      "FROM",
+      "SAMPLE",
+      "GLOBAL ARRAY JOIN",
+      "ARRAY JOIN",
+      "PREWHERE",
+      "WHERE",
+      "GROUP BY",
+      "HAVING",
+      "WINDOW",
+      "QUALIFY",
+      "ORDER BY",
+      "LIMIT BY",
+      "LIMIT",
+      "OFFSET",
+      "SETTINGS",
+      "FORMAT",
+  };
   vector<std::pair<int, string>> poses;
   for (const char* kw : clauses) {
     const int pos = find_top_level_keyword(text, kw, 6);
     if (pos >= 0) poses.push_back({pos, kw});
   }
-  std::sort(poses.begin(), poses.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::sort(poses.begin(), poses.end(), [](const auto& a, const auto& b) {
+    if (a.first != b.first) return a.first < b.first;
+    return a.second.size() > b.second.size();
+  });
+  vector<std::pair<int, string>> deduped_poses;
+  for (const auto& p : poses) {
+    if (!deduped_poses.empty() && deduped_poses.back().first == p.first) continue;
+    deduped_poses.push_back(p);
+  }
+  poses = std::move(deduped_poses);
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
   const string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
@@ -680,7 +706,14 @@ string normalize_boolean_lines(string_view s) {
 
 string Formatter::format_clause(string_view kw, string_view body) {
   if (iequals_ascii(kw, "FROM")) return format_from_clause(body);
-  if (iequals_ascii(kw, "WHERE") || iequals_ascii(kw, "PREWHERE") || iequals_ascii(kw, "HAVING")) {
+  if (iequals_ascii(kw, "ARRAY JOIN") || iequals_ascii(kw, "GLOBAL ARRAY JOIN")) {
+    const auto items = split_top_level(body, ',');
+    if (items.size() == 1 && trim_ascii_spaces(body).find('\n') == string::npos) {
+      return string(kw) + " " + format_expression(items.front());
+    }
+    return string(kw) + "\n" + indent_block(format_simple_item_block(items), 4);
+  }
+  if (iequals_ascii(kw, "WHERE") || iequals_ascii(kw, "PREWHERE") || iequals_ascii(kw, "HAVING") || iequals_ascii(kw, "QUALIFY")) {
     const string cond = format_bool_expr(body);
     const bool has_bool_ops = find_top_level_keyword(body, "AND") >= 0 || find_top_level_keyword(body, "OR") >= 0;
     if (!has_bool_ops) {
@@ -696,7 +729,7 @@ string Formatter::format_clause(string_view kw, string_view body) {
     }
     return string(kw) + "\n" + indent_block(rendered, 4);
   }
-  if (iequals_ascii(kw, "GROUP BY") || iequals_ascii(kw, "ORDER BY")) {
+  if (iequals_ascii(kw, "GROUP BY") || iequals_ascii(kw, "ORDER BY") || iequals_ascii(kw, "WINDOW")) {
     string base = trim_ascii_spaces(body);
     string suffix;
     if (iequals_ascii(kw, "GROUP BY")) {
@@ -719,6 +752,14 @@ string Formatter::format_clause(string_view kw, string_view body) {
     string block = format_simple_item_block(items);
     if (!suffix.empty()) block += " " + suffix;
     return string(kw) + "\n" + indent_block(block, 4);
+  }
+  if (iequals_ascii(kw, "SETTINGS")) {
+    const auto items = split_top_level(body, ',');
+    if (items.size() == 1 && trim_ascii_spaces(body).find('\n') == string::npos) return string(kw) + " " + cleanup_surface(body);
+    return string(kw) + "\n" + indent_block(format_simple_item_block(items), 4);
+  }
+  if (iequals_ascii(kw, "FORMAT")) {
+    return string(kw) + " " + collapse_whitespace(cleanup_surface(body));
   }
   return string(kw) + " " + cleanup_surface(body);
 }

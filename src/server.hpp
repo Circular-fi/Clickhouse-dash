@@ -66,6 +66,8 @@ private:
     std::string name;
     bool is_aggregate = false;
     bool case_insensitive = false;
+    bool is_user_defined = false;
+    std::string origin;
   };
 
   struct MetaFunctions {
@@ -73,8 +75,23 @@ private:
     std::vector<MetaFunction> items;
   };
 
+  struct MetaCatalogItem {
+    std::string name;
+    std::string database;
+    std::string table;
+    std::string type;
+    std::string detail;
+    std::string parent;
+  };
+
+  struct MetaCatalog {
+    uint64_t updated_at_ms = 0;
+    std::vector<MetaCatalogItem> items;
+  };
+
   StaleCache<std::string, MetaKeywords> meta_keywords_cache_;
   StaleCache<std::string, MetaFunctions> meta_functions_cache_;
+  StaleCache<std::string, MetaCatalog> meta_catalog_cache_;
 
   AppConfig cfg_;
   httplib::Server http_;

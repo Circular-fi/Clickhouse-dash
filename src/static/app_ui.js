@@ -136,6 +136,23 @@
     else closeHostMenu();
   }
 
+  function hostPickerSignature(snapshot) {
+    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
+    return JSON.stringify({
+      selected: state.selectedHostId || "",
+      apiOnline: state.apiOnline !== false,
+      hosts: hosts
+        .filter((h) => h && h.id)
+        .map((h) => ({
+          id: String(h.id),
+          label: String(h.label || h.id),
+          healthy: !!h.healthy,
+          ping_ms: h.ping_ms == null ? null : Number(h.ping_ms),
+          clickhouse_version: h.clickhouse_version == null ? "" : String(h.clickhouse_version),
+        })),
+    });
+  }
+
   function renderHostPicker(snapshot) {
     if (!dom.hostPickerMenu) return;
     const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
@@ -146,6 +163,13 @@
       const ids = hosts.map((x) => String(x.id));
       if (!ids.includes(String(state.selectedHostId))) setSelectedHostId(ids.length ? ids[0] : null);
     }
+
+    const signature = hostPickerSignature(snapshot);
+    if (state.hostPickerRenderSignature === signature) {
+      applyHostPickerUi();
+      return;
+    }
+    state.hostPickerRenderSignature = signature;
 
     const staticPicker = hosts.length <= 1;
 
@@ -1178,6 +1202,11 @@
     if (ns.highlight && typeof ns.highlight.attach === "function") {
       const ctrl = ns.highlight.attach(dom.queryTextArea);
       if (ns.state) ns.state.highlightCtrl = ctrl || null;
+    }
+
+    if (ns.autocomplete && typeof ns.autocomplete.attach === "function") {
+      const ctrl = ns.autocomplete.attach(dom.queryTextArea);
+      if (ns.state) ns.state.autocompleteCtrl = ctrl || null;
     }
 
     if (storage && typeof storage.loadEditorHeight === "function" && typeof storage.saveEditorHeight === "function") {

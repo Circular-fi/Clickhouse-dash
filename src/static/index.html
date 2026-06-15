@@ -7,13 +7,45 @@
   <script>
     (function () {
       try {
-        var mode = localStorage.getItem("chdash.theme");
         var root = document.documentElement;
+        var mode = localStorage.getItem("chdash.theme");
+        if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
         if (mode === "dark" || mode === "light") {
           root.dataset.theme = mode;
         } else {
           delete root.dataset.theme;
         }
+        root.dataset.themeMode = mode;
+
+        // Apply editor UI preferences before CSS loads to avoid a one-frame flash
+        // of disabled controls such as the copy button and line numbers.
+        var copyButton = localStorage.getItem("chdash.editor.copy_button.enabled");
+        var lineNumbers = localStorage.getItem("chdash.editor.line_numbers.enabled");
+        var copyHidden = copyButton === "false" || copyButton === "0";
+        var lineHidden = lineNumbers === "false" || lineNumbers === "0";
+        root.classList.toggle("chdash-copy-button-hidden", copyHidden);
+        root.classList.toggle("chdash-line-numbers-hidden", lineHidden);
+
+        // The editor size is stored in sessionStorage by the resize observer. Apply
+        // it as a CSS variable before style.css is parsed so the editor does not
+        // jump after app_ui.js starts.
+        var editorHeightRaw = sessionStorage.getItem("chdash.editorHeight.v1");
+        var editorHeight = editorHeightRaw == null ? NaN : Number(editorHeightRaw);
+        if (Number.isFinite(editorHeight) && editorHeight > 0) {
+          var roundedEditorHeight = Math.round(editorHeight);
+          root.style.setProperty("--initialEditorHeight", roundedEditorHeight + "px");
+          root.classList.add("chdash-has-initial-editor-height");
+          editorHeight = roundedEditorHeight;
+        } else {
+          editorHeight = null;
+        }
+
+        window.__chdashEarlyState = {
+          themeMode: mode,
+          copyButtonHidden: copyHidden,
+          lineNumbersHidden: lineHidden,
+          editorHeight: editorHeight
+        };
       } catch (_) {}
     })();
   </script>
@@ -74,6 +106,25 @@
           <button type="button" class="themeSelect__option" role="option" data-value="light" aria-selected="false">Light</button>
         </div>
       </div>
+      <script>
+        (function () {
+          try {
+            var early = window.__chdashEarlyState || {};
+            var mode = early.themeMode || "system";
+            if (mode !== "system" && mode !== "dark" && mode !== "light") mode = "system";
+            var label = mode === "system" ? "System" : mode.charAt(0).toUpperCase() + mode.slice(1);
+            var text = document.getElementById("themeSelectText");
+            if (text) text.textContent = label;
+            var menu = document.getElementById("themeSelectMenu");
+            if (menu) {
+              var opts = menu.querySelectorAll(".themeSelect__option[data-value]");
+              for (var i = 0; i < opts.length; i += 1) {
+                opts[i].setAttribute("aria-selected", String(opts[i].getAttribute("data-value") === mode));
+              }
+            }
+          } catch (_) {}
+        })();
+      </script>
     </div>
   </header>
 
@@ -90,6 +141,61 @@
         <button id="editorCopyButton" class="editorCopyButton" type="button" aria-label="Copy query" title="Copy query">
           <span class="editorCopyButton__icon" aria-hidden="true"></span>
         </button>
+        <div class="editorAutocompleteControl" aria-label="Editor options">
+          <button
+            class="editorAutocompleteControl__button"
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-label="Editor options"
+            title="Editor options">
+            <span class="editorAutocompleteControl__gear" aria-hidden="true"></span>
+          </button>
+          <div class="editorAutocompleteControl__menu" role="menu" tabindex="-1" hidden>
+            <div class="editorAutocompleteControl__title">Editor options</div>
+            <button class="editorAutocompleteControl__opt" type="button" role="menuitemcheckbox" data-autocomplete-toggle="true" aria-checked="true">
+              <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+              <span class="editorAutocompleteControl__text">Autocomplete</span>
+            </button>
+            <button class="editorAutocompleteControl__opt" type="button" role="menuitemcheckbox" data-copy-button-toggle="true" aria-checked="true">
+              <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+              <span class="editorAutocompleteControl__text">Copy button</span>
+            </button>
+            <button class="editorAutocompleteControl__opt" type="button" role="menuitemcheckbox" data-line-numbers-toggle="true" aria-checked="true">
+              <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+              <span class="editorAutocompleteControl__text">Line numbers</span>
+            </button>
+          </div>
+        </div>
+        <script>
+          (function () {
+            try {
+              var ta = document.getElementById("queryTextArea");
+              if (!ta) return;
+              var wrap = ta.closest ? ta.closest(".editorWrap") : null;
+              var early = window.__chdashEarlyState || {};
+              if (wrap && early.editorHeight) {
+                wrap.style.height = early.editorHeight + "px";
+              }
+
+              var saved = sessionStorage.getItem("chdash.editor.draft.v2") || "";
+              if (!saved) return;
+              ta.value = saved;
+
+              var pre = wrap ? wrap.querySelector(".editorHighlight") : null;
+              if (pre) pre.textContent = saved;
+
+              var gutter = wrap ? wrap.querySelector(".editorGutter") : null;
+              if (gutter) {
+                var count = Math.max(1, saved.split("\n").length);
+                var lines = [];
+                for (var i = 1; i <= count; i += 1) lines.push(String(i));
+                gutter.textContent = lines.join("\n");
+              }
+              document.documentElement.classList.add("chdash-has-initial-query");
+            } catch (_) {}
+          })();
+        </script>
       </div>
 
       <div class="panel_bottom">
