@@ -509,13 +509,21 @@ static bool has_256_bit_int_type(std::string_view type) {
   return icontains(type, "UInt256") || icontains(type, "Int256");
 }
 
+static bool has_decimal_type(std::string_view type) {
+  return icontains(type, "Decimal(") || icontains(type, "Decimal32") ||
+         icontains(type, "Decimal64") || icontains(type, "Decimal128") ||
+         icontains(type, "Decimal256");
+}
+
 static bool has_aggregate_function_type(std::string_view type) {
   return icontains(type, "AggregateFunction(");
 }
 
 static ResultTransportMode classify_result_transport(std::string_view type) {
   if (has_aggregate_function_type(type)) return ResultTransportMode::Opaque;
-  if (has_256_bit_int_type(type) || has_json_like_type(type)) return ResultTransportMode::Stringify;
+  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_decimal_type(type)) {
+    return ResultTransportMode::Stringify;
+  }
   return ResultTransportMode::Passthrough;
 }
 

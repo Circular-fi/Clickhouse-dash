@@ -249,11 +249,15 @@ FROM (
 
 ### IN subquery
 
+For `IN (` / `GLOBAL IN (` subqueries, keep fixture-48 canonical indentation:
+- subquery body indented by 8 spaces from the clause line
+- closing `)` aligned at 4 spaces
+
 ```sql
 WHERE entity_key IN (
-    SELECT entity_key
-    FROM anon.reference_table
-)
+        SELECT entity_key
+        FROM anon.reference_table
+    )
 ```
 
 ### EXISTS subquery
@@ -431,11 +435,31 @@ Use this mental model when formatting:
 When in doubt, choose the formatting that makes two queries with the same structure look the same.
 Consistency across the repository matters more than local stylistic preference.
 
-## Test Data Layout
+## Test Fixtures
 
-- `sql_raw/` contains the raw ClickHouse output used as formatter input.
-- `sql/` contains the expected final formatted SQL returned by the API.
+- All fixtures live under `test/api/format/sql/`.
+- When a fixture is idempotent, the file acts as both the formatter input (after trimming) and the expected output.
+- When a fixture documents a transformation (for example, alias quoting), keep both the raw submission and the expected formatted output in the same file with `-- INPUT` / `-- EXPECTED` sections.
 
-The roundtrip test sends each file from `sql_raw/` to `/api/format` and compares the response to the matching file in `sql/`.
+The roundtrip test iterates over every `.sql` file in this directory, parses the sections, feeds the input to `/api/format`, and compares the response to the normalized expected section.
 
 All `.sql` files are normalized without a trailing newline.
+
+## Input/Expected fixtures
+
+When a formatter fixture needs to describe a transformation (for example, when the API changes one form of SQL into another), keep both the raw submission and the expected formatted output in the same file.
+
+Use the `-- INPUT` and `-- EXPECTED` markers (case-insensitive) to delimit the two sections:
+
+```sql
+-- INPUT
+SELECT entity_key AS entity_key_alias
+FROM anon.metrics_store AS base_src
+
+-- EXPECTED
+SELECT
+    entity_key AS `entity_key_alias`
+FROM anon.metrics_store AS `base_src`
+```
+
+`-- OUTPUT` may be used in place of `-- EXPECTED`. The `check_format.py` helper trims the input section before sending it to `/api/format` and normalizes the expected section for comparison. If no markers are present, the entire `.sql` file is treated as both the input (trimmed) and the expected output, so existing fixtures remain compatible.

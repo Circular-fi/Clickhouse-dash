@@ -420,6 +420,28 @@ std::pair<string, string> split_top_level_as(string_view s) {
   return {trim_ascii_spaces(s.substr(0, static_cast<size_t>(last))), trim_ascii_spaces(s.substr(static_cast<size_t>(last) + 2))};
 }
 
+static string format_alias_identifier(string_view alias) {
+  const string trimmed = trim_ascii_spaces(alias);
+  if (trimmed.empty()) return {};
+  string normalized = trimmed;
+  if (normalized.size() >= 2) {
+    const char first = normalized.front();
+    const char last = normalized.back();
+    if ((first == '`' && last == '`') || (first == '"' && last == '"')) {
+      normalized = normalized.substr(1, normalized.size() - 2);
+    }
+  }
+  string quoted;
+  quoted.reserve(normalized.size() + 2);
+  quoted.push_back('`');
+  for (char ch : normalized) {
+    if (ch == '`') quoted += "``";
+    else quoted.push_back(ch);
+  }
+  quoted.push_back('`');
+  return quoted;
+}
+
 struct Formatter {
   explicit Formatter(size_t threshold_) : threshold(threshold_) {}
 
@@ -743,7 +765,7 @@ string Formatter::format_clause(string_view kw, string_view body) {
 }
 
 vector<std::pair<string, string>> Formatter::split_joins(string_view s) const {
-  static const char* join_kws[] = {"INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN", "JOIN"};
+  static const char* join_kws[] = {"LEFT ARRAY JOIN", "ARRAY JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN", "JOIN"};
   vector<std::pair<string, string>> parts;
   size_t start = 0;
   bool found = false;
@@ -824,7 +846,7 @@ string Formatter::format_parenthesized_query(string_view s) {
   const string inner = unwrap_outer_parens(base);
   if (inner.empty() || !looks_like_query(inner)) return {};
   string out = "(\n" + indent_block(format_statement(inner), 4) + "\n)";
-  if (!alias.empty()) out += " AS " + alias;
+  if (!alias.empty()) out += " AS " + format_alias_identifier(alias);
   return out;
 }
 
@@ -885,19 +907,22 @@ string Formatter::format_with_item_block(const vector<string>& items) {
       if (items.size() == 1 && starts_with_ci(rendered, "SELECT ") && rendered.find('\n') != string::npos) {
         rendered = expand_nested_select_head(rendered);
       }
-      item = "(\n" + indent_block(rendered, 4) + "\n) AS " + parsed[i].alias;
+      const string scalar_alias = format_alias_identifier(parsed[i].alias);
+      item = "(\n" + indent_block(rendered, 4) + "\n) AS " + scalar_alias;
     } else if (parsed[i].named_query) {
       item = parsed[i].expr + " AS\n(\n" + indent_block(format_statement(parsed[i].query), 4) + "\n)";
     } else {
       item = parsed[i].expr;
       if (!parsed[i].alias.empty()) {
+        const string alias = format_alias_identifier(parsed[i].alias);
         if (can_align) {
           const size_t gap = (width > last_line_length(item) ? width - last_line_length(item) : 0);
           size_t extra = (width <= 40) ? 4 : 1;
           if (width > 80 && gap > 0) ++extra;
-          item += string(gap + extra, ' ') + "AS " + parsed[i].alias;
+          item += string(gap + extra, ' ') + "AS " + alias;
+        } else {
+          item += " AS " + alias;
         }
-        else item += " AS " + parsed[i].alias;
       }
     }
     if (i + 1 < parsed.size()) item += ',';
@@ -928,8 +953,11 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
   for (size_t i = 0; i < parsed.size(); ++i) {
     string item = parsed[i].first;
     if (!parsed[i].second.empty()) {
-      if (can_align) item += string((width > last_line_length(item) ? width - last_line_length(item) : 0) + 2, ' ') + "AS " + parsed[i].second;
-      else item += " AS " + parsed[i].second;
+      const string alias = format_alias_identifier(parsed[i].second);
+      if (can_align) item += string((width > last_line_length(item) ? width - last_line_length(item) : 0) + 2, ' ') + "AS " + alias;
+      else {
+        item += " AS " + alias;
+      }
     }
     if (i + 1 < parsed.size()) item += ',';
     const size_t nl = item.find('\n');
@@ -1324,12 +1352,31 @@ string Formatter::format_in_literal(string_view expr) {
         const string left = trim_ascii_spaces(expr.substr(0, i));
         const string right = trim_ascii_spaces(expr.substr(i + op.size()));
         if (left.empty() || right.empty()) continue;
+
+        const size_t wrap_threshold = std::min<size_t>(threshold, 80);
+        const string compact = left + " " + string(op) + " " + right;
+
+        if (right.size() >= 2 && right.front() == '[' && right.back() == ']') {
+          const string right_body = trim_ascii_spaces(right.substr(1, right.size() - 2));
+          const auto right_items = split_top_level(right_body, ',');
+          const bool should_wrap_array = right.find('\n') != string::npos ||
+                                        (right_items.size() > 1 && compact.size() > wrap_threshold);
+          if (should_wrap_array) {
+            string rendered_right = "[\n";
+            for (size_t j = 0; j < right_items.size(); ++j) {
+              rendered_right += "    " + format_expression(right_items[j]);
+              if (j + 1 < right_items.size()) rendered_right += ',';
+              rendered_right += '\n';
+            }
+            rendered_right += ']';
+            return left + " " + string(op) + " " + rendered_right;
+          }
+        }
+
         const string right_inner = unwrap_outer_parens(right);
         if (!right_inner.empty() && looks_like_query(right_inner)) continue;
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
-        const string compact = left + " " + string(op) + " " + right;
-        const size_t wrap_threshold = std::min<size_t>(threshold, 80);
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};
         const auto left_items = split_top_level(left_inner, ',');
         string rendered_left = "(\n";
@@ -1354,6 +1401,11 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
   if (auto inner = unwrap_outer_parens(s); !inner.empty()) {
     if (find_top_level_keyword(inner, "AND") >= 0 || find_top_level_keyword(inner, "OR") >= 0) {
       string nested = format_bool_expr(inner);
+      if (nested.find(" IN (\n") != string::npos || nested.find(" GLOBAL IN (\n") != string::npos) {
+        string grouped = "(\n" + indent_block(nested, 4) + "\n)";
+        if (!comment.empty()) grouped += " " + comment;
+        return grouped;
+      }
       vector<string> nested_lines;
       size_t nested_start = 0;
       while (nested_start <= nested.size()) {

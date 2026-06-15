@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, ex: v2.7.10"
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -9,12 +15,77 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      version: ${{ steps.vars.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag/version
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [ -z "${TAG}" ]; then
+            echo "Missing release tag"
+            exit 1
+          fi
+
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${TAG}"
+            echo "Expected format: v2.7.10"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved release tag: ${TAG}"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Ensure tag exists for manual release
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.vars.outputs.tag }}"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists"
+          else
+            echo "Creating tag ${TAG} on the selected workflow commit"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "${TAG}"
+            git push origin "refs/tags/${TAG}"
+          fi
+
   build:
     name: Build (${{ matrix.goos }} ${{ matrix.goarch }})
+    needs: prepare
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
@@ -22,13 +93,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04
             goos: linux
             goarch: amd64
+            zig_target: x86_64-linux-musl
+            cmake_processor: x86_64
+
+          - runner: ubuntu-22.04-arm
+            goos: linux
+            goarch: arm64
+            zig_target: aarch64-linux-musl
+            cmake_processor: aarch64
 
           - runner: macos-latest
             goos: darwin
             goarch: amd64
+
           - runner: macos-latest
             goos: darwin
             goarch: arm64
@@ -38,54 +118,208 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Compute build metadata
         id: vars
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          GIT_SHA="${GITHUB_SHA}"
+
+          VERSION="${{ needs.prepare.outputs.version }}"
+          GIT_SHA="$(git rev-parse HEAD)"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "git_sha=$GIT_SHA" >> "$GITHUB_OUTPUT"
-          echo "build_time=$BUILD_TIME" >> "$GITHUB_OUTPUT"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "GIT_SHA=$GIT_SHA" >> "$GITHUB_ENV"
-          echo "BUILD_TIME=$BUILD_TIME" >> "$GITHUB_ENV"
+          BUILD_DIR="build-${{ matrix.goos }}-${{ matrix.goarch }}"
+          FETCHCONTENT_DIR="${PWD}/.cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}"
 
-      - name: Set up QEMU
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "git_sha=${GIT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "build_time=${BUILD_TIME}" >> "${GITHUB_OUTPUT}"
+          echo "build_dir=${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
+          echo "fetchcontent_dir=${FETCHCONTENT_DIR}" >> "${GITHUB_OUTPUT}"
+
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "GIT_SHA=${GIT_SHA}" >> "${GITHUB_ENV}"
+          echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
+          echo "BUILD_DIR=${BUILD_DIR}" >> "${GITHUB_ENV}"
+          echo "FETCHCONTENT_DIR=${FETCHCONTENT_DIR}" >> "${GITHUB_ENV}"
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            echo "ZIG_TARGET=${{ matrix.zig_target }}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Install deps (Linux)
         if: matrix.goos == 'linux'
-        uses: docker/setup-qemu-action@v4
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            binutils \
+            ca-certificates \
+            cmake \
+            file \
+            git \
+            ninja-build \
+            python3
 
-      - name: Set up Buildx
+      - name: Set up Zig (Linux musl toolchain)
         if: matrix.goos == 'linux'
-        uses: docker/setup-buildx-action@v4
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+          cache-key: chdash-zig-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.zig_target }}
 
-      - name: Build (Linux via Dockerfile target=production, cached)
+      - name: Create Zig musl CMake toolchain (Linux)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
 
-          rm -rf build_out
-          mkdir -p build_out
+          TOOLS_DIR="${PWD}/.github-build-tools/${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${TOOLS_DIR}"
 
-          docker buildx build \
-            --platform "linux/${{ matrix.goarch }}" \
-            -f test/Dockerfile \
-            --target production \
-            --build-arg CHDASH_SEMVER="${VERSION}" \
-            --build-arg CHDASH_GIT_SHA="${GIT_SHA}" \
-            --build-arg CHDASH_BUILD_TIME="${BUILD_TIME}" \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
-            --output "type=local,dest=build_out" \
-            .
+          cat > "${TOOLS_DIR}/zig-cc" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig cc -target "${ZIG_TARGET}" -static "$@"
+          EOF
 
-          test -f build_out/app/chdash
-          chmod +x build_out/app/chdash
-          file build_out/app/chdash || true
+          cat > "${TOOLS_DIR}/zig-cxx" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig c++ -target "${ZIG_TARGET}" -static "$@"
+          EOF
+
+          cat > "${TOOLS_DIR}/zig-ar" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig ar "$@"
+          EOF
+
+          cat > "${TOOLS_DIR}/zig-ranlib" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec zig ranlib "$@"
+          EOF
+
+          sed -i 's/^          //' "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
+          chmod +x "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
+
+          TOOLCHAIN_FILE="${TOOLS_DIR}/zig-musl-toolchain.cmake"
+          cat > "${TOOLCHAIN_FILE}" <<EOF
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR ${{ matrix.cmake_processor }})
+          set(CMAKE_C_COMPILER "${TOOLS_DIR}/zig-cc")
+          set(CMAKE_CXX_COMPILER "${TOOLS_DIR}/zig-cxx")
+          set(CMAKE_AR "${TOOLS_DIR}/zig-ar")
+          set(CMAKE_RANLIB "${TOOLS_DIR}/zig-ranlib")
+          set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+          set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(CMAKE_POSITION_INDEPENDENT_CODE OFF CACHE BOOL "" FORCE)
+          set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")
+          EOF
+          sed -i 's/^          //' "${TOOLCHAIN_FILE}"
+
+          echo "ZIG_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}" >> "${GITHUB_ENV}"
+          echo "Created ${TOOLCHAIN_FILE}"
+
+      - name: Cache FetchContent deps (Linux)
+        if: matrix.goos == 'linux'
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.vars.outputs.fetchcontent_dir }}
+          key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
+          restore-keys: |
+            cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-
+
+      - name: Configure (Linux musl static, no Docker)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf "${BUILD_DIR}"
+
+          cmake -S src -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="${ZIG_TOOLCHAIN_FILE}" \
+            -DCHDASH_EMBED_STATIC=ON \
+            -DCHDASH_SEMVER_VALUE="${VERSION}" \
+            -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
+            -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}"
+
+          echo "CMake compiler selection:"
+          grep -E 'CMAKE_(C|CXX)_COMPILER(:|=)' "${BUILD_DIR}/CMakeCache.txt" || true
+
+      - name: Patch RapidJSON for Clang/libc++ (Linux musl)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RAPIDJSON_DOCUMENT="${FETCHCONTENT_DIR}/rapidjson-src/include/rapidjson/document.h"
+          test -f "${RAPIDJSON_DOCUMENT}"
+
+          python3 - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          path = Path(os.environ["FETCHCONTENT_DIR"]) / "rapidjson-src/include/rapidjson/document.h"
+          text = path.read_text()
+
+          old = "GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }"
+          new = "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;"
+
+          if new in text:
+              print(f"RapidJSON already patched: {path}")
+          elif old in text:
+              path.write_text(text.replace(old, new, 1))
+              print(f"Patched RapidJSON GenericStringRef assignment: {path}")
+          else:
+              print("Could not find expected RapidJSON assignment operator to patch", file=sys.stderr)
+              for i, line in enumerate(text.splitlines(), start=1):
+                  if "GenericStringRef& operator=" in line:
+                      print(f"{i}: {line}", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+          grep -n 'GenericStringRef& operator=' "${RAPIDJSON_DOCUMENT}"
+
+      - name: Build (Linux musl static, no Docker)
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "${BUILD_DIR}" --target chdash -- -j"$(getconf _NPROCESSORS_ONLN)"
+          strip "${BUILD_DIR}/chdash" || true
+
+      - name: Verify static Linux binary
+        if: matrix.goos == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BIN="${BUILD_DIR}/chdash"
+          test -f "${BIN}"
+
+          file "${BIN}"
+
+          if readelf -l "${BIN}" | grep -q 'INTERP'; then
+            echo "ERROR: Linux binary has an ELF interpreter, so it is dynamically linked."
+            readelf -l "${BIN}" | sed -n '/INTERP/,+2p'
+            exit 1
+          fi
+
+          LDD_OUT="$(ldd "${BIN}" 2>&1 || true)"
+          echo "${LDD_OUT}"
+          if ! grep -qi 'not a dynamic executable' <<< "${LDD_OUT}"; then
+            echo "ERROR: Linux binary is not fully static."
+            exit 1
+          fi
 
       - name: Install deps (macOS)
         if: runner.os == 'macOS'
@@ -136,16 +370,17 @@ jobs:
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
 
           if [ "${{ matrix.goos }}" = "linux" ]; then
-            BIN="build_out/app/chdash"
+            BIN="${BUILD_DIR}/chdash"
           else
             BIN="build/chdash"
           fi
 
-          test -f "$BIN"
+          test -f "${BIN}"
+          rm -rf pkg
           mkdir -p pkg
-          cp "$BIN" pkg/chdash
-          tar -C pkg -czf "$TAR" chdash
-          echo "tar=$TAR" >> "$GITHUB_OUTPUT"
+          cp "${BIN}" pkg/chdash
+          tar -C pkg -czf "${TAR}" chdash
+          echo "tar=${TAR}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -156,7 +391,9 @@ jobs:
 
   release:
     name: Publish GitHub Release assets
-    needs: build
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -175,9 +412,47 @@ jobs:
           (cd out && sha256sum *.tar.gz > SHA256SUMS)
           ls -la out
 
+      - name: Verify Linux release assets before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          linux_assets=(out/*_linux_*.tar.gz)
+
+          if [ "${#linux_assets[@]}" -eq 0 ]; then
+            echo "ERROR: no Linux assets found"
+            exit 1
+          fi
+
+          for asset in "${linux_assets[@]}"; do
+            echo "Checking ${asset}"
+            tmp="$(mktemp -d)"
+            tar -C "${tmp}" -xzf "${asset}"
+            test -f "${tmp}/chdash"
+            file "${tmp}/chdash"
+
+            if readelf -l "${tmp}/chdash" | grep -q 'INTERP'; then
+              echo "ERROR: ${asset} contains a dynamically linked binary"
+              readelf -l "${tmp}/chdash" | sed -n '/INTERP/,+2p'
+              exit 1
+            fi
+
+            LDD_OUT="$(ldd "${tmp}/chdash" 2>&1 || true)"
+            echo "${LDD_OUT}"
+            if ! grep -qi 'not a dynamic executable' <<< "${LDD_OUT}"; then
+              echo "ERROR: ${asset} is not fully static"
+              exit 1
+            fi
+
+            rm -rf "${tmp}"
+          done
+
       - name: Publish Release (generated notes)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
           files: |
             out/*.tar.gz

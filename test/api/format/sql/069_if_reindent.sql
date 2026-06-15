@@ -1,3 +1,4 @@
+-- INPUT
 SELECT
     if(
         column_1 IS NOT NULL,
@@ -7,4 +8,16 @@ SELECT
         ), -- test
         NULL
     ) AS data
+FROM database_1.table_1
+
+-- EXPECTED
+SELECT
+    if(
+        column_1 IS NOT NULL,
+        toUInt64(
+            ((column_2 - 5000) * 100000000000000000)
+            / least(column_1, 1400000)
+        ), -- test
+        NULL
+    ) AS `data`
 FROM database_1.table_1
