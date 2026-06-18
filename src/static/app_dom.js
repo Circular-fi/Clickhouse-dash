@@ -9,6 +9,10 @@
   const dom = {
     root: document.documentElement,
 
+    queryTabs: byId("queryTabs"),
+    queryTabsList: byId("queryTabsList"),
+    queryTabsAdd: byId("queryTabsAdd"),
+
     queryTextArea: byId("queryTextArea"),
     editorCopyButton: byId("editorCopyButton"),
     autocompleteMenu: byId("autocompleteMenu"),

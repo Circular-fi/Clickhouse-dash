@@ -5,7 +5,7 @@
     const ns = window.ChDash;
     if (!ns) return;
 
-    const { ui, run, results } = ns;
+    const { ui, run, results, tabs } = ns;
 
     if (results) {
       results.clearResultsStack();
@@ -15,11 +15,12 @@
 
     if (ui) ui.init();
     if (run) run.init();
+    if (tabs) tabs.init();
   };
 
   const hasCore = () => {
     const ns = window.ChDash;
-    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage);
+    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.tabs);
   };
 
   const getBaseUrl = () => {
@@ -54,6 +55,7 @@
       "app_results.js",
       "app_ui.js",
       "app_run.js",
+      "app_tabs.js",
     ];
 
     for (const f of files) {

@@ -2677,7 +2677,80 @@
     if (sink && typeof sink.finalize === "function") sink.finalize({ expandedByDefault });
   }
 
+  // ---------------------------------------------------------------------------
+  // Per-tab session snapshot/restore.
+  //
+  // The renderer reads its DOM targets from `dom.*` and its data from the
+  // module-level state below at call time, so a tab switch only needs to swap
+  // that state. We capture the raw data model (columns/types/rows + sort/error/
+  // status) and, on restore, replay it through the normal render path. This
+  // rebuilds the table from scratch with live sort listeners, gauges and
+  // virtualization intact -- no dead HTML, no stale internal state.
+  // ---------------------------------------------------------------------------
+  function captureState() {
+    // Detach the multiquery stack node (with its live listeners) so it can be
+    // re-attached untouched when this tab is restored.
+    const stackNode = resultsStackElement;
+    if (stackNode && stackNode.parentNode) stackNode.parentNode.removeChild(stackNode);
+    resultsStackElement = null;
+
+    const panel = dom.resultsPanel;
+    return {
+      columns: resultColumns.slice(),
+      types: resultTypes.slice(),
+      rows: allResultRows.slice(),
+      sortKey,
+      sortDir,
+      error: lastErrorMessage,
+      status: currentStatusValue,
+      stackNode: stackNode || null,
+      multiquery: panel ? panel.classList.contains("is-multiquery") : false,
+    };
+  }
+
+  function restoreState(snap) {
+    // Full reset of live table + module state + any current stack.
+    clearLiveResults();
+    clearResultsStack();
+    resetTableMode();
+
+    if (!snap) {
+      setMultiqueryMode(false);
+      setResultsVisible(false);
+      return;
+    }
+
+    if (snap.stackNode && dom.resultsPanel) {
+      const header = dom.resultsPanel.querySelector(".panel__header");
+      const anchor = header ? header.nextSibling : dom.resultsPanel.firstChild;
+      dom.resultsPanel.insertBefore(snap.stackNode, anchor);
+      resultsStackElement = snap.stackNode;
+    }
+
+    setMultiqueryMode(!!snap.multiquery);
+
+    const hasTable = Array.isArray(snap.columns) && snap.columns.length > 0;
+    if (hasTable) {
+      renderTableMeta(snap.columns, snap.types);
+      if (snap.sortKey != null) {
+        sortKey = snap.sortKey;
+        sortDir = snap.sortDir || "";
+        updateLiveSortIndicators();
+      }
+      appendRows(snap.rows);
+      finalizeAfterDone();
+    }
+
+    if (snap.error) setError(snap.error);
+    setStatus(snap.status || "");
+
+    const hasStack = !!(snap.stackNode && snap.stackNode.childElementCount > 0);
+    setResultsVisible(hasTable || hasStack || !!snap.error);
+  }
+
   ns.results = {
+    captureState,
+    restoreState,
     beginMultiqueryPanel,
     endMultiqueryPanel,
     clearLiveResults,

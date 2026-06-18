@@ -280,6 +280,85 @@
     util.setText(dom.threadText, "-");
   }
 
+  // Snapshot the metrics column + status pills + chart series for a tab switch.
+  function captureMetrics() {
+    const html = (el) => (el ? el.innerHTML : "");
+    return {
+      metrics: {
+        elapsed: html(dom.elapsedSecondsText),
+        progress: html(dom.progressPercentText),
+        rowsRate: html(dom.readRowsRateText),
+        rowsTotal: html(dom.readRowsTotalText),
+        bytesRate: html(dom.readBytesRateText),
+        bytesTotal: html(dom.readBytesTotalText),
+        cpu: html(dom.cpuText),
+        cpuMax: html(dom.cpuMaxText),
+        mem: html(dom.memoryText),
+        memMax: html(dom.memoryMaxText),
+        thr: html(dom.threadText),
+        thrMax: html(dom.threadMaxText),
+      },
+      progressVar: dom.progressCard ? dom.progressCard.style.getPropertyValue("--p") : "",
+      progressIndeterminate: dom.progressCard ? dom.progressCard.classList.contains("is-indeterminate") : false,
+      series: {
+        readRowsPerSec: series.readRowsPerSec.slice(),
+        readBytesPerSec: series.readBytesPerSec.slice(),
+        cpu: series.cpu.slice(),
+        memBytes: series.memBytes.slice(),
+        threads: series.threads.slice(),
+      },
+      statusText: dom.queryStatusText ? dom.queryStatusText.textContent : "-",
+      statusRank: state.queryStatusText || "-",
+      queryIdHtml: dom.queryIdentifierText ? dom.queryIdentifierText.innerHTML : "",
+    };
+  }
+
+  function restoreMetrics(snap) {
+    if (!snap) {
+      resetMetrics();
+      state.queryStatusText = "-";
+      util.setText(dom.queryStatusText, "-");
+      setQueryIdText(null);
+      return;
+    }
+
+    const m = snap.metrics || {};
+    const setHtml = (el, v) => { if (el) el.innerHTML = v != null ? v : ""; };
+    setHtml(dom.elapsedSecondsText, m.elapsed);
+    setHtml(dom.progressPercentText, m.progress);
+    setHtml(dom.readRowsRateText, m.rowsRate);
+    setHtml(dom.readRowsTotalText, m.rowsTotal);
+    setHtml(dom.readBytesRateText, m.bytesRate);
+    setHtml(dom.readBytesTotalText, m.bytesTotal);
+    setHtml(dom.cpuText, m.cpu);
+    setHtml(dom.cpuMaxText, m.cpuMax);
+    setHtml(dom.memoryText, m.mem);
+    setHtml(dom.memoryMaxText, m.memMax);
+    setHtml(dom.threadText, m.thr);
+    setHtml(dom.threadMaxText, m.thrMax);
+
+    if (dom.progressCard) {
+      dom.progressCard.style.setProperty("--p", snap.progressVar || "0");
+      dom.progressCard.classList.toggle("is-indeterminate", !!snap.progressIndeterminate);
+    }
+
+    const s = snap.series || {};
+    const setSeries = (arr, vals) => {
+      arr.length = 0;
+      if (Array.isArray(vals)) for (const p of vals) arr.push(p);
+    };
+    setSeries(series.readRowsPerSec, s.readRowsPerSec);
+    setSeries(series.readBytesPerSec, s.readBytesPerSec);
+    setSeries(series.cpu, s.cpu);
+    setSeries(series.memBytes, s.memBytes);
+    setSeries(series.threads, s.threads);
+    renderCharts();
+
+    state.queryStatusText = snap.statusRank || "-";
+    util.setText(dom.queryStatusText, snap.statusText || "-");
+    if (dom.queryIdentifierText) dom.queryIdentifierText.innerHTML = snap.queryIdHtml || "#-";
+  }
+
   function setProgressIndeterminate(enabled) {
     if (!dom.progressCard) return;
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
@@ -1611,5 +1690,5 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", handleCopyLiveCsv);
   }
 
-  ns.run = { init, handleRun, handleFormat, handleCancelOrClear, updateActionButtons };
+  ns.run = { init, handleRun, handleFormat, handleCancelOrClear, updateActionButtons, captureMetrics, restoreMetrics };
 })();
