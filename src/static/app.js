@@ -20,7 +20,7 @@
 
   const hasCore = () => {
     const ns = window.ChDash;
-    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.tabs);
+    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.tabs && ns.library);
   };
 
   const getBaseUrl = () => {
@@ -46,6 +46,7 @@
     const files = [
       "app_dom.js",
       "app_state.js",
+      "app_library.js",
       "app_util.js",
       "app_sql.js",
       "app_api.js",

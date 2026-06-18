@@ -663,153 +663,27 @@
     }, 160);
   }
 
+  function queryLibraryContext() {
+    return {
+      getCurrentSql: () => String(dom.queryTextArea?.value || ""),
+      getHostId: () => state.selectedHostId || "",
+      onActivate: (item) => activateQueryLibraryItem(item),
+      preview: (sql, maxLen) => formatInlineSqlPreview(sql, maxLen),
+      formatDate: (tsMs) => formatShortDateTime(tsMs),
+      onSaved: () => setQueryLibraryMode("saved"),
+    };
+  }
+
   function renderHistoryContent(target) {
-    const items = storage.loadHistory();
-    target.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.className = "queryLibraryPanel";
-
-    const list = document.createElement("div");
-    list.className = "queryLibraryList";
-
-    if (!items.length) {
-      const empty = document.createElement("div");
-      empty.className = "queryLibraryEmpty";
-      empty.textContent = "No history yet";
-      list.appendChild(empty);
-      wrap.appendChild(list);
-      target.appendChild(wrap);
-      return;
+    if (ns.library && typeof ns.library.renderHistory === "function") {
+      ns.library.renderHistory(target, queryLibraryContext());
     }
-
-    for (const it of items) {
-      const sqlText = String(it.sql_formatted || it.sql_raw || "");
-      list.appendChild(createQueryLibraryItem({
-        title: formatInlineSqlPreview(sqlText, 108) || "Query",
-        titleMaxLen: 108,
-        hostId: it.host_id || "",
-        tsMs: it.ts_ms,
-        sql: sqlText,
-        sqlPreview: "",
-        onActivate: () => activateQueryLibraryItem(it),
-      }));
-    }
-
-    wrap.appendChild(list);
-    target.appendChild(wrap);
   }
 
   function renderSavedContent(target) {
-    target.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.className = "queryLibraryPanel";
-
-    const form = document.createElement("div");
-    form.className = "savePanel";
-
-    const input = document.createElement("input");
-    input.className = "savePanel__input";
-    input.type = "text";
-    input.placeholder = "Search or save query…";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "button button--primary savePanel__button";
-    button.textContent = "Save";
-
-    const list = document.createElement("div");
-    list.className = "queryLibraryList";
-
-    const hasDuplicateSavedName = (name) => {
-      const normalizedName = normalizeSavedQueryName(name);
-      if (!normalizedName) return false;
-      return storage.loadSavedQueries().some((it) => normalizeSavedQueryName(it.name) === normalizedName);
-    };
-
-    const renderSavedList = () => {
-      const savedItems = storage.loadSavedQueries();
-      const search = normalizeSavedQueryName(input.value);
-      list.innerHTML = "";
-
-      const filteredItems = search
-        ? savedItems.filter((it) => normalizeSavedQueryName(it.name).includes(search))
-        : savedItems;
-
-      if (!filteredItems.length) {
-        const empty = document.createElement("div");
-        empty.className = "queryLibraryEmpty";
-        empty.textContent = savedItems.length ? "No matching saved queries" : "No saved queries yet";
-        list.appendChild(empty);
-        return;
-      }
-
-      for (const it of filteredItems) {
-        const sqlText = String(it.sql_formatted || it.sql_raw || "");
-        list.appendChild(createQueryLibraryItem({
-          title: String(it.name || "Untitled query"),
-          titleMaxLen: 34,
-          hostId: it.host_id || "",
-          tsMs: it.created_at_ms,
-          sql: sqlText,
-          sqlPreview: formatInlineSqlPreview(sqlText, 168),
-          onActivate: () => activateQueryLibraryItem(it),
-          onDelete: () => {
-            storage.deleteSavedQuery(it.name);
-            renderSavedList();
-            updateSaveState();
-          },
-          deleteLabel: `Delete ${it.name}`,
-        }));
-      }
-    };
-
-    const updateSaveState = () => {
-      const currentSql = String(dom.queryTextArea?.value || "").trim();
-      const name = String(input.value || "").trim();
-      button.disabled = !currentSql || !name || hasDuplicateSavedName(name);
-    };
-
-    const commitSave = () => {
-      const currentSql = String(dom.queryTextArea?.value || "").trim();
-      const name = String(input.value || "").trim();
-      if (!currentSql || !name || hasDuplicateSavedName(name)) return;
-      storage.addSavedQuery({
-        name,
-        created_at_ms: Date.now(),
-        host_id: state.selectedHostId || "",
-        sql_raw: currentSql,
-        sql_formatted: currentSql,
-      });
-      input.value = "";
-      renderSavedList();
-      updateSaveState();
-      requestAnimationFrame(focusQueryLibrarySaveInput);
-    };
-
-    input.addEventListener("input", () => {
-      renderSavedList();
-      updateSaveState();
-    });
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter") return;
-      ev.preventDefault();
-      commitSave();
-    });
-    button.addEventListener("click", commitSave);
-
-    form.appendChild(input);
-    form.appendChild(button);
-    wrap.appendChild(form);
-    wrap.appendChild(list);
-    target.appendChild(wrap);
-
-    renderSavedList();
-    updateSaveState();
-    requestAnimationFrame(focusQueryLibrarySaveInput);
+    if (ns.library && typeof ns.library.renderSaved === "function") {
+      ns.library.renderSaved(target, queryLibraryContext());
+    }
   }
 
   function updateQueryLibraryMenuHeight() {
@@ -1305,7 +1179,9 @@
         if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
       }
       if (dom.queryLibrary && dom.queryLibraryMenu && !dom.queryLibraryMenu.hidden) {
-        if (t instanceof Node && !dom.queryLibrary.contains(t)) closeQueryLibraryMenu();
+        // Ignore clicks whose target was detached by an in-menu re-render
+        // (e.g. expanding a folder); those are not real outside clicks.
+        if (t instanceof Node && t.isConnected && !dom.queryLibrary.contains(t)) closeQueryLibraryMenu();
       }
     });
 

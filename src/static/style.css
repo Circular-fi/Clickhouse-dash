@@ -2350,6 +2350,171 @@ html[data-theme="light"] .queryLibraryItem__delete:hover {
   opacity: 0.7;
 }
 
+/* ---- Saved-query tree (folders + queries) ---- */
+.savePanel__folder {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.libSearch {
+  flex: 0 0 auto;
+}
+
+.libSearch__input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--inputBg);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.libSearch__input:focus {
+  border-color: var(--accentBorder, color-mix(in srgb, #2563eb 50%, var(--border)));
+}
+
+.libTree.is-dropRoot {
+  outline: 2px dashed color-mix(in srgb, #2563eb 55%, transparent);
+  outline-offset: -3px;
+  border-radius: 0.6rem;
+}
+
+.libNode {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.34rem 0.45rem;
+  border-radius: 0.55rem;
+  border: 1px solid transparent;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.libNode:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.libNode.is-dragging {
+  opacity: 0.45;
+}
+
+.libNode.is-dropInto {
+  background: color-mix(in srgb, #2563eb 22%, transparent);
+  border-color: color-mix(in srgb, #2563eb 60%, var(--border));
+}
+
+.libNode.is-dropBefore {
+  box-shadow: inset 0 0.12rem 0 color-mix(in srgb, #2563eb 70%, var(--text));
+}
+
+.libNode__twisty {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.libNode__icon {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.libNode--query .libNode__icon {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.libNode__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.libNode--folder > .libNode__label {
+  font-weight: 750;
+}
+
+.libNode--history.has-label .libNode__label {
+  font-weight: 700;
+}
+
+.libNode__count {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 999rem;
+  padding: 0.02rem 0.4rem;
+}
+
+.libNode__host {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999rem;
+  padding: 0.02rem 0.4rem;
+}
+
+.libNode__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, #2563eb 50%, var(--border));
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.3rem;
+  outline: none;
+}
+
+.libNode__btn {
+  flex: 0 0 auto;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.libNode:hover .libNode__btn,
+.libNode:focus-within .libNode__btn {
+  opacity: 1;
+}
+
+.libNode__btn:hover {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text);
+}
+
+.libNode__btn--delete:hover {
+  background: color-mix(in srgb, #ef4444 30%, transparent);
+  color: var(--text);
+}
+
+.libNode__btn--save:hover {
+  color: color-mix(in srgb, #f59e0b 80%, var(--text));
+}
+
 #runButton {
   border-radius: 0.75rem 0px 0px 0.75rem;
   border-right: 0px;

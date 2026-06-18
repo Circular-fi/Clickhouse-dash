@@ -8,6 +8,7 @@
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
   const SAVED_QUERIES_STORAGE_KEY = "chdash.savedQueries.v1";
+  const SAVED_TREE_STORAGE_KEY = "chdash.savedTree.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
@@ -73,7 +74,38 @@
       sql_raw: entry.sql_raw,
       sql_formatted: typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw,
       host_id: entry.host_id == null ? null : String(entry.host_id),
+      label: typeof entry.label === "string" ? entry.label : "",
     };
+  };
+
+  // A library node is either a folder or a saved query, stored flat with a
+  // parentId reference so folders/subfolders, moves and reordering are cheap.
+  let nodeIdCounter = 0;
+  const genNodeId = () => {
+    nodeIdCounter += 1;
+    return `n_${Date.now().toString(36)}_${nodeIdCounter}`;
+  };
+
+  const normalizeTreeNode = (node) => {
+    if (!node || typeof node !== "object") return null;
+    const id = String(node.id || "");
+    const type = node.type === "folder" ? "folder" : "query";
+    if (!id) return null;
+    const base = {
+      id,
+      type,
+      name: typeof node.name === "string" ? node.name : "",
+      parentId: node.parentId == null ? null : String(node.parentId),
+      order: Number.isFinite(node.order) ? Number(node.order) : 0,
+    };
+    if (type === "query") {
+      if (typeof node.sql_raw !== "string") return null;
+      base.sql_raw = node.sql_raw;
+      base.sql_formatted = typeof node.sql_formatted === "string" ? node.sql_formatted : node.sql_raw;
+      base.host_id = node.host_id == null ? null : String(node.host_id);
+      base.created_at_ms = typeof node.created_at_ms === "number" ? node.created_at_ms : Date.now();
+    }
+    return base;
   };
 
   const normalizeSavedQueryEntry = (entry) => {
@@ -147,6 +179,14 @@
       if (!normalizedEntry) return;
 
       const items = storage.loadHistory();
+
+      // Preserve a user-given label across re-runs of the same query/host.
+      if (!normalizedEntry.label) {
+        const newKey = `${normalizedEntry.host_id || ""}::${normalizedEntry.sql_raw || ""}`;
+        const prior = items.find((it) => `${it.host_id || ""}::${it.sql_raw || ""}` === newKey && it.label);
+        if (prior) normalizedEntry.label = prior.label;
+      }
+
       items.unshift(normalizedEntry);
 
       const seen = new Set();
@@ -159,6 +199,20 @@
         if (deduped.length >= HISTORY_MAX_ENTRIES) break;
       }
       storage.saveHistory(deduped);
+    },
+
+    // Attach (or clear) a friendly label on the history entry matching host+sql.
+    setHistoryLabel(hostId, sqlRaw, label) {
+      const key = `${hostId || ""}::${sqlRaw || ""}`;
+      const items = storage.loadHistory();
+      let changed = false;
+      for (const it of items) {
+        if (`${it.host_id || ""}::${it.sql_raw || ""}` === key) {
+          it.label = String(label || "");
+          changed = true;
+        }
+      }
+      if (changed) storage.saveHistory(items);
     },
 
     loadSavedQueries() {
@@ -186,6 +240,37 @@
     deleteSavedQuery(name) {
       const items = storage.loadSavedQueries().filter((x) => x.name !== name);
       storage.saveSavedQueries(items);
+    },
+
+    genNodeId,
+
+    // Saved library as a node tree. On first access it migrates the legacy flat
+    // saved-queries list into root-level query nodes.
+    loadSavedTree() {
+      const raw = safeReadJson(SAVED_TREE_STORAGE_KEY, null);
+      if (raw && typeof raw === "object" && Array.isArray(raw.nodes)) {
+        return { version: 1, nodes: raw.nodes.map(normalizeTreeNode).filter(Boolean) };
+      }
+      const legacy = storage.loadSavedQueries();
+      const nodes = legacy.map((q, i) => ({
+        id: genNodeId(),
+        type: "query",
+        name: q.name,
+        parentId: null,
+        order: i,
+        sql_raw: q.sql_raw,
+        sql_formatted: q.sql_formatted,
+        host_id: q.host_id,
+        created_at_ms: q.created_at_ms,
+      }));
+      const tree = { version: 1, nodes };
+      storage.saveSavedTree(tree);
+      return tree;
+    },
+
+    saveSavedTree(tree) {
+      const nodes = tree && Array.isArray(tree.nodes) ? tree.nodes.map(normalizeTreeNode).filter(Boolean) : [];
+      safeWriteJson(SAVED_TREE_STORAGE_KEY, { version: 1, nodes });
     },
 
     loadEditorSql() {
