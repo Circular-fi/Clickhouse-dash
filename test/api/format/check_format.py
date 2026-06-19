@@ -19,7 +19,8 @@ CLICKHOUSE_URL = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstr
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "test")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "test")
 CLICKHOUSE_TIMEOUT_SECONDS = int(os.environ.get("CLICKHOUSE_TIMEOUT_SECONDS", "10"))
-SQL_DIR = Path(os.environ.get("EXPECTED_SQL_DIR", str(Path(__file__).with_name("sql"))))
+INPUT_SQL_DIR = Path(os.environ.get("FORMAT_INPUT_SQL_DIR", str(Path(__file__).with_name("input"))))
+OUTPUT_SQL_DIR = Path(os.environ.get("FORMAT_OUTPUT_SQL_DIR", str(Path(__file__).with_name("output"))))
 ARTIFACTS_DIR = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tests/artifacts"))
 FAIL_DIR = ARTIFACTS_DIR / "format_failures"
 CRASH_DIR = ARTIFACTS_DIR / "api_crash"
@@ -90,30 +91,6 @@ def load_sql_text(path: Path) -> str:
 def load_trimmed_sql_text(path: Path) -> str:
     return trim_sql_input(path.read_text(encoding="utf-8"))
 
-def load_sql_fixture(path: Path) -> tuple[str, str]:
-    text = normalize_sql_file_content(path.read_text(encoding="utf-8"))
-    sections = {"input": [], "expected": []}
-    current = "expected"
-    has_marker = False
-    for line in text.split("\n"):
-        marker = line.strip().upper()
-        if marker == "-- INPUT":
-            current = "input"
-            has_marker = True
-            continue
-        if marker in {"-- EXPECTED", "-- OUTPUT"}:
-            current = "expected"
-            has_marker = True
-            continue
-        sections[current].append(line)
-    if not has_marker:
-        return trim_sql_input(text), text
-    if not sections["input"]:
-        raise ValueError(f"{path}: missing -- INPUT section in fixture")
-    input_section = "\n".join(sections["input"])
-    expected_section = "\n".join(sections["expected"])
-    return trim_sql_input(input_section), normalize_sql_file_content(expected_section)
-
 
 def write_sql_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -157,14 +134,44 @@ def fetch_clickhouse_raw_formatted_sql(sql_text: str) -> str:
     return normalize_sql_file_content(response.text)
 
 
-def iter_expected_sql_files() -> list[Path]:
-    return sorted(SQL_DIR.glob("*.sql"))
+def iter_output_sql_files() -> list[Path]:
+    return sorted(OUTPUT_SQL_DIR.glob("*.sql"))
 
 
-def require_expected_sql_files() -> list[Path]:
-    files = iter_expected_sql_files()
+def input_sql_path_for(output_sql_path: Path) -> Path:
+    return INPUT_SQL_DIR / output_sql_path.name
+
+
+def load_input_sql_text(output_sql_path: Path) -> str:
+    input_sql_path = input_sql_path_for(output_sql_path)
+    if not input_sql_path.exists():
+        raise FileNotFoundError(
+            f"missing formatter input fixture for {output_sql_path.name}: {input_sql_path}"
+        )
+    return load_trimmed_sql_text(input_sql_path)
+
+
+def require_output_sql_files() -> list[Path]:
+    files = iter_output_sql_files()
     if not files:
-        raise SystemExit(f"no .sql files found in {SQL_DIR}")
+        raise SystemExit(f"no .sql files found in {OUTPUT_SQL_DIR}")
+
+    missing_inputs = [path.name for path in files if not input_sql_path_for(path).exists()]
+    if missing_inputs:
+        raise SystemExit(
+            "missing matching formatter input fixture(s) in "
+            f"{INPUT_SQL_DIR}: {', '.join(missing_inputs)}"
+        )
+
+    extra_inputs = sorted(
+        path.name for path in INPUT_SQL_DIR.glob("*.sql") if not (OUTPUT_SQL_DIR / path.name).exists()
+    )
+    if extra_inputs:
+        raise SystemExit(
+            "formatter input fixture(s) without matching output in "
+            f"{OUTPUT_SQL_DIR}: {', '.join(extra_inputs)}"
+        )
+
     return files
 
 
@@ -183,15 +190,15 @@ def unified_sql_diff(expected_sql: str, actual_sql: str, file_name: str) -> str:
 
 
 def write_failure_artifacts(
-    expected_sql_path: Path,
+    output_sql_path: Path,
     input_sql: str,
     expected_sql: str,
     actual_sql: str,
 ) -> tuple[Path, Path, Path]:
     FAIL_DIR.mkdir(parents=True, exist_ok=True)
-    input_path = FAIL_DIR / f"{expected_sql_path.stem}.input.sql"
-    expected_path = FAIL_DIR / f"{expected_sql_path.stem}.expected.sql"
-    actual_path = FAIL_DIR / f"{expected_sql_path.stem}.actual.sql"
+    input_path = FAIL_DIR / f"{output_sql_path.stem}.input.sql"
+    expected_path = FAIL_DIR / f"{output_sql_path.stem}.expected.sql"
+    actual_path = FAIL_DIR / f"{output_sql_path.stem}.actual.sql"
     write_sql_text(input_path, input_sql)
     write_sql_text(expected_path, expected_sql)
     write_sql_text(actual_path, actual_sql)
@@ -213,15 +220,15 @@ def probe_api_health() -> tuple[bool, str]:
         return False, f"health request failed: {exc}"
 
 
-def write_crash_artifacts(expected_sql_path: Path, input_sql: str, note: str) -> Path:
+def write_crash_artifacts(output_sql_path: Path, input_sql: str, note: str) -> Path:
     CRASH_DIR.mkdir(parents=True, exist_ok=True)
-    crash_prefix = CRASH_DIR / expected_sql_path.stem
+    crash_prefix = CRASH_DIR / output_sql_path.stem
     write_sql_text(crash_prefix.with_suffix(".input.sql"), input_sql)
     write_text(crash_prefix.with_suffix(".diagnostic.txt"), note)
     return crash_prefix
 
 
-def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
+def call_format_api(output_sql_path: Path, input_sql: str) -> str:
     url = f"{BASE_URL}/api/format"
     last_error = None
 
@@ -255,19 +262,19 @@ def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
     health_ok, health_note = probe_api_health()
     diagnostic = "\n\n".join(
         [
-            f"format request failed for {expected_sql_path.name}",
+            f"format request failed for {output_sql_path.name}",
             f"last_error:\n{last_error or '(none)'}",
             f"health_ok={health_ok}",
             f"health_probe:\n{health_note}",
         ]
     )
-    crash_prefix = write_crash_artifacts(expected_sql_path, input_sql, diagnostic)
+    crash_prefix = write_crash_artifacts(output_sql_path, input_sql, diagnostic)
 
     if not health_ok:
         pytest.exit(
             "\n".join(
                 [
-                    f"API became unhealthy while testing {expected_sql_path.name}",
+                    f"API became unhealthy while testing {output_sql_path.name}",
                     f"input:      {crash_prefix.with_suffix('.input.sql')}",
                     f"diagnostic: {crash_prefix.with_suffix('.diagnostic.txt')}",
                 ]
@@ -277,7 +284,7 @@ def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
     pytest.fail(
         "\n".join(
             [
-                f"API request failed for {expected_sql_path.name}",
+                f"API request failed for {output_sql_path.name}",
                 f"input:      {crash_prefix.with_suffix('.input.sql')}",
                 f"diagnostic: {crash_prefix.with_suffix('.diagnostic.txt')}",
             ]
@@ -286,12 +293,13 @@ def call_format_api(expected_sql_path: Path, input_sql: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "expected_sql_path", require_expected_sql_files(), ids=lambda path: path.stem
+    "output_sql_path", require_output_sql_files(), ids=lambda path: path.stem
 )
-def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
-    input_sql, expected_sql = load_sql_fixture(expected_sql_path)
+def test_format_sql_roundtrip(output_sql_path: Path) -> None:
+    input_sql = load_input_sql_text(output_sql_path)
+    expected_sql = load_sql_text(output_sql_path)
 
-    formatted_sql = call_format_api(expected_sql_path, input_sql)
+    formatted_sql = call_format_api(output_sql_path, input_sql)
 
     if INTER_TEST_DELAY_SECONDS > 0:
         time.sleep(INTER_TEST_DELAY_SECONDS)
@@ -300,19 +308,19 @@ def test_format_sql_roundtrip(expected_sql_path: Path) -> None:
         return
 
     input_path, expected_path, actual_path = write_failure_artifacts(
-        expected_sql_path=expected_sql_path,
+        output_sql_path=output_sql_path,
         input_sql=input_sql,
         expected_sql=expected_sql,
         actual_sql=formatted_sql,
     )
-    diff = unified_sql_diff(expected_sql, formatted_sql, expected_sql_path.name)
+    diff = unified_sql_diff(expected_sql, formatted_sql, output_sql_path.name)
     if not diff:
         diff = "(no unified diff available)"
 
     pytest.fail(
         "\n".join(
             [
-                f"format mismatch: {expected_sql_path.name}",
+                f"format mismatch: {output_sql_path.name}",
                 f"input:    {input_path}",
                 f"expected: {expected_path}",
                 f"actual:   {actual_path}",

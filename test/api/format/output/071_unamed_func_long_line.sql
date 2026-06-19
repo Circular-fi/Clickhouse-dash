@@ -1,0 +1,10 @@
+SELECT
+    unamed_func_1(
+        column_1 IS NOT NULL,
+        unamed_func_2(
+            ((column_2 - 5000) * 100000000000000000)
+            / unamed_func_3(column_1, 1400000)
+        ),
+        NULL
+    ) AS `data`
+FROM database_1.table_1

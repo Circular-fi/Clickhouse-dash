@@ -12,6 +12,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace chdash {
 
@@ -96,6 +97,201 @@ bool has_top_level_values_insert(std::string_view s) {
   return false;
 }
 
+bool has_single_quoted_literal_with_whitespace(std::string_view s) {
+  bool in_str = false;
+  bool esc = false;
+  bool has_ws = false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (!in_str) {
+      if (c == '\'') {
+        in_str = true;
+        esc = false;
+        has_ws = false;
+      }
+      continue;
+    }
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (c == '\\') {
+      esc = true;
+      continue;
+    }
+    if (c == '\'') {
+      if (has_ws) return true;
+      in_str = false;
+      continue;
+    }
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') has_ws = true;
+  }
+  return false;
+}
+
+bool has_complex_sql_surface(std::string_view s) {
+  bool in_str = false;
+  bool in_backtick = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+  bool esc = false;
+  std::string token;
+  token.reserve(s.size());
+
+  auto is_ident = [](char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+           (ch >= '0' && ch <= '9') || ch == '_';
+  };
+  auto lower = [](char ch) {
+    if (ch >= 'A' && ch <= 'Z') return static_cast<char>(ch - 'A' + 'a');
+    return ch;
+  };
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
+
+    if (in_str) {
+      if (esc) esc = false;
+      else if (c == '\\') esc = true;
+      else if (c == '\'') in_str = false;
+      continue;
+    }
+    if (in_backtick) {
+      if (c == '`') in_backtick = false;
+      continue;
+    }
+    if (in_line_comment) {
+      if (c == '\n') in_line_comment = false;
+      continue;
+    }
+    if (in_block_comment) {
+      if (c == '*' && n == '/') {
+        in_block_comment = false;
+        ++i;
+      }
+      continue;
+    }
+
+    if (c == '\'') {
+      in_str = true;
+      esc = false;
+      token.push_back(' ');
+      continue;
+    }
+    if (c == '`') {
+      in_backtick = true;
+      token.push_back(' ');
+      continue;
+    }
+    if (c == '-' && n == '-') {
+      in_line_comment = true;
+      token.push_back(' ');
+      ++i;
+      continue;
+    }
+    if (c == '#') {
+      in_line_comment = true;
+      token.push_back(' ');
+      continue;
+    }
+    if (c == '/' && n == '*') {
+      in_block_comment = true;
+      token.push_back(' ');
+      ++i;
+      continue;
+    }
+
+    token.push_back(is_ident(c) ? lower(c) : c);
+  }
+
+  auto has = [&](std::string_view needle) { return token.find(needle) != std::string::npos; };
+
+  if (has("->") || has(" over ") || has(" over(") || has(" over (")) return true;
+  if (has("multiif(") || has("arraymap(") || has("arrayfilter(") || has("arrayexists(") ||
+      has("arrayall(") || has("arraycount(") || has("arrayjoin(") || has("arrayzip(") ||
+      has("arrayreduce(") || has("arrayavg(") || has("arraysum(")) return true;
+  if (has("jsonextract") || has("dictget(") || has("dictgetordefault(") || has("map(")) return true;
+  if (has(" in [") || has("deduplicate by")) return true;
+  return false;
+}
+
+bool should_preserve_sql_surface(std::string_view sql) {
+  return contains_sql_comments(sql) || has_top_level_values_insert(sql) ||
+         has_single_quoted_literal_with_whitespace(sql) || has_complex_sql_surface(sql);
+}
+
+
+std::vector<std::string> extract_single_quoted_literals(std::string_view s) {
+  std::vector<std::string> out;
+  bool in_str = false;
+  bool esc = false;
+  size_t start = 0;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (!in_str) {
+      if (c == '\'') {
+        in_str = true;
+        esc = false;
+        start = i;
+      }
+      continue;
+    }
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (c == '\\') {
+      esc = true;
+      continue;
+    }
+    if (c == '\'') {
+      out.emplace_back(s.substr(start, i + 1 - start).data(), s.substr(start, i + 1 - start).size());
+      in_str = false;
+    }
+  }
+  return out;
+}
+
+std::string restore_single_quoted_literals(std::string formatted, std::string_view original) {
+  const auto source_literals = extract_single_quoted_literals(original);
+  if (source_literals.empty()) return formatted;
+  size_t literal_index = 0;
+  bool in_str = false;
+  bool esc = false;
+  size_t start = 0;
+  std::string out;
+  out.reserve(formatted.size());
+  for (size_t i = 0; i < formatted.size(); ++i) {
+    const char c = formatted[i];
+    if (!in_str) {
+      if (c == '\'') {
+        out.append(formatted.substr(start, i - start));
+        in_str = true;
+        esc = false;
+        start = i;
+      }
+      continue;
+    }
+    if (esc) {
+      esc = false;
+      continue;
+    }
+    if (c == '\\') {
+      esc = true;
+      continue;
+    }
+    if (c == '\'') {
+      if (literal_index < source_literals.size()) out += source_literals[literal_index++];
+      else out.append(formatted.substr(start, i + 1 - start));
+      start = i + 1;
+      in_str = false;
+    }
+  }
+  out.append(formatted.substr(start));
+  return out;
+}
+
 } // namespace
 
 
@@ -124,8 +320,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       if (err) *err = "Missing SQL text.";
       return false;
     }
-    const bool preserve_original_surface = contains_sql_comments(sql) || has_top_level_values_insert(sql);
-    if (preserve_original_surface) {
+    if (contains_sql_comments(sql) || has_top_level_values_insert(sql)) {
       if (out_pretty) *out_pretty = postprocess_format_query(sql, 80);
       return true;
     }
@@ -136,7 +331,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
       return false;
     }
-    if (out_pretty) *out_pretty = postprocess_format_query(*formatted, 80);
+    std::string formatted_text = restore_single_quoted_literals(*formatted, sql);
+    if (out_pretty) *out_pretty = postprocess_format_query(formatted_text, 80);
     return true;
   };
 
