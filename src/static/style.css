@@ -2780,3 +2780,209 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 .editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
   padding-left: 14px;
 }
+
+
+/* Nested autocomplete options. The submenu is expanded only while autocomplete is enabled. */
+.editorAutocompleteControl__submenu {
+  margin: 0.08rem 0 0.16rem 0.42rem;
+  padding: 0.1rem 0 0.14rem 0.46rem;
+  border-left: 1px solid color-mix(in srgb, var(--buttonBorder) 76%, transparent);
+}
+
+.editorAutocompleteControl__submenu[hidden],
+.editorAutocompleteControl__menu.has-disabled-autocomplete .editorAutocompleteControl__submenu {
+  display: none !important;
+}
+
+.editorAutocompleteControl__subtitle {
+  padding: 0.16rem 0.42rem 0.1rem;
+  color: color-mix(in srgb, var(--muted) 84%, transparent);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.editorAutocompleteControl__opt--sub {
+  padding-left: 0.42rem;
+  font-size: 0.68rem;
+}
+
+/* Editor autocomplete nested option as a compact dropdown row. */
+.editorAutocompleteControl__opt--parent {
+  padding-right: 0.58rem;
+}
+
+.editorAutocompleteControl__opt--parent .editorAutocompleteControl__text,
+.editorAutocompleteControl__opt--sub .editorAutocompleteControl__text {
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.editorAutocompleteControl__caret {
+  width: 0.46rem;
+  height: 0.46rem;
+  margin-left: auto;
+  opacity: 0.72;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M4.2 6.1a.75.75 0 0 1 1.06 0L8 8.84l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.16a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M4.2 6.1a.75.75 0 0 1 1.06 0L8 8.84l2.74-2.74a.75.75 0 1 1 1.06 1.06l-3.27 3.27a.75.75 0 0 1-1.06 0L4.2 7.16a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.editorAutocompleteControl__opt--parent[aria-expanded="true"] .editorAutocompleteControl__caret {
+  transform: rotate(180deg);
+  opacity: 0.92;
+}
+
+.editorAutocompleteControl__submenu {
+  display: grid;
+  gap: 0.06rem;
+  margin: -0.02rem 0 0.18rem 0;
+  padding: 0 0 0 1.34rem;
+  border-left: 0;
+}
+
+.editorAutocompleteControl__submenu[hidden],
+.editorAutocompleteControl__menu.has-disabled-autocomplete .editorAutocompleteControl__submenu {
+  display: none !important;
+}
+
+.editorAutocompleteControl__subtitle {
+  display: none !important;
+}
+
+.editorAutocompleteControl__opt--sub {
+  min-height: 1.52rem;
+  padding-left: 0;
+  padding-right: 0.58rem;
+  font-size: inherit;
+}
+
+
+/* Compact editor-options submenu: same scale as the other menu rows, no chevron. */
+.editorAutocompleteControl__caret {
+  display: none !important;
+}
+
+.editorAutocompleteControl__menu {
+  font-size: 0.72rem;
+}
+
+.editorAutocompleteControl__opt,
+.editorAutocompleteControl__opt--parent,
+.editorAutocompleteControl__opt--sub {
+  font-size: 0.72rem !important;
+  line-height: 1.15;
+}
+
+.editorAutocompleteControl__opt--sub {
+  min-height: 1.34rem;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  padding-left: 0;
+  padding-right: 0.58rem;
+}
+
+.editorAutocompleteControl__opt--sub .editorAutocompleteControl__text {
+  font-size: inherit !important;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+
+.editorDiagnosticsLayer {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  padding-right: 84px;
+  padding-left: calc(14px + var(--gutterW));
+  border-radius: var(--radiusSm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 21px;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  white-space: pre;
+  tab-size: 4;
+  -moz-tab-size: 4;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.editorDiagnostic {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  overflow: hidden;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  --diagnosticWaveColor: color-mix(in srgb, #facc15 82%, var(--text));
+  text-decoration: none;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  pointer-events: auto;
+  cursor: help;
+}
+
+.editorDiagnostic::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 1px;
+  height: 5px;
+  background: var(--diagnosticWaveColor);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 3 Q2 0.5 4 3 T8 3' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 3 Q2 0.5 4 3 T8 3' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  -webkit-mask-size: 8px 5px;
+  mask-size: 8px 5px;
+  pointer-events: none;
+}
+
+
+.editorDiagnostic--unknown_function {
+  --diagnosticWaveColor: color-mix(in srgb, var(--sqlFunction) 72%, #facc15);
+}
+
+.editorDiagnostic--unknown_table {
+  --diagnosticWaveColor: color-mix(in srgb, #facc15 78%, var(--accent));
+}
+
+.editorDiagnostic--unknown_column {
+  --diagnosticWaveColor: color-mix(in srgb, #facc15 82%, var(--text));
+}
+
+.editorDiagnosticTooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: min(30rem, calc(100vw - 1rem));
+  padding: 0.42rem 0.55rem;
+  border: 1px solid var(--borderStrong);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--panelBg) 94%, #000);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.editorDiagnosticTooltip[hidden] {
+  display: none !important;
+}
+
+.editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
+html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
+  padding-left: 14px;
+}

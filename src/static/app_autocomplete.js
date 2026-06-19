@@ -32,14 +32,55 @@
   let ghostFrame = 0;
   let ghostKey = "";
   const autocompleteStorageKey = "chdash.autocomplete.enabled";
+  const autocompletePartialStorageKey = "chdash.autocomplete.partial_match.enabled";
   const copyButtonStorageKey = "chdash.editor.copy_button.enabled";
   const lineNumbersStorageKey = "chdash.editor.line_numbers.enabled";
+  const warningsStorageKey = "chdash.editor.warnings.enabled";
+  const warningTablesStorageKey = "chdash.editor.warnings.tables.enabled";
+  const warningFunctionsStorageKey = "chdash.editor.warnings.functions.enabled";
+  const warningColumnsStorageKey = "chdash.editor.warnings.columns.enabled";
+  const legacyWarningsStorageKeys = ["chdash.editor.reference_diagnostics.enabled"];
+  const legacyAutocompletePartialStorageKeys = ["chdash.autocomplete.fuzzy_matching.enabled", "chdash.autocomplete.contains_matches.enabled"];
+  function loadStoredBoolWithLegacy(key, legacyKeys, fallback = true) {
+    try {
+      if (window.localStorage) {
+        const raw = window.localStorage.getItem(key);
+        if (raw != null) return raw !== "false" && raw !== "0";
+
+        const keys = Array.isArray(legacyKeys) ? legacyKeys : (legacyKeys ? [legacyKeys] : []);
+        for (const legacyKey of keys) {
+          const legacyRaw = window.localStorage.getItem(legacyKey);
+          if (legacyRaw != null) {
+            const value = legacyRaw !== "false" && legacyRaw !== "0";
+            window.localStorage.setItem(key, value ? "true" : "false");
+            return value;
+          }
+        }
+      }
+    } catch {
+      // ignore storage failures; fallback applies.
+    }
+    return fallback;
+  }
   let autocompleteEnabled = loadStoredBool(autocompleteStorageKey, true);
+  let autocompletePartialEnabled = loadStoredBoolWithLegacy(autocompletePartialStorageKey, legacyAutocompletePartialStorageKeys, false);
   let copyButtonEnabled = loadStoredBool(copyButtonStorageKey, true);
   let lineNumbersEnabled = loadStoredBool(lineNumbersStorageKey, true);
+  let warningsEnabled = loadStoredBoolWithLegacy(warningsStorageKey, legacyWarningsStorageKeys, true);
+  let warningTablesEnabled = loadStoredBool(warningTablesStorageKey, true);
+  let warningFunctionsEnabled = loadStoredBool(warningFunctionsStorageKey, true);
+  let warningColumnsEnabled = loadStoredBool(warningColumnsStorageKey, true);
+  let diagnosticsLayer = null;
+  let diagnosticsTooltip = null;
+  let diagnosticsTimer = 0;
+  let diagnosticsRaf = 0;
+  let currentDiagnostics = [];
   let autocompleteControl = null;
   let autocompleteControlButton = null;
   let autocompleteControlMenu = null;
+  let lastPointerX = null;
+  let lastPointerY = null;
+  let pointerTrackingBound = false;
 
   function loadStoredBool(key, fallback = true) {
     try {
@@ -62,12 +103,36 @@
     return autocompleteEnabled !== false;
   }
 
+  function isAutocompletePartialEnabled() {
+    return autocompletePartialEnabled !== false;
+  }
+
   function isCopyButtonEnabled() {
     return copyButtonEnabled !== false;
   }
 
   function isLineNumbersEnabled() {
     return lineNumbersEnabled !== false;
+  }
+
+  function isWarningsEnabled() {
+    return warningsEnabled !== false;
+  }
+
+  function isTableWarningsEnabled() {
+    return isWarningsEnabled() && warningTablesEnabled !== false;
+  }
+
+  function isFunctionWarningsEnabled() {
+    return isWarningsEnabled() && warningFunctionsEnabled !== false;
+  }
+
+  function isColumnWarningsEnabled() {
+    return isWarningsEnabled() && warningColumnsEnabled !== false;
+  }
+
+  function isReferenceDiagnosticsEnabled() {
+    return isWarningsEnabled() && (isTableWarningsEnabled() || isFunctionWarningsEnabled() || isColumnWarningsEnabled());
   }
 
   function renderAutocompleteSettingsButton() {
@@ -114,9 +179,38 @@
     renderAutocompleteSettingsButton();
     autocompleteControlButton.removeAttribute("aria-pressed");
     autocompleteControlButton.classList.toggle("has-disabled-autocomplete", !enabled);
+    if (autocompleteControlMenu) {
+      autocompleteControlMenu.classList.toggle("has-disabled-autocomplete", !enabled);
+      const submenu = autocompleteControlMenu.querySelector("[data-autocomplete-submenu]");
+      if (submenu) {
+        submenu.hidden = !enabled;
+        submenu.setAttribute("aria-hidden", String(!enabled));
+      }
+      const autoToggle = autocompleteControlMenu.querySelector("[data-autocomplete-toggle]");
+      if (autoToggle) {
+        autoToggle.setAttribute("aria-expanded", String(enabled));
+        autoToggle.classList.toggle("is-expanded", enabled);
+      }
+      const warningsEnabledNow = isWarningsEnabled();
+      const warningsSubmenu = autocompleteControlMenu.querySelector("[data-warnings-submenu]");
+      if (warningsSubmenu) {
+        warningsSubmenu.hidden = !warningsEnabledNow;
+        warningsSubmenu.setAttribute("aria-hidden", String(!warningsEnabledNow));
+      }
+      const warningsToggle = autocompleteControlMenu.querySelector("[data-warnings-toggle]");
+      if (warningsToggle) {
+        warningsToggle.setAttribute("aria-expanded", String(warningsEnabledNow));
+        warningsToggle.classList.toggle("is-expanded", warningsEnabledNow);
+      }
+    }
     setMenuToggleState("[data-autocomplete-toggle]", enabled);
+    setMenuToggleState("[data-autocomplete-partial-toggle]", isAutocompletePartialEnabled());
     setMenuToggleState("[data-copy-button-toggle]", isCopyButtonEnabled());
     setMenuToggleState("[data-line-numbers-toggle]", isLineNumbersEnabled());
+    setMenuToggleState("[data-warnings-toggle]", isWarningsEnabled());
+    setMenuToggleState("[data-warning-tables-toggle]", isTableWarningsEnabled());
+    setMenuToggleState("[data-warning-functions-toggle]", isFunctionWarningsEnabled());
+    setMenuToggleState("[data-warning-columns-toggle]", isColumnWarningsEnabled());
     applyEditorOptionClasses();
   }
 
@@ -152,6 +246,16 @@
     }
   }
 
+  function setAutocompletePartialEnabled(value) {
+    autocompletePartialEnabled = value !== false;
+    saveStoredBool(autocompletePartialStorageKey, autocompletePartialEnabled);
+    updateAutocompleteControlUi();
+    hideGhost();
+    if (textarea && document.activeElement === textarea && isAutocompleteEnabled()) {
+      scheduleUpdate(true);
+    }
+  }
+
   function setCopyButtonEnabled(value) {
     copyButtonEnabled = value !== false;
     saveStoredBool(copyButtonStorageKey, copyButtonEnabled);
@@ -165,6 +269,40 @@
     if (window.ChDash && window.ChDash.highlight && typeof window.ChDash.highlight.update === "function") {
       window.ChDash.highlight.update();
     }
+    scheduleDiagnostics();
+  }
+
+  function setWarningsEnabled(value) {
+    warningsEnabled = value !== false;
+    saveStoredBool(warningsStorageKey, warningsEnabled);
+    updateAutocompleteControlUi();
+    scheduleDiagnostics(true);
+  }
+
+  // Backward-compatible alias for older callers / return objects.
+  function setReferenceDiagnosticsEnabled(value) {
+    setWarningsEnabled(value);
+  }
+
+  function setTableWarningsEnabled(value) {
+    warningTablesEnabled = value !== false;
+    saveStoredBool(warningTablesStorageKey, warningTablesEnabled);
+    updateAutocompleteControlUi();
+    scheduleDiagnostics(true);
+  }
+
+  function setFunctionWarningsEnabled(value) {
+    warningFunctionsEnabled = value !== false;
+    saveStoredBool(warningFunctionsStorageKey, warningFunctionsEnabled);
+    updateAutocompleteControlUi();
+    scheduleDiagnostics(true);
+  }
+
+  function setColumnWarningsEnabled(value) {
+    warningColumnsEnabled = value !== false;
+    saveStoredBool(warningColumnsStorageKey, warningColumnsEnabled);
+    updateAutocompleteControlUi();
+    scheduleDiagnostics(true);
   }
 
   function buildEditorOption(label, attrName) {
@@ -187,17 +325,131 @@
     return btn;
   }
 
+  function enhanceAutocompleteToggle() {
+    if (!autocompleteControlMenu) return null;
+    const autoToggle = autocompleteControlMenu.querySelector("[data-autocomplete-toggle]");
+    if (!autoToggle) return null;
+    autoToggle.classList.add("editorAutocompleteControl__opt--parent");
+    autoToggle.setAttribute("aria-controls", "editorAutocompleteSubmenu");
+    autoToggle.querySelectorAll(".editorAutocompleteControl__caret").forEach((caret) => caret.remove());
+    return autoToggle;
+  }
+
+  function buildAutocompleteSubmenu() {
+    const wrap = document.createElement("div");
+    wrap.id = "editorAutocompleteSubmenu";
+    wrap.className = "editorAutocompleteControl__submenu";
+    wrap.setAttribute("data-autocomplete-submenu", "true");
+
+    const partial = buildEditorOption("Partial match", "data-autocomplete-partial-toggle");
+    partial.classList.add("editorAutocompleteControl__opt--sub");
+    wrap.appendChild(partial);
+    return wrap;
+  }
+
+  function ensureAutocompleteSubmenu() {
+    if (!autocompleteControlMenu) return;
+    const autoToggle = enhanceAutocompleteToggle();
+    let submenu = autocompleteControlMenu.querySelector("[data-autocomplete-submenu]");
+    if (!submenu) {
+      submenu = buildAutocompleteSubmenu();
+      if (autoToggle && autoToggle.nextSibling) autocompleteControlMenu.insertBefore(submenu, autoToggle.nextSibling);
+      else if (autoToggle) autocompleteControlMenu.appendChild(submenu);
+      else autocompleteControlMenu.appendChild(submenu);
+    }
+    submenu.id = submenu.id || "editorAutocompleteSubmenu";
+    if (!submenu.querySelector("[data-autocomplete-partial-toggle]")) {
+      const partial = buildEditorOption("Partial match", "data-autocomplete-partial-toggle");
+      partial.classList.add("editorAutocompleteControl__opt--sub");
+      submenu.appendChild(partial);
+    }
+    const legacyTitle = submenu.querySelector(".editorAutocompleteControl__subtitle");
+    if (legacyTitle) legacyTitle.remove();
+    const partialText = submenu.querySelector("[data-autocomplete-partial-toggle] .editorAutocompleteControl__text");
+    if (partialText) partialText.textContent = "Partial match";
+  }
+
+  function enhanceWarningsToggle() {
+    if (!autocompleteControlMenu) return null;
+    let warningsToggle = autocompleteControlMenu.querySelector("[data-warnings-toggle]");
+    const legacy = autocompleteControlMenu.querySelector("[data-reference-diagnostics-toggle]");
+    if (!warningsToggle && legacy) {
+      warningsToggle = legacy;
+      warningsToggle.removeAttribute("data-reference-diagnostics-toggle");
+      warningsToggle.setAttribute("data-warnings-toggle", "true");
+    }
+    if (!warningsToggle) return null;
+    warningsToggle.classList.add("editorAutocompleteControl__opt--parent");
+    warningsToggle.setAttribute("aria-controls", "editorWarningsSubmenu");
+    warningsToggle.querySelectorAll(".editorAutocompleteControl__caret").forEach((caret) => caret.remove());
+    const text = warningsToggle.querySelector(".editorAutocompleteControl__text");
+    if (text) text.textContent = "Warnings";
+    return warningsToggle;
+  }
+
+  function buildWarningsSubmenu() {
+    const wrap = document.createElement("div");
+    wrap.id = "editorWarningsSubmenu";
+    wrap.className = "editorAutocompleteControl__submenu editorAutocompleteControl__submenu--warnings";
+    wrap.setAttribute("data-warnings-submenu", "true");
+
+    const table = buildEditorOption("Tables", "data-warning-tables-toggle");
+    table.classList.add("editorAutocompleteControl__opt--sub");
+    wrap.appendChild(table);
+
+    const fn = buildEditorOption("Functions", "data-warning-functions-toggle");
+    fn.classList.add("editorAutocompleteControl__opt--sub");
+    wrap.appendChild(fn);
+
+    const col = buildEditorOption("Columns", "data-warning-columns-toggle");
+    col.classList.add("editorAutocompleteControl__opt--sub");
+    wrap.appendChild(col);
+    return wrap;
+  }
+
+  function ensureWarningsSubmenu() {
+    if (!autocompleteControlMenu) return;
+    let warningsToggle = enhanceWarningsToggle();
+    if (!warningsToggle) {
+      warningsToggle = buildEditorOption("Warnings", "data-warnings-toggle");
+      warningsToggle.classList.add("editorAutocompleteControl__opt--parent");
+      warningsToggle.setAttribute("aria-controls", "editorWarningsSubmenu");
+      autocompleteControlMenu.appendChild(warningsToggle);
+    }
+    let submenu = autocompleteControlMenu.querySelector("[data-warnings-submenu]");
+    if (!submenu) {
+      submenu = buildWarningsSubmenu();
+      if (warningsToggle && warningsToggle.nextSibling) autocompleteControlMenu.insertBefore(submenu, warningsToggle.nextSibling);
+      else autocompleteControlMenu.appendChild(submenu);
+    }
+    submenu.id = submenu.id || "editorWarningsSubmenu";
+    const required = [
+      ["[data-warning-tables-toggle]", "Tables", "data-warning-tables-toggle"],
+      ["[data-warning-functions-toggle]", "Functions", "data-warning-functions-toggle"],
+      ["[data-warning-columns-toggle]", "Columns", "data-warning-columns-toggle"],
+    ];
+    for (const [selector, label, attr] of required) {
+      if (!submenu.querySelector(selector)) {
+        const opt = buildEditorOption(label, attr);
+        opt.classList.add("editorAutocompleteControl__opt--sub");
+        submenu.appendChild(opt);
+      }
+    }
+  }
+
   function ensureEditorOptionsMenuItems() {
     if (!autocompleteControlMenu) return;
     if (!autocompleteControlMenu.querySelector("[data-autocomplete-toggle]")) {
       autocompleteControlMenu.appendChild(buildEditorOption("Autocomplete", "data-autocomplete-toggle"));
     }
+    ensureAutocompleteSubmenu();
     if (!autocompleteControlMenu.querySelector("[data-copy-button-toggle]")) {
       autocompleteControlMenu.appendChild(buildEditorOption("Copy button", "data-copy-button-toggle"));
     }
     if (!autocompleteControlMenu.querySelector("[data-line-numbers-toggle]")) {
       autocompleteControlMenu.appendChild(buildEditorOption("Line numbers", "data-line-numbers-toggle"));
     }
+    ensureWarningsSubmenu();
   }
 
   function bindAutocompleteControlEvents() {
@@ -218,10 +470,22 @@
       ev.stopPropagation();
       if (btn.hasAttribute("data-autocomplete-toggle")) {
         setAutocompleteEnabled(!isAutocompleteEnabled());
+      } else if (btn.hasAttribute("data-autocomplete-partial-toggle")) {
+        setAutocompletePartialEnabled(!isAutocompletePartialEnabled());
       } else if (btn.hasAttribute("data-copy-button-toggle")) {
         setCopyButtonEnabled(!isCopyButtonEnabled());
       } else if (btn.hasAttribute("data-line-numbers-toggle")) {
         setLineNumbersEnabled(!isLineNumbersEnabled());
+      } else if (btn.hasAttribute("data-warnings-toggle")) {
+        setWarningsEnabled(!isWarningsEnabled());
+      } else if (btn.hasAttribute("data-warning-tables-toggle")) {
+        setTableWarningsEnabled(!isTableWarningsEnabled());
+      } else if (btn.hasAttribute("data-warning-functions-toggle")) {
+        setFunctionWarningsEnabled(!isFunctionWarningsEnabled());
+      } else if (btn.hasAttribute("data-warning-columns-toggle")) {
+        setColumnWarningsEnabled(!isColumnWarningsEnabled());
+      } else if (btn.hasAttribute("data-reference-diagnostics-toggle")) {
+        setWarningsEnabled(!isWarningsEnabled());
       }
       // Keep the editor options menu open when toggling options.
       // This menu is meant to host several settings, so changing one should not close it.
@@ -298,7 +562,45 @@
     menu.className = "autocompleteMenu";
     menu.hidden = true;
     menu.setAttribute("role", "listbox");
+    bindPointerTracking();
     return menu;
+  }
+
+  function bindPointerTracking() {
+    if (pointerTrackingBound) return;
+    pointerTrackingBound = true;
+    document.addEventListener("pointermove", (ev) => {
+      lastPointerX = ev.clientX;
+      lastPointerY = ev.clientY;
+    }, { passive: true });
+  }
+
+  function hoveredAutocompleteRow() {
+    if (!menu || menu.hidden || lastPointerX == null || lastPointerY == null) return null;
+    const el = document.elementFromPoint(lastPointerX, lastPointerY);
+    if (!(el instanceof Element) || !menu.contains(el)) return null;
+    return el.closest(".autocompleteItem");
+  }
+
+  function syncGhostWithPointer() {
+    if (!menu || menu.hidden || !suggestions.length) {
+      hideGhost();
+      return;
+    }
+    const row = hoveredAutocompleteRow();
+    if (!row) {
+      hideGhost();
+      return;
+    }
+    const index = Number(row.dataset.index);
+    if (!Number.isFinite(index) || !suggestions[index]) {
+      hideGhost();
+      return;
+    }
+    activeIndex = index;
+    const rows = menu.querySelectorAll(".autocompleteItem");
+    rows.forEach((candidate, i) => candidate.setAttribute("aria-selected", String(i === index)));
+    showGhostForSuggestion(suggestions[index]);
   }
 
   function currentHostMeta() {
@@ -529,25 +831,8 @@
   }
 
   function isBlankSelectProjectionSlot(sql, pos) {
-    const info = currentStatementInfoAt(sql, pos);
-    const stmt = String(info.statement || "");
-    const cursor = Math.max(0, Math.min(stmt.length, info.cursor));
-    const selectPos = findTopLevelKeyword(stmt, "SELECT", 0);
-    if (selectPos < 0) return false;
-    const fromPos = findTopLevelKeyword(stmt, "FROM", selectPos + 6);
-    if (fromPos < 0 || cursor < selectPos + 6 || cursor > fromPos) return false;
-
-    const masked = maskSql(stmt);
-    const comma = lastTopLevelComma(masked, selectPos + 6, cursor);
-    const slotStart = comma >= 0 ? comma + 1 : selectPos + 6;
-    const beforeSlot = masked.slice(slotStart, cursor);
-    const afterSlot = masked.slice(cursor, fromPos);
-
-    // Only the intentionally empty projection slot triggers suggestions without a prefix:
-    //   SELECT | FROM t
-    //   SELECT a, | FROM t
-    // Whitespace and newlines are allowed, but no expression text.
-    return /^\s*$/.test(beforeSlot) && /^\s*$/.test(afterSlot);
+    const active = activeSelectProjectionAt(sql, pos);
+    return !!active?.isBlank;
   }
 
   function lastClause(before) {
@@ -693,6 +978,94 @@
       else if (ch === ")") depth = Math.max(0, depth - 1);
     }
     return depth;
+  }
+
+
+  function findKeywordAtDepth(maskedText, keyword, startIndex, targetDepth, limitIndex = null) {
+    const masked = String(maskedText || "");
+    const kw = String(keyword || "").toUpperCase();
+    const limit = limitIndex == null ? masked.length : Math.min(masked.length, Math.max(0, limitIndex));
+    for (let i = Math.max(0, startIndex || 0); i < limit; i += 1) {
+      if (topLevelDepthAt(masked, i) !== targetDepth) continue;
+      if (masked.slice(i, i + kw.length).toUpperCase() !== kw) continue;
+      const prev = i === 0 ? " " : masked[i - 1];
+      const next = masked[i + kw.length] || " ";
+      if (!/[A-Za-z0-9_$]/.test(prev) && !/[A-Za-z0-9_$]/.test(next)) return i;
+    }
+    return -1;
+  }
+
+  function lastCommaAtDepth(maskedText, from, to, targetDepth) {
+    const masked = String(maskedText || "");
+    let last = -1;
+    for (let i = Math.max(0, from); i < Math.min(masked.length, to); i += 1) {
+      if (masked[i] === "," && topLevelDepthAt(masked, i) === targetDepth) last = i;
+    }
+    return last;
+  }
+
+  function findSelectScopeEndAtDepth(maskedText, selectPos, selectDepth) {
+    const masked = String(maskedText || "");
+    for (let i = Math.max(0, selectPos + 6); i < masked.length; i += 1) {
+      const depth = topLevelDepthAt(masked, i);
+      if (masked[i] === ";" && depth === selectDepth) return i;
+      if (masked[i] === ")" && depth === selectDepth) return i;
+    }
+    return masked.length;
+  }
+
+  function activeSelectProjectionAt(sql, pos) {
+    const value = String(sql || "");
+    const cursor = Math.max(0, Math.min(value.length, pos == null ? value.length : pos));
+    const info = currentStatementInfoAt(value, cursor);
+    const stmtStart = cursor - info.cursor;
+    const stmt = String(info.statement || "");
+    const localCursor = Math.max(0, Math.min(stmt.length, info.cursor));
+    const masked = maskSql(stmt);
+    const cursorDepth = topLevelDepthAt(masked, localCursor);
+
+    let selectPos = -1;
+    const re = /\bSELECT\b/gi;
+    let m;
+    while ((m = re.exec(masked))) {
+      if (m.index > localCursor) break;
+      if (topLevelDepthAt(masked, m.index) === cursorDepth) selectPos = m.index;
+    }
+    if (selectPos < 0) return null;
+
+    const scopeEnd = findSelectScopeEndAtDepth(masked, selectPos, cursorDepth);
+    const fromPos = findKeywordAtDepth(masked, "FROM", selectPos + 6, cursorDepth, scopeEnd);
+    if (fromPos < 0 || localCursor < selectPos + 6 || localCursor > fromPos) return null;
+
+    const comma = lastCommaAtDepth(masked, selectPos + 6, localCursor, cursorDepth);
+    const slotStart = comma >= 0 ? comma + 1 : selectPos + 6;
+    const beforeSlot = masked.slice(slotStart, localCursor);
+    const afterSlot = masked.slice(localCursor, fromPos);
+    const isBlank = /^\s*$/.test(beforeSlot) && /^\s*$/.test(afterSlot);
+    return {
+      isBlank,
+      statement: stmt,
+      statementStart: stmtStart,
+      selectPos,
+      fromPos,
+      scopeEnd,
+      cursor: localCursor,
+      depth: cursorDepth,
+      scopeText: stmt.slice(selectPos, scopeEnd),
+    };
+  }
+
+  function sourceInfoForCursor(sql, pos, meta) {
+    const value = String(sql || "");
+    const cursor = Math.max(0, Math.min(value.length, pos == null ? value.length : pos));
+    const stmt = currentStatementAt(value, cursor);
+    const active = activeSelectProjectionAt(value, cursor);
+    if (active) {
+      const outerCtes = parseCtes(stmt, meta);
+      const scopeSources = parseSources(active.scopeText, meta, 0, outerCtes);
+      return { ...scopeSources, activeSelect: active };
+    }
+    return { ...parseSources(stmt, meta), activeSelect: active };
   }
 
   function tableFunctionColumnsFromMeta(meta, name) {
@@ -860,7 +1233,7 @@
     return found?.type || "";
   }
 
-  function parseSources(sql, meta, depth = 0) {
+  function parseSources(sql, meta, depth = 0, externalCtes = null) {
     const aliases = new Map();
     const sources = [];
     if (depth > 5) return { aliases, sources };
@@ -868,7 +1241,7 @@
     const text = String(sql || "");
     const masked = maskSql(text);
     const uniqueTables = uniqueTablesByName(meta);
-    const ctes = parseCtes(text, meta, depth + 1);
+    const ctes = externalCtes || parseCtes(text, meta, depth + 1);
 
     const addSource = (source) => {
       if (!source) return;
@@ -1060,7 +1433,8 @@
     const p = norm(prefix);
     if (!p) return true;
     if (/^\d/.test(p)) return n.startsWith(p);
-    return n.startsWith(p) || n.includes(p);
+    if (n.startsWith(p)) return true;
+    return isAutocompletePartialEnabled() && n.includes(p);
   }
 
   function matchFunctionName(name, prefix, rawToken) {
@@ -1126,7 +1500,7 @@
     const label = norm(s.label);
     let score = 0;
 
-    // 1) The textual match dominates: exact > startsWith > word-boundary startsWith > contains.
+    // 1) The textual match dominates: exact > startsWith > word-boundary startsWith > partial.
     if (p) {
       if (label === p) score -= 1000;
       else if (label.startsWith(p)) score -= 800;
@@ -1149,6 +1523,32 @@
     // 4) Shorter, cleaner names win ties. This keeps the top 10 readable.
     score += Math.min(80, String(s.label || "").length * 0.6);
     return score;
+  }
+
+  function normalizeCompletionText(value) {
+    return stripQuotes(String(value || "")).trim().toLowerCase();
+  }
+
+  function isNoopSuggestionForToken(s, token, value) {
+    if (!s || !token) return false;
+    const start = Number.isFinite(s.replaceStart) ? s.replaceStart : token.replaceStart;
+    const end = Number.isFinite(s.replaceEnd) ? s.replaceEnd : token.replaceEnd;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+
+    const current = String(value || "").slice(start, end);
+    if (!current.trim()) return false;
+
+    // Function suggestions can still be useful when the function name is already
+    // fully typed because accepting it adds parentheses, e.g. `sum` -> `sum()`.
+    if (s.kind === "function") {
+      const after = String(value || "").slice(end);
+      if (!/^\s*\(/.test(after)) return false;
+    }
+
+    const insert = String(s.insert || s.label || "");
+    if (!insert) return false;
+
+    return normalizeCompletionText(current) === normalizeCompletionText(insert);
   }
 
   function sortAndLimit(list, prefix) {
@@ -1261,7 +1661,7 @@
     const value = String(ta.value || "");
     const pos = ta.selectionStart || 0;
     const statement = currentStatementAt(value, pos);
-    const parsed = parseSources(statement, meta);
+    const parsed = sourceInfoForCursor(value, pos, meta);
     const aliases = parsed.aliases;
     const sources = parsed.sources;
     const ctes = parseCtes(statement, meta);
@@ -1324,17 +1724,21 @@
       }
     };
 
-    const addTables = (tables, insertQualified) => {
+    const addTables = (tables, insertQualified, options = {}) => {
+      const displayQualified = options.displayQualified == null ? insertQualified : !!options.displayQualified;
+      const insertQualifiedName = options.insertQualified == null ? insertQualified : !!options.insertQualified;
       for (const t of tables || []) {
         const name = String(t.name || "");
         const db = String(t.database || "");
         if (!name) continue;
-        const label = insertQualified && db ? `${db}.${name}` : name;
-        const matchName = insertQualified ? label : name;
+        const full = db ? `${db}.${name}` : name;
+        const label = displayQualified && db ? full : name;
+        const insert = insertQualifiedName && db ? full : name;
+        const matchName = displayQualified && db ? full : name;
         // In db-qualified context (`system.`), the prefix is the part after the dot.
         // Match both `one` and `system.one`, but insert only `one` after the dot.
         if (!matchPrefix(matchName, prefix) && !matchPrefix(name, prefix) && !(qualified && !prefix)) continue;
-        addSuggestion(list, seen, { label, insert: label, kind: "table", database: db, detail: t.detail || "", badges: t.detail ? [compactEngineName(t.detail)] : [] });
+        addSuggestion(list, seen, { label, insert, kind: "table", database: db, detail: t.detail || "", badges: t.detail ? [compactEngineName(t.detail)] : [] });
       }
     };
 
@@ -1408,7 +1812,7 @@
       } else if (isKnownDatabase || dbTables.length || tokenEndsWithDot) {
         // `system.` / `db.` must always propose tables from that database, even with an empty prefix after the dot.
         // Some restricted users may not see the database in SHOW DATABASES but can still see tables from SHOW TABLES.
-        addTables(dbTables, false);
+        addTables(dbTables, false, { displayQualified: true, insertQualified: false });
       } else {
         let matchedColumnPath = false;
         for (const src of sources) {
@@ -1458,8 +1862,509 @@
     const tokenEndsWithDot = String(token.raw || "").endsWith(".");
     const shouldShow = explicit || ctx.kind === "select_blank_slot" || prefix.length >= minAutoPrefix || (qualified && showEmptyQualifiedAfterDot && tokenEndsWithDot);
     if (!shouldShow) return { items: [], token, totalAvailable: 0 };
-    const ranked = sortAndLimit(list, prefix);
+    const nonNoop = list.filter((s) => !isNoopSuggestionForToken(s, token, ta.value));
+    const ranked = sortAndLimit(nonNoop, prefix);
     return { items: ranked.items, token, totalAvailable: ranked.total };
+  }
+
+
+
+  function ensureDiagnosticsTooltip() {
+    if (diagnosticsTooltip && diagnosticsTooltip.isConnected) return diagnosticsTooltip;
+    diagnosticsTooltip = document.createElement("div");
+    diagnosticsTooltip.className = "editorDiagnosticTooltip";
+    diagnosticsTooltip.setAttribute("role", "tooltip");
+    diagnosticsTooltip.hidden = true;
+    document.body.appendChild(diagnosticsTooltip);
+    return diagnosticsTooltip;
+  }
+
+  function hideDiagnosticsTooltip() {
+    if (!diagnosticsTooltip) return;
+    diagnosticsTooltip.hidden = true;
+    diagnosticsTooltip.textContent = "";
+    diagnosticsTooltip.style.left = "0px";
+    diagnosticsTooltip.style.top = "0px";
+  }
+
+  function placeDiagnosticsTooltip(mark) {
+    if (!mark || !mark.isConnected) return;
+    const msg = mark.dataset.message || "Unknown reference";
+    const tip = ensureDiagnosticsTooltip();
+    tip.textContent = msg;
+    tip.hidden = false;
+
+    const rect = mark.getBoundingClientRect();
+    const margin = 8;
+    const maxLeft = Math.max(margin, window.innerWidth - tip.offsetWidth - margin);
+    const left = Math.min(Math.max(margin, rect.left), maxLeft);
+    let top = rect.top - tip.offsetHeight - 8;
+    if (top < margin) top = rect.bottom + 8;
+    if (top + tip.offsetHeight > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - tip.offsetHeight - margin);
+    }
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  }
+
+  function ensureDiagnosticsLayer() {
+    if (!textarea) return null;
+    const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
+    if (!wrap) return null;
+    if (diagnosticsLayer && diagnosticsLayer.isConnected) return diagnosticsLayer;
+    diagnosticsLayer = wrap.querySelector(".editorDiagnosticsLayer");
+    if (!diagnosticsLayer) {
+      diagnosticsLayer = document.createElement("div");
+      diagnosticsLayer.className = "editorDiagnosticsLayer";
+      diagnosticsLayer.setAttribute("aria-hidden", "true");
+      wrap.appendChild(diagnosticsLayer);
+    }
+    return diagnosticsLayer;
+  }
+
+  function clearDiagnostics() {
+    currentDiagnostics = [];
+    if (diagnosticsTimer) { clearTimeout(diagnosticsTimer); diagnosticsTimer = 0; }
+    if (diagnosticsRaf) { cancelAnimationFrame(diagnosticsRaf); diagnosticsRaf = 0; }
+    if (diagnosticsLayer) diagnosticsLayer.innerHTML = "";
+    hideDiagnosticsTooltip();
+  }
+
+  function splitTopLevelWithSpans(text, baseIndex = 0, separator = ",") {
+    const out = [];
+    let start = 0;
+    let quote = "";
+    let escaped = false;
+    let depth = 0;
+    const s = String(text || "");
+    const push = (end) => {
+      let a = start;
+      let b = end;
+      while (a < b && /\s/.test(s[a])) a += 1;
+      while (b > a && /\s/.test(s[b - 1])) b -= 1;
+      if (b > a) out.push({ text: s.slice(a, b), start: baseIndex + a, end: baseIndex + b });
+    };
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      if (quote) {
+        if (quote === "'" && ch === "\\" && !escaped) { escaped = true; continue; }
+        if (ch === quote && !escaped) quote = "";
+        escaped = false;
+        continue;
+      }
+      if (ch === "'" || ch === "`" || ch === '"') { quote = ch; escaped = false; continue; }
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth = Math.max(0, depth - 1);
+      else if (ch === separator && depth === 0) {
+        push(i);
+        start = i + 1;
+      }
+    }
+    push(s.length);
+    return out;
+  }
+
+  function autocompleteKeywordSet(meta) {
+    const out = new Set();
+    const keywords = Array.isArray(meta?.keywords?.items) ? meta.keywords.items : Array.from(meta?.keywords?.set || []);
+    for (const kw of keywords) out.add(norm(kw));
+    for (const kw of [
+      "select", "from", "where", "prewhere", "and", "or", "not", "in", "is", "null", "as", "with", "join", "on", "using",
+      "group", "by", "order", "having", "limit", "offset", "format", "settings", "array", "global", "case", "when", "then", "else", "end", "asc", "desc"
+    ]) out.add(kw);
+    return out;
+  }
+
+  function collectLambdaParams(expr) {
+    const params = new Set();
+    const text = String(expr || "");
+    let m;
+    const single = /\b([A-Za-z_][A-Za-z0-9_$]*)\s*->/g;
+    while ((m = single.exec(text))) params.add(norm(m[1]));
+    const tuple = /\(([^)]{1,160})\)\s*->/g;
+    while ((m = tuple.exec(text))) {
+      for (const part of String(m[1] || "").split(",")) {
+        const name = part.trim().match(/^[A-Za-z_][A-Za-z0-9_$]*$/);
+        if (name) params.add(norm(name[0]));
+      }
+    }
+    return params;
+  }
+
+  function findSelectAliasRange(itemText, itemStart) {
+    const s = String(itemText || "");
+    const asMatch = s.match(new RegExp(`\\s+AS\\s+(${aliasIdentReSource})\\s*$`, "i"));
+    if (asMatch) {
+      const raw = asMatch[1] || "";
+      const idx = s.lastIndexOf(raw);
+      return idx >= 0 ? { start: itemStart + idx, end: itemStart + idx + raw.length } : null;
+    }
+    const trailing = s.match(new RegExp(`\\s+(${aliasIdentReSource})\\s*$`));
+    if (trailing && /[()\s+\-*/%]/.test(s.slice(0, trailing.index))) {
+      const raw = trailing[1] || "";
+      const idx = s.lastIndexOf(raw);
+      return idx >= 0 ? { start: itemStart + idx, end: itemStart + idx + raw.length } : null;
+    }
+    return null;
+  }
+
+  function expressionSpanBeforeAlias(item) {
+    const text = String(item?.text || "");
+    const itemStart = Number.isFinite(item?.start) ? item.start : 0;
+
+    // While an alias is being typed after AS, especially a quoted ClickHouse
+    // alias like `foo without the closing quote yet, the partial alias must not
+    // be linted as a missing column. Closed aliases are handled by
+    // findSelectAliasRange(); this handles the in-progress quoted case.
+    const unfinishedAlias = text.match(/\s+AS\s+(`[^`]*|"[^"]*|'[^']*)\s*$/i);
+    if (unfinishedAlias) {
+      let end = itemStart + unfinishedAlias.index;
+      let a = itemStart;
+      let b = end;
+      const value = String(textarea?.value || "");
+      while (a < b && /\s/.test(value[a])) a += 1;
+      while (b > a && /\s/.test(value[b - 1])) b -= 1;
+      return { text: value.slice(a, b), start: a, end: b };
+    }
+
+    const alias = inferAliasFromSelectItem(text);
+    if (!alias) return { text, start: itemStart, end: item.end };
+    const aliasRange = findSelectAliasRange(text, itemStart);
+    if (!aliasRange) return { text, start: itemStart, end: item.end };
+    let end = aliasRange.start;
+    const beforeAlias = text.slice(0, Math.max(0, end - itemStart));
+    const asMatch = beforeAlias.match(/\s+AS\s*$/i);
+    if (asMatch) end = itemStart + asMatch.index;
+    const expr = String(textarea?.value || "").slice(itemStart, end);
+    let a = itemStart;
+    let b = end;
+    while (a < b && /\s/.test(String(textarea?.value || "")[a])) a += 1;
+    while (b > a && /\s/.test(String(textarea?.value || "")[b - 1])) b -= 1;
+    return { text: String(textarea?.value || "").slice(a, b), start: a, end: b };
+  }
+
+  function relationReferenceIsKnown(refName, meta, ctes) {
+    const name = normalizeQualifiedName(refName);
+    const parts = name.split(".").filter(Boolean);
+    if (!parts.length) return { ok: true };
+    if (parts.length > 2) return { ok: false, message: `Invalid table reference '${name}'. Expected table or database.table.` };
+    const key = norm(name);
+    const last = norm(parts[parts.length - 1] || "");
+    if (ctes && (ctes.has(key) || ctes.has(last))) return { ok: true };
+    if (parts.length === 2) {
+      const [db, table] = parts;
+      const tables = tablesForDatabase(meta, db);
+      if (tables.some((t) => norm(t.name) === norm(table))) return { ok: true };
+      const dbKnown = (Array.isArray(meta?.databases?.items) ? meta.databases.items : []).some((d) => norm(d.name) === norm(db));
+      return { ok: false, message: dbKnown ? `Unknown table '${name}'.` : `Unknown database or table '${name}'.` };
+    }
+    const unique = uniqueTablesByName(meta);
+    if (unique.has(norm(parts[0]))) return { ok: true };
+    return { ok: false, message: `Unknown table '${name}'. Use database.table if the name is ambiguous.` };
+  }
+
+  function aliasDefinedBySelectItem(item) {
+    const text = String(item?.text ?? item ?? "");
+    const start = Number.isFinite(item?.start) ? item.start : 0;
+    const range = findSelectAliasRange(text, start);
+    if (!range) return "";
+    return stripQuotes(String(text).slice(range.start - start, range.end - start));
+  }
+
+  function selectAliasesForSegment(selectList) {
+    const set = new Set();
+    for (const item of selectList || []) {
+      const alias = aliasDefinedBySelectItem(item);
+      if (alias) set.add(norm(alias));
+    }
+    return set;
+  }
+
+  function canValidateColumnsForSources(sources, meta, scalarCtes) {
+    if (scalarCtes && scalarCtes.size) return true;
+    for (const src of sources || []) {
+      const cols = sourceColumns(src, meta);
+      if (cols && cols.length) return true;
+    }
+    return false;
+  }
+
+  function isKnownReferenceName(name, sourceInfo, meta, scalarCtes, selectAliases, lambdaParams) {
+    const q = normalizeQualifiedName(name);
+    const parts = q.split(".").filter(Boolean);
+    if (!parts.length) return true;
+    const first = parts[0];
+    if (lambdaParams && lambdaParams.has(norm(first))) return true;
+    if (parts.length >= 2) {
+      const src = sourceInfo.aliases.get(norm(first));
+      if (src) {
+        const colPath = parts.slice(1).join(".");
+        const cols = sourceColumns(src, meta);
+        return cols.some((c) => norm(c.name) === norm(colPath) || norm(c.insertName) === norm(colPath));
+      }
+      const direct = findColumnInSources(q, sourceInfo.sources, meta);
+      if (direct) return true;
+      return false;
+    }
+    if (scalarCtes && scalarCtes.has(norm(q))) return true;
+    if (selectAliases && selectAliases.has(norm(q))) return true;
+    return !!findColumnInSources(q, sourceInfo.sources, meta);
+  }
+
+  function collectIdentifierRefs(exprText, exprStart, meta) {
+    const refs = [];
+    const masked = maskSql(exprText);
+    const re = new RegExp(qualifiedIdentReSource, "g");
+    const keywords = autocompleteKeywordSet(meta);
+    let m;
+    while ((m = re.exec(masked))) {
+      const rawMasked = m[0] || "";
+      const raw = String(exprText || "").slice(m.index, m.index + rawMasked.length);
+      const name = normalizeQualifiedName(raw);
+      if (!name) continue;
+      const before = masked[m.index - 1] || "";
+      const afterIndex = m.index + rawMasked.length;
+      const after = masked.slice(afterIndex).match(/^\s*([A-Za-z0-9_$.(]|->)/);
+      if (before === ".") continue;
+      if (after && after[1] === "(") continue; // function call
+      if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
+      if (/^\d/.test(name)) continue;
+      refs.push({ raw, name, start: exprStart + m.index, end: exprStart + m.index + rawMasked.length });
+    }
+    return refs;
+  }
+
+  function collectSelectReferenceDiagnostics(text, meta) {
+    const issues = [];
+    const value = String(text || "");
+    const masked = maskSql(value);
+    const ctes = parseCtes(value, meta);
+    const scalarCtes = parseWithScalars(value);
+    const re = /\bSELECT\b/gi;
+    let m;
+    while ((m = re.exec(masked))) {
+      const selectPos = m.index;
+      const depth = topLevelDepthAt(masked, selectPos);
+      const scopeEnd = findSelectScopeEndAtDepth(masked, selectPos, depth);
+      const fromPos = findKeywordAtDepth(masked, "FROM", selectPos + 6, depth, scopeEnd);
+      if (fromPos < 0) continue; // Do not lint references until the source context exists.
+      const scopeText = value.slice(selectPos, scopeEnd);
+      const sourceInfo = parseSources(scopeText, meta, 0, ctes);
+      if (!canValidateColumnsForSources(sourceInfo.sources, meta, scalarCtes)) continue;
+      const selectItems = splitTopLevelWithSpans(value.slice(selectPos + 6, fromPos), selectPos + 6);
+      const aliasesBefore = new Set();
+      for (const item of selectItems) {
+        const span = expressionSpanBeforeAlias(item);
+        if (span.text) {
+          const lambdaParams = collectLambdaParams(span.text);
+          for (const ref of collectIdentifierRefs(span.text, span.start, meta)) {
+            if (isKnownReferenceName(ref.name, sourceInfo, meta, scalarCtes, aliasesBefore, lambdaParams)) continue;
+            issues.push({
+              start: ref.start,
+              end: ref.end,
+              kind: "unknown_column",
+              message: `Unknown column or variable '${normalizeQualifiedName(ref.raw)}' in the current SELECT context.`,
+            });
+          }
+        }
+
+        // ClickHouse lets aliases defined earlier in the same SELECT be reused
+        // later in the projection. But a plain identifier (`SELECT foo`) must
+        // not be treated as a self-defined alias, otherwise unknown columns like
+        // `anchor_valu` silently validate themselves.
+        const alias = aliasDefinedBySelectItem(item);
+        if (alias) aliasesBefore.add(norm(alias));
+      }
+    }
+    return issues;
+  }
+
+  function isKnownFunctionName(meta, name) {
+    const n = norm(normalizeQualifiedName(name));
+    if (!n) return false;
+    const items = Array.isArray(meta?.functions?.items) ? meta.functions.items : [];
+    if (items.some((fn) => norm(fn.name) === n)) return true;
+    const set = meta?.functions?.set;
+    if (set && typeof set.has === "function" && set.has(n)) return true;
+    return false;
+  }
+
+  function previousWordBefore(masked, index) {
+    const part = String(masked || "").slice(0, Math.max(0, index));
+    const m = part.match(/([A-Za-z_][A-Za-z0-9_$]*)\s*$/);
+    return m ? m[1] : "";
+  }
+
+  function collectFunctionDiagnostics(text, meta) {
+    const issues = [];
+    const value = String(text || "");
+    const masked = maskSql(value);
+    const re = new RegExp(`${qualifiedIdentReSource}\\s*\\(`, "g");
+    const keywords = autocompleteKeywordSet(meta);
+    let m;
+    while ((m = re.exec(masked))) {
+      const rawWithParen = String(value || "").slice(m.index, m.index + (m[0] || "").length);
+      const raw = rawWithParen.replace(/\s*\($/, "");
+      const name = normalizeQualifiedName(raw);
+      if (!name || /^\d/.test(name)) continue;
+      if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
+
+      const prev = previousWordBefore(masked, m.index).toUpperCase();
+      if (relationStarters.has(prev) || prev === "AS") continue;
+      if (isKnownFunctionName(meta, name)) continue;
+      if (isKnownTableFunction(meta, name)) continue;
+
+      issues.push({
+        start: m.index,
+        end: m.index + raw.length,
+        kind: "unknown_function",
+        message: `Unknown function '${name}' in the current ClickHouse context.`,
+      });
+    }
+    return issues;
+  }
+
+  function collectRelationDiagnostics(text, meta) {
+    const issues = [];
+    const value = String(text || "");
+    const masked = maskSql(value);
+    const re = /\b(?:FROM|JOIN)\b/gi;
+    let m;
+    while ((m = re.exec(masked))) {
+      let i = re.lastIndex;
+      while (i < value.length && /\s/.test(value[i])) i += 1;
+      if (value[i] === "(") continue;
+      const ref = readIdentifierAt(value, i);
+      if (!ref || !ref.name) continue;
+      let j = ref.end;
+      while (j < value.length && /\s/.test(value[j])) j += 1;
+      if (value[j] === ".") continue; // incomplete db. while typing
+      if (value[j] === "(" && isKnownTableFunction(meta, ref.name)) continue;
+      const statement = currentStatementAt(value, m.index);
+      const ctes = parseCtes(statement, meta);
+      const known = relationReferenceIsKnown(ref.name, meta, ctes);
+      if (!known.ok) issues.push({ start: i + (String(value).slice(i).match(/^\s*/)?.[0]?.length || 0), end: ref.end, kind: "unknown_table", message: known.message });
+    }
+    return issues;
+  }
+
+  function computeDiagnostics(text, meta) {
+    if (!isReferenceDiagnosticsEnabled() || !meta) return [];
+    const value = String(text || "");
+    const masked = maskSql(value);
+    const issues = [];
+    if (isTableWarningsEnabled()) issues.push(...collectRelationDiagnostics(value, meta));
+    if (isColumnWarningsEnabled() && /\bFROM\b/i.test(masked)) issues.push(...collectSelectReferenceDiagnostics(value, meta));
+    if (isFunctionWarningsEnabled()) issues.push(...collectFunctionDiagnostics(value, meta));
+    issues.sort((a, b) => a.start - b.start || a.end - b.end);
+    const dedup = [];
+    const seen = new Set();
+    for (const issue of issues) {
+      if (!Number.isFinite(issue.start) || !Number.isFinite(issue.end) || issue.end <= issue.start) continue;
+      const key = `${issue.start}:${issue.end}:${issue.kind}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      dedup.push(issue);
+      if (dedup.length >= 200) break;
+    }
+    return dedup;
+  }
+
+  function lineRangeAtIndex(text, index) {
+    const value = String(text || "");
+    const start = value.lastIndexOf("\n", Math.max(0, index - 1)) + 1;
+    let end = value.indexOf("\n", index);
+    if (end < 0) end = value.length;
+    const before = value.slice(0, start);
+    return { start, end, lineIndex: before ? before.split("\n").length - 1 : 0, line: value.slice(start, end) };
+  }
+
+  function renderDiagnosticsLayer(issues = currentDiagnostics) {
+    const layer = ensureDiagnosticsLayer();
+    if (!layer || !textarea || !isReferenceDiagnosticsEnabled()) {
+      if (layer) layer.innerHTML = "";
+      hideDiagnosticsTooltip();
+      return;
+    }
+    currentDiagnostics = Array.isArray(issues) ? issues : [];
+    layer.innerHTML = "";
+    hideDiagnosticsTooltip();
+    if (!currentDiagnostics.length) return;
+
+    const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
+    const visual = wrap ? wrap.querySelector(".editorHighlight") : null;
+    const ref = visual || textarea;
+    const cs = getComputedStyle(textarea);
+    const lineHeight = Number.parseFloat(cs.lineHeight) || 21;
+    const padLeft = Number.parseFloat(cs.paddingLeft) || 0;
+    const padTop = Number.parseFloat(cs.paddingTop) || 0;
+    const charWidth = measureCharWidth(textarea);
+    const value = String(textarea.value || "");
+    const minY = -lineHeight;
+    const maxY = (textarea.clientHeight || 0) + lineHeight;
+
+    for (const issue of currentDiagnostics) {
+      const r = lineRangeAtIndex(value, issue.start);
+      if (issue.end > r.end) continue;
+      const localStart = Math.max(0, issue.start - r.start);
+      const localEnd = Math.max(localStart + 1, issue.end - r.start);
+      const token = r.line.slice(localStart, localEnd);
+      let top = padTop + r.lineIndex * lineHeight - textarea.scrollTop;
+      if (top < minY || top > maxY) continue;
+      let left = padLeft + measureRenderedTextWidth(ref, r.line.slice(0, localStart)) - textarea.scrollLeft;
+      let width = Math.max(charWidth, measureRenderedTextWidth(ref, token));
+      const domRect = highlightedRectForRange(visual, issue.start, issue.end);
+      if (domRect && wrap) {
+        const wrapRect = wrap.getBoundingClientRect();
+        left = domRect.left - wrapRect.left;
+        top = domRect.top - wrapRect.top;
+        width = Math.max(charWidth, domRect.width);
+      }
+      const mark = document.createElement("span");
+      mark.className = `editorDiagnostic editorDiagnostic--${issue.kind || "warning"}`;
+      mark.style.left = `${left.toFixed(2)}px`;
+      mark.style.top = `${top.toFixed(2)}px`;
+      mark.style.width = `${Math.max(1, width).toFixed(2)}px`;
+      mark.style.height = `${Math.ceil(lineHeight)}px`;
+      mark.dataset.message = issue.message || "Unknown reference";
+      mark.textContent = token || " ";
+      mark.addEventListener("mouseenter", () => placeDiagnosticsTooltip(mark));
+      mark.addEventListener("mousemove", () => placeDiagnosticsTooltip(mark));
+      mark.addEventListener("mouseleave", hideDiagnosticsTooltip);
+      layer.appendChild(mark);
+    }
+  }
+
+  function runDiagnostics() {
+    if (!textarea || !isReferenceDiagnosticsEnabled()) {
+      clearDiagnostics();
+      return;
+    }
+    const meta = currentHostMeta();
+    if (!meta) {
+      clearDiagnostics();
+      return;
+    }
+    currentDiagnostics = computeDiagnostics(textarea.value || "", meta);
+    renderDiagnosticsLayer(currentDiagnostics);
+  }
+
+  function scheduleDiagnostics(immediate = false) {
+    if (!textarea) return;
+    if (!isReferenceDiagnosticsEnabled()) {
+      clearDiagnostics();
+      return;
+    }
+    if (diagnosticsTimer) { clearTimeout(diagnosticsTimer); diagnosticsTimer = 0; }
+    if (diagnosticsRaf) { cancelAnimationFrame(diagnosticsRaf); diagnosticsRaf = 0; }
+    const delay = immediate ? 0 : 180;
+    diagnosticsTimer = setTimeout(() => {
+      diagnosticsTimer = 0;
+      diagnosticsRaf = requestAnimationFrame(() => {
+        diagnosticsRaf = 0;
+        runDiagnostics();
+      });
+    }, delay);
   }
 
   function visualColumn(line) {
@@ -1558,6 +2463,44 @@
       offset = next;
     }
     return null;
+  }
+
+  function textNodeRangeRectForRange(root, startIndex, endIndex) {
+    if (!root || !Number.isFinite(startIndex) || !Number.isFinite(endIndex) || endIndex <= startIndex) return null;
+    const range = document.createRange();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let offset = 0;
+    let node;
+    let startSet = false;
+    try {
+      while ((node = walker.nextNode())) {
+        const text = node.nodeValue || "";
+        const next = offset + text.length;
+        if (!startSet && startIndex >= offset && startIndex <= next) {
+          range.setStart(node, Math.max(0, Math.min(text.length, startIndex - offset)));
+          startSet = true;
+        }
+        if (startSet && endIndex >= offset && endIndex <= next) {
+          range.setEnd(node, Math.max(0, Math.min(text.length, endIndex - offset)));
+          const rects = Array.from(range.getClientRects()).filter((r) => r && r.width > 0 && r.height > 0);
+          const rect = rects.length ? rects[0] : range.getBoundingClientRect();
+          range.detach?.();
+          return rect && Number.isFinite(rect.left) ? rect : null;
+        }
+        offset = next;
+      }
+    } catch (_) {
+      try { range.detach?.(); } catch (_) {}
+      return null;
+    }
+    try { range.detach?.(); } catch (_) {}
+    return null;
+  }
+
+  function highlightedRectForRange(highlight, startIndex, endIndex) {
+    const rect = textNodeRangeRectForRange(highlight, startIndex, endIndex);
+    if (!rect) return null;
+    return rect;
   }
 
   function highlightedEndPointForIndex(highlight, absoluteIndex) {
@@ -1672,6 +2615,11 @@
     replaceRange = token ? { start: token.replaceStart, end: token.replaceEnd } : null;
     const moreCount = Math.max(0, Number(totalAvailable || 0) - suggestions.length);
     activeIndex = Math.max(0, Math.min(activeIndex, suggestions.length - 1));
+    // Suggestions are about to be rebuilt. Any ghost preview from the previous
+    // menu is now stale until the current pointer position is reconciled against
+    // the new rows. This prevents an old hovered suggestion from staying painted
+    // while the user types a non-matching character.
+    hideGhost();
 
     if (!suggestions.length) {
       close();
@@ -1765,6 +2713,7 @@
           label.classList.remove("is-overflowing");
         }
       }
+      syncGhostWithPointer();
     });
   }
 
@@ -1864,7 +2813,7 @@
     // - prefix match, e.g. `num` -> `numeric...`: keep the already typed token
     //   rendered by the normal highlighter and only ghost the suffix from the
     //   cursor. This avoids tiny baseline/left drifts on duplicated text.
-    // - contains match, e.g. `number` -> `row_number`: start at the token
+    // - partial match, e.g. `number` -> `row_number`: start at the token
     //   beginning so the missing prefix (`row_`) is visible.
     const suffixOnlyFromTokenEnd = preview.before.length === 0 && preview.match.length > 0;
     const ghostAnchorLocal = suffixOnlyFromTokenEnd ? localEnd : localStart;
@@ -1915,7 +2864,7 @@
 
       // Anchor the ghost exactly where the visual replacement starts. For a
       // normal prefix completion this is the end of the already typed token;
-      // for a contains-match completion this is the beginning of the token so
+      // for a partial-match completion this is the beginning of the token so
       // a missing prefix can be shown.
       let tokenPrefixWidth;
       let tokenLeft;
@@ -2068,6 +3017,7 @@
 
   function refresh() {
     if (isOpen()) update(lastExplicit);
+    scheduleDiagnostics(false);
   }
 
   function setActive(next, scrollIntoView = true) {
@@ -2261,7 +3211,11 @@
       }
     }, true);
 
-    ta.addEventListener("input", () => scheduleUpdate(false));
+    ta.addEventListener("input", () => {
+      hideGhost();
+      scheduleUpdate(false);
+      scheduleDiagnostics(false);
+    });
     ta.addEventListener("click", () => scheduleUpdate(false));
     ta.addEventListener("keyup", (ev) => {
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(ev.key)) scheduleUpdate(false);
@@ -2271,13 +3225,16 @@
       // Close instead of trying to chase it; global page scroll still repositions the menu.
       if (isOpen()) close();
       else hideGhost();
+      renderDiagnosticsLayer();
     }, { passive: true });
     ta.addEventListener("blur", scheduleClose);
     window.addEventListener("resize", () => {
       if (isOpen()) positionMenu(ta);
+      renderDiagnosticsLayer();
     });
     window.addEventListener("scroll", () => {
       if (isOpen()) positionMenu(ta);
+      renderDiagnosticsLayer();
     }, true);
     document.addEventListener("mousedown", (ev) => {
       const target = ev.target instanceof Node ? ev.target : null;
@@ -2287,8 +3244,31 @@
       close();
     });
 
-    return { refresh, close, update, setEnabled: setAutocompleteEnabled, isEnabled: isAutocompleteEnabled };
+    scheduleDiagnostics(true);
+
+    return {
+      refresh,
+      close,
+      update,
+      setEnabled: setAutocompleteEnabled,
+      isEnabled: isAutocompleteEnabled,
+      setPartialMatchEnabled: setAutocompletePartialEnabled,
+      isPartialMatchEnabled: isAutocompletePartialEnabled,
+      setReferenceDiagnosticsEnabled,
+      isReferenceDiagnosticsEnabled,
+    };
   }
 
-  ns.autocomplete = { attach, refresh, close, update, setEnabled: setAutocompleteEnabled, isEnabled: isAutocompleteEnabled };
+  ns.autocomplete = {
+    attach,
+    refresh,
+    close,
+    update,
+    setEnabled: setAutocompleteEnabled,
+    isEnabled: isAutocompleteEnabled,
+    setPartialMatchEnabled: setAutocompletePartialEnabled,
+    isPartialMatchEnabled: isAutocompletePartialEnabled,
+    setReferenceDiagnosticsEnabled,
+    isReferenceDiagnosticsEnabled,
+  };
 })();
