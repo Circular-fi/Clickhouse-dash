@@ -1,0 +1,4 @@
+ALTER TABLE anon.metrics_store
+(
+    MODIFY TTL event_date + toIntervalDay(90)
+)

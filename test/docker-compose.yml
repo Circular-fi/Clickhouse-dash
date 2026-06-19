@@ -55,8 +55,8 @@ services:
       CLICKHOUSE_PASSWORD: test
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' | grep -q '1'"]
-      interval: 30s
-      timeout: 10s
+      interval: 5s
+      timeout: 1s
       retries: 3
-      start_period: 60s
+      start_period: 1s
     restart: unless-stopped
