@@ -1253,16 +1253,17 @@ button.button:not(:disabled):hover {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  max-width: 14rem;
+  max-width: 12rem;
   padding: 0.4rem 0.6rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--buttonBorder);
   border-radius: var(--radiusSm) var(--radiusSm) 0 0;
-  background: var(--pillBg);
+  background: var(--buttonBg);
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
   cursor: pointer;
   user-select: none;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -1270,18 +1271,19 @@ button.button:not(:disabled):hover {
 
 .queryTab:hover {
   background: var(--buttonBgHover);
+  border-color: var(--buttonBorderHover);
   color: var(--text);
 }
 
 .queryTab.is-active {
-  background: var(--inputBg);
+  background: var(--buttonBg);
   color: var(--text);
-  border-color: var(--border);
-  box-shadow: inset 0 0.14rem 0 color-mix(in srgb, #2563eb 70%, var(--text));
+  border-color: var(--accentBorder);
+  box-shadow: inset 0 0.14rem 0 var(--accentBorder);
 }
 
 .queryTab:focus-visible {
-  outline: 2px solid color-mix(in srgb, #2563eb 60%, var(--text));
+  outline: 2px solid var(--accentBorder);
   outline-offset: 1px;
 }
 
@@ -1290,10 +1292,11 @@ button.button:not(:disabled):hover {
 }
 
 .queryTab.is-dropBefore {
-  box-shadow: inset 0.14rem 0 0 color-mix(in srgb, #2563eb 70%, var(--text));
+  box-shadow: inset 0.14rem 0 0 var(--accentBorder);
 }
 
 .queryTab__label {
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1304,11 +1307,11 @@ button.button:not(:disabled):hover {
   font: inherit;
   color: var(--text);
   background: var(--bg);
-  border: 1px solid color-mix(in srgb, #2563eb 50%, var(--border));
+  border: 1px solid var(--accentBorder);
   border-radius: 0.3rem;
   padding: 0.1rem 0.25rem;
   width: 8rem;
-  max-width: 12rem;
+  max-width: 10rem;
   outline: none;
 }
 
@@ -1355,13 +1358,30 @@ button.button:not(:disabled):hover {
 
 .queryTabs__add:hover {
   background: var(--buttonBgHover);
-  border-color: color-mix(in srgb, #2563eb 40%, var(--border));
+  border-color: var(--buttonBorderHover);
+}
+
+.queryTabs__add:disabled,
+.queryTabs__add.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .queryTabs.is-busy .queryTab,
 .queryTabs.is-busy .queryTabs__add {
   opacity: 0.55;
   pointer-events: none;
+}
+
+/* Editor-options toggle: hide the tabs bar when the feature is disabled and
+   reclaim the height the editor reserved for it. */
+html.chdash-tabs-disabled #queryTabs {
+  display: none;
+}
+
+html.chdash-tabs-disabled .editorWrap {
+  --queryTabsH: 0rem;
 }
 
 .panel--results {
@@ -2373,7 +2393,7 @@ html[data-theme="light"] .queryLibraryItem__delete:hover {
 }
 
 .libSearch__input:focus {
-  border-color: var(--accentBorder, color-mix(in srgb, #2563eb 50%, var(--border)));
+  border-color: var(--accentBorder);
 }
 
 .libTree.is-dropRoot {
@@ -2410,7 +2430,7 @@ html[data-theme="light"] .queryLibraryItem__delete:hover {
 }
 
 .libNode.is-dropBefore {
-  box-shadow: inset 0 0.12rem 0 color-mix(in srgb, #2563eb 70%, var(--text));
+  box-shadow: inset 0 0.12rem 0 var(--accentBorder);
 }
 
 .libNode__twisty {

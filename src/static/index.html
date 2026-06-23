@@ -26,6 +26,10 @@
         root.classList.toggle("chdash-copy-button-hidden", copyHidden);
         root.classList.toggle("chdash-line-numbers-hidden", lineHidden);
 
+        // Hide the query tabs bar before paint when the feature is disabled.
+        var tabsEnabled = localStorage.getItem("chdash.tabs.enabled");
+        root.classList.toggle("chdash-tabs-disabled", tabsEnabled === "false" || tabsEnabled === "0");
+
         // The editor size is stored in sessionStorage by the resize observer. Apply
         // it as a CSS variable before style.css is parsed so the editor does not
         // jump after app_ui.js starts.

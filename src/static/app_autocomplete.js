@@ -34,6 +34,7 @@
   const autocompleteStorageKey = "chdash.autocomplete.enabled";
   const copyButtonStorageKey = "chdash.editor.copy_button.enabled";
   const lineNumbersStorageKey = "chdash.editor.line_numbers.enabled";
+  const tabsEnabledStorageKey = "chdash.tabs.enabled";
   let autocompleteEnabled = loadStoredBool(autocompleteStorageKey, true);
   let copyButtonEnabled = loadStoredBool(copyButtonStorageKey, true);
   let lineNumbersEnabled = loadStoredBool(lineNumbersStorageKey, true);
@@ -68,6 +69,19 @@
 
   function isLineNumbersEnabled() {
     return lineNumbersEnabled !== false;
+  }
+
+  // The multi-tab feature is owned by app_tabs; mirror its state here so the
+  // editor options menu can toggle it. Falls back to storage before tabs init.
+  function isTabsEnabled() {
+    if (ns.tabs && typeof ns.tabs.isEnabled === "function") return ns.tabs.isEnabled();
+    return loadStoredBool(tabsEnabledStorageKey, true);
+  }
+
+  function setTabsEnabled(value) {
+    if (ns.tabs && typeof ns.tabs.setEnabled === "function") ns.tabs.setEnabled(value !== false);
+    else saveStoredBool(tabsEnabledStorageKey, value !== false);
+    updateAutocompleteControlUi();
   }
 
   function renderAutocompleteSettingsButton() {
@@ -117,6 +131,7 @@
     setMenuToggleState("[data-autocomplete-toggle]", enabled);
     setMenuToggleState("[data-copy-button-toggle]", isCopyButtonEnabled());
     setMenuToggleState("[data-line-numbers-toggle]", isLineNumbersEnabled());
+    setMenuToggleState("[data-tabs-toggle]", isTabsEnabled());
     applyEditorOptionClasses();
   }
 
@@ -198,6 +213,9 @@
     if (!autocompleteControlMenu.querySelector("[data-line-numbers-toggle]")) {
       autocompleteControlMenu.appendChild(buildEditorOption("Line numbers", "data-line-numbers-toggle"));
     }
+    if (!autocompleteControlMenu.querySelector("[data-tabs-toggle]")) {
+      autocompleteControlMenu.appendChild(buildEditorOption("Query tabs", "data-tabs-toggle"));
+    }
   }
 
   function bindAutocompleteControlEvents() {
@@ -222,6 +240,8 @@
         setCopyButtonEnabled(!isCopyButtonEnabled());
       } else if (btn.hasAttribute("data-line-numbers-toggle")) {
         setLineNumbersEnabled(!isLineNumbersEnabled());
+      } else if (btn.hasAttribute("data-tabs-toggle")) {
+        setTabsEnabled(!isTabsEnabled());
       }
       // Keep the editor options menu open when toggling options.
       // This menu is meant to host several settings, so changing one should not close it.

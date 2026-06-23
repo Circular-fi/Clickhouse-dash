@@ -7,7 +7,9 @@
   const { dom, util, results, run, state } = ns;
 
   const STORAGE_KEY = "chdash.tabs.v1";
-  const MAX_TABS = 24;
+  const ENABLED_KEY = "chdash.tabs.enabled";
+  const MAX_TABS = 20;
+  const TAB_TITLE_MAX = 32;
 
   // In-memory tab list. Each tab keeps its editor SQL plus a snapshot of the
   // results table and metrics column. Snapshots are null until the tab has been
@@ -17,6 +19,23 @@
   let activeId = null;
   let seq = 0;
   let dragId = null;
+
+  // Whether the multi-tab UI is enabled (toggled from the editor options menu).
+  // Written there; read here at init and applied as a root class.
+  const readEnabled = () => {
+    try {
+      const v = localStorage.getItem(ENABLED_KEY);
+      return v == null ? true : v !== "false" && v !== "0";
+    } catch {
+      return true;
+    }
+  };
+  let enabled = readEnabled();
+
+  const applyEnabledVisibility = () => {
+    const root = document.documentElement;
+    if (root && root.classList) root.classList.toggle("chdash-tabs-disabled", !enabled);
+  };
 
   // --- persistence (SQL + titles only; live results are not persisted) -------
 
@@ -143,6 +162,13 @@
       list.appendChild(el);
     }
 
+    if (dom.queryTabsAdd) {
+      const atLimit = tabs.length >= MAX_TABS;
+      dom.queryTabsAdd.disabled = atLimit;
+      dom.queryTabsAdd.classList.toggle("is-disabled", atLimit);
+      dom.queryTabsAdd.title = atLimit ? `Tab limit reached (${MAX_TABS})` : "New query tab";
+    }
+
     if (dom.queryTabs) dom.queryTabs.classList.toggle("is-busy", isBusy());
   };
 
@@ -228,6 +254,7 @@
     const input = document.createElement("input");
     input.type = "text";
     input.className = "queryTab__rename";
+    input.maxLength = TAB_TITLE_MAX;
     input.value = tab.title;
     label.replaceWith(input);
     input.focus();
@@ -239,7 +266,7 @@
       done = true;
       if (save) {
         const next = String(input.value || "").trim();
-        if (next) tab.title = next.slice(0, 40);
+        if (next) tab.title = next.slice(0, TAB_TITLE_MAX);
       }
       renderTabs();
       persist();
@@ -372,6 +399,29 @@
     }
   };
 
+  // Enable/disable the multi-tab UI (called from the editor options menu).
+  // Disabling collapses to a single editor: the active tab's query stays in the
+  // editor and the bar is hidden; other tabs are preserved so re-enabling
+  // restores them.
+  function setEnabled(on) {
+    on = on !== false;
+    try {
+      localStorage.setItem(ENABLED_KEY, on ? "true" : "false");
+    } catch {
+      /* ignore */
+    }
+    if (on === enabled) {
+      applyEnabledVisibility();
+      return;
+    }
+    if (!on) snapshotActive();
+    enabled = on;
+    applyEnabledVisibility();
+    if (on) renderTabs();
+  }
+
+  const isEnabled = () => enabled;
+
   // Keep the busy-state class in sync so tabs visibly lock during a run.
   // run.js owns isRunning and exposes no event, so a light poll is enough.
   const watchBusy = () => {
@@ -408,6 +458,7 @@
 
     renderTabs();
     persist();
+    applyEnabledVisibility();
 
     dom.queryTabsList.addEventListener("click", onListClick);
     dom.queryTabsList.addEventListener("dblclick", onListDblClick);
@@ -436,5 +487,5 @@
     watchBusy();
   }
 
-  ns.tabs = { init, addTab, closeTab, activate };
+  ns.tabs = { init, addTab, closeTab, activate, setEnabled, isEnabled };
 })();
