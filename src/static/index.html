@@ -164,10 +164,16 @@
           </button>
           <div class="editorAutocompleteControl__menu" role="menu" tabindex="-1" hidden>
             <div class="editorAutocompleteControl__title">Editor options</div>
-            <button class="editorAutocompleteControl__opt" type="button" role="menuitemcheckbox" data-autocomplete-toggle="true" aria-checked="true">
+            <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--parent" type="button" role="menuitemcheckbox" data-autocomplete-toggle="true" aria-checked="true" aria-expanded="true" aria-controls="editorAutocompleteSubmenu">
               <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
               <span class="editorAutocompleteControl__text">Autocomplete</span>
             </button>
+            <div id="editorAutocompleteSubmenu" class="editorAutocompleteControl__submenu" data-autocomplete-submenu="true" aria-hidden="false">
+              <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--sub" type="button" role="menuitemcheckbox" data-autocomplete-partial-toggle="true" aria-checked="false">
+                <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+                <span class="editorAutocompleteControl__text">Partial match</span>
+              </button>
+            </div>
             <button class="editorAutocompleteControl__opt" type="button" role="menuitemcheckbox" data-copy-button-toggle="true" aria-checked="true">
               <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
               <span class="editorAutocompleteControl__text">Copy button</span>
@@ -176,6 +182,24 @@
               <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
               <span class="editorAutocompleteControl__text">Line numbers</span>
             </button>
+            <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--parent" type="button" role="menuitemcheckbox" data-warnings-toggle="true" aria-checked="true" aria-expanded="true" aria-controls="editorWarningsSubmenu">
+              <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+              <span class="editorAutocompleteControl__text">Warnings</span>
+            </button>
+            <div id="editorWarningsSubmenu" class="editorAutocompleteControl__submenu editorAutocompleteControl__submenu--warnings" data-warnings-submenu="true" aria-hidden="false">
+              <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--sub" type="button" role="menuitemcheckbox" data-warning-tables-toggle="true" aria-checked="true">
+                <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+                <span class="editorAutocompleteControl__text">Tables</span>
+              </button>
+              <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--sub" type="button" role="menuitemcheckbox" data-warning-functions-toggle="true" aria-checked="true">
+                <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+                <span class="editorAutocompleteControl__text">Functions</span>
+              </button>
+              <button class="editorAutocompleteControl__opt editorAutocompleteControl__opt--sub" type="button" role="menuitemcheckbox" data-warning-columns-toggle="true" aria-checked="true">
+                <span class="editorAutocompleteControl__check" aria-hidden="true"></span>
+                <span class="editorAutocompleteControl__text">Columns</span>
+              </button>
+            </div>
           </div>
         </div>
         <script>

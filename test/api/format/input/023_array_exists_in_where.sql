@@ -1,0 +1,1 @@
+SELECT entity_key, event_tags FROM anon.tagged_events WHERE arrayExists( tag_item -> tag_item IN ['alpha','beta','gamma'], event_tags ) ORDER BY entity_key ASC
