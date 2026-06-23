@@ -35,7 +35,6 @@
   const autocompletePartialStorageKey = "chdash.autocomplete.partial_match.enabled";
   const copyButtonStorageKey = "chdash.editor.copy_button.enabled";
   const lineNumbersStorageKey = "chdash.editor.line_numbers.enabled";
-  const tabsEnabledStorageKey = "chdash.tabs.enabled";
   const warningsStorageKey = "chdash.editor.warnings.enabled";
   const warningTablesStorageKey = "chdash.editor.warnings.tables.enabled";
   const warningFunctionsStorageKey = "chdash.editor.warnings.functions.enabled";
@@ -114,19 +113,6 @@
 
   function isLineNumbersEnabled() {
     return lineNumbersEnabled !== false;
-  }
-
-  // The multi-tab feature is owned by app_tabs; mirror its state here so the
-  // editor options menu can toggle it. Falls back to storage before tabs init.
-  function isTabsEnabled() {
-    if (ns.tabs && typeof ns.tabs.isEnabled === "function") return ns.tabs.isEnabled();
-    return loadStoredBool(tabsEnabledStorageKey, true);
-  }
-
-  function setTabsEnabled(value) {
-    if (ns.tabs && typeof ns.tabs.setEnabled === "function") ns.tabs.setEnabled(value !== false);
-    else saveStoredBool(tabsEnabledStorageKey, value !== false);
-    updateAutocompleteControlUi();
   }
 
   function isWarningsEnabled() {
@@ -221,7 +207,6 @@
     setMenuToggleState("[data-autocomplete-partial-toggle]", isAutocompletePartialEnabled());
     setMenuToggleState("[data-copy-button-toggle]", isCopyButtonEnabled());
     setMenuToggleState("[data-line-numbers-toggle]", isLineNumbersEnabled());
-    setMenuToggleState("[data-tabs-toggle]", isTabsEnabled());
     setMenuToggleState("[data-warnings-toggle]", isWarningsEnabled());
     setMenuToggleState("[data-warning-tables-toggle]", isTableWarningsEnabled());
     setMenuToggleState("[data-warning-functions-toggle]", isFunctionWarningsEnabled());
@@ -464,9 +449,6 @@
     if (!autocompleteControlMenu.querySelector("[data-line-numbers-toggle]")) {
       autocompleteControlMenu.appendChild(buildEditorOption("Line numbers", "data-line-numbers-toggle"));
     }
-    if (!autocompleteControlMenu.querySelector("[data-tabs-toggle]")) {
-      autocompleteControlMenu.appendChild(buildEditorOption("Query tabs", "data-tabs-toggle"));
-    }
     ensureWarningsSubmenu();
   }
 
@@ -494,8 +476,6 @@
         setCopyButtonEnabled(!isCopyButtonEnabled());
       } else if (btn.hasAttribute("data-line-numbers-toggle")) {
         setLineNumbersEnabled(!isLineNumbersEnabled());
-      } else if (btn.hasAttribute("data-tabs-toggle")) {
-        setTabsEnabled(!isTabsEnabled());
       } else if (btn.hasAttribute("data-warnings-toggle")) {
         setWarningsEnabled(!isWarningsEnabled());
       } else if (btn.hasAttribute("data-warning-tables-toggle")) {

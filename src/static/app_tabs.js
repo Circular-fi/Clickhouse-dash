@@ -38,6 +38,10 @@
   };
 
   // --- persistence (SQL + titles only; live results are not persisted) -------
+  // Stored in sessionStorage so each browser tab/window keeps its own set of
+  // query tabs: a new browser tab starts fresh, and a reload restores this
+  // page's tabs. (The on/off preference below lives in localStorage instead,
+  // since it is a global page-level setting.)
 
   const persist = () => {
     try {
@@ -45,7 +49,7 @@
         activeId,
         tabs: tabs.map((t) => ({ id: t.id, title: t.title, sql: t.sql })),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       /* ignore quota / privacy errors */
     }
@@ -53,7 +57,7 @@
 
   const loadPersisted = () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = sessionStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const obj = JSON.parse(raw);
       if (!obj || !Array.isArray(obj.tabs) || obj.tabs.length === 0) return null;

@@ -48,6 +48,11 @@
     themeSelectMenu: byId("themeSelectMenu"),
     themeSelectText: byId("themeSelectText"),
 
+    settingsSelect: byId("settingsSelect"),
+    settingsButton: byId("settingsButton"),
+    settingsMenu: byId("settingsMenu"),
+    settingTabsToggle: byId("settingTabsToggle"),
+
     versionBadge: byId("versionBadge"),
 
     queryStatusText: byId("queryStatusText"),

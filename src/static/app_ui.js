@@ -423,6 +423,40 @@
     else openThemeMenu();
   }
 
+  // --- system-level settings menu (gear) ---
+  function syncSettingsUi() {
+    if (!dom.settingTabsToggle) return;
+    const on = ns.tabs && typeof ns.tabs.isEnabled === "function" ? ns.tabs.isEnabled() : true;
+    dom.settingTabsToggle.setAttribute("aria-checked", String(on));
+    dom.settingTabsToggle.classList.toggle("is-checked", on);
+  }
+
+  function isSettingsMenuOpen() {
+    return !!(dom.settingsMenu && !dom.settingsMenu.hidden);
+  }
+
+  function openSettingsMenu() {
+    if (!dom.settingsMenu || !dom.settingsButton) return;
+    syncSettingsUi();
+    dom.settingsMenu.hidden = false;
+    dom.settingsButton.setAttribute("aria-expanded", "true");
+    if (dom.settingsSelect) dom.settingsSelect.classList.add("is-open");
+    dom.settingsMenu.focus({ preventScroll: true });
+  }
+
+  function closeSettingsMenu() {
+    if (!dom.settingsMenu || !dom.settingsButton) return;
+    dom.settingsMenu.hidden = true;
+    dom.settingsButton.setAttribute("aria-expanded", "false");
+    if (dom.settingsSelect) dom.settingsSelect.classList.remove("is-open");
+  }
+
+  function toggleSettingsMenu() {
+    if (!dom.settingsMenu) return;
+    if (isSettingsMenuOpen()) closeSettingsMenu();
+    else openSettingsMenu();
+  }
+
   function isCopyMenuOpen() {
     return !!(dom.copySplit && dom.copySplit.classList.contains("is-open"));
   }
@@ -1183,6 +1217,9 @@
         // (e.g. expanding a folder); those are not real outside clicks.
         if (t instanceof Node && t.isConnected && !dom.queryLibrary.contains(t)) closeQueryLibraryMenu();
       }
+      if (dom.settingsSelect && dom.settingsMenu && isSettingsMenuOpen()) {
+        if (t instanceof Node && !dom.settingsSelect.contains(t)) closeSettingsMenu();
+      }
     });
 
     document.addEventListener("keydown", (ev) => {
@@ -1192,6 +1229,7 @@
         closeThemeMenu({ immediate: true });
         closeCopyMenu({ immediate: true });
         closeQueryLibraryMenu({ immediate: true });
+        closeSettingsMenu();
       }
     });
 
@@ -1222,6 +1260,23 @@
         });
       }
     }
+
+    if (dom.settingsButton) {
+      dom.settingsButton.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleSettingsMenu();
+      });
+    }
+    if (dom.settingTabsToggle) {
+      dom.settingTabsToggle.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const on = ns.tabs && typeof ns.tabs.isEnabled === "function" ? ns.tabs.isEnabled() : true;
+        if (ns.tabs && typeof ns.tabs.setEnabled === "function") ns.tabs.setEnabled(!on);
+        syncSettingsUi();
+      });
+    }
+    syncSettingsUi();
 
     if (dom.copyMenuButton) dom.copyMenuButton.addEventListener("click", toggleCopyMenu);
     if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", () => closeCopyMenu({ immediate: true }));
