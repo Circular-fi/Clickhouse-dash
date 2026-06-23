@@ -26,6 +26,10 @@
         root.classList.toggle("chdash-copy-button-hidden", copyHidden);
         root.classList.toggle("chdash-line-numbers-hidden", lineHidden);
 
+        // Hide the query tabs bar before paint when the feature is disabled.
+        var tabsEnabled = localStorage.getItem("chdash.tabs.enabled");
+        root.classList.toggle("chdash-tabs-disabled", tabsEnabled === "false" || tabsEnabled === "0");
+
         // The editor size is stored in sessionStorage by the resize observer. Apply
         // it as a CSS variable before style.css is parsed so the editor does not
         // jump after app_ui.js starts.
@@ -125,8 +129,36 @@
           } catch (_) {}
         })();
       </script>
+
+      <div id="settingsSelect" class="settingsSelect" aria-label="Settings">
+        <button
+          id="settingsButton"
+          class="button settingsSelect__button"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          title="Settings"
+          aria-label="Settings">
+          <span class="settingsSelect__gear" aria-hidden="true"></span>
+        </button>
+
+        <div id="settingsMenu" class="settingsSelect__menu" role="menu" tabindex="-1" hidden>
+          <div class="settingsSelect__title">Settings</div>
+          <button id="settingTabsToggle" class="settingsSelect__opt" type="button" role="menuitemcheckbox" aria-checked="true">
+            <span class="settingsSelect__check" aria-hidden="true"></span>
+            <span class="settingsSelect__text">Query tabs</span>
+          </button>
+        </div>
+      </div>
     </div>
   </header>
+
+  <div id="queryTabs" class="queryTabs" role="tablist" aria-label="Query tabs">
+    <div id="queryTabsList" class="queryTabs__list"></div>
+    <button id="queryTabsAdd" class="queryTabs__add" type="button" title="New query tab" aria-label="New query tab">
+      <span class="queryTabs__addIcon" aria-hidden="true">+</span>
+    </button>
+  </div>
 
   <main class="layout" role="main">
     <section class="panel panel--query">
