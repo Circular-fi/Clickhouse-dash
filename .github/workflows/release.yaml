@@ -227,7 +227,7 @@ jobs:
 
       - name: Cache FetchContent deps (Linux)
         if: matrix.goos == 'linux'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ steps.vars.outputs.fetchcontent_dir }}
           key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
@@ -329,7 +329,7 @@ jobs:
 
       - name: Cache CMake deps (macOS)
         if: matrix.goos == 'darwin'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             build/_deps
