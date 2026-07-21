@@ -1,4 +1,5 @@
 #include "format_postprocess.hpp"
+#include "sql_scan.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -129,10 +130,6 @@ string repair_split_clause_keywords(string_view s) {
 }
 
 
-
-bool is_space_char(char ch) {
-  return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
-}
 
 string normalize_code_spacing(string_view s) {
   const string trimmed_for_comment = trim_ascii_spaces(s);
@@ -833,19 +830,6 @@ bool query_returns_table_like_cte(string_view query) {
   return split_top_level(select_body, ',').size() > 1;
 }
 
-bool contains_any_sql_comment(string_view s) {
-  ScanState st;
-  for (size_t i = 0; i < s.size(); ++i) {
-    if (!st.in_str && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
-      char c = s[i];
-      char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-      if (c == '#' || (c == '-' && n == '-') || (c == '/' && n == '*')) return true;
-    }
-    step_scan(st, s, i);
-  }
-  return false;
-}
-
 vector<string> split_lines_keep(string_view s) {
   vector<string> lines;
   size_t start = 0;
@@ -1530,6 +1514,36 @@ string Formatter::format_with_item_block(const vector<string>& items) {
   return join_lines(lines);
 }
 
+string normalize_aliased_operator_continuations(string value) {
+  const string masked = mask_sql_surface(value).code_lower;
+  vector<int> line_depths{0};
+  int paren = 0;
+  int bracket = 0;
+  int brace = 0;
+  for (char ch : masked) {
+    if (ch == '(') ++paren;
+    else if (ch == ')' && paren > 0) --paren;
+    else if (ch == '[') ++bracket;
+    else if (ch == ']' && bracket > 0) --bracket;
+    else if (ch == '{') ++brace;
+    else if (ch == '}' && brace > 0) --brace;
+    if (ch == '\n') line_depths.push_back(paren + bracket + brace);
+  }
+
+  auto lines = split_lines_keep(value);
+  for (size_t i = 1; i < lines.size() && i < line_depths.size(); ++i) {
+    if (line_depths[i] != 0) continue;
+    size_t content = 0;
+    while (content < lines[i].size() && (lines[i][content] == ' ' || lines[i][content] == '\t')) ++content;
+    const bool binary_continuation = content + 1 < lines[i].size() &&
+        (lines[i][content] == '-' || lines[i][content] == '/' ||
+         lines[i][content] == '+' || lines[i][content] == '*') &&
+        lines[i][content + 1] == ' ';
+    if (binary_continuation) lines[i].replace(0, content, 4, ' ');
+  }
+  return join_lines(lines);
+}
+
 string Formatter::format_item_block(const vector<string>& items, bool align_alias) {
   vector<std::pair<string, string>> parsed;
   size_t width = 0;
@@ -1540,6 +1554,7 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
     auto [expr, alias] = split_top_level_as(raw);
     expr = format_expression(expr);
     if (!alias.empty()) {
+      expr = normalize_aliased_operator_continuations(std::move(expr));
       ++aliased_count;
       const size_t line_width = last_line_length(expr);
       width = std::max(width, line_width);
@@ -2191,37 +2206,6 @@ string format_create_view_head_clauses(string_view raw_head) {
 }
 
 
-string format_create_tail(string_view tail, Formatter& fmt) {
-  string text = trim_ascii_spaces(tail);
-  if (text.empty()) return {};
-  static const char* clauses[] = {"ENGINE", "PARTITION BY", "ORDER BY", "TTL", "SETTINGS"};
-  vector<std::pair<int, string>> poses;
-  for (const char* kw : clauses) {
-    int p = find_top_level_keyword(text, kw);
-    if (p >= 0) poses.push_back({p, kw});
-  }
-  std::sort(poses.begin(), poses.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-  if (poses.empty()) return fmt.cleanup_surface(text);
-  vector<string> lines;
-  for (size_t i = 0; i < poses.size(); ++i) {
-    const size_t start = static_cast<size_t>(poses[i].first);
-    const string kw = poses[i].second;
-    const size_t body_start = start + kw.size();
-    const size_t end = (i + 1 < poses.size()) ? static_cast<size_t>(poses[i + 1].first) : text.size();
-    string body = trim_ascii_spaces(text.substr(body_start, end - body_start));
-    if (iequals_ascii(kw, "ENGINE")) {
-      if (!body.empty() && body.front() == '=') body = trim_ascii_spaces(body.substr(1));
-      lines.push_back("ENGINE = " + fmt.cleanup_surface(body));
-    } else if (iequals_ascii(kw, "ORDER BY")) {
-      lines.push_back("ORDER BY " + fmt.cleanup_surface(body));
-    } else if (iequals_ascii(kw, "SETTINGS")) {
-      lines.push_back("SETTINGS " + fmt.cleanup_surface(body));
-    } else {
-      lines.push_back(kw + " " + fmt.cleanup_surface(body));
-    }
-  }
-  return join_lines(lines);
-}
 string Formatter::format_create_table(string_view s) {
   const string text = trim_ascii_spaces(s);
   const size_t par = text.find('(');

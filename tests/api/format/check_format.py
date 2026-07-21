@@ -1,6 +1,7 @@
 import difflib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -24,9 +25,145 @@ OUTPUT_SQL_DIR = Path(os.environ.get("FORMAT_OUTPUT_SQL_DIR", str(Path(__file__)
 ARTIFACTS_DIR = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tests/artifacts"))
 FAIL_DIR = ARTIFACTS_DIR / "format_failures"
 CRASH_DIR = ARTIFACTS_DIR / "api_crash"
+FORMAT_RESULTS_PATH = ARTIFACTS_DIR / "format_results.json"
+FORMAT_RESULTS_LOCK = threading.Lock()
+FORMAT_RESULTS_FLUSH_EVERY = max(1, int(os.environ.get("FORMAT_RESULTS_FLUSH_EVERY", "20")))
+FORMAT_RESULTS_STATE: dict = {}
+FORMAT_RESULTS_DIRTY = 0
 
+# requests.Session keeps one connection pool per origin. Reusing it avoids a new
+# TCP handshake for every formatter fixture and every ClickHouse reference call.
 SESSION = requests.Session()
-SESSION.headers.update({"Connection": "close"})
+SESSION.headers.update({"User-Agent": "chdash-tests/1"})
+
+
+def utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
+
+
+def _new_format_manifest() -> dict:
+    now = utc_now()
+    return {
+        "version": 1,
+        "generated_at": now,
+        "updated_at": now,
+        "total_expected": len(iter_output_sql_files()),
+        "completed": 0,
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "items": [],
+    }
+
+
+def _refresh_format_totals_locked() -> None:
+    items = FORMAT_RESULTS_STATE.get("items", [])
+    FORMAT_RESULTS_STATE["updated_at"] = utc_now()
+    FORMAT_RESULTS_STATE["completed"] = len(items)
+    FORMAT_RESULTS_STATE["passed"] = sum(1 for row in items if row.get("status") == "passed")
+    FORMAT_RESULTS_STATE["failed"] = sum(1 for row in items if row.get("status") == "failed")
+    FORMAT_RESULTS_STATE["errors"] = sum(1 for row in items if row.get("status") == "error")
+
+
+def _flush_format_results_locked() -> None:
+    global FORMAT_RESULTS_DIRTY
+    _refresh_format_totals_locked()
+    write_json_atomic(FORMAT_RESULTS_PATH, FORMAT_RESULTS_STATE)
+    FORMAT_RESULTS_DIRTY = 0
+
+
+def flush_format_results() -> None:
+    with FORMAT_RESULTS_LOCK:
+        if FORMAT_RESULTS_STATE:
+            _flush_format_results_locked()
+
+
+def initialize_format_results() -> None:
+    global FORMAT_RESULTS_STATE, FORMAT_RESULTS_DIRTY
+    with FORMAT_RESULTS_LOCK:
+        FORMAT_RESULTS_STATE = _new_format_manifest()
+        FORMAT_RESULTS_DIRTY = 0
+        _flush_format_results_locked()
+
+
+def relative_artifact(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return str(path.resolve().relative_to(ARTIFACTS_DIR.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def record_format_result(
+    *,
+    output_sql_path: Path,
+    status: str,
+    input_sql: str,
+    expected_sql: str,
+    actual_sql: str,
+    diff: str,
+    duration_ms: float,
+    input_artifact: Path | None = None,
+    expected_artifact: Path | None = None,
+    actual_artifact: Path | None = None,
+    error: str | None = None,
+) -> None:
+    global FORMAT_RESULTS_STATE, FORMAT_RESULTS_DIRTY
+    diff_lines = diff.splitlines()
+    added_lines = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+    removed_lines = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
+    changed_blocks = sum(1 for line in diff_lines if line.startswith("@@"))
+
+    item = {
+        "name": output_sql_path.stem,
+        "file": output_sql_path.name,
+        "status": status,
+        "duration_ms": round(duration_ms, 3),
+        "input": input_sql,
+        "expected": expected_sql,
+        "actual": actual_sql,
+        "diff": diff,
+        "error": error,
+        "expected_lines": len(expected_sql.splitlines()),
+        "actual_lines": len(actual_sql.splitlines()),
+        "added_lines": added_lines,
+        "removed_lines": removed_lines,
+        "changed_blocks": changed_blocks,
+        "artifacts": {
+            "input": relative_artifact(input_artifact),
+            "expected": relative_artifact(expected_artifact),
+            "actual": relative_artifact(actual_artifact),
+        },
+    }
+
+    with FORMAT_RESULTS_LOCK:
+        if not FORMAT_RESULTS_STATE:
+            FORMAT_RESULTS_STATE = _new_format_manifest()
+        items = [
+            previous
+            for previous in FORMAT_RESULTS_STATE.get("items", [])
+            if isinstance(previous, dict) and previous.get("file") != output_sql_path.name
+        ]
+        items.append(item)
+        items.sort(key=lambda row: str(row.get("file") or ""))
+        FORMAT_RESULTS_STATE["items"] = items
+        FORMAT_RESULTS_DIRTY += 1
+
+        # Persist failures immediately so diagnostics survive a crash. Successful
+        # cases are flushed in batches, avoiding O(n²) JSON read/modify/write I/O.
+        if status != "passed" or FORMAT_RESULTS_DIRTY >= FORMAT_RESULTS_FLUSH_EVERY:
+            _flush_format_results_locked()
 
 
 def wait_for_api_ready() -> None:
@@ -56,6 +193,15 @@ def wait_for_api_ready() -> None:
 @pytest.fixture(scope="session", autouse=True)
 def api_ready() -> None:
     wait_for_api_ready()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def format_results_manifest():
+    initialize_format_results()
+    try:
+        yield
+    finally:
+        flush_format_results()
 
 
 def normalize_sql_file_content(text: str) -> str:
@@ -296,15 +442,38 @@ def call_format_api(output_sql_path: Path, input_sql: str) -> str:
     "output_sql_path", require_output_sql_files(), ids=lambda path: path.stem
 )
 def test_format_sql_roundtrip(output_sql_path: Path) -> None:
+    started = time.perf_counter()
     input_sql = load_input_sql_text(output_sql_path)
     expected_sql = load_sql_text(output_sql_path)
 
-    formatted_sql = call_format_api(output_sql_path, input_sql)
+    try:
+        formatted_sql = call_format_api(output_sql_path, input_sql)
+    except BaseException as exc:
+        record_format_result(
+            output_sql_path=output_sql_path,
+            status="error",
+            input_sql=input_sql,
+            expected_sql=expected_sql,
+            actual_sql="",
+            diff="",
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+            error=str(exc),
+        )
+        raise
 
     if INTER_TEST_DELAY_SECONDS > 0:
         time.sleep(INTER_TEST_DELAY_SECONDS)
 
     if formatted_sql == expected_sql:
+        record_format_result(
+            output_sql_path=output_sql_path,
+            status="passed",
+            input_sql=input_sql,
+            expected_sql=expected_sql,
+            actual_sql=formatted_sql,
+            diff="",
+            duration_ms=(time.perf_counter() - started) * 1000.0,
+        )
         return
 
     input_path, expected_path, actual_path = write_failure_artifacts(
@@ -316,6 +485,19 @@ def test_format_sql_roundtrip(output_sql_path: Path) -> None:
     diff = unified_sql_diff(expected_sql, formatted_sql, output_sql_path.name)
     if not diff:
         diff = "(no unified diff available)"
+
+    record_format_result(
+        output_sql_path=output_sql_path,
+        status="failed",
+        input_sql=input_sql,
+        expected_sql=expected_sql,
+        actual_sql=formatted_sql,
+        diff=diff,
+        duration_ms=(time.perf_counter() - started) * 1000.0,
+        input_artifact=input_path,
+        expected_artifact=expected_path,
+        actual_artifact=actual_path,
+    )
 
     pytest.fail(
         "\n".join(
@@ -329,3 +511,58 @@ def test_format_sql_roundtrip(output_sql_path: Path) -> None:
             ]
         )
     )
+
+
+def post_format_payload(payload: dict) -> requests.Response:
+    response = SESSION.post(
+        f"{BASE_URL}/api/format",
+        json={"host_id": "local", **payload},
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return response
+
+
+def test_format_batch_deduplicates_identical_statements() -> None:
+    sql = f"SELECT 1 AS cache_probe_{time.time_ns()}"
+    response = post_format_payload({"sqls": [sql, sql]})
+    payload = response.json()
+    assert payload["formatted_sqls"][0] == payload["formatted_sqls"][1]
+    assert payload["cache"]["deduplicated"] >= 1
+    assert response.headers.get("X-Chdash-Format-Cache") in {"hit", "partial"}
+
+
+def test_format_global_cache_is_reused() -> None:
+    sql = f"SELECT 2 AS cache_probe_{time.time_ns()}"
+    first = post_format_payload({"sql": sql})
+    second = post_format_payload({"sql": sql})
+    assert first.json()["formatted_sql"] == second.json()["formatted_sql"]
+    assert second.json()["cache"]["hits"] >= 1
+    assert second.headers.get("X-Chdash-Format-Cache") == "hit"
+
+
+def test_format_preserves_exact_literal_spelling() -> None:
+    sql = "SELECT 1 AS \"identifier'with_quote\", 'it''s \\\\ exact' AS value"
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert "\"identifier'with_quote\"" in formatted
+    assert "'it''s \\\\ exact'" in formatted
+
+
+def test_format_clamps_line_width() -> None:
+    payload = post_format_payload({"sql": "SELECT 1", "line_width": 10_000}).json()
+    assert payload["line_width"] == 200
+
+
+def test_expected_format_fixtures_are_idempotent_in_batch() -> None:
+    fixtures = iter_output_sql_files()
+    for offset in range(0, len(fixtures), 20):
+        batch = fixtures[offset : offset + 20]
+        expected = [load_sql_text(path) for path in batch]
+        payload = post_format_payload({"sqls": expected}).json()
+        actual = [normalize_sql_file_content(value) for value in payload["formatted_sqls"]]
+        mismatches = [
+            path.name
+            for path, wanted, got in zip(batch, expected, actual)
+            if wanted != got
+        ]
+        assert not mismatches, "non-idempotent formatter fixtures: " + ", ".join(mismatches)

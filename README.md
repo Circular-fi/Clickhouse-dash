@@ -65,7 +65,7 @@ Each `tick` SSE event is an **array** (Go-compatible layout):
 Where `samples` is an array of points collected between ticks:
 
 ```
-[elapsedMs, readBytesTotal, cpuCenti|null, memBytes|null, threads]
+[elapsedMs, readRowsTotal, readBytesTotal, cpuCenti|null, memBytes|null, threads]
 ```
 
 ### About CPU / RAM / Threads
@@ -80,24 +80,28 @@ If your ClickHouse server/role overrides this setting, CPU/RAM/Threads may stay 
 
 ## 🚀 Quick start
 
-### 1) Docker (recommended)
+### 1) Docker stack avec tests et benchmarks
 
+```bash
+cd tests
+docker compose up -d --build
 ```
-cd test
-docker compose up --build
-```
+
+Cette stack lance son propre ClickHouse, le dashboard buildé depuis les sources, la plus haute release disponible dans `tests/releases/`, puis une console Python unique. L'interface sépare **Tests** et **Benchmark**, conserve les positions de défilement, affiche les diffs SQL attendu/obtenu et génère un rapport ZIP autonome par vue. L'état est poussé uniquement lorsqu'il change, les logs et détails sont chargés progressivement, et le benchmark compare les flux SSE source/release à un plancher ClickHouse HTTP direct avec connexions persistantes.
 
 Open:
 
-```
-http://localhost:8080
+```text
+Dashboard source : http://localhost:18080
+Dashboard release: http://localhost:18081
+Résultats tests  : http://localhost:18082
 ```
 
 ### 2) Local build
 
 Requirements: CMake >= 3.20, a C++17 compiler, Ninja.
 
-```
+```bash
 cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target chdash
 ./build/chdash

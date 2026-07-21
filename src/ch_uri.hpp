@@ -25,6 +25,10 @@ struct ParsedUri {
 // Only the subset we need.
 std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::string* err);
 
+// Return a log-safe representation of a ClickHouse URI. Passwords and common
+// secret query parameters are replaced without changing the endpoint shape.
+std::string redact_clickhouse_uri(const std::string& uri);
+
 // Build clickhouse::ClientOptions from a clickhouse:// URI.
 // Timeouts can be overridden (used for aggressive health checks).
 std::optional<clickhouse::ClientOptions> client_options_from_uri(

@@ -10,8 +10,8 @@ def main() -> int:
         return pytest.main(
             [
                 "-q",
-                "/tests/format/check_format.py",
-                "/tests/query_types/check_query_types.py",
+                "/tests/api/format/check_format.py",
+                "/tests/api/query_types/check_query_types.py",
             ]
         )
 

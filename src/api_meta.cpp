@@ -32,6 +32,20 @@ std::string lower_ascii(std::string_view s) {
   return out;
 }
 
+
+int compare_ascii_ci(std::string_view a, std::string_view b) {
+  const size_t n = std::min(a.size(), b.size());
+  for (size_t i = 0; i < n; ++i) {
+    const char ac = (a[i] >= 'A' && a[i] <= 'Z') ? static_cast<char>(a[i] - 'A' + 'a') : a[i];
+    const char bc = (b[i] >= 'A' && b[i] <= 'Z') ? static_cast<char>(b[i] - 'A' + 'a') : b[i];
+    if (ac < bc) return -1;
+    if (ac > bc) return 1;
+  }
+  if (a.size() < b.size()) return -1;
+  if (a.size() > b.size()) return 1;
+  return 0;
+}
+
 std::string block_string_at(const clickhouse::Block& b, size_t col, size_t row) {
   if (col >= b.GetColumnCount()) return {};
   auto c = b[col]->As<clickhouse::ColumnString>();
@@ -84,17 +98,21 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   std::vector<std::string> types;
   {
+    std::unordered_set<std::string> seen_types;
+    auto add_type = [&](std::string type) {
+      if (!type.empty() && seen_types.insert(type).second) types.push_back(std::move(type));
+    };
     std::string cur;
     for (char c : types_csv) {
       if (c == ',') {
-        if (!cur.empty()) types.push_back(cur);
+        add_type(std::move(cur));
         cur.clear();
         continue;
       }
       if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
       cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
     }
-    if (!cur.empty()) types.push_back(cur);
+    add_type(std::move(cur));
   }
   if (types.empty()) types.push_back("keywords");
 
@@ -104,7 +122,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   const uint64_t ts_ms = static_cast<uint64_t>(now_ms());
   const uint64_t ttl_ms = 10ULL * 60ULL * 1000ULL;
 
-  rapidjson::StringBuffer sb;
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
 
   w.StartObject();
@@ -118,22 +136,37 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   struct ErrItem { std::string type; std::string code; std::string message; bool stale = false; };
   std::vector<ErrItem> errors;
 
+  // A multi-type metadata request is sequential. Reuse one exclusive pooled
+  // connection instead of acquiring/releasing a client for every cache miss.
+  std::shared_ptr<clickhouse::Client> request_client;
+  std::string request_client_error;
+  bool request_client_attempted = false;
   auto make_client = [&]() {
-    std::string err;
-    auto client = make_client_from_uri(
+    if (request_client) return std::pair{request_client, std::string{}};
+    if (request_client_attempted) return std::pair{request_client, request_client_error};
+    request_client_attempted = true;
+    request_client = client_pool_ ? client_pool_->acquire(
         host->runner_uri,
         std::chrono::seconds(5),
         std::chrono::seconds(10),
         std::chrono::seconds(10),
-        &err
+        &request_client_error
+    ) : make_client_from_uri(
+        host->runner_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(10),
+        std::chrono::seconds(10),
+        &request_client_error
     );
-    return std::pair<decltype(client), std::string>(std::move(client), std::move(err));
+    return std::pair{request_client, request_client_error};
   };
 
   auto fetch_keywords = [&](MetaKeywords& out, std::string& err_code, std::string& err_msg) -> bool {
     out.updated_at_ms = ts_ms;
 
-    auto [client, err] = make_client();
+    auto client_result = make_client();
+    auto client = std::move(client_result.first);
+    std::string err = std::move(client_result.second);
     if (!client) {
       err_code = "clickhouse_connect";
       err_msg = err;
@@ -164,7 +197,9 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   auto fetch_functions = [&](MetaFunctions& out, std::string& err_code, std::string& err_msg) -> bool {
     out.updated_at_ms = ts_ms;
 
-    auto [client, err] = make_client();
+    auto client_result = make_client();
+    auto client = std::move(client_result.first);
+    std::string err = std::move(client_result.second);
     if (!client) {
       err_code = "clickhouse_connect";
       err_msg = err;
@@ -285,9 +320,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       }
 
       std::sort(out.items.begin(), out.items.end(), [](const MetaFunction& a, const MetaFunction& b) {
-        const std::string an = lower_ascii(a.name);
-        const std::string bn = lower_ascii(b.name);
-        if (an != bn) return an < bn;
+        const int ci = compare_ascii_ci(a.name, b.name);
+        if (ci != 0) return ci < 0;
         return a.name < b.name;
       });
     } catch (const std::exception& e) {
@@ -302,7 +336,9 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   auto fetch_catalog = [&](const std::string& type, MetaCatalog& out, std::string& err_code, std::string& err_msg) -> bool {
     out.updated_at_ms = ts_ms;
 
-    auto [client, err] = make_client();
+    auto client_result = make_client();
+    auto client = std::move(client_result.first);
+    std::string err = std::move(client_result.second);
     if (!client) {
       err_code = "clickhouse_connect";
       err_msg = err;
@@ -324,10 +360,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         }
       });
       std::sort(databases.begin(), databases.end(), [](const std::string& a, const std::string& b) {
-        const std::string al = lower_ascii(a);
-        const std::string bl = lower_ascii(b);
-        if (al != bl) return al < bl;
-        return a < b;
+        const int ci = compare_ascii_ci(a, b);
+        return ci != 0 ? ci < 0 : a < b;
       });
       databases.erase(std::unique(databases.begin(), databases.end()), databases.end());
       return databases;
@@ -371,10 +405,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       }
 
       std::sort(tables.begin(), tables.end(), [](const MetaCatalogItem& a, const MetaCatalogItem& b) {
-        const std::string an = lower_ascii(a.name);
-        const std::string bn = lower_ascii(b.name);
-        if (an != bn) return an < bn;
-        return a.name < b.name;
+        const int ci = compare_ascii_ci(a.name, b.name);
+        return ci != 0 ? ci < 0 : a.name < b.name;
       });
       return tables;
     };
@@ -391,16 +423,70 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         }
       }
       std::sort(tables.begin(), tables.end(), [](const MetaCatalogItem& a, const MetaCatalogItem& b) {
-        const std::string ad = lower_ascii(a.database);
-        const std::string bd = lower_ascii(b.database);
-        if (ad != bd) return ad < bd;
+        int ci = compare_ascii_ci(a.database, b.database);
+        if (ci != 0) return ci < 0;
         if (a.database != b.database) return a.database < b.database;
-        const std::string an = lower_ascii(a.name);
-        const std::string bn = lower_ascii(b.name);
-        if (an != bn) return an < bn;
-        return a.name < b.name;
+        ci = compare_ascii_ci(a.name, b.name);
+        return ci != 0 ? ci < 0 : a.name < b.name;
       });
       return tables;
+    };
+
+    auto fetch_all_tables_system = [&]() -> std::optional<std::vector<MetaCatalogItem>> {
+      std::vector<MetaCatalogItem> tables;
+      try {
+        client->Select(
+          "SELECT database, name, engine "
+          "FROM system.tables "
+          "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
+          "ORDER BY lower(database), database, lower(name), name",
+          [&](const clickhouse::Block& b) {
+            const size_t n = b.GetRowCount();
+            if (!n || b.GetColumnCount() < 2) return;
+            tables.reserve(tables.size() + n);
+            for (size_t i = 0; i < n; ++i) {
+              MetaCatalogItem item;
+              item.database = block_string_at(b, 0, i);
+              item.name = block_string_at(b, 1, i);
+              if (b.GetColumnCount() >= 3) item.detail = block_string_at(b, 2, i);
+              if (!item.database.empty() && !item.name.empty()) tables.push_back(std::move(item));
+            }
+          }
+        );
+      } catch (const std::exception&) {
+        return std::nullopt;
+      }
+      return tables;
+    };
+
+    auto fetch_all_columns_system = [&]() -> std::optional<std::vector<MetaCatalogItem>> {
+      std::vector<MetaCatalogItem> columns;
+      try {
+        client->Select(
+          "SELECT database, `table`, name, type "
+          "FROM system.columns "
+          "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
+          "ORDER BY lower(database), database, lower(table), table, lower(name), name",
+          [&](const clickhouse::Block& b) {
+            const size_t n = b.GetRowCount();
+            if (!n || b.GetColumnCount() < 4) return;
+            columns.reserve(columns.size() + n);
+            for (size_t i = 0; i < n; ++i) {
+              MetaCatalogItem item;
+              item.database = block_string_at(b, 0, i);
+              item.table = block_string_at(b, 1, i);
+              item.name = block_string_at(b, 2, i);
+              item.type = block_string_at(b, 3, i);
+              if (!item.database.empty() && !item.table.empty() && !item.name.empty()) {
+                columns.push_back(std::move(item));
+              }
+            }
+          }
+        );
+      } catch (const std::exception&) {
+        return std::nullopt;
+      }
+      return columns;
     };
 
     auto describe_table_acl = [&](const MetaCatalogItem& table) -> std::vector<MetaCatalogItem> {
@@ -443,15 +529,23 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           out.items.push_back(std::move(item));
         }
       } else if (type == "tables") {
-        out.items = fetch_all_tables_acl();
+        if (auto fast_tables = fetch_all_tables_system(); fast_tables.has_value()) {
+          out.items = std::move(*fast_tables);
+        } else {
+          out.items = fetch_all_tables_acl();
+        }
       } else if (type == "columns") {
-        const auto tables = fetch_all_tables_acl();
-        for (const auto& table : tables) {
-          try {
-            auto cols = describe_table_acl(table);
-            out.items.insert(out.items.end(), std::make_move_iterator(cols.begin()), std::make_move_iterator(cols.end()));
-          } catch (const std::exception&) {
-            // Table can be visible through SHOW but not DESCRIBE-able for this user; skip it.
+        if (auto fast_columns = fetch_all_columns_system(); fast_columns.has_value()) {
+          out.items = std::move(*fast_columns);
+        } else {
+          const auto tables = fetch_all_tables_acl();
+          for (const auto& table : tables) {
+            try {
+              auto cols = describe_table_acl(table);
+              out.items.insert(out.items.end(), std::make_move_iterator(cols.begin()), std::make_move_iterator(cols.end()));
+            } catch (const std::exception&) {
+              // Table can be visible through SHOW but not DESCRIBE-able for this user; skip it.
+            }
           }
         }
       } else {
@@ -491,19 +585,16 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       }
 
       std::sort(out.items.begin(), out.items.end(), [](const MetaCatalogItem& a, const MetaCatalogItem& b) {
-        const std::string ad = lower_ascii(a.database);
-        const std::string bd = lower_ascii(b.database);
-        if (ad != bd) return ad < bd;
+        int ci = compare_ascii_ci(a.database, b.database);
+        if (ci != 0) return ci < 0;
         if (a.database != b.database) return a.database < b.database;
 
-        const std::string at = lower_ascii(a.table);
-        const std::string bt = lower_ascii(b.table);
-        if (at != bt) return at < bt;
+        ci = compare_ascii_ci(a.table, b.table);
+        if (ci != 0) return ci < 0;
         if (a.table != b.table) return a.table < b.table;
 
-        const std::string an = lower_ascii(a.name);
-        const std::string bn = lower_ascii(b.name);
-        if (an != bn) return an < bn;
+        ci = compare_ascii_ci(a.name, b.name);
+        if (ci != 0) return ci < 0;
         return a.name < b.name;
       });
     } catch (const std::exception& e) {
@@ -551,12 +642,12 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       if (r.had_error) errors.push_back({"keywords", r.error_code, r.error_message, true});
       w.Key("keywords");
       w.StartObject();
-      w.Key("updated_at_ms"); w.Uint64(r.value.updated_at_ms);
+      w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
       if (r.stale) w.Key("stale");
       if (r.stale) w.Bool(true);
       w.Key("items");
       w.StartArray();
-      for (const auto& kw : r.value.items) w.String(kw.c_str());
+      for (const auto& kw : r.value->items) w.String(kw.c_str());
       w.EndArray();
       w.EndObject();
       continue;
@@ -571,13 +662,13 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       if (r.had_error) errors.push_back({"functions", r.error_code, r.error_message, true});
       w.Key("functions");
       w.StartObject();
-      w.Key("updated_at_ms"); w.Uint64(r.value.updated_at_ms);
+      w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
       if (r.stale) {
         w.Key("stale"); w.Bool(true);
       }
       w.Key("items");
       w.StartArray();
-      for (const auto& fn : r.value.items) {
+      for (const auto& fn : r.value->items) {
         w.StartObject();
         w.Key("name"); w.String(fn.name.c_str());
         w.Key("is_aggregate"); w.Bool(fn.is_aggregate);
@@ -602,7 +693,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         continue;
       }
       if (r.had_error) errors.push_back({t, r.error_code, r.error_message, true});
-      write_catalog(t, r.value, r.stale);
+      write_catalog(t, *r.value, r.stale);
       continue;
     }
 
@@ -632,13 +723,13 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     }
     if (fatal) {
       res.status = 503;
-      res.set_content(sb.GetString(), "application/json");
+      res.set_content(sb.GetString(), sb.GetSize(), "application/json");
       return;
     }
   }
 
   res.status = 200;
-  res.set_content(sb.GetString(), "application/json");
+  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
 } // namespace chdash

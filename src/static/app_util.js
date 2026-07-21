@@ -12,47 +12,42 @@
   // Set a metric value with a stable unit area (prevents jitter when unit switches, e.g. M <-> B).
   // Renders: <span class="metricCompact__number">123.4</span><span class="metricCompact__unit">MiB/s</span>
   function setMetricText(el, rawValue) {
-  if (!el) return;
+    if (!el) return;
 
-  const text = String(rawValue ?? "").trim();
+    const text = String(rawValue ?? "").trim();
+    const match = text.match(/^(-?\d+(?:[.,]\d+)?)(.*)$/);
 
-  // Sépare nombre + unité (ex: 123.4MB/s, 10k, 1.2B, 15 ms)
-  const match = text.match(/^(-?\d+(?:[.,]\d+)?)(.*)$/);
+    if (!match || !(match[2] || "").trim()) {
+      const value = match ? match[1] : text;
+      if (el.textContent !== value || el.classList.contains("metricCompact__value--split")) {
+        el.classList.remove("metricCompact__value--split");
+        el.replaceChildren(document.createTextNode(value));
+      }
+      return;
+    }
 
-  if (!match) {
-    el.textContent = text;
-    el.classList.remove("metricCompact__value--split");
-    return;
+    const number = match[1];
+    const unit = match[2].trim();
+    let numberEl = el.firstElementChild;
+    let unitEl = numberEl ? numberEl.nextElementSibling : null;
+    if (!numberEl || !unitEl || !numberEl.classList.contains("metricCompact__number") ||
+        !unitEl.classList.contains("metricCompact__unit")) {
+      numberEl = document.createElement("span");
+      numberEl.className = "metricCompact__number";
+      unitEl = document.createElement("span");
+      unitEl.className = "metricCompact__unit";
+      el.replaceChildren(numberEl, unitEl);
+    }
+
+    el.classList.add("metricCompact__value--split");
+    const unitClass = unit.length <= 1
+      ? "metricCompact__unit_1"
+      : (unit.length <= 3 ? "metricCompact__unit_3" : "metricCompact__unit_4");
+    unitEl.className = `metricCompact__unit ${unitClass}`;
+    if (numberEl.textContent !== number) numberEl.textContent = number;
+    if (unitEl.textContent !== unit) unitEl.textContent = unit;
   }
 
-  const number = match[1];
-  const unit = (match[2] || "").trim();
-
-  if (!unit) {
-    el.textContent = number;
-    el.classList.remove("metricCompact__value--split");
-    return;
-  }
-
-  el.classList.add("metricCompact__value--split");
-
-  // Nettoyage classes précédentes
-  const unitClassList = [
-    "metricCompact__unit_1",
-    "metricCompact__unit_3",
-    "metricCompact__unit_4"
-  ];
-
-  // Détermine largeur adaptée
-  let unitClass = "metricCompact__unit_4";
-  if (unit.length <= 1) unitClass = "metricCompact__unit_1";
-  else if (unit.length <= 3) unitClass = "metricCompact__unit_3";
-
-  el.innerHTML = `
-    <span class="metricCompact__number">${number}</span>
-    <span class="metricCompact__unit ${unitClass}">${unit}</span>
-  `;
-}
 
   function escapeHtml(text) {
     return String(text)

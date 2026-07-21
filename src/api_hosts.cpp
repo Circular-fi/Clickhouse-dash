@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <deque>
-#include <thread>
 #include <string>
 
 #include <rapidjson/stringbuffer.h>
@@ -81,61 +79,62 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
 
   struct HostsStreamState {
     uint64_t last_version = 0;
+    int emit_every_ms = 5000;
+    bool initial_event_pending = true;
+    std::string initial_event;
     std::chrono::steady_clock::time_point last_keepalive{};
     std::chrono::steady_clock::time_point last_hosts_emit{};
-    std::deque<std::string> local_chunks;
   };
 
+  const HostsSnapshot initial_snapshot = health_->snapshot();
   auto st = std::make_shared<HostsStreamState>();
   st->last_version = health_->version();
-  st->local_chunks.push_back(sse_json_event("hosts", build_hosts_json(health_->snapshot())));
+  st->emit_every_ms = std::min(15000, std::max(1000, initial_snapshot.interval_ms));
+  st->initial_event = sse_json_event("hosts", build_hosts_json(initial_snapshot));
   st->last_hosts_emit = std::chrono::steady_clock::now();
+  st->last_keepalive = st->last_hosts_emit;
 
   HealthRunner* runner = health_.get();
 
   res.set_chunked_content_provider(
       "text/event-stream",
       [st, runner](size_t, httplib::DataSink& sink) {
-        if (!st->local_chunks.empty()) {
-          auto chunk = std::move(st->local_chunks.front());
-          st->local_chunks.pop_front();
-          sink.write(chunk.data(), chunk.size());
+        if (st->initial_event_pending) {
+          st->initial_event_pending = false;
+          sink.write(st->initial_event.data(), st->initial_event.size());
+          st->initial_event.clear();
           return true;
-        }
-
-        const int interval_ms = runner->snapshot().interval_ms;
-        const int emit_every_ms = std::min(15000, std::max(1000, interval_ms));
-        const int wait_ms = emit_every_ms;
-
-        uint64_t new_ver = st->last_version;
-        const bool changed = runner->wait_for_update(st->last_version, wait_ms, &new_ver);
-        if (changed) {
-          st->last_version = new_ver;
-          const auto ev = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
-          st->last_hosts_emit = std::chrono::steady_clock::now();
-          sink.write(ev.data(), ev.size());
-          return true;
-        }
-
-        {
-          const auto now = std::chrono::steady_clock::now();
-          if (st->last_hosts_emit.time_since_epoch().count() == 0 || now - st->last_hosts_emit >= std::chrono::milliseconds(emit_every_ms)) {
-            st->last_hosts_emit = now;
-            const auto ev = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
-            sink.write(ev.data(), ev.size());
-            return true;
-          }
         }
 
         const auto now = std::chrono::steady_clock::now();
-        if (st->last_keepalive.time_since_epoch().count() == 0 || now - st->last_keepalive >= std::chrono::seconds(15)) {
-          st->last_keepalive = now;
-          const auto ka = sse_json_event("keepalive", "{}");
-          sink.write(ka.data(), ka.size());
+        const auto hosts_due = st->last_hosts_emit + std::chrono::milliseconds(st->emit_every_ms);
+        const auto keepalive_due = st->last_keepalive + std::chrono::seconds(15);
+        const auto next_due = std::min(hosts_due, keepalive_due);
+        const int wait_ms = now >= next_due
+          ? 0
+          : static_cast<int>(std::max<int64_t>(1, std::chrono::duration_cast<std::chrono::milliseconds>(next_due - now).count()));
+
+        uint64_t new_version = st->last_version;
+        const bool changed = runner->wait_for_update(st->last_version, wait_ms, &new_version);
+        if (changed) {
+          st->last_version = new_version;
+          st->last_hosts_emit = std::chrono::steady_clock::now();
+          const auto event = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+          sink.write(event.data(), event.size());
           return true;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        const auto after_wait = std::chrono::steady_clock::now();
+        if (after_wait >= st->last_hosts_emit + std::chrono::milliseconds(st->emit_every_ms)) {
+          st->last_hosts_emit = after_wait;
+          const auto event = sse_json_event("hosts", build_hosts_json(runner->snapshot()));
+          sink.write(event.data(), event.size());
+          return true;
+        }
+
+        st->last_keepalive = after_wait;
+        const auto keepalive = sse_json_event("keepalive", "{}");
+        sink.write(keepalive.data(), keepalive.size());
         return true;
       },
       [](bool) {}

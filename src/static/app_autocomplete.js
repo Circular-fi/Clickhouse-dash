@@ -2982,6 +2982,14 @@
     }
     lastExplicit = explicit;
     const value = String(textarea.value || "");
+    const hostMeta = currentHostMeta();
+    const columnsLoaded = Array.isArray(hostMeta?.columns?.items);
+    if (!columnsLoaded && ns.meta && typeof ns.meta.ensureColumns === "function" &&
+        (explicit || /\b(?:from|join|into|update|table)\b/i.test(value))) {
+      // Fire-and-refresh: the current completion stays responsive and refresh()
+      // is called when metadata arrives. The request itself is de-duplicated.
+      ns.meta.ensureColumns();
+    }
     const pos = textarea.selectionStart || 0;
     const keySlice = value.slice(Math.max(0, pos - 160), Math.min(value.length, pos + 160));
     const updateKey = `${explicit ? 1 : 0}|${pos}|${textarea.selectionEnd || 0}|${value.length}|${keySlice}`;

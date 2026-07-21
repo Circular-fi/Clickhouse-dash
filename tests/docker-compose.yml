@@ -1,0 +1,209 @@
+name: chdash-tests
+
+x-chdash-runtime-env: &chdash-runtime-env
+  CH_HOSTS_FILE: /config/CH_HOSTS.hcl
+  LISTEN_HOST: 0.0.0.0
+  LISTEN_PORT: "8080"
+  RESULT_PREVIEW_ROW_LIMIT: "${RESULT_PREVIEW_ROW_LIMIT:-200000}"
+
+x-chdash-config-volume: &chdash-config-volume
+  type: bind
+  source: ${CH_HOSTS_CONFIG:-./config/CH_HOSTS.hcl}
+  target: /config/CH_HOSTS.hcl
+  read_only: true
+
+services:
+  clickhouse:
+    image: "${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:latest}"
+    container_name: chdash-tests-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-test}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-test}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "${CLICKHOUSE_TCP_PORT:-19000}:9000"
+      - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "clickhouse-client --host 127.0.0.1 --port 9000 --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1' | grep -q '1'",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 90
+      start_period: 5s
+
+  chdash_source:
+    image: chdash-tests-source:local
+    build:
+      context: ..
+      dockerfile: ./tests/Dockerfile.source
+      args:
+        CHDASH_SEMVER: "${SOURCE_SEMVER:-source-tests}"
+        CHDASH_GIT_SHA: "${SOURCE_GIT_SHA:-local}"
+        CHDASH_BUILD_TIME: "${SOURCE_BUILD_TIME:-docker-compose}"
+        SOURCE_CMAKE_BUILD_TYPE: "${SOURCE_CMAKE_BUILD_TYPE:-Release}"
+    container_name: chdash-tests-source
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      <<: *chdash-runtime-env
+      QUERY_DESCRIBE_MODE: "${QUERY_DESCRIBE_MODE:-auto}"
+      QUERY_FINAL_STATS_FROM_QUERY_LOG: "${QUERY_FINAL_STATS_FROM_QUERY_LOG:-0}"
+      QUERY_FINAL_STATS_FLUSH_LOGS: "${QUERY_FINAL_STATS_FLUSH_LOGS:-0}"
+      QUERY_SAMPLE_INTERVAL_MS: "${QUERY_SAMPLE_INTERVAL_MS:-40}"
+      QUERY_RESULT_BATCH_ROWS: "${QUERY_RESULT_BATCH_ROWS:-1000}"
+      QUERY_RESULT_BATCH_BYTES: "${QUERY_RESULT_BATCH_BYTES:-262144}"
+      QUERY_SSE_BATCH_EVENTS: "${QUERY_SSE_BATCH_EVENTS:-8}"
+      QUERY_SSE_BATCH_BYTES: "${QUERY_SSE_BATCH_BYTES:-262144}"
+      QUERY_SSE_QUEUE_MAX_BYTES: "${QUERY_SSE_QUEUE_MAX_BYTES:-8388608}"
+      QUERY_DESCRIBE_CACHE_ENTRIES: "${QUERY_DESCRIBE_CACHE_ENTRIES:-256}"
+      QUERY_DESCRIBE_CACHE_TTL_MS: "${QUERY_DESCRIBE_CACHE_TTL_MS:-60000}"
+      QUERY_MAX_SQL_BYTES: "${QUERY_MAX_SQL_BYTES:-4194304}"
+      QUERY_SESSION_MAX_COUNT: "${QUERY_SESSION_MAX_COUNT:-256}"
+      QUERY_SESSION_ABANDONED_TTL_MS: "${QUERY_SESSION_ABANDONED_TTL_MS:-60000}"
+      QUERY_SESSION_TERMINAL_TTL_MS: "${QUERY_SESSION_TERMINAL_TTL_MS:-30000}"
+      QUERY_SESSION_REAPER_INTERVAL_MS: "${QUERY_SESSION_REAPER_INTERVAL_MS:-5000}"
+      FORMAT_CACHE_MAX_ENTRIES: "${FORMAT_CACHE_MAX_ENTRIES:-512}"
+      FORMAT_CACHE_MAX_BYTES: "${FORMAT_CACHE_MAX_BYTES:-16777216}"
+      FORMAT_CACHE_TTL_MS: "${FORMAT_CACHE_TTL_MS:-600000}"
+      CH_CLIENT_POOL_MAX_IDLE: "${CH_CLIENT_POOL_MAX_IDLE:-8}"
+    volumes:
+      - *chdash-config-volume
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${SOURCE_PORT:-18080}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/chdash-source-entrypoint", "--health"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  chdash_release:
+    image: chdash-tests-release:selected
+    build:
+      context: .
+      dockerfile: Dockerfile.release
+    container_name: chdash-tests-release
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      <<: *chdash-runtime-env
+      CHDASH_RELEASE_DIR: /releases
+    volumes:
+      - *chdash-config-volume
+      - type: bind
+        source: ./releases
+        target: /releases
+        read_only: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${RELEASE_PORT:-18081}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/health | grep -q '\"ok\":true'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  tests:
+    image: chdash-tests-runner:web
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    container_name: chdash-tests-runner
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      chdash_source:
+        condition: service_healthy
+      chdash_release:
+        condition: service_healthy
+    environment:
+      TEST_RUNNER_HOST: 0.0.0.0
+      TEST_RUNNER_PORT: "8080"
+      TEST_RUNNER_SOURCE_PUBLIC_PORT: "${SOURCE_PORT:-18080}"
+      TEST_RUNNER_RELEASE_PUBLIC_PORT: "${RELEASE_PORT:-18081}"
+      TEST_RUNNER_CLICKHOUSE_PUBLIC_PORT: "${CLICKHOUSE_HTTP_PORT:-18123}"
+      TEST_RUNNER_AUTO_TESTS: "${TEST_RUNNER_AUTO_TESTS:-1}"
+      TEST_RUNNER_AUTO_BENCHMARK: "${TEST_RUNNER_AUTO_BENCHMARK:-0}"
+      TEST_RUNNER_LOG_INITIAL_BYTES: "${TEST_RUNNER_LOG_INITIAL_BYTES:-131072}"
+      TEST_RUNNER_LOG_CHUNK_BYTES: "${TEST_RUNNER_LOG_CHUNK_BYTES:-65536}"
+      TEST_RUNNER_MAX_RUNS: "${TEST_RUNNER_MAX_RUNS:-30}"
+      TEST_RUNNER_MAX_HISTORY: "${TEST_RUNNER_MAX_HISTORY:-30}"
+      TEST_RUNNER_FORMAT_PAGE_SIZE: "${TEST_RUNNER_FORMAT_PAGE_SIZE:-20}"
+      TEST_RUNNER_FORMAT_MAX_DIFF_ROWS: "${TEST_RUNNER_FORMAT_MAX_DIFF_ROWS:-1800}"
+      TEST_RUNNER_JSON_GZIP_MIN_BYTES: "${TEST_RUNNER_JSON_GZIP_MIN_BYTES:-4096}"
+      TEST_RUNNER_JSON_GZIP_LEVEL: "${TEST_RUNNER_JSON_GZIP_LEVEL:-3}"
+      TEST_RUNNER_SSE_HEARTBEAT_SECONDS: "${TEST_RUNNER_SSE_HEARTBEAT_SECONDS:-15}"
+      TEST_RUNNER_QUIET_ACCESS_LOGS: "${TEST_RUNNER_QUIET_ACCESS_LOGS:-1}"
+      TEST_RUNNER_REPORT_COMPRESSION_LEVEL: "${TEST_RUNNER_REPORT_COMPRESSION_LEVEL:-3}"
+      FORMAT_RESULTS_FLUSH_EVERY: "${FORMAT_RESULTS_FLUSH_EVERY:-20}"
+      TEST_ARTIFACTS_ROOT: /artifacts
+      API_BASE_URL: http://chdash_source:8080
+      API_REFERENCE_BASE_URL: http://chdash_release:8080
+      API_HEALTH_PATH: /api/health
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-test}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-test}"
+      BENCH_TARGETS: "source=http://chdash_source:8080,release=http://chdash_release:8080"
+      BENCH_BASELINE: "${BENCH_BASELINE:-source}"
+      BENCH_CLICKHOUSE_HTTP_TARGETS: "${BENCH_CLICKHOUSE_HTTP_TARGETS:-local=http://clickhouse:8123}"
+      BENCH_CLICKHOUSE_HTTP_USER: "${BENCH_CLICKHOUSE_HTTP_USER:-test}"
+      BENCH_CLICKHOUSE_HTTP_PASSWORD: "${BENCH_CLICKHOUSE_HTTP_PASSWORD:-test}"
+      BENCH_CLICKHOUSE_HTTP_DATABASE: "${BENCH_CLICKHOUSE_HTTP_DATABASE:-default}"
+      BENCH_CLICKHOUSE_HTTP_VERIFY_TLS: "${BENCH_CLICKHOUSE_HTTP_VERIFY_TLS:-1}"
+      BENCH_CLICKHOUSE_HTTP_CHUNK_SIZE: "${BENCH_CLICKHOUSE_HTTP_CHUNK_SIZE:-65536}"
+      BENCH_TRACE_COMPRESSION_LEVEL: "${BENCH_TRACE_COMPRESSION_LEVEL:-3}"
+      BENCH_DISABLE_DIRECT_HTTP: "${BENCH_DISABLE_DIRECT_HTTP:-0}"
+      BENCH_HOST_IDS: "${BENCH_HOST_IDS:-}"
+      BENCH_RUNS: "${BENCH_RUNS:-5}"
+      BENCH_WARMUP: "${BENCH_WARMUP:-1}"
+      BENCH_QUERIES_FILE: /tests/benchmark/queries.json
+      BENCH_CH_HOSTS_FILE: /tests/config/CH_HOSTS.hcl
+      BENCH_STRICT_EVENT_COUNTS: "${BENCH_STRICT_EVENT_COUNTS:-0}"
+      BENCH_NO_STRICT: "${BENCH_NO_STRICT:-0}"
+      BENCH_STREAM_TIMEOUT_SECONDS: "${BENCH_STREAM_TIMEOUT_SECONDS:-180}"
+      BENCH_REQUEST_TIMEOUT_SECONDS: "${BENCH_REQUEST_TIMEOUT_SECONDS:-10}"
+      BENCH_READY_TIMEOUT_SECONDS: "${BENCH_READY_TIMEOUT_SECONDS:-180}"
+    volumes:
+      - type: bind
+        source: ./artifacts
+        target: /artifacts
+      - type: bind
+        source: ${CH_HOSTS_CONFIG:-./config/CH_HOSTS.hcl}
+        target: /tests/config/CH_HOSTS.hcl
+        read_only: true
+      - type: bind
+        source: ./benchmark/queries.json
+        target: /tests/benchmark/queries.json
+        read_only: true
+    ports:
+      - "${TEST_UI_PORT:-18082}:8080"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python - <<'PY'\nimport json, urllib.request\nwith urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2) as r:\n    assert r.status == 200\nPY",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

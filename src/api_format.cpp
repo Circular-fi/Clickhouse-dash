@@ -1,16 +1,23 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "ch_uri.hpp"
 #include "format_clickhouse.hpp"
 #include "format_postprocess.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
+#include "sql_scan.hpp"
 #include "sql_util.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -18,282 +25,95 @@ namespace chdash {
 
 namespace {
 
-bool contains_sql_comments(std::string_view s) {
-  bool in_str = false;
-  bool esc = false;
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-    if (in_str) {
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (c == '\'') {
-      in_str = true;
-      esc = false;
-      continue;
-    }
-    if ((c == '-' && n == '-') || (c == '/' && n == '*') || c == '#') return true;
-  }
-  return false;
-}
+constexpr size_t kMaxFormatSqlBytes = 500 * 1024;
+constexpr rapidjson::SizeType kMaxBatchItems = 1024;
 
-bool has_top_level_values_insert(std::string_view s) {
-  auto is_ident = [](char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_';
-  };
-  auto ieq = [](char a, char b) {
-    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a - 'A' + 'a');
-    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b - 'A' + 'a');
-    return a == b;
-  };
-  auto match_kw = [&](size_t pos, std::string_view kw) {
-    if (pos + kw.size() > s.size()) return false;
-    for (size_t i = 0; i < kw.size(); ++i) {
-      if (!ieq(s[pos + i], kw[i])) return false;
-    }
+bool has_top_level_values_insert(std::string_view sql) {
+  const auto masked = mask_sql_surface(sql);
+  const std::string_view s(masked.code_lower);
+
+  auto match_keyword = [&](size_t pos, std::string_view keyword) {
+    if (pos + keyword.size() > s.size() || s.substr(pos, keyword.size()) != keyword) return false;
     const char prev = (pos == 0) ? '\0' : s[pos - 1];
-    const char next = (pos + kw.size() < s.size()) ? s[pos + kw.size()] : '\0';
-    if (prev && is_ident(prev)) return false;
-    if (next && is_ident(next)) return false;
-    return true;
+    const char next = (pos + keyword.size() < s.size()) ? s[pos + keyword.size()] : '\0';
+    return !sql_is_ident_continue(prev) && !sql_is_ident_continue(next);
   };
 
-  bool in_str = false;
-  bool esc = false;
-  int par = 0;
-  int br = 0;
-  int brc = 0;
+  int parentheses = 0;
+  int brackets = 0;
+  int braces = 0;
   bool seen_insert = false;
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    if (in_str) {
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (c == '\'') {
-      in_str = true;
-      esc = false;
-      continue;
-    }
-    if (c == '(') ++par;
-    else if (c == ')' && par > 0) --par;
-    else if (c == '[') ++br;
-    else if (c == ']' && br > 0) --br;
-    else if (c == '{') ++brc;
-    else if (c == '}' && brc > 0) --brc;
 
-    if (par == 0 && br == 0 && brc == 0) {
-      if (!seen_insert && match_kw(i, "INSERT")) seen_insert = true;
-      else if (seen_insert && match_kw(i, "VALUES")) return true;
-      else if (seen_insert && match_kw(i, "SELECT")) return false;
-      else if (seen_insert && match_kw(i, "FORMAT")) return false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    switch (s[i]) {
+      case '(': ++parentheses; break;
+      case ')': if (parentheses > 0) --parentheses; break;
+      case '[': ++brackets; break;
+      case ']': if (brackets > 0) --brackets; break;
+      case '{': ++braces; break;
+      case '}': if (braces > 0) --braces; break;
+      default: break;
+    }
+
+    if (parentheses != 0 || brackets != 0 || braces != 0 || !sql_is_ident_start(s[i])) continue;
+
+    if (!seen_insert && match_keyword(i, "insert")) {
+      seen_insert = true;
+      i += 5;
+    } else if (seen_insert && match_keyword(i, "values")) {
+      return true;
+    } else if (seen_insert && (match_keyword(i, "select") || match_keyword(i, "format"))) {
+      return false;
     }
   }
+
   return false;
 }
 
-bool has_single_quoted_literal_with_whitespace(std::string_view s) {
-  bool in_str = false;
-  bool esc = false;
-  bool has_ws = false;
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    if (!in_str) {
-      if (c == '\'') {
-        in_str = true;
-        esc = false;
-        has_ws = false;
-      }
-      continue;
-    }
-    if (esc) {
-      esc = false;
-      continue;
-    }
-    if (c == '\\') {
-      esc = true;
-      continue;
-    }
-    if (c == '\'') {
-      if (has_ws) return true;
-      in_str = false;
-      continue;
-    }
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') has_ws = true;
-  }
-  return false;
+int requested_line_width(const rapidjson::Document& doc) {
+  int width = 80;
+  if (doc.HasMember("line_width") && doc["line_width"].IsInt()) width = doc["line_width"].GetInt();
+  return std::max(40, std::min(200, width));
 }
 
-bool has_complex_sql_surface(std::string_view s) {
-  bool in_str = false;
-  bool in_backtick = false;
-  bool in_line_comment = false;
-  bool in_block_comment = false;
-  bool esc = false;
-  std::string token;
-  token.reserve(s.size());
-
-  auto is_ident = [](char ch) {
-    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-           (ch >= '0' && ch <= '9') || ch == '_';
-  };
-  auto lower = [](char ch) {
-    if (ch >= 'A' && ch <= 'Z') return static_cast<char>(ch - 'A' + 'a');
-    return ch;
-  };
-
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-
-    if (in_str) {
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (in_backtick) {
-      if (c == '`') in_backtick = false;
-      continue;
-    }
-    if (in_line_comment) {
-      if (c == '\n') in_line_comment = false;
-      continue;
-    }
-    if (in_block_comment) {
-      if (c == '*' && n == '/') {
-        in_block_comment = false;
-        ++i;
-      }
-      continue;
-    }
-
-    if (c == '\'') {
-      in_str = true;
-      esc = false;
-      token.push_back(' ');
-      continue;
-    }
-    if (c == '`') {
-      in_backtick = true;
-      token.push_back(' ');
-      continue;
-    }
-    if (c == '-' && n == '-') {
-      in_line_comment = true;
-      token.push_back(' ');
-      ++i;
-      continue;
-    }
-    if (c == '#') {
-      in_line_comment = true;
-      token.push_back(' ');
-      continue;
-    }
-    if (c == '/' && n == '*') {
-      in_block_comment = true;
-      token.push_back(' ');
-      ++i;
-      continue;
-    }
-
-    token.push_back(is_ident(c) ? lower(c) : c);
+uint64_t fnv1a64(std::string_view value, uint64_t seed) {
+  uint64_t hash = seed;
+  for (const unsigned char ch : value) {
+    hash ^= ch;
+    hash *= UINT64_C(1099511628211);
   }
-
-  auto has = [&](std::string_view needle) { return token.find(needle) != std::string::npos; };
-
-  if (has("->") || has(" over ") || has(" over(") || has(" over (")) return true;
-  if (has("multiif(") || has("arraymap(") || has("arrayfilter(") || has("arrayexists(") ||
-      has("arrayall(") || has("arraycount(") || has("arrayjoin(") || has("arrayzip(") ||
-      has("arrayreduce(") || has("arrayavg(") || has("arraysum(")) return true;
-  if (has("jsonextract") || has("dictget(") || has("dictgetordefault(") || has("map(")) return true;
-  if (has(" in [") || has("deduplicate by")) return true;
-  return false;
+  return hash;
 }
 
-bool should_preserve_sql_surface(std::string_view sql) {
-  return contains_sql_comments(sql) || has_top_level_values_insert(sql) ||
-         has_single_quoted_literal_with_whitespace(sql) || has_complex_sql_surface(sql);
+std::string format_cache_key(
+    std::string_view host_id,
+    int line_width,
+    std::string_view sql
+) {
+  const uint64_t hash_a = fnv1a64(sql, UINT64_C(14695981039346656037));
+  const uint64_t hash_b = fnv1a64(sql, UINT64_C(7809847782465536322));
+  std::string key;
+  key.reserve(host_id.size() + 72);
+  key.append(host_id.data(), host_id.size());
+  key.push_back('\x1f');
+  key += std::to_string(line_width);
+  key.push_back('\x1f');
+  key += std::to_string(sql.size());
+  key.push_back(':');
+  key += std::to_string(hash_a);
+  key.push_back(':');
+  key += std::to_string(hash_b);
+  return key;
 }
 
-
-std::vector<std::string> extract_single_quoted_literals(std::string_view s) {
-  std::vector<std::string> out;
-  bool in_str = false;
-  bool esc = false;
-  size_t start = 0;
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    if (!in_str) {
-      if (c == '\'') {
-        in_str = true;
-        esc = false;
-        start = i;
-      }
-      continue;
-    }
-    if (esc) {
-      esc = false;
-      continue;
-    }
-    if (c == '\\') {
-      esc = true;
-      continue;
-    }
-    if (c == '\'') {
-      out.emplace_back(s.substr(start, i + 1 - start).data(), s.substr(start, i + 1 - start).size());
-      in_str = false;
-    }
-  }
-  return out;
-}
-
-std::string restore_single_quoted_literals(std::string formatted, std::string_view original) {
-  const auto source_literals = extract_single_quoted_literals(original);
-  if (source_literals.empty()) return formatted;
-  size_t literal_index = 0;
-  bool in_str = false;
-  bool esc = false;
-  size_t start = 0;
-  std::string out;
-  out.reserve(formatted.size());
-  for (size_t i = 0; i < formatted.size(); ++i) {
-    const char c = formatted[i];
-    if (!in_str) {
-      if (c == '\'') {
-        out.append(formatted.substr(start, i - start));
-        in_str = true;
-        esc = false;
-        start = i;
-      }
-      continue;
-    }
-    if (esc) {
-      esc = false;
-      continue;
-    }
-    if (c == '\\') {
-      esc = true;
-      continue;
-    }
-    if (c == '\'') {
-      if (literal_index < source_literals.size()) out += source_literals[literal_index++];
-      else out.append(formatted.substr(start, i + 1 - start));
-      start = i + 1;
-      in_str = false;
-    }
-  }
-  out.append(formatted.substr(start));
-  return out;
+void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses) {
+  const char* value = "miss";
+  if (hits > 0 && misses == 0) value = "hit";
+  else if (hits > 0) value = "partial";
+  res.set_header("X-Chdash-Format-Cache", value);
 }
 
 } // namespace
-
 
 void Server::handle_api_format(const httplib::Request& req, httplib::Response& res) {
   rapidjson::Document doc;
@@ -310,59 +130,160 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
 
-  if (!is_host_healthy(health_.get(), host_id)) {
-    return json_error(res, 503, "host_down", "Selected host is down.");
-  }
+  const int line_width = requested_line_width(doc);
+  size_t cache_hits = 0;
+  size_t cache_misses = 0;
+  size_t request_deduplicated = 0;
 
-  auto format_one = [&](std::string sql_raw, std::string* out_pretty, std::string* err) -> bool {
+  std::shared_ptr<clickhouse::Client> format_client;
+  std::string format_client_error;
+  bool format_client_attempted = false;
+  auto get_format_client = [&]() -> std::shared_ptr<clickhouse::Client> {
+    if (format_client) return format_client;
+    if (format_client_attempted) return {};
+    format_client_attempted = true;
+    if (!is_host_healthy(health_.get(), host_id)) {
+      format_client_error = "Selected host is down.";
+      return {};
+    }
+    format_client = client_pool_ ? client_pool_->acquire(
+      host->runner_uri,
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      &format_client_error
+    ) : make_client_from_uri(
+      host->runner_uri,
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      &format_client_error
+    );
+    return format_client;
+  };
+
+  // A batch can contain duplicate editor buffers. Avoid repeated cache lookups,
+  // ClickHouse calls and post-processing within the same request.
+  using FormatValue = FormatCache::ValuePtr;
+  std::unordered_map<std::string, FormatValue> request_results;
+
+  auto format_one = [&](std::string sql_raw, FormatValue* out_pretty, std::string* err) -> bool {
     std::string sql = trim_sql(std::move(sql_raw));
     if (sql.empty()) {
       if (err) *err = "Missing SQL text.";
       return false;
     }
-    if (contains_sql_comments(sql) || has_top_level_values_insert(sql)) {
-      if (out_pretty) *out_pretty = postprocess_format_query(sql, 80);
-      return true;
-    }
-
-    std::string fmt_err;
-    const auto formatted = try_format_query(*host, sql, 500 * 1024, &fmt_err);
-    if (!formatted.has_value()) {
-      if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
+    if (sql.size() > kMaxFormatSqlBytes) {
+      if (err) *err = "SQL text is too large to format.";
       return false;
     }
-    std::string formatted_text = restore_single_quoted_literals(*formatted, sql);
-    if (out_pretty) *out_pretty = postprocess_format_query(formatted_text, 80);
+
+    const std::string key = format_cache_key(host_id, line_width, sql);
+    if (auto local = request_results.find(key); local != request_results.end()) {
+      ++request_deduplicated;
+      if (out_pretty) *out_pretty = local->second;
+      return true;
+    }
+    if (format_cache_) {
+      if (auto cached = format_cache_->get(key)) {
+        ++cache_hits;
+        request_results.emplace(key, cached);
+        if (out_pretty) *out_pretty = std::move(cached);
+        return true;
+      }
+    }
+    ++cache_misses;
+
+    std::string pretty;
+    const auto masked = mask_sql_surface(sql);
+    if (masked.has_comments || has_top_level_values_insert(sql)) {
+      // ClickHouse formatQuery removes or restructures these surfaces. The local
+      // post-processor preserves comments and VALUES payloads byte-for-byte.
+      pretty = postprocess_format_query(sql, line_width);
+    } else {
+      auto client = get_format_client();
+      if (!client) {
+        if (err) {
+          *err = format_client_error.empty()
+            ? "Failed to connect to ClickHouse for formatQuery."
+            : format_client_error;
+        }
+        return false;
+      }
+
+      std::string fmt_err;
+      const auto formatted = try_format_query_with_client(*client, sql, kMaxFormatSqlBytes, &fmt_err);
+      if (!formatted.has_value()) {
+        if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
+        return false;
+      }
+
+      // formatQuery may normalize literal escaping. Restore the user's exact
+      // literal spelling, including doubled SQL quotes, before line wrapping.
+      pretty = postprocess_format_query(
+          restore_sql_single_quoted_literals(*formatted, sql),
+          line_width);
+    }
+
+    auto value = std::make_shared<const std::string>(std::move(pretty));
+    request_results.emplace(key, value);
+    if (format_cache_) format_cache_->put(key, value);
+    if (out_pretty) *out_pretty = std::move(value);
     return true;
+  };
+
+  auto write_cache_meta = [&](rapidjson::Writer<rapidjson::StringBuffer>& w) {
+    w.Key("cache");
+    w.StartObject();
+    w.Key("hits"); w.Uint64(cache_hits);
+    w.Key("misses"); w.Uint64(cache_misses);
+    w.Key("deduplicated"); w.Uint64(request_deduplicated);
+    w.EndObject();
+    w.Key("line_width"); w.Int(line_width);
   };
 
   if (doc.HasMember("sqls") && doc["sqls"].IsArray()) {
     const auto& arr = doc["sqls"];
-    rapidjson::StringBuffer sb;
-    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-    w.StartObject();
-    w.Key("formatted_sqls");
-    w.StartArray();
+    if (arr.Size() > kMaxBatchItems) {
+      return json_error(res, 413, "too_many_sqls", "Too many SQL statements in one format request.");
+    }
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
       if (!arr[i].IsString()) {
         return json_error(res, 400, "invalid_sqls", "sqls must be an array of strings.");
       }
-      std::string pretty;
+    }
+
+    std::vector<FormatValue> formatted_sqls;
+    formatted_sqls.reserve(arr.Size());
+    for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
+      FormatValue pretty;
       std::string err;
-      if (!format_one(arr[i].GetString(), &pretty, &err)) {
+      if (!format_one(std::string(arr[i].GetString(), arr[i].GetStringLength()), &pretty, &err)) {
         const std::string sql_trimmed = trim_sql(arr[i].GetString());
         const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
-        const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
+        const ClickHouseErrorLocation* locp =
+          (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
         const int idx = static_cast<int>(i);
         return json_error_with_payload(res, 422, "format_failed", err, locp, nullptr, &idx);
       }
-      w.String(pretty.c_str());
+      formatted_sqls.push_back(std::move(pretty));
+    }
+
+    rapidjson::StringBuffer sb(nullptr, 4096);
+    rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+    w.StartObject();
+    w.Key("formatted_sqls");
+    w.StartArray();
+    for (const auto& pretty : formatted_sqls) {
+      w.String(pretty->data(), static_cast<rapidjson::SizeType>(pretty->size()));
     }
     w.EndArray();
+    write_cache_meta(w);
     w.EndObject();
 
+    set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
     res.status = 200;
-    res.set_content(sb.GetString(), "application/json");
+    res.set_content(sb.GetString(), sb.GetSize(), "application/json");
     return;
   }
 
@@ -370,25 +291,27 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     return json_error(res, 400, "missing_sql", "Missing SQL text.");
   }
 
-  std::string pretty;
+  FormatValue pretty;
   std::string err;
-  if (!format_one(doc["sql"].GetString(), &pretty, &err)) {
+  if (!format_one(std::string(doc["sql"].GetString(), doc["sql"].GetStringLength()), &pretty, &err)) {
     const std::string sql_trimmed = trim_sql(doc["sql"].GetString());
     const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
-    const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
+    const ClickHouseErrorLocation* locp =
+      (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
     return json_error_with_payload(res, 422, "format_failed", err, locp, nullptr, nullptr);
   }
 
-  rapidjson::StringBuffer sb;
+  rapidjson::StringBuffer sb(nullptr, std::max<size_t>(1024, pretty->size() + 128));
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("formatted_sql");
-  w.String(pretty.c_str());
+  w.String(pretty->data(), static_cast<rapidjson::SizeType>(pretty->size()));
+  write_cache_meta(w);
   w.EndObject();
 
+  set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
   res.status = 200;
-  res.set_content(sb.GetString(), "application/json");
+  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
 } // namespace chdash
-

@@ -20,6 +20,10 @@
     "data_types",
   ];
 
+  // The complete columns catalog can dwarf every other metadata payload on a
+  // busy cluster. Load it only when the editor actually needs relation-aware
+  // completion; all lighter catalogs remain eager.
+  const eagerTypes = baseTypes.filter((t) => t !== "columns");
   const rawTypes = new Set(baseTypes.filter((t) => t !== "keywords"));
   const inflight = new Map();
 
@@ -156,7 +160,7 @@
   }
 
   async function fetchAndStore(hostId, types) {
-    const normalizedTypes = types.map(normalizeType).filter(Boolean);
+    const normalizedTypes = Array.from(new Set(types.map(normalizeType).filter(Boolean))).sort();
     const key = `${hostId}::${normalizedTypes.join(",")}`;
     if (inflight.has(key)) return inflight.get(key);
 
@@ -177,20 +181,24 @@
     return p;
   }
 
-  function maybeRefreshOnUserAction() {
+  function refreshTypes(types) {
     const hostId = state.selectedHostId;
-    if (!hostId) return;
-    const need = baseTypes.filter((t) => shouldRefresh(hostId, t));
-    if (!need.length) return;
-    fetchAndStore(String(hostId), need);
+    if (!hostId) return null;
+    const need = types.filter((t) => shouldRefresh(hostId, t));
+    if (!need.length) return null;
+    return fetchAndStore(String(hostId), need);
+  }
+
+  function maybeRefreshOnUserAction() {
+    return refreshTypes(eagerTypes);
   }
 
   function maybeRefreshOnLoad() {
-    const hostId = state.selectedHostId;
-    if (!hostId) return;
-    const need = baseTypes.filter((t) => shouldRefresh(hostId, t));
-    if (!need.length) return;
-    fetchAndStore(String(hostId), need);
+    return refreshTypes(eagerTypes);
+  }
+
+  function ensureColumns() {
+    return refreshTypes(["columns"]);
   }
 
   function hydrateFunctions(hostMeta, raw) {
@@ -243,12 +251,36 @@
 
   if (state && state.selectedHostId) hydrateFromStorage(state.selectedHostId);
 
-  setInterval(() => {
+  let refreshTimer = 0;
+
+  function scheduleBackgroundRefresh(delay = refreshPollMs) {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = 0;
+    if (document.hidden) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = 0;
+      try {
+        maybeRefreshOnLoad();
+      } catch {
+      }
+      scheduleBackgroundRefresh();
+    }, delay);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = 0;
+      return;
+    }
     try {
       maybeRefreshOnLoad();
     } catch {
     }
-  }, refreshPollMs);
+    scheduleBackgroundRefresh();
+  });
 
-  ns.meta = { maybeRefreshOnUserAction, maybeRefreshOnLoad, hydrateFromStorage, fetchAndStore };
+  scheduleBackgroundRefresh();
+
+  ns.meta = { maybeRefreshOnUserAction, maybeRefreshOnLoad, ensureColumns, hydrateFromStorage, fetchAndStore };
 })();

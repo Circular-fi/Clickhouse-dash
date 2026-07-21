@@ -89,6 +89,7 @@ private:
     HostSpec spec;
     std::shared_ptr<clickhouse::Client> client;
     HostHealth last;
+    std::string last_error;
   };
 
   mutable std::mutex mu_;

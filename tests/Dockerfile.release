@@ -1,0 +1,11 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl tar gzip unzip libgcc-s1 libstdc++6 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoints/release-entrypoint.sh /usr/local/bin/chdash-release-entrypoint
+RUN chmod +x /usr/local/bin/chdash-release-entrypoint
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/chdash-release-entrypoint"]

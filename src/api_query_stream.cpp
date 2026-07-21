@@ -1,15 +1,13 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
-#include "query_sql_store.hpp"
 #include "sse_util.hpp"
 
+#include <algorithm>
 #include <chrono>
-#include <ctime>
 #include <deque>
 #include <memory>
 #include <string>
-#include <thread>
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -18,44 +16,25 @@ namespace chdash {
 
 namespace {
 
+constexpr auto kTickInterval = std::chrono::milliseconds(250);
+
 static std::string build_meta_json(const std::string& qid) {
-  rapidjson::StringBuffer sb;
+  rapidjson::StringBuffer sb(nullptr, 128);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("query_id"); w.String(qid.c_str());
   w.Key("status"); w.String("connected");
   w.EndObject();
-  return sb.GetString();
-}
-
-static std::string build_keepalive_json(const std::string& qid) {
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("query_id"); w.String(qid.c_str());
-
-  auto t = std::time(nullptr);
-  std::tm tm{};
-#if defined(_WIN32)
-  gmtime_s(&tm, &t);
-#else
-  gmtime_r(&t, &tm);
-#endif
-  char buf[64];
-  std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
-
-  w.Key("time"); w.String(buf);
-  w.EndObject();
-  return sb.GetString();
+  return std::string(sb.GetString(), sb.GetSize());
 }
 
 struct StreamState {
   std::shared_ptr<QuerySession> session;
   std::string query_id;
-  std::string sql;
+  bool connected_event_sent = false;
+  bool terminal_event_sent = false;
 
   std::chrono::steady_clock::time_point last_publish{};
-  std::chrono::steady_clock::time_point last_keepalive{};
 
   uint64_t prev_read_rows = 0;
   uint64_t prev_read_bytes = 0;
@@ -63,102 +42,102 @@ struct StreamState {
   int64_t prev_cpu_total_us = 0;
   int64_t cpu_inst_max_centi = 0;
   int64_t thread_peak = 0;
-
-  std::deque<std::string> local_chunks;
 };
 
+static bool is_terminal(SessionStatus status) {
+  return status == SessionStatus::Finished ||
+         status == SessionStatus::Error ||
+         status == SessionStatus::Canceled ||
+         status == SessionStatus::ResultLimitReached;
+}
+
 static std::string build_tick_json(const SessionSnapshot& snap, StreamState& st) {
-  int64_t percentCenti = 0;
-  int64_t knownInt = 0;
+  int64_t percent_centi = 0;
+  int64_t known_int = 0;
   if (snap.total_rows_to_read > 0) {
-    knownInt = 1;
+    known_int = 1;
     const __int128 num = static_cast<__int128>(snap.read_rows_total) * 10000;
-    percentCenti = static_cast<int64_t>(num / static_cast<__int128>(snap.total_rows_to_read));
-    if (percentCenti < 0) percentCenti = 0;
-    if (percentCenti > 10000) percentCenti = 10000;
+    percent_centi = static_cast<int64_t>(num / static_cast<__int128>(snap.total_rows_to_read));
+    percent_centi = std::max<int64_t>(0, std::min<int64_t>(10000, percent_centi));
   }
 
   const auto now = std::chrono::steady_clock::now();
   const auto prev_publish = st.last_publish;
 
-  int64_t rowsPerSec = 0;
-  int64_t bytesPerSec = 0;
-
+  int64_t rows_per_sec = 0;
+  int64_t bytes_per_sec = 0;
   if (prev_publish.time_since_epoch().count() != 0) {
     const double dt = std::chrono::duration_cast<std::chrono::duration<double>>(now - prev_publish).count();
     if (dt > 1e-9) {
-      rowsPerSec = static_cast<int64_t>(double(snap.read_rows_total - st.prev_read_rows) / dt);
-      bytesPerSec = static_cast<int64_t>(double(snap.read_bytes_total - st.prev_read_bytes) / dt);
-      if (rowsPerSec < 0) rowsPerSec = 0;
-      if (bytesPerSec < 0) bytesPerSec = 0;
+      const uint64_t delta_rows = snap.read_rows_total >= st.prev_read_rows
+        ? snap.read_rows_total - st.prev_read_rows
+        : 0;
+      const uint64_t delta_bytes = snap.read_bytes_total >= st.prev_read_bytes
+        ? snap.read_bytes_total - st.prev_read_bytes
+        : 0;
+      rows_per_sec = static_cast<int64_t>(static_cast<double>(delta_rows) / dt);
+      bytes_per_sec = static_cast<int64_t>(static_cast<double>(delta_bytes) / dt);
     }
   }
-
   st.prev_read_rows = snap.read_rows_total;
   st.prev_read_bytes = snap.read_bytes_total;
 
-  int64_t cpuCenti = 0;
-  {
-    const int64_t cpu_total_us = snap.user_time_us_total + snap.system_time_us_total;
-    if (prev_publish.time_since_epoch().count() != 0) {
-      const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - prev_publish).count();
-      const int64_t d_cpu = cpu_total_us - st.prev_cpu_total_us;
-      if (dt_us > 0 && d_cpu >= 0) {
-        cpuCenti = static_cast<int64_t>((__int128)d_cpu * 10000 / dt_us);
-      }
+  int64_t cpu_centi = 0;
+  const int64_t cpu_total_us = snap.user_time_us_total + snap.system_time_us_total;
+  if (prev_publish.time_since_epoch().count() != 0) {
+    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - prev_publish).count();
+    const int64_t delta_cpu = cpu_total_us - st.prev_cpu_total_us;
+    if (dt_us > 0 && delta_cpu >= 0) {
+      cpu_centi = static_cast<int64_t>(static_cast<__int128>(delta_cpu) * 10000 / dt_us);
     }
-    st.prev_cpu_total_us = cpu_total_us;
-    if (cpuCenti > st.cpu_inst_max_centi) st.cpu_inst_max_centi = cpuCenti;
   }
-
+  st.prev_cpu_total_us = cpu_total_us;
+  st.cpu_inst_max_centi = std::max(st.cpu_inst_max_centi, cpu_centi);
   st.last_publish = now;
 
-  const int64_t memInst = snap.current_mem_bytes;
-  const int64_t memMax = snap.peak_mem_bytes;
+  st.thread_peak = std::max(st.thread_peak, snap.threads_peak);
 
-  const int64_t thrInst = snap.threads_inst;
-  if (snap.threads_peak > st.thread_peak) st.thread_peak = snap.threads_peak;
-  const int64_t thrMax = st.thread_peak;
-
-  rapidjson::StringBuffer sb;
+  rapidjson::StringBuffer sb(nullptr, 512);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartArray();
   w.Int64(snap.elapsed_ms);
-  w.Int64(percentCenti);
-  w.Int64(knownInt);
-  w.Int64((int64_t)snap.read_rows_total);
-  w.Int64((int64_t)snap.read_bytes_total);
-  w.Int64((int64_t)snap.total_rows_to_read);
-  w.Int64(rowsPerSec);
-  w.Int64(bytesPerSec);
-  w.Int64(cpuCenti);
+  w.Int64(percent_centi);
+  w.Int64(known_int);
+  w.Uint64(snap.read_rows_total);
+  w.Uint64(snap.read_bytes_total);
+  w.Uint64(snap.total_rows_to_read);
+  w.Int64(rows_per_sec);
+  w.Int64(bytes_per_sec);
+  w.Int64(cpu_centi);
   w.Int64(st.cpu_inst_max_centi);
-  if (memInst < 0) w.Null(); else w.Int64(memInst);
-  if (memMax < 0) w.Null(); else w.Int64(memMax);
-  w.Int64(thrInst);
-  w.Int64(thrMax);
+  if (snap.current_mem_bytes < 0) w.Null(); else w.Int64(snap.current_mem_bytes);
+  if (snap.peak_mem_bytes < 0) w.Null(); else w.Int64(snap.peak_mem_bytes);
+  w.Int64(snap.threads_inst);
+  w.Int64(st.thread_peak);
+
   auto samples = st.session->drain_samples();
   if (samples.empty()) {
     w.Null();
   } else {
     w.StartArray();
-    for (const auto& s : samples) {
+    for (const auto& sample : samples) {
       w.StartArray();
-      w.Int64(s.elapsed_ms);
-      w.Uint64(s.read_bytes_total);
-      if (s.cpu_centi < 0) w.Null(); else w.Int64(s.cpu_centi);
-      if (s.mem_bytes < 0) w.Null(); else w.Int64(s.mem_bytes);
-      w.Int64(s.threads);
+      w.Int64(sample.elapsed_ms);
+      w.Uint64(sample.read_rows_total);
+      w.Uint64(sample.read_bytes_total);
+      if (sample.cpu_centi < 0) w.Null(); else w.Int64(sample.cpu_centi);
+      if (sample.mem_bytes < 0) w.Null(); else w.Int64(sample.mem_bytes);
+      w.Int64(sample.threads);
       w.EndArray();
     }
     w.EndArray();
   }
   w.EndArray();
-  return sb.GetString();
+  return std::string(sb.GetString(), sb.GetSize());
 }
 
-static std::string build_done_json(const SessionSnapshot& snap, const std::string& message, bool truncated) {
-  rapidjson::StringBuffer sb;
+static std::string build_done_json(const SessionSnapshot& snap, bool truncated) {
+  rapidjson::StringBuffer sb(nullptr, 256);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("query_id"); w.String(snap.query_id.c_str());
@@ -170,16 +149,22 @@ static std::string build_done_json(const SessionSnapshot& snap, const std::strin
     case SessionStatus::ResultLimitReached: w.String("result_limit_reached"); break;
     default: w.String("finished"); break;
   }
-  w.Key("elapsed_seconds"); w.Double(double(snap.elapsed_ms) / 1000.0);
+  w.Key("elapsed_seconds"); w.Double(static_cast<double>(snap.elapsed_ms) / 1000.0);
   w.Key("read_rows"); w.Uint64(snap.read_rows_total);
   w.Key("read_bytes"); w.Uint64(snap.read_bytes_total);
   w.Key("result_rows_returned"); w.Uint64(snap.wrote_rows_total);
   w.Key("result_truncated"); w.Bool(truncated);
-  if (!message.empty()) {
-    w.Key("message"); w.String(message.c_str());
-  }
   w.EndObject();
-  return sb.GetString();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+static int wait_until_next_tick_ms(const StreamState& st) {
+  if (st.last_publish.time_since_epoch().count() == 0) return 0;
+  const auto now = std::chrono::steady_clock::now();
+  const auto due = st.last_publish + kTickInterval;
+  if (now >= due) return 0;
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(due - now).count();
+  return static_cast<int>(std::max<int64_t>(1, remaining));
 }
 
 } // namespace
@@ -193,109 +178,101 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   std::shared_ptr<QuerySession> session;
   {
     std::lock_guard<std::mutex> lk(mu_);
-    auto it = sessions_.find(qid);
+    const auto it = sessions_.find(qid);
     if (it == sessions_.end()) return json_error(res, 404, "not_found", "Unknown query_id.");
     session = it->second;
   }
 
+  if (!session->attach_stream()) {
+    return json_error(res, 409, "stream_already_attached", "This query stream already has a consumer.");
+  }
   session->start();
 
-  res.set_header("Content-Type", "text/event-stream");
-  res.set_header("Cache-Control", "no-cache");
+  res.set_header("Content-Type", "text/event-stream; charset=utf-8");
+  res.set_header("Cache-Control", "no-cache, no-transform");
   res.set_header("Connection", "keep-alive");
   res.set_header("X-Accel-Buffering", "no");
 
-  auto st = std::make_shared<StreamState>();
-  st->session = session;
-  st->query_id = qid;
-  if (auto sql = get_query_sql(qid)) st->sql = *sql;
-  st->local_chunks.push_back(sse_json_event("meta", build_meta_json(qid)));
-
+  auto state = std::make_shared<StreamState>();
+  state->session = session;
+  state->query_id = qid;
   Server* self = this;
 
   res.set_chunked_content_provider(
       "text/event-stream",
-      [st, self](size_t, httplib::DataSink& sink) {
-        if (!st->local_chunks.empty()) {
-          auto chunk = std::move(st->local_chunks.front());
-          st->local_chunks.pop_front();
-          sink.write(chunk.data(), chunk.size());
-          return true;
-        }
-
-        std::string produced;
-        st->session->wait_pop_sse_chunk(produced, 0);
-        if (!produced.empty()) {
-          if (auto rew = maybe_rewrite_error_sse_chunk(produced, st->sql)) {
-            produced = std::move(*rew);
-          }
-          sink.write(produced.data(), produced.size());
-          return true;
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (st->last_publish.time_since_epoch().count() == 0 || now - st->last_publish >= std::chrono::milliseconds(250)) {
-          const auto snap = st->session->snapshot();
-          const auto tick = sse_json_event("tick", build_tick_json(snap, *st));
-          sink.write(tick.data(), tick.size());
-
-          if (snap.status == SessionStatus::Finished || snap.status == SessionStatus::Error || snap.status == SessionStatus::Canceled || snap.status == SessionStatus::ResultLimitReached) {
-            const bool truncated = (snap.status == SessionStatus::ResultLimitReached);
-            const auto done = sse_json_event("done", build_done_json(snap, "", truncated));
-            sink.write(done.data(), done.size());
-            sink.done();
-
-            {
-              std::lock_guard<std::mutex> lk(self->mu_);
-              self->sessions_.erase(st->query_id);
-            }
-            forget_query_sql(st->query_id);
+      [state, self](size_t, httplib::DataSink& sink) {
+        if (!state->connected_event_sent) {
+          state->connected_event_sent = true;
+          const std::string connected = sse_json_event("meta", build_meta_json(state->query_id));
+          if (!sink.write(connected.data(), connected.size())) {
+            state->session->request_cancel();
             return false;
           }
           return true;
         }
 
-        const bool cont = st->session->wait_pop_sse_chunk(produced, 30);
+        std::string produced;
+        const int wait_ms = wait_until_next_tick_ms(*state);
+        const bool query_may_continue = state->session->wait_pop_sse_batch(produced, wait_ms);
         if (!produced.empty()) {
-          if (auto rew = maybe_rewrite_error_sse_chunk(produced, st->sql)) {
-            produced = std::move(*rew);
+          // Data can flow continuously for large result sets. Piggy-back a due
+          // telemetry tick on the same socket write instead of starving charts
+          // until the result queue becomes empty.
+          const auto now = std::chrono::steady_clock::now();
+          if (state->last_publish.time_since_epoch().count() == 0 ||
+              now - state->last_publish >= kTickInterval) {
+            const auto live = state->session->snapshot();
+            const std::string tick = sse_json_event("tick", build_tick_json(live, *state));
+            produced.reserve(produced.size() + tick.size());
+            produced += tick;
           }
-          sink.write(produced.data(), produced.size());
+          if (!sink.write(produced.data(), produced.size())) {
+            state->session->request_cancel();
+            return false;
+          }
           return true;
         }
 
-        if (!cont) {
-          const auto snap = st->session->snapshot();
-          const auto finalTick = sse_json_event("tick", build_tick_json(snap, *st));
-          sink.write(finalTick.data(), finalTick.size());
-          const bool truncated = (snap.status == SessionStatus::ResultLimitReached);
-          const auto done = sse_json_event("done", build_done_json(snap, "", truncated));
-          sink.write(done.data(), done.size());
+        const auto snapshot = state->session->snapshot();
+        if (!query_may_continue || is_terminal(snapshot.status)) {
+          if (!state->terminal_event_sent) {
+            state->terminal_event_sent = true;
+            std::string terminal;
+            const std::string tick = sse_json_event("tick", build_tick_json(snapshot, *state));
+            const std::string done = sse_json_event(
+                "done",
+                build_done_json(snapshot, snapshot.status == SessionStatus::ResultLimitReached));
+            terminal.reserve(tick.size() + done.size());
+            terminal += tick;
+            terminal += done;
+            if (!sink.write(terminal.data(), terminal.size())) {
+              state->session->request_cancel();
+            }
+          }
           sink.done();
-
           {
             std::lock_guard<std::mutex> lk(self->mu_);
-            self->sessions_.erase(st->query_id);
+            self->sessions_.erase(state->query_id);
           }
-          forget_query_sql(st->query_id);
           return false;
         }
 
-        if (st->last_keepalive.time_since_epoch().count() == 0 || now - st->last_keepalive >= std::chrono::seconds(15)) {
-          st->last_keepalive = now;
-          const auto ka = sse_json_event("keepalive", build_keepalive_json(st->query_id));
-          sink.write(ka.data(), ka.size());
-          return cont;
+        const auto now = std::chrono::steady_clock::now();
+        if (state->last_publish.time_since_epoch().count() == 0 ||
+            now - state->last_publish >= kTickInterval) {
+          const std::string tick = sse_json_event("tick", build_tick_json(snapshot, *state));
+          if (!sink.write(tick.data(), tick.size())) {
+            state->session->request_cancel();
+            return false;
+          }
         }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        return cont;
+        return true;
       },
-      [session, qid](bool success) {
-        if (!success) {
-          session->request_cancel();
-          forget_query_sql(qid);
-        }
+      [session, qid, self](bool success) {
+        session->detach_stream();
+        if (!success) session->request_cancel();
+        std::lock_guard<std::mutex> lk(self->mu_);
+        self->sessions_.erase(qid);
       }
   );
 }

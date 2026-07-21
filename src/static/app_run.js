@@ -18,6 +18,7 @@
   };
 
   const MAX_STORE_POINTS = 2400;
+  const STORE_TRIM_SLACK = 160;
   const EPS_T = 1e-9;
 
   let chartsScheduled = false;
@@ -41,7 +42,9 @@
       return;
     }
     arr.push({ t, v });
-    if (arr.length > MAX_STORE_POINTS) {
+    // Trim in chunks instead of moving the entire backing array for every
+    // point once the graph reaches its retention limit.
+    if (arr.length > MAX_STORE_POINTS + STORE_TRIM_SLACK) {
       arr.splice(0, arr.length - MAX_STORE_POINTS);
     }
   }
@@ -354,14 +357,26 @@
           const st = Number.isFinite(sm) ? sm / 1000 : null;
           if (st == null) continue;
 
-          const rb = Number(s[1]);
-          const cpu = s[2] == null ? null : Number(s[2]);
-          const mem = s[3] == null ? null : Number(s[3]);
-          const thr = s[4] == null ? null : Number(s[4]);
+          // New backend layout: [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes, threads].
+          // Old layout kept for compatibility: [elapsedMs, readBytesTotal, cpuCenti, memBytes, threads].
+          const hasRowsInSample = s.length >= 6;
+          const rr = hasRowsInSample ? Number(s[1]) : null;
+          const rb = hasRowsInSample ? Number(s[2]) : Number(s[1]);
+          const cpu = s[hasRowsInSample ? 3 : 2] == null ? null : Number(s[hasRowsInSample ? 3 : 2]);
+          const mem = s[hasRowsInSample ? 4 : 3] == null ? null : Number(s[hasRowsInSample ? 4 : 3]);
+          const thr = s[hasRowsInSample ? 5 : 4] == null ? null : Number(s[hasRowsInSample ? 5 : 4]);
 
           if (cpu != null && Number.isFinite(cpu)) pushPointMonotone(series.cpu, st, cpu / 100);
           if (mem != null && Number.isFinite(mem)) pushPointMonotone(series.memBytes, st, mem);
           if (thr != null && Number.isFinite(thr)) pushPointMonotone(series.threads, st, thr);
+
+          if (Number.isFinite(rr) && agg.lastSampleReadRows != null && agg.lastSampleReadRowsT != null) {
+            const dt = st - agg.lastSampleReadRowsT;
+            if (dt > 1e-9) {
+              const rps = (rr - agg.lastSampleReadRows) / dt;
+              if (Number.isFinite(rps) && rps >= 0) pushPointMonotone(series.readRowsPerSec, st, rps);
+            }
+          }
 
           if (Number.isFinite(rb) && agg.lastSampleReadBytes != null && agg.lastSampleReadBytesT != null) {
             const dt = st - agg.lastSampleReadBytesT;
@@ -369,6 +384,11 @@
               const bps = (rb - agg.lastSampleReadBytes) / dt;
               if (Number.isFinite(bps) && bps >= 0) pushPointMonotone(series.readBytesPerSec, st, bps);
             }
+          }
+
+          if (Number.isFinite(rr)) {
+            agg.lastSampleReadRows = rr;
+            agg.lastSampleReadRowsT = st;
           }
 
           if (Number.isFinite(rb)) {
@@ -1087,6 +1107,8 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
       cpuMaxCenti: 0,
       memMax: 0,
       thrMax: 0,
+      lastSampleReadRows: null,
+      lastSampleReadRowsT: null,
       lastSampleReadBytes: null,
       lastSampleReadBytesT: null,
       terminal: false,

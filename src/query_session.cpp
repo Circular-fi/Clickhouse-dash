@@ -1,5 +1,9 @@
 #include "query_session.hpp"
+#include "api_error.hpp"
+#include "ch_client_pool.hpp"
+#include "ch_uri.hpp"
 #include "json_clickhouse.hpp"
+#include "sql_scan.hpp"
 
 #include <clickhouse/query.h>
 
@@ -9,7 +13,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <sstream>
+#include <functional>
+#include <iterator>
+#include <limits>
+#include <optional>
+#include <unordered_map>
+#include <utility>
 
 namespace chdash {
 
@@ -96,21 +105,47 @@ static std::string sql_quote_string(std::string_view s);
 
 QuerySession::QuerySession(
   std::string query_id,
+  std::string host_id,
   std::string sql,
   std::string database,
-  std::shared_ptr<clickhouse::Client> client_for_query,
-  std::shared_ptr<clickhouse::Client> client_for_stats,
-  int result_preview_row_limit
+  std::string runner_uri,
+  std::string stats_uri,
+  std::shared_ptr<ClickHouseClientPool> client_pool,
+  int result_preview_row_limit,
+  QuerySessionOptions options
 ) : query_id_(std::move(query_id)),
+    host_id_(std::move(host_id)),
     sql_(std::move(sql)),
     database_(std::move(database)),
-    client_query_(std::move(client_for_query)),
-    client_stats_(std::move(client_for_stats)),
-    result_preview_row_limit_(result_preview_row_limit) {}
+    runner_uri_(std::move(runner_uri)),
+    stats_uri_(std::move(stats_uri)),
+    client_pool_(std::move(client_pool)),
+    result_preview_row_limit_(result_preview_row_limit),
+    options_(std::move(options)) {
+  if (options_.sample_interval_ms < 10) options_.sample_interval_ms = 10;
+  if (options_.sample_interval_ms > 1000) options_.sample_interval_ms = 1000;
+  if (options_.result_rows_batch_size <= 0) options_.result_rows_batch_size = 1000;
+  if (options_.result_rows_batch_size > 10000) options_.result_rows_batch_size = 10000;
+  options_.result_rows_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.result_rows_batch_bytes));
+  options_.sse_write_batch_events = std::max<size_t>(1, std::min<size_t>(64, options_.sse_write_batch_events));
+  options_.sse_write_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.sse_write_batch_bytes));
+  options_.sse_queue_max_bytes = std::max<size_t>(options_.sse_write_batch_bytes, std::min<size_t>(128 * 1024 * 1024, options_.sse_queue_max_bytes));
+  options_.describe_cache_entries = std::min<size_t>(4096, options_.describe_cache_entries);
+  options_.describe_cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, options_.describe_cache_ttl_ms));
+}
 
 QuerySession::~QuerySession() {
   request_cancel();
-  if (query_thread_.joinable()) query_thread_.join();
+  if (!query_thread_.joinable()) return;
+
+  // A disconnected stream may erase the server-owned reference while the
+  // worker still owns the last shared_ptr. In that case destruction happens at
+  // the end of the worker itself; joining the current thread would terminate.
+  if (query_thread_.get_id() == std::this_thread::get_id()) {
+    query_thread_.detach();
+  } else {
+    query_thread_.join();
+  }
 }
 
 void QuerySession::start() {
@@ -119,6 +154,12 @@ void QuerySession::start() {
 
   {
     std::lock_guard<std::mutex> lk(mu_);
+    if (cancel_requested_.load(std::memory_order_relaxed)) {
+      status_ = SessionStatus::Canceled;
+      finished_at_ = std::chrono::steady_clock::now();
+      cv_.notify_all();
+      return;
+    }
     status_ = SessionStatus::Running;
     started_at_ = std::chrono::steady_clock::now();
   }
@@ -137,6 +178,38 @@ void QuerySession::request_cancel() {
     }
   }
   cv_.notify_all();
+}
+
+bool QuerySession::attach_stream() {
+  std::lock_guard<std::mutex> lk(mu_);
+  if (stream_attached_) return false;
+  stream_attached_ = true;
+  return true;
+}
+
+void QuerySession::detach_stream() {
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    stream_attached_ = false;
+  }
+  cv_.notify_all();
+}
+
+bool QuerySession::should_reap(int abandoned_ttl_ms, int terminal_ttl_ms) const {
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lk(mu_);
+  if (stream_attached_) return false;
+
+  const bool terminal = status_ == SessionStatus::Finished || status_ == SessionStatus::Error ||
+                        status_ == SessionStatus::Canceled || status_ == SessionStatus::ResultLimitReached;
+  if (terminal) {
+    if (terminal_ttl_ms <= 0) return true;
+    const auto since = finished_at_.time_since_epoch().count() == 0 ? created_at_ : finished_at_;
+    return now - since >= std::chrono::milliseconds(terminal_ttl_ms);
+  }
+
+  if (abandoned_ttl_ms <= 0) return true;
+  return now - created_at_ >= std::chrono::milliseconds(abandoned_ttl_ms);
 }
 
 SessionSnapshot QuerySession::snapshot() const {
@@ -188,35 +261,67 @@ std::vector<SamplePoint> QuerySession::drain_samples(size_t max_points) {
   return out;
 }
 
-bool QuerySession::wait_pop_sse_chunk(std::string& out, int wait_ms) {
+bool QuerySession::wait_pop_sse_batch(std::string& out, int wait_ms) {
+  out.clear();
   std::unique_lock<std::mutex> lk(mu_);
-  if (sse_chunks_.empty()) {
+  auto is_terminal = [&]() {
+    return status_ == SessionStatus::Finished || status_ == SessionStatus::Error ||
+           status_ == SessionStatus::Canceled || status_ == SessionStatus::ResultLimitReached;
+  };
+
+  if (sse_chunks_.empty() && wait_ms > 0) {
     cv_.wait_for(lk, std::chrono::milliseconds(wait_ms), [&] {
-      return !sse_chunks_.empty() || status_ == SessionStatus::Finished || status_ == SessionStatus::Error || status_ == SessionStatus::Canceled || status_ == SessionStatus::ResultLimitReached;
+      return !sse_chunks_.empty() || is_terminal();
     });
   }
 
   if (!sse_chunks_.empty()) {
+    const size_t event_limit = std::max<size_t>(1, options_.sse_write_batch_events);
+    const size_t byte_limit = std::max<size_t>(1, options_.sse_write_batch_bytes);
+    const size_t reserve_bytes = std::min(queued_sse_bytes_, byte_limit);
+
+    queued_sse_bytes_ -= std::min(queued_sse_bytes_, sse_chunks_.front().size());
     out = std::move(sse_chunks_.front());
     sse_chunks_.pop_front();
+    out.reserve(std::max(out.size(), reserve_bytes));
+
+    size_t events = 1;
+    while (!sse_chunks_.empty() && events < event_limit) {
+      const std::string& next = sse_chunks_.front();
+      if (out.size() + next.size() > byte_limit) break;
+      queued_sse_bytes_ -= std::min(queued_sse_bytes_, next.size());
+      out += next;
+      sse_chunks_.pop_front();
+      ++events;
+      if (out.size() >= byte_limit) break;
+    }
+    lk.unlock();
+    cv_.notify_all(); // wake a producer blocked by queue backpressure
     return true;
   }
 
-  if (status_ == SessionStatus::Finished || status_ == SessionStatus::Error || status_ == SessionStatus::Canceled || status_ == SessionStatus::ResultLimitReached) {
-    return false;
-  }
-
-  return true;
+  return !is_terminal();
 }
 
-void QuerySession::push_sse_json_event(const std::string& event_name, const std::string& json) {
-  std::ostringstream oss;
-  oss << "event: " << event_name << "\n";
-  oss << "data: " << json << "\n\n";
-  {
-    std::lock_guard<std::mutex> lk(mu_);
-    sse_chunks_.push_back(oss.str());
-  }
+void QuerySession::push_sse_json_event(std::string_view event_name, std::string_view json) {
+  std::string chunk;
+  chunk.reserve(event_name.size() + json.size() + 16);
+  chunk += "event: ";
+  chunk += event_name;
+  chunk += "\ndata: ";
+  chunk += json;
+  chunk += "\n\n";
+
+  std::unique_lock<std::mutex> lk(mu_);
+  cv_.wait(lk, [&] {
+    return cancel_requested_.load(std::memory_order_relaxed) ||
+           sse_chunks_.empty() ||
+           queued_sse_bytes_ + chunk.size() <= options_.sse_queue_max_bytes;
+  });
+  if (cancel_requested_.load(std::memory_order_relaxed)) return;
+  queued_sse_bytes_ += chunk.size();
+  sse_chunks_.push_back(std::move(chunk));
+  lk.unlock();
   cv_.notify_all();
 }
 
@@ -240,24 +345,59 @@ void QuerySession::finish_canceled() {
 }
 
 void QuerySession::finish_error(const std::string& message) {
-  // Emit an "error" event compatible with app.js
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("query_id"); w.String(query_id_.c_str());
-  w.Key("message"); w.String(message.c_str());
-  w.EndObject();
-  push_sse_json_event("error", sb.GetString());
+  if (cancel_requested_.load(std::memory_order_relaxed)) {
+    finish_canceled();
+    return;
+  }
+
+  const auto location = parse_clickhouse_error_location(message, sql_);
+  const ClickHouseErrorLocation* location_ptr =
+      (location.has_code || location.has_position || location.has_line_col || location.has_near)
+      ? &location
+      : nullptr;
+  const std::string payload = build_error_payload_json(
+      "query_failed", message, location_ptr, &query_id_, nullptr);
+  push_sse_json_event("error", payload);
 
   {
     std::lock_guard<std::mutex> lk(mu_);
-    status_ = SessionStatus::Error;
+    if (status_ == SessionStatus::Canceled || cancel_requested_.load(std::memory_order_relaxed)) {
+      status_ = SessionStatus::Canceled;
+    } else {
+      status_ = SessionStatus::Error;
+    }
     finished_at_ = std::chrono::steady_clock::now();
   }
   cv_.notify_all();
 }
 
 void QuerySession::refresh_stats_from_query_log_best_effort() {
+  if (!options_.final_stats_from_query_log) return;
+
+  // Keep the optional query_log connection out of the hot query path. Most
+  // installations leave these final stats disabled; when enabled, acquire the
+  // system client only after the result stream has completed. Reuse the query
+  // client when both roles use the same URI.
+  if (!client_stats_) {
+    if (stats_uri_.empty() || stats_uri_ == runner_uri_) {
+      client_stats_ = client_query_;
+    } else {
+      std::string err;
+      client_stats_ = client_pool_ ? client_pool_->acquire(
+          stats_uri_,
+          std::chrono::seconds(5),
+          std::chrono::seconds(5),
+          std::chrono::seconds(5),
+          &err)
+        : make_client_from_uri(
+          stats_uri_,
+          std::chrono::seconds(5),
+          std::chrono::seconds(5),
+          std::chrono::seconds(5),
+          &err);
+    }
+  }
+
   auto client = client_stats_ ? client_stats_ : client_query_;
   if (!client) return;
 
@@ -275,9 +415,11 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
   int64_t log_peak_threads_usage = -1;
 
   for (int attempt = 0; attempt < 5; ++attempt) {
-    try {
-      client->Execute("SYSTEM FLUSH LOGS query_log");
-    } catch (...) {
+    if (options_.flush_query_log_for_final_stats) {
+      try {
+        client->Execute("SYSTEM FLUSH LOGS query_log");
+      } catch (...) {
+      }
     }
 
     bool found = false;
@@ -327,14 +469,21 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
 }
 
 void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::time_point& now) {
-  if (last_sample_at_.time_since_epoch().count() != 0 && now - last_sample_at_ < std::chrono::milliseconds(10)) {
+  const auto min_interval = std::chrono::milliseconds(std::max(10, options_.sample_interval_ms));
+  if (last_sample_at_.time_since_epoch().count() != 0 && now - last_sample_at_ < min_interval) {
     return;
   }
   last_sample_at_ = now;
   int64_t thr_cur = 0;
   const auto window = std::chrono::seconds(2);
-  for (const auto& kv : thread_last_seen_) {
-    if (now - kv.second <= window) thr_cur++;
+  const auto retention = std::chrono::seconds(10);
+  for (auto it = thread_last_seen_.begin(); it != thread_last_seen_.end();) {
+    if (now - it->second > retention) {
+      it = thread_last_seen_.erase(it);
+      continue;
+    }
+    if (now - it->second <= window) ++thr_cur;
+    ++it;
   }
   if (thr_cur == 0 && saw_profile_events_) {
     thr_cur = 1;
@@ -375,25 +524,13 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   threads_peak_ = std::max<int64_t>(threads_peak_, thr_cur);
 
   const int64_t elapsed_ms = ms_since(started_at_, now);
-  samples_.push_back(SamplePoint{elapsed_ms, read_bytes_total_, cpu_centi, current_mem_bytes_, thr_cur});
-  if (samples_.size() > 5000) {
-    samples_.pop_front();
-  }
+  samples_.push_back(SamplePoint{elapsed_ms, read_rows_total_, read_bytes_total_, cpu_centi, current_mem_bytes_, thr_cur});
+  // The SSE tick drains at most a handful of samples. A small safety window is
+  // enough for temporary network stalls and prevents unbounded telemetry growth
+  // when a client never opens the stream.
+  while (samples_.size() > 512) samples_.pop_front();
 }
 
-
-static bool starts_with_ci(const std::string& s, const char* pfx) {
-  const size_t n = std::strlen(pfx);
-  if (s.size() < n) return false;
-  for (size_t i = 0; i < n; ++i) {
-    char a = s[i];
-    char b = pfx[i];
-    if (a >= 'A' && a <= 'Z') a = char(a - 'A' + 'a');
-    if (b >= 'A' && b <= 'Z') b = char(b - 'A' + 'a');
-    if (a != b) return false;
-  }
-  return true;
-}
 
 static bool icontains(std::string_view hay, std::string_view needle) {
   if (needle.empty()) return true;
@@ -465,6 +602,104 @@ struct ResultColumnPlan {
   ResultTransportMode mode = ResultTransportMode::Passthrough;
 };
 
+
+using ResultPlan = std::vector<std::pair<std::string, ResultColumnPlan>>;
+
+struct CachedDescribePlan {
+  ResultPlan plan;
+  std::chrono::steady_clock::time_point expires_at{};
+  uint64_t access_sequence = 0;
+};
+
+static std::mutex g_describe_cache_mu;
+static std::unordered_map<std::string, CachedDescribePlan> g_describe_cache;
+static uint64_t g_describe_cache_sequence = 0;
+
+static uint64_t fnv1a64(std::string_view value, uint64_t seed) {
+  uint64_t hash = seed;
+  for (const unsigned char ch : value) {
+    hash ^= ch;
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
+static std::string describe_cache_key(
+    std::string_view host_id,
+    std::string_view database,
+    std::string_view sql
+) {
+  // Keep cache keys small even for multi-hundred-kilobyte editor buffers. Two
+  // independently seeded 64-bit hashes plus the SQL length make accidental
+  // collisions negligible for this process-local, short-lived cache.
+  const uint64_t hash_a = fnv1a64(sql, UINT64_C(14695981039346656037));
+  const uint64_t hash_b = fnv1a64(sql, UINT64_C(7809847782465536322));
+  std::string key;
+  key.reserve(host_id.size() + database.size() + 64);
+  key.append(host_id.data(), host_id.size());
+  key.push_back('\x1f');
+  key.append(database.data(), database.size());
+  key.push_back('\x1f');
+  key += std::to_string(sql.size());
+  key.push_back(':');
+  key += std::to_string(hash_a);
+  key.push_back(':');
+  key += std::to_string(hash_b);
+  return key;
+}
+
+static std::optional<ResultPlan> get_cached_describe_plan(
+    const std::string& key,
+    const QuerySessionOptions& options
+) {
+  if (options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
+  auto it = g_describe_cache.find(key);
+  if (it == g_describe_cache.end()) return std::nullopt;
+  if (it->second.expires_at <= now) {
+    g_describe_cache.erase(it);
+    return std::nullopt;
+  }
+  it->second.access_sequence = ++g_describe_cache_sequence;
+  return it->second.plan;
+}
+
+static void put_cached_describe_plan(
+    const std::string& key,
+    ResultPlan plan,
+    const QuerySessionOptions& options
+) {
+  if (key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
+
+  for (auto it = g_describe_cache.begin(); it != g_describe_cache.end();) {
+    if (it->second.expires_at <= now) it = g_describe_cache.erase(it);
+    else ++it;
+  }
+
+  CachedDescribePlan entry;
+  entry.plan = std::move(plan);
+  entry.expires_at = now + std::chrono::milliseconds(options.describe_cache_ttl_ms);
+  entry.access_sequence = ++g_describe_cache_sequence;
+  g_describe_cache[key] = std::move(entry);
+
+  while (g_describe_cache.size() > options.describe_cache_entries) {
+    auto victim = g_describe_cache.begin();
+    for (auto it = std::next(g_describe_cache.begin()); it != g_describe_cache.end(); ++it) {
+      if (it->second.access_sequence < victim->second.access_sequence) victim = it;
+    }
+    g_describe_cache.erase(victim);
+  }
+}
+
+static void invalidate_cached_describe_plan(const std::string& key) {
+  if (key.empty()) return;
+  std::lock_guard<std::mutex> lk(g_describe_cache_mu);
+  g_describe_cache.erase(key);
+}
+
 static const char* transport_mode_name(ResultTransportMode mode) {
   switch (mode) {
     case ResultTransportMode::Passthrough: return "passthrough";
@@ -527,6 +762,16 @@ static ResultTransportMode classify_result_transport(std::string_view type) {
   return ResultTransportMode::Passthrough;
 }
 
+
+static bool should_retry_with_describe_after_fast_path_error(std::string_view msg) {
+  return icontains(msg, "unimplemented") ||
+         icontains(msg, "unsupported column type") ||
+         icontains(msg, "unsupported custom serialization") ||
+         icontains(msg, "cannot create column") ||
+         icontains(msg, "cannot read data") ||
+         icontains(msg, "cannot parse type");
+}
+
 static std::string quote_ident(std::string_view ident) {
   std::string out;
   out.reserve(ident.size() + 2);
@@ -580,34 +825,89 @@ static std::string build_transport_wrapper_sql(
     return original_sql;
   }
 
-  std::ostringstream oss;
-  oss << "SELECT\n";
+  std::string out;
+  out.reserve(original_sql.size() + columns.size() * 64 + 32);
+  out += "SELECT\n";
   for (size_t i = 0; i < columns.size(); ++i) {
-    oss << "    " << build_projected_expr(columns[i].first, columns[i].second);
-    if (i + 1 < columns.size()) oss << ",";
-    oss << "\n";
+    out += "    ";
+    out += build_projected_expr(columns[i].first, columns[i].second);
+    if (i + 1 < columns.size()) out.push_back(',');
+    out.push_back('\n');
   }
-  oss << "FROM\n(\n";
-  oss << strip_trailing_semicolon_copy(original_sql) << "\n";
-  oss << ") AS _q";
-  return oss.str();
+  out += "FROM\n(\n";
+  out += strip_trailing_semicolon_copy(original_sql);
+  out += "\n) AS _q";
+  return out;
 }
 
 
 void QuerySession::run_query() {
+  auto reset_query_connection_best_effort = [&]() {
+    try {
+      if (client_query_) client_query_->ResetConnection();
+    } catch (...) {
+    }
+  };
+
+  auto reset_stats_for_compat_retry = [&]() {
+    std::lock_guard<std::mutex> lk(mu_);
+    read_rows_total_ = 0;
+    read_bytes_total_ = 0;
+    total_rows_to_read_ = 0;
+    wrote_rows_total_ = 0;
+    wrote_bytes_total_ = 0;
+    user_time_us_total_ = 0;
+    system_time_us_total_ = 0;
+    real_time_us_total_ = 0;
+    current_mem_bytes_ = -1;
+    peak_mem_bytes_ = -1;
+    threads_inst_ = 0;
+    threads_peak_ = 0;
+    saw_profile_events_ = false;
+    thread_last_seen_.clear();
+    samples_.clear();
+    last_sample_at_ = {};
+    last_sample_cpu_at_ = {};
+    last_sample_cpu_total_us_ = 0;
+    last_sample_rt_at_ = {};
+    last_sample_rt_total_us_ = 0;
+  };
+
   try {
     if (cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
       return;
     }
-    try {
-      if (!database_.empty()) client_query_->Execute("USE " + database_);
-    } catch (...) {}
-    const std::string sql_trim = trim_copy(sql_);
 
-    const bool is_wrappable_select = starts_with_ci(sql_trim, "select") || starts_with_ci(sql_trim, "with");
-    const bool is_select_like =
-      is_wrappable_select || starts_with_ci(sql_trim, "show") || starts_with_ci(sql_trim, "describe") || starts_with_ci(sql_trim, "explain");
+    // Acquire the TCP connection only when the SSE consumer is attached. This
+    // makes POST /api/query/run allocation-only, avoids holding pooled sockets
+    // for abandoned runs, and keeps connection latency in the measured stream.
+    std::string client_error;
+    client_query_ = client_pool_ ? client_pool_->acquire(
+        runner_uri_,
+        std::chrono::seconds(5),
+        std::chrono::milliseconds(0),
+        std::chrono::milliseconds(0),
+        &client_error)
+      : make_client_from_uri(
+        runner_uri_,
+        std::chrono::seconds(5),
+        std::chrono::milliseconds(0),
+        std::chrono::milliseconds(0),
+        &client_error);
+    if (!client_query_) {
+      finish_error(client_error.empty() ? "Could not connect to ClickHouse." : client_error);
+      return;
+    }
+
+    try {
+      if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+    } catch (...) {}
+    const std::string first_keyword = sql_first_keyword_lower(sql_);
+    const bool is_wrappable_select = first_keyword == "select" || first_keyword == "with";
+    const bool is_select_like = is_wrappable_select || first_keyword == "show" ||
+                                first_keyword == "describe" || first_keyword == "desc" ||
+                                first_keyword == "explain";
 
     if (!is_select_like) {
       client_query_->Execute(sql_);
@@ -647,315 +947,357 @@ void QuerySession::run_query() {
     }
 
     bool meta_sent = false;
-    int rows_returned = 0;
+    uint64_t rows_returned = 0;
+    const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
+    bool attempt_used_cached_plan = false;
 
-    // clickhouse-cpp currently loses named Tuple element names (it only keeps element types).
-    // To let the frontend display Tuple / Array(Tuple(...)) as objects with field names, we
-    // prefetch verbose column types from the server via DESCRIBE (SELECT ...).
-    std::unordered_map<std::string, std::string> described_types;
-    std::vector<std::string> described_column_order;
-    try {
-      std::string ds = strip_trailing_semicolon_copy(sql_);
+    auto apply_database_best_effort = [&]() {
+      try {
+        if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+      } catch (...) {
+      }
+    };
 
-      clickhouse::Query dq("DESCRIBE (" + ds + ")");
-      dq.OnData([&](const clickhouse::Block& b) {
-        if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
+    auto execute_select_attempt = [&](bool use_describe, bool allow_cached_plan) {
+      // The fast path intentionally skips DESCRIBE. Auto mode pre-plans SQL
+      // that visibly produces driver-incompatible result types, and otherwise
+      // retries once only if the native decoder fails before any SSE payload.
+      ResultPlan result_plan;
+      bool cache_new_plan_after_success = false;
+      attempt_used_cached_plan = false;
 
-        int idx_name = -1;
-        int idx_type = -1;
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          const auto& cn = b.GetColumnName(i);
-          if (cn == "name") idx_name = static_cast<int>(i);
-          else if (cn == "type") idx_type = static_cast<int>(i);
-        }
-        if (idx_name < 0) idx_name = 0;
-        if (idx_type < 0) idx_type = 1;
-
-        auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
-        auto c_type = b[idx_type]->As<clickhouse::ColumnString>();
-        if (!c_name || !c_type) return;
-
-        for (size_t r = 0; r < b.GetRowCount(); ++r) {
-          const std::string_view n = c_name->At(r);
-          const std::string_view t = c_type->At(r);
-          const std::string name(n);
-          if (described_types.find(name) == described_types.end()) {
-            described_column_order.push_back(name);
+      if (use_describe && is_wrappable_select) {
+        if (allow_cached_plan) {
+          if (auto cached = get_cached_describe_plan(plan_cache_key, options_)) {
+            result_plan = std::move(*cached);
+            attempt_used_cached_plan = true;
           }
-          described_types[name] = normalize_type_string(std::string(t));
         }
+
+        if (result_plan.empty()) {
+          const std::string ds = strip_trailing_semicolon_copy(sql_);
+          clickhouse::Query dq("DESCRIBE (" + ds + ")");
+          dq.OnData([&](const clickhouse::Block& b) {
+            if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
+
+            int idx_name = -1;
+            int idx_type = -1;
+            for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+              const auto& cn = b.GetColumnName(i);
+              if (cn == "name") idx_name = static_cast<int>(i);
+              else if (cn == "type") idx_type = static_cast<int>(i);
+            }
+            if (idx_name < 0) idx_name = 0;
+            if (idx_type < 0) idx_type = 1;
+
+            auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
+            auto c_type = b[idx_type]->As<clickhouse::ColumnString>();
+            if (!c_name || !c_type) return;
+
+            for (size_t r = 0; r < b.GetRowCount(); ++r) {
+              const std::string_view n = c_name->At(r);
+              const std::string normalized_type = normalize_type_string(std::string(c_type->At(r)));
+              ResultColumnPlan plan;
+              plan.original_type = normalized_type;
+              plan.mode = classify_result_transport(normalized_type);
+              plan.transport_type = (plan.mode == ResultTransportMode::Passthrough)
+                ? normalized_type
+                : (is_top_level_nullable_type(normalized_type)
+                    ? std::string("Nullable(String)")
+                    : std::string("String"));
+              result_plan.emplace_back(std::string(n), std::move(plan));
+            }
+          });
+          client_query_->Select(dq);
+          cache_new_plan_after_success = !result_plan.empty();
+        }
+      }
+
+      bool used_transport_wrapper = false;
+      std::string effective_sql = sql_;
+      if (use_describe && is_wrappable_select && !result_plan.empty()) {
+        effective_sql = build_transport_wrapper_sql(sql_, result_plan, &used_transport_wrapper);
+      }
+
+      clickhouse::Query q(effective_sql, query_id_);
+
+      // Ensure ClickHouse actually sends ProfileEvents packets to the client (native TCP).
+      // Otherwise CPU/RAM/thread stats will stay empty.
+      {
+        clickhouse::QuerySettingsField f;
+        f.value = "1";
+        q.SetSetting("send_profile_events", f);
+      }
+
+      q.OnProgress([self = shared_from_this()](const clickhouse::Progress& p) {
+        if (self->cancel_requested_.load(std::memory_order_relaxed)) {
+          throw std::runtime_error("canceled");
+        }
+        const auto now = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> lk(self->mu_);
+        self->read_rows_total_ += p.rows;
+        self->read_bytes_total_ += p.bytes;
+        if (p.total_rows > 0) {
+          self->total_rows_to_read_ = std::max<uint64_t>(self->total_rows_to_read_, p.total_rows);
+        }
+
+        self->maybe_record_sample_locked(now);
       });
 
-      client_query_->Select(dq);
-    } catch (...) {
-      // Best-effort: if DESCRIBE fails (e.g. invalid SQL), fall back to clickhouse-cpp types.
-    }
+      // clickhouse-cpp expects ProfileEventsCallback = std::function<bool(const Block&)>.
+      // Returning false aborts query processing (used here for cancellation).
+      q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& b) -> bool {
+        if (self->cancel_requested_.load(std::memory_order_relaxed)) {
+          return false;
+        }
+        if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return true;
 
-    std::vector<std::pair<std::string, ResultColumnPlan>> result_plan;
-    result_plan.reserve(described_column_order.size());
-    for (const auto& name : described_column_order) {
-      auto it = described_types.find(name);
-      if (it == described_types.end()) continue;
-      ResultColumnPlan plan;
-      plan.original_type = it->second;
-      plan.mode = classify_result_transport(it->second);
-      plan.transport_type = (plan.mode == ResultTransportMode::Passthrough)
-        ? it->second
-        : (is_top_level_nullable_type(it->second) ? std::string("Nullable(String)") : std::string("String"));
-      result_plan.push_back({name, std::move(plan)});
-    }
+        int idx_name = -1;
+        int idx_value = -1;
+        int idx_thread = -1;
 
-    bool used_transport_wrapper = false;
-    std::string effective_sql = sql_;
-    if (is_wrappable_select && !result_plan.empty()) {
-      effective_sql = build_transport_wrapper_sql(sql_, result_plan, &used_transport_wrapper);
-    }
-
-    clickhouse::Query q(effective_sql, query_id_);
-
-    // Ensure ClickHouse actually sends ProfileEvents packets to the client (native TCP).
-    // Otherwise CPU/RAM/thread stats will stay empty.
-    {
-      clickhouse::QuerySettingsField f;
-      f.value = "1";
-      q.SetSetting("send_profile_events", f);
-    }
-
-
-    q.OnProgress([self = shared_from_this()](const clickhouse::Progress& p) {
-      if (self->cancel_requested_.load(std::memory_order_relaxed)) {
-        throw std::runtime_error("canceled");
-      }
-      const auto now = std::chrono::steady_clock::now();
-      std::lock_guard<std::mutex> lk(self->mu_);
-      self->read_rows_total_ += p.rows;
-      self->read_bytes_total_ += p.bytes;
-      if (p.total_rows > 0) {
-        self->total_rows_to_read_ = std::max<uint64_t>(self->total_rows_to_read_, p.total_rows);
-      }
-
-      self->maybe_record_sample_locked(now);
-    });
-
-    // clickhouse-cpp expects ProfileEventsCallback = std::function<bool(const Block&)>.
-    // Returning false aborts query processing (used here for cancellation).
-    q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& b) -> bool {
-      if (self->cancel_requested_.load(std::memory_order_relaxed)) {
-        return false;
-      }
-      if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return true;
-
-      int idx_name = -1;
-      int idx_value = -1;
-      int idx_thread = -1;
-
-      for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-        const auto& cn = b.GetColumnName(i);
-        if (iequals_ascii(cn, "name") || iequals_ascii(cn, "event") || iequals_ascii(cn, "profileevent") || iequals_ascii(cn, "profile_event")) idx_name = static_cast<int>(i);
-        else if (iequals_ascii(cn, "value")) idx_value = static_cast<int>(i);
-        else if (iequals_ascii(cn, "thread_id") || iequals_ascii(cn, "thread") || iequals_ascii(cn, "threadid")) idx_thread = static_cast<int>(i);
-      }
-
-      if (idx_name < 0) {
         for (size_t i = 0; i < b.GetColumnCount(); ++i) {
           const auto& cn = b.GetColumnName(i);
-          if (b[i]->As<clickhouse::ColumnString>() && !icontains(cn, "host") && (icontains(cn, "event") || icontains(cn, "name"))) {
-            idx_name = static_cast<int>(i);
-            break;
+          if (iequals_ascii(cn, "name") || iequals_ascii(cn, "event") || iequals_ascii(cn, "profileevent") || iequals_ascii(cn, "profile_event")) idx_name = static_cast<int>(i);
+          else if (iequals_ascii(cn, "value")) idx_value = static_cast<int>(i);
+          else if (iequals_ascii(cn, "thread_id") || iequals_ascii(cn, "thread") || iequals_ascii(cn, "threadid")) idx_thread = static_cast<int>(i);
+        }
+
+        if (idx_name < 0) {
+          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+            const auto& cn = b.GetColumnName(i);
+            if (b[i]->As<clickhouse::ColumnString>() && !icontains(cn, "host") && (icontains(cn, "event") || icontains(cn, "name"))) {
+              idx_name = static_cast<int>(i);
+              break;
+            }
           }
         }
-      }
-      if (idx_value < 0) {
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          const auto& cn = b.GetColumnName(i);
-          if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "value")) {
-            idx_value = static_cast<int>(i);
-            break;
+        if (idx_value < 0) {
+          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+            const auto& cn = b.GetColumnName(i);
+            if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "value")) {
+              idx_value = static_cast<int>(i);
+              break;
+            }
           }
         }
-      }
-      if (idx_thread < 0) {
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          const auto& cn = b.GetColumnName(i);
-          if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "thread")) {
-            idx_thread = static_cast<int>(i);
-            break;
+        if (idx_thread < 0) {
+          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+            const auto& cn = b.GetColumnName(i);
+            if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "thread")) {
+              idx_thread = static_cast<int>(i);
+              break;
+            }
           }
         }
-      }
-      if (idx_name < 0) {
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          if (b[i]->As<clickhouse::ColumnString>()) { idx_name = static_cast<int>(i); break; }
-        }
-      }
-      if (idx_value < 0) {
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          if (b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) { idx_value = static_cast<int>(i); break; }
-        }
-      }
-      if (idx_name < 0 || idx_value < 0) return true;
-
-      auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
-      auto c_val_u64 = b[idx_value]->As<clickhouse::ColumnUInt64>();
-      auto c_val_i64 = b[idx_value]->As<clickhouse::ColumnInt64>();
-
-      clickhouse::ColumnRef c_thr_ref;
-      if (idx_thread >= 0 && static_cast<size_t>(idx_thread) < b.GetColumnCount()) c_thr_ref = b[idx_thread];
-      auto c_thr_u64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnUInt64>() : nullptr;
-      auto c_thr_i64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnInt64>() : nullptr;
-
-      if (!c_name || (!c_val_u64 && !c_val_i64)) return true;
-
-      const auto now = std::chrono::steady_clock::now();
-      std::lock_guard<std::mutex> lk(self->mu_);
-
-      for (size_t r = 0; r < b.GetRowCount(); ++r) {
-        self->saw_profile_events_ = true;
-
-        const std::string_view name = c_name->At(r);
-        const int64_t v = c_val_u64 ? static_cast<int64_t>(c_val_u64->At(r)) : c_val_i64->At(r);
-
-        // Thread tracking: even if server omits thread IDs, keep a synthetic thread=0 so we report >=1.
-        uint64_t tid = 0;
-        if (c_thr_u64) {
-          tid = c_thr_u64->At(r);
-        } else if (c_thr_i64) {
-          const int64_t tv = c_thr_i64->At(r);
-          if (tv > 0) tid = static_cast<uint64_t>(tv);
-        }
-        self->thread_last_seen_[tid] = now;
-
-        // CPU time (increments). Some servers use OS* variants.
-        if (name == "UserTimeMicroseconds" || name == "OSUserTimeMicroseconds") {
-          self->user_time_us_total_ += v;
-        } else if (name == "SystemTimeMicroseconds" || name == "OSSystemTimeMicroseconds") {
-          self->system_time_us_total_ += v;
-        } else if (name == "RealTimeMicroseconds") {
-          self->real_time_us_total_ += v;
-        }
-
-        // Memory: mimic the Go implementation (substring match; best-effort).
-        if (icontains(name, "memory") || icontains(name, "mem")) {
-          const bool is_peak = icontains(name, "peak");
-          const bool looks_current = icontains(name, "tracking") || icontains(name, "current") || icontains(name, "usage") || icontains(name, "used");
-          if (is_peak) {
-            if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
-            else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
-          }
-          if (looks_current || (!is_peak && self->current_mem_bytes_ < 0)) {
-            self->current_mem_bytes_ = v;
-            if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
-            else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
+        if (idx_name < 0) {
+          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+            if (b[i]->As<clickhouse::ColumnString>()) { idx_name = static_cast<int>(i); break; }
           }
         }
-      }
-
-      // Record a sample point (throttled).
-      self->maybe_record_sample_locked(now);
-
-      return true;
-    });
-
-    q.OnData([&](const clickhouse::Block& block) {
-      if (cancel_requested_.load(std::memory_order_relaxed)) {
-        throw std::runtime_error("canceled");
-      }
-
-      if (!meta_sent && block.GetColumnCount() > 0) {
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
-        w.Key("columns");
-        w.StartArray();
-        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-          const auto& name = block.GetColumnName(i);
-          w.String(name.c_str(), (rapidjson::SizeType)name.size());
-        }
-        w.EndArray();
-        w.Key("types");
-        w.StartArray();
-        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-          const auto& name = block.GetColumnName(i);
-          auto it = described_types.find(name);
-          if (it != described_types.end()) {
-            const ResultTransportMode mode = classify_result_transport(it->second);
-            const std::string transport_type = (mode == ResultTransportMode::Passthrough)
-              ? it->second
-              : (is_top_level_nullable_type(it->second) ? std::string("Nullable(String)") : std::string("String"));
-            w.String(transport_type.c_str(), (rapidjson::SizeType)transport_type.size());
-          } else {
-            const auto& tn = block[i]->Type()->GetName();
-            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+        if (idx_value < 0) {
+          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
+            if (b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) { idx_value = static_cast<int>(i); break; }
           }
         }
-        w.EndArray();
-        w.Key("original_types");
-        w.StartArray();
-        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-          const auto& name = block.GetColumnName(i);
-          auto it = described_types.find(name);
-          if (it != described_types.end()) {
-            const auto& tn = it->second;
-            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
-          } else {
-            const auto& tn = block[i]->Type()->GetName();
-            w.String(tn.c_str(), (rapidjson::SizeType)tn.size());
+        if (idx_name < 0 || idx_value < 0) return true;
+
+        auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
+        auto c_val_u64 = b[idx_value]->As<clickhouse::ColumnUInt64>();
+        auto c_val_i64 = b[idx_value]->As<clickhouse::ColumnInt64>();
+
+        clickhouse::ColumnRef c_thr_ref;
+        if (idx_thread >= 0 && static_cast<size_t>(idx_thread) < b.GetColumnCount()) c_thr_ref = b[idx_thread];
+        auto c_thr_u64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnUInt64>() : nullptr;
+        auto c_thr_i64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnInt64>() : nullptr;
+
+        if (!c_name || (!c_val_u64 && !c_val_i64)) return true;
+
+        const auto now = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> lk(self->mu_);
+
+        for (size_t r = 0; r < b.GetRowCount(); ++r) {
+          self->saw_profile_events_ = true;
+
+          const std::string_view name = c_name->At(r);
+          const int64_t v = c_val_u64 ? static_cast<int64_t>(c_val_u64->At(r)) : c_val_i64->At(r);
+
+          // Thread tracking: even if server omits thread IDs, keep a synthetic thread=0 so we report >=1.
+          uint64_t tid = 0;
+          if (c_thr_u64) {
+            tid = c_thr_u64->At(r);
+          } else if (c_thr_i64) {
+            const int64_t tv = c_thr_i64->At(r);
+            if (tv > 0) tid = static_cast<uint64_t>(tv);
+          }
+          self->thread_last_seen_[tid] = now;
+
+          // CPU time (increments). Some servers use OS* variants.
+          if (name == "UserTimeMicroseconds" || name == "OSUserTimeMicroseconds") {
+            self->user_time_us_total_ += v;
+          } else if (name == "SystemTimeMicroseconds" || name == "OSSystemTimeMicroseconds") {
+            self->system_time_us_total_ += v;
+          } else if (name == "RealTimeMicroseconds") {
+            self->real_time_us_total_ += v;
+          }
+
+          // Memory: mimic the Go implementation (substring match; best-effort).
+          if (icontains(name, "memory") || icontains(name, "mem")) {
+            const bool is_peak = icontains(name, "peak");
+            const bool looks_current = icontains(name, "tracking") || icontains(name, "current") || icontains(name, "usage") || icontains(name, "used");
+            if (is_peak) {
+              if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
+              else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
+            }
+            if (looks_current || (!is_peak && self->current_mem_bytes_ < 0)) {
+              self->current_mem_bytes_ = v;
+              if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
+              else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
+            }
           }
         }
-        w.EndArray();
-        w.Key("transport_modes");
-        w.StartArray();
-        for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-          const auto& name = block.GetColumnName(i);
-          auto it = described_types.find(name);
-          const char* mode_name = "passthrough";
-          if (it != described_types.end()) {
-            mode_name = transport_mode_name(classify_result_transport(it->second));
-          }
-          w.String(mode_name);
+
+        // Record a sample point (throttled).
+        self->maybe_record_sample_locked(now);
+
+        return true;
+      });
+
+      std::vector<const ResultColumnPlan*> resolved_column_plans;
+      size_t resolved_column_count = 0;
+
+      q.OnData([&](const clickhouse::Block& block) {
+        if (cancel_requested_.load(std::memory_order_relaxed)) {
+          throw std::runtime_error("canceled");
         }
-        w.EndArray();
-        w.Key("used_transport_wrapper"); w.Bool(used_transport_wrapper);
-        w.EndObject();
-        push_sse_json_event("result_meta", sb.GetString());
-        meta_sent = true;
-      }
 
-      if (block.GetRowCount() == 0) return;
+        if (resolved_column_count != block.GetColumnCount()) {
+          resolved_column_plans.assign(block.GetColumnCount(), nullptr);
+          if (result_plan.size() == block.GetColumnCount()) {
+            for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+              resolved_column_plans[i] = &result_plan[i].second;
+            }
+          } else if (!result_plan.empty()) {
+            // Defensive fallback for servers that reorder DESCRIBE metadata.
+            for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+              const auto& block_name = block.GetColumnName(i);
+              for (const auto& item : result_plan) {
+                if (item.first == block_name) {
+                  resolved_column_plans[i] = &item.second;
+                  break;
+                }
+              }
+            }
+          }
+          resolved_column_count = block.GetColumnCount();
+        }
+        const auto& column_plans = resolved_column_plans;
 
-      const size_t n = block.GetRowCount();
-      const size_t batch = 200;
-
-      for (size_t begin = 0; begin < n; begin += batch) {
-        const size_t end = std::min(n, begin + batch);
-
-        rapidjson::StringBuffer sb;
-        rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-        w.StartObject();
-        w.Key("query_id"); w.String(query_id_.c_str());
-        w.Key("rows");
-        w.StartArray();
-        for (size_t r = begin; r < end; ++r) {
+        if (!meta_sent && block.GetColumnCount() > 0) {
+          rapidjson::StringBuffer sb(nullptr, 1024);
+          rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+          w.StartObject();
+          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("columns");
           w.StartArray();
-          for (size_t c = 0; c < block.GetColumnCount(); ++c) {
-            write_cell_json(w, block[c], r);
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+            const auto& name = block.GetColumnName(i);
+            w.String(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
           }
           w.EndArray();
+          w.Key("types");
+          w.StartArray();
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+            if (column_plans[i]) {
+              const auto& tn = column_plans[i]->transport_type;
+              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+            } else {
+              const auto& tn = block[i]->Type()->GetName();
+              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+            }
+          }
+          w.EndArray();
+          w.Key("original_types");
+          w.StartArray();
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+            if (column_plans[i]) {
+              const auto& tn = column_plans[i]->original_type;
+              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+            } else {
+              const auto& tn = block[i]->Type()->GetName();
+              w.String(tn.c_str(), static_cast<rapidjson::SizeType>(tn.size()));
+            }
+          }
+          w.EndArray();
+          w.Key("transport_modes");
+          w.StartArray();
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+            w.String(column_plans[i] ? transport_mode_name(column_plans[i]->mode) : "passthrough");
+          }
+          w.EndArray();
+          w.Key("used_transport_wrapper"); w.Bool(used_transport_wrapper);
+          w.Key("describe_mode"); w.String(use_describe ? "described" : "fast");
+          w.Key("describe_cache_hit"); w.Bool(attempt_used_cached_plan);
+          w.EndObject();
+          push_sse_json_event("result_meta", std::string_view(sb.GetString(), sb.GetSize()));
+          meta_sent = true;
         }
-        w.EndArray();
-        w.EndObject();
 
-        push_sse_json_event("result_rows", sb.GetString());
+        if (block.GetRowCount() == 0) return;
 
-        {
-          std::lock_guard<std::mutex> lk(mu_);
-          wrote_rows_total_ += (end - begin);
-          wrote_bytes_total_ += sb.GetSize();
+        const size_t row_limit = result_preview_row_limit_ > 0
+          ? static_cast<size_t>(result_preview_row_limit_)
+          : std::numeric_limits<size_t>::max();
+        const size_t max_rows_per_event = static_cast<size_t>(std::max(1, options_.result_rows_batch_size));
+        const size_t max_bytes_per_event = std::max<size_t>(16 * 1024, options_.result_rows_batch_bytes);
+        size_t row = 0;
+
+        while (row < block.GetRowCount() && rows_returned < row_limit) {
+          const size_t initial_capacity = std::min<size_t>(max_bytes_per_event, 64 * 1024);
+          rapidjson::StringBuffer sb(nullptr, initial_capacity);
+          rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+          w.StartObject();
+          w.Key("query_id"); w.String(query_id_.c_str());
+          w.Key("rows");
+          w.StartArray();
+
+          size_t rows_in_event = 0;
+          while (row < block.GetRowCount() &&
+                 rows_in_event < max_rows_per_event &&
+                 rows_returned < row_limit) {
+            w.StartArray();
+            for (size_t c = 0; c < block.GetColumnCount(); ++c) {
+              // Compatibility projections are already String columns. JSON and
+              // 256-bit values stay strings for backwards compatibility. Opaque
+              // aggregate states additionally get a valid-UTF8/hex safety guard.
+              if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
+                write_cell_json_declared(w, block[c], row, column_plans[c]->original_type);
+              } else {
+                write_cell_json(w, block[c], row);
+              }
+            }
+            w.EndArray();
+            ++row;
+            ++rows_in_event;
+            ++rows_returned;
+
+            // A single large row is always allowed through; subsequent rows are
+            // deferred to avoid multi-megabyte events and browser main-thread stalls.
+            if (rows_in_event > 0 && sb.GetSize() >= max_bytes_per_event) break;
+          }
+
+          w.EndArray();
+          w.EndObject();
+          push_sse_json_event("result_rows", std::string_view(sb.GetString(), sb.GetSize()));
+
+          {
+            std::lock_guard<std::mutex> lk(mu_);
+            wrote_rows_total_ += rows_in_event;
+            wrote_bytes_total_ += sb.GetSize();
+          }
         }
 
-        rows_returned += static_cast<int>(end - begin);
-        if (result_preview_row_limit_ > 0 && rows_returned >= result_preview_row_limit_) {
+        if (row < block.GetRowCount()) {
           {
             std::lock_guard<std::mutex> lk(mu_);
             status_ = SessionStatus::ResultLimitReached;
@@ -963,16 +1305,60 @@ void QuerySession::run_query() {
           }
           throw std::runtime_error("result_limit_reached");
         }
-      }
-    });
+      });
 
-    client_query_->Select(q);
+      client_query_->Select(q);
+      if (cache_new_plan_after_success) {
+        put_cached_describe_plan(plan_cache_key, result_plan, options_);
+      }
+    };
+
+    const bool force_describe = options_.describe_mode == QueryDescribeMode::Always;
+    const bool auto_describe = options_.describe_mode == QueryDescribeMode::Auto &&
+                               is_wrappable_select &&
+                               sql_likely_requires_compat_describe(sql_);
+    const bool initial_describe = force_describe || auto_describe;
+    const bool allow_describe_retry = options_.describe_mode == QueryDescribeMode::Auto &&
+                                      is_wrappable_select && !initial_describe;
+
+    try {
+      execute_select_attempt(initial_describe, true);
+    } catch (const std::exception& e) {
+      const std::string msg = e.what() ? std::string(e.what()) : std::string("error");
+      const bool can_retry_without_emitted_data = !meta_sent && rows_returned == 0 &&
+          msg != "canceled" && msg != "result_limit_reached" &&
+          !cancel_requested_.load(std::memory_order_relaxed);
+
+      if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_data) {
+        // Schema changed while a plan was cached. Retry the DESCRIBE once on a
+        // fresh native connection rather than returning a stale-plan failure.
+        invalidate_cached_describe_plan(plan_cache_key);
+        reset_query_connection_best_effort();
+        apply_database_best_effort();
+        reset_stats_for_compat_retry();
+        execute_select_attempt(true, false);
+      } else if (allow_describe_retry && can_retry_without_emitted_data &&
+                 should_retry_with_describe_after_fast_path_error(msg)) {
+        // A failed native decode can leave the connection mid-packet. Reset it
+        // before the compatibility retry, but do not emit anything yet.
+        reset_query_connection_best_effort();
+        apply_database_best_effort();
+        reset_stats_for_compat_retry();
+        meta_sent = false;
+        rows_returned = 0;
+        execute_select_attempt(true, true);
+      } else {
+        throw;
+      }
+    }
 
     refresh_stats_from_query_log_best_effort();
     finish_ok();
 
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
+    // Do not return possibly mid-stream/error-state clients to the idle pool as-is.
+    reset_query_connection_best_effort();
     refresh_stats_from_query_log_best_effort();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();

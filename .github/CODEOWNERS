@@ -8,4 +8,4 @@
 src/** @SCcagg5
 
 # Tests
-test/** @SCcagg5
+tests/** @SCcagg5
