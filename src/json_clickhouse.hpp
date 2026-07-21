@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <cstring>
@@ -114,6 +115,13 @@ inline void writer_string(rapidjson::Writer<rapidjson::StringBuffer>& w, std::st
   w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
 }
 
+inline void writer_finite_double(rapidjson::Writer<rapidjson::StringBuffer>& writer, double value) {
+  // JSON cannot represent NaN or infinity. Encode non-finite native
+  // floating-point values as null so every SSE data field remains valid JSON.
+  if (std::isfinite(value)) writer.Double(value);
+  else writer.Null();
+}
+
 inline std::string u128_to_string(clickhouse::UInt128 v) {
   if (v == 0) return "0";
   std::string out;
@@ -126,19 +134,24 @@ inline std::string u128_to_string(clickhouse::UInt128 v) {
   return out;
 }
 
+inline clickhouse::UInt128 i128_magnitude(clickhouse::Int128 value) {
+  if (value >= 0) return static_cast<clickhouse::UInt128>(value);
+  // Avoid signed overflow for the minimum Int128 value.
+  return static_cast<clickhouse::UInt128>(-(value + 1)) + 1;
+}
+
 inline std::string i128_to_string(clickhouse::Int128 v) {
   if (v == 0) return "0";
-  bool neg = v < 0;
-  clickhouse::UInt128 u = neg ? clickhouse::UInt128(-v) : clickhouse::UInt128(v);
-  std::string s = u128_to_string(u);
+  const bool neg = v < 0;
+  std::string s = u128_to_string(i128_magnitude(v));
   if (neg) s.insert(s.begin(), '-');
   return s;
 }
 
 inline std::string decimal_to_string(clickhouse::Int128 raw, size_t scale) {
   // raw is an integer scaled by 10^scale.
-  bool neg = raw < 0;
-  clickhouse::UInt128 u = neg ? clickhouse::UInt128(-raw) : clickhouse::UInt128(raw);
+  const bool neg = raw < 0;
+  clickhouse::UInt128 u = i128_magnitude(raw);
   std::string digits = u128_to_string(u);
 
   if (scale == 0) {
@@ -241,8 +254,8 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::UInt32: w.Uint(it.get<uint32_t>()); return;
     case Type::UInt64: w.Uint64(it.get<uint64_t>()); return;
 
-    case Type::Float32: w.Double(static_cast<double>(it.get<float>())); return;
-    case Type::Float64: w.Double(it.get<double>()); return;
+    case Type::Float32: writer_finite_double(w, static_cast<double>(it.get<float>())); return;
+    case Type::Float64: writer_finite_double(w, it.get<double>()); return;
 
     case Type::DateTime:
       writer_string(w, datetime_to_iso(it.get<uint32_t>()));

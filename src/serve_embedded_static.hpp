@@ -64,7 +64,19 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   const auto* a = chdash_embedded::find(rel);
   if (!a) return false;
 
-  res.set_header("Cache-Control", "public, max-age=31536000, immutable");
+  std::string etag;
+  etag.reserve(std::char_traits<char>::length(a->content_hash) + 2);
+  etag.push_back('"');
+  etag += a->content_hash;
+  etag.push_back('"');
+  res.set_header("ETag", etag);
+  // Asset URLs are stable rather than content-hashed. Revalidate cheaply so a
+  // newly deployed binary cannot be paired with stale JavaScript from cache.
+  res.set_header("Cache-Control", "public, max-age=0, must-revalidate");
+  if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
+    res.status = 304;
+    return true;
+  }
   res.set_content(
       reinterpret_cast<const char*>(a->data),
       a->size,

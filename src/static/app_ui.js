@@ -63,11 +63,8 @@
     if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
     applyHostPickerUi();
 
-    if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) {
-      ns.meta.hydrateFromStorage(state.selectedHostId);
-    }
-    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") {
-      ns.meta.maybeRefreshOnLoad();
+    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
+      ns.meta.prepareHost(state.selectedHostId);
     }
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") {
       state.highlightCtrl.refresh();
@@ -250,6 +247,7 @@
     let pollTimer = 0;
     let reconnectTimer = 0;
     let hasSnapshot = false;
+    let booting = false;
 
     const useSnapshot = (snap) => {
       if (!snap || !Array.isArray(snap.hosts)) return;
@@ -295,7 +293,7 @@
     };
 
     const schedulePoll = () => {
-      if (pollTimer) return;
+      if (document.hidden || pollTimer) return;
       pollTimer = setTimeout(async () => {
         pollTimer = 0;
         const ok = await fetchHostsOnce();
@@ -306,7 +304,7 @@
     };
 
     const scheduleReconnect = () => {
-      if (reconnectTimer || !hasSnapshot || es) return;
+      if (document.hidden || reconnectTimer || !hasSnapshot || es) return;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = 0;
         ensureStream();
@@ -314,7 +312,7 @@
     };
 
     const ensureStream = () => {
-      if (es || !hasSnapshot) return;
+      if (document.hidden || es || !hasSnapshot) return;
       stopReconnect();
 
       let next = null;
@@ -347,14 +345,30 @@
     };
 
     const boot = async () => {
-      const ok = await fetchHostsOnce();
-      if (!ok) {
-        setApiOnline(false);
-        schedulePoll();
+      if (document.hidden || booting) return;
+      booting = true;
+      try {
+        const ok = await fetchHostsOnce();
+        if (!ok) {
+          setApiOnline(false);
+          schedulePoll();
+          return;
+        }
+        ensureStream();
+      } finally {
+        booting = false;
+      }
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        closeStream();
+        stopPoll();
+        stopReconnect();
         return;
       }
-      ensureStream();
-    };
+      boot();
+    });
 
     boot();
   }
@@ -1276,11 +1290,8 @@
     initEditor();
     initEditorCopyButton();
 
-    if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) {
-      ns.meta.hydrateFromStorage(state.selectedHostId);
-    }
-    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") {
-      ns.meta.maybeRefreshOnLoad();
+    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
+      ns.meta.prepareHost(state.selectedHostId);
     }
 
     if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);

@@ -20,8 +20,8 @@ Thanks for contributing to `clickhouse-dash`.
 ### Local run
 
 ```bash
-cd test
-docker compose up --build
+cd tests
+docker compose up -d --build
 ```
 
 ### Local build
@@ -35,8 +35,9 @@ cmake --build build --target chdash
 ### Run tests
 
 ```bash
-cd test
-docker compose up --build --abort-on-container-exit --exit-code-from api-tests
+cd tests
+docker compose up -d --build
+docker compose exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
 ```
 
 ## Coding guidelines

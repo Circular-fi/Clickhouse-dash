@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en" data-theme-mode="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ClickHouse Dash - Quality Center</title>
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem("chdash.tests.theme") || "system";
+        if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
+        document.documentElement.dataset.themeMode = mode;
+        if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
+      } catch (_) {}
+    }());
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <div>
+        <div class="brand-line">ClickHouse Dash</div>
+        <div class="brand-subtitle">Quality and performance center</div>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <span id="connectionStatus" class="connection-pill is-connecting">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connectionText">Connexion...</span>
+      </span>
+      <a id="sourceLink" class="button button-ghost button-compact" href="http://localhost:18080" target="_blank" rel="noreferrer">Source</a>
+      <a id="releaseLink" class="button button-ghost button-compact" href="http://localhost:18081" target="_blank" rel="noreferrer">Release</a>
+      <a id="clickhouseLink" class="button button-ghost button-compact" href="http://localhost:18123/ping" target="_blank" rel="noreferrer">ClickHouse</a>
+      <button id="themeToggle" class="button button-ghost button-icon" type="button" aria-label="Change theme" title="Change theme">
+        <span id="themeIcon" aria-hidden="true">A</span>
+      </button>
+      <button id="refreshState" class="button button-ghost button-icon" type="button" aria-label="Refresh" title="Refresh">
+        <span aria-hidden="true">&#8635;</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="overview-panel">
+      <div class="overview-copy">
+        <p class="eyebrow">Validation locale reproductible</p>
+        <h1>Tests fonctionnels et benchmarks de performance</h1>
+        <p class="overview-description">
+          Compare the local build with the latest release, validate SSE streams, and measure the direct ClickHouse HTTP floor.
+        </p>
+      </div>
+      <div class="runner-control">
+        <div class="runner-status-line">
+          <span id="runnerStatus" class="status-badge idle"><span class="status-dot"></span><span>Idle</span></span>
+          <span id="runnerMeta" class="runner-meta">Ready</span>
+        </div>
+        <div class="runner-actions">
+          <button id="runAll" class="button button-secondary" type="button">Run all</button>
+          <button id="cancelJob" class="button button-danger" type="button" disabled>Stop</button>
+        </div>
+      </div>
+    </section>
+
+    <nav class="workspace-tabs" role="tablist" aria-label="Sections des resultats">
+      <button id="tabTests" class="workspace-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="testsPanel" data-tab="tests">
+        <span class="tab-icon" aria-hidden="true">&#10003;</span>
+        <span class="tab-copy"><strong>Tests</strong><small id="testsTabMeta">No results</small></span>
+        <span id="testsTabStatus" class="mini-status idle" aria-label="Statut tests"></span>
+      </button>
+      <button id="tabBenchmark" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="benchmarkPanel" data-tab="benchmark">
+        <span class="tab-icon" aria-hidden="true">&#9651;</span>
+        <span class="tab-copy"><strong>Benchmark</strong><small id="benchmarkTabMeta">No results</small></span>
+        <span id="benchmarkTabStatus" class="mini-status idle" aria-label="Statut benchmark"></span>
+      </button>
+    </nav>
+
+    <section id="testsPanel" class="tab-panel" role="tabpanel" aria-labelledby="tabTests" data-panel="tests">
+      <section class="section-toolbar panel">
+        <div>
+          <div class="section-title-line">
+            <h2>Suite de tests</h2>
+            <span id="testsHeaderStatus" class="status-badge idle"><span class="status-dot"></span><span>No run</span></span>
+          </div>
+          <p id="testsRunMeta" class="section-description">API tests run automatically when the runner starts.</p>
+        </div>
+        <div class="section-actions">
+          <button id="runTests" class="button button-primary" type="button">Run tests</button>
+          <a id="downloadTests" class="button button-secondary is-disabled" href="/api/report/tests.zip" download aria-disabled="true">Download ZIP report</a>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="Test metrics">
+        <article class="metric-card panel"><span class="metric-label">Total</span><strong id="testsTotal" class="metric-value">--</strong><small>cas executes</small></article>
+        <article class="metric-card panel metric-success"><span class="metric-label">Passed</span><strong id="testsPassed" class="metric-value">--</strong><small>successful checks</small></article>
+        <article class="metric-card panel metric-danger"><span class="metric-label">Failures</span><strong id="testsFailures" class="metric-value">--</strong><small id="testsErrorsMeta">0 errors</small></article>
+        <article class="metric-card panel"><span class="metric-label">Duration</span><strong id="testsDuration" class="metric-value">--</strong><small>pytest duration</small></article>
+        <article class="metric-card panel metric-warning"><span class="metric-label">Formatting</span><strong id="testsFormatDiffs" class="metric-value">--</strong><small id="testsFormatMeta">no differences</small></article>
+        <article class="metric-card panel metric-warning"><span class="metric-label">Native types</span><strong id="testsTypeRegressions" class="metric-value">--</strong><small id="testsTypeMeta">source / release diagnosis</small></article>
+      </section>
+
+      <section class="content-grid content-grid-tests">
+        <article class="panel">
+          <div class="panel-heading">
+            <div><h3>Failed tests</h3><p>Errors and assertions from the latest run.</p></div>
+            <span id="failedCasesCount" class="count-pill">0</span>
+          </div>
+          <div id="failedCases" class="empty-state compact">No results disponible.</div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div><h3>Key files</h3><p>Direct access to the most useful artifacts.</p></div>
+          </div>
+          <div id="testsLinks" class="resource-list"></div>
+          <div class="run-facts" id="testsFacts"></div>
+        </article>
+      </section>
+
+      <section class="panel format-panel">
+        <div class="panel-heading panel-heading-responsive">
+          <div>
+            <h3>SQL formatting comparison</h3>
+            <p>Expected and actual details load only when a case is opened.</p>
+          </div>
+          <div class="toolbar-inline">
+            <div class="segmented-control" role="group" aria-label="Formatting case filter">
+              <button id="formatFailures" class="segment is-active" type="button" data-format-filter="failures">Failures</button>
+              <button id="formatAll" class="segment" type="button" data-format-filter="all">All</button>
+            </div>
+            <label class="search-field">
+              <span class="sr-only">Search formatting tests</span>
+              <input id="formatSearch" type="search" placeholder="Search fixtures…" autocomplete="off">
+            </label>
+            <span id="formatResultCount" class="count-pill">0</span>
+          </div>
+        </div>
+        <div id="formatResults" class="format-list">
+          <div class="empty-state">No results de formatage disponible.</div>
+        </div>
+        <div class="load-more-row">
+          <button id="formatLoadMore" class="button button-secondary" type="button" hidden>Load more</button>
+        </div>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-heading">
+          <div><h3>Test log</h3><p>Incremental reading without reloading the rest of the page.</p></div>
+          <div class="log-actions"><span id="testsLogState" class="live-pill">Idle</span><a id="testsLogDownload" class="button button-ghost button-compact is-disabled" href="#" aria-disabled="true">Open log</a></div>
+        </div>
+        <pre id="testsLog" class="live-log" tabindex="0">No log available.</pre>
+      </section>
+
+      <section class="details-grid">
+        <details id="testsArtifactsDisclosure" class="panel disclosure-panel">
+          <summary><span><strong>Latest test artifacts</strong><small>Detailed list of files included in the ZIP report</small></span><span class="summary-chevron" aria-hidden="true">&#8250;</span></summary>
+          <div id="testsArtifacts" class="artifact-list"><div class="empty-state compact">Open this section to load artifacts.</div></div>
+        </details>
+        <details class="panel disclosure-panel">
+          <summary><span><strong>Test history</strong><small>Runs completed since the runner started</small></span><span class="summary-chevron" aria-hidden="true">&#8250;</span></summary>
+          <div id="testsHistory" class="history-list"><div class="empty-state compact">No history.</div></div>
+        </details>
+      </section>
+    </section>
+
+    <section id="benchmarkPanel" class="tab-panel" role="tabpanel" aria-labelledby="tabBenchmark" data-panel="benchmark" hidden>
+      <section class="section-toolbar panel">
+        <div>
+          <div class="section-title-line">
+            <h2>Comparative benchmark</h2>
+            <span id="benchmarkHeaderStatus" class="status-badge idle"><span class="status-dot"></span><span>No run</span></span>
+          </div>
+          <p id="benchmarkRunMeta" class="section-description">Source build vs release with a direct ClickHouse HTTP reference.</p>
+        </div>
+        <div class="section-actions">
+          <button id="runBenchmark" class="button button-primary" type="button">Run benchmark</button>
+          <a id="downloadBenchmark" class="button button-secondary is-disabled" href="/api/report/benchmark.zip" download aria-disabled="true">Download ZIP report</a>
+        </div>
+      </section>
+
+      <section class="metric-grid" aria-label="Benchmark metrics">
+        <article class="metric-card panel"><span class="metric-label">Comparisons</span><strong id="benchmarkComparisons" class="metric-value">--</strong><small>SSE source / release</small></article>
+        <article class="metric-card panel metric-success"><span class="metric-label">Median speedup</span><strong id="benchmarkSpeedup" class="metric-value">--</strong><small id="benchmarkWinsMeta">source faster</small></article>
+        <article class="metric-card panel"><span class="metric-label">HTTP reference</span><strong id="benchmarkHttpCount" class="metric-value">--</strong><small>direct measurements</small></article>
+        <article class="metric-card panel metric-warning"><span class="metric-label">Median wire overhead</span><strong id="benchmarkOverhead" class="metric-value">--</strong><small id="benchmarkRatioMeta">vs raw HTTP transport</small></article>
+        <article class="metric-card panel metric-danger"><span class="metric-label">Errors</span><strong id="benchmarkIssues" class="metric-value">--</strong><small>blocking findings</small></article>
+        <article class="metric-card panel metric-warning"><span class="metric-label">Warnings</span><strong id="benchmarkWarnings" class="metric-value">--</strong><small>expected or non-blocking differences</small></article>
+      </section>
+
+      <section class="panel benchmark-results-panel">
+        <div class="panel-heading panel-heading-responsive">
+          <div><h3>Detailed results</h3><p>Tables remain mounted across updates, so their scroll position is preserved.</p></div>
+          <label class="search-field benchmark-search">
+            <span class="sr-only">Filter benchmark queries</span>
+            <input id="benchmarkSearch" type="search" placeholder="Filter by host, query, or target…" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="result-section">
+          <div class="subheading"><div><h4>Source vs release</h4><p>Complete SSE latency and semantic validation.</p></div><span id="comparisonCount" class="count-pill">0</span></div>
+          <div id="comparisonTable" class="data-scroll"><div class="empty-state">No benchmark available.</div></div>
+        </div>
+
+        <div class="result-section">
+          <div class="subheading"><div><h4>ClickHouse HTTP direct</h4><p>Raw network floor and verified duration after Python decoding and hashing.</p></div><span id="httpOverheadCount" class="count-pill">0</span></div>
+          <div id="httpOverheadTable" class="data-scroll"><div class="empty-state">No direct HTTP measurements.</div></div>
+        </div>
+      </section>
+
+      <section id="benchmarkIssuesPanel" class="panel issues-panel" hidden>
+        <div class="panel-heading"><div><h3>Blocking findings</h3><p>Execution errors or deterministic content and event divergences.</p></div><span id="benchmarkIssuesCount" class="count-pill danger">0</span></div>
+        <div id="benchmarkIssueList" class="issue-list"></div>
+      </section>
+
+      <section id="benchmarkWarningsPanel" class="panel issues-panel warning-panel" hidden>
+        <div class="panel-heading"><div><h3>Non-blocking differences</h3><p>Expected batching, timing cadence, historical-release, and telemetry-schema differences.</p></div><span id="benchmarkWarningsCount" class="count-pill">0</span></div>
+        <div id="benchmarkWarningList" class="issue-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading"><div><h3>Key files</h3><p>CSV, JSON, Markdown reports, and complete traces.</p></div></div>
+        <div id="benchmarkLinks" class="resource-list resource-list-wide"></div>
+      </section>
+
+      <section class="panel log-panel">
+        <div class="panel-heading">
+          <div><h3>Benchmark log</h3><p>Progress of source, release, and direct HTTP runs.</p></div>
+          <div class="log-actions"><span id="benchmarkLogState" class="live-pill">Idle</span><a id="benchmarkLogDownload" class="button button-ghost button-compact is-disabled" href="#" aria-disabled="true">Open log</a></div>
+        </div>
+        <pre id="benchmarkLog" class="live-log" tabindex="0">No log available.</pre>
+      </section>
+
+      <section class="details-grid">
+        <details id="benchmarkArtifactsDisclosure" class="panel disclosure-panel">
+          <summary><span><strong>Latest benchmark artifacts</strong><small>JSONL, CSV, Markdown, and compressed SSE traces</small></span><span class="summary-chevron" aria-hidden="true">&#8250;</span></summary>
+          <div id="benchmarkArtifacts" class="artifact-list"><div class="empty-state compact">Open this section to load artifacts.</div></div>
+        </details>
+        <details class="panel disclosure-panel">
+          <summary><span><strong>Benchmark history</strong><small>Runs completed since the runner started</small></span><span class="summary-chevron" aria-hidden="true">&#8250;</span></summary>
+          <div id="benchmarkHistory" class="history-list"><div class="empty-state compact">No history.</div></div>
+        </details>
+      </section>
+    </section>
+  </main>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

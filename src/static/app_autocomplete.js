@@ -1106,11 +1106,19 @@
   }
 
   function columnsFor(meta, database, table) {
-    const key = `${database || ""}.${table || ""}`.toLowerCase();
-    const idx = meta?.autocomplete?.columnsByTable;
-    if (idx && idx.has(key)) return idx.get(key) || [];
-    const cols = Array.isArray(meta?.columns?.items) ? meta.columns.items : [];
-    return cols.filter((c) => norm(c.database) === norm(database) && norm(c.table) === norm(table));
+    const normalizedDatabase = String(database || "");
+    const normalizedTable = String(table || "");
+    if (!normalizedDatabase || !normalizedTable) return [];
+    const cached = ns.meta && typeof ns.meta.getTableColumns === "function"
+      ? ns.meta.getTableColumns(normalizedDatabase, normalizedTable)
+      : null;
+    if (Array.isArray(cached)) return cached;
+    if (ns.meta && typeof ns.meta.ensureTableColumns === "function") {
+      // The request is de-duplicated by app_meta. Suggestions are refreshed
+      // when the scoped column list arrives.
+      ns.meta.ensureTableColumns(normalizedDatabase, normalizedTable);
+    }
+    return [];
   }
 
   function tablesForDatabase(meta, database) {
@@ -3016,7 +3024,10 @@
   }
 
   function refresh() {
-    if (isOpen()) update(lastExplicit);
+    if (isOpen()) {
+      lastUpdateKey = "";
+      update(lastExplicit);
+    }
     scheduleDiagnostics(false);
   }
 

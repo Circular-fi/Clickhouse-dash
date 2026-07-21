@@ -1,6 +1,7 @@
 #include "ch_uri.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cctype>
 #include <sstream>
 
@@ -135,6 +136,55 @@ static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& po
 }
 
 } // namespace
+
+
+std::string redact_clickhouse_uri(const std::string& uri) {
+  try {
+    std::string out = uri;
+    const size_t scheme = out.find("://");
+    if (scheme == std::string::npos) return "<redacted-uri>";
+
+    const size_t authority_begin = scheme + 3;
+    const size_t authority_end = out.find_first_of("/?#", authority_begin);
+    const size_t end = authority_end == std::string::npos ? out.size() : authority_end;
+    const size_t at = out.rfind('@', end);
+    if (at != std::string::npos && at >= authority_begin) {
+      const size_t colon = out.find(':', authority_begin);
+      if (colon != std::string::npos && colon < at) {
+        out.replace(colon + 1, at - colon - 1, "***");
+      }
+    }
+
+    const size_t query = out.find('?', authority_begin);
+    if (query == std::string::npos) return out;
+
+    size_t pos = query + 1;
+    while (pos < out.size()) {
+      const size_t amp = out.find('&', pos);
+      const size_t item_end = amp == std::string::npos ? out.size() : amp;
+      const size_t eq = out.find('=', pos);
+      if (eq != std::string::npos && eq < item_end) {
+        std::string key = to_lower(url_decode(std::string_view(out).substr(pos, eq - pos)));
+        const bool sensitive = key == "password" || key == "passwd" ||
+            key == "token" || key == "access_token" || key == "secret" ||
+            key == "api_key" || key == "apikey";
+        if (sensitive) {
+          const size_t old_len = item_end - eq - 1;
+          out.replace(eq + 1, old_len, "***");
+          const std::ptrdiff_t delta = static_cast<std::ptrdiff_t>(3) - static_cast<std::ptrdiff_t>(old_len);
+          if (amp == std::string::npos) break;
+          pos = static_cast<size_t>(static_cast<std::ptrdiff_t>(amp + 1) + delta);
+          continue;
+        }
+      }
+      if (amp == std::string::npos) break;
+      pos = amp + 1;
+    }
+    return out;
+  } catch (...) {
+    return "<redacted-uri>";
+  }
+}
 
 bool query_param_truthy(const std::unordered_map<std::string, std::string>& q, const std::string& key, bool def) {
   auto it = q.find(key);

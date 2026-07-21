@@ -63,11 +63,14 @@
     return payload;
   }
 
-  async function getMeta(hostId, types) {
+  async function getMeta(hostId, types, scope = null) {
     if (!hostId) throw new Error("No host selected.");
     const arr = Array.isArray(types) ? types.filter((x) => x) : [];
     const typesCsv = arr.length ? arr.map((x) => String(x)).join(",") : "keywords";
-    const qs = new URLSearchParams({ host_id: String(hostId), types: typesCsv }).toString();
+    const query = new URLSearchParams({ host_id: String(hostId), types: typesCsv });
+    if (scope && scope.database != null) query.set("database", String(scope.database));
+    if (scope && scope.table != null) query.set("table", String(scope.table));
+    const qs = query.toString();
     let response;
     try {
       response = await fetch(`api/meta?${qs}`, { cache: "no-store" });

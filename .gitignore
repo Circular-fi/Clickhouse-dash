@@ -10,8 +10,8 @@
 # Test artifacts
 /result.txt
 /results.txt
-/test/artifacts/
-/test/api/artifacts/
+/tests/artifacts/*
+!/tests/artifacts/.gitkeep
 
 # Python
 __pycache__/
@@ -29,9 +29,16 @@ Thumbs.db
 # Environment and local overrides
 .env
 .env.*
+!**/.env.example
 *.local
 
 # Archives
 *.zip
 *.tar
 *.tar.gz
+
+# Test fixture release archives
+!/tests/releases/*.tar.gz
+!/tests/releases/*.tgz
+!/tests/releases/*.tar
+!/tests/releases/*.zip

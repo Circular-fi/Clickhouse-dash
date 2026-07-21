@@ -21,7 +21,6 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
   w.String(message.data(), static_cast<rapidjson::SizeType>(message.size()));
   w.EndObject();
   res.status = status;
-  res.set_header("Content-Type", "application/json");
   res.set_content(sb.GetString(), "application/json");
 }
 
@@ -407,7 +406,6 @@ void json_error_with_payload(
 ) {
   const std::string payload = build_error_payload_json(code, message, loc, query_id, index);
   res.status = status;
-  res.set_header("Content-Type", "application/json");
   res.set_content(payload, "application/json");
 }
 

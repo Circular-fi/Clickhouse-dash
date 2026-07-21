@@ -32,17 +32,15 @@ jobs:
 
       - name: Build and run integration tests
         run: |
-          docker compose -f test/docker-compose.yml up \
-            --build \
-            --abort-on-container-exit \
-            --exit-code-from api-tests
+          docker compose -f tests/docker-compose.yml up -d --build
+          docker compose -f tests/docker-compose.yml exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
 
       - name: Collect logs
         if: always()
         run: |
           mkdir -p artifacts
-          docker compose -f test/docker-compose.yml ps -a > artifacts/compose-ps.txt || true
-          docker compose -f test/docker-compose.yml logs --no-color > artifacts/compose.log || true
+          docker compose -f tests/docker-compose.yml ps -a > artifacts/compose-ps.txt || true
+          docker compose -f tests/docker-compose.yml logs --no-color > artifacts/compose.log || true
 
       - name: Upload logs
         if: always()
@@ -54,4 +52,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f test/docker-compose.yml down -v --remove-orphans || true
+        run: docker compose -f tests/docker-compose.yml down -v --remove-orphans || true

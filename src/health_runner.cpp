@@ -18,8 +18,12 @@ static int64_t now_ms() {
 }
 
 
-static constexpr int64_t kSystemTablesRefreshMs = 30000;
-static constexpr int64_t kHostVersionRefreshMs = 30000;
+int normalize_health_interval_ms(int interval_ms) {
+  return std::max(250, std::min(600 * 1000, interval_ms));
+}
+
+static constexpr int64_t kSystemTablesRefreshMs = 10 * 60 * 1000;
+static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
 
 static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
   HostSystemTables out;
@@ -76,7 +80,8 @@ static std::string detect_host_version(clickhouse::Client* client) {
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
   : hosts_(std::move(hosts)), settings_(settings) {
 
-  if (settings_.interval_ms > 600 * 1000) settings_.interval_ms = 600 * 1000;
+  settings_.interval_ms = normalize_health_interval_ms(settings_.interval_ms);
+  settings_.timeout_ms = std::max(100, std::min(60 * 1000, settings_.timeout_ms));
 
   // Initialize snapshot with all hosts non-healthy.
   std::lock_guard<std::mutex> lk(mu_);
@@ -105,6 +110,7 @@ void HealthRunner::start() {
 
 void HealthRunner::stop() {
   stop_.store(true, std::memory_order_relaxed);
+  cv_.notify_all();
   if (th_.joinable()) th_.join();
 }
 
@@ -160,199 +166,202 @@ void HealthRunner::loop() {
     const int64_t ts = now_ms();
 
     struct InitJob {
-      size_t idx;
+      size_t index = 0;
       std::string id;
       std::string uri;
     };
 
-    std::vector<InitJob> init;
+    std::vector<InitJob> init_jobs;
     {
       std::lock_guard<std::mutex> lk(mu_);
+      init_jobs.reserve(ctx_.size());
       for (size_t i = 0; i < ctx_.size(); ++i) {
-        const auto& c = ctx_[i];
-        if (c.client) continue;
-        init.push_back(InitJob{i, c.spec.id, c.spec.system_uri});
+        if (!ctx_[i].client) init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.system_uri});
       }
     }
 
-    for (const auto& j : init) {
+    // Client creation is intentionally outside the runner mutex because DNS and
+    // connect timeouts may block. Repeated identical failures are logged once,
+    // not every retry cycle.
+    for (const auto& job : init_jobs) {
+      if (stop_.load(std::memory_order_relaxed)) break;
       std::string err;
       auto client = make_client_from_uri(
-        j.uri,
-        milliseconds(settings_.timeout_ms),
-        milliseconds(settings_.timeout_ms),
-        milliseconds(settings_.timeout_ms),
-        &err
-      );
-      if (!client) {
-        std::cerr << "[health] host=" << j.id << " client init error: " << err << "\n";
-        continue;
-      }
+          job.uri,
+          milliseconds(settings_.timeout_ms),
+          milliseconds(settings_.timeout_ms),
+          milliseconds(settings_.timeout_ms),
+          &err);
+
       std::lock_guard<std::mutex> lk(mu_);
-      if (j.idx < ctx_.size() && !ctx_[j.idx].client) {
-        ctx_[j.idx].client = std::move(client);
+      if (job.index >= ctx_.size() || ctx_[job.index].client) continue;
+      auto& ctx = ctx_[job.index];
+      if (client) {
+        ctx.client = std::move(client);
+        ctx.last_error.clear();
+      } else {
+        const std::string message = err.empty() ? "client initialization failed" : err;
+        if (ctx.last_error != message) {
+          std::cerr << "[health] host=" << job.id << " client init error: " << message << "\n";
+        }
+        ctx.last_error = message;
+        ctx.last.checked_at_ms = ts;
+        ctx.last.healthy = false;
+        ctx.last.ping_ms = -1;
       }
     }
-
-    // Ping each host concurrently (one client per host).
-    struct PingRes {
-      std::string id;
-      bool ok;
-      int64_t ping_ms;
-      std::string err;
-    };
 
     struct PingJob {
-      std::string id;
+      size_t index = 0;
+      std::shared_ptr<clickhouse::Client> client;
+    };
+    struct PingResult {
+      size_t index = 0;
+      bool ok = false;
+      int64_t ping_ms = -1;
+      std::string error;
+    };
+    struct AuxiliaryJob {
+      size_t index = 0;
       std::shared_ptr<clickhouse::Client> client;
     };
 
-    struct CapsJob {
-      std::string id;
-      std::shared_ptr<clickhouse::Client> client;
-    };
-
-    struct VersionJob {
-      std::string id;
-      std::shared_ptr<clickhouse::Client> client;
-    };
-
-    std::vector<PingJob> jobs;
-    std::vector<CapsJob> caps_jobs;
-    std::vector<VersionJob> version_jobs;
+    std::vector<PingJob> ping_jobs;
+    std::vector<AuxiliaryJob> caps_jobs;
+    std::vector<AuxiliaryJob> version_jobs;
+    size_t context_count = 0;
     {
       std::lock_guard<std::mutex> lk(mu_);
-      jobs.reserve(ctx_.size());
-      for (auto& c : ctx_) {
-        jobs.push_back(PingJob{c.spec.id, c.client});
-        if (c.client && (c.last.system_tables.checked_at_ms == 0 || (ts - c.last.system_tables.checked_at_ms) >= kSystemTablesRefreshMs)) {
-          caps_jobs.push_back(CapsJob{c.spec.id, c.client});
+      context_count = ctx_.size();
+      ping_jobs.reserve(ctx_.size());
+      for (size_t i = 0; i < ctx_.size(); ++i) {
+        const auto& ctx = ctx_[i];
+        ping_jobs.push_back(PingJob{i, ctx.client});
+        if (ctx.client &&
+            (ctx.last.system_tables.checked_at_ms == 0 ||
+             ts - ctx.last.system_tables.checked_at_ms >= kSystemTablesRefreshMs)) {
+          caps_jobs.push_back(AuxiliaryJob{i, ctx.client});
         }
-        if (c.client && (c.last.version_checked_at_ms == 0 || (ts - c.last.version_checked_at_ms) >= kHostVersionRefreshMs)) {
-          version_jobs.push_back(VersionJob{c.spec.id, c.client});
+        if (ctx.client &&
+            (ctx.last.version_checked_at_ms == 0 ||
+             ts - ctx.last.version_checked_at_ms >= kHostVersionRefreshMs)) {
+          version_jobs.push_back(AuxiliaryJob{i, ctx.client});
         }
       }
     }
 
-    std::vector<std::future<PingRes>> futs;
-    futs.reserve(jobs.size());
-    for (const auto& j : jobs) {
-      futs.push_back(std::async(std::launch::async, [j]() -> PingRes {
-        PingRes r;
-        r.id = j.id;
-        r.ok = false;
-        r.ping_ms = -1;
-        if (!j.client) {
-          r.err = "no client";
-          return r;
-        }
+    auto ping_one = [](const PingJob& job) {
+      PingResult result;
+      result.index = job.index;
+      if (!job.client) {
+        result.error = "no client";
+        return result;
+      }
+      try {
+        const auto started = steady_clock::now();
+        job.client->Ping();
+        result.ok = true;
+        result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
+      } catch (const std::exception& e) {
+        result.error = e.what();
         try {
-          auto t0 = std::chrono::steady_clock::now();
-          j.client->Ping();
-          auto t1 = std::chrono::steady_clock::now();
-          r.ok = true;
-          r.ping_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
-          return r;
-        } catch (const std::exception& e) {
-          r.err = e.what();
-          try {
-            j.client->ResetConnection();
-          } catch (...) {}
-          return r;
+          job.client->ResetConnection();
+        } catch (...) {
         }
-      }));
+      } catch (...) {
+        result.error = "unknown ping failure";
+        try {
+          job.client->ResetConnection();
+        } catch (...) {
+        }
+      }
+      return result;
+    };
+
+    std::vector<PingResult> ping_results;
+    ping_results.reserve(ping_jobs.size());
+    if (ping_jobs.size() <= 1) {
+      for (const auto& job : ping_jobs) ping_results.push_back(ping_one(job));
+    } else {
+      // Preserve parallel health checks for multiple hosts, but avoid spawning a
+      // short-lived std::async worker every five seconds in the common 1-host case.
+      std::vector<std::future<PingResult>> futures;
+      futures.reserve(ping_jobs.size());
+      for (const auto& job : ping_jobs) {
+        futures.push_back(std::async(std::launch::async, [job, ping_one] { return ping_one(job); }));
+      }
+      for (auto& future : futures) ping_results.push_back(future.get());
     }
 
-    std::vector<PingRes> ping_results;
-    ping_results.reserve(futs.size());
-    for (auto& f : futs) ping_results.push_back(f.get());
+    std::vector<bool> ping_ok(context_count, false);
+    for (const auto& result : ping_results) {
+      if (result.index < ping_ok.size()) ping_ok[result.index] = result.ok;
+    }
 
-    std::vector<std::pair<std::string, HostSystemTables>> caps_results;
+    std::vector<std::pair<size_t, HostSystemTables>> caps_results;
     caps_results.reserve(caps_jobs.size());
-    for (const auto& j : caps_jobs) {
-      bool ping_ok = false;
-      for (const auto& r : ping_results) {
-        if (r.id == j.id) {
-          ping_ok = r.ok;
-          break;
-        }
+    for (const auto& job : caps_jobs) {
+      if (job.index < ping_ok.size() && ping_ok[job.index]) {
+        caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
       }
-      if (!ping_ok) continue;
-      caps_results.emplace_back(j.id, detect_system_tables(j.client.get(), ts));
     }
 
-    std::vector<std::pair<std::string, std::string>> version_results;
+    std::vector<std::pair<size_t, std::string>> version_results;
     version_results.reserve(version_jobs.size());
-    for (const auto& j : version_jobs) {
-      bool ping_ok = false;
-      for (const auto& r : ping_results) {
-        if (r.id == j.id) {
-          ping_ok = r.ok;
-          break;
-        }
+    for (const auto& job : version_jobs) {
+      if (job.index < ping_ok.size() && ping_ok[job.index]) {
+        version_results.emplace_back(job.index, detect_host_version(job.client.get()));
       }
-      if (!ping_ok) continue;
-      version_results.emplace_back(j.id, detect_host_version(j.client.get()));
     }
 
-    // Apply results
     {
       std::lock_guard<std::mutex> lk(mu_);
-      for (const auto& r : ping_results) {
-        for (auto& c : ctx_) {
-          if (c.spec.id != r.id) continue;
-          c.last.checked_at_ms = ts;
-          c.last.healthy = r.ok;
-          c.last.ping_ms = r.ok ? r.ping_ms : -1;
-          if (!r.ok) {
-            std::cerr << "[health] host=" << c.spec.id << " down: " << r.err << "\n";
+      for (const auto& result : ping_results) {
+        if (result.index >= ctx_.size()) continue;
+        auto& ctx = ctx_[result.index];
+        const bool was_healthy = ctx.last.healthy;
+        ctx.last.checked_at_ms = ts;
+        ctx.last.healthy = result.ok;
+        ctx.last.ping_ms = result.ok ? result.ping_ms : -1;
+        if (result.ok) {
+          ctx.last_error.clear();
+        } else if (ctx.client) {
+          const std::string message = result.error.empty() ? "ping failed" : result.error;
+          if (was_healthy || ctx.last_error != message) {
+            std::cerr << "[health] host=" << ctx.spec.id << " down: " << message << "\n";
           }
-          break;
+          ctx.last_error = message;
         }
       }
-      for (const auto& item : caps_results) {
-        for (auto& c : ctx_) {
-          if (c.spec.id != item.first) continue;
-          c.last.system_tables = item.second;
-          break;
-        }
+      for (auto& result : caps_results) {
+        if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = std::move(result.second);
       }
-      for (const auto& item : version_results) {
-        for (auto& c : ctx_) {
-          if (c.spec.id != item.first) continue;
-          c.last.version_checked_at_ms = ts;
-          if (!item.second.empty()) c.last.clickhouse_version = item.second;
-          break;
-        }
+      for (auto& result : version_results) {
+        if (result.first >= ctx_.size()) continue;
+        auto& health = ctx_[result.first].last;
+        health.version_checked_at_ms = ts;
+        if (!result.second.empty()) health.clickhouse_version = std::move(result.second);
       }
-
-      // Publish update.
-      version_++;
+      ++version_;
     }
-
     cv_.notify_all();
 
-    // Sleep until next interval.
     const auto elapsed = duration_cast<milliseconds>(steady_clock::now() - tick_start);
     int effective_interval_ms = settings_.interval_ms;
     {
       std::lock_guard<std::mutex> lk(mu_);
-      for (const auto& c : ctx_) {
-        if (!c.client) {
+      for (const auto& ctx : ctx_) {
+        if (!ctx.client) {
           effective_interval_ms = std::min(effective_interval_ms, 1000);
           break;
         }
       }
     }
-    const auto wait_ms = milliseconds(effective_interval_ms) - elapsed;
-    if (wait_ms.count() > 0) {
-      const auto step = milliseconds(50);
-      auto remaining = wait_ms;
-      while (remaining.count() > 0 && !stop_.load(std::memory_order_relaxed)) {
-        auto s = remaining < step ? remaining : step;
-        std::this_thread::sleep_for(s);
-        remaining -= s;
-      }
+
+    const auto remaining = milliseconds(effective_interval_ms) - elapsed;
+    if (remaining.count() > 0) {
+      std::unique_lock<std::mutex> lk(mu_);
+      cv_.wait_for(lk, remaining, [&] { return stop_.load(std::memory_order_relaxed); });
     }
   }
 }

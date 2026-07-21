@@ -1,0 +1,96 @@
+{
+  "queries": [
+    {
+      "name": "select_1",
+      "sql": "SELECT 1 AS one",
+      "expected_rows": 1,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "numbers_1000",
+      "sql": "SELECT number FROM numbers(1000)",
+      "expected_rows": 1000,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "mixed_types_10000",
+      "sql": "SELECT number, toString(number) AS label, cityHash64(number) AS hash, number % 100 AS bucket FROM numbers(10000)",
+      "expected_rows": 10000,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "result_stream_50000",
+      "sql": "SELECT number, toString(number) AS label, cityHash64(number) AS hash FROM numbers(50000)",
+      "expected_rows": 50000,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "cpu_progress_aggregate",
+      "sql": "SELECT sum(cityHash64(number)) AS checksum, count() AS n FROM numbers(5000000)",
+      "expected_rows": 1,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "non_finite_float_json",
+      "sql": "SELECT number % (number / 2) AS value, count() AS count FROM numbers(1000000) GROUP BY ALL ORDER BY isNaN(value), value",
+      "expected_rows": 2,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    },
+    {
+      "name": "active_query_log_example",
+      "enabled": false,
+      "sql": "SELECT event_time, query_duration_ms, read_rows, read_bytes, memory_usage, query FROM system.query_log WHERE event_time >= now() - INTERVAL 1 DAY AND type = 'QueryFinish' ORDER BY event_time DESC LIMIT 10000",
+      "expected_min_rows": 0,
+      "required_events": [
+        "meta",
+        "result_meta",
+        "result_rows",
+        "tick",
+        "done"
+      ],
+      "expected_status": "finished"
+    }
+  ]
+}

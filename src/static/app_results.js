@@ -1422,11 +1422,6 @@
     applyLiveBodyHold();
   }
 
-  function enqueueRowForRender(row) {
-    pendingRows.push(row);
-    scheduleFlush();
-  }
-
   function scheduleFlush() {
     if (scheduledFlush) return;
     scheduledFlush = true;
@@ -1456,9 +1451,11 @@
 
     const frag = document.createDocumentFragment();
     const toRender = Math.min(flushBatchSize, pendingRows.length);
+    // One splice is O(n); repeatedly shifting the head was O(n²) for large
+    // result streams because every row moved the remainder of the array.
+    const rowsToRender = pendingRows.splice(0, toRender);
 
-    for (let i = 0; i < toRender; i++) {
-      const row = pendingRows.shift();
+    for (const row of rowsToRender) {
       const tr = document.createElement("tr");
       appendLiveRowCells(tr, row);
       frag.appendChild(tr);
@@ -1470,16 +1467,32 @@
   }
 
   function appendRows(rowsChunk) {
-    if (!Array.isArray(rowsChunk)) return;
+    if (!Array.isArray(rowsChunk) || rowsChunk.length === 0) return;
+
+    let needsFullRender = isLiveSortActive() || isVirtualResults;
     for (const row of rowsChunk) {
       if (!Array.isArray(row)) continue;
       rowIndexCounter++;
       row.__chdashRowIndex = rowIndexCounter;
       updateLiveGaugeMaximaFromRow(row);
       allResultRows.push(row);
-      if (isLiveSortActive() || isVirtualResults || allResultRows.length > virtualRowThreshold) scheduleLiveTableFullRender();
-      else enqueueRowForRender(row);
+
+      if (!needsFullRender && allResultRows.length <= virtualRowThreshold) {
+        pendingRows.push(row);
+      } else {
+        needsFullRender = true;
+      }
     }
+
+    // Schedule at most one DOM update per SSE batch. Large batches previously
+    // called the scheduler once per row, creating avoidable main-thread work.
+    if (needsFullRender) {
+      pendingRows.length = 0;
+      scheduleLiveTableFullRender();
+    } else if (pendingRows.length > 0) {
+      scheduleFlush();
+    }
+
     setResultsVisible(true);
     updateCopyButtonState();
     applyLiveBodyHold();

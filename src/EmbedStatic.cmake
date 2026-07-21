@@ -23,7 +23,7 @@ function(chdash_embed_directory DIR OUTPUT_CPP OUTPUT_HPP NS)
 #include <string_view>
 
 namespace ${NS} {
-struct Asset { const char* path; const unsigned char* data; size_t size; };
+struct Asset { const char* path; const unsigned char* data; size_t size; const char* content_hash; };
 // Returns nullptr if not found.
 const Asset* find(std::string_view path);
 }
@@ -48,19 +48,20 @@ namespace ${NS} {
     string(REPLACE ":" "_" sym "${sym}")
 
     file(READ "${_abs}" _hex HEX)
+    file(SHA256 "${_abs}" _sha256)
     string(LENGTH "${_hex}" _hex_len)
 
     if((_hex_len LESS 2) OR (NOT (_hex_len GREATER 0)))
       # Empty file: emit empty array
       file(APPEND "${_cpp}" "static const unsigned char data_${sym}[] = {};\n")
-      file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, 0};\n\n")
+      file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, 0, \"${_sha256}\"};\n\n")
       continue()
     endif()
 
     math(EXPR _nbytes "${_hex_len} / 2")
     if(_nbytes LESS 1)
       file(APPEND "${_cpp}" "static const unsigned char data_${sym}[] = {};\n")
-      file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, 0};\n\n")
+      file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, 0, \"${_sha256}\"};\n\n")
       continue()
     endif()
 
@@ -86,7 +87,7 @@ namespace ${NS} {
     endforeach()
 
     file(APPEND "${_cpp}" "\n};\n")
-    file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, sizeof(data_${sym})};\n\n")
+    file(APPEND "${_cpp}" "static const Asset asset_${sym} = {\"${f}\", data_${sym}, sizeof(data_${sym}), \"${_sha256}\"};\n\n")
   endforeach()
 
   file(APPEND "${_cpp}" "static const Asset* assets[] = {\n")
