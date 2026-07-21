@@ -548,6 +548,27 @@ def test_format_preserves_exact_literal_spelling() -> None:
     assert "'it''s \\\\ exact'" in formatted
 
 
+def test_format_preserves_function_delimiter_literal() -> None:
+    sql = "SELECT arrayStringConcat(['a', 'b'], ',') AS joined"
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert "arrayStringConcat(['a', 'b'], ',')" in formatted
+    assert "arrayStringConcat(['a', 'b'], ', ')" not in formatted
+
+
+def test_format_preserves_quoted_identifier_after_unquoted_alias() -> None:
+    sql = 'SELECT 1 AS first_alias, 2 AS "second alias"'
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert '"second alias"' in formatted
+    assert '`first_alias`' in formatted
+
+
+def test_format_preserves_doubled_quotes_in_commented_identifier() -> None:
+    sql = '/* keep */ SELECT 1 AS "commented""alias"'
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert '"commented""alias"' in formatted
+    assert '`commented""alias`' not in formatted
+
+
 def test_format_clamps_line_width() -> None:
     payload = post_format_payload({"sql": "SELECT 1", "line_width": 10_000}).json()
     assert payload["line_width"] == 200

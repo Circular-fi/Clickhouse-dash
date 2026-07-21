@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <deque>
 #include <memory>
 #include <string>
 
@@ -18,14 +17,29 @@ namespace {
 
 constexpr auto kTickInterval = std::chrono::milliseconds(250);
 
-static std::string build_meta_json(const std::string& qid) {
-  rapidjson::StringBuffer sb(nullptr, 128);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("query_id"); w.String(qid.c_str());
-  w.Key("status"); w.String("connected");
-  w.EndObject();
-  return std::string(sb.GetString(), sb.GetSize());
+static std::string build_meta_json(const std::string& query_id) {
+  rapidjson::StringBuffer buffer(nullptr, 384);
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("query_id"); writer.String(query_id.c_str());
+  writer.Key("status"); writer.String("connected");
+  writer.Key("telemetry");
+  writer.StartObject();
+  writer.Key("schema_version"); writer.Int(2);
+  writer.Key("source"); writer.String("clickhouse_native_tcp");
+  writer.Key("metrics");
+  writer.StartArray();
+  writer.String("progress");
+  writer.String("read_rate");
+  writer.String("cpu_time");
+  writer.String("memory_tracker");
+  writer.String("cpu_scheduler_wait");
+  writer.String("io_wait");
+  writer.String("temporary_data_on_disk");
+  writer.EndArray();
+  writer.EndObject();
+  writer.EndObject();
+  return std::string(buffer.GetString(), buffer.GetSize());
 }
 
 struct StreamState {
@@ -38,10 +52,9 @@ struct StreamState {
 
   uint64_t prev_read_rows = 0;
   uint64_t prev_read_bytes = 0;
-
   int64_t prev_cpu_total_us = 0;
-  int64_t cpu_inst_max_centi = 0;
-  int64_t thread_peak = 0;
+  int64_t prev_cpu_wait_total_us = 0;
+  int64_t prev_io_wait_total_us = 0;
 };
 
 static bool is_terminal(SessionStatus status) {
@@ -51,93 +64,142 @@ static bool is_terminal(SessionStatus status) {
          status == SessionStatus::ResultLimitReached;
 }
 
-static std::string build_tick_json(const SessionSnapshot& snap, StreamState& st) {
-  int64_t percent_centi = 0;
-  int64_t known_int = 0;
-  if (snap.total_rows_to_read > 0) {
-    known_int = 1;
-    const __int128 num = static_cast<__int128>(snap.read_rows_total) * 10000;
-    percent_centi = static_cast<int64_t>(num / static_cast<__int128>(snap.total_rows_to_read));
-    percent_centi = std::max<int64_t>(0, std::min<int64_t>(10000, percent_centi));
+static void write_nullable_int64(
+    rapidjson::Writer<rapidjson::StringBuffer>& writer,
+    int64_t value
+) {
+  if (value < 0) writer.Null();
+  else writer.Int64(value);
+}
+
+static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState& state) {
+  int64_t progress_percent_centi = 0;
+  const bool progress_known = snapshot.total_rows_to_read > 0;
+  if (progress_known) {
+    const __int128 numerator = static_cast<__int128>(snapshot.read_rows_total) * 10000;
+    progress_percent_centi = static_cast<int64_t>(
+        numerator / static_cast<__int128>(snapshot.total_rows_to_read));
+    progress_percent_centi = std::clamp<int64_t>(progress_percent_centi, 0, 10000);
   }
 
   const auto now = std::chrono::steady_clock::now();
-  const auto prev_publish = st.last_publish;
+  const auto previous_publish = state.last_publish;
+  const bool has_previous_publish = previous_publish.time_since_epoch().count() != 0;
 
-  int64_t rows_per_sec = 0;
-  int64_t bytes_per_sec = 0;
-  if (prev_publish.time_since_epoch().count() != 0) {
-    const double dt = std::chrono::duration_cast<std::chrono::duration<double>>(now - prev_publish).count();
-    if (dt > 1e-9) {
-      const uint64_t delta_rows = snap.read_rows_total >= st.prev_read_rows
-        ? snap.read_rows_total - st.prev_read_rows
+  int64_t rows_per_second = 0;
+  int64_t bytes_per_second = 0;
+  int64_t cpu_centi = -1;
+  int64_t cpu_wait_centi = -1;
+  int64_t io_wait_centi = -1;
+
+  const int64_t cpu_total_us = snapshot.user_time_us_total + snapshot.system_time_us_total;
+  if (has_previous_publish) {
+    const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - previous_publish).count();
+    if (elapsed_us > 0) {
+      const uint64_t delta_rows = snapshot.read_rows_total >= state.prev_read_rows
+        ? snapshot.read_rows_total - state.prev_read_rows
         : 0;
-      const uint64_t delta_bytes = snap.read_bytes_total >= st.prev_read_bytes
-        ? snap.read_bytes_total - st.prev_read_bytes
+      const uint64_t delta_bytes = snapshot.read_bytes_total >= state.prev_read_bytes
+        ? snapshot.read_bytes_total - state.prev_read_bytes
         : 0;
-      rows_per_sec = static_cast<int64_t>(static_cast<double>(delta_rows) / dt);
-      bytes_per_sec = static_cast<int64_t>(static_cast<double>(delta_bytes) / dt);
+      rows_per_second = static_cast<int64_t>(
+          static_cast<__int128>(delta_rows) * 1000000 / elapsed_us);
+      bytes_per_second = static_cast<int64_t>(
+          static_cast<__int128>(delta_bytes) * 1000000 / elapsed_us);
+
+      const int64_t delta_cpu = cpu_total_us - state.prev_cpu_total_us;
+      const int64_t delta_cpu_wait = snapshot.cpu_wait_time_us_total - state.prev_cpu_wait_total_us;
+      const int64_t delta_io_wait = snapshot.io_wait_time_us_total - state.prev_io_wait_total_us;
+      if (snapshot.cpu_time_available && delta_cpu >= 0) {
+        cpu_centi = static_cast<int64_t>(
+            static_cast<__int128>(delta_cpu) * 10000 / elapsed_us);
+      }
+      if (snapshot.cpu_wait_available && delta_cpu_wait >= 0) {
+        cpu_wait_centi = static_cast<int64_t>(
+            static_cast<__int128>(delta_cpu_wait) * 10000 / elapsed_us);
+      }
+      if (snapshot.io_wait_available && delta_io_wait >= 0) {
+        io_wait_centi = static_cast<int64_t>(
+            static_cast<__int128>(delta_io_wait) * 10000 / elapsed_us);
+      }
     }
   }
-  st.prev_read_rows = snap.read_rows_total;
-  st.prev_read_bytes = snap.read_bytes_total;
 
-  int64_t cpu_centi = 0;
-  const int64_t cpu_total_us = snap.user_time_us_total + snap.system_time_us_total;
-  if (prev_publish.time_since_epoch().count() != 0) {
-    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - prev_publish).count();
-    const int64_t delta_cpu = cpu_total_us - st.prev_cpu_total_us;
-    if (dt_us > 0 && delta_cpu >= 0) {
-      cpu_centi = static_cast<int64_t>(static_cast<__int128>(delta_cpu) * 10000 / dt_us);
-    }
-  }
-  st.prev_cpu_total_us = cpu_total_us;
-  st.cpu_inst_max_centi = std::max(st.cpu_inst_max_centi, cpu_centi);
-  st.last_publish = now;
+  state.prev_read_rows = snapshot.read_rows_total;
+  state.prev_read_bytes = snapshot.read_bytes_total;
+  state.prev_cpu_total_us = cpu_total_us;
+  state.prev_cpu_wait_total_us = snapshot.cpu_wait_time_us_total;
+  state.prev_io_wait_total_us = snapshot.io_wait_time_us_total;
+  state.last_publish = now;
 
-  st.thread_peak = std::max(st.thread_peak, snap.threads_peak);
+  rapidjson::StringBuffer buffer(nullptr, 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  writer.Key("schema_version"); writer.Int(2);
+  writer.Key("elapsed_ms"); writer.Int64(snapshot.elapsed_ms);
 
-  rapidjson::StringBuffer sb(nullptr, 512);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartArray();
-  w.Int64(snap.elapsed_ms);
-  w.Int64(percent_centi);
-  w.Int64(known_int);
-  w.Uint64(snap.read_rows_total);
-  w.Uint64(snap.read_bytes_total);
-  w.Uint64(snap.total_rows_to_read);
-  w.Int64(rows_per_sec);
-  w.Int64(bytes_per_sec);
-  w.Int64(cpu_centi);
-  w.Int64(st.cpu_inst_max_centi);
-  if (snap.current_mem_bytes < 0) w.Null(); else w.Int64(snap.current_mem_bytes);
-  if (snap.peak_mem_bytes < 0) w.Null(); else w.Int64(snap.peak_mem_bytes);
-  w.Int64(snap.threads_inst);
-  w.Int64(st.thread_peak);
+  writer.Key("progress");
+  writer.StartObject();
+  writer.Key("known"); writer.Bool(progress_known);
+  writer.Key("percent_centi");
+  if (progress_known) writer.Int64(progress_percent_centi); else writer.Null();
+  writer.Key("read_rows"); writer.Uint64(snapshot.read_rows_total);
+  writer.Key("read_bytes"); writer.Uint64(snapshot.read_bytes_total);
+  writer.Key("total_rows_to_read"); writer.Uint64(snapshot.total_rows_to_read);
+  writer.EndObject();
 
-  auto samples = st.session->drain_samples();
+  writer.Key("rates");
+  writer.StartObject();
+  writer.Key("read_rows_per_second"); writer.Int64(rows_per_second);
+  writer.Key("read_bytes_per_second"); writer.Int64(bytes_per_second);
+  writer.EndObject();
+
+  writer.Key("profile");
+  writer.StartObject();
+  writer.Key("cpu_percent_centi"); write_nullable_int64(writer, cpu_centi);
+  writer.Key("memory_bytes"); write_nullable_int64(writer, snapshot.current_mem_bytes);
+  writer.Key("peak_memory_bytes"); write_nullable_int64(writer, snapshot.peak_mem_bytes);
+  writer.Key("cpu_wait_percent_centi"); write_nullable_int64(writer, cpu_wait_centi);
+  writer.Key("io_wait_percent_centi"); write_nullable_int64(writer, io_wait_centi);
+  writer.Key("temporary_data_bytes"); write_nullable_int64(writer, snapshot.temporary_data_bytes);
+  writer.Key("cpu_time_us");
+  if (snapshot.cpu_time_available) writer.Int64(cpu_total_us); else writer.Null();
+  writer.Key("cpu_wait_time_us");
+  if (snapshot.cpu_wait_available) writer.Int64(snapshot.cpu_wait_time_us_total); else writer.Null();
+  writer.Key("io_wait_time_us");
+  if (snapshot.io_wait_available) writer.Int64(snapshot.io_wait_time_us_total); else writer.Null();
+  writer.EndObject();
+
+  writer.Key("samples");
+  const auto samples = state.session->drain_samples();
   if (samples.empty()) {
-    w.Null();
+    writer.Null();
   } else {
-    w.StartArray();
+    writer.StartArray();
     for (const auto& sample : samples) {
-      w.StartArray();
-      w.Int64(sample.elapsed_ms);
-      w.Uint64(sample.read_rows_total);
-      w.Uint64(sample.read_bytes_total);
-      if (sample.cpu_centi < 0) w.Null(); else w.Int64(sample.cpu_centi);
-      if (sample.mem_bytes < 0) w.Null(); else w.Int64(sample.mem_bytes);
-      w.Int64(sample.threads);
-      w.EndArray();
+      // Compact sample schema:
+      // [elapsed_ms, read_rows, read_bytes, cpu_centi, memory_bytes,
+      //  cpu_wait_centi, io_wait_centi]
+      writer.StartArray();
+      writer.Int64(sample.elapsed_ms);
+      writer.Uint64(sample.read_rows_total);
+      writer.Uint64(sample.read_bytes_total);
+      write_nullable_int64(writer, sample.cpu_centi);
+      write_nullable_int64(writer, sample.mem_bytes);
+      write_nullable_int64(writer, sample.cpu_wait_centi);
+      write_nullable_int64(writer, sample.io_wait_centi);
+      writer.EndArray();
     }
-    w.EndArray();
+    writer.EndArray();
   }
-  w.EndArray();
-  return std::string(sb.GetString(), sb.GetSize());
+
+  writer.EndObject();
+  return std::string(buffer.GetString(), buffer.GetSize());
 }
 
 static std::string build_done_json(const SessionSnapshot& snap, bool truncated) {
-  rapidjson::StringBuffer sb(nullptr, 256);
+  rapidjson::StringBuffer sb(nullptr, 512);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("query_id"); w.String(snap.query_id.c_str());
@@ -154,6 +216,19 @@ static std::string build_done_json(const SessionSnapshot& snap, bool truncated) 
   w.Key("read_bytes"); w.Uint64(snap.read_bytes_total);
   w.Key("result_rows_returned"); w.Uint64(snap.wrote_rows_total);
   w.Key("result_truncated"); w.Bool(truncated);
+  w.Key("telemetry");
+  w.StartObject();
+  w.Key("schema_version"); w.Int(2);
+  w.Key("cpu_time_us");
+  if (snap.cpu_time_available) w.Int64(snap.user_time_us_total + snap.system_time_us_total); else w.Null();
+  w.Key("cpu_wait_time_us");
+  if (snap.cpu_wait_available) w.Int64(snap.cpu_wait_time_us_total); else w.Null();
+  w.Key("io_wait_time_us");
+  if (snap.io_wait_available) w.Int64(snap.io_wait_time_us_total); else w.Null();
+  w.Key("memory_bytes"); write_nullable_int64(w, snap.current_mem_bytes);
+  w.Key("peak_memory_bytes"); write_nullable_int64(w, snap.peak_mem_bytes);
+  w.Key("temporary_data_bytes"); write_nullable_int64(w, snap.temporary_data_bytes);
+  w.EndObject();
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
 }
@@ -188,7 +263,9 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   }
   session->start();
 
-  res.set_header("Content-Type", "text/event-stream; charset=utf-8");
+  // set_chunked_content_provider owns Content-Type. Setting it separately
+  // creates two header values in cpp-httplib; clients such as requests then
+  // parse the combined value as an invalid charset ("utf-8, text/event-stream").
   res.set_header("Cache-Control", "no-cache, no-transform");
   res.set_header("Connection", "keep-alive");
   res.set_header("X-Accel-Buffering", "no");
@@ -199,7 +276,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   Server* self = this;
 
   res.set_chunked_content_provider(
-      "text/event-stream",
+      "text/event-stream; charset=utf-8",
       [state, self](size_t, httplib::DataSink& sink) {
         if (!state->connected_event_sent) {
           state->connected_event_sent = true;
@@ -208,6 +285,17 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
             state->session->request_cancel();
             return false;
           }
+
+          // Establish a counter baseline without emitting an empty zero-value
+          // tick. Short queries now send one meaningful terminal tick, while
+          // longer queries still publish at the regular cadence.
+          const auto baseline = state->session->snapshot();
+          state->prev_read_rows = baseline.read_rows_total;
+          state->prev_read_bytes = baseline.read_bytes_total;
+          state->prev_cpu_total_us = baseline.user_time_us_total + baseline.system_time_us_total;
+          state->prev_cpu_wait_total_us = baseline.cpu_wait_time_us_total;
+          state->prev_io_wait_total_us = baseline.io_wait_time_us_total;
+          state->last_publish = std::chrono::steady_clock::now();
           return true;
         }
 

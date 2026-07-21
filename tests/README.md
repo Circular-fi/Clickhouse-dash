@@ -1,74 +1,75 @@
-# Console Docker de tests et de benchmarks
+# Docker test and benchmark console
 
-Le dossier `tests/` regroupe la validation fonctionnelle et la mesure de performances dans une seule stack reproductible. Il lance :
+The `tests/` directory provides one reproducible stack for functional validation and performance measurement. It starts:
 
-- un ClickHouse dédié ;
-- `chdash_source`, compilé depuis les sources locales en mode Release ;
-- `chdash_release`, démarré depuis la release versionnée la plus élevée de `tests/releases/` ;
-- un runner Python unique qui exécute les tests, produit les rapports et sert l'interface web.
+- a dedicated ClickHouse server;
+- `chdash_source`, compiled from the local source tree in Release mode;
+- `chdash_release`, started from the highest versioned archive in `tests/releases/`;
+- one Python runner that executes jobs, builds reports, and serves the web console.
 
-## Démarrage
+## Start the stack
 
-Depuis ce dossier :
+From this directory:
 
 ```bash
 docker compose up -d --build
 ```
 
-Interfaces :
+Services:
 
 ```text
-Console qualité    : http://localhost:18082
-Dashboard source   : http://localhost:18080
-Dashboard release  : http://localhost:18081
-ClickHouse HTTP    : http://localhost:18123
-ClickHouse TCP     : localhost:19000
+Quality console    http://localhost:18082
+Source dashboard   http://localhost:18080
+Release dashboard  http://localhost:18081
+ClickHouse HTTP    http://localhost:18123
+ClickHouse TCP     localhost:19000
 ```
 
-Suivi du runner :
+Follow the runner:
 
 ```bash
 docker compose logs -f tests
 ```
 
-Arrêt et nettoyage complet :
+Remove containers and volumes:
 
 ```bash
 docker compose down -v --remove-orphans
 ```
 
-## Interface web
+## Web console
 
-La console possède deux vues indépendantes :
+The console has independent **Tests** and **Benchmark** tabs.
 
-- **Tests** : synthèse JUnit, auto-tests du harness, cas en échec, diagnostic différentiel source/release des types natifs, diff attendu/obtenu du formatage SQL et log pytest ;
-- **Benchmark** : source vs release, plancher ClickHouse HTTP direct, intégrité des lignes/types/events SSE et log du runner.
+The Tests tab shows the JUnit summary, harness self-tests, failed cases, source-vs-release native-type diagnosis, expected-vs-actual SQL formatting diffs, incremental pytest logs, run history, and downloadable artifacts.
 
-Chaque vue possède son propre bouton de relance et son bouton **Télécharger le rapport ZIP**. Le ZIP est autonome et contient tous les artefacts du run ainsi qu'un `report-manifest.json` compact, prévu pour une analyse automatique ou pour être transmis tel quel.
+The Benchmark tab shows source-vs-release latency, deterministic SSE compatibility, expected operational event differences, direct ClickHouse HTTP measurements, incremental logs, and downloadable artifacts.
 
-L'interface ne remplace plus les tableaux lors d'une simple mise à jour d'état : leurs scrollbars horizontales et verticales restent en place. L'état est poussé par Server-Sent Events uniquement lorsqu'il change. Les logs sont lus par blocs incrémentaux et le détail d'un diff SQL n'est calculé qu'à l'ouverture du cas.
+Each tab has its own run button and ZIP report button. Reports are self-contained and include a compact `report-manifest.json` for automated analysis.
 
-## Exécution automatique
+State changes do not recreate result tables. Horizontal and vertical scroll positions remain stable. Logs are read incrementally, artifacts are loaded on demand, and detailed SQL diffs are generated only when a case is opened.
 
-Par défaut, les tests API sont lancés au démarrage du runner. Un échec de test ne termine pas le conteneur web : le résultat reste consultable et les boutons permettent une nouvelle exécution.
+## Automatic execution
+
+API tests run automatically when the runner starts. A failed test does not terminate the web container; the result remains available and jobs can be rerun from the UI.
 
 ```bash
-# Aucun lancement automatique
+# Disable automatic jobs
 TEST_RUNNER_AUTO_TESTS=0 docker compose up -d --build
 
-# Tests puis benchmark au démarrage
+# Run tests and then the benchmark at startup
 TEST_RUNNER_AUTO_BENCHMARK=1 docker compose up -d --build
 ```
 
-## Releases comparées
+## Release selection
 
-Dépose autant d'archives versionnées que nécessaire dans :
+Place any number of versioned archives in:
 
 ```text
 tests/releases/
 ```
 
-Exemple :
+Example:
 
 ```text
 chdash_2.8.0_linux_amd64.tar.gz
@@ -76,46 +77,46 @@ chdash_2.8.1_linux_amd64.tar.gz
 chdash_2.8.2_linux_amd64.tar.gz
 ```
 
-Le conteneur `chdash_release` choisit automatiquement la version la plus élevée présente dans le nom du fichier.
+`chdash_release` automatically selects the highest version found in the filename.
 
-## Diagnostic des tests de types natifs
+## Native-type diagnosis
 
-Les requêtes `AggregateFunction`, `JSON` et entiers larges sont toujours validées sur le binaire source. Lorsqu'un cas échoue, le runner rejoue automatiquement la même requête sur la release sélectionnée afin de distinguer :
+The source binary is always validated with `AggregateFunction`, `JSON`, wide integers, non-finite floats, and other native edge cases. When a case fails, the runner repeats the same query against the selected release and classifies the outcome as a source regression, a shared product limitation, different product failures, or a harness/transport error.
 
-- une régression du binaire source si la release réussit ;
-- une limitation partagée par la source et la release ;
-- une erreur de transport ou d'infrastructure du harness.
-
-Le test reste en échec lorsqu'il révèle un problème du binaire : le runner ne masque pas une régression produit pour rendre la suite verte. Le diagnostic détaillé, avec tokens sensibles expurgés, est écrit dans :
+Detailed results are written to:
 
 ```text
 tests/artifacts/tests/<run>/query_types_results.json
 ```
 
-Le runner exécute aussi des auto-tests locaux du benchmark avant les tests API. Ils couvrent notamment les réponses HTTP ClickHouse `Transfer-Encoding: chunked`, les réponses `Content-Length`, les coupures au milieu d'un caractère UTF-8 et le parsing des hosts HCL commentés.
+Sensitive tokens are redacted from reports.
 
-## Benchmark
+## Benchmark paths
 
-Chaque requête est exécutée par trois chemins :
+Each query runs through three paths:
 
 ```text
-source       -> API chdash compilée localement + flux SSE
-release      -> API chdash de la release sélectionnée + flux SSE
-http_direct  -> ClickHouse HTTP + JSONCompactEachRowWithNamesAndTypes
+source       local source build through chdash SSE
+release      selected release through chdash SSE
+http_direct  ClickHouse HTTP with JSONCompactEachRowWithNamesAndTypes
 ```
 
-Les trois chemins réutilisent leurs connexions HTTP entre les warmups et les runs mesurés. Le chemin HTTP direct télécharge le résultat complet et mesure les headers, le premier octet, la première ligne et la fin de réponse. Il sert de plancher réaliste : le coût de sérialisation et de transfert n'est pas masqué par un `FORMAT Null`, et le benchmark ne mesure pas artificiellement un nouveau handshake à chaque requête.
+Connections are reused across warmups and measured runs. Direct HTTP reports both:
 
-Les comparaisons vérifient notamment :
+- **HTTP wire**: time until the final response byte is received;
+- **HTTP verified**: wire time plus Python JSON decoding and row hashing.
 
-- le hash et le nombre de lignes ;
-- la signature noms/types des colonnes ;
-- les events SSE obligatoires et leur présence ;
-- le nombre d'events, lorsqu'un contrôle strict est demandé ;
-- le statut `done`, les erreurs et la cohérence des compteurs ;
-- l'overhead de chaque dashboard au-dessus de ClickHouse HTTP direct.
+The benchmark validates row count and hash, column names and types, terminal status, required SSE events, deterministic event counts, normalized core-event order, and direct-HTTP equivalence.
 
-Réglages usuels :
+SSE events are classified as:
+
+- deterministic control events: `meta`, `result_meta`, `error`, and `done`;
+- operational events: `result_rows` and `tick`;
+- optional transport events: `keepalive` and `message`.
+
+Operational counts may differ when batching or telemetry cadence changes. These differences are warnings when row order, row hash, result types, and deterministic control events remain equivalent. Set `BENCH_STRICT_EVENT_COUNTS=1` only when exact operational counts are intentionally part of the compatibility contract.
+
+Common settings:
 
 ```bash
 BENCH_RUNS=10 BENCH_WARMUP=2 docker compose up -d --build
@@ -123,15 +124,9 @@ BENCH_DISABLE_DIRECT_HTTP=1 docker compose up -d --build
 BENCH_STRICT_EVENT_COUNTS=1 docker compose up -d --build
 ```
 
-Le CSV spécifique au plancher HTTP est écrit dans :
+## Remote active instance
 
-```text
-tests/artifacts/benchmark/<run>/direct_http_overhead.csv
-```
-
-## Instance distante active
-
-Ajoute un vrai bloc `host` dans `tests/config/CH_HOSTS.hcl`, puis expose son endpoint HTTP au benchmark direct avec le même identifiant :
+Add a real host block to `tests/config/CH_HOSTS.hcl`, then expose the matching HTTP endpoint to the direct benchmark:
 
 ```hcl
 host {
@@ -147,59 +142,33 @@ BENCH_CLICKHOUSE_HTTP_TARGETS="local=http://clickhouse:8123,active=https://user:
 docker compose up -d --build
 ```
 
-## Artefacts et rapports ZIP
+## Artifacts and ZIP reports
 
-Tous les runs sont conservés sous :
+Runs are stored under:
 
 ```text
 tests/artifacts/tests/<run>/
 tests/artifacts/benchmark/<run>/
 ```
 
-Le rapport ZIP est construit uniquement lors du premier téléchargement, puis mis en cache tant que les fichiers du run ne changent pas. Il contient :
+A ZIP report is built on first download and cached until the run changes. It contains original artifacts such as JUnit XML, SQL diffs, query-type traces, benchmark CSV/JSON/Markdown files, JSONL measurements, compressed SSE traces, and logs.
 
-```text
-README.txt
-report-manifest.json
-runner-result.json
-junit.xml / format_results.json / query_types_results.json / format_failures/*
-comparison.md / summary.json / *.csv / runs.jsonl / events/*
-logs complets
-```
-
-Le cache des rapports se trouve dans `tests/artifacts/.reports/` et peut être supprimé sans perdre les résultats sources.
-
-## Réglages d'overhead du runner
+## Runner overhead controls
 
 ```bash
-# Quantité initiale de log chargée et blocs incrémentaux
 TEST_RUNNER_LOG_INITIAL_BYTES=131072
 TEST_RUNNER_LOG_CHUNK_BYTES=65536
-
-# Rétention en disque et historique envoyé à l'interface
 TEST_RUNNER_MAX_RUNS=30
 TEST_RUNNER_MAX_HISTORY=30
-
-# Pagination/lazy loading des diffs SQL
 TEST_RUNNER_FORMAT_PAGE_SIZE=20
 TEST_RUNNER_FORMAT_MAX_DIFF_ROWS=1800
-
-# Compression des réponses JSON volumineuses et des rapports à la demande
 TEST_RUNNER_JSON_GZIP_MIN_BYTES=4096
 TEST_RUNNER_JSON_GZIP_LEVEL=3
 TEST_RUNNER_REPORT_COMPRESSION_LEVEL=3
-
-# Fréquence de heartbeat SSE et silence des access logs du polling
 TEST_RUNNER_SSE_HEARTBEAT_SECONDS=15
 TEST_RUNNER_QUIET_ACCESS_LOGS=1
-
-# Écrit le manifeste de formatage tous les N succès ; un échec est écrit immédiatement
 FORMAT_RESULTS_FLUSH_EVERY=20
-
-# Compression modérée des traces du benchmark, hors fenêtre chronométrée
 BENCH_TRACE_COMPRESSION_LEVEL=3
 ```
 
-Les healthchecks utilisent `/api/health`, qui ne déclenche ni parsing de rapport ni parcours récursif des artefacts. L'état complet n'est demandé qu'après une notification SSE ou lors du polling de secours. Les détails benchmark, les listes d'artefacts et les diffs SQL sont chargés séparément et mis en cache avec `ETag`.
-
-Pendant l’exécution, `runs.partial.jsonl` est alimenté en append après chaque mesure au lieu d’être réécrit intégralement ; à la fin d’une exécution complète, il est renommé atomiquement en `runs.jsonl`, même si les validations signalent ensuite une régression. Il reste en place uniquement si le processus est réellement interrompu avant la production du rapport. Les traces JSON gzip utilisent un niveau de compression modéré et un encodage compact afin que la génération des artefacts ne perturbe pas les temps mesurés.
+Health checks use `/api/health` and do not parse reports or scan artifact trees. Completed benchmark measurements are appended to `runs.partial.jsonl` and atomically promoted to `runs.jsonl`; the partial file remains only after a real interruption.

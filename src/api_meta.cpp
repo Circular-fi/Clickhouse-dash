@@ -116,6 +116,23 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   }
   if (types.empty()) types.push_back("keywords");
 
+  const std::string column_database = req.has_param("database")
+    ? req.get_param_value("database")
+    : std::string{};
+  const std::string column_table = req.has_param("table")
+    ? req.get_param_value("table")
+    : std::string{};
+  const bool columns_requested = std::find(types.begin(), types.end(), "columns") != types.end();
+  const bool scoped_columns = !column_database.empty() && !column_table.empty();
+  if (columns_requested && (column_database.empty() != column_table.empty())) {
+    return json_error(
+      res,
+      400,
+      "invalid_column_scope",
+      "Both database and table are required for scoped column metadata."
+    );
+  }
+
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "unknown host_id");
 
@@ -489,6 +506,37 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       return columns;
     };
 
+    auto fetch_scoped_columns_system = [&]() -> std::optional<std::vector<MetaCatalogItem>> {
+      std::vector<MetaCatalogItem> columns;
+      try {
+        clickhouse::Query query(
+          "SELECT database, `table`, name, type "
+          "FROM system.columns "
+          "WHERE database = {database:String} AND `table` = {table:String} "
+          "ORDER BY lower(name), name"
+        );
+        query.SetParam("database", column_database);
+        query.SetParam("table", column_table);
+        query.OnData([&](const clickhouse::Block& block) {
+          const size_t row_count = block.GetRowCount();
+          if (!row_count || block.GetColumnCount() < 4) return;
+          columns.reserve(columns.size() + row_count);
+          for (size_t row = 0; row < row_count; ++row) {
+            MetaCatalogItem item;
+            item.database = block_string_at(block, 0, row);
+            item.table = block_string_at(block, 1, row);
+            item.name = block_string_at(block, 2, row);
+            item.type = block_string_at(block, 3, row);
+            if (!item.name.empty()) columns.push_back(std::move(item));
+          }
+        });
+        client->Select(query);
+      } catch (const std::exception&) {
+        return std::nullopt;
+      }
+      return columns;
+    };
+
     auto describe_table_acl = [&](const MetaCatalogItem& table) -> std::vector<MetaCatalogItem> {
       std::vector<MetaCatalogItem> columns;
       const std::string table_ref = qualified_ident(table.database, table.name);
@@ -535,7 +583,16 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           out.items = fetch_all_tables_acl();
         }
       } else if (type == "columns") {
-        if (auto fast_columns = fetch_all_columns_system(); fast_columns.has_value()) {
+        if (scoped_columns) {
+          if (auto fast_columns = fetch_scoped_columns_system(); fast_columns.has_value()) {
+            out.items = std::move(*fast_columns);
+          } else {
+            MetaCatalogItem table;
+            table.database = column_database;
+            table.name = column_table;
+            out.items = describe_table_acl(table);
+          }
+        } else if (auto fast_columns = fetch_all_columns_system(); fast_columns.has_value()) {
           out.items = std::move(*fast_columns);
         } else {
           const auto tables = fetch_all_tables_acl();
@@ -683,7 +740,10 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     }
 
     if (catalog_types.find(t) != catalog_types.end()) {
-      const std::string cache_key = host_id + "::" + t;
+      std::string cache_key = host_id + "::" + t;
+      if (t == "columns" && scoped_columns) {
+        cache_key += "::" + column_database + "::" + column_table;
+      }
       auto fetch = [&](MetaCatalog& out, std::string& err_code, std::string& err_msg) -> bool {
         return fetch_catalog(t, out, err_code, err_msg);
       };

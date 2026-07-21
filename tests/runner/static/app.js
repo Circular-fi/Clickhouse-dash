@@ -4,7 +4,7 @@
   function storageGet(storage, key, fallback) {
     try {
       var value = storage.getItem(key);
-      return value == null ? fallback : value;
+      return value == null ? fallback: value;
     } catch (_) {
       return fallback;
     }
@@ -36,7 +36,7 @@
     stateLoading: false,
     stateQueued: false,
     lastStateAt: 0,
-    activeTab: storageGet(localStore, "chdash.tests.activeTab", "tests") === "benchmark" ? "benchmark" : "tests",
+    activeTab: storageGet(localStore, "chdash.tests.activeTab", "tests") === "benchmark" ? "benchmark": "tests",
     tabScroll: {
       tests: Number(storageGet(sessionStore, "chdash.tests.scroll.tests", "0") || 0),
       benchmark: Number(storageGet(sessionStore, "chdash.tests.scroll.benchmark", "0") || 0)
@@ -73,8 +73,8 @@
     searchTimers: { format: null, benchmark: null }
   };
 
-  var integerFormatter = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
-  var dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", {
+  var integerFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  var dateTimeFormatter = new Intl.DateTimeFormat("en-US", {
     dateStyle: "short",
     timeStyle: "medium"
   });
@@ -86,13 +86,13 @@
   function text(name, value) {
     var element = byId(name);
     if (!element) return;
-    var next = value == null ? "" : String(value);
+    var next = value == null ? "": String(value);
     if (element.textContent !== next) element.textContent = next;
   }
 
   function number(value, fallback) {
     var parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : (fallback == null ? 0 : fallback);
+    return Number.isFinite(parsed) ? parsed: (fallback == null ? 0: fallback);
   }
 
   function formatInteger(value) {
@@ -102,19 +102,19 @@
   function formatMs(value) {
     var parsed = Number(value);
     if (!Number.isFinite(parsed)) return "--";
-    return (parsed >= 100 ? parsed.toFixed(0) : parsed.toFixed(2)) + " ms";
+    return (parsed >= 100 ? parsed.toFixed(0): parsed.toFixed(2)) + " ms";
   }
 
   function formatSeconds(value) {
     var parsed = Number(value);
     if (!Number.isFinite(parsed)) return "--";
-    return (parsed >= 100 ? parsed.toFixed(0) : parsed.toFixed(2)) + " s";
+    return (parsed >= 100 ? parsed.toFixed(0): parsed.toFixed(2)) + " s";
   }
 
   function formatPercent(value, signed) {
     var parsed = Number(value);
     if (!Number.isFinite(parsed)) return "--";
-    var prefix = signed && parsed > 0 ? "+" : "";
+    var prefix = signed && parsed > 0 ? "+": "";
     return prefix + parsed.toFixed(2) + "%";
   }
 
@@ -126,7 +126,7 @@
       parsed /= 1024;
       index += 1;
     }
-    return (index ? parsed.toFixed(1) : parsed.toFixed(0)) + " " + units[index];
+    return (index ? parsed.toFixed(1): parsed.toFixed(0)) + " " + units[index];
   }
 
   function formatDate(value) {
@@ -138,15 +138,15 @@
 
   function statusLabel(status) {
     return {
-      success: "Succ\u00e8s",
-      passed: "Succ\u00e8s",
-      failed: "\u00c9chec",
-      error: "Erreur",
-      running: "En cours",
-      queued: "En attente",
-      cancelled: "Annul\u00e9",
-      idle: "Inactif"
-    }[status] || "Inconnu";
+      success: "Success",
+      passed: "Success",
+      failed: "Failed",
+      error: "Error",
+      running: "Running",
+      queued: "Queued",
+      cancelled: "Cancelled",
+      idle: "Idle"
+    }[status] || "Unknown";
   }
 
   function normalizedStatus(status) {
@@ -185,7 +185,7 @@
     if (!element) return;
     if (url) element.href = url;
     element.classList.toggle("is-disabled", !enabled);
-    element.setAttribute("aria-disabled", enabled ? "false" : "true");
+    element.setAttribute("aria-disabled", enabled ? "false": "true");
   }
 
   function create(tag, className, value) {
@@ -196,7 +196,7 @@
   }
 
   function emptyState(message, compact) {
-    return create("div", "empty-state" + (compact ? " compact" : ""), message);
+    return create("div", "empty-state" + (compact ? " compact": ""), message);
   }
 
   function toast(message, type, timeout) {
@@ -206,7 +206,7 @@
     var content = create("span", "", message);
     var close = create("button", "", "\u00d7");
     close.type = "button";
-    close.setAttribute("aria-label", "Fermer");
+    close.setAttribute("aria-label", "Close");
     close.addEventListener("click", function () { item.remove(); });
     item.append(create("span", "sr-only", type || "info"), content, close);
     region.appendChild(item);
@@ -247,17 +247,17 @@
     }
     app.stateLoading = true;
     try {
-      var result = await requestJson("/api/state", { etag: force ? "" : app.stateEtag });
+      var result = await requestJson("/api/state", { etag: force ? "": app.stateEtag });
       app.lastStateAt = Date.now();
-      setConnection("online", "Connect\u00e9");
+      setConnection("online", "Connected");
       if (!result.notModified) {
         app.stateEtag = result.etag;
         app.state = result.payload;
         applyState();
       }
     } catch (error) {
-      setConnection("offline", "D\u00e9connect\u00e9");
-      toast("Impossible de charger l'\u00e9tat : " + error.message, "error", 7000);
+      setConnection("offline", "Disconnected");
+      toast("Unable to load state: " + error.message, "error", 7000);
     } finally {
       app.stateLoading = false;
       if (app.stateQueued) {
@@ -274,12 +274,12 @@
       return;
     }
     if (app.eventSource) app.eventSource.close();
-    var version = app.state && app.state.version ? app.state.version : -1;
+    var version = app.state && app.state.version ? app.state.version: -1;
     var source = new EventSource("/api/events?version=" + encodeURIComponent(version));
     app.eventSource = source;
     setConnection("connecting", "Connexion...");
     source.onopen = function () {
-      setConnection("online", "Temps r\u00e9el");
+      setConnection("online", "Live");
     };
     source.addEventListener("state", function () {
       loadState(false);
@@ -296,8 +296,8 @@
   }
 
   function runnerMeta(active) {
-    if (!active) return "Pr\u00eat";
-    var parts = [active.kind, active.phase, active.started_at ? formatDate(active.started_at) : ""];
+    if (!active) return "Ready";
+    var parts = [active.kind, active.phase, active.started_at ? formatDate(active.started_at): ""];
     return parts.filter(Boolean).join(" / ");
   }
 
@@ -310,7 +310,7 @@
     var latest = state.latest || {};
     var busy = Boolean(active);
 
-    setStatusBadge("runnerStatus", busy ? active.status : "idle", busy ? statusLabel(active.status) : "Pr\u00eat");
+    setStatusBadge("runnerStatus", busy ? active.status: "idle", busy ? statusLabel(active.status): "Ready");
     text("runnerMeta", runnerMeta(active));
 
     ["runTests", "runBenchmark", "runAll"].forEach(function (name) {
@@ -334,56 +334,57 @@
   function updateTestsOverview(overview, job) {
     var status = job.status || overview.status || "idle";
     setMiniStatus("testsTabStatus", status);
-    setStatusBadge("testsHeaderStatus", status, status === "idle" ? "Aucun run" : statusLabel(status));
+    setStatusBadge("testsHeaderStatus", status, status === "idle" ? "No run": statusLabel(status));
     text(
       "testsTabMeta",
       overview.run_id
-        ? formatInteger(overview.passed) + "/" + formatInteger(overview.tests) + " r\u00e9ussis, " + formatInteger(overview.format_failed) + " diff(s), " + formatInteger(overview.query_type_regressions) + " r\u00e9gression(s) type"
-        : "Aucun r\u00e9sultat"
+        ? formatInteger(overview.passed) + "/" + formatInteger(overview.tests) + " passed, " + formatInteger(overview.format_failed) + " formatting difference(s), " + formatInteger(overview.query_type_regressions) + " native-type regression(s)"
+       : "No results"
     );
-    text("testsRunMeta", overview.run_id ? ("Run " + overview.run_id + " / " + formatSeconds(overview.time_seconds)) : "Les tests API sont lanc\u00e9s automatiquement au d\u00e9marrage du runner.");
+    text("testsRunMeta", overview.run_id ? ("Run " + overview.run_id + " / " + formatSeconds(overview.time_seconds)): "API tests run automatically when the runner starts.");
     setDownload("downloadTests", Boolean(overview.report_url) && !job.active, overview.report_url || "/api/report/tests.zip");
 
-    text("testsTotal", overview.run_id ? formatInteger(overview.tests) : "--");
-    text("testsPassed", overview.run_id ? formatInteger(overview.passed) : "--");
-    text("testsFailures", overview.run_id ? formatInteger(number(overview.failures) + number(overview.errors)) : "--");
-    text("testsErrorsMeta", overview.run_id ? formatInteger(overview.errors) + " erreur(s)" : "0 erreur");
-    text("testsDuration", overview.run_id ? formatSeconds(overview.time_seconds) : "--");
-    text("testsFormatDiffs", overview.run_id ? formatInteger(overview.format_failed) : "--");
-    text("testsFormatMeta", overview.run_id ? formatInteger(overview.format_completed) + "/" + formatInteger(overview.format_total) + " termin\u00e9s" : "aucun diff");
-    text("testsTypeRegressions", overview.run_id ? formatInteger(overview.query_type_regressions) : "--");
+    text("testsTotal", overview.run_id ? formatInteger(overview.tests): "--");
+    text("testsPassed", overview.run_id ? formatInteger(overview.passed): "--");
+    text("testsFailures", overview.run_id ? formatInteger(number(overview.failures) + number(overview.errors)): "--");
+    text("testsErrorsMeta", overview.run_id ? formatInteger(overview.errors) + " error(s)": "0 errors");
+    text("testsDuration", overview.run_id ? formatSeconds(overview.time_seconds): "--");
+    text("testsFormatDiffs", overview.run_id ? formatInteger(overview.format_failed): "--");
+    text("testsFormatMeta", overview.run_id ? formatInteger(overview.format_completed) + "/" + formatInteger(overview.format_total) + " completed": "no differences");
+    text("testsTypeRegressions", overview.run_id ? formatInteger(overview.query_type_regressions): "--");
     text(
       "testsTypeMeta",
       overview.run_id
-        ? formatInteger(overview.query_type_failed) + " échec(s), " + formatInteger(overview.query_type_infrastructure_errors) + " erreur(s) harness"
-        : "diagnostic source / release"
+        ? formatInteger(overview.query_type_failed) + " failure(s), " + formatInteger(overview.query_type_infrastructure_errors) + " error(s) harness"
+       : "source / release diagnosis"
     );
   }
 
   function updateBenchmarkOverview(overview, job) {
     var status = job.status || overview.status || "idle";
     setMiniStatus("benchmarkTabStatus", status);
-    setStatusBadge("benchmarkHeaderStatus", status, status === "idle" ? "Aucun run" : statusLabel(status));
+    setStatusBadge("benchmarkHeaderStatus", status, status === "idle" ? "No run": statusLabel(status));
     text(
       "benchmarkTabMeta",
       overview.run_id
-        ? formatInteger(overview.comparisons_count) + " comparaison(s), " + formatInteger(overview.issues_count) + " issue(s)"
-        : "Aucun r\u00e9sultat"
+        ? formatInteger(overview.comparisons_count) + " comparison(s), " + formatInteger(overview.issues_count) + " error(s), " + formatInteger(overview.warnings_count) + " warning(s)"
+       : "No results"
     );
-    text("benchmarkRunMeta", overview.run_id ? ("Run " + overview.run_id + " / " + formatInteger(overview.direct_http_count) + " r\u00e9f\u00e9rence(s) HTTP") : "Build source vs release et r\u00e9f\u00e9rence ClickHouse HTTP directe.");
+    text("benchmarkRunMeta", overview.run_id ? ("Run " + overview.run_id + " / " + formatInteger(overview.direct_http_count) + " direct HTTP reference(s)"): "Source build vs release with a direct ClickHouse HTTP reference.");
     setDownload("downloadBenchmark", Boolean(overview.report_url) && !job.active, overview.report_url || "/api/report/benchmark.zip");
 
-    text("benchmarkComparisons", overview.run_id ? formatInteger(overview.comparisons_count) : "--");
-    text("benchmarkSpeedup", overview.run_id ? formatPercent(overview.median_speedup_pct, true) : "--");
-    text("benchmarkWinsMeta", overview.run_id ? formatInteger(overview.source_faster_count) + " gain(s), " + formatInteger(overview.source_slower_count) + " r\u00e9gression(s)" : "source plus rapide");
-    text("benchmarkHttpCount", overview.run_id ? formatInteger(overview.direct_http_count) : "--");
-    text("benchmarkOverhead", overview.run_id ? formatMs(overview.median_direct_overhead_ms) : "--");
-    text("benchmarkRatioMeta", overview.run_id && overview.median_direct_ratio != null ? number(overview.median_direct_ratio).toFixed(2) + "x vs HTTP direct" : "vs HTTP direct");
-    text("benchmarkIssues", overview.run_id ? formatInteger(overview.issues_count) : "--");
+    text("benchmarkComparisons", overview.run_id ? formatInteger(overview.comparisons_count): "--");
+    text("benchmarkSpeedup", overview.run_id ? formatPercent(overview.median_speedup_pct, true): "--");
+    text("benchmarkWinsMeta", overview.run_id ? formatInteger(overview.source_faster_count) + " source win(s), " + formatInteger(overview.source_slower_count) + " source slowdown(s)": "source faster");
+    text("benchmarkHttpCount", overview.run_id ? formatInteger(overview.direct_http_count): "--");
+    text("benchmarkOverhead", overview.run_id ? formatMs(overview.median_direct_overhead_ms): "--");
+    text("benchmarkRatioMeta", overview.run_id && overview.median_direct_ratio != null ? number(overview.median_direct_ratio).toFixed(2) + "x vs HTTP wire": "vs raw HTTP transport");
+    text("benchmarkIssues", overview.run_id ? formatInteger(overview.issues_count): "--");
+    text("benchmarkWarnings", overview.run_id ? formatInteger(overview.warnings_count): "--");
   }
 
   async function ensureDetails(kind, force) {
-    var latest = app.state && app.state.latest ? app.state.latest[kind] : null;
+    var latest = app.state && app.state.latest ? app.state.latest[kind]: null;
     var cache = app.details[kind];
     if (!latest || !latest.run_id) {
       cache.etag = "";
@@ -403,7 +404,7 @@
     cache.loading = true;
     try {
       var result = await requestJson("/api/details/" + kind, {
-        etag: !force && cache.runId === latest.run_id ? cache.etag : ""
+        etag: !force && cache.runId === latest.run_id ? cache.etag: ""
       });
       if (!result.notModified) {
         cache.etag = result.etag;
@@ -414,7 +415,7 @@
         else renderBenchmarkDetails(result.payload);
       }
     } catch (error) {
-      toast("Impossible de charger les d\u00e9tails " + kind + " : " + error.message, "error", 7000);
+      toast("Unable to load " + kind + ": " + error.message, "error", 7000);
     } finally {
       cache.loading = false;
       if (cache.queued) {
@@ -426,7 +427,7 @@
 
   function clearTestsDetails() {
     var failed = byId("failedCases");
-    failed.replaceChildren(emptyState("Aucun r\u00e9sultat disponible.", true));
+    failed.replaceChildren(emptyState("No results available.", true));
     byId("testsLinks").replaceChildren();
     byId("testsFacts").replaceChildren();
     text("failedCasesCount", "0");
@@ -435,10 +436,11 @@
 
   function clearBenchmarkDetails() {
     app.benchmarkData = null;
-    byId("comparisonTable").replaceChildren(emptyState("Aucun benchmark disponible."));
-    byId("httpOverheadTable").replaceChildren(emptyState("Aucune mesure HTTP directe."));
+    byId("comparisonTable").replaceChildren(emptyState("No benchmark available."));
+    byId("httpOverheadTable").replaceChildren(emptyState("No direct HTTP measurements."));
     byId("benchmarkLinks").replaceChildren();
     byId("benchmarkIssuesPanel").hidden = true;
+    byId("benchmarkWarningsPanel").hidden = true;
     text("comparisonCount", "0");
     text("httpOverheadCount", "0");
   }
@@ -448,24 +450,24 @@
     var formats = details.format_results || {};
     var queryTypes = details.query_types || {};
     var runner = details.runner || {};
-    var cases = Array.isArray(junit.failed_cases) ? junit.failed_cases : [];
+    var cases = Array.isArray(junit.failed_cases) ? junit.failed_cases: [];
 
     text("failedCasesCount", formatInteger(cases.length));
     renderFailedCases(cases);
     renderResourceLinks("testsLinks", [
-      [details.links && details.links.junit, "JUnit XML", "r\u00e9sultats structur\u00e9s"],
-      [details.links && details.links.log, "pytest.log", "sortie compl\u00e8te"],
-      [details.links && details.links.result, "runner-result.json", "m\u00e9tadonn\u00e9es du run"],
-      [details.links && details.links.format_results, "format_results.json", "attendu / obtenu"],
+      [details.links && details.links.junit, "JUnit XML", "structured results"],
+      [details.links && details.links.log, "pytest.log", "complete output"],
+      [details.links && details.links.result, "runner-result.json", "run metadata"],
+      [details.links && details.links.format_results, "format_results.json", "expected / actual"],
       [details.links && details.links.query_types, "query_types_results.json", "classification source / release"]
     ]);
     renderFacts("testsFacts", [
       ["Run", details.run_id || "--"],
-      ["Statut", statusLabel(normalizedStatus(runner.status || ((number(junit.failures) + number(junit.errors)) ? "failed" : "success")))],
+      ["Statut", statusLabel(normalizedStatus(runner.status || ((number(junit.failures) + number(junit.errors)) ? "failed": "success")))],
       ["Tests", formatInteger(junit.tests)],
       ["Formatting", formatInteger(formats.completed) + "/" + formatInteger(formats.total_expected)],
-      ["Types natifs", formatInteger(queryTypes.passed) + "/" + formatInteger(queryTypes.total_expected) + " réussis"],
-      ["Régressions source", formatInteger(queryTypes.source_regressions_vs_release)]
+      ["Native types", formatInteger(queryTypes.passed) + "/" + formatInteger(queryTypes.total_expected) + " passed"],
+      ["Source regressions", formatInteger(queryTypes.source_regressions_vs_release)]
     ]);
 
     var logLink = byId("testsLogDownload");
@@ -481,7 +483,7 @@
   function renderFailedCases(cases) {
     var container = byId("failedCases");
     if (!cases.length) {
-      var success = emptyState("Aucun test en \u00e9chec sur le dernier run.", true);
+      var success = emptyState("No failed tests in the latest run.", true);
       success.classList.add("metric-success");
       container.replaceChildren(success);
       return;
@@ -489,7 +491,7 @@
     var list = create("div", "failure-list");
     cases.forEach(function (item) {
       var card = create("details", "failure-item");
-      var summary = create("summary", "failure-title", (item.classname ? item.classname + " :: " : "") + (item.name || "test"));
+      var summary = create("summary", "failure-title", (item.classname ? item.classname + " :: ": "") + (item.name || "test"));
       card.appendChild(summary);
       if (item.message) card.appendChild(create("div", "failure-message", item.message));
       if (item.details) card.appendChild(create("pre", "failure-details", item.details));
@@ -510,7 +512,7 @@
       link.append(create("span", "", row[1]), create("span", "", row[2]));
       fragment.appendChild(link);
     });
-    if (!fragment.childNodes.length) container.replaceChildren(emptyState("Aucun fichier disponible.", true));
+    if (!fragment.childNodes.length) container.replaceChildren(emptyState("No files available.", true));
     else container.replaceChildren(fragment);
   }
 
@@ -529,7 +531,7 @@
     if (!element) return;
     if (url) element.href = url;
     element.classList.toggle("is-disabled", !url);
-    element.setAttribute("aria-disabled", url ? "false" : "true");
+    element.setAttribute("aria-disabled", url ? "false": "true");
   }
 
   function resetFormatView(runId) {
@@ -541,7 +543,7 @@
     app.format.loading = false;
     app.format.requestToken += 1;
     app.format.caseCache.clear();
-    byId("formatResults").replaceChildren(emptyState(runId ? "Chargement des r\u00e9sultats..." : "Aucun r\u00e9sultat de formatage disponible."));
+    byId("formatResults").replaceChildren(emptyState(runId ? "Loading results...": "No results de formatage disponible."));
     byId("formatLoadMore").hidden = true;
     text("formatResultCount", "0");
   }
@@ -562,7 +564,7 @@
       app.format.offset = 0;
       app.format.total = 0;
       app.format.hasMore = false;
-      byId("formatResults").replaceChildren(emptyState("Chargement des r\u00e9sultats..."));
+      byId("formatResults").replaceChildren(emptyState("Loading results..."));
     }
     byId("formatLoadMore").disabled = true;
     try {
@@ -575,8 +577,8 @@
       renderFormatPage(result.payload, reset);
     } catch (error) {
       if (token !== app.format.requestToken) return;
-      byId("formatResults").replaceChildren(emptyState("Impossible de charger les diffs : " + error.message));
-      toast("Erreur de chargement du formatting : " + error.message, "error", 7000);
+      byId("formatResults").replaceChildren(emptyState("Unable to load diffs: " + error.message));
+      toast("Failed to load formatting results: " + error.message, "error", 7000);
     } finally {
       if (token === app.format.requestToken) {
         app.format.loading = false;
@@ -587,7 +589,7 @@
 
   function renderFormatPage(payload, reset) {
     var container = byId("formatResults");
-    var items = Array.isArray(payload.items) ? payload.items : [];
+    var items = Array.isArray(payload.items) ? payload.items: [];
     app.format.total = number(payload.total);
     app.format.offset = number(payload.next_offset);
     app.format.hasMore = Boolean(payload.has_more);
@@ -599,15 +601,15 @@
       var summaryData = payload.summary || {};
       summary.append(
         create("span", "", formatInteger(payload.total) + " cas dans le filtre"),
-        create("span", "", formatInteger(summaryData.passed) + " conformes / " + formatInteger(number(summaryData.failed) + number(summaryData.errors)) + " en \u00e9chec")
+        create("span", "", formatInteger(summaryData.passed) + " passed / " + formatInteger(number(summaryData.failed) + number(summaryData.errors)) + " failed")
       );
       container.appendChild(summary);
     }
 
     if (!items.length && reset) {
       var message = app.format.filter === "failures"
-        ? "Aucune diff\u00e9rence de formatage d\u00e9tect\u00e9e."
-        : "Aucun cas ne correspond au filtre.";
+        ? "No formatting differences detected."
+       : "No case matches the filter.";
       container.appendChild(emptyState(message, true));
     } else {
       var fragment = document.createDocumentFragment();
@@ -640,7 +642,7 @@
     summary.append(title, stats);
 
     var body = create("div", "diff-card-body");
-    body.appendChild(emptyState("Ouvre ce cas pour charger le diff d\u00e9taill\u00e9.", true));
+    body.appendChild(emptyState("Open this case to load the detailed diff.", true));
     card.append(summary, body);
     card.addEventListener("toggle", function () {
       if (card.open && card.dataset.loaded !== "1") loadFormatCase(card, item);
@@ -657,14 +659,14 @@
       card.dataset.loaded = "1";
       return;
     }
-    body.replaceChildren(emptyState("Chargement du diff...", true));
+    body.replaceChildren(emptyState("Loading diff...", true));
     try {
       var result = await requestJson(item.detail_url || ("/api/format-case?file=" + encodeURIComponent(item.file || "")));
       app.format.caseCache.set(cacheKey, result.payload);
       renderFormatCase(body, result.payload);
       card.dataset.loaded = "1";
     } catch (error) {
-      body.replaceChildren(emptyState("Impossible de charger le diff : " + error.message, true));
+      body.replaceChildren(emptyState("Unable to load diff: " + error.message, true));
     }
   }
 
@@ -675,8 +677,8 @@
     var toolbar = create("div", "diff-toolbar");
     [
       [detail.input_url, "Input"],
-      [detail.expected_url, "Attendu"],
-      [detail.actual_url, "Obtenu"]
+      [detail.expected_url, "Expected"],
+      [detail.actual_url, "Actual"]
     ].forEach(function (row) {
       if (!row[0]) return;
       var link = create("a", "file-chip", row[1]);
@@ -692,19 +694,19 @@
     var table = create("table", "diff-table");
     var thead = document.createElement("thead");
     var headRow = document.createElement("tr");
-    ["#", "Attendu", "#", "Obtenu"].forEach(function (label) {
+    ["#", "Expected", "#", "Actual"].forEach(function (label) {
       headRow.appendChild(create("th", "", label));
     });
     thead.appendChild(headRow);
     var tbody = document.createElement("tbody");
-    (Array.isArray(detail.rows) ? detail.rows : []).forEach(function (row) {
+    (Array.isArray(detail.rows) ? detail.rows: []).forEach(function (row) {
       var tr = document.createElement("tr");
       tr.className = "diff-" + (row.kind || "equal");
       tr.append(
-        create("td", "diff-no", row.expected_no == null ? "" : row.expected_no),
-        create("td", "diff-code mono", row.expected == null ? "" : row.expected),
-        create("td", "diff-no", row.actual_no == null ? "" : row.actual_no),
-        create("td", "diff-code mono", row.actual == null ? "" : row.actual)
+        create("td", "diff-no", row.expected_no == null ? "": row.expected_no),
+        create("td", "diff-code mono", row.expected == null ? "": row.expected),
+        create("td", "diff-no", row.actual_no == null ? "": row.actual_no),
+        create("td", "diff-code mono", row.actual == null ? "": row.actual)
       );
       tbody.appendChild(tr);
     });
@@ -713,11 +715,11 @@
     fragment.appendChild(scroll);
 
     if (detail.rows_truncated) {
-      fragment.appendChild(create("div", "diff-message", "Affichage tronqu\u00e9. Les fichiers complets restent disponibles dans le rapport ZIP."));
+      fragment.appendChild(create("div", "diff-message", "Display truncated. Complete files remain available in the ZIP report."));
     }
     if (detail.unified) {
       var unified = create("details", "unified-diff");
-      unified.append(create("summary", "", "Diff unifi\u00e9"), create("pre", "", detail.unified));
+      unified.append(create("summary", "", "Unified diff"), create("pre", "", detail.unified));
       fragment.appendChild(unified);
     }
     body.replaceChildren(fragment);
@@ -728,13 +730,13 @@
     var summary = details.summary || {};
     var overview = details.overview || {};
     renderResourceLinks("benchmarkLinks", [
-      [details.links && details.links.comparison, "comparison.md", "rapport lisible"],
-      [details.links && details.links.summary, "summary.json", "donn\u00e9es structur\u00e9es"],
-      [details.links && details.links.summary_csv, "summary.csv", "m\u00e9triques agr\u00e9g\u00e9es"],
+      [details.links && details.links.comparison, "comparison.md", "readable report"],
+      [details.links && details.links.summary, "summary.json", "structured data"],
+      [details.links && details.links.summary_csv, "summary.csv", "aggregated metrics"],
       [details.links && details.links.comparisons_csv, "comparisons.csv", "source vs release"],
-      [details.links && details.links.direct_http_csv, "direct_http_overhead.csv", "plancher HTTP"],
-      [details.links && details.links.runs, "runs.jsonl", "tous les runs"],
-      [details.links && details.links.log, "runner.log", "progression compl\u00e8te"]
+      [details.links && details.links.direct_http_csv, "direct_http_overhead.csv", "HTTP floor"],
+      [details.links && details.links.runs, "runs.jsonl", "all runs"],
+      [details.links && details.links.log, "runner.log", "complete progress log"]
     ]);
     setSimpleLink(byId("benchmarkLogDownload"), details.links && details.links.log);
     text("benchmarkComparisons", formatInteger(overview.comparisons_count));
@@ -742,7 +744,9 @@
     text("benchmarkHttpCount", formatInteger(overview.direct_http_count));
     text("benchmarkOverhead", formatMs(overview.median_direct_overhead_ms));
     text("benchmarkIssues", formatInteger(overview.issues_count));
-    renderBenchmarkIssues(Array.isArray(summary.issues) ? summary.issues : []);
+    text("benchmarkWarnings", formatInteger(overview.warnings_count));
+    renderBenchmarkIssues(Array.isArray(summary.issues) ? summary.issues: []);
+    renderBenchmarkWarnings(Array.isArray(summary.warnings) ? summary.warnings: []);
     renderBenchmarkTables();
   }
 
@@ -757,8 +761,25 @@
     }
     var fragment = document.createDocumentFragment();
     issues.forEach(function (issue) {
-      var value = typeof issue === "string" ? issue : JSON.stringify(issue, null, 2);
+      var value = typeof issue === "string" ? issue: JSON.stringify(issue, null, 2);
       fragment.appendChild(create("div", "issue-row", value));
+    });
+    list.replaceChildren(fragment);
+  }
+
+  function renderBenchmarkWarnings(warnings) {
+    var panel = byId("benchmarkWarningsPanel");
+    var list = byId("benchmarkWarningList");
+    text("benchmarkWarningsCount", formatInteger(warnings.length));
+    panel.hidden = !warnings.length;
+    if (!warnings.length) {
+      list.replaceChildren();
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    warnings.forEach(function (warning) {
+      var value = typeof warning === "string" ? warning: JSON.stringify(warning, null, 2);
+      fragment.appendChild(create("div", "issue-row warning-row", value));
     });
     list.replaceChildren(fragment);
   }
@@ -795,7 +816,7 @@
       cells.forEach(function (cell) {
         var td = document.createElement("td");
         if (cell instanceof Node) td.appendChild(cell);
-        else td.textContent = cell == null ? "" : String(cell);
+        else td.textContent = cell == null ? "": String(cell);
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -805,20 +826,53 @@
   }
 
   function metricSpan(value, positive) {
-    return create("span", positive === true ? "metric-positive" : positive === false ? "metric-negative" : "metric-neutral", value);
+    return create("span", positive === true ? "metric-positive": positive === false ? "metric-negative": "metric-neutral", value);
   }
 
   function checkSpan(ok) {
-    return create("span", ok ? "check-mark" : "diff-mark", ok ? "OK" : "DIFF");
+    return create("span", ok ? "check-mark": "diff-mark", ok ? "OK": "DIFF");
+  }
+
+  function expectedSpan(differs, value) {
+    return create("span", differs ? "expected-mark": "check-mark", differs ? value + " (expected)": value);
+  }
+
+  function classificationSpan(value) {
+    var labels = {
+      equivalent: ["Equivalent", "check-mark"],
+      baseline_correctness_improvement: ["Source correctness improvement", "expected-mark"],
+      baseline_regression: ["Source regression", "diff-mark"],
+      both_failed: ["Both failed", "diff-mark"]
+    };
+    var item = labels[value] || [String(value || "Unknown"), "metric-neutral"];
+    return create("span", item[1], item[0]);
+  }
+
+  function deterministicCountPair(row) {
+    var left = row.baseline_deterministic_event_count_medians || {};
+    var right = row.compared_deterministic_event_count_medians || {};
+    return ["meta", "result_meta", "done", "error"].map(function (name) {
+      return name + " " + formatInteger(left[name]) + "/" + formatInteger(right[name]);
+    }).join(" · ");
+  }
+
+  function telemetrySchemaPair(row) {
+    var left = Array.isArray(row.baseline_tick_schemas) && row.baseline_tick_schemas.length
+      ? row.baseline_tick_schemas.join(", ")
+      : "none";
+    var right = Array.isArray(row.compared_tick_schemas) && row.compared_tick_schemas.length
+      ? row.compared_tick_schemas.join(", ")
+      : "none";
+    return left + " / " + right;
   }
 
   function renderBenchmarkTables() {
     if (!app.benchmarkData) return;
     var summary = app.benchmarkData.summary || {};
-    var comparisons = (Array.isArray(summary.comparisons) ? summary.comparisons : []).filter(function (row) {
+    var comparisons = (Array.isArray(summary.comparisons) ? summary.comparisons: []).filter(function (row) {
       return rowMatchesSearch(row, app.benchmarkSearch);
     });
-    var overheads = (Array.isArray(summary.direct_http_overheads) ? summary.direct_http_overheads : []).filter(function (row) {
+    var overheads = (Array.isArray(summary.direct_http_overheads) ? summary.direct_http_overheads: []).filter(function (row) {
       return rowMatchesSearch(row, app.benchmarkSearch);
     });
 
@@ -828,29 +882,33 @@
     var comparisonContainer = byId("comparisonTable");
     preserveElementScroll(comparisonContainer, function () {
       if (!comparisons.length) {
-        comparisonContainer.replaceChildren(emptyState("Aucune comparaison ne correspond au filtre."));
+        comparisonContainer.replaceChildren(emptyState("No comparison matches the filter."));
         return;
       }
       var rows = comparisons.map(function (row) {
         var speedup = Number(row.speedup_pct_positive_means_baseline_faster);
+        var resultBatchPair = formatInteger(row.baseline_result_row_events) + " / " + formatInteger(row.compared_result_row_events);
+        var tickPair = formatInteger(row.baseline_tick_events) + " / " + formatInteger(row.compared_tick_events);
         return [
           row.host_id || "",
           create("span", "mono", row.query_name || ""),
-          (row.baseline_target || "") + " / " + (row.compared_target || ""),
+          classificationSpan(row.correctness_classification),
           formatMs(row.baseline_median_done_ms),
           formatMs(row.compared_median_done_ms),
-          metricSpan(formatPercent(speedup, true), Number.isFinite(speedup) ? speedup >= 0 : null),
+          metricSpan(formatPercent(speedup, true), Number.isFinite(speedup) ? speedup >= 0: null),
           formatMs(row.baseline_first_row_ms),
           formatMs(row.compared_first_row_ms),
-          formatInteger(row.baseline_total_events) + " / " + formatInteger(row.compared_total_events),
-          formatInteger(row.baseline_result_row_events) + " / " + formatInteger(row.compared_result_row_events),
+          create("span", "mono compact-cell", deterministicCountPair(row)),
+          checkSpan(Boolean(row.core_event_order_match)),
+          expectedSpan(Boolean(row.result_batching_differs), resultBatchPair),
+          expectedSpan(Boolean(row.tick_cadence_differs), tickPair),
+          expectedSpan(Boolean(row.telemetry_schema_differs), telemetrySchemaPair(row)),
           checkSpan(Boolean(row.row_hash_match)),
-          checkSpan(Boolean(row.columns_match)),
-          checkSpan(Boolean(row.event_presence_match))
+          checkSpan(Boolean(row.columns_match))
         ];
       });
       comparisonContainer.replaceChildren(createDataTable(
-        ["Host", "Query", "Targets", "Source total", "Release total", "Gain", "Source 1re ligne", "Release 1re ligne", "Events", "Rows events", "Rows", "Colonnes", "SSE"],
+        ["Host", "Query", "Correctness", "Source total", "Release total", "Speedup", "Source first row", "Release first row", "Control events S/R", "Core order", "Result batches S/R", "Ticks S/R", "Telemetry S/R", "Rows", "Columns"],
         rows
       ));
     });
@@ -858,7 +916,7 @@
     var overheadContainer = byId("httpOverheadTable");
     preserveElementScroll(overheadContainer, function () {
       if (!overheads.length) {
-        overheadContainer.replaceChildren(emptyState("Aucune mesure HTTP directe ne correspond au filtre."));
+        overheadContainer.replaceChildren(emptyState("No direct HTTP measurement matches the filter."));
         return;
       }
       var rows = overheads.map(function (row) {
@@ -871,16 +929,21 @@
           formatMs(row.direct_http_first_byte_ms),
           formatMs(row.direct_http_first_row_ms),
           formatMs(row.direct_http_median_done_ms),
+          formatMs(row.direct_http_verified_done_ms),
           formatMs(row.direct_http_server_elapsed_ms),
-          metricSpan(formatMs(row.overhead_ms), Number.isFinite(overhead) ? overhead <= 0 : null),
-          formatPercent(row.overhead_pct_vs_direct_http, false),
-          row.duration_ratio_vs_direct_http == null ? "--" : number(row.duration_ratio_vs_direct_http).toFixed(2) + "x",
+          metricSpan(formatMs(row.overhead_ms), Number.isFinite(overhead) ? overhead <= 0: null),
+          row.duration_ratio_vs_direct_http == null ? "--": number(row.duration_ratio_vs_direct_http).toFixed(2) + "x",
+          metricSpan(
+            formatMs(row.verified_overhead_ms),
+            Number.isFinite(Number(row.verified_overhead_ms)) ? Number(row.verified_overhead_ms) <= 0: null
+          ),
+          row.duration_ratio_vs_verified_direct_http == null ? "--": number(row.duration_ratio_vs_verified_direct_http).toFixed(2) + "x",
           checkSpan(Boolean(row.row_hash_match)),
           checkSpan(Boolean(row.columns_match))
         ];
       });
       overheadContainer.replaceChildren(createDataTable(
-        ["Host", "Query", "Dashboard", "Dashboard total", "HTTP TTFB", "HTTP 1re ligne", "HTTP total", "Serveur CH", "Overhead", "Overhead %", "Ratio", "Rows", "Colonnes"],
+        ["Host", "Query", "Dashboard", "Dashboard total", "HTTP TTFB", "HTTP first row", "HTTP wire", "HTTP verified", "ClickHouse server", "Wire delta", "Wire ratio", "Verified delta", "Verified ratio", "Rows", "Columns"],
         rows
       ));
     });
@@ -895,9 +958,9 @@
     }).join("|");
     if (app.historyKeys[kind] === key) return;
     app.historyKeys[kind] = key;
-    var container = byId(kind === "tests" ? "testsHistory" : "benchmarkHistory");
+    var container = byId(kind === "tests" ? "testsHistory": "benchmarkHistory");
     if (!filtered.length) {
-      container.replaceChildren(emptyState("Aucun historique depuis le d\u00e9marrage.", true));
+      container.replaceChildren(emptyState("No history since the runner started.", true));
       return;
     }
     var fragment = document.createDocumentFragment();
@@ -910,7 +973,7 @@
       );
       row.appendChild(main);
       if (item.artifact_url) {
-        var link = create("a", "", "Ouvrir");
+        var link = create("a", "", "Open");
         link.href = item.artifact_url;
         link.target = "_blank";
         link.rel = "noreferrer";
@@ -923,12 +986,12 @@
 
   function syncArtifactCaches(latest) {
     ["tests", "benchmark"].forEach(function (kind) {
-      var runId = latest[kind] && latest[kind].run_id ? latest[kind].run_id : "";
-      var revision = latest[kind] && latest[kind].revision ? latest[kind].revision : runId;
+      var runId = latest[kind] && latest[kind].run_id ? latest[kind].run_id: "";
+      var revision = latest[kind] && latest[kind].revision ? latest[kind].revision: runId;
       if (app.artifacts[kind].runId !== runId || app.artifacts[kind].revision !== revision) {
         app.artifacts[kind] = { runId: runId, revision: revision, data: null, loading: false };
-        var container = byId(kind === "tests" ? "testsArtifacts" : "benchmarkArtifacts");
-        container.replaceChildren(emptyState(runId ? "Ouvre cette section pour charger les artefacts." : "Aucun artefact disponible.", true));
+        var container = byId(kind === "tests" ? "testsArtifacts": "benchmarkArtifacts");
+        container.replaceChildren(emptyState(runId ? "Open this section to load artifacts.": "No artifacts available.", true));
       }
     });
   }
@@ -937,25 +1000,25 @@
     var cache = app.artifacts[kind];
     if (!cache.runId || cache.loading || cache.data) return;
     cache.loading = true;
-    var container = byId(kind === "tests" ? "testsArtifacts" : "benchmarkArtifacts");
-    container.replaceChildren(emptyState("Chargement des artefacts...", true));
+    var container = byId(kind === "tests" ? "testsArtifacts": "benchmarkArtifacts");
+    container.replaceChildren(emptyState("Loading artifacts...", true));
     try {
       var result = await requestJson("/api/artifacts/" + kind);
       if (app.artifacts[kind] !== cache) return;
       cache.data = result.payload;
       renderArtifacts(kind, result.payload);
     } catch (error) {
-      container.replaceChildren(emptyState("Impossible de charger les artefacts : " + error.message, true));
+      container.replaceChildren(emptyState("Unable to load artifacts: " + error.message, true));
     } finally {
       cache.loading = false;
     }
   }
 
   function renderArtifacts(kind, payload) {
-    var container = byId(kind === "tests" ? "testsArtifacts" : "benchmarkArtifacts");
-    var items = Array.isArray(payload.items) ? payload.items : [];
+    var container = byId(kind === "tests" ? "testsArtifacts": "benchmarkArtifacts");
+    var items = Array.isArray(payload.items) ? payload.items: [];
     if (!items.length) {
-      container.replaceChildren(emptyState("Aucun artefact disponible.", true));
+      container.replaceChildren(emptyState("No artifacts available.", true));
       return;
     }
     var fragment = document.createDocumentFragment();
@@ -963,22 +1026,22 @@
       var row = create("div", "artifact-row");
       var main = create("div", "artifact-main");
       main.append(create("strong", "", item.path), create("small", "", formatBytes(item.size)));
-      var link = create("a", "", "Ouvrir");
+      var link = create("a", "", "Open");
       link.href = item.url;
       link.target = "_blank";
       link.rel = "noreferrer";
       row.append(main, link);
       fragment.appendChild(row);
     });
-    if (payload.truncated) fragment.appendChild(emptyState("Liste tronqu\u00e9e. Le rapport ZIP contient tous les fichiers.", true));
+    if (payload.truncated) fragment.appendChild(emptyState("List truncated. The ZIP report contains every file.", true));
     container.replaceChildren(fragment);
   }
 
   function logElements(kind) {
     return {
-      pre: byId(kind === "tests" ? "testsLog" : "benchmarkLog"),
-      state: byId(kind === "tests" ? "testsLogState" : "benchmarkLogState"),
-      download: byId(kind === "tests" ? "testsLogDownload" : "benchmarkLogDownload")
+      pre: byId(kind === "tests" ? "testsLog": "benchmarkLog"),
+      state: byId(kind === "tests" ? "testsLogState": "benchmarkLogState"),
+      download: byId(kind === "tests" ? "testsLogDownload": "benchmarkLogDownload")
     };
   }
 
@@ -1007,7 +1070,7 @@
       return;
     }
     var kind = active.kind;
-    if (kind === "all") kind = active.phase === "benchmark" ? "benchmark" : "tests";
+    if (kind === "all") kind = active.phase === "benchmark" ? "benchmark": "tests";
     // Only poll the visible log. Switching tabs immediately loads the active
     // stream, so hidden panels no longer generate one request every 900 ms.
     if ((kind === "tests" || kind === "benchmark") && kind === app.activeTab) {
@@ -1019,7 +1082,7 @@
 
   function updateLogState(kind, live) {
     var element = logElements(kind).state;
-    element.textContent = live ? "Live" : "Inactif";
+    element.textContent = live ? "Live": "Idle";
     element.classList.toggle("is-live", live);
   }
 
@@ -1039,13 +1102,13 @@
       var pre = elements.pre;
       var pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 36;
       if (payload.reset || state.key !== payload.key) {
-        pre.textContent = payload.text || "Aucun log disponible.";
+        pre.textContent = payload.text || "No log available.";
       } else if (payload.text) {
-        if (pre.textContent === "Aucun log disponible.") pre.textContent = "";
+        if (pre.textContent === "No log available.") pre.textContent = "";
         pre.appendChild(document.createTextNode(payload.text));
       }
       if (pre.textContent.length > 600000) {
-        pre.textContent = "... log tronqu\u00e9 dans l'interface ...\n" + pre.textContent.slice(-420000);
+        pre.textContent = "... log truncated in the interface ...\n" + pre.textContent.slice(-420000);
       }
       state.key = payload.key || "";
       state.offset = number(payload.next_offset);
@@ -1070,17 +1133,17 @@
 
     ["tests", "benchmark"].forEach(function (name) {
       var active = name === kind;
-      var tab = byId(name === "tests" ? "tabTests" : "tabBenchmark");
-      var panel = byId(name === "tests" ? "testsPanel" : "benchmarkPanel");
+      var tab = byId(name === "tests" ? "tabTests": "tabBenchmark");
+      var panel = byId(name === "tests" ? "testsPanel": "benchmarkPanel");
       tab.classList.toggle("is-active", active);
-      tab.setAttribute("aria-selected", active ? "true" : "false");
-      tab.tabIndex = active ? 0 : -1;
+      tab.setAttribute("aria-selected", active ? "true": "false");
+      tab.tabIndex = active ? 0: -1;
       panel.hidden = !active;
     });
 
     ensureDetails(kind, false);
     fetchLog(kind, !app.logs[kind].initialized);
-    syncLogPolling(app.state && app.state.active ? app.state.active : null);
+    syncLogPolling(app.state && app.state.active ? app.state.active: null);
     window.requestAnimationFrame(function () {
       window.scrollTo({ top: app.tabScroll[kind] || 0, behavior: "auto" });
     });
@@ -1089,20 +1152,20 @@
   async function runJob(kind) {
     try {
       await requestJson("/api/run/" + kind, { method: "POST" });
-      toast(kind === "tests" ? "Tests lanc\u00e9s." : kind === "benchmark" ? "Benchmark lanc\u00e9." : "Tests et benchmark lanc\u00e9s.", "success");
+      toast(kind === "tests" ? "Tests started.": kind === "benchmark" ? "Benchmark started.": "Tests and benchmark started.", "success");
       await loadState(true);
     } catch (error) {
-      toast("Impossible de lancer le job : " + error.message, "error", 7000);
+      toast("Unable to start job: " + error.message, "error", 7000);
     }
   }
 
   async function cancelJob() {
     try {
       var result = await requestJson("/api/cancel", { method: "POST" });
-      toast(result.payload.ok ? "Arr\u00eat demand\u00e9." : "Aucun processus actif a arr\u00eater.", result.payload.ok ? "warning" : "info");
+      toast(result.payload.ok ? "Stop requested.": "No active process to stop.", result.payload.ok ? "warning": "info");
       await loadState(true);
     } catch (error) {
-      toast("Impossible d'arr\u00eater le job : " + error.message, "error", 7000);
+      toast("Unable to stop job: " + error.message, "error", 7000);
     }
   }
 
@@ -1113,7 +1176,7 @@
       await loadState(true);
       await ensureDetails(app.activeTab, true);
       await fetchLog(app.activeTab, true);
-      toast("R\u00e9sultats actualis\u00e9s.", "success", 2500);
+      toast("Results refreshed.", "success", 2500);
     } finally {
       button.disabled = false;
     }
@@ -1121,14 +1184,14 @@
 
   function updateThemeButton() {
     var mode = document.documentElement.dataset.themeMode || "system";
-    text("themeIcon", mode === "dark" ? "☾" : mode === "light" ? "☀" : "◐");
-    byId("themeToggle").title = "Thème : " + (mode === "dark" ? "sombre" : mode === "light" ? "clair" : "automatique");
+    text("themeIcon", mode === "dark" ? "☾": mode === "light" ? "☀": "◐");
+    byId("themeToggle").title = "Theme: " + (mode === "dark" ? "dark": mode === "light" ? "light": "system");
   }
 
   function cycleTheme() {
     var root = document.documentElement;
     var current = root.dataset.themeMode || "system";
-    var next = current === "system" ? "dark" : current === "dark" ? "light" : "system";
+    var next = current === "system" ? "dark": current === "dark" ? "light": "system";
     root.dataset.themeMode = next;
     if (next === "system") delete root.dataset.theme;
     else root.dataset.theme = next;
@@ -1138,8 +1201,8 @@
 
   function configureExternalLinks(config) {
     var host = window.location.hostname || "localhost";
-    var protocol = window.location.protocol === "https:" ? "https:" : "http:";
-    var ports = config && config.public_ports ? config.public_ports : {};
+    var protocol = window.location.protocol === "https:" ? "https:": "http:";
+    var ports = config && config.public_ports ? config.public_ports: {};
     byId("sourceLink").href = protocol + "//" + host + ":" + (ports.source || 18080);
     byId("releaseLink").href = protocol + "//" + host + ":" + (ports.release || 18081);
     byId("clickhouseLink").href = protocol + "//" + host + ":" + (ports.clickhouse_http || 18123) + "/ping";
@@ -1152,9 +1215,9 @@
       tab.addEventListener("keydown", function (event) {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
-        var next = event.key === "Home" || event.key === "ArrowLeft" ? "tests" : "benchmark";
+        var next = event.key === "Home" || event.key === "ArrowLeft" ? "tests": "benchmark";
         switchTab(next);
-        byId(next === "tests" ? "tabTests" : "tabBenchmark").focus();
+        byId(next === "tests" ? "tabTests": "tabBenchmark").focus();
       });
     });
     byId("runTests").addEventListener("click", function () { runJob("tests"); });
@@ -1196,7 +1259,7 @@
           event.preventDefault();
           return;
         }
-        toast("Pr\u00e9paration du rapport ZIP...", "info", 3000);
+        toast("Preparing ZIP report...", "info", 3000);
       });
     });
 
@@ -1209,7 +1272,7 @@
       }
       connectStateEvents();
       if (Date.now() - app.lastStateAt > 5000) loadState(false);
-      syncLogPolling(app.state && app.state.active ? app.state.active : null);
+      syncLogPolling(app.state && app.state.active ? app.state.active: null);
       fetchLog(app.activeTab, false);
     });
 
@@ -1224,11 +1287,11 @@
   function initializeTab() {
     ["tests", "benchmark"].forEach(function (kind) {
       var active = app.activeTab === kind;
-      var tab = byId(kind === "tests" ? "tabTests" : "tabBenchmark");
+      var tab = byId(kind === "tests" ? "tabTests": "tabBenchmark");
       tab.classList.toggle("is-active", active);
-      tab.setAttribute("aria-selected", active ? "true" : "false");
-      tab.tabIndex = active ? 0 : -1;
-      byId(kind === "tests" ? "testsPanel" : "benchmarkPanel").hidden = !active;
+      tab.setAttribute("aria-selected", active ? "true": "false");
+      tab.tabIndex = active ? 0: -1;
+      byId(kind === "tests" ? "testsPanel": "benchmarkPanel").hidden = !active;
     });
   }
 
@@ -1244,7 +1307,7 @@
     });
     window.setInterval(function () {
       if (document.visibilityState !== "visible") return;
-      var staleAfter = app.eventSource ? 30000 : 5000;
+      var staleAfter = app.eventSource ? 30000: 5000;
       if (Date.now() - app.lastStateAt > staleAfter) loadState(false);
     }, 5000);
   }

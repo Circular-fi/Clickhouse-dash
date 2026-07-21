@@ -107,6 +107,21 @@ def normalize_stream_url(base_url: str, stream_url: str) -> str:
     return f"{base_url}{stream_url}"
 
 
+def validate_sse_content_type(response: requests.Response) -> str:
+    content_type = response.headers.get("Content-Type", "").strip()
+    # requests joins duplicate Content-Type headers with a comma. Such a value
+    # makes its charset parser interpret "utf-8, text/event-stream" as an
+    # encoding name and masks the real server-side protocol bug.
+    values = [value.strip() for value in content_type.split(",") if value.strip()]
+    if len(values) != 1:
+        raise RuntimeError(f"invalid SSE Content-Type (expected one value): {content_type!r}")
+    media_type = values[0].split(";", 1)[0].strip().lower()
+    if media_type != "text/event-stream":
+        raise RuntimeError(f"invalid SSE Content-Type: {content_type!r}")
+    response.encoding = "utf-8"
+    return content_type
+
+
 def parse_sse_events(response: requests.Response) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     event_name: str | None = None
@@ -162,6 +177,7 @@ def run_query_and_collect_events(
         headers={"Accept": "text/event-stream"},
     ) as stream_response:
         stream_response.raise_for_status()
+        validate_sse_content_type(stream_response)
         events = parse_sse_events(stream_response)
 
     return run_payload, events
@@ -405,23 +421,23 @@ def assert_query_stream_ok(case_name: str, sql: str) -> None:
 
     explanations = {
         "source_regression_vs_release": (
-            "Le harness POST/SSE fonctionne et la release de référence réussit : "
-            "l'échec appartient au binaire source testé."
+            "The POST/SSE harness works and the reference release succeeds, so the failure belongs "
+            "to the source binary under test."
         ),
         "clickhouse_dash_source_failure": (
-            "Le harness POST/SSE fonctionne, mais aucune release de référence n'est configurée."
+            "The POST/SSE harness works, but no reference release is configured."
         ),
         "shared_product_or_clickhouse_limitation": (
-            "La source et la release échouent de la même façon ; vérifier la compatibilité ClickHouse/version."
+            "The source and release fail in the same way; verify ClickHouse/version compatibility."
         ),
         "source_and_release_fail_differently": (
-            "La source et la release échouent différemment ; les deux traces sont jointes."
+            "The source and release fail differently; both event traces are attached."
         ),
         "reference_transport_error": (
-            "La source a échoué et la release de référence n'a pas pu être interrogée."
+            "The source failed and the reference release could not be queried."
         ),
         "test_infrastructure_or_transport_error": (
-            "Le harness n'a pas pu terminer le cycle HTTP/SSE de la source."
+            "The harness could not complete the source HTTP/SSE cycle."
         ),
     }
     message = [
@@ -515,3 +531,83 @@ def test_query_classification_ignores_leading_comments() -> None:
     assert outcome.get("first_row") == [1]
     meta = outcome.get("result_meta") or {}
     assert meta.get("describe_mode") == "fast"
+
+
+
+def result_rows_from_events(events: list[dict[str, Any]]) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    for event in events:
+        if event.get("event") != "result_rows":
+            continue
+        payload = event.get("data")
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            continue
+        rows.extend(row for row in payload["rows"] if isinstance(row, list))
+    return rows
+
+
+def test_non_finite_float_is_serialized_as_json_null() -> None:
+    sql = (
+        "SELECT number % (number / 2) AS value, count() AS count "
+        "FROM numbers(10) GROUP BY ALL ORDER BY isNaN(value), value"
+    )
+    result, events = execute_case(sql, base_url=BASE_URL, session=SESSION)
+    outcome = result.get("outcome") or {}
+    assert outcome.get("success"), concise_result(result)
+    assert result_rows_from_events(events) == [[0.0, 9], [None, 1]]
+
+
+def test_native_telemetry_uses_deterministic_schema_v2() -> None:
+    result, events = execute_case(
+        "SELECT sum(cityHash64(number)) AS checksum FROM numbers(1000000)",
+        base_url=BASE_URL,
+        session=SESSION,
+    )
+    outcome = result.get("outcome") or {}
+    assert outcome.get("success"), concise_result(result)
+
+    meta = next(
+        (event.get("data") for event in events if event.get("event") == "meta"),
+        None,
+    )
+    assert isinstance(meta, dict)
+    telemetry = meta.get("telemetry")
+    assert isinstance(telemetry, dict)
+    assert telemetry.get("schema_version") == 2
+    assert telemetry.get("source") == "clickhouse_native_tcp"
+
+    ticks = [
+        event.get("data")
+        for event in events
+        if event.get("event") == "tick" and isinstance(event.get("data"), dict)
+    ]
+    assert ticks, "expected at least one schema-v2 telemetry tick"
+    required_profile_fields = {
+        "cpu_percent_centi",
+        "memory_bytes",
+        "peak_memory_bytes",
+        "cpu_wait_percent_centi",
+        "io_wait_percent_centi",
+        "temporary_data_bytes",
+        "cpu_time_us",
+        "cpu_wait_time_us",
+        "io_wait_time_us",
+    }
+    for tick in ticks:
+        assert tick.get("schema_version") == 2
+        assert isinstance(tick.get("progress"), dict)
+        assert isinstance(tick.get("rates"), dict)
+        profile = tick.get("profile")
+        assert isinstance(profile, dict)
+        assert required_profile_fields.issubset(profile)
+        assert not [key for key in profile if "thread" in str(key).lower()]
+        assert "peak_cpu_percent_centi" not in profile
+        assert "peak_wait_percent_centi" not in profile
+
+    done = next(
+        (event.get("data") for event in reversed(events) if event.get("event") == "done"),
+        None,
+    )
+    assert isinstance(done, dict)
+    assert isinstance(done.get("telemetry"), dict)
+    assert done["telemetry"].get("schema_version") == 2

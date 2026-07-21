@@ -75,3 +75,22 @@ def test_partial_rows_followed_by_error_are_not_considered_success() -> None:
     assert outcome["success"] is False
     assert outcome["result_rows_parsed"] == 1
     assert outcome["errors"][0]["message"] == "unimplemented 9"
+
+
+def test_sse_content_type_accepts_one_event_stream_value() -> None:
+    import requests
+
+    response = requests.Response()
+    response.headers["Content-Type"] = "text/event-stream; charset=utf-8"
+    assert query_types.validate_sse_content_type(response) == "text/event-stream; charset=utf-8"
+    assert response.encoding == "utf-8"
+
+
+def test_sse_content_type_rejects_duplicate_values() -> None:
+    import requests
+    import pytest
+
+    response = requests.Response()
+    response.headers["Content-Type"] = "text/event-stream; charset=utf-8, text/event-stream"
+    with pytest.raises(RuntimeError, match="expected one value"):
+        query_types.validate_sse_content_type(response)

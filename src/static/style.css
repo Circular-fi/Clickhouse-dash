@@ -365,7 +365,7 @@ body {
   user-select: none;
   text-align: right;
   color: color-mix(in srgb, var(--muted) 78%, transparent);
-  background: var(--panelBg);    
+  background: var(--panelBg);
   z-index: 2;
   border-right: 1px solid var(--border);
 }
@@ -1228,7 +1228,6 @@ button.button:not(:disabled):hover {
 #copyMenu .runMenu__opt {
   margin-top: -0.5rem;
   margin-left: 0.2rem;
-    
 }
 
 .copyMenu .runMenu__opt .runMenu__optText,
@@ -1447,7 +1446,7 @@ button.button:not(:disabled):hover {
 
 .resultTable.resultTable--vertical thead th:first-child,
 .resultTable.resultTable--vertical tbody th {
-  width: 14rem;           /* "serré" à gauche */
+  width: 14rem;           /* Compact alignment on the left. */
   max-width: 14rem;
   text-align: left;
   white-space: nowrap;
@@ -1539,20 +1538,20 @@ button.button:not(:disabled):hover {
 
   border-radius: var(--radiusSm);
   border: 1px solid var(--borderStrong);
-  border-top: 0;              /* supprime la ligne entre bouton et menu */
+  border-top: 0;              /* Remove the divider between the button and menu. */
 
   background:
     linear-gradient(180deg, var(--panelTopSheen), transparent 22%),
     var(--panel);
 
-  /* shadow qui “tombe” vers le bas (peu/pas de blur au-dessus) */
+  /* Downward shadow with little blur above the element. */
   box-shadow:
     0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
 
   backdrop-filter: none;
 
-  /* animation base (fermée) */
+  /* Base animation in the closed state. */
   transform-origin: top;
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
@@ -1650,14 +1649,14 @@ button.button:not(:disabled):hover {
 .themeSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
   display: none;
-  
+
 }
 
 
 
 
 
-/* optionnel : respecte "reduce motion" */
+/* Respect reduced-motion preferences. */
 @media (prefers-reduced-motion: reduce) {
   .themeSelect__menu {
     transition: none;

@@ -8,4 +8,4 @@ WITH
 SELECT
     normalized_values,
     filtered_values,
-    arrayStringConcat(filtered_values, ', ') AS `joined_values`
+    arrayStringConcat(filtered_values, ',') AS `joined_values`

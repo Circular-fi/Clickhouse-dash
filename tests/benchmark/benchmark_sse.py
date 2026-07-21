@@ -490,6 +490,17 @@ def collect_direct_http(
     return aggregate, trace
 
 
+def sse_content_type_issues(content_type: str) -> list[str]:
+    value = (content_type or "").strip()
+    values = [item.strip() for item in value.split(",") if item.strip()]
+    if len(values) != 1:
+        return [f"invalid_sse_content_type_values:{value!r}"]
+    media_type = values[0].split(";", 1)[0].strip().lower()
+    if media_type != "text/event-stream":
+        return [f"invalid_sse_content_type:{value!r}"]
+    return []
+
+
 def normalize_stream_url(base_url: str, stream_url: str) -> str:
     if not stream_url:
         raise ValueError("empty stream_url")
@@ -551,9 +562,22 @@ def summarize_event(index: int, name: str, raw_data: str, payload: Any, json_ok:
             if key in payload:
                 row[key] = payload.get(key)
     elif name == "tick" and isinstance(payload, list):
+        row["schema"] = "legacy_array"
         row["fields"] = len(payload)
         if len(payload) > 14 and isinstance(payload[14], list):
             row["samples"] = len(payload[14])
+    elif name == "tick" and isinstance(payload, dict):
+        row["schema"] = f"object_v{payload.get('schema_version')}"
+        samples = payload.get("samples")
+        if isinstance(samples, list):
+            row["samples"] = len(samples)
+        progress = payload.get("progress")
+        profile = payload.get("profile")
+        if isinstance(progress, dict):
+            row["read_rows"] = progress.get("read_rows")
+            row["read_bytes"] = progress.get("read_bytes")
+        if isinstance(profile, dict):
+            row["profile_fields"] = sorted(profile)
     elif name == "error" and isinstance(payload, dict):
         row["message"] = payload.get("message")
     return row
@@ -587,6 +611,10 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
         "result_row_events": 0,
         "tick_events": 0,
         "tick_samples_total": 0,
+        "tick_schema_versions": [],
+        "telemetry_sources": [],
+        "telemetry_thread_fields": [],
+        "telemetry_shape_issues": [],
         "done_payload": None,
         "error_messages": [],
     }
@@ -615,7 +643,21 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
         if not json_ok:
             aggregate["json_decode_errors"] += 1
 
-        if name == "result_meta" and isinstance(payload, dict):
+        if name == "meta" and isinstance(payload, dict):
+            telemetry = payload.get("telemetry")
+            if isinstance(telemetry, dict):
+                version = telemetry.get("schema_version")
+                source = telemetry.get("source")
+                if version is not None:
+                    aggregate["tick_schema_versions"].append(version)
+                if source:
+                    aggregate["telemetry_sources"].append(str(source))
+                metrics = telemetry.get("metrics")
+                if isinstance(metrics, list):
+                    aggregate["telemetry_thread_fields"].extend(
+                        sorted(str(metric) for metric in metrics if "thread" in str(metric).lower())
+                    )
+        elif name == "result_meta" and isinstance(payload, dict):
             if aggregate["time_to_result_meta_ms"] is None:
                 aggregate["time_to_result_meta_ms"] = elapsed_ms
             for key in ["columns", "types", "original_types", "transport_modes"]:
@@ -632,12 +674,53 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
                     canonical_hash_update(rows_hash, row)
         elif name == "tick" and isinstance(payload, list):
             aggregate["tick_events"] += 1
+            aggregate["tick_schema_versions"].append("legacy_array")
             if len(payload) > 14 and isinstance(payload[14], list):
                 aggregate["tick_samples_total"] += len(payload[14])
+        elif name == "tick" and isinstance(payload, dict):
+            aggregate["tick_events"] += 1
+            aggregate["tick_schema_versions"].append(payload.get("schema_version"))
+            if payload.get("schema_version") != 2:
+                aggregate["telemetry_shape_issues"].append("tick_schema_version")
+            for object_field in ("progress", "rates", "profile"):
+                if not isinstance(payload.get(object_field), dict):
+                    aggregate["telemetry_shape_issues"].append(f"tick_missing_object:{object_field}")
+            samples = payload.get("samples")
+            if samples is not None and not isinstance(samples, list):
+                aggregate["telemetry_shape_issues"].append("tick_samples_not_array_or_null")
+            elif isinstance(samples, list):
+                aggregate["tick_samples_total"] += len(samples)
+                for sample in samples:
+                    if not isinstance(sample, list) or len(sample) != TELEMETRY_V2_SAMPLE_WIDTH:
+                        aggregate["telemetry_shape_issues"].append("tick_sample_width")
+                        break
+            profile = payload.get("profile")
+            if isinstance(profile, dict):
+                aggregate["telemetry_thread_fields"].extend(
+                    sorted(key for key in profile if "thread" in str(key).lower())
+                )
+                missing_profile_fields = sorted(TELEMETRY_V2_PROFILE_FIELDS.difference(profile))
+                if missing_profile_fields:
+                    aggregate["telemetry_shape_issues"].append(
+                        "tick_missing_profile_fields:" + ",".join(missing_profile_fields)
+                    )
+                for forbidden in ("peak_cpu_percent_centi", "peak_wait_percent_centi"):
+                    if forbidden in profile:
+                        aggregate["telemetry_shape_issues"].append(f"sampled_peak_field:{forbidden}")
         elif name == "done" and isinstance(payload, dict):
             if aggregate["time_to_done_ms"] is None:
                 aggregate["time_to_done_ms"] = elapsed_ms
             aggregate["done_payload"] = payload
+            telemetry = payload.get("telemetry")
+            if telemetry is not None:
+                if not isinstance(telemetry, dict):
+                    aggregate["telemetry_shape_issues"].append("done_telemetry_not_object")
+                else:
+                    aggregate["telemetry_thread_fields"].extend(
+                        sorted(key for key in telemetry if "thread" in str(key).lower())
+                    )
+                    if payload.get("status") == "finished" and telemetry.get("schema_version") != 2:
+                        aggregate["telemetry_shape_issues"].append("done_telemetry_schema_version")
         elif name == "error" and isinstance(payload, dict):
             aggregate["error_messages"].append(str(payload.get("message") or payload))
 
@@ -694,6 +777,23 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
     aggregate["rows_hash"] = rows_hash.hexdigest()
     aggregate["event_counts"] = dict(sorted(aggregate["event_counts"].items()))
     aggregate["event_sequence_hash"] = hashlib.sha256("\n".join(aggregate["event_sequence"]).encode("utf-8")).hexdigest()
+    core_sequence: list[str] = []
+    for event in aggregate["event_sequence"]:
+        if event in {"tick", "keepalive", "message"}:
+            continue
+        if event == "result_rows" and core_sequence and core_sequence[-1] == "result_rows":
+            continue
+        core_sequence.append(event)
+    aggregate["core_event_sequence"] = core_sequence
+    aggregate["core_event_sequence_hash"] = hashlib.sha256(
+        "\n".join(core_sequence).encode("utf-8")
+    ).hexdigest()
+    aggregate["tick_schema_versions"] = sorted(
+        {str(value) for value in aggregate["tick_schema_versions"] if value is not None}
+    )
+    aggregate["telemetry_sources"] = sorted(set(aggregate["telemetry_sources"]))
+    aggregate["telemetry_thread_fields"] = sorted(set(aggregate["telemetry_thread_fields"]))
+    aggregate["telemetry_shape_issues"] = sorted(set(aggregate["telemetry_shape_issues"]))
     aggregate["total_events"] = sum(aggregate["event_counts"].values())
     return aggregate, events_lite
 
@@ -748,6 +848,7 @@ def run_once(
             headers={"Accept": "text/event-stream"},
         ) as stream:
             row["stream_status_code"] = stream.status_code
+            row["stream_content_type"] = stream.headers.get("Content-Type", "")
             stream.raise_for_status()
             aggregate, events_lite = collect_sse(stream, start, args.stream_chunk_size)
         row.update(aggregate)
@@ -871,6 +972,7 @@ def validate_run(query: dict[str, Any], row: dict[str, Any]) -> list[str]:
             issues.append("http_columns_types_length_mismatch")
     counts = row.get("event_counts") or {}
     if not is_direct_http:
+        issues.extend(sse_content_type_issues(str(row.get("stream_content_type") or "")))
         for event_name in query.get("required_events") or []:
             if int(counts.get(event_name, 0)) <= 0:
                 issues.append(f"missing_event:{event_name}")
@@ -880,6 +982,15 @@ def validate_run(query: dict[str, Any], row: dict[str, Any]) -> list[str]:
             issues.append("error_event_present")
         if int(row.get("json_decode_errors") or 0) > 0:
             issues.append(f"json_decode_errors:{row.get('json_decode_errors')}")
+
+        tick_schemas = set(row.get("tick_schema_versions") or [])
+        if row.get("target") == "source" and tick_schemas and "2" not in tick_schemas:
+            issues.append(f"source_tick_schema:{sorted(tick_schemas)!r}:expected:'2'")
+        thread_fields = row.get("telemetry_thread_fields") or []
+        if thread_fields:
+            issues.append(f"nondeterministic_thread_fields:{thread_fields!r}")
+        for telemetry_issue in row.get("telemetry_shape_issues") or []:
+            issues.append(f"telemetry_shape:{telemetry_issue}")
 
     done = row.get("done_payload") if isinstance(row.get("done_payload"), dict) else {}
     expected_status = query.get("expected_status")
@@ -920,20 +1031,45 @@ def signature(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+def is_transport_warning(issue: str) -> bool:
+    return issue.startswith("invalid_sse_content_type_values:")
+
+
+def semantic_validation_issues(row: dict[str, Any]) -> list[str]:
+    return [
+        str(issue)
+        for issue in (row.get("validation_issues") or [])
+        if not is_transport_warning(str(issue))
+    ]
+
+
 def summarize_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
     counts_by_event: dict[str, list[int]] = defaultdict(list)
     for row in rows:
         for event_name, count in (row.get("event_counts") or {}).items():
             counts_by_event[event_name].append(int(count))
-    event_medians = {name: int(statistics.median(values)) for name, values in sorted(counts_by_event.items())}
-    issues = sorted({issue for row in rows for issue in (row.get("validation_issues") or [])})
+    event_medians = {
+        name: int(statistics.median(values))
+        for name, values in sorted(counts_by_event.items())
+    }
+    issues = sorted({str(issue) for row in rows for issue in (row.get("validation_issues") or [])})
     done_status_counts = Counter(
         ((row.get("done_payload") or {}).get("status") if isinstance(row.get("done_payload"), dict) else None)
         for row in rows
     )
     row_hashes = sorted({str(row.get("rows_hash") or "") for row in rows if row.get("rows_hash")})
     result_row_counts = sorted({int(row.get("result_rows_total") or 0) for row in rows})
-    col_sigs = sorted({signature({"columns": row.get("columns") or [], "types": row.get("types") or []}) for row in rows})
+    col_sigs = sorted(
+        {
+            signature({"columns": row.get("columns") or [], "types": row.get("types") or []})
+            for row in rows
+        }
+    )
+    core_event_sequences = sorted({tuple(row.get("core_event_sequence") or []) for row in rows})
+    tick_schemas = sorted({str(schema) for row in rows for schema in (row.get("tick_schema_versions") or [])})
+    telemetry_sources = sorted(
+        {str(source) for row in rows for source in (row.get("telemetry_sources") or []) if source}
+    )
     return {
         "target": rows[0]["target"],
         "target_url": rows[0]["target_url"],
@@ -942,6 +1078,12 @@ def summarize_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "query_name": rows[0]["query_name"],
         "runs": len(rows),
         "failed_runs": sum(1 for row in rows if row.get("validation_issues")),
+        "semantic_failed_runs": sum(1 for row in rows if semantic_validation_issues(row)),
+        "transport_warning_runs": sum(
+            1
+            for row in rows
+            if row.get("validation_issues") and not semantic_validation_issues(row)
+        ),
         "median_done_ms": rounded(median(finite(rows, "time_to_done_ms"))),
         "p95_done_ms": rounded(percentile(finite(rows, "time_to_done_ms"), 95.0)),
         "median_verified_done_ms": rounded(median(finite(rows, "verified_done_ms"))),
@@ -962,9 +1104,11 @@ def summarize_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "result_row_counts_seen": result_row_counts,
         "row_hashes_seen": row_hashes,
         "columns_signatures_seen": col_sigs,
+        "core_event_sequences_seen": [list(sequence) for sequence in core_event_sequences],
+        "tick_schemas_seen": tick_schemas,
+        "telemetry_sources_seen": telemetry_sources,
         "validation_issues": issues,
     }
-
 
 def build_summaries(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -985,6 +1129,7 @@ def compare_targets(
         if summary.get("transport") != "dashboard_sse":
             continue
         by_case[(summary["host_id"], summary["query_name"])][summary["target"]] = summary
+
     comparisons: list[dict[str, Any]] = []
     for (host_id, query_name), items in sorted(by_case.items()):
         if baseline_name not in items:
@@ -993,58 +1138,116 @@ def compare_targets(
         for target_name, other in sorted(items.items()):
             if target_name == baseline_name:
                 continue
+
             base_ms = baseline.get("median_done_ms")
             other_ms = other.get("median_done_ms")
             speedup = None
             if isinstance(base_ms, (int, float)) and isinstance(other_ms, (int, float)) and float(other_ms) > 0:
                 speedup = round((float(other_ms) - float(base_ms)) / float(other_ms) * 100.0, 2)
+
             base_counts = baseline.get("event_count_medians") or {}
             other_counts = other.get("event_count_medians") or {}
-            base_semantic_counts = {k: v for k, v in base_counts.items() if k not in optional_events}
-            other_semantic_counts = {k: v for k, v in other_counts.items() if k not in optional_events}
-            event_count_match = base_semantic_counts == other_semantic_counts
-            event_presence_match = {k for k, v in base_semantic_counts.items() if v > 0} == {k for k, v in other_semantic_counts.items() if v > 0}
-            baseline_failed = int(baseline.get("failed_runs") or 0)
-            other_failed = int(other.get("failed_runs") or 0)
-            both_successful = baseline_failed == 0 and other_failed == 0
-            row_hash_match = both_successful and set(baseline.get("row_hashes_seen") or []) == set(other.get("row_hashes_seen") or [])
-            columns_match = both_successful and set(baseline.get("columns_signatures_seen") or []) == set(other.get("columns_signatures_seen") or [])
-            event_presence_match = both_successful and event_presence_match
-            event_count_match = both_successful and event_count_match
-            comparison = {
-                "host_id": host_id,
-                "query_name": query_name,
-                "baseline_target": baseline_name,
-                "compared_target": target_name,
-                "baseline_median_done_ms": base_ms,
-                "compared_median_done_ms": other_ms,
-                "speedup_pct_positive_means_baseline_faster": speedup,
-                "baseline_first_row_ms": baseline.get("median_first_row_ms"),
-                "compared_first_row_ms": other.get("median_first_row_ms"),
-                "baseline_total_events": baseline.get("median_total_events"),
-                "compared_total_events": other.get("median_total_events"),
-                "baseline_result_row_events": baseline.get("median_result_row_events"),
-                "compared_result_row_events": other.get("median_result_row_events"),
-                "baseline_tick_events": baseline.get("median_tick_events"),
-                "compared_tick_events": other.get("median_tick_events"),
-                "baseline_event_count_medians": base_counts,
-                "compared_event_count_medians": other_counts,
-                "baseline_semantic_event_count_medians": base_semantic_counts,
-                "compared_semantic_event_count_medians": other_semantic_counts,
-                "ignored_optional_events": sorted(optional_events),
-                "event_count_match": event_count_match,
-                "event_presence_match": event_presence_match,
-                "strict_event_counts": strict_event_counts,
-                "row_hash_match": row_hash_match,
-                "columns_match": columns_match,
-                "baseline_failed_runs": baseline.get("failed_runs"),
-                "compared_failed_runs": other.get("failed_runs"),
+            base_operational_counts = {k: v for k, v in base_counts.items() if k not in optional_events}
+            other_operational_counts = {k: v for k, v in other_counts.items() if k not in optional_events}
+            deterministic_events = {"meta", "result_meta", "done", "error"}
+            base_deterministic_counts = {
+                event: int(base_operational_counts.get(event, 0)) for event in deterministic_events
             }
-            comparisons.append(comparison)
+            other_deterministic_counts = {
+                event: int(other_operational_counts.get(event, 0)) for event in deterministic_events
+            }
+
+            baseline_failed = int(baseline.get("semantic_failed_runs") or 0)
+            other_failed = int(other.get("semantic_failed_runs") or 0)
+            if baseline_failed == 0 and other_failed == 0:
+                correctness_classification = "equivalent"
+            elif baseline_failed == 0 and other_failed > 0:
+                correctness_classification = "baseline_correctness_improvement"
+            elif baseline_failed > 0 and other_failed == 0:
+                correctness_classification = "baseline_regression"
+            else:
+                correctness_classification = "both_failed"
+
+            both_successful = correctness_classification == "equivalent"
+            row_hash_match = both_successful and set(baseline.get("row_hashes_seen") or []) == set(
+                other.get("row_hashes_seen") or []
+            )
+            columns_match = both_successful and set(baseline.get("columns_signatures_seen") or []) == set(
+                other.get("columns_signatures_seen") or []
+            )
+            event_presence_match = both_successful and {
+                key for key, value in base_operational_counts.items() if int(value) > 0
+            } == {
+                key for key, value in other_operational_counts.items() if int(value) > 0
+            }
+            event_count_match = both_successful and base_deterministic_counts == other_deterministic_counts
+            raw_event_count_match = both_successful and base_operational_counts == other_operational_counts
+            core_event_order_match = both_successful and set(
+                tuple(sequence) for sequence in (baseline.get("core_event_sequences_seen") or [])
+            ) == set(
+                tuple(sequence) for sequence in (other.get("core_event_sequences_seen") or [])
+            )
+            result_batching_differs = both_successful and (
+                baseline.get("median_result_row_events") != other.get("median_result_row_events")
+            )
+            tick_cadence_differs = both_successful and (
+                baseline.get("median_tick_events") != other.get("median_tick_events")
+            )
+            baseline_tick_schemas = baseline.get("tick_schemas_seen") or []
+            compared_tick_schemas = other.get("tick_schemas_seen") or []
+            telemetry_schema_differs = baseline_tick_schemas != compared_tick_schemas
+
+            comparisons.append(
+                {
+                    "host_id": host_id,
+                    "query_name": query_name,
+                    "baseline_target": baseline_name,
+                    "compared_target": target_name,
+                    "correctness_classification": correctness_classification,
+                    "baseline_median_done_ms": base_ms,
+                    "compared_median_done_ms": other_ms,
+                    "speedup_pct_positive_means_baseline_faster": speedup,
+                    "baseline_first_row_ms": baseline.get("median_first_row_ms"),
+                    "compared_first_row_ms": other.get("median_first_row_ms"),
+                    "baseline_total_events": baseline.get("median_total_events"),
+                    "compared_total_events": other.get("median_total_events"),
+                    "baseline_result_row_events": baseline.get("median_result_row_events"),
+                    "compared_result_row_events": other.get("median_result_row_events"),
+                    "baseline_tick_events": baseline.get("median_tick_events"),
+                    "compared_tick_events": other.get("median_tick_events"),
+                    "baseline_event_count_medians": base_counts,
+                    "compared_event_count_medians": other_counts,
+                    "baseline_operational_event_count_medians": base_operational_counts,
+                    "compared_operational_event_count_medians": other_operational_counts,
+                    # Backward-compatible aliases retained in machine-readable reports.
+                    "baseline_semantic_event_count_medians": base_operational_counts,
+                    "compared_semantic_event_count_medians": other_operational_counts,
+                    "baseline_deterministic_event_count_medians": base_deterministic_counts,
+                    "compared_deterministic_event_count_medians": other_deterministic_counts,
+                    "ignored_optional_events": sorted(optional_events),
+                    "event_count_match": event_count_match,
+                    "raw_event_count_match": raw_event_count_match,
+                    "event_presence_match": event_presence_match,
+                    "core_event_order_match": core_event_order_match,
+                    "result_batching_differs": result_batching_differs,
+                    "tick_cadence_differs": tick_cadence_differs,
+                    "baseline_tick_schemas": baseline_tick_schemas,
+                    "compared_tick_schemas": compared_tick_schemas,
+                    "baseline_telemetry_sources": baseline.get("telemetry_sources_seen") or [],
+                    "compared_telemetry_sources": other.get("telemetry_sources_seen") or [],
+                    "telemetry_schema_differs": telemetry_schema_differs,
+                    "strict_event_counts": strict_event_counts,
+                    "row_hash_match": row_hash_match,
+                    "columns_match": columns_match,
+                    "baseline_failed_runs": baseline.get("failed_runs"),
+                    "compared_failed_runs": other.get("failed_runs"),
+                    "baseline_semantic_failed_runs": baseline_failed,
+                    "compared_semantic_failed_runs": other_failed,
+                    "baseline_transport_warning_runs": baseline.get("transport_warning_runs", 0),
+                    "compared_transport_warning_runs": other.get("transport_warning_runs", 0),
+                }
+            )
     return comparisons
-
-
-
 
 def build_direct_http_overheads(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_case: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -1065,6 +1268,9 @@ def build_direct_http_overheads(summaries: list[dict[str, Any]]) -> list[dict[st
             overhead_ms = None
             overhead_pct = None
             ratio = None
+            verified_overhead_ms = None
+            verified_overhead_pct = None
+            verified_ratio = None
             if (
                 isinstance(dashboard_ms, (int, float))
                 and isinstance(direct_ms, (int, float))
@@ -1073,8 +1279,21 @@ def build_direct_http_overheads(summaries: list[dict[str, Any]]) -> list[dict[st
                 overhead_ms = round(float(dashboard_ms) - float(direct_ms), 3)
                 overhead_pct = round(overhead_ms / float(direct_ms) * 100.0, 2)
                 ratio = round(float(dashboard_ms) / float(direct_ms), 3)
-            dashboard_failed = int(dashboard.get("failed_runs") or 0)
-            direct_failed = int(direct.get("failed_runs") or 0)
+            direct_verified_ms = direct.get("median_verified_done_ms")
+            if (
+                isinstance(dashboard_ms, (int, float))
+                and isinstance(direct_verified_ms, (int, float))
+                and float(direct_verified_ms) > 0
+            ):
+                verified_overhead_ms = round(float(dashboard_ms) - float(direct_verified_ms), 3)
+                verified_overhead_pct = round(
+                    verified_overhead_ms / float(direct_verified_ms) * 100.0,
+                    2,
+                )
+                verified_ratio = round(float(dashboard_ms) / float(direct_verified_ms), 3)
+
+            dashboard_failed = int(dashboard.get("semantic_failed_runs") or 0)
+            direct_failed = int(direct.get("semantic_failed_runs") or direct.get("failed_runs") or 0)
             both_successful = dashboard_failed == 0 and direct_failed == 0
             rows.append(
                 {
@@ -1093,6 +1312,9 @@ def build_direct_http_overheads(summaries: list[dict[str, Any]]) -> list[dict[st
                     "overhead_ms": overhead_ms,
                     "overhead_pct_vs_direct_http": overhead_pct,
                     "duration_ratio_vs_direct_http": ratio,
+                    "verified_overhead_ms": verified_overhead_ms,
+                    "verified_overhead_pct_vs_direct_http": verified_overhead_pct,
+                    "duration_ratio_vs_verified_direct_http": verified_ratio,
                     "dashboard_raw_bytes": dashboard.get("median_raw_stream_bytes"),
                     "direct_http_raw_bytes": direct.get("median_raw_stream_bytes"),
                     "row_hash_match": both_successful
@@ -1102,10 +1324,10 @@ def build_direct_http_overheads(summaries: list[dict[str, Any]]) -> list[dict[st
                     == set(direct.get("columns_signatures_seen") or []),
                     "dashboard_failed_runs": dashboard_failed,
                     "direct_http_failed_runs": direct_failed,
+                    "dashboard_transport_warning_runs": dashboard.get("transport_warning_runs", 0),
                 }
             )
     return rows
-
 
 def scalar(value: Any) -> str:
     if value is None:
@@ -1161,6 +1383,7 @@ def write_report(
     comparisons: list[dict[str, Any]],
     direct_http_overheads: list[dict[str, Any]],
     issues: list[str],
+    warnings: list[str],
     args: argparse.Namespace,
 ) -> None:
     lines: list[str] = []
@@ -1174,6 +1397,13 @@ def write_report(
         "The direct ClickHouse HTTP result uses a persistent HTTP connection and "
         "`JSONCompactEachRowWithNamesAndTypes`. It is a latency floor, not an SSE "
         "compatibility target; event comparisons remain source vs release only."
+    )
+    lines.append("")
+    lines.append(
+        "SSE compatibility is split into deterministic control events and operational "
+        "streaming events. `meta`, `result_meta`, `done`, and `error` have deterministic "
+        "counts. `result_rows` depends on batch size, while `tick` depends on query duration "
+        "and scheduling; their counts may differ without changing semantics."
     )
     lines.append("")
     lines.append("## Targets")
@@ -1214,16 +1444,16 @@ def write_report(
                 "transport",
                 "host",
                 "query",
-                "failed",
+                "semantic failures",
+                "transport warnings",
                 "done ms",
                 "p95 ms",
                 "first byte ms",
                 "first row ms",
-                "server ms",
                 "events",
                 "row events",
                 "tick events",
-                "event counts",
+                "telemetry schema",
             ],
             [
                 [
@@ -1231,16 +1461,16 @@ def write_report(
                     s.get("transport"),
                     s.get("host_id"),
                     s.get("query_name"),
-                    s.get("failed_runs"),
+                    s.get("semantic_failed_runs"),
+                    s.get("transport_warning_runs"),
                     s.get("median_done_ms"),
                     s.get("p95_done_ms"),
                     s.get("median_first_byte_ms"),
                     s.get("median_first_row_ms"),
-                    s.get("median_server_elapsed_ms"),
                     s.get("median_total_events"),
                     s.get("median_result_row_events"),
                     s.get("median_tick_events"),
-                    s.get("event_count_medians"),
+                    s.get("tick_schemas_seen"),
                 ]
                 for s in summaries
             ],
@@ -1254,26 +1484,24 @@ def write_report(
             [
                 "host",
                 "query",
-                "baseline",
-                "compared",
-                "failures",
+                "classification",
                 "baseline ms",
                 "compared ms",
                 "speedup %",
                 "rows",
                 "columns",
-                "required event presence",
-                "semantic event count",
-                "raw baseline counts",
-                "raw compared counts",
+                "required events",
+                "control counts",
+                "core order",
+                "result batching",
+                "tick cadence",
+                "schemas",
             ],
             [
                 [
                     c.get("host_id"),
                     c.get("query_name"),
-                    c.get("baseline_target"),
-                    c.get("compared_target"),
-                    f"{c.get('baseline_failed_runs')}/{c.get('compared_failed_runs')}",
+                    c.get("correctness_classification"),
                     c.get("baseline_median_done_ms"),
                     c.get("compared_median_done_ms"),
                     c.get("speedup_pct_positive_means_baseline_faster"),
@@ -1281,8 +1509,10 @@ def write_report(
                     "OK" if c.get("columns_match") else "DIFF",
                     "OK" if c.get("event_presence_match") else "DIFF",
                     "OK" if c.get("event_count_match") else "DIFF",
-                    c.get("baseline_event_count_medians"),
-                    c.get("compared_event_count_medians"),
+                    "OK" if c.get("core_event_order_match") else "DIFF",
+                    "DIFFERENT (expected)" if c.get("result_batching_differs") else "same",
+                    "DIFFERENT (expected)" if c.get("tick_cadence_differs") else "same",
+                    f"{c.get('baseline_tick_schemas')} / {c.get('compared_tick_schemas')}",
                 ]
                 for c in comparisons
             ],
@@ -1298,13 +1528,13 @@ def write_report(
                     "host",
                     "query",
                     "dashboard",
-                    "direct ms",
+                    "HTTP wire ms",
+                    "HTTP verified ms",
                     "dashboard ms",
-                    "overhead ms",
-                    "overhead %",
-                    "ratio",
-                    "direct first row",
-                    "dashboard first row",
+                    "wire overhead ms",
+                    "wire ratio",
+                    "verified delta ms",
+                    "verified ratio",
                     "rows",
                     "columns",
                 ],
@@ -1314,12 +1544,12 @@ def write_report(
                         row.get("query_name"),
                         row.get("dashboard_target"),
                         row.get("direct_http_median_done_ms"),
+                        row.get("direct_http_verified_done_ms"),
                         row.get("dashboard_median_done_ms"),
                         row.get("overhead_ms"),
-                        row.get("overhead_pct_vs_direct_http"),
                         row.get("duration_ratio_vs_direct_http"),
-                        row.get("direct_http_first_row_ms"),
-                        row.get("dashboard_first_row_ms"),
+                        row.get("verified_overhead_ms"),
+                        row.get("duration_ratio_vs_verified_direct_http"),
                         "OK" if row.get("row_hash_match") else "DIFF",
                         "OK" if row.get("columns_match") else "DIFF",
                     ]
@@ -1330,45 +1560,93 @@ def write_report(
     else:
         lines.append("No direct ClickHouse HTTP endpoint was configured for the selected host(s).")
     lines.append("")
+    lines.append("## Warnings")
+    lines.append("")
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("No non-fatal warning detected.")
+    lines.append("")
     lines.append("## Issues")
     lines.append("")
     if issues:
-        for issue in issues:
-            lines.append(f"- {issue}")
+        lines.extend(f"- {issue}" for issue in issues)
     else:
         lines.append("No validation issue detected.")
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
-
-def compute_issues(
+def compute_findings(
     results: list[dict[str, Any]],
     comparisons: list[dict[str, Any]],
     direct_http_overheads: list[dict[str, Any]],
     strict_event_counts: bool,
-) -> list[str]:
+    baseline_name: str,
+) -> tuple[list[str], list[str]]:
     issues: list[str] = []
+    warnings: list[str] = []
+
     for row in results:
         if row.get("warmup"):
             continue
+        prefix = (
+            f"{row.get('target')} host={row.get('host_id')} "
+            f"query={row.get('query_name')} run={row.get('run_index')}"
+        )
         for issue in row.get("validation_issues") or []:
-            issues.append(
-                f"{row.get('target')} host={row.get('host_id')} "
-                f"query={row.get('query_name')} run={row.get('run_index')}: {issue}"
-            )
+            issue_text = str(issue)
+            if is_transport_warning(issue_text):
+                warnings.append(f"{prefix}: {issue_text}")
+                continue
+            if row.get("transport") == "dashboard_sse" and row.get("target") == baseline_name:
+                issues.append(f"{prefix}: {issue_text}")
+            else:
+                # A historical release or the optional direct HTTP floor must not
+                # make a correct source build fail. Their failures remain visible.
+                warnings.append(f"{prefix}: {issue_text}")
+
     for comp in comparisons:
         prefix = (
             f"compare {comp.get('baseline_target')} vs {comp.get('compared_target')} "
             f"host={comp.get('host_id')} query={comp.get('query_name')}"
         )
+        classification = comp.get("correctness_classification")
+        if classification == "baseline_regression":
+            issues.append(f"{prefix}: baseline failed while the comparison target succeeded")
+            continue
+        if classification == "both_failed":
+            issues.append(f"{prefix}: both dashboard targets failed semantic validation")
+            continue
+        if classification == "baseline_correctness_improvement":
+            warnings.append(f"{prefix}: baseline succeeds while the historical release fails")
+            continue
+
         if not comp.get("row_hash_match"):
             issues.append(f"{prefix}: result row hash mismatch")
         if not comp.get("columns_match"):
             issues.append(f"{prefix}: columns/types mismatch")
         if not comp.get("event_presence_match"):
-            issues.append(f"{prefix}: event presence mismatch")
-        if strict_event_counts and not comp.get("event_count_match"):
-            issues.append(f"{prefix}: event count mismatch")
+            issues.append(f"{prefix}: required event presence mismatch")
+        if not comp.get("event_count_match"):
+            issues.append(f"{prefix}: deterministic control event count mismatch")
+        if not comp.get("core_event_order_match"):
+            issues.append(f"{prefix}: normalized core event order mismatch")
+        if strict_event_counts and not comp.get("raw_event_count_match"):
+            issues.append(f"{prefix}: strict operational event count mismatch")
+        if comp.get("result_batching_differs"):
+            warnings.append(
+                f"{prefix}: result_rows count differs because batch sizes differ; row hash and order match"
+            )
+        if comp.get("tick_cadence_differs"):
+            warnings.append(
+                f"{prefix}: tick count differs because telemetry cadence depends on query duration and scheduling"
+            )
+        if comp.get("telemetry_schema_differs"):
+            warnings.append(
+                f"{prefix}: telemetry schema differs ({comp.get('baseline_tick_schemas')} vs "
+                f"{comp.get('compared_tick_schemas')}); schema v2 replaces inferred legacy fields"
+            )
+
     for overhead in direct_http_overheads:
         prefix = (
             f"compare {overhead.get('dashboard_target')} vs http_direct "
@@ -1377,14 +1655,13 @@ def compute_issues(
         dashboard_failed = int(overhead.get("dashboard_failed_runs") or 0)
         direct_failed = int(overhead.get("direct_http_failed_runs") or 0)
         if dashboard_failed or direct_failed:
-            # Per-run validation issues already describe the underlying error.
             continue
         if not overhead.get("row_hash_match"):
             issues.append(f"{prefix}: result row hash mismatch")
         if not overhead.get("columns_match"):
             issues.append(f"{prefix}: columns/types mismatch")
-    return sorted(set(issues))
 
+    return sorted(set(issues)), sorted(set(warnings))
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -1658,11 +1935,12 @@ def main(argv: list[str] | None = None) -> int:
     summaries = build_summaries(results)
     comparisons = compare_targets(summaries, args.baseline, args.strict_event_counts, optional_events)
     direct_http_overheads = build_direct_http_overheads(summaries)
-    issues = compute_issues(
+    issues, warnings = compute_findings(
         results,
         comparisons,
         direct_http_overheads,
         args.strict_event_counts,
+        args.baseline,
     )
 
     # ``runs.partial.jsonl`` already contains every measurement in order.
@@ -1691,6 +1969,8 @@ def main(argv: list[str] | None = None) -> int:
             "query_name",
             "runs",
             "failed_runs",
+            "semantic_failed_runs",
+            "transport_warning_runs",
             "median_done_ms",
             "p95_done_ms",
             "median_verified_done_ms",
@@ -1731,8 +2011,16 @@ def main(argv: list[str] | None = None) -> int:
             "compared_result_row_events",
             "baseline_tick_events",
             "compared_tick_events",
+            "correctness_classification",
             "event_presence_match",
             "event_count_match",
+            "raw_event_count_match",
+            "core_event_order_match",
+            "result_batching_differs",
+            "tick_cadence_differs",
+            "baseline_tick_schemas",
+            "compared_tick_schemas",
+            "telemetry_schema_differs",
             "row_hash_match",
             "columns_match",
             "baseline_failed_runs",
@@ -1763,12 +2051,16 @@ def main(argv: list[str] | None = None) -> int:
             "overhead_ms",
             "overhead_pct_vs_direct_http",
             "duration_ratio_vs_direct_http",
+            "verified_overhead_ms",
+            "verified_overhead_pct_vs_direct_http",
+            "duration_ratio_vs_verified_direct_http",
             "dashboard_raw_bytes",
             "direct_http_raw_bytes",
             "row_hash_match",
             "columns_match",
             "dashboard_failed_runs",
             "direct_http_failed_runs",
+            "dashboard_transport_warning_runs",
         ],
     )
 
@@ -1801,6 +2093,7 @@ def main(argv: list[str] | None = None) -> int:
         "summaries": summaries,
         "comparisons": comparisons,
         "direct_http_overheads": direct_http_overheads,
+        "warnings": warnings,
         "issues": issues,
     }
     (artifacts_dir / "summary.json").write_text(
@@ -1817,6 +2110,7 @@ def main(argv: list[str] | None = None) -> int:
         comparisons,
         direct_http_overheads,
         issues,
+        warnings,
         args,
     )
 
@@ -1830,7 +2124,9 @@ def main(argv: list[str] | None = None) -> int:
             f"rows={'OK' if comp['row_hash_match'] else 'DIFF'} "
             f"columns={'OK' if comp['columns_match'] else 'DIFF'} "
             f"events_presence={'OK' if comp['event_presence_match'] else 'DIFF'} "
-            f"events_count={'OK' if comp['event_count_match'] else 'DIFF'}",
+            f"control_events={'OK' if comp['event_count_match'] else 'DIFF'} "
+            f"core_order={'OK' if comp['core_event_order_match'] else 'DIFF'} "
+            f"classification={comp['correctness_classification']}",
             file=sys.stderr,
         )
 
@@ -1845,6 +2141,10 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
+    if warnings:
+        print("\nwarnings:", file=sys.stderr)
+        for warning in warnings:
+            print(f"  - {warning}", file=sys.stderr)
     if issues:
         print("\nissues:", file=sys.stderr)
         for issue in issues:

@@ -63,11 +63,8 @@
     if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
     applyHostPickerUi();
 
-    if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) {
-      ns.meta.hydrateFromStorage(state.selectedHostId);
-    }
-    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") {
-      ns.meta.maybeRefreshOnLoad();
+    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
+      ns.meta.prepareHost(state.selectedHostId);
     }
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") {
       state.highlightCtrl.refresh();
@@ -1293,11 +1290,8 @@
     initEditor();
     initEditorCopyButton();
 
-    if (ns.meta && typeof ns.meta.hydrateFromStorage === "function" && state.selectedHostId) {
-      ns.meta.hydrateFromStorage(state.selectedHostId);
-    }
-    if (ns.meta && typeof ns.meta.maybeRefreshOnLoad === "function") {
-      ns.meta.maybeRefreshOnLoad();
+    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
+      ns.meta.prepareHost(state.selectedHostId);
     }
 
     if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);

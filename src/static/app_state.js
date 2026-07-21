@@ -12,7 +12,9 @@
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
   const META_PREFIX = "chdash.meta.v1.";
-  const HISTORY_MAX_ENTRIES = 100;
+  const HISTORY_MAX_ENTRIES = 50;
+  const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
+  const HISTORY_MAX_SQL_BYTES = 256 * 1024;
 
   const safeRead = (key) => {
     try {
@@ -25,6 +27,14 @@
   const safeWrite = (key, value) => {
     try {
       localStorage.setItem(key, value);
+    } catch {
+      return;
+    }
+  };
+
+  const safeRemove = (key) => {
+    try {
+      localStorage.removeItem(key);
     } catch {
       return;
     }
@@ -68,12 +78,29 @@
   const normalizeHistoryEntry = (entry) => {
     if (!entry || typeof entry !== "object") return null;
     if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
+    const sqlRaw = entry.sql_raw.slice(0, HISTORY_MAX_SQL_BYTES);
+    const formattedSource = typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw;
     return {
       ts_ms: entry.ts_ms,
-      sql_raw: entry.sql_raw,
-      sql_formatted: typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw,
+      sql_raw: sqlRaw,
+      sql_formatted: formattedSource.slice(0, HISTORY_MAX_SQL_BYTES),
       host_id: entry.host_id == null ? null : String(entry.host_id),
     };
+  };
+
+  const boundedHistory = (items) => {
+    const out = [];
+    let estimatedBytes = 2;
+    for (const item of items.slice(0, HISTORY_MAX_ENTRIES)) {
+      const itemBytes = String(item.sql_raw || "").length * 2
+        + String(item.sql_formatted || "").length * 2
+        + String(item.host_id || "").length * 2
+        + 96;
+      if (out.length && estimatedBytes + itemBytes > HISTORY_MAX_BYTES) break;
+      estimatedBytes += itemBytes;
+      out.push(item);
+    }
+    return out;
   };
 
   const normalizeSavedQueryEntry = (entry) => {
@@ -134,12 +161,12 @@
     loadHistory() {
       const arr = safeReadJson(HISTORY_STORAGE_KEY, []);
       if (!Array.isArray(arr)) return [];
-      return arr.map(normalizeHistoryEntry).filter(Boolean).slice(0, HISTORY_MAX_ENTRIES);
+      return boundedHistory(arr.map(normalizeHistoryEntry).filter(Boolean));
     },
 
     saveHistory(items) {
       const normalized = Array.isArray(items) ? items.map(normalizeHistoryEntry).filter(Boolean) : [];
-      safeWriteJson(HISTORY_STORAGE_KEY, normalized.slice(0, HISTORY_MAX_ENTRIES));
+      safeWriteJson(HISTORY_STORAGE_KEY, boundedHistory(normalized));
     },
 
     addHistoryEntry(entry) {
@@ -246,7 +273,29 @@
       const payload = { updated_at_ms: Number(updatedAtMs) || 0, items: Array.isArray(items) ? items : [] };
       safeWriteJson(key, payload);
     },
+
+    removeMeta(hostId, type) {
+      safeRemove(storage.metaKey(hostId, type));
+    },
+
+    removeLegacyColumnMetadata() {
+      try {
+        const keys = [];
+        for (let index = 0; index < localStorage.length; index += 1) {
+          const key = localStorage.key(index);
+          if (key && key.startsWith(META_PREFIX) && key.endsWith(".columns")) keys.push(key);
+        }
+        for (const key of keys) localStorage.removeItem(key);
+      } catch {
+        return;
+      }
+    },
   };
+
+  // Older builds persisted the complete system.columns payload for every host.
+  // Removing those entries without parsing them avoids a large startup heap
+  // spike and migrates users to the table-scoped metadata cache.
+  storage.removeLegacyColumnMetadata();
 
   const runOpts = storage.loadRunOptions();
 

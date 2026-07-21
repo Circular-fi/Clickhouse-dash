@@ -1106,11 +1106,19 @@
   }
 
   function columnsFor(meta, database, table) {
-    const key = `${database || ""}.${table || ""}`.toLowerCase();
-    const idx = meta?.autocomplete?.columnsByTable;
-    if (idx && idx.has(key)) return idx.get(key) || [];
-    const cols = Array.isArray(meta?.columns?.items) ? meta.columns.items : [];
-    return cols.filter((c) => norm(c.database) === norm(database) && norm(c.table) === norm(table));
+    const normalizedDatabase = String(database || "");
+    const normalizedTable = String(table || "");
+    if (!normalizedDatabase || !normalizedTable) return [];
+    const cached = ns.meta && typeof ns.meta.getTableColumns === "function"
+      ? ns.meta.getTableColumns(normalizedDatabase, normalizedTable)
+      : null;
+    if (Array.isArray(cached)) return cached;
+    if (ns.meta && typeof ns.meta.ensureTableColumns === "function") {
+      // The request is de-duplicated by app_meta. Suggestions are refreshed
+      // when the scoped column list arrives.
+      ns.meta.ensureTableColumns(normalizedDatabase, normalizedTable);
+    }
+    return [];
   }
 
   function tablesForDatabase(meta, database) {
@@ -2982,14 +2990,6 @@
     }
     lastExplicit = explicit;
     const value = String(textarea.value || "");
-    const hostMeta = currentHostMeta();
-    const columnsLoaded = Array.isArray(hostMeta?.columns?.items);
-    if (!columnsLoaded && ns.meta && typeof ns.meta.ensureColumns === "function" &&
-        (explicit || /\b(?:from|join|into|update|table)\b/i.test(value))) {
-      // Fire-and-refresh: the current completion stays responsive and refresh()
-      // is called when metadata arrives. The request itself is de-duplicated.
-      ns.meta.ensureColumns();
-    }
     const pos = textarea.selectionStart || 0;
     const keySlice = value.slice(Math.max(0, pos - 160), Math.min(value.length, pos + 160));
     const updateKey = `${explicit ? 1 : 0}|${pos}|${textarea.selectionEnd || 0}|${value.length}|${keySlice}`;
@@ -3024,7 +3024,10 @@
   }
 
   function refresh() {
-    if (isOpen()) update(lastExplicit);
+    if (isOpen()) {
+      lastUpdateKey = "";
+      update(lastExplicit);
+    }
     scheduleDiagnostics(false);
   }
 

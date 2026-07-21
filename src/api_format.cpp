@@ -225,6 +225,13 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
           line_width);
     }
 
+    // formatQuery and the local post-processor intentionally normalize many
+    // identifiers to backticks. Keep formatting deterministic while restoring
+    // the exact spelling of identifiers that the user explicitly quoted, as
+    // well as the original spelling of string literals.
+    pretty = restore_sql_quoted_identifiers(std::move(pretty), sql);
+    pretty = restore_sql_single_quoted_literals(std::move(pretty), sql);
+
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);
     if (format_cache_) format_cache_->put(key, value);

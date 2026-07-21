@@ -1,133 +1,99 @@
 # clickhouse-dash
 
-A real-time ClickHouse query dashboard with live metrics.
+A lightweight real-time ClickHouse query dashboard.
 
 [![CI](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml)
 [![Release](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml)
 
-Backend: **C++17** (clickhouse-cpp + cpp-httplib + rapidjson)  
-Frontend: **Vanilla JS + Canvas**  
-Transport: **Server-Sent Events (SSE)**
+- Backend: **C++17** using clickhouse-cpp, cpp-httplib, and RapidJSON
+- Frontend: **vanilla JavaScript and Canvas**
+- Query transport: **ClickHouse native TCP**
+- Browser transport: **Server-Sent Events**
 
----
+## Features
 
-## ✨ Features
+- Execute ClickHouse SQL with streamed result batches.
+- Live progress, read rates, CPU time, memory, scheduler wait, I/O wait, and temporary-data telemetry.
+- Deterministic telemetry sourced from ClickHouse query-group native profile events.
+- Safe JSON serialization for native types and non-finite floating-point values.
+- Multi-host configuration, health checks, query cancellation, SQL formatting, history, saved queries, syntax highlighting, autocomplete, and reference diagnostics.
+- Lazy table-scoped column metadata to keep the idle browser heap small.
+- Bounded result, history, metadata, SSE, and session caches.
+- One self-contained binary with embedded frontend assets.
+- Reproducible source-vs-release tests and benchmarks with a direct ClickHouse HTTP floor.
 
-- 🔎 Execute any ClickHouse SQL query
-- 📊 Real-time metrics streaming via **SSE** (`/api/query/stream`)
-- ⚡ High-frequency internal samples (throttled), sent in batches with each tick
-- 📈 Smooth sparklines (front)
-- 📦 Single lightweight binary
-- 🧠 Automatic rate derivation (rows/sec & bytes/sec)
-- 🧭 Multi-host support with a UI selector (persisted in localStorage)
-- 🩺 Background host health checks (TCP Ping)
-- 🛑 Query cancellation via signed JWT cancel tokens + `KILL QUERY` (system user)
-- 🧹 Local query history (last 100, localStorage)
-- 🏷️ Version badge (from `/api/meta`)
+## Architecture
 
----
-
-## 🏗 Architecture
-
-```
+```text
 Browser
-  │
-  │  POST /api/query/run   (alias: POST /api/query)
-  │  GET  /api/query/stream?query_id=...   (SSE)
-  │  POST /api/query/cancel
-  ▼
-HTTP server (cpp-httplib)
-  │
-  ▼
-ClickHouse (native TCP, clickhouse-cpp)
+  POST /api/query/run
+  GET  /api/query/stream?query_id=...  (SSE)
+  POST /api/query/cancel
+       |
+       v
+cpp-httplib server
+       |
+       v
+ClickHouse native TCP via clickhouse-cpp
 ```
 
----
+## Telemetry
 
-## 📊 Metrics model
+Telemetry schema version 2 uses named JSON objects. It exposes only query-group values reported by ClickHouse. Inferred thread counts were removed because native profile packets do not provide a reliable live active-thread metric.
 
-Each `tick` SSE event is an **array** (Go-compatible layout):
+Deterministic SSE control events are compared strictly. `result_rows` and `tick` counts are operational and may change with result batching, query duration, or scheduling without changing query semantics.
 
-```
-[
-  elapsedMs,
-  percentCenti, percentKnown,
-  readRowsTotal, readBytesTotal, totalRowsToRead,
-  rowsPerSec, bytesPerSec,
-  cpuCenti, cpuInstMaxCenti,
-  memInstBytes|null, memPeakBytes|null,
-  threadsInst, threadsPeak,
-  samples|null
-]
-```
+See [`docs/telemetry.md`](docs/telemetry.md) for the complete event contract, field definitions, and compatibility policy.
 
-Where `samples` is an array of points collected between ticks:
-
-```
-[elapsedMs, readRowsTotal, readBytesTotal, cpuCenti|null, memBytes|null, threads]
-```
-
-### About CPU / RAM / Threads
-
-These fields rely on ClickHouse **ProfileEvents**. The server tries to enable them with:
-
-- `send_profile_events = 1`
-
-If your ClickHouse server/role overrides this setting, CPU/RAM/Threads may stay `null/0`.
-
----
-
-## 🚀 Quick start
-
-### 1) Docker stack avec tests et benchmarks
+## Quick start with tests and benchmarks
 
 ```bash
 cd tests
 docker compose up -d --build
 ```
 
-Cette stack lance son propre ClickHouse, le dashboard buildé depuis les sources, la plus haute release disponible dans `tests/releases/`, puis une console Python unique. L'interface sépare **Tests** et **Benchmark**, conserve les positions de défilement, affiche les diffs SQL attendu/obtenu et génère un rapport ZIP autonome par vue. L'état est poussé uniquement lorsqu'il change, les logs et détails sont chargés progressivement, et le benchmark compare les flux SSE source/release à un plancher ClickHouse HTTP direct avec connexions persistantes.
-
-Open:
+The stack starts its own ClickHouse server, the local source build, the highest release archive in `tests/releases/`, and one Python quality console.
 
 ```text
-Dashboard source : http://localhost:18080
-Dashboard release: http://localhost:18081
-Résultats tests  : http://localhost:18082
+Source dashboard   http://localhost:18080
+Release dashboard  http://localhost:18081
+Quality console    http://localhost:18082
 ```
 
-### 2) Local build
+The quality console keeps result-table scroll positions stable, loads logs and artifacts incrementally, shows expected-vs-actual SQL formatting diffs, separates benchmark warnings from blocking errors, and exports self-contained ZIP reports.
 
-Requirements: CMake >= 3.20, a C++17 compiler, Ninja.
+## Local build
+
+Requirements: CMake 3.20 or newer, a C++17 compiler, and Ninja.
 
 ```bash
 cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target chdash
 ./build/chdash
-./build/chdash --version
 ```
 
-The default build embeds the frontend assets into the binary. In the dev Docker image, filesystem assets are served from the image itself; there is no runtime `STATIC_DIR` override anymore.
+The default build embeds frontend assets into the binary.
 
-`--version` and `-v` print the compiled version and exit without starting the server.
-
----
-
-## ⚙️ Configuration
-
-Environment variables:
+## Configuration
 
 | Variable | Default | Description |
 |---|---:|---|
 | `LISTEN_HOST` | `0.0.0.0` | HTTP listen host |
 | `LISTEN_PORT` | `8080` | HTTP listen port |
-| `CH_HOSTS` | (required) | Multi-host HCL config |
-| `RESULT_PREVIEW_ROW_LIMIT` | `10000` | Max rows returned to the browser |
+| `CH_HOSTS` | required | Multi-host HCL configuration |
+| `RESULT_PREVIEW_ROW_LIMIT` | `10000` | Maximum rows returned to the browser |
+| `QUERY_RESULT_BATCH_ROWS` | `1000` | Maximum rows per SSE result batch |
+| `QUERY_RESULT_BATCH_BYTES` | `262144` | Approximate byte limit per SSE result batch |
+| `QUERY_SSE_QUEUE_MAX_BYTES` | `8388608` | Per-query backpressure queue limit |
+| `QUERY_DESCRIBE_MODE` | `auto` | `auto`, `always`, or `never` compatibility planning |
+| `QUERY_DESCRIBE_CACHE_ENTRIES` | `256` | Maximum cached result transport plans |
+| `QUERY_DESCRIBE_CACHE_TTL_MS` | `60000` | Transport-plan cache lifetime |
+| `CH_CLIENT_POOL_MAX_IDLE` | `4` | Maximum idle native clients per pool |
+| `FORMAT_CACHE_MAX_ENTRIES` | `512` | SQL formatting cache entries |
+| `FORMAT_CACHE_MAX_BYTES` | `16777216` | SQL formatting cache byte limit |
 
-Health settings now live inside `CH_HOSTS` via an optional `health { ... }` block.
-
-### Example `CH_HOSTS`
+Example `CH_HOSTS`:
 
 ```hcl
 health {
@@ -144,60 +110,20 @@ clickhouse {
 }
 ```
 
----
+## HTTP API
 
-## 🔌 Endpoints
+- `GET /healthz` strict process health.
+- `GET /api/meta` build metadata and optional scoped autocomplete catalogs.
+- `GET /api/hosts` host health snapshot.
+- `GET /api/hosts/stream` host health SSE stream.
+- `POST /api/format` SQL formatting batch.
+- `POST /api/query/run` start a query and obtain its stream URL and cancel token.
+- `GET /api/query/stream?query_id=...` query results and telemetry SSE stream.
+- `POST /api/query/cancel` cancel a query with its signed token.
 
-- `GET /` → serves `static/index.html`
-- `GET /static/*` → static assets
-- `GET /healthz` → strict health check (all configured hosts must be healthy)
-- `GET /api/meta` → `{ name, version, git_sha, build_time }`
-- `GET /api/hosts` → health snapshot for all hosts (polled by the UI)
-- `GET /api/health` → strict JSON health (`ok=true` only if all hosts are healthy)
-- `POST /api/query/run` → `{ "sql": "...", "host_id": "par1" }` → `{ query_id, cancel_token, formatted_sql, stream_url }`
-  - Alias: `POST /api/query`
-- `GET /api/query/stream?query_id=...` → SSE stream (`meta`, `tick`, `done`)
-- `POST /api/query/cancel` → `{ "cancel_token": "..." }` → `{ "ok": true }`
+## Development and support
 
----
-
-## 📦 Release
-
-A tag push creates GitHub release assets automatically:
-
-- `.github/workflows/release.yaml`
-- Trigger: tags matching `v*`
-
-Artifacts include release tarballs and checksums.
-
----
-
-## ✅ TODO / Roadmap 
-
-### Data explorer
-
-* [ ] Databases/Tables page (sizes + sort/filter)
-* [ ] MV/Buffer dependency graph 
-
-### Perf / Ops
-
-* [ ] Query perf tracking (CPU/RAM/threads + top queries)
-* [ ] Cluster perf overview
-
----
-
-## 🤝 Contributing
-
-See `CONTRIBUTING.md` for local development, testing, and pull request guidelines.
-
-## 🔐 Security
-
-See `SECURITY.md` for responsible disclosure guidance.
-
-## 💬 Support
-
-See `SUPPORT.md` for support and issue reporting guidance.
-
-## 📝 License
-
-MIT (see `LICENSE`).
+- Development workflow: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security reporting: [`SECURITY.md`](SECURITY.md)
+- Support: [`SUPPORT.md`](SUPPORT.md)
+- License: MIT, see [`LICENSE`](LICENSE)

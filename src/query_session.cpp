@@ -6,6 +6,7 @@
 #include "sql_scan.hpp"
 
 #include <clickhouse/query.h>
+#include <clickhouse/columns/enum.h>
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -17,6 +18,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -224,19 +226,14 @@ SessionSnapshot QuerySession::snapshot() const {
   s.wrote_bytes_total = wrote_bytes_total_;
   s.user_time_us_total = user_time_us_total_;
   s.system_time_us_total = system_time_us_total_;
+  s.cpu_wait_time_us_total = cpu_wait_time_us_total_;
+  s.io_wait_time_us_total = io_wait_time_us_total_;
+  s.cpu_time_available = cpu_time_available_;
+  s.cpu_wait_available = cpu_wait_available_;
+  s.io_wait_available = io_wait_available_;
   s.current_mem_bytes = current_mem_bytes_;
   s.peak_mem_bytes = peak_mem_bytes_;
-  const auto now = std::chrono::steady_clock::now();
-  int64_t thr_cur = 0;
-  const auto window = std::chrono::seconds(2);
-  for (const auto& kv : thread_last_seen_) {
-    if (now - kv.second <= window) thr_cur++;
-  }
-  if (thr_cur == 0 && saw_profile_events_) {
-    thr_cur = 1;
-  }
-  s.threads_inst = std::max<int64_t>(thr_cur, threads_inst_);
-  s.threads_peak = std::max<int64_t>(threads_peak_, s.threads_inst);
+  s.temporary_data_bytes = temporary_data_bytes_;
   s.elapsed_ms = ms_since(started_at_, finished_at_);
   return s;
 }
@@ -403,7 +400,7 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
 
   const std::string sql =
     "SELECT toUInt64(read_rows) AS read_rows, toUInt64(read_bytes) AS read_bytes, "
-    "toInt64(memory_usage) AS memory_usage, toInt64(peak_threads_usage) AS peak_threads_usage "
+    "toInt64(memory_usage) AS memory_usage "
     "FROM system.query_log "
     "WHERE query_id = " + sql_quote_string(query_id_) + " "
     "ORDER BY event_time_microseconds DESC "
@@ -412,7 +409,6 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
   uint64_t log_read_rows = 0;
   uint64_t log_read_bytes = 0;
   int64_t log_memory_usage = -1;
-  int64_t log_peak_threads_usage = -1;
 
   for (int attempt = 0; attempt < 5; ++attempt) {
     if (options_.flush_query_log_for_final_stats) {
@@ -426,20 +422,17 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
     try {
       clickhouse::Query q(sql);
       q.OnData([&](const clickhouse::Block& b) {
-        if (b.GetRowCount() == 0 || b.GetColumnCount() < 4) return;
+        if (b.GetRowCount() == 0 || b.GetColumnCount() < 3) return;
 
         auto c_read_rows = b[0]->As<clickhouse::ColumnUInt64>();
         auto c_read_bytes = b[1]->As<clickhouse::ColumnUInt64>();
         auto c_memory_i64 = b[2]->As<clickhouse::ColumnInt64>();
         auto c_memory_u64 = b[2]->As<clickhouse::ColumnUInt64>();
-        auto c_threads_i64 = b[3]->As<clickhouse::ColumnInt64>();
-        auto c_threads_u64 = b[3]->As<clickhouse::ColumnUInt64>();
-        if (!c_read_rows || !c_read_bytes || (!c_memory_i64 && !c_memory_u64) || (!c_threads_i64 && !c_threads_u64)) return;
+        if (!c_read_rows || !c_read_bytes || (!c_memory_i64 && !c_memory_u64)) return;
 
         log_read_rows = c_read_rows->At(0);
         log_read_bytes = c_read_bytes->At(0);
         log_memory_usage = c_memory_i64 ? c_memory_i64->At(0) : static_cast<int64_t>(c_memory_u64->At(0));
-        log_peak_threads_usage = c_threads_i64 ? c_threads_i64->At(0) : static_cast<int64_t>(c_threads_u64->At(0));
         found = true;
       });
       client->Select(q);
@@ -454,10 +447,6 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
       if (log_memory_usage >= 0) {
         current_mem_bytes_ = std::max<int64_t>(current_mem_bytes_, log_memory_usage);
         peak_mem_bytes_ = std::max<int64_t>(peak_mem_bytes_, log_memory_usage);
-      }
-      if (log_peak_threads_usage >= 0) {
-        threads_inst_ = std::max<int64_t>(threads_inst_, log_peak_threads_usage);
-        threads_peak_ = std::max<int64_t>(threads_peak_, log_peak_threads_usage);
       }
       return;
     }
@@ -474,57 +463,45 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
     return;
   }
   last_sample_at_ = now;
-  int64_t thr_cur = 0;
-  const auto window = std::chrono::seconds(2);
-  const auto retention = std::chrono::seconds(10);
-  for (auto it = thread_last_seen_.begin(); it != thread_last_seen_.end();) {
-    if (now - it->second > retention) {
-      it = thread_last_seen_.erase(it);
-      continue;
-    }
-    if (now - it->second <= window) ++thr_cur;
-    ++it;
-  }
-  if (thr_cur == 0 && saw_profile_events_) {
-    thr_cur = 1;
-  }
 
-  int64_t thr_est = 0;
-  if (last_sample_rt_at_.time_since_epoch().count() != 0) {
-    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_sample_rt_at_).count();
-    const int64_t d_rt = real_time_us_total_ - last_sample_rt_total_us_;
-    if (dt_us > 0 && d_rt >= 0) {
-      thr_est = std::max<int64_t>(thr_est, (d_rt + dt_us / 2) / dt_us);
-    }
-  }
-  last_sample_rt_at_ = now;
-  last_sample_rt_total_us_ = real_time_us_total_;
-  // CPU instant (centi-percent) from delta CPU us / delta wall us.
+  // Rates are computed from ClickHouse query-group counters. One fully busy
+  // core is 100.00%, so parallel queries may legitimately exceed 100%.
   const int64_t cpu_total_us = user_time_us_total_ + system_time_us_total_;
   int64_t cpu_centi = -1;
+  int64_t cpu_wait_centi = -1;
+  int64_t io_wait_centi = -1;
   if (last_sample_cpu_at_.time_since_epoch().count() != 0) {
     const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_sample_cpu_at_).count();
     const int64_t d_cpu = cpu_total_us - last_sample_cpu_total_us_;
-    if (dt_us > 0 && d_cpu >= 0) {
-      cpu_centi = static_cast<int64_t>((__int128)d_cpu * 10000 / dt_us);
-      thr_est = std::max<int64_t>(thr_est, (d_cpu + dt_us / 2) / dt_us);
-    } else {
-      cpu_centi = 0;
+    const int64_t d_cpu_wait = cpu_wait_time_us_total_ - last_sample_cpu_wait_total_us_;
+    const int64_t d_io_wait = io_wait_time_us_total_ - last_sample_io_wait_total_us_;
+    if (dt_us > 0) {
+      if (cpu_time_available_ && d_cpu >= 0) {
+        cpu_centi = static_cast<int64_t>((__int128)d_cpu * 10000 / dt_us);
+      }
+      if (cpu_wait_available_ && d_cpu_wait >= 0) {
+        cpu_wait_centi = static_cast<int64_t>((__int128)d_cpu_wait * 10000 / dt_us);
+      }
+      if (io_wait_available_ && d_io_wait >= 0) {
+        io_wait_centi = static_cast<int64_t>((__int128)d_io_wait * 10000 / dt_us);
+      }
     }
   }
   last_sample_cpu_at_ = now;
   last_sample_cpu_total_us_ = cpu_total_us;
-
-  if (thr_est > 0) {
-    if (thr_est > 4096) thr_est = 4096;
-    thr_cur = std::max<int64_t>(thr_cur, thr_est);
-  }
-
-  threads_inst_ = thr_cur;
-  threads_peak_ = std::max<int64_t>(threads_peak_, thr_cur);
+  last_sample_cpu_wait_total_us_ = cpu_wait_time_us_total_;
+  last_sample_io_wait_total_us_ = io_wait_time_us_total_;
 
   const int64_t elapsed_ms = ms_since(started_at_, now);
-  samples_.push_back(SamplePoint{elapsed_ms, read_rows_total_, read_bytes_total_, cpu_centi, current_mem_bytes_, thr_cur});
+  samples_.push_back(SamplePoint{
+      elapsed_ms,
+      read_rows_total_,
+      read_bytes_total_,
+      cpu_centi,
+      current_mem_bytes_,
+      cpu_wait_centi,
+      io_wait_centi,
+  });
   // The SSE tick drains at most a handful of samples. A small safety window is
   // enough for temporary network stalls and prevents unbounded telemetry growth
   // when a client never opens the stream.
@@ -858,19 +835,23 @@ void QuerySession::run_query() {
     wrote_bytes_total_ = 0;
     user_time_us_total_ = 0;
     system_time_us_total_ = 0;
-    real_time_us_total_ = 0;
+    cpu_wait_time_us_total_ = 0;
+    io_wait_time_us_total_ = 0;
+    cpu_time_available_ = false;
+    cpu_wait_available_ = false;
+    io_wait_available_ = false;
     current_mem_bytes_ = -1;
     peak_mem_bytes_ = -1;
-    threads_inst_ = 0;
-    threads_peak_ = 0;
-    saw_profile_events_ = false;
-    thread_last_seen_.clear();
+    temporary_data_bytes_ = -1;
+    memory_usage_by_host_.clear();
+    peak_memory_usage_by_host_.clear();
+    temporary_data_by_host_.clear();
     samples_.clear();
     last_sample_at_ = {};
     last_sample_cpu_at_ = {};
     last_sample_cpu_total_us_ = 0;
-    last_sample_rt_at_ = {};
-    last_sample_rt_total_us_ = 0;
+    last_sample_cpu_wait_total_us_ = 0;
+    last_sample_io_wait_total_us_ = 0;
   };
 
   try {
@@ -1021,8 +1002,9 @@ void QuerySession::run_query() {
 
       clickhouse::Query q(effective_sql, query_id_);
 
-      // Ensure ClickHouse actually sends ProfileEvents packets to the client (native TCP).
-      // Otherwise CPU/RAM/thread stats will stay empty.
+      // Ensure ClickHouse sends query-group ProfileEvents over native TCP.
+      // CPU time, memory gauges, scheduler wait, I/O wait, and temporary disk
+      // usage remain unavailable when the server does not emit these packets.
       {
         clickhouse::QuerySettingsField f;
         f.value = "1";
@@ -1044,122 +1026,107 @@ void QuerySession::run_query() {
         self->maybe_record_sample_locked(now);
       });
 
-      // clickhouse-cpp expects ProfileEventsCallback = std::function<bool(const Block&)>.
-      // Returning false aborts query processing (used here for cancellation).
-      q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& b) -> bool {
-        if (self->cancel_requested_.load(std::memory_order_relaxed)) {
-          return false;
-        }
-        if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return true;
+      // ClickHouse ProfileEvents packets have a stable schema:
+      // host_name, current_time, thread_id, type, name, value. Match the
+      // official clickhouse-client behavior by consuming query-group rows only
+      // (thread_id = 0), accumulating increment counters, and replacing gauges.
+      q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& block) -> bool {
+        if (self->cancel_requested_.load(std::memory_order_relaxed)) return false;
+        if (block.GetRowCount() == 0) return true;
 
-        int idx_name = -1;
-        int idx_value = -1;
-        int idx_thread = -1;
-
-        for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-          const auto& cn = b.GetColumnName(i);
-          if (iequals_ascii(cn, "name") || iequals_ascii(cn, "event") || iequals_ascii(cn, "profileevent") || iequals_ascii(cn, "profile_event")) idx_name = static_cast<int>(i);
-          else if (iequals_ascii(cn, "value")) idx_value = static_cast<int>(i);
-          else if (iequals_ascii(cn, "thread_id") || iequals_ascii(cn, "thread") || iequals_ascii(cn, "threadid")) idx_thread = static_cast<int>(i);
-        }
-
-        if (idx_name < 0) {
-          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-            const auto& cn = b.GetColumnName(i);
-            if (b[i]->As<clickhouse::ColumnString>() && !icontains(cn, "host") && (icontains(cn, "event") || icontains(cn, "name"))) {
-              idx_name = static_cast<int>(i);
-              break;
-            }
+        auto column_index = [&](std::string_view expected) -> int {
+          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
+            if (block.GetColumnName(i) == expected) return static_cast<int>(i);
           }
-        }
-        if (idx_value < 0) {
-          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-            const auto& cn = b.GetColumnName(i);
-            if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "value")) {
-              idx_value = static_cast<int>(i);
-              break;
-            }
-          }
-        }
-        if (idx_thread < 0) {
-          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-            const auto& cn = b.GetColumnName(i);
-            if ((b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) && icontains(cn, "thread")) {
-              idx_thread = static_cast<int>(i);
-              break;
-            }
-          }
-        }
-        if (idx_name < 0) {
-          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-            if (b[i]->As<clickhouse::ColumnString>()) { idx_name = static_cast<int>(i); break; }
-          }
-        }
-        if (idx_value < 0) {
-          for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-            if (b[i]->As<clickhouse::ColumnUInt64>() || b[i]->As<clickhouse::ColumnInt64>()) { idx_value = static_cast<int>(i); break; }
-          }
-        }
-        if (idx_name < 0 || idx_value < 0) return true;
+          return -1;
+        };
 
-        auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
-        auto c_val_u64 = b[idx_value]->As<clickhouse::ColumnUInt64>();
-        auto c_val_i64 = b[idx_value]->As<clickhouse::ColumnInt64>();
+        const int host_index = column_index("host_name");
+        const int thread_index = column_index("thread_id");
+        const int type_index = column_index("type");
+        const int name_index = column_index("name");
+        const int value_index = column_index("value");
+        if (host_index < 0 || thread_index < 0 || type_index < 0 ||
+            name_index < 0 || value_index < 0) {
+          return true;
+        }
 
-        clickhouse::ColumnRef c_thr_ref;
-        if (idx_thread >= 0 && static_cast<size_t>(idx_thread) < b.GetColumnCount()) c_thr_ref = b[idx_thread];
-        auto c_thr_u64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnUInt64>() : nullptr;
-        auto c_thr_i64 = c_thr_ref ? c_thr_ref->As<clickhouse::ColumnInt64>() : nullptr;
+        const auto hosts = block[static_cast<size_t>(host_index)]->As<clickhouse::ColumnString>();
+        const auto threads = block[static_cast<size_t>(thread_index)]->As<clickhouse::ColumnUInt64>();
+        const auto types = block[static_cast<size_t>(type_index)]->As<clickhouse::ColumnEnum8>();
+        const auto names = block[static_cast<size_t>(name_index)]->As<clickhouse::ColumnString>();
+        const auto values_i64 = block[static_cast<size_t>(value_index)]->As<clickhouse::ColumnInt64>();
+        const auto values_u64 = block[static_cast<size_t>(value_index)]->As<clickhouse::ColumnUInt64>();
+        if (!hosts || !threads || !types || !names || (!values_i64 && !values_u64)) return true;
 
-        if (!c_name || (!c_val_u64 && !c_val_i64)) return true;
+        auto saturating_add = [](int64_t current, int64_t increment) {
+          if (increment <= 0) return current;
+          if (current > std::numeric_limits<int64_t>::max() - increment) {
+            return std::numeric_limits<int64_t>::max();
+          }
+          return current + increment;
+        };
+        auto sum_gauges = [](const std::unordered_map<std::string, int64_t>& gauges) {
+          __int128 total = 0;
+          for (const auto& item : gauges) total += std::max<int64_t>(0, item.second);
+          if (total > std::numeric_limits<int64_t>::max()) return std::numeric_limits<int64_t>::max();
+          return static_cast<int64_t>(total);
+        };
 
         const auto now = std::chrono::steady_clock::now();
-        std::lock_guard<std::mutex> lk(self->mu_);
+        std::lock_guard<std::mutex> lock(self->mu_);
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          // Per-thread rows are implementation details and do not represent a
+          // stable live thread count. ClickHouse emits the authoritative
+          // query-group aggregate with thread_id = 0.
+          if (threads->At(row) != 0) continue;
 
-        for (size_t r = 0; r < b.GetRowCount(); ++r) {
-          self->saw_profile_events_ = true;
-
-          const std::string_view name = c_name->At(r);
-          const int64_t v = c_val_u64 ? static_cast<int64_t>(c_val_u64->At(r)) : c_val_i64->At(r);
-
-          // Thread tracking: even if server omits thread IDs, keep a synthetic thread=0 so we report >=1.
-          uint64_t tid = 0;
-          if (c_thr_u64) {
-            tid = c_thr_u64->At(r);
-          } else if (c_thr_i64) {
-            const int64_t tv = c_thr_i64->At(r);
-            if (tv > 0) tid = static_cast<uint64_t>(tv);
-          }
-          self->thread_last_seen_[tid] = now;
-
-          // CPU time (increments). Some servers use OS* variants.
-          if (name == "UserTimeMicroseconds" || name == "OSUserTimeMicroseconds") {
-            self->user_time_us_total_ += v;
-          } else if (name == "SystemTimeMicroseconds" || name == "OSSystemTimeMicroseconds") {
-            self->system_time_us_total_ += v;
-          } else if (name == "RealTimeMicroseconds") {
-            self->real_time_us_total_ += v;
+          const std::string_view event_type = types->NameAt(row);
+          const std::string_view event_name = names->At(row);
+          int64_t value = 0;
+          if (values_i64) {
+            value = values_i64->At(row);
+          } else {
+            const uint64_t unsigned_value = values_u64->At(row);
+            value = unsigned_value > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())
+              ? std::numeric_limits<int64_t>::max()
+              : static_cast<int64_t>(unsigned_value);
           }
 
-          // Memory: mimic the Go implementation (substring match; best-effort).
-          if (icontains(name, "memory") || icontains(name, "mem")) {
-            const bool is_peak = icontains(name, "peak");
-            const bool looks_current = icontains(name, "tracking") || icontains(name, "current") || icontains(name, "usage") || icontains(name, "used");
-            if (is_peak) {
-              if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
-              else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
+          if (event_type == "increment") {
+            if (event_name == "UserTimeMicroseconds") {
+              self->cpu_time_available_ = true;
+              self->user_time_us_total_ = saturating_add(self->user_time_us_total_, value);
+            } else if (event_name == "SystemTimeMicroseconds") {
+              self->cpu_time_available_ = true;
+              self->system_time_us_total_ = saturating_add(self->system_time_us_total_, value);
+            } else if (event_name == "OSCPUWaitMicroseconds") {
+              self->cpu_wait_available_ = true;
+              self->cpu_wait_time_us_total_ = saturating_add(self->cpu_wait_time_us_total_, value);
+            } else if (event_name == "OSIOWaitMicroseconds") {
+              self->io_wait_available_ = true;
+              self->io_wait_time_us_total_ = saturating_add(self->io_wait_time_us_total_, value);
             }
-            if (looks_current || (!is_peak && self->current_mem_bytes_ < 0)) {
-              self->current_mem_bytes_ = v;
-              if (self->peak_mem_bytes_ < 0) self->peak_mem_bytes_ = v;
-              else self->peak_mem_bytes_ = std::max<int64_t>(self->peak_mem_bytes_, v);
-            }
+            continue;
+          }
+
+          if (event_type != "gauge") continue;
+          const std::string_view host_view = hosts->At(row);
+          const std::string host(host_view.data(), host_view.size());
+          const int64_t gauge_value = std::max<int64_t>(0, value);
+          if (event_name == "MemoryTrackerUsage") {
+            self->memory_usage_by_host_[host] = gauge_value;
+            self->current_mem_bytes_ = sum_gauges(self->memory_usage_by_host_);
+          } else if (event_name == "MemoryTrackerPeakUsage") {
+            self->peak_memory_usage_by_host_[host] = gauge_value;
+            self->peak_mem_bytes_ = sum_gauges(self->peak_memory_usage_by_host_);
+          } else if (event_name == "TemporaryDataOnDiskUsage") {
+            self->temporary_data_by_host_[host] = gauge_value;
+            self->temporary_data_bytes_ = sum_gauges(self->temporary_data_by_host_);
           }
         }
 
-        // Record a sample point (throttled).
         self->maybe_record_sample_locked(now);
-
         return true;
       });
 

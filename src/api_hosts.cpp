@@ -72,7 +72,8 @@ void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
 void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
 
-  res.set_header("Content-Type", "text/event-stream");
+  // The chunked provider sets Content-Type once. Avoid duplicate header
+  // values, which are legal at the HTTP layer but break strict SSE clients.
   res.set_header("Cache-Control", "no-cache");
   res.set_header("Connection", "keep-alive");
   res.set_header("X-Accel-Buffering", "no");
@@ -97,7 +98,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
   HealthRunner* runner = health_.get();
 
   res.set_chunked_content_provider(
-      "text/event-stream",
+      "text/event-stream; charset=utf-8",
       [st, runner](size_t, httplib::DataSink& sink) {
         if (st->initial_event_pending) {
           st->initial_event_pending = false;

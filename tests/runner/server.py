@@ -542,6 +542,7 @@ def benchmark_overview(summary: dict[str, Any]) -> dict[str, Any]:
     comparisons = summary.get("comparisons") if isinstance(summary.get("comparisons"), list) else []
     overheads = summary.get("direct_http_overheads") if isinstance(summary.get("direct_http_overheads"), list) else []
     issues = summary.get("issues") if isinstance(summary.get("issues"), list) else []
+    warnings = summary.get("warnings") if isinstance(summary.get("warnings"), list) else []
     summaries = summary.get("summaries") if isinstance(summary.get("summaries"), list) else []
     speedups = [row.get("speedup_pct_positive_means_baseline_faster") for row in comparisons if isinstance(row, dict)]
     overhead_ms = [row.get("overhead_ms") for row in overheads if isinstance(row, dict)]
@@ -554,6 +555,7 @@ def benchmark_overview(summary: dict[str, Any]) -> dict[str, Any]:
         "comparisons_count": len(comparisons),
         "direct_http_count": len(overheads),
         "issues_count": len(issues),
+        "warnings_count": len(warnings),
         "summaries_count": len(summaries),
         "median_speedup_pct": median_or_none(speedups),
         "source_faster_count": sum(1 for value in positive if value > 0),
@@ -637,6 +639,7 @@ class ArtifactRepository:
                 "comparisons": summary.get("comparisons") or [],
                 "direct_http_overheads": summary.get("direct_http_overheads") or [],
                 "issues": (summary.get("issues") or [])[:500],
+                "warnings": (summary.get("warnings") or [])[:500],
             }
             return {
                 "kind": "benchmark",
@@ -917,7 +920,8 @@ class JobStore:
 
     def _finish(self, job: Job) -> None:
         with self.lock:
-            job.ended_at = utc_now()
+            if job.ended_at is None:
+                job.ended_at = utc_now()
             self.history.append(job)
             if len(self.history) > MAX_HISTORY:
                 self.history = self.history[-MAX_HISTORY:]
@@ -962,6 +966,10 @@ class JobStore:
                     pass
         finally:
             job.duration_seconds = round(time.perf_counter() - started, 3)
+            # Persist the terminal timestamp in runner-result.json as well as in
+            # the in-memory history. Previously _finish() filled it only after
+            # the report had already been written, leaving ended_at=null.
+            job.ended_at = utc_now()
             self._write_job_result(job)
             self._finish(job)
             prune_runs("tests")
@@ -982,6 +990,7 @@ class JobStore:
                 "comparisons_count": len(job.summary.get("comparisons") or []),
                 "direct_http_overheads_count": len(job.summary.get("direct_http_overheads") or []),
                 "issues_count": len(job.summary.get("issues") or []),
+                "warnings_count": len(job.summary.get("warnings") or []),
             }
         return payload
 

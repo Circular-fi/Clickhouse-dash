@@ -7,36 +7,63 @@
   const { api, state, storage } = ns;
   const clientTtlMs = 30 * 60 * 1000;
   const refreshPollMs = 5 * 60 * 1000;
+  const maxCachedHosts = 2;
+  const maxColumnTablesPerHost = 32;
+  const maxColumnsPerHost = 10000;
 
-  const baseTypes = [
+  const catalogTypes = [
     "keywords",
     "functions",
     "databases",
     "tables",
-    "columns",
     "table_functions",
     "formats",
     "settings",
     "data_types",
   ];
-
-  // The complete columns catalog can dwarf every other metadata payload on a
-  // busy cluster. Load it only when the editor actually needs relation-aware
-  // completion; all lighter catalogs remain eager.
-  const eagerTypes = baseTypes.filter((t) => t !== "columns");
-  const rawTypes = new Set(baseTypes.filter((t) => t !== "keywords"));
+  const rawTypes = new Set(catalogTypes.filter((type) => type !== "keywords"));
   const inflight = new Map();
+  const activatedHosts = new Set();
+  const hydratedHosts = new Set();
 
-  function normalizeType(t) {
-    return String(t || "").trim().toLowerCase();
+  function normalizeType(type) {
+    return String(type || "").trim().toLowerCase();
+  }
+
+  function normalizeScopePart(value) {
+    return String(value || "").trim();
+  }
+
+  function columnTableKey(database, table) {
+    return `${normalizeScopePart(database)}.${normalizeScopePart(table)}`.toLowerCase();
+  }
+
+  function pruneHostMetadata(activeHostId) {
+    const hosts = state?.meta?.hosts;
+    if (!hosts) return;
+    const entries = Object.entries(hosts);
+    if (entries.length <= maxCachedHosts) return;
+    entries
+      .filter(([hostId]) => String(hostId) !== String(activeHostId || ""))
+      .sort((a, b) => Number(a[1]?.last_access_ms || 0) - Number(b[1]?.last_access_ms || 0))
+      .slice(0, Math.max(0, entries.length - maxCachedHosts))
+      .forEach(([hostId]) => {
+        delete hosts[hostId];
+        activatedHosts.delete(hostId);
+        hydratedHosts.delete(hostId);
+      });
   }
 
   function getHostMeta(hostId) {
-    const h = String(hostId || "");
-    if (!h) return null;
+    const normalizedHostId = String(hostId || "");
+    if (!normalizedHostId) return null;
     const root = state.meta;
-    if (!root.hosts[h]) root.hosts[h] = Object.create(null);
-    return root.hosts[h];
+    if (!root.hosts[normalizedHostId]) root.hosts[normalizedHostId] = Object.create(null);
+    const hostMeta = root.hosts[normalizedHostId];
+    hostMeta.last_access_ms = Date.now();
+    if (!(hostMeta.columnTables instanceof Map)) hostMeta.columnTables = new Map();
+    pruneHostMetadata(normalizedHostId);
+    return hostMeta;
   }
 
   function normalizeCatalogItem(raw) {
@@ -59,28 +86,14 @@
 
   function rebuildAutocompleteIndexes(hostMeta) {
     if (!hostMeta) return;
-
     const tables = Array.isArray(hostMeta.tables?.items) ? hostMeta.tables.items : [];
-    const columns = Array.isArray(hostMeta.columns?.items) ? hostMeta.columns.items : [];
-
     const tablesByDatabase = new Map();
-    for (const t of tables) {
-      const db = String(t.database || "");
-      const key = db.toLowerCase();
-      if (!tablesByDatabase.has(key)) tablesByDatabase.set(key, []);
-      tablesByDatabase.get(key).push(t);
+    for (const table of tables) {
+      const databaseKey = String(table.database || "").toLowerCase();
+      if (!tablesByDatabase.has(databaseKey)) tablesByDatabase.set(databaseKey, []);
+      tablesByDatabase.get(databaseKey).push(table);
     }
-
-    const columnsByTable = new Map();
-    for (const c of columns) {
-      const db = String(c.database || "");
-      const table = String(c.table || "");
-      const key = `${db}.${table}`.toLowerCase();
-      if (!columnsByTable.has(key)) columnsByTable.set(key, []);
-      columnsByTable.get(key).push(c);
-    }
-
-    hostMeta.autocomplete = { tablesByDatabase, columnsByTable };
+    hostMeta.autocomplete = { tablesByDatabase };
   }
 
   function notifyMetaChanged(hostId) {
@@ -90,10 +103,10 @@
   }
 
   function applyKeywords(hostId, payload) {
-    const data = payload && payload.data && payload.data.keywords ? payload.data.keywords : null;
+    const data = payload?.data?.keywords;
     if (!data || !Array.isArray(data.items)) return;
     const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
-    const items = data.items.map((x) => String(x || "")).filter((x) => x);
+    const items = data.items.map((value) => String(value || "")).filter(Boolean);
     storage.writeMeta(hostId, "keywords", updatedAt, items);
 
     const hostMeta = getHostMeta(hostId);
@@ -102,39 +115,45 @@
   }
 
   function applyFunctions(hostId, payload) {
-    const data = payload && payload.data && payload.data.functions ? payload.data.functions : null;
+    const data = payload?.data?.functions;
     if (!data || !Array.isArray(data.items)) return;
 
     const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
     const items = data.items
-      .map((x) => (x && typeof x === "object" ? x : null))
+      .map((value) => (value && typeof value === "object" ? value : null))
       .filter(Boolean)
-      .map((x) => ({
-        name: String(x.name || ""),
-        is_aggregate: Boolean(x.is_aggregate),
-        case_insensitive: Boolean(x.case_insensitive),
-        is_user_defined: Boolean(x.is_user_defined),
-        origin: x.origin == null ? "" : String(x.origin),
+      .map((value) => ({
+        name: String(value.name || ""),
+        is_aggregate: Boolean(value.is_aggregate),
+        case_insensitive: Boolean(value.case_insensitive),
+        is_user_defined: Boolean(value.is_user_defined),
+        origin: value.origin == null ? "" : String(value.origin),
       }))
-      .filter((x) => x.name);
+      .filter((value) => value.name);
 
     storage.writeMetaRaw(hostId, "functions", updatedAt, items);
 
     const hostMeta = getHostMeta(hostId);
-    const ci = new Set();
-    const cs = new Set();
-    const meta = new Map();
-    for (const it of items) {
-      meta.set(it.name, it);
-      if (it.case_insensitive) ci.add(it.name.toLowerCase());
-      else cs.add(it.name);
+    const caseInsensitive = new Set();
+    const caseSensitive = new Set();
+    const metadata = new Map();
+    for (const item of items) {
+      metadata.set(item.name, item);
+      if (item.case_insensitive) caseInsensitive.add(item.name.toLowerCase());
+      else caseSensitive.add(item.name);
     }
-    hostMeta.functions = { updated_at_ms: updatedAt, items, ci, cs, meta };
+    hostMeta.functions = {
+      updated_at_ms: updatedAt,
+      items,
+      ci: caseInsensitive,
+      cs: caseSensitive,
+      meta: metadata,
+    };
     notifyMetaChanged(hostId);
   }
 
   function applyCatalog(hostId, type, payload) {
-    const data = payload && payload.data && payload.data[type] ? payload.data[type] : null;
+    const data = payload?.data?.[type];
     if (!data || !Array.isArray(data.items)) return;
     const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
     const items = data.items.map(normalizeCatalogItem).filter(Boolean);
@@ -146,122 +165,237 @@
     notifyMetaChanged(hostId);
   }
 
+  function pruneColumnTables(hostMeta) {
+    const cache = hostMeta?.columnTables;
+    if (!(cache instanceof Map)) return;
+    let totalColumns = 0;
+    for (const entry of cache.values()) totalColumns += Array.isArray(entry?.items) ? entry.items.length : 0;
+    while (cache.size > maxColumnTablesPerHost || totalColumns > maxColumnsPerHost) {
+      const oldest = cache.entries().next();
+      if (oldest.done) break;
+      const [, entry] = oldest.value;
+      totalColumns -= Array.isArray(entry?.items) ? entry.items.length : 0;
+      cache.delete(oldest.value[0]);
+    }
+  }
+
+  function applyScopedColumns(hostId, database, table, payload) {
+    const data = payload?.data?.columns;
+    if (!data || !Array.isArray(data.items)) return;
+    const normalizedDatabase = normalizeScopePart(database);
+    const normalizedTable = normalizeScopePart(table);
+    if (!normalizedDatabase || !normalizedTable) return;
+
+    const items = data.items
+      .map(normalizeCatalogItem)
+      .filter(Boolean)
+      .map((item) => ({
+        ...item,
+        database: item.database || normalizedDatabase,
+        table: item.table || normalizedTable,
+      }));
+    const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : Date.now();
+    const hostMeta = getHostMeta(hostId);
+    const key = columnTableKey(normalizedDatabase, normalizedTable);
+    hostMeta.columnTables.delete(key);
+    hostMeta.columnTables.set(key, { updated_at_ms: updatedAt, items });
+    pruneColumnTables(hostMeta);
+    notifyMetaChanged(hostId);
+  }
+
   function readClientUpdatedAt(hostId, type) {
-    const t = normalizeType(type);
-    const v = rawTypes.has(t) ? storage.readMetaRaw(hostId, t) : storage.readMeta(hostId, t);
-    return v && typeof v.updated_at_ms === "number" ? v.updated_at_ms : 0;
+    const normalizedType = normalizeType(type);
+    const hostMeta = state?.meta?.hosts?.[String(hostId || "")];
+    const value = hostMeta && hostMeta[normalizedType];
+    return value && typeof value.updated_at_ms === "number" ? value.updated_at_ms : 0;
   }
 
   function shouldRefresh(hostId, type) {
     const updatedAt = readClientUpdatedAt(hostId, type);
-    if (!updatedAt) return true;
-    const age = Date.now() - updatedAt;
-    return age > clientTtlMs;
+    return !updatedAt || Date.now() - updatedAt > clientTtlMs;
   }
 
-  async function fetchAndStore(hostId, types) {
+  async function fetchAndStore(hostId, types, scope = null) {
     const normalizedTypes = Array.from(new Set(types.map(normalizeType).filter(Boolean))).sort();
-    const key = `${hostId}::${normalizedTypes.join(",")}`;
+    const database = normalizeScopePart(scope?.database);
+    const table = normalizeScopePart(scope?.table);
+    const key = `${hostId}::${normalizedTypes.join(",")}::${database}::${table}`;
     if (inflight.has(key)) return inflight.get(key);
 
-    const p = (async () => {
-      const payload = await api.getMeta(hostId, normalizedTypes);
-      const tset = new Set(normalizedTypes);
-      if (tset.has("keywords")) applyKeywords(hostId, payload);
-      if (tset.has("functions")) applyFunctions(hostId, payload);
-      for (const t of baseTypes) {
-        if (t !== "keywords" && t !== "functions" && tset.has(t)) applyCatalog(hostId, t, payload);
+    const request = (async () => {
+      const payload = await api.getMeta(hostId, normalizedTypes, database && table ? { database, table } : null);
+      const requestedTypes = new Set(normalizedTypes);
+      if (requestedTypes.has("keywords")) applyKeywords(hostId, payload);
+      if (requestedTypes.has("functions")) applyFunctions(hostId, payload);
+      for (const type of catalogTypes) {
+        if (type !== "keywords" && type !== "functions" && requestedTypes.has(type)) {
+          applyCatalog(hostId, type, payload);
+        }
+      }
+      if (requestedTypes.has("columns") && database && table) {
+        applyScopedColumns(hostId, database, table, payload);
       }
       return payload;
     })()
       .catch(() => null)
       .finally(() => inflight.delete(key));
 
-    inflight.set(key, p);
-    return p;
+    inflight.set(key, request);
+    return request;
   }
 
   function refreshTypes(types) {
     const hostId = state.selectedHostId;
     if (!hostId) return null;
-    const need = types.filter((t) => shouldRefresh(hostId, t));
-    if (!need.length) return null;
-    return fetchAndStore(String(hostId), need);
+    const neededTypes = types.filter((type) => shouldRefresh(hostId, type));
+    if (!neededTypes.length) return null;
+    return fetchAndStore(String(hostId), neededTypes);
+  }
+
+  function prepareHost(hostId) {
+    const normalizedHostId = String(hostId || "");
+    if (!normalizedHostId) return null;
+    const hostMeta = getHostMeta(normalizedHostId);
+
+    // Delete the old cluster-wide column payload by key only. Never read or
+    // parse it: a large system.columns catalog can expand to hundreds of
+    // megabytes once represented as JavaScript objects and autocomplete maps.
+    storage.removeMeta(normalizedHostId, "columns");
+    return hostMeta;
+  }
+
+  function activateHost(hostId) {
+    const normalizedHostId = String(hostId || "");
+    if (!normalizedHostId) return null;
+    prepareHost(normalizedHostId);
+    activatedHosts.add(normalizedHostId);
+    hydrateFromStorage(normalizedHostId);
+    scheduleBackgroundRefresh();
+    return normalizedHostId;
   }
 
   function maybeRefreshOnUserAction() {
-    return refreshTypes(eagerTypes);
+    const hostId = activateHost(state.selectedHostId);
+    if (!hostId) return null;
+    return refreshTypes(catalogTypes);
   }
 
   function maybeRefreshOnLoad() {
-    return refreshTypes(eagerTypes);
+    const hostId = String(state.selectedHostId || "");
+    if (!hostId || !activatedHosts.has(hostId)) return null;
+    return refreshTypes(catalogTypes);
   }
 
-  function ensureColumns() {
-    return refreshTypes(["columns"]);
+  function getTableColumns(database, table) {
+    const hostId = String(state.selectedHostId || "");
+    const normalizedDatabase = normalizeScopePart(database);
+    const normalizedTable = normalizeScopePart(table);
+    if (!hostId || !normalizedDatabase || !normalizedTable) return null;
+    const hostMeta = getHostMeta(hostId);
+    const key = columnTableKey(normalizedDatabase, normalizedTable);
+    const entry = hostMeta.columnTables.get(key);
+    if (!entry) return null;
+    hostMeta.columnTables.delete(key);
+    hostMeta.columnTables.set(key, entry);
+    return Array.isArray(entry.items) ? entry.items : [];
+  }
+
+  function ensureTableColumns(database, table) {
+    const hostId = String(state.selectedHostId || "");
+    const normalizedDatabase = normalizeScopePart(database);
+    const normalizedTable = normalizeScopePart(table);
+    if (!hostId || !normalizedDatabase || !normalizedTable) return null;
+
+    const hostMeta = getHostMeta(hostId);
+    const key = columnTableKey(normalizedDatabase, normalizedTable);
+    const entry = hostMeta.columnTables.get(key);
+    if (entry && Date.now() - Number(entry.updated_at_ms || 0) <= clientTtlMs) {
+      hostMeta.columnTables.delete(key);
+      hostMeta.columnTables.set(key, entry);
+      return Promise.resolve(entry.items);
+    }
+    return fetchAndStore(hostId, ["columns"], {
+      database: normalizedDatabase,
+      table: normalizedTable,
+    });
   }
 
   function hydrateFunctions(hostMeta, raw) {
-    const ci = new Set();
-    const cs = new Set();
-    const meta = new Map();
+    const caseInsensitive = new Set();
+    const caseSensitive = new Set();
+    const metadata = new Map();
     const items = [];
     for (const rawItem of raw.items) {
       if (!rawItem || typeof rawItem !== "object") continue;
       const name = String(rawItem.name || "");
       if (!name) continue;
-      const it = {
+      const item = {
         name,
         is_aggregate: Boolean(rawItem.is_aggregate),
         case_insensitive: Boolean(rawItem.case_insensitive),
         is_user_defined: Boolean(rawItem.is_user_defined),
         origin: rawItem.origin == null ? "" : String(rawItem.origin),
       };
-      items.push(it);
-      meta.set(name, it);
-      if (it.case_insensitive) ci.add(name.toLowerCase());
-      else cs.add(name);
+      items.push(item);
+      metadata.set(name, item);
+      if (item.case_insensitive) caseInsensitive.add(name.toLowerCase());
+      else caseSensitive.add(name);
     }
-    hostMeta.functions = { updated_at_ms: raw.updated_at_ms, items, ci, cs, meta };
+    hostMeta.functions = {
+      updated_at_ms: raw.updated_at_ms,
+      items,
+      ci: caseInsensitive,
+      cs: caseSensitive,
+      meta: metadata,
+    };
   }
 
   function hydrateFromStorage(hostId) {
-    const h = String(hostId || "");
-    if (!h) return;
-    const hostMeta = getHostMeta(h);
+    const normalizedHostId = String(hostId || "");
+    if (!normalizedHostId || hydratedHosts.has(normalizedHostId)) return;
+    const hostMeta = prepareHost(normalizedHostId);
+    if (!hostMeta) return;
+    hydratedHosts.add(normalizedHostId);
 
-    const kw = storage.readMeta(h, "keywords");
-    if (kw && Array.isArray(kw.items) && kw.items.length) {
-      const items = kw.items.map((x) => String(x || "")).filter((x) => x);
-      hostMeta.keywords = { updated_at_ms: kw.updated_at_ms, items, set: new Set(items) };
+    const keywords = storage.readMeta(normalizedHostId, "keywords");
+    if (keywords && Array.isArray(keywords.items) && keywords.items.length) {
+      const items = keywords.items.map((value) => String(value || "")).filter(Boolean);
+      hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items) };
     }
 
-    const fn = storage.readMetaRaw(h, "functions");
-    if (fn && Array.isArray(fn.items) && fn.items.length) hydrateFunctions(hostMeta, fn);
+    const functions = storage.readMetaRaw(normalizedHostId, "functions");
+    if (functions && Array.isArray(functions.items) && functions.items.length) {
+      hydrateFunctions(hostMeta, functions);
+    }
 
-    for (const t of baseTypes) {
-      if (t === "keywords" || t === "functions") continue;
-      const raw = storage.readMetaRaw(h, t);
+    for (const type of catalogTypes) {
+      if (type === "keywords" || type === "functions") continue;
+      const raw = storage.readMetaRaw(normalizedHostId, type);
       if (!raw || !Array.isArray(raw.items) || !raw.items.length) continue;
-      hostMeta[t] = { updated_at_ms: raw.updated_at_ms, items: raw.items.map(normalizeCatalogItem).filter(Boolean) };
+      hostMeta[type] = {
+        updated_at_ms: raw.updated_at_ms,
+        items: raw.items.map(normalizeCatalogItem).filter(Boolean),
+      };
     }
 
     rebuildAutocompleteIndexes(hostMeta);
   }
 
-  if (state && state.selectedHostId) hydrateFromStorage(state.selectedHostId);
+  if (state?.selectedHostId) prepareHost(state.selectedHostId);
 
   let refreshTimer = 0;
 
   function scheduleBackgroundRefresh(delay = refreshPollMs) {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = 0;
-    if (document.hidden) return;
+    const hostId = String(state.selectedHostId || "");
+    if (document.hidden || !hostId || !activatedHosts.has(hostId)) return;
     refreshTimer = setTimeout(() => {
       refreshTimer = 0;
       try {
         maybeRefreshOnLoad();
       } catch {
+        // A later user action or scheduled refresh will retry.
       }
       scheduleBackgroundRefresh();
     }, delay);
@@ -276,11 +410,19 @@
     try {
       maybeRefreshOnLoad();
     } catch {
+      // A later user action or scheduled refresh will retry.
     }
     scheduleBackgroundRefresh();
   });
 
-  scheduleBackgroundRefresh();
-
-  ns.meta = { maybeRefreshOnUserAction, maybeRefreshOnLoad, ensureColumns, hydrateFromStorage, fetchAndStore };
+  ns.meta = {
+    prepareHost,
+    activateHost,
+    maybeRefreshOnUserAction,
+    maybeRefreshOnLoad,
+    ensureTableColumns,
+    getTableColumns,
+    hydrateFromStorage,
+    fetchAndStore,
+  };
 })();

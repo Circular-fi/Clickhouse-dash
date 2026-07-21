@@ -74,27 +74,29 @@ struct SessionSnapshot {
 
   int64_t user_time_us_total = 0;
   int64_t system_time_us_total = 0;
+  int64_t cpu_wait_time_us_total = 0;
+  int64_t io_wait_time_us_total = 0;
+  bool cpu_time_available = false;
+  bool cpu_wait_available = false;
+  bool io_wait_available = false;
 
   int64_t current_mem_bytes = -1;
   int64_t peak_mem_bytes = -1;
-
-  int64_t threads_inst = 0;
-  int64_t threads_peak = 0;
+  int64_t temporary_data_bytes = -1;
 
   int64_t elapsed_ms = 0;
 };
 
-// High-frequency sampling stream (packed by the backend and sent in tick[14]).
-// New layout:
-//   [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes|null, threads]
-// app_run.js still understands the old 5-field layout for compatibility.
+// High-frequency samples are packed into telemetry tick schema v2. Every value
+// is derived from native ClickHouse progress or query-group ProfileEvents.
 struct SamplePoint {
   int64_t elapsed_ms = 0;
   uint64_t read_rows_total = 0;
   uint64_t read_bytes_total = 0;
-  int64_t cpu_centi = -1;   // centi-percent, may be -1 if unknown
-  int64_t mem_bytes = -1;   // -1 means unknown; server encodes as JSON null
-  int64_t threads = 0;
+  int64_t cpu_centi = -1;       // centi-percent, -1 means unavailable
+  int64_t mem_bytes = -1;       // -1 means unavailable
+  int64_t cpu_wait_centi = -1;  // scheduler wait rate, centi-percent
+  int64_t io_wait_centi = -1;   // I/O wait rate, centi-percent
 };
 
 class QuerySession : public std::enable_shared_from_this<QuerySession> {
@@ -185,23 +187,26 @@ private:
 
   int64_t user_time_us_total_ = 0;
   int64_t system_time_us_total_ = 0;
-  int64_t real_time_us_total_ = 0;
+  int64_t cpu_wait_time_us_total_ = 0;
+  int64_t io_wait_time_us_total_ = 0;
+  bool cpu_time_available_ = false;
+  bool cpu_wait_available_ = false;
+  bool io_wait_available_ = false;
 
   int64_t current_mem_bytes_ = -1;
   int64_t peak_mem_bytes_ = -1;
+  int64_t temporary_data_bytes_ = -1;
+  std::unordered_map<std::string, int64_t> memory_usage_by_host_;
+  std::unordered_map<std::string, int64_t> peak_memory_usage_by_host_;
+  std::unordered_map<std::string, int64_t> temporary_data_by_host_;
 
-  int64_t threads_inst_ = 0;
-  int64_t threads_peak_ = 0;
-  bool saw_profile_events_ = false;
-  std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> thread_last_seen_;
-
-  // High-frequency samples (sent in tick[14]).
+  // High-frequency samples embedded in telemetry tick schema v2.
   std::deque<SamplePoint> samples_;
   std::chrono::steady_clock::time_point last_sample_at_{};
   std::chrono::steady_clock::time_point last_sample_cpu_at_{};
   int64_t last_sample_cpu_total_us_ = 0;
-  std::chrono::steady_clock::time_point last_sample_rt_at_{};
-  int64_t last_sample_rt_total_us_ = 0;
+  int64_t last_sample_cpu_wait_total_us_ = 0;
+  int64_t last_sample_io_wait_total_us_ = 0;
 
   std::condition_variable cv_;
   std::deque<std::string> sse_chunks_;
