@@ -14,7 +14,6 @@
     readBytesPerSec: [],
     cpu: [],
     memBytes: [],
-    schedulerWait: [],
   };
 
   const MAX_STORE_POINTS = 2400;
@@ -95,8 +94,14 @@
     return out;
   }
 
+  function releaseCanvasBuffer(canvas) {
+    if (!canvas) return;
+    if (canvas.width !== 1) canvas.width = 1;
+    if (canvas.height !== 1) canvas.height = 1;
+  }
+
   function drawSparkline(canvas, points, opts = {}) {
-    if (!Array.isArray(points) || points.length === 0) {
+    if (!Array.isArray(points) || points.length === 0 || document.hidden) {
       releaseCanvasBuffer(canvas);
       return;
     }
@@ -185,30 +190,22 @@
     ctx.stroke();
   }
 
-  function chartCanvases() {
-    return [
-      dom.readRowsChart,
-      dom.readBytesChart,
-      dom.cpuChart,
-      dom.memoryChart,
-      dom.waitChart,
-    ].filter(Boolean);
-  }
-
-  function releaseCanvasBuffer(canvas) {
-    if (!canvas) return;
-    // A single-pixel backing store preserves layout while releasing the large
-    // bitmap allocated by a high-DPI canvas.
-    if (canvas.width !== 1) canvas.width = 1;
-    if (canvas.height !== 1) canvas.height = 1;
-  }
+  const chartCanvases = () => [
+    dom.readRowsChart,
+    dom.readBytesChart,
+    dom.cpuChart,
+    dom.memoryChart,
+  ].filter(Boolean);
 
   function releaseChartBuffers() {
     for (const canvas of chartCanvases()) releaseCanvasBuffer(canvas);
   }
 
   function renderCharts() {
-    if (document.hidden) return;
+    if (document.hidden) {
+      releaseChartBuffers();
+      return;
+    }
 
     drawSparkline(dom.readRowsChart, series.readRowsPerSec, { min: 0 });
     drawSparkline(dom.readBytesChart, series.readBytesPerSec, { min: 0 });
@@ -222,11 +219,10 @@
     });
 
     drawSparkline(dom.memoryChart, series.memBytes, { min: 0 });
-    drawSparkline(dom.waitChart, series.schedulerWait, { min: 0 });
   }
 
   function scheduleChartsRender() {
-    if (document.hidden || chartsFrame) return;
+    if (chartsFrame || document.hidden) return;
     chartsFrame = requestAnimationFrame(() => {
       chartsFrame = 0;
       renderCharts();
@@ -238,28 +234,27 @@
     series.readBytesPerSec.length = 0;
     series.cpu.length = 0;
     series.memBytes.length = 0;
-    series.schedulerWait.length = 0;
+    releaseChartBuffers();
     scheduleChartsRender();
   }
 
-  function formatShort(value, mul = 1000, units = ["k", "M", "B", "T"], fixed = 2, space = false, baseUnit = "") {
+  function formatShort(value, mul = 1000, units = ['k', 'M', 'B', 'T'], fixed=2, space=false) {
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
-    const separator = space && baseUnit ? " " : "";
-    if (Math.abs(n) < mul) return `${Math.round(n)}${separator}${baseUnit}`;
-
-    const sign = n < 0 ? "-" : "";
-    let scaled = Math.abs(n);
-    let unitIndex = -1;
-    while (scaled >= mul && unitIndex < units.length - 1) {
-      scaled /= mul;
-      unitIndex += 1;
+    const sign = n < 0 ? '-' : '';
+    if (n < mul) return `${Math.round(n)} B`;
+    let v = Math.abs(n);
+    let u = -1;
+    while (v >= mul && u < units.length - 1) {
+      v /= mul;
+      u++;
     }
-    return `${sign}${scaled.toFixed(fixed)}${space ? " " : ""}${units[unitIndex]}`;
+    const d = u > 1 ? 2 : 0;
+    return `${sign}${v.toFixed(fixed)}${space?' ':''}${units[u]}`;
   }
 
   function formatBytesShort(value) {
-    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"], 2, true, "B");
+    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"],  2, true);
   }
 
   function formatSecondsFromMs(ms) {
@@ -272,17 +267,7 @@
     return `${Math.round(s)}s`;
   }
 
-  function formatDurationFromMicroseconds(value) {
-    if (value === null || value === undefined) return "-";
-    const microseconds = Number(value);
-    if (!Number.isFinite(microseconds) || microseconds < 0) return "-";
-    if (microseconds < 1000) return `${Math.round(microseconds)}µs`;
-    if (microseconds < 1000000) return `${(microseconds / 1000).toFixed(2)}ms`;
-    return `${(microseconds / 1000000).toFixed(3)}s`;
-  }
-
   function formatPercentFromCenti(value) {
-    if (value === null || value === undefined) return "-";
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
     return `${(n / 100).toFixed(2)}%`;
@@ -297,11 +282,9 @@
     util.setMetricText(dom.readBytesRateText, "-");
     util.setMetricText(dom.readBytesTotalText, "-");
     util.setText(dom.cpuText, "-");
-    util.setText(dom.cpuMaxText, "total -");
+    util.setText(dom.cpuMaxText, "-");
     util.setMetricText(dom.memoryText, "-");
-    util.setMetricText(dom.memoryMaxText, "peak -");
-    util.setText(dom.waitText, "-");
-    util.setText(dom.waitDetailText, "scheduler total - · I/O -");
+    util.setMetricText(dom.memoryMaxText, "-");
     if (dom.progressCard) {
       dom.progressCard.classList.remove("is-indeterminate");
       dom.progressCard.style.setProperty("--p", "0");
@@ -317,8 +300,6 @@
     util.setMetricText(dom.readBytesRateText, "-");
     util.setText(dom.cpuText, "-");
     util.setMetricText(dom.memoryText, "-");
-    util.setText(dom.waitText, "-");
-    util.setText(dom.waitDetailText, "scheduler total - · I/O -");
   }
 
   function setProgressIndeterminate(enabled) {
@@ -326,66 +307,24 @@
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
   }
 
-  function applyTickMetrics(payload, agg) {
-    let elapsedMs = null;
-    let percentCenti = null;
-    let percentKnown = false;
-    let readRowsTotal = null;
-    let readBytesTotal = null;
-    let rowsPerSec = null;
-    let bytesPerSec = null;
-    let cpuCenti = null;
-    let cpuTimeUs = null;
-    let memInst = null;
-    let memMax = null;
-    let cpuWaitCenti = null;
-    let ioWaitCenti = null;
-    let cpuWaitTimeUs = null;
-    let ioWaitTimeUs = null;
-    let temporaryDataBytes = null;
-    let samples = null;
-    let sampleSchema = "legacy";
+  function applyTickMetrics(arr, agg) {
+    if (!Array.isArray(arr) || arr.length < 14) return;
 
-    if (payload && typeof payload === "object" && !Array.isArray(payload) && Number(payload.schema_version) === 2) {
-      const progress = payload.progress && typeof payload.progress === "object" ? payload.progress : {};
-      const rates = payload.rates && typeof payload.rates === "object" ? payload.rates : {};
-      const profile = payload.profile && typeof payload.profile === "object" ? payload.profile : {};
-      elapsedMs = Number(payload.elapsed_ms);
-      percentKnown = progress.known === true;
-      percentCenti = progress.percent_centi == null ? null : Number(progress.percent_centi);
-      readRowsTotal = Number(progress.read_rows);
-      readBytesTotal = Number(progress.read_bytes);
-      rowsPerSec = Number(rates.read_rows_per_second);
-      bytesPerSec = Number(rates.read_bytes_per_second);
-      cpuCenti = profile.cpu_percent_centi == null ? null : Number(profile.cpu_percent_centi);
-      cpuTimeUs = profile.cpu_time_us == null ? null : Number(profile.cpu_time_us);
-      memInst = profile.memory_bytes == null ? null : Number(profile.memory_bytes);
-      memMax = profile.peak_memory_bytes == null ? null : Number(profile.peak_memory_bytes);
-      cpuWaitCenti = profile.cpu_wait_percent_centi == null ? null : Number(profile.cpu_wait_percent_centi);
-      ioWaitCenti = profile.io_wait_percent_centi == null ? null : Number(profile.io_wait_percent_centi);
-      cpuWaitTimeUs = profile.cpu_wait_time_us == null ? null : Number(profile.cpu_wait_time_us);
-      ioWaitTimeUs = profile.io_wait_time_us == null ? null : Number(profile.io_wait_time_us);
-      temporaryDataBytes = profile.temporary_data_bytes == null ? null : Number(profile.temporary_data_bytes);
-      samples = Array.isArray(payload.samples) ? payload.samples : null;
-      sampleSchema = "v2";
-    } else if (Array.isArray(payload) && payload.length >= 14) {
-      // Legacy schema from releases before telemetry v2. Thread fields are
-      // deliberately ignored because they were inferred rather than emitted by
-      // ClickHouse and therefore were not a reliable query metric.
-      elapsedMs = Number(payload[0]);
-      percentCenti = Number(payload[1]);
-      percentKnown = !!payload[2];
-      readRowsTotal = Number(payload[3]);
-      readBytesTotal = Number(payload[4]);
-      rowsPerSec = Number(payload[6]);
-      bytesPerSec = Number(payload[7]);
-      cpuCenti = payload[8] == null ? null : Number(payload[8]);
-      memInst = payload[10] == null ? null : Number(payload[10]);
-      memMax = payload[11] == null ? null : Number(payload[11]);
-      samples = Array.isArray(payload[14]) ? payload[14] : null;
-    } else {
-      return;
-    }
+    const elapsedMs = Number(arr[0]);
+    const percentCenti = Number(arr[1]);
+    const percentKnown = !!arr[2];
+    const readRowsTotal = Number(arr[3]);
+    const readBytesTotal = Number(arr[4]);
+    const rowsPerSec = Number(arr[6]);
+    const bytesPerSec = Number(arr[7]);
+    const cpuCenti = arr[8] == null ? null : Number(arr[8]);
+    const cpuMaxCenti = arr[9] == null ? null : Number(arr[9]);
+    const memInst = arr[10] == null ? null : Number(arr[10]);
+    const memMax = arr[11] == null ? null : Number(arr[11]);
+    // Positions 12 and 13 are reserved compatibility placeholders. The source
+    // dashboard always sends null because ClickHouse does not expose a stable
+    // live active-thread count in native query telemetry.
+    const samples = Array.isArray(arr[14]) ? arr[14] : null;
 
     if (Number.isFinite(elapsedMs)) util.setText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
 
@@ -402,98 +341,75 @@
 
     if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, `${formatShort(rowsPerSec)}/s`);
     if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, formatShort(readRowsTotal));
+
     if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
     if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
 
-    util.setText(dom.cpuText, formatPercentFromCenti(cpuCenti));
-    util.setText(dom.cpuMaxText, Number.isFinite(cpuTimeUs) ? `total ${formatDurationFromMicroseconds(cpuTimeUs)}` : "total -");
-    util.setMetricText(dom.memoryText, Number.isFinite(memInst) ? formatBytesShort(memInst) : "-");
-    util.setMetricText(dom.memoryMaxText, Number.isFinite(memMax) ? `peak ${formatBytesShort(memMax)}` : "peak -");
+    util.setText(dom.cpuText, cpuCenti == null ? "-" : formatPercentFromCenti(cpuCenti));
+    util.setText(dom.cpuMaxText, cpuMaxCenti == null ? "-" : formatPercentFromCenti(cpuMaxCenti));
 
-    const waitParts = [];
-    const ioWaitRate = Number.isFinite(ioWaitCenti) ? formatPercentFromCenti(ioWaitCenti) : "-";
-    const cpuWaitTotal = Number.isFinite(cpuWaitTimeUs) ? formatDurationFromMicroseconds(cpuWaitTimeUs) : "-";
-    const ioWaitTotal = Number.isFinite(ioWaitTimeUs) ? formatDurationFromMicroseconds(ioWaitTimeUs) : "-";
-    waitParts.push(`scheduler total ${cpuWaitTotal}`);
-    waitParts.push(`I/O ${ioWaitRate} · total ${ioWaitTotal}`);
-    if (Number.isFinite(temporaryDataBytes) && temporaryDataBytes > 0) {
-      waitParts.push(`spill ${formatBytesShort(temporaryDataBytes)}`);
-    }
-    util.setText(dom.waitText, formatPercentFromCenti(cpuWaitCenti));
-    util.setText(dom.waitDetailText, waitParts.join(" · "));
+    util.setMetricText(dom.memoryText, memInst == null ? "-" : formatBytesShort(memInst));
+    util.setMetricText(dom.memoryMaxText, memMax == null ? "-" : formatBytesShort(memMax));
 
     if (agg) {
       if (Number.isFinite(readRowsTotal)) agg.lastReadRows = readRowsTotal;
       if (Number.isFinite(readBytesTotal)) agg.lastReadBytes = readBytesTotal;
-      if (Number.isFinite(cpuTimeUs)) agg.cpuTimeUs = Math.max(agg.cpuTimeUs, cpuTimeUs);
-      if (Number.isFinite(cpuWaitTimeUs)) agg.cpuWaitTimeUs = Math.max(agg.cpuWaitTimeUs, cpuWaitTimeUs);
-      if (Number.isFinite(ioWaitTimeUs)) agg.ioWaitTimeUs = Math.max(agg.ioWaitTimeUs, ioWaitTimeUs);
-      if (Number.isFinite(memMax)) agg.peakMemoryBytes = Math.max(agg.peakMemoryBytes, memMax);
+      if (Number.isFinite(cpuMaxCenti)) agg.cpuMaxCenti = Math.max(agg.cpuMaxCenti, cpuMaxCenti);
+      if (Number.isFinite(memMax)) agg.memMax = Math.max(agg.memMax, memMax);
 
       const tSec = Number.isFinite(elapsedMs) ? elapsedMs / 1000 : null;
       if (tSec != null) {
         if (Number.isFinite(rowsPerSec) && rowsPerSec >= 0) pushPointMonotone(series.readRowsPerSec, tSec, rowsPerSec);
         if (Number.isFinite(bytesPerSec) && bytesPerSec >= 0) pushPointMonotone(series.readBytesPerSec, tSec, bytesPerSec);
         if (Number.isFinite(cpuCenti)) pushPointMonotone(series.cpu, tSec, cpuCenti / 100);
-        if (Number.isFinite(memInst)) pushPointMonotone(series.memBytes, tSec, memInst);
-        if (Number.isFinite(cpuWaitCenti)) pushPointMonotone(series.schedulerWait, tSec, cpuWaitCenti / 100);
+        if (memInst != null && Number.isFinite(memInst)) pushPointMonotone(series.memBytes, tSec, memInst);
       }
 
-      if (samples && samples.length > 0) {
-        for (const sample of samples) {
-          if (!Array.isArray(sample) || sample.length < 2) continue;
-          const sampleMs = Number(sample[0]);
-          const sampleTime = Number.isFinite(sampleMs) ? sampleMs / 1000 : null;
-          if (sampleTime == null) continue;
+      if (samples && Array.isArray(samples) && samples.length > 0) {
+        for (const s of samples) {
+          if (!Array.isArray(s) || s.length < 2) continue;
+          const sm = Number(s[0]);
+          const st = Number.isFinite(sm) ? sm / 1000 : null;
+          if (st == null) continue;
 
-          let sampleRows = null;
-          let sampleBytes = null;
-          let sampleCpu = null;
-          let sampleMemory = null;
-          let sampleCpuWait = null;
-          let sampleIoWait = null;
-          if (sampleSchema === "v2") {
-            sampleRows = Number(sample[1]);
-            sampleBytes = Number(sample[2]);
-            sampleCpu = sample[3] == null ? null : Number(sample[3]);
-            sampleMemory = sample[4] == null ? null : Number(sample[4]);
-            sampleCpuWait = sample[5] == null ? null : Number(sample[5]);
-            sampleIoWait = sample[6] == null ? null : Number(sample[6]);
-          } else {
-            const hasRows = sample.length >= 6;
-            sampleRows = hasRows ? Number(sample[1]) : null;
-            sampleBytes = hasRows ? Number(sample[2]) : Number(sample[1]);
-            sampleCpu = sample[hasRows ? 3 : 2] == null ? null : Number(sample[hasRows ? 3 : 2]);
-            sampleMemory = sample[hasRows ? 4 : 3] == null ? null : Number(sample[hasRows ? 4 : 3]);
-          }
+          // Current source layout (five values):
+          // [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes].
+          // Release 2.8.x may append a sixth legacy thread value; it is ignored.
+          const hasReadRows = s.length >= 5;
+          const rr = hasReadRows ? Number(s[1]) : null;
+          const rb = hasReadRows ? Number(s[2]) : Number(s[1]);
+          const cpuIndex = hasReadRows ? 3 : 2;
+          const memoryIndex = hasReadRows ? 4 : 3;
+          const cpu = s[cpuIndex] == null ? null : Number(s[cpuIndex]);
+          const mem = s[memoryIndex] == null ? null : Number(s[memoryIndex]);
 
-          if (Number.isFinite(sampleCpu)) pushPointMonotone(series.cpu, sampleTime, sampleCpu / 100);
-          if (Number.isFinite(sampleMemory)) pushPointMonotone(series.memBytes, sampleTime, sampleMemory);
-          if (Number.isFinite(sampleCpuWait)) {
-            pushPointMonotone(series.schedulerWait, sampleTime, sampleCpuWait / 100);
-          }
+          if (cpu != null && Number.isFinite(cpu)) pushPointMonotone(series.cpu, st, cpu / 100);
+          if (mem != null && Number.isFinite(mem)) pushPointMonotone(series.memBytes, st, mem);
 
-          if (Number.isFinite(sampleRows) && agg.lastSampleReadRows != null && agg.lastSampleReadRowsT != null) {
-            const dt = sampleTime - agg.lastSampleReadRowsT;
+          if (Number.isFinite(rr) && agg.lastSampleReadRows != null && agg.lastSampleReadRowsT != null) {
+            const dt = st - agg.lastSampleReadRowsT;
             if (dt > 1e-9) {
-              const rowsRate = (sampleRows - agg.lastSampleReadRows) / dt;
-              if (Number.isFinite(rowsRate) && rowsRate >= 0) pushPointMonotone(series.readRowsPerSec, sampleTime, rowsRate);
+              const rps = (rr - agg.lastSampleReadRows) / dt;
+              if (Number.isFinite(rps) && rps >= 0) pushPointMonotone(series.readRowsPerSec, st, rps);
             }
           }
-          if (Number.isFinite(sampleBytes) && agg.lastSampleReadBytes != null && agg.lastSampleReadBytesT != null) {
-            const dt = sampleTime - agg.lastSampleReadBytesT;
+
+          if (Number.isFinite(rb) && agg.lastSampleReadBytes != null && agg.lastSampleReadBytesT != null) {
+            const dt = st - agg.lastSampleReadBytesT;
             if (dt > 1e-9) {
-              const bytesRate = (sampleBytes - agg.lastSampleReadBytes) / dt;
-              if (Number.isFinite(bytesRate) && bytesRate >= 0) pushPointMonotone(series.readBytesPerSec, sampleTime, bytesRate);
+              const bps = (rb - agg.lastSampleReadBytes) / dt;
+              if (Number.isFinite(bps) && bps >= 0) pushPointMonotone(series.readBytesPerSec, st, bps);
             }
           }
-          if (Number.isFinite(sampleRows)) {
-            agg.lastSampleReadRows = sampleRows;
-            agg.lastSampleReadRowsT = sampleTime;
+
+          if (Number.isFinite(rr)) {
+            agg.lastSampleReadRows = rr;
+            agg.lastSampleReadRowsT = st;
           }
-          if (Number.isFinite(sampleBytes)) {
-            agg.lastSampleReadBytes = sampleBytes;
-            agg.lastSampleReadBytesT = sampleTime;
+
+          if (Number.isFinite(rb)) {
+            agg.lastSampleReadBytes = rb;
+            agg.lastSampleReadBytesT = st;
           }
         }
       }
@@ -515,33 +431,6 @@
 
     if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, formatBytesShort(rb));
     else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
-
-    const telemetry = done.telemetry && typeof done.telemetry === "object" ? done.telemetry : null;
-    if (telemetry) {
-      const cpuTimeUs = telemetry.cpu_time_us == null ? null : Number(telemetry.cpu_time_us);
-      const cpuWaitTimeUs = telemetry.cpu_wait_time_us == null ? null : Number(telemetry.cpu_wait_time_us);
-      const ioWaitTimeUs = telemetry.io_wait_time_us == null ? null : Number(telemetry.io_wait_time_us);
-      const peakMemoryBytes = telemetry.peak_memory_bytes == null ? null : Number(telemetry.peak_memory_bytes);
-      const temporaryDataBytes = telemetry.temporary_data_bytes == null ? null : Number(telemetry.temporary_data_bytes);
-
-      if (Number.isFinite(cpuTimeUs)) util.setText(dom.cpuMaxText, `total ${formatDurationFromMicroseconds(cpuTimeUs)}`);
-      if (Number.isFinite(peakMemoryBytes)) util.setMetricText(dom.memoryMaxText, `peak ${formatBytesShort(peakMemoryBytes)}`);
-
-      const waitParts = [];
-      waitParts.push(`scheduler total ${formatDurationFromMicroseconds(cpuWaitTimeUs)}`);
-      waitParts.push(`I/O total ${formatDurationFromMicroseconds(ioWaitTimeUs)}`);
-      if (Number.isFinite(temporaryDataBytes) && temporaryDataBytes > 0) {
-        waitParts.push(`spill ${formatBytesShort(temporaryDataBytes)}`);
-      }
-      util.setText(dom.waitDetailText, waitParts.join(" · "));
-
-      if (agg) {
-        if (Number.isFinite(cpuTimeUs)) agg.cpuTimeUs = Math.max(agg.cpuTimeUs, cpuTimeUs);
-        if (Number.isFinite(cpuWaitTimeUs)) agg.cpuWaitTimeUs = Math.max(agg.cpuWaitTimeUs, cpuWaitTimeUs);
-        if (Number.isFinite(ioWaitTimeUs)) agg.ioWaitTimeUs = Math.max(agg.ioWaitTimeUs, ioWaitTimeUs);
-        if (Number.isFinite(peakMemoryBytes)) agg.peakMemoryBytes = Math.max(agg.peakMemoryBytes, peakMemoryBytes);
-      }
-    }
 
     setProgressIndeterminate(false);
   }
@@ -1219,16 +1108,10 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
   }
 
-  function parseSseJson(ev, eventName, onInvalid) {
+  function parseSseJson(ev) {
     try {
       return JSON.parse(ev.data);
-    } catch (error) {
-      if (typeof onInvalid === "function") {
-        onInvalid(
-          `Invalid JSON received in the ${String(eventName || "message")} SSE event.`,
-          error
-        );
-      }
+    } catch {
       return null;
     }
   }
@@ -1237,10 +1120,8 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
     return {
       lastReadRows: null,
       lastReadBytes: null,
-      cpuTimeUs: 0,
-      cpuWaitTimeUs: 0,
-      ioWaitTimeUs: 0,
-      peakMemoryBytes: 0,
+      cpuMaxCenti: 0,
+      memMax: 0,
       lastSampleReadRows: null,
       lastSampleReadRowsT: null,
       lastSampleReadBytes: null,
@@ -1251,9 +1132,9 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
 
 
   function makeStreamSink(sink) {
-    // Sink can redirect table meta/rows rendering to a per-query panel during multiquery.
-    // If not provided, fall back to the global results renderer.
-    const s = sink && typeof sink === "object" ? sink : null;
+  // Sink can redirect table meta/rows rendering to a per-query panel during multiquery.
+  // If not provided, fall back to the global results renderer.
+  const s = sink && typeof sink === "object" ? sink : null;
 
   const api = {
     // Table streaming
@@ -1297,25 +1178,12 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       const streamSink = makeStreamSink(sink);
       let doneReceived = false;
       let sseErrorEventReceived = false;
-      let protocolErrorMessage = "";
-
-      const reportInvalidEvent = (message) => {
-        if (protocolErrorMessage) return;
-        protocolErrorMessage = String(message || "Invalid JSON received from the query stream.");
-        sseErrorEventReceived = true;
-        streamSink.setError(protocolErrorMessage);
-        streamSink.setStatus("error");
-        lockProgressIndeterminate = true;
-        if (agg) agg.terminal = true;
-        setProgressIndeterminate(false);
-      };
-      const parseEvent = (ev, eventName) => parseSseJson(ev, eventName, reportInvalidEvent);
 
       const es = new EventSource(streamUrl);
       activeEventSource = es;
 
       es.addEventListener("meta", (ev) => {
-        const data = parseEvent(ev, "meta");
+        const data = parseSseJson(ev);
         if (data && data.status) {
           const st = String(data.status);
           if (st) setQueryStatusText(st);
@@ -1323,7 +1191,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       });
 
       es.addEventListener("result_meta", (ev) => {
-        const data = parseEvent(ev, "result_meta");
+        const data = parseSseJson(ev);
         if (!data) return;
         const cols = Array.isArray(data.columns) ? data.columns : [];
         const types = Array.isArray(data.types) ? data.types : [];
@@ -1331,21 +1199,21 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       });
 
       es.addEventListener("result_rows", (ev) => {
-        const data = parseEvent(ev, "result_rows");
+        const data = parseSseJson(ev);
         if (!data) return;
         streamSink.appendRows(Array.isArray(data.rows) ? data.rows : []);
       });
 
       es.addEventListener("tick", (ev) => {
         if (agg && agg.terminal) return;
-        const data = parseEvent(ev, "tick");
+        const data = parseSseJson(ev);
         if (!data) return;
         applyTickMetrics(data, agg);
       });
 
       es.addEventListener("error", (ev) => {
         if (!ev || typeof ev.data !== "string" || !ev.data) return;
-        const data = parseEvent(ev, "error");
+        const data = parseSseJson(ev);
         if (!data) return;
         sseErrorEventReceived = true;
         const msg = data && data.message ? String(data.message) : "Query error.";
@@ -1360,11 +1228,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       });
 
       es.addEventListener("done", (ev) => {
-        const data = parseEvent(ev, "done") || {};
+        const data = parseSseJson(ev) || {};
         doneReceived = true;
-        const st = protocolErrorMessage
-          ? "error"
-          : (data && data.status ? String(data.status) : "done");
+        const st = data && data.status ? String(data.status) : "done";
 
         if (st) setQueryStatusText(st);
         state.cancelRequested = false;
@@ -1401,17 +1267,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       });
 
       es.onerror = () => {
-        if (doneReceived) return;
-        if (protocolErrorMessage) {
-          closeActiveStream();
-          resolve({ status: "error", message: protocolErrorMessage });
-          return;
-        }
-        if (sseErrorEventReceived) {
-          closeActiveStream();
-          resolve({ status: "error" });
-          return;
-        }
+        if (doneReceived || sseErrorEventReceived) return;
 
         // If the user requested cancellation, the server may close the SSE stream without a final "done".
         // Treat this as a canceled query to avoid getting stuck in "canceling".
@@ -1459,7 +1315,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     return s === "error" || s === "canceled" || s === "cancelled";
   }
 
-  function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuTimeUs, cpuWaitTimeUs, ioWaitTimeUs, peakMemoryBytes, truncated }) {
+  function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, truncated }) {
     const parts = [];
     parts.push(statusLabel(status));
     if (elapsedSeconds != null) parts.push(util.formatSeconds(elapsedSeconds));
@@ -1467,10 +1323,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     if (readRows != null) parts.push(`${formatShort(readRows)} row${readRows > 1 ? 's' : ''}`);
     if (readBytes != null) parts.push(`${formatBytesShort(readBytes)}`);
 
-    if (cpuTimeUs != null && cpuTimeUs > 0) parts.push(`CPU time ${formatDurationFromMicroseconds(cpuTimeUs)}`);
-    if (cpuWaitTimeUs != null && cpuWaitTimeUs > 0) parts.push(`Scheduler wait ${formatDurationFromMicroseconds(cpuWaitTimeUs)}`);
-    if (ioWaitTimeUs != null && ioWaitTimeUs > 0) parts.push(`I/O wait ${formatDurationFromMicroseconds(ioWaitTimeUs)}`);
-    if (peakMemoryBytes != null && peakMemoryBytes > 0) parts.push(`peak RAM ${formatBytesShort(peakMemoryBytes)}`);
+    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${formatPercentFromCenti(cpuMaxCenti)}`);
+    if (memMax != null && memMax > 0) parts.push(`max RAM ${formatBytesShort(memMax)}`);
     return parts.join(" · ");
   }
 
@@ -1647,10 +1501,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           outCols,
           readRows,
           readBytes,
-          cpuTimeUs: agg.cpuTimeUs || null,
-          cpuWaitTimeUs: agg.cpuWaitTimeUs || null,
-          ioWaitTimeUs: agg.ioWaitTimeUs || null,
-          peakMemoryBytes: agg.peakMemoryBytes || null,
+          cpuMaxCenti: agg.cpuMaxCenti || null,
+          memMax: agg.memMax || null,
           truncated: !!(done && done.result_truncated),
         });
 
@@ -1776,19 +1628,18 @@ function streamQuery(streamUrl, agg, sink, ctx) {
   }
 
   function initCharts() {
-    window.addEventListener("resize", scheduleChartsRender);
+    window.addEventListener("resize", scheduleChartsRender, { passive: true });
+    const themeObserver = new MutationObserver(() => scheduleChartsRender());
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         if (chartsFrame) cancelAnimationFrame(chartsFrame);
         chartsFrame = 0;
         releaseChartBuffers();
-        return;
+      } else {
+        scheduleChartsRender();
       }
-      scheduleChartsRender();
     });
-
-    const themeObserver = new MutationObserver(() => scheduleChartsRender());
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     scheduleChartsRender();
   }
 

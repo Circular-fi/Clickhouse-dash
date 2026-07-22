@@ -2,9 +2,9 @@
 
 A lightweight real-time ClickHouse query dashboard.
 
-[![CI](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/codeql.yml)
-[![Release](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml/badge.svg)](https://github.com/SCcagg5/Clickhouse-dash/actions/workflows/release.yaml)
+[![CI](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/ci.yml/badge.svg)](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/codeql.yml/badge.svg)](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/codeql.yml)
+[![Release](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/release.yaml/badge.svg)](https://github.com/Circular-fi/Clickhouse-dash/actions/workflows/release.yaml)
 
 - Backend: **C++17** using clickhouse-cpp, cpp-httplib, and RapidJSON
 - Frontend: **vanilla JavaScript and Canvas**
@@ -14,8 +14,8 @@ A lightweight real-time ClickHouse query dashboard.
 ## Features
 
 - Execute ClickHouse SQL with streamed result batches.
-- Live progress, read rates, CPU time, memory, scheduler wait, I/O wait, and temporary-data telemetry.
-- Deterministic telemetry sourced from ClickHouse query-group native profile events.
+- Original compact telemetry: elapsed time, read progress, read rates, CPU usage, and current/peak query memory.
+- CPU and memory are sourced from ClickHouse query-group native profile events; inferred thread counts are not exposed.
 - Safe JSON serialization for native types and non-finite floating-point values.
 - Multi-host configuration, health checks, query cancellation, SQL formatting, history, saved queries, syntax highlighting, autocomplete, and reference diagnostics.
 - Lazy table-scoped column metadata to keep the idle browser heap small.
@@ -40,7 +40,7 @@ ClickHouse native TCP via clickhouse-cpp
 
 ## Telemetry
 
-Telemetry schema version 2 uses named JSON objects. It exposes only query-group values reported by ClickHouse. Inferred thread counts were removed because native profile packets do not provide a reliable live active-thread metric.
+Telemetry uses the original compact positional tick contract for compatibility. The thread metric is removed because ClickHouse does not provide a deterministic live active-thread count for a query. Read progress, rows, bytes, CPU, and memory remain available.
 
 Deterministic SSE control events are compared strictly. `result_rows` and `tick` counts are operational and may change with result batching, query duration, or scheduling without changing query semantics.
 

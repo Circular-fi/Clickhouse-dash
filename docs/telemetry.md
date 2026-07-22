@@ -1,120 +1,72 @@
 # Native TCP telemetry
 
-ClickHouse Dash streams query telemetry over Server-Sent Events while the query itself runs through ClickHouse's native TCP protocol.
+ClickHouse Dash executes queries through ClickHouse native TCP and streams results and telemetry to the browser with Server-Sent Events.
 
-## Design rules
+## Metrics
 
-The dashboard exposes only values that ClickHouse reports for the query group. It does not infer an active thread count from per-thread profile rows, event frequency, CPU percentage, or any other proxy.
+The dashboard keeps the original compact metric set:
 
-ClickHouse native `ProfileEvents` packets have a stable row schema:
+- elapsed time;
+- read progress when ClickHouse provides `total_rows_to_read`;
+- rows read and rows per second;
+- bytes read and bytes per second;
+- CPU usage derived from query-group `UserTimeMicroseconds` and `SystemTimeMicroseconds` increments;
+- current and peak query memory from `MemoryTrackerUsage` and `MemoryTrackerPeakUsage` gauges.
 
-```text
-host_name, current_time, thread_id, type, name, value
-```
+The former thread metric is removed. Native profile packets contain thread identifiers, but they do not provide a deterministic live active-thread count for the whole query. The dashboard does not infer one.
 
-The authoritative query-group aggregate uses `thread_id = 0`. Counter rows use `type = increment`; current-value rows use `type = gauge`.
+Rows and bytes come from native `Progress` packets. CPU and memory come only from the query-group `ProfileEvents` row (`thread_id = 0`). Missing CPU or memory values are represented by JSON `null` rather than guessed values.
 
-The dashboard consumes these query-group metrics:
-
-| Dashboard field | ClickHouse source | Semantics |
-|---|---|---|
-| CPU time | `UserTimeMicroseconds` + `SystemTimeMicroseconds` | Cumulative query CPU time |
-| Scheduler wait | `OSCPUWaitMicroseconds` | Cumulative time runnable threads waited for CPU |
-| I/O wait | `OSIOWaitMicroseconds` | Cumulative query I/O wait time |
-| Current memory | `MemoryTrackerUsage` | Query memory gauge |
-| Peak memory | `MemoryTrackerPeakUsage` | Query peak-memory gauge |
-| Temporary data | `TemporaryDataOnDiskUsage` | Current compressed temporary-data gauge |
-| Read rows/bytes | native progress packets | Cumulative query progress |
-| Total rows to read | native progress packets | Progress denominator when ClickHouse can provide one |
-
-Rates are derived only from monotonic ClickHouse counters and the client-side elapsed interval. A missing metric is encoded as JSON `null`; it is never replaced with zero or an estimate.
+The progress percentage is read progress. ClickHouse does not provide a deterministic denominator for later pipeline work such as aggregation, sorting, final projection, or result serialization, so the dashboard does not invent an overall query percentage.
 
 ## SSE event contract
 
-A query stream contains these event families:
-
 | Event | Count contract | Purpose |
 |---|---|---|
-| `meta` | exactly one | Connection and telemetry-schema declaration |
-| `result_meta` | zero or one | Result column names and types; absent for statements without a result set |
-| `result_rows` | operational | Result batches; count depends on batch limits and row size |
-| `tick` | operational | Telemetry snapshots; count depends on query duration and scheduling |
+| `meta` | exactly one | Connection acknowledgement |
+| `result_meta` | zero or one | Result columns and types |
+| `result_rows` | operational | Result batches; count depends on batch size |
+| `tick` | operational | Compact telemetry snapshot |
 | `error` | zero or one | Terminal query error |
-| `done` | exactly one | Terminal status and final counters |
-| `keepalive` / `message` | optional | Transport-level compatibility events |
+| `done` | exactly one | Terminal status and final read counters |
+| `keepalive` / `message` | optional | Transport compatibility events |
 
-Only deterministic control-event counts are compared strictly between releases. Different `result_rows` counts are expected when batching changes, provided row order, row count, and row hash match. Different `tick` counts are expected when telemetry cadence or query duration changes. The stream does not emit an empty zero-value tick on connection; it emits periodic meaningful ticks and always emits one final tick before `done`.
+`result_rows`, `tick`, `keepalive`, and `message` counts may differ between releases without changing query semantics. Tests compare rows, row order, hashes, columns, types, terminal status, and deterministic control events.
 
-## Telemetry schema version 2
+## Tick layout
 
-The connected `meta` event declares the current telemetry schema:
-
-```json
-{
-  "query_id": "...",
-  "status": "connected",
-  "telemetry": {
-    "schema_version": 2,
-    "source": "clickhouse_native_tcp",
-    "metrics": [
-      "progress",
-      "read_rate",
-      "cpu_time",
-      "memory_tracker",
-      "cpu_scheduler_wait",
-      "io_wait",
-      "temporary_data_on_disk"
-    ]
-  }
-}
-```
-
-A `tick` is a named JSON object rather than an undocumented positional array:
-
-```json
-{
-  "schema_version": 2,
-  "elapsed_ms": 750,
-  "progress": {
-    "known": true,
-    "percent_centi": 3577,
-    "read_rows": 357721821,
-    "read_bytes": 2861774568,
-    "total_rows_to_read": 1000000000
-  },
-  "rates": {
-    "read_rows_per_second": 607739705,
-    "read_bytes_per_second": 4861917643
-  },
-  "profile": {
-    "cpu_percent_centi": 11872,
-    "memory_bytes": 685248,
-    "peak_memory_bytes": 685248,
-    "cpu_wait_percent_centi": 312,
-    "io_wait_percent_centi": 0,
-    "temporary_data_bytes": 0,
-    "cpu_time_us": 89040,
-    "cpu_wait_time_us": 2340,
-    "io_wait_time_us": 0
-  },
-  "samples": null
-}
-```
-
-Compact samples use this documented layout:
+A `tick` payload is a positional JSON array kept compatible with the original dashboard contract:
 
 ```text
-[elapsed_ms, read_rows, read_bytes, cpu_percent_centi|null,
- memory_bytes|null, cpu_wait_percent_centi|null, io_wait_percent_centi|null]
+[
+  elapsed_ms,
+  read_percent_centi,
+  read_percent_known,
+  read_rows_total,
+  read_bytes_total,
+  total_rows_to_read,
+  read_rows_per_second,
+  read_bytes_per_second,
+  cpu_percent_centi|null,
+  maximum_cpu_percent_centi|null,
+  current_memory_bytes|null,
+  peak_memory_bytes|null,
+  null,
+  null,
+  samples|null
+]
 ```
 
-The frontend still accepts the legacy positional tick format when viewing streams from an older release. Legacy inferred thread values are intentionally ignored.
+Positions 12 and 13 are reserved compatibility placeholders for the removed current and peak thread values. The source dashboard always sends `null` in both positions.
+
+Compact samples use:
+
+```text
+[elapsed_ms, read_rows_total, read_bytes_total, cpu_percent_centi|null, memory_bytes|null]
+```
+
+Historical releases may append a sixth thread value to a sample. The current frontend ignores it.
 
 ## Non-finite floating-point values
 
-JSON has no representation for NaN or infinity. ClickHouse HTTP JSON formats emit these values as `null` in the relevant compatibility mode. The native TCP result serializer follows the same safe rule:
-
-- finite `Float32` and `Float64` values remain JSON numbers;
-- NaN, positive infinity, and negative infinity become JSON `null`.
-
-This guarantees that every `result_rows` event is valid JSON and prevents one non-finite cell from discarding the complete result batch in the browser.
+JSON has no representation for NaN or infinity. The native result serializer emits JSON `null` for non-finite `Float32` and `Float64` values while preserving finite values as JSON numbers. This keeps every `result_rows` event valid JSON.

@@ -83,6 +83,38 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 TRACE_GZIP_LEVEL = max(0, min(9, env_int("BENCH_TRACE_COMPRESSION_LEVEL", 3)))
 
+TELEMETRY_SCHEMA_CURRENT = "legacy_array"
+TELEMETRY_V2_SAMPLE_WIDTH = 7
+TELEMETRY_V3_SAMPLE_WIDTH = 6
+TELEMETRY_V2_PROFILE_FIELDS = {
+    "cpu_percent_centi",
+    "memory_bytes",
+    "peak_memory_bytes",
+    "cpu_wait_percent_centi",
+    "io_wait_percent_centi",
+    "temporary_data_bytes",
+    "cpu_time_us",
+    "cpu_wait_time_us",
+    "io_wait_time_us",
+}
+TELEMETRY_V3_PROFILE_FIELDS = {
+    "cpu_percent_centi",
+    "memory_bytes",
+    "peak_memory_bytes",
+    "io_wait_percent_centi",
+    "temporary_data_bytes",
+    "cpu_time_us",
+    "user_time_us",
+    "system_time_us",
+    "io_wait_time_us",
+}
+TELEMETRY_V3_ACTIVITY_FIELDS = {
+    "read_complete",
+    "aggregation_observed",
+    "arena_activity_observed",
+    "external_aggregation_observed",
+}
+
 
 def now_stamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S", time.localtime())
@@ -515,8 +547,27 @@ def normalize_stream_url(base_url: str, stream_url: str) -> str:
     return base_url.rstrip("/") + "/" + stream_url.lstrip("/")
 
 
+def canonicalize_hash_value(value: Any) -> Any:
+    """Normalize JSON-equivalent values before cross-transport hashing.
+
+    ClickHouse JSON formats may encode an integral Float64 as ``0`` while the
+    native TCP serializer emits ``0.0``. Column types are compared separately,
+    so these two JSON number spellings must not create a false row mismatch.
+    """
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, list):
+        return [canonicalize_hash_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [canonicalize_hash_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: canonicalize_hash_value(item) for key, item in value.items()}
+    return value
+
+
 def canonical_hash_update(hasher: Any, value: Any) -> None:
-    data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    normalized = canonicalize_hash_value(value)
+    data = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     hasher.update(data)
     hasher.update(b"\n")
 
@@ -614,6 +665,7 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
         "tick_schema_versions": [],
         "telemetry_sources": [],
         "telemetry_thread_fields": [],
+        "telemetry_scheduler_fields": [],
         "telemetry_shape_issues": [],
         "done_payload": None,
         "error_messages": [],
@@ -657,6 +709,9 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
                     aggregate["telemetry_thread_fields"].extend(
                         sorted(str(metric) for metric in metrics if "thread" in str(metric).lower())
                     )
+                    aggregate["telemetry_scheduler_fields"].extend(
+                        sorted(str(metric) for metric in metrics if "scheduler" in str(metric).lower() or "cpu_wait" in str(metric).lower())
+                    )
         elif name == "result_meta" and isinstance(payload, dict):
             if aggregate["time_to_result_meta_ms"] is None:
                 aggregate["time_to_result_meta_ms"] = elapsed_ms
@@ -675,31 +730,66 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
         elif name == "tick" and isinstance(payload, list):
             aggregate["tick_events"] += 1
             aggregate["tick_schema_versions"].append("legacy_array")
-            if len(payload) > 14 and isinstance(payload[14], list):
-                aggregate["tick_samples_total"] += len(payload[14])
+            if len(payload) < 15:
+                aggregate["telemetry_shape_issues"].append(
+                    f"legacy_tick_width:{len(payload)}:expected_at_least:15"
+                )
+            else:
+                if payload[12] is not None or payload[13] is not None:
+                    aggregate["telemetry_thread_fields"].append("legacy_thread_slots")
+                samples = payload[14]
+                if samples is not None and not isinstance(samples, list):
+                    aggregate["telemetry_shape_issues"].append(
+                        "legacy_tick_samples_not_array_or_null"
+                    )
+                elif isinstance(samples, list):
+                    aggregate["tick_samples_total"] += len(samples)
+                    for sample in samples:
+                        # Source samples contain five values. Historical releases
+                        # may append a sixth legacy thread value; comparison targets
+                        # are allowed to differ without generating a global warning.
+                        if not isinstance(sample, list) or len(sample) not in {5, 6}:
+                            aggregate["telemetry_shape_issues"].append(
+                                "legacy_tick_sample_width:"
+                                f"{len(sample) if isinstance(sample, list) else 'not_array'}:"
+                                "expected:5_or_6"
+                            )
+                            break
         elif name == "tick" and isinstance(payload, dict):
             aggregate["tick_events"] += 1
-            aggregate["tick_schema_versions"].append(payload.get("schema_version"))
-            if payload.get("schema_version") != 2:
-                aggregate["telemetry_shape_issues"].append("tick_schema_version")
+            schema_version = payload.get("schema_version")
+            aggregate["tick_schema_versions"].append(schema_version)
+            if schema_version not in {2, 3}:
+                aggregate["telemetry_shape_issues"].append(f"unsupported_tick_schema:{schema_version!r}")
             for object_field in ("progress", "rates", "profile"):
                 if not isinstance(payload.get(object_field), dict):
                     aggregate["telemetry_shape_issues"].append(f"tick_missing_object:{object_field}")
+
             samples = payload.get("samples")
             if samples is not None and not isinstance(samples, list):
                 aggregate["telemetry_shape_issues"].append("tick_samples_not_array_or_null")
             elif isinstance(samples, list):
                 aggregate["tick_samples_total"] += len(samples)
+                expected_width = TELEMETRY_V3_SAMPLE_WIDTH if schema_version == 3 else TELEMETRY_V2_SAMPLE_WIDTH
                 for sample in samples:
-                    if not isinstance(sample, list) or len(sample) != TELEMETRY_V2_SAMPLE_WIDTH:
-                        aggregate["telemetry_shape_issues"].append("tick_sample_width")
+                    if not isinstance(sample, list) or len(sample) != expected_width:
+                        aggregate["telemetry_shape_issues"].append(
+                            f"tick_sample_width:{len(sample) if isinstance(sample, list) else 'not_array'}:expected:{expected_width}"
+                        )
                         break
+
             profile = payload.get("profile")
             if isinstance(profile, dict):
                 aggregate["telemetry_thread_fields"].extend(
                     sorted(key for key in profile if "thread" in str(key).lower())
                 )
-                missing_profile_fields = sorted(TELEMETRY_V2_PROFILE_FIELDS.difference(profile))
+                aggregate["telemetry_scheduler_fields"].extend(
+                    sorted(key for key in profile if "scheduler" in str(key).lower() or "cpu_wait" in str(key).lower())
+                )
+                required_profile_fields = (
+                    TELEMETRY_V3_PROFILE_FIELDS if schema_version == 3 else TELEMETRY_V2_PROFILE_FIELDS
+                )
+                missing_profile_fields = sorted(required_profile_fields.difference(profile))
                 if missing_profile_fields:
                     aggregate["telemetry_shape_issues"].append(
                         "tick_missing_profile_fields:" + ",".join(missing_profile_fields)
@@ -707,6 +797,26 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
                 for forbidden in ("peak_cpu_percent_centi", "peak_wait_percent_centi"):
                     if forbidden in profile:
                         aggregate["telemetry_shape_issues"].append(f"sampled_peak_field:{forbidden}")
+
+            if schema_version == 3:
+                progress = payload.get("progress")
+                if isinstance(progress, dict) and progress.get("scope") != "read":
+                    aggregate["telemetry_shape_issues"].append("tick_progress_scope_not_read")
+                activity = payload.get("native_activity")
+                if not isinstance(activity, dict):
+                    aggregate["telemetry_shape_issues"].append("tick_missing_object:native_activity")
+                else:
+                    missing_activity = sorted(TELEMETRY_V3_ACTIVITY_FIELDS.difference(activity))
+                    if missing_activity:
+                        aggregate["telemetry_shape_issues"].append(
+                            "tick_missing_activity_fields:" + ",".join(missing_activity)
+                        )
+                if not isinstance(payload.get("profile_events"), dict):
+                    aggregate["telemetry_shape_issues"].append("tick_missing_object:profile_events")
+                serialized = json.dumps(payload, sort_keys=True).lower()
+                for forbidden in ("aggregation_percent", "overall_percent"):
+                    if forbidden in serialized:
+                        aggregate["telemetry_shape_issues"].append(f"fabricated_progress_field:{forbidden}")
         elif name == "done" and isinstance(payload, dict):
             if aggregate["time_to_done_ms"] is None:
                 aggregate["time_to_done_ms"] = elapsed_ms
@@ -719,7 +829,10 @@ def collect_sse(response: requests.Response, start_time: float, chunk_size: int)
                     aggregate["telemetry_thread_fields"].extend(
                         sorted(key for key in telemetry if "thread" in str(key).lower())
                     )
-                    if payload.get("status") == "finished" and telemetry.get("schema_version") != 2:
+                    aggregate["telemetry_scheduler_fields"].extend(
+                        sorted(key for key in telemetry if "scheduler" in str(key).lower() or "cpu_wait" in str(key).lower())
+                    )
+                    if payload.get("status") == "finished" and telemetry.get("schema_version") not in {2, 3}:
                         aggregate["telemetry_shape_issues"].append("done_telemetry_schema_version")
         elif name == "error" and isinstance(payload, dict):
             aggregate["error_messages"].append(str(payload.get("message") or payload))
@@ -983,14 +1096,21 @@ def validate_run(query: dict[str, Any], row: dict[str, Any]) -> list[str]:
         if int(row.get("json_decode_errors") or 0) > 0:
             issues.append(f"json_decode_errors:{row.get('json_decode_errors')}")
 
-        tick_schemas = set(row.get("tick_schema_versions") or [])
-        if row.get("target") == "source" and tick_schemas and "2" not in tick_schemas:
-            issues.append(f"source_tick_schema:{sorted(tick_schemas)!r}:expected:'2'")
-        thread_fields = row.get("telemetry_thread_fields") or []
-        if thread_fields:
-            issues.append(f"nondeterministic_thread_fields:{thread_fields!r}")
-        for telemetry_issue in row.get("telemetry_shape_issues") or []:
-            issues.append(f"telemetry_shape:{telemetry_issue}")
+        if row.get("target") == "source":
+            tick_schemas = {str(value) for value in (row.get("tick_schema_versions") or [])}
+            if tick_schemas and str(TELEMETRY_SCHEMA_CURRENT) not in tick_schemas:
+                issues.append(
+                    f"source_tick_schema:{sorted(tick_schemas)!r}:"
+                    f"expected:{TELEMETRY_SCHEMA_CURRENT!r}"
+                )
+            thread_fields = row.get("telemetry_thread_fields") or []
+            if thread_fields:
+                issues.append(f"nondeterministic_thread_fields:{thread_fields!r}")
+            scheduler_fields = row.get("telemetry_scheduler_fields") or []
+            if scheduler_fields:
+                issues.append(f"unexpected_scheduler_wait_fields:{scheduler_fields!r}")
+            for telemetry_issue in row.get("telemetry_shape_issues") or []:
+                issues.append(f"telemetry_shape:{telemetry_issue}")
 
     done = row.get("done_payload") if isinstance(row.get("done_payload"), dict) else {}
     expected_status = query.get("expected_status")
@@ -1015,6 +1135,7 @@ def validate_run(query: dict[str, Any], row: dict[str, Any]) -> list[str]:
             issues.append(f"invalid_done_result_rows_returned:{returned!r}")
     if done.get("result_truncated") is True and query.get("allow_truncated") is not True:
         issues.append("unexpected_result_truncated")
+
     return issues
 
 
@@ -1586,8 +1707,14 @@ def compute_findings(
     issues: list[str] = []
     warnings: list[str] = []
 
+    # Only the selected baseline is the product under test. Historical releases
+    # and direct HTTP are references: their unsupported types, legacy headers,
+    # telemetry cadence and batching remain visible in raw tables without
+    # polluting the top-level warning count.
     for row in results:
-        if row.get("warmup"):
+        if row.get("warmup") or row.get("target") != baseline_name:
+            continue
+        if row.get("transport") != "dashboard_sse":
             continue
         prefix = (
             f"{row.get('target')} host={row.get('host_id')} "
@@ -1597,13 +1724,8 @@ def compute_findings(
             issue_text = str(issue)
             if is_transport_warning(issue_text):
                 warnings.append(f"{prefix}: {issue_text}")
-                continue
-            if row.get("transport") == "dashboard_sse" and row.get("target") == baseline_name:
-                issues.append(f"{prefix}: {issue_text}")
             else:
-                # A historical release or the optional direct HTTP floor must not
-                # make a correct source build fail. Their failures remain visible.
-                warnings.append(f"{prefix}: {issue_text}")
+                issues.append(f"{prefix}: {issue_text}")
 
     for comp in comparisons:
         prefix = (
@@ -1614,11 +1736,9 @@ def compute_findings(
         if classification == "baseline_regression":
             issues.append(f"{prefix}: baseline failed while the comparison target succeeded")
             continue
-        if classification == "both_failed":
-            issues.append(f"{prefix}: both dashboard targets failed semantic validation")
-            continue
-        if classification == "baseline_correctness_improvement":
-            warnings.append(f"{prefix}: baseline succeeds while the historical release fails")
+
+        # A failing historical release is not an actionable source warning.
+        if classification in {"baseline_correctness_improvement", "both_failed"}:
             continue
 
         if not comp.get("row_hash_match"):
@@ -1633,21 +1753,14 @@ def compute_findings(
             issues.append(f"{prefix}: normalized core event order mismatch")
         if strict_event_counts and not comp.get("raw_event_count_match"):
             issues.append(f"{prefix}: strict operational event count mismatch")
-        if comp.get("result_batching_differs"):
-            warnings.append(
-                f"{prefix}: result_rows count differs because batch sizes differ; row hash and order match"
-            )
-        if comp.get("tick_cadence_differs"):
-            warnings.append(
-                f"{prefix}: tick count differs because telemetry cadence depends on query duration and scheduling"
-            )
-        if comp.get("telemetry_schema_differs"):
-            warnings.append(
-                f"{prefix}: telemetry schema differs ({comp.get('baseline_tick_schemas')} vs "
-                f"{comp.get('compared_tick_schemas')}); schema v2 replaces inferred legacy fields"
-            )
+
+        # result_rows, tick, keepalive and telemetry schema counts are operational
+        # details. They intentionally do not create warnings when source and
+        # release segment the same semantic result differently.
 
     for overhead in direct_http_overheads:
+        if overhead.get("dashboard_target") != baseline_name:
+            continue
         prefix = (
             f"compare {overhead.get('dashboard_target')} vs http_direct "
             f"host={overhead.get('host_id')} query={overhead.get('query_name')}"

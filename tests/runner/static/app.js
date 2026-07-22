@@ -277,7 +277,7 @@
     var version = app.state && app.state.version ? app.state.version: -1;
     var source = new EventSource("/api/events?version=" + encodeURIComponent(version));
     app.eventSource = source;
-    setConnection("connecting", "Connexion...");
+    setConnection("connecting", "Connecting...");
     source.onopen = function () {
       setConnection("online", "Live");
     };
@@ -285,7 +285,7 @@
       loadState(false);
     });
     source.onerror = function () {
-      setConnection("connecting", "Reconnexion...");
+      setConnection("connecting", "Reconnecting...");
     };
   }
 
@@ -463,7 +463,7 @@
     ]);
     renderFacts("testsFacts", [
       ["Run", details.run_id || "--"],
-      ["Statut", statusLabel(normalizedStatus(runner.status || ((number(junit.failures) + number(junit.errors)) ? "failed": "success")))],
+      ["Status", statusLabel(normalizedStatus(runner.status || ((number(junit.failures) + number(junit.errors)) ? "failed": "success")))],
       ["Tests", formatInteger(junit.tests)],
       ["Formatting", formatInteger(formats.completed) + "/" + formatInteger(formats.total_expected)],
       ["Native types", formatInteger(queryTypes.passed) + "/" + formatInteger(queryTypes.total_expected) + " passed"],
@@ -543,7 +543,7 @@
     app.format.loading = false;
     app.format.requestToken += 1;
     app.format.caseCache.clear();
-    byId("formatResults").replaceChildren(emptyState(runId ? "Loading results...": "No results de formatage disponible."));
+    byId("formatResults").replaceChildren(emptyState(runId ? "Loading results...": "No formatting results available."));
     byId("formatLoadMore").hidden = true;
     text("formatResultCount", "0");
   }

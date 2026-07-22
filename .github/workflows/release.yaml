@@ -89,6 +89,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -98,20 +99,26 @@ jobs:
             goarch: amd64
             zig_target: x86_64-linux-musl
             cmake_processor: x86_64
+            build_jobs: 2
 
           - runner: ubuntu-22.04-arm
             goos: linux
             goarch: arm64
             zig_target: aarch64-linux-musl
             cmake_processor: aarch64
+            build_jobs: 2
 
-          - runner: macos-latest
+          - runner: macos-15-intel
             goos: darwin
             goarch: amd64
+            osx_arch: x86_64
+            build_jobs: 2
 
-          - runner: macos-latest
+          - runner: macos-15
             goos: darwin
             goarch: arm64
+            osx_arch: arm64
+            build_jobs: 2
 
     steps:
       - name: Checkout
@@ -131,24 +138,30 @@ jobs:
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           BUILD_DIR="build-${{ matrix.goos }}-${{ matrix.goarch }}"
           FETCHCONTENT_DIR="${PWD}/.cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}"
+          BUILD_JOBS="${{ matrix.build_jobs }}"
 
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "git_sha=${GIT_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "build_time=${BUILD_TIME}" >> "${GITHUB_OUTPUT}"
-          echo "build_dir=${BUILD_DIR}" >> "${GITHUB_OUTPUT}"
-          echo "fetchcontent_dir=${FETCHCONTENT_DIR}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "version=${VERSION}"
+            echo "git_sha=${GIT_SHA}"
+            echo "build_time=${BUILD_TIME}"
+            echo "build_dir=${BUILD_DIR}"
+            echo "fetchcontent_dir=${FETCHCONTENT_DIR}"
+          } >> "${GITHUB_OUTPUT}"
 
-          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
-          echo "GIT_SHA=${GIT_SHA}" >> "${GITHUB_ENV}"
-          echo "BUILD_TIME=${BUILD_TIME}" >> "${GITHUB_ENV}"
-          echo "BUILD_DIR=${BUILD_DIR}" >> "${GITHUB_ENV}"
-          echo "FETCHCONTENT_DIR=${FETCHCONTENT_DIR}" >> "${GITHUB_ENV}"
+          {
+            echo "VERSION=${VERSION}"
+            echo "GIT_SHA=${GIT_SHA}"
+            echo "BUILD_TIME=${BUILD_TIME}"
+            echo "BUILD_DIR=${BUILD_DIR}"
+            echo "FETCHCONTENT_DIR=${FETCHCONTENT_DIR}"
+            echo "BUILD_JOBS=${BUILD_JOBS}"
+          } >> "${GITHUB_ENV}"
 
           if [ "${{ matrix.goos }}" = "linux" ]; then
             echo "ZIG_TARGET=${{ matrix.zig_target }}" >> "${GITHUB_ENV}"
           fi
 
-      - name: Install deps (Linux)
+      - name: Install dependencies (Linux)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
@@ -163,6 +176,14 @@ jobs:
             ninja-build \
             python3
 
+      - name: Install dependencies (macOS)
+        if: matrix.goos == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew list --versions cmake >/dev/null 2>&1 || brew install cmake
+          brew list --versions ninja >/dev/null 2>&1 || brew install ninja
+
       - name: Set up Zig (Linux musl toolchain)
         if: matrix.goos == 'linux'
         uses: mlugg/setup-zig@v2
@@ -170,7 +191,7 @@ jobs:
           version: 0.15.2
           cache-key: chdash-zig-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.zig_target }}
 
-      - name: Create Zig musl CMake toolchain (Linux)
+      - name: Create Zig musl CMake toolchain
         if: matrix.goos == 'linux'
         shell: bash
         run: |
@@ -203,8 +224,16 @@ jobs:
           exec zig ranlib "$@"
           EOF
 
-          sed -i 's/^          //' "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
-          chmod +x "${TOOLS_DIR}/zig-cc" "${TOOLS_DIR}/zig-cxx" "${TOOLS_DIR}/zig-ar" "${TOOLS_DIR}/zig-ranlib"
+          sed -i 's/^          //' \
+            "${TOOLS_DIR}/zig-cc" \
+            "${TOOLS_DIR}/zig-cxx" \
+            "${TOOLS_DIR}/zig-ar" \
+            "${TOOLS_DIR}/zig-ranlib"
+          chmod +x \
+            "${TOOLS_DIR}/zig-cc" \
+            "${TOOLS_DIR}/zig-cxx" \
+            "${TOOLS_DIR}/zig-ar" \
+            "${TOOLS_DIR}/zig-ranlib"
 
           TOOLCHAIN_FILE="${TOOLS_DIR}/zig-musl-toolchain.cmake"
           cat > "${TOOLCHAIN_FILE}" <<EOF
@@ -223,23 +252,20 @@ jobs:
           sed -i 's/^          //' "${TOOLCHAIN_FILE}"
 
           echo "ZIG_TOOLCHAIN_FILE=${TOOLCHAIN_FILE}" >> "${GITHUB_ENV}"
-          echo "Created ${TOOLCHAIN_FILE}"
 
-      - name: Cache FetchContent deps (Linux)
-        if: matrix.goos == 'linux'
+      - name: Cache FetchContent sources and builds
         uses: actions/cache@v5
         with:
           path: ${{ steps.vars.outputs.fetchcontent_dir }}
-          key: cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
+          key: fetchcontent-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake', '.github/workflows/release.yaml') }}
           restore-keys: |
-            cmake-fetchcontent-${{ matrix.goos }}-${{ matrix.goarch }}-
+            fetchcontent-${{ runner.os }}-${{ matrix.goarch }}-
 
-      - name: Configure (Linux musl static, no Docker)
+      - name: Configure (Linux musl static)
         if: matrix.goos == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-
           rm -rf "${BUILD_DIR}"
 
           cmake -S src -B "${BUILD_DIR}" -G Ninja \
@@ -251,7 +277,6 @@ jobs:
             -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
             -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}"
 
-          echo "CMake compiler selection:"
           grep -E 'CMAKE_(C|CXX)_COMPILER(:|=)' "${BUILD_DIR}/CMakeCache.txt" || true
 
       - name: Patch RapidJSON for Clang/libc++ (Linux musl)
@@ -270,7 +295,6 @@ jobs:
 
           path = Path(os.environ["FETCHCONTENT_DIR"]) / "rapidjson-src/include/rapidjson/document.h"
           text = path.read_text()
-
           old = "GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }"
           new = "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;"
 
@@ -280,22 +304,66 @@ jobs:
               path.write_text(text.replace(old, new, 1))
               print(f"Patched RapidJSON GenericStringRef assignment: {path}")
           else:
-              print("Could not find expected RapidJSON assignment operator to patch", file=sys.stderr)
-              for i, line in enumerate(text.splitlines(), start=1):
+              print("Could not find the expected RapidJSON assignment operator", file=sys.stderr)
+              for line_number, line in enumerate(text.splitlines(), start=1):
                   if "GenericStringRef& operator=" in line:
-                      print(f"{i}: {line}", file=sys.stderr)
+                      print(f"{line_number}: {line}", file=sys.stderr)
               sys.exit(1)
           PY
 
-          grep -n 'GenericStringRef& operator=' "${RAPIDJSON_DOCUMENT}"
-
-      - name: Build (Linux musl static, no Docker)
-        if: matrix.goos == 'linux'
+      - name: Configure (macOS)
+        if: matrix.goos == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build "${BUILD_DIR}" --target chdash -- -j"$(getconf _NPROCESSORS_ONLN)"
-          strip "${BUILD_DIR}/chdash" || true
+          rm -rf "${BUILD_DIR}"
+
+          cmake -S src -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="${{ matrix.osx_arch }}" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCHDASH_EMBED_STATIC=ON \
+            -DCHDASH_SEMVER_VALUE="${VERSION}" \
+            -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
+            -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
+            -DFETCHCONTENT_BASE_DIR="${FETCHCONTENT_DIR}"
+
+          grep -E 'CMAKE_(C|CXX)_COMPILER(:|=)|CMAKE_OSX_ARCHITECTURES' "${BUILD_DIR}/CMakeCache.txt" || true
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_LOG="${BUILD_DIR}/build.log"
+
+          set +e
+          cmake --build "${BUILD_DIR}" --target chdash --parallel "${BUILD_JOBS}" 2>&1 | tee "${BUILD_LOG}"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if [ "${BUILD_STATUS}" -ne 0 ]; then
+            echo "::group::Last 300 build-log lines"
+            tail -n 300 "${BUILD_LOG}" || true
+            echo "::endgroup::"
+            exit "${BUILD_STATUS}"
+          fi
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            strip "${BUILD_DIR}/chdash" || true
+          fi
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-diagnostics-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            ${{ env.BUILD_DIR }}/build.log
+            ${{ env.BUILD_DIR }}/CMakeCache.txt
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeError.log
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeOutput.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Verify static Linux binary
         if: matrix.goos == 'linux'
@@ -305,62 +373,20 @@ jobs:
 
           BIN="${BUILD_DIR}/chdash"
           test -f "${BIN}"
-
           file "${BIN}"
 
           if readelf -l "${BIN}" | grep -q 'INTERP'; then
-            echo "ERROR: Linux binary has an ELF interpreter, so it is dynamically linked."
+            echo "ERROR: Linux binary has an ELF interpreter and is dynamically linked."
             readelf -l "${BIN}" | sed -n '/INTERP/,+2p'
             exit 1
           fi
 
           LDD_OUT="$(ldd "${BIN}" 2>&1 || true)"
           echo "${LDD_OUT}"
-          if ! grep -qi 'not a dynamic executable' <<< "${LDD_OUT}"; then
+          if ! grep -Eqi 'not a dynamic executable|statically linked' <<< "${LDD_OUT}"; then
             echo "ERROR: Linux binary is not fully static."
             exit 1
           fi
-
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install ninja cmake
-
-      - name: Cache CMake deps (macOS)
-        if: matrix.goos == 'darwin'
-        uses: actions/cache@v5
-        with:
-          path: |
-            build/_deps
-            build/CMakeCache.txt
-          key: cmake-${{ runner.os }}-${{ matrix.goarch }}-${{ hashFiles('src/CMakeLists.txt', 'src/EmbedStatic.cmake') }}
-
-      - name: Configure (macOS)
-        if: matrix.goos == 'darwin'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          EXTRA=()
-          if [ "${{ matrix.goarch }}" = "amd64" ]; then
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
-          else
-            EXTRA+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
-          fi
-
-          cmake -S src -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DCHDASH_EMBED_STATIC=ON \
-            -DCHDASH_SEMVER_VALUE="${VERSION}" \
-            -DCHDASH_GIT_SHA_VALUE="${GIT_SHA}" \
-            -DCHDASH_BUILD_TIME_VALUE="${BUILD_TIME}" \
-            "${EXTRA[@]}"
-
-      - name: Build (macOS)
-        if: matrix.goos == 'darwin'
-        run: cmake --build build --target chdash -- -j2
 
       - name: Package
         id: package
@@ -368,12 +394,7 @@ jobs:
         run: |
           set -euo pipefail
           TAR="chdash_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
-
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            BIN="${BUILD_DIR}/chdash"
-          else
-            BIN="build/chdash"
-          fi
+          BIN="${BUILD_DIR}/chdash"
 
           test -f "${BIN}"
           rm -rf pkg
@@ -382,7 +403,7 @@ jobs:
           tar -C pkg -czf "${TAR}" chdash
           echo "tar=${TAR}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload artifact
+      - name: Upload release asset
         uses: actions/upload-artifact@v7
         with:
           name: chdash_${{ steps.vars.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}

@@ -40,6 +40,10 @@ docker compose up -d --build
 docker compose exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
 ```
 
+### Validate release builds
+
+The release workflow builds Linux amd64/arm64 and macOS amd64/arm64 in isolated CMake directories with bounded parallelism. When a matrix build fails, download its `build-diagnostics-*` artifact and inspect `build.log` and `CMakeCache.txt`. Do not cache or reuse a platform-specific `CMakeCache.txt` across runners.
+
 ## Coding guidelines
 
 - Backend code is C++17.

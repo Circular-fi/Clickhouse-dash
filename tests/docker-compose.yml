@@ -157,6 +157,7 @@ services:
       TEST_RUNNER_REPORT_COMPRESSION_LEVEL: "${TEST_RUNNER_REPORT_COMPRESSION_LEVEL:-3}"
       FORMAT_RESULTS_FLUSH_EVERY: "${FORMAT_RESULTS_FLUSH_EVERY:-20}"
       TEST_ARTIFACTS_ROOT: /artifacts
+      TEST_REPOSITORY_ROOT: /repo
       API_BASE_URL: http://chdash_source:8080
       API_REFERENCE_BASE_URL: http://chdash_release:8080
       API_HEALTH_PATH: /api/health
@@ -194,6 +195,10 @@ services:
       - type: bind
         source: ./benchmark/queries.json
         target: /tests/benchmark/queries.json
+        read_only: true
+      - type: bind
+        source: ../.github/workflows/release.yaml
+        target: /repo/.github/workflows/release.yaml
         read_only: true
     ports:
       - "${TEST_UI_PORT:-18082}:8080"

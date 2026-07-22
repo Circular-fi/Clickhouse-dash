@@ -114,7 +114,9 @@ SSE events are classified as:
 - operational events: `result_rows` and `tick`;
 - optional transport events: `keepalive` and `message`.
 
-Operational counts may differ when batching or telemetry cadence changes. These differences are warnings when row order, row hash, result types, and deterministic control events remain equivalent. Set `BENCH_STRICT_EVENT_COUNTS=1` only when exact operational counts are intentionally part of the compatibility contract.
+Operational counts may differ when batching or telemetry cadence changes. Source/release differences remain visible in the comparison tables but do not create top-level warnings when row order, row hash, result types, and deterministic control events remain equivalent. Set `BENCH_STRICT_EVENT_COUNTS=1` only when exact operational counts are intentionally part of the compatibility contract.
+
+The benchmark also includes a forced two-level `GROUP BY` case. It validates that the source reports native aggregation activity through ClickHouse `ProfileEvents`, while keeping the progress percentage scoped to input reading. No aggregate or overall completion percentage is inferred.
 
 Common settings:
 

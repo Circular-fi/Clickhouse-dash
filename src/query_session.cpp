@@ -226,14 +226,9 @@ SessionSnapshot QuerySession::snapshot() const {
   s.wrote_bytes_total = wrote_bytes_total_;
   s.user_time_us_total = user_time_us_total_;
   s.system_time_us_total = system_time_us_total_;
-  s.cpu_wait_time_us_total = cpu_wait_time_us_total_;
-  s.io_wait_time_us_total = io_wait_time_us_total_;
   s.cpu_time_available = cpu_time_available_;
-  s.cpu_wait_available = cpu_wait_available_;
-  s.io_wait_available = io_wait_available_;
   s.current_mem_bytes = current_mem_bytes_;
   s.peak_mem_bytes = peak_mem_bytes_;
-  s.temporary_data_bytes = temporary_data_bytes_;
   s.elapsed_ms = ms_since(started_at_, finished_at_);
   return s;
 }
@@ -464,47 +459,30 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   }
   last_sample_at_ = now;
 
-  // Rates are computed from ClickHouse query-group counters. One fully busy
-  // core is 100.00%, so parallel queries may legitimately exceed 100%.
+  // One fully busy CPU core is 100.00%. Parallel ClickHouse queries may
+  // legitimately exceed 100% because the value is based on native query-group
+  // user and system CPU counters.
   const int64_t cpu_total_us = user_time_us_total_ + system_time_us_total_;
   int64_t cpu_centi = -1;
-  int64_t cpu_wait_centi = -1;
-  int64_t io_wait_centi = -1;
   if (last_sample_cpu_at_.time_since_epoch().count() != 0) {
-    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_sample_cpu_at_).count();
-    const int64_t d_cpu = cpu_total_us - last_sample_cpu_total_us_;
-    const int64_t d_cpu_wait = cpu_wait_time_us_total_ - last_sample_cpu_wait_total_us_;
-    const int64_t d_io_wait = io_wait_time_us_total_ - last_sample_io_wait_total_us_;
-    if (dt_us > 0) {
-      if (cpu_time_available_ && d_cpu >= 0) {
-        cpu_centi = static_cast<int64_t>((__int128)d_cpu * 10000 / dt_us);
-      }
-      if (cpu_wait_available_ && d_cpu_wait >= 0) {
-        cpu_wait_centi = static_cast<int64_t>((__int128)d_cpu_wait * 10000 / dt_us);
-      }
-      if (io_wait_available_ && d_io_wait >= 0) {
-        io_wait_centi = static_cast<int64_t>((__int128)d_io_wait * 10000 / dt_us);
-      }
+    const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        now - last_sample_cpu_at_).count();
+    const int64_t delta_cpu_us = cpu_total_us - last_sample_cpu_total_us_;
+    if (cpu_time_available_ && dt_us > 0 && delta_cpu_us >= 0) {
+      cpu_centi = static_cast<int64_t>(
+          static_cast<__int128>(delta_cpu_us) * 10000 / dt_us);
     }
   }
   last_sample_cpu_at_ = now;
   last_sample_cpu_total_us_ = cpu_total_us;
-  last_sample_cpu_wait_total_us_ = cpu_wait_time_us_total_;
-  last_sample_io_wait_total_us_ = io_wait_time_us_total_;
 
-  const int64_t elapsed_ms = ms_since(started_at_, now);
   samples_.push_back(SamplePoint{
-      elapsed_ms,
+      ms_since(started_at_, now),
       read_rows_total_,
       read_bytes_total_,
       cpu_centi,
       current_mem_bytes_,
-      cpu_wait_centi,
-      io_wait_centi,
   });
-  // The SSE tick drains at most a handful of samples. A small safety window is
-  // enough for temporary network stalls and prevents unbounded telemetry growth
-  // when a client never opens the stream.
   while (samples_.size() > 512) samples_.pop_front();
 }
 
@@ -835,23 +813,15 @@ void QuerySession::run_query() {
     wrote_bytes_total_ = 0;
     user_time_us_total_ = 0;
     system_time_us_total_ = 0;
-    cpu_wait_time_us_total_ = 0;
-    io_wait_time_us_total_ = 0;
     cpu_time_available_ = false;
-    cpu_wait_available_ = false;
-    io_wait_available_ = false;
     current_mem_bytes_ = -1;
     peak_mem_bytes_ = -1;
-    temporary_data_bytes_ = -1;
     memory_usage_by_host_.clear();
     peak_memory_usage_by_host_.clear();
-    temporary_data_by_host_.clear();
     samples_.clear();
     last_sample_at_ = {};
     last_sample_cpu_at_ = {};
     last_sample_cpu_total_us_ = 0;
-    last_sample_cpu_wait_total_us_ = 0;
-    last_sample_io_wait_total_us_ = 0;
   };
 
   try {
@@ -1003,8 +973,8 @@ void QuerySession::run_query() {
       clickhouse::Query q(effective_sql, query_id_);
 
       // Ensure ClickHouse sends query-group ProfileEvents over native TCP.
-      // CPU time, memory gauges, scheduler wait, I/O wait, and temporary disk
-      // usage remain unavailable when the server does not emit these packets.
+      // Only counters and gauges emitted by ClickHouse are exposed. Missing
+      // events remain unavailable instead of being inferred from another value.
       {
         clickhouse::QuerySettingsField f;
         f.value = "1";
@@ -1027,9 +997,9 @@ void QuerySession::run_query() {
       });
 
       // ClickHouse ProfileEvents packets have a stable schema:
-      // host_name, current_time, thread_id, type, name, value. Match the
-      // official clickhouse-client behavior by consuming query-group rows only
-      // (thread_id = 0), accumulating increment counters, and replacing gauges.
+      // host_name, current_time, thread_id, type, name, value. Consume only the
+      // query-group aggregate (thread_id = 0). Thread counts are deliberately
+      // not inferred or exposed.
       q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& block) -> bool {
         if (self->cancel_requested_.load(std::memory_order_relaxed)) return false;
         if (block.GetRowCount() == 0) return true;
@@ -1069,16 +1039,15 @@ void QuerySession::run_query() {
         auto sum_gauges = [](const std::unordered_map<std::string, int64_t>& gauges) {
           __int128 total = 0;
           for (const auto& item : gauges) total += std::max<int64_t>(0, item.second);
-          if (total > std::numeric_limits<int64_t>::max()) return std::numeric_limits<int64_t>::max();
+          if (total > std::numeric_limits<int64_t>::max()) {
+            return std::numeric_limits<int64_t>::max();
+          }
           return static_cast<int64_t>(total);
         };
 
         const auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lock(self->mu_);
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          // Per-thread rows are implementation details and do not represent a
-          // stable live thread count. ClickHouse emits the authoritative
-          // query-group aggregate with thread_id = 0.
           if (threads->At(row) != 0) continue;
 
           const std::string_view event_type = types->NameAt(row);
@@ -1100,12 +1069,6 @@ void QuerySession::run_query() {
             } else if (event_name == "SystemTimeMicroseconds") {
               self->cpu_time_available_ = true;
               self->system_time_us_total_ = saturating_add(self->system_time_us_total_, value);
-            } else if (event_name == "OSCPUWaitMicroseconds") {
-              self->cpu_wait_available_ = true;
-              self->cpu_wait_time_us_total_ = saturating_add(self->cpu_wait_time_us_total_, value);
-            } else if (event_name == "OSIOWaitMicroseconds") {
-              self->io_wait_available_ = true;
-              self->io_wait_time_us_total_ = saturating_add(self->io_wait_time_us_total_, value);
             }
             continue;
           }
@@ -1120,9 +1083,6 @@ void QuerySession::run_query() {
           } else if (event_name == "MemoryTrackerPeakUsage") {
             self->peak_memory_usage_by_host_[host] = gauge_value;
             self->peak_mem_bytes_ = sum_gauges(self->peak_memory_usage_by_host_);
-          } else if (event_name == "TemporaryDataOnDiskUsage") {
-            self->temporary_data_by_host_[host] = gauge_value;
-            self->temporary_data_bytes_ = sum_gauges(self->temporary_data_by_host_);
           }
         }
 

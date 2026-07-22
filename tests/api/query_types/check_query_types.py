@@ -557,7 +557,7 @@ def test_non_finite_float_is_serialized_as_json_null() -> None:
     assert result_rows_from_events(events) == [[0.0, 9], [None, 1]]
 
 
-def test_native_telemetry_uses_deterministic_schema_v2() -> None:
+def test_native_telemetry_keeps_original_metrics_without_threads() -> None:
     result, events = execute_case(
         "SELECT sum(cityHash64(number)) AS checksum FROM numbers(1000000)",
         base_url=BASE_URL,
@@ -571,43 +571,46 @@ def test_native_telemetry_uses_deterministic_schema_v2() -> None:
         None,
     )
     assert isinstance(meta, dict)
-    telemetry = meta.get("telemetry")
-    assert isinstance(telemetry, dict)
-    assert telemetry.get("schema_version") == 2
-    assert telemetry.get("source") == "clickhouse_native_tcp"
+    assert meta.get("status") == "connected"
+    assert "telemetry" not in meta
 
     ticks = [
         event.get("data")
         for event in events
-        if event.get("event") == "tick" and isinstance(event.get("data"), dict)
+        if event.get("event") == "tick" and isinstance(event.get("data"), list)
     ]
-    assert ticks, "expected at least one schema-v2 telemetry tick"
-    required_profile_fields = {
-        "cpu_percent_centi",
-        "memory_bytes",
-        "peak_memory_bytes",
-        "cpu_wait_percent_centi",
-        "io_wait_percent_centi",
-        "temporary_data_bytes",
-        "cpu_time_us",
-        "cpu_wait_time_us",
-        "io_wait_time_us",
-    }
+    assert ticks, "expected at least one telemetry tick"
+
     for tick in ticks:
-        assert tick.get("schema_version") == 2
-        assert isinstance(tick.get("progress"), dict)
-        assert isinstance(tick.get("rates"), dict)
-        profile = tick.get("profile")
-        assert isinstance(profile, dict)
-        assert required_profile_fields.issubset(profile)
-        assert not [key for key in profile if "thread" in str(key).lower()]
-        assert "peak_cpu_percent_centi" not in profile
-        assert "peak_wait_percent_centi" not in profile
+        assert len(tick) >= 15
+        assert isinstance(tick[0], int)  # elapsed milliseconds
+        assert isinstance(tick[1], int)  # read progress in centi-percent
+        assert tick[2] in (0, 1)
+        assert isinstance(tick[3], int)  # read rows
+        assert isinstance(tick[4], int)  # read bytes
+        assert isinstance(tick[5], int)  # total rows to read
+        assert isinstance(tick[6], int)  # rows per second
+        assert isinstance(tick[7], int)  # bytes per second
+        assert tick[8] is None or isinstance(tick[8], int)  # CPU centi-percent
+        assert tick[9] is None or isinstance(tick[9], int)  # maximum CPU centi-percent
+        assert tick[10] is None or isinstance(tick[10], int)  # current memory
+        assert tick[11] is None or isinstance(tick[11], int)  # peak memory
+
+        # Reserved legacy positions must remain null. ClickHouse does not expose
+        # a deterministic live active-thread count through these packets.
+        assert tick[12] is None
+        assert tick[13] is None
+
+        samples = tick[14]
+        assert samples is None or all(
+            isinstance(sample, list) and len(sample) == 5
+            for sample in samples
+        )
 
     done = next(
         (event.get("data") for event in reversed(events) if event.get("event") == "done"),
         None,
     )
     assert isinstance(done, dict)
-    assert isinstance(done.get("telemetry"), dict)
-    assert done["telemetry"].get("schema_version") == 2
+    assert done.get("status") == "finished"
+    assert "telemetry" not in done

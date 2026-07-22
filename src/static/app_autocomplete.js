@@ -962,7 +962,10 @@
       if (masked.slice(i, i + kw.length).toUpperCase() === kw) {
         const prev = i === 0 ? " " : masked[i - 1];
         const next = masked[i + kw.length] || " ";
-        if (!/[A-Za-z0-9_$]/.test(prev) && !/[A-Za-z0-9_$]/.test(next)) return i;
+        if (!/[A-Za-z0-9_$]/.test(prev) && !/[A-Za-z0-9_$]/.test(next)) {
+          if (previousWordBefore(masked, i).toUpperCase() === "AS") continue;
+          return i;
+        }
       }
     }
     return -1;
@@ -990,7 +993,10 @@
       if (masked.slice(i, i + kw.length).toUpperCase() !== kw) continue;
       const prev = i === 0 ? " " : masked[i - 1];
       const next = masked[i + kw.length] || " ";
-      if (!/[A-Za-z0-9_$]/.test(prev) && !/[A-Za-z0-9_$]/.test(next)) return i;
+      if (!/[A-Za-z0-9_$]/.test(prev) && !/[A-Za-z0-9_$]/.test(next)) {
+        if (previousWordBefore(masked, i).toUpperCase() === "AS") continue;
+        return i;
+      }
     }
     return -1;
   }
@@ -1263,6 +1269,10 @@
     const re = /\b(?:FROM|JOIN)\b/gi;
     let m;
     while ((m = re.exec(masked))) {
+      if (String(m[0] || "").toUpperCase() === "JOIN" &&
+          previousWordBefore(masked, m.index).toUpperCase() === "ARRAY") {
+        continue;
+      }
       // Only parse relation sources for the query level we are currently
       // analyzing. WITH bodies and nested subqueries are parsed recursively
       // when they become the current source, otherwise their columns leak into
@@ -2020,35 +2030,28 @@
     const text = String(item?.text || "");
     const itemStart = Number.isFinite(item?.start) ? item.start : 0;
 
-    // While an alias is being typed after AS, especially a quoted ClickHouse
-    // alias like `foo without the closing quote yet, the partial alias must not
-    // be linted as a missing column. Closed aliases are handled by
-    // findSelectAliasRange(); this handles the in-progress quoted case.
+    const trimSpan = (localStart, localEnd) => {
+      let a = Math.max(0, localStart);
+      let b = Math.max(a, Math.min(text.length, localEnd));
+      while (a < b && /\s/.test(text[a])) a += 1;
+      while (b > a && /\s/.test(text[b - 1])) b -= 1;
+      return { text: text.slice(a, b), start: itemStart + a, end: itemStart + b };
+    };
+
+    // Do not lint an unfinished quoted alias as a column reference.
     const unfinishedAlias = text.match(/\s+AS\s+(`[^`]*|"[^"]*|'[^']*)\s*$/i);
-    if (unfinishedAlias) {
-      let end = itemStart + unfinishedAlias.index;
-      let a = itemStart;
-      let b = end;
-      const value = String(textarea?.value || "");
-      while (a < b && /\s/.test(value[a])) a += 1;
-      while (b > a && /\s/.test(value[b - 1])) b -= 1;
-      return { text: value.slice(a, b), start: a, end: b };
-    }
+    if (unfinishedAlias) return trimSpan(0, unfinishedAlias.index);
 
     const alias = inferAliasFromSelectItem(text);
-    if (!alias) return { text, start: itemStart, end: item.end };
+    if (!alias) return trimSpan(0, text.length);
     const aliasRange = findSelectAliasRange(text, itemStart);
-    if (!aliasRange) return { text, start: itemStart, end: item.end };
-    let end = aliasRange.start;
-    const beforeAlias = text.slice(0, Math.max(0, end - itemStart));
+    if (!aliasRange) return trimSpan(0, text.length);
+
+    let localEnd = aliasRange.start - itemStart;
+    const beforeAlias = text.slice(0, Math.max(0, localEnd));
     const asMatch = beforeAlias.match(/\s+AS\s*$/i);
-    if (asMatch) end = itemStart + asMatch.index;
-    const expr = String(textarea?.value || "").slice(itemStart, end);
-    let a = itemStart;
-    let b = end;
-    while (a < b && /\s/.test(String(textarea?.value || "")[a])) a += 1;
-    while (b > a && /\s/.test(String(textarea?.value || "")[b - 1])) b -= 1;
-    return { text: String(textarea?.value || "").slice(a, b), start: a, end: b };
+    if (asMatch) localEnd = asMatch.index;
+    return trimSpan(0, localEnd);
   }
 
   function relationReferenceIsKnown(refName, meta, ctes) {
@@ -2142,6 +2145,40 @@
     return refs;
   }
 
+  function collectArrayJoinAliases(value, masked, selectPos, scopeEnd, targetDepth) {
+    const aliases = new Set();
+    const clauseRe = /\b(?:GLOBAL\s+ARRAY\s+JOIN|ARRAY\s+JOIN|PREWHERE|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT\s+BY|LIMIT|OFFSET|SETTINGS|FORMAT|QUALIFY|WINDOW|SAMPLE)\b/gi;
+    clauseRe.lastIndex = Math.max(0, selectPos + 6);
+    let match;
+    while ((match = clauseRe.exec(masked))) {
+      if (match.index >= scopeEnd) break;
+      if (topLevelDepthAt(masked, match.index) !== targetDepth) continue;
+      const keyword = String(match[0] || "").replace(/\s+/g, " ").toUpperCase();
+      if (keyword !== "ARRAY JOIN" && keyword !== "GLOBAL ARRAY JOIN") continue;
+
+      const bodyStart = clauseRe.lastIndex;
+      let bodyEnd = scopeEnd;
+      const nextRe = new RegExp(clauseRe.source, "gi");
+      nextRe.lastIndex = bodyStart;
+      let next;
+      while ((next = nextRe.exec(masked))) {
+        if (next.index >= scopeEnd) break;
+        if (topLevelDepthAt(masked, next.index) !== targetDepth) continue;
+        if (previousWordBefore(masked, next.index).toUpperCase() === "AS") continue;
+        bodyEnd = next.index;
+        break;
+      }
+
+      const items = splitTopLevelWithSpans(value.slice(bodyStart, bodyEnd), bodyStart);
+      for (const item of items) {
+        const alias = aliasDefinedBySelectItem(item);
+        if (alias) aliases.add(norm(alias));
+      }
+      clauseRe.lastIndex = bodyEnd;
+    }
+    return aliases;
+  }
+
   function collectSelectReferenceDiagnostics(text, meta) {
     const issues = [];
     const value = String(text || "");
@@ -2160,7 +2197,7 @@
       const sourceInfo = parseSources(scopeText, meta, 0, ctes);
       if (!canValidateColumnsForSources(sourceInfo.sources, meta, scalarCtes)) continue;
       const selectItems = splitTopLevelWithSpans(value.slice(selectPos + 6, fromPos), selectPos + 6);
-      const aliasesBefore = new Set();
+      const aliasesBefore = collectArrayJoinAliases(value, masked, selectPos, scopeEnd, depth);
       for (const item of selectItems) {
         const span = expressionSpanBeforeAlias(item);
         if (span.text) {
@@ -2239,6 +2276,10 @@
     const re = /\b(?:FROM|JOIN)\b/gi;
     let m;
     while ((m = re.exec(masked))) {
+      if (String(m[0] || "").toUpperCase() === "JOIN" &&
+          previousWordBefore(masked, m.index).toUpperCase() === "ARRAY") {
+        continue;
+      }
       let i = re.lastIndex;
       while (i < value.length && /\s/.test(value[i])) i += 1;
       if (value[i] === "(") continue;
@@ -3281,5 +3322,6 @@
     isPartialMatchEnabled: isAutocompletePartialEnabled,
     setReferenceDiagnosticsEnabled,
     isReferenceDiagnosticsEnabled,
+    diagnose: computeDiagnostics,
   };
 })();

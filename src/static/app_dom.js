@@ -11,6 +11,7 @@
 
     queryTextArea: byId("queryTextArea"),
     editorCopyButton: byId("editorCopyButton"),
+    autocompleteMenu: byId("autocompleteMenu"),
 
     runSplit: byId("runSplit"),
     runButton: byId("runButton"),
@@ -21,6 +22,7 @@
 
     formatButton: byId("formatButton"),
     cancelButton: byId("cancelButton"),
+    clearButton: byId("clearButton"),
 
     queryLibrary: byId("queryLibrary"),
     queryLibraryButton: byId("queryLibraryButton"),
@@ -58,13 +60,10 @@
     readBytesChart: byId("readBytesChart"),
     cpuChart: byId("cpuChart"),
     memoryChart: byId("memoryChart"),
-    waitChart: byId("waitChart"),
     cpuText: byId("cpuText"),
     cpuMaxText: byId("cpuMaxText"),
     memoryText: byId("memoryText"),
     memoryMaxText: byId("memoryMaxText"),
-    waitText: byId("waitText"),
-    waitDetailText: byId("waitDetailText"),
 
     resultsPanel: byId("resultsPanel") || document.querySelector(".panel--results"),
     resultColumnsText: byId("resultColumnsText"),

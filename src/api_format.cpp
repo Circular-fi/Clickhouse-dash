@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -111,6 +112,53 @@ void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses)
   if (hits > 0 && misses == 0) value = "hit";
   else if (hits > 0) value = "partial";
   res.set_header("X-Chdash-Format-Cache", value);
+}
+
+std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
+  static const std::unordered_set<std::string> reserved_aliases = {
+      "all", "alter", "and", "array", "as", "asc", "by", "case",
+      "cross", "desc", "distinct", "else", "end", "except", "exists",
+      "final", "format", "from", "full", "global", "group", "having",
+      "inner", "intersect", "into", "join", "left", "limit", "not",
+      "null", "offset", "on", "or", "order", "outer", "prewhere",
+      "qualify", "right", "sample", "select", "semi", "settings",
+      "then", "union", "using", "when", "where", "window", "with"};
+
+  const auto masked = mask_sql_surface(sql);
+  const std::string_view code(masked.code_lower);
+  struct Range { size_t begin; size_t end; };
+  std::vector<Range> ranges;
+
+  for (size_t i = 0; i + 2 <= code.size(); ++i) {
+    if (code.substr(i, 2) != "as") continue;
+    const char previous = i == 0 ? '\0' : code[i - 1];
+    const char next = i + 2 < code.size() ? code[i + 2] : '\0';
+    if (sql_is_ident_continue(previous) || sql_is_ident_continue(next)) continue;
+
+    size_t begin = i + 2;
+    while (begin < code.size() && std::isspace(static_cast<unsigned char>(code[begin]))) ++begin;
+    if (begin >= code.size() || !sql_is_ident_start(code[begin])) continue;
+    size_t end = begin + 1;
+    while (end < code.size() && sql_is_ident_continue(code[end])) ++end;
+    const std::string candidate(code.substr(begin, end - begin));
+    if (reserved_aliases.find(candidate) == reserved_aliases.end()) continue;
+    ranges.push_back({begin, end});
+    i = end - 1;
+  }
+
+  if (ranges.empty()) return std::string(sql);
+  std::string out;
+  out.reserve(sql.size() + ranges.size() * 2);
+  size_t cursor = 0;
+  for (const auto& range : ranges) {
+    out.append(sql.substr(cursor, range.begin - cursor));
+    out.push_back('`');
+    out.append(sql.substr(range.begin, range.end - range.begin));
+    out.push_back('`');
+    cursor = range.end;
+  }
+  out.append(sql.substr(cursor));
+  return out;
 }
 
 } // namespace
@@ -212,7 +260,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       }
 
       std::string fmt_err;
-      const auto formatted = try_format_query_with_client(*client, sql, kMaxFormatSqlBytes, &fmt_err);
+      const std::string parseable_sql = quote_reserved_aliases_for_format_query(sql);
+      const auto formatted = try_format_query_with_client(*client, parseable_sql, kMaxFormatSqlBytes, &fmt_err);
       if (!formatted.has_value()) {
         if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
         return false;

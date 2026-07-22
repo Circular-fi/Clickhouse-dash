@@ -30,7 +30,7 @@
     <div class="header-actions">
       <span id="connectionStatus" class="connection-pill is-connecting">
         <span class="connection-dot" aria-hidden="true"></span>
-        <span id="connectionText">Connexion...</span>
+        <span id="connectionText">Connecting...</span>
       </span>
       <a id="sourceLink" class="button button-ghost button-compact" href="http://localhost:18080" target="_blank" rel="noreferrer">Source</a>
       <a id="releaseLink" class="button button-ghost button-compact" href="http://localhost:18081" target="_blank" rel="noreferrer">Release</a>
@@ -47,8 +47,8 @@
   <main class="app-shell">
     <section class="overview-panel">
       <div class="overview-copy">
-        <p class="eyebrow">Validation locale reproductible</p>
-        <h1>Tests fonctionnels et benchmarks de performance</h1>
+        <p class="eyebrow">Reproducible local validation</p>
+        <h1>Functional tests and performance benchmarks</h1>
         <p class="overview-description">
           Compare the local build with the latest release, validate SSE streams, and measure the direct ClickHouse HTTP floor.
         </p>
@@ -65,16 +65,16 @@
       </div>
     </section>
 
-    <nav class="workspace-tabs" role="tablist" aria-label="Sections des resultats">
+    <nav class="workspace-tabs" role="tablist" aria-label="Result sections">
       <button id="tabTests" class="workspace-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="testsPanel" data-tab="tests">
         <span class="tab-icon" aria-hidden="true">&#10003;</span>
         <span class="tab-copy"><strong>Tests</strong><small id="testsTabMeta">No results</small></span>
-        <span id="testsTabStatus" class="mini-status idle" aria-label="Statut tests"></span>
+        <span id="testsTabStatus" class="mini-status idle" aria-label="Test status"></span>
       </button>
       <button id="tabBenchmark" class="workspace-tab" type="button" role="tab" aria-selected="false" aria-controls="benchmarkPanel" data-tab="benchmark">
         <span class="tab-icon" aria-hidden="true">&#9651;</span>
         <span class="tab-copy"><strong>Benchmark</strong><small id="benchmarkTabMeta">No results</small></span>
-        <span id="benchmarkTabStatus" class="mini-status idle" aria-label="Statut benchmark"></span>
+        <span id="benchmarkTabStatus" class="mini-status idle" aria-label="Benchmark status"></span>
       </button>
     </nav>
 
@@ -82,7 +82,7 @@
       <section class="section-toolbar panel">
         <div>
           <div class="section-title-line">
-            <h2>Suite de tests</h2>
+            <h2>Test suite</h2>
             <span id="testsHeaderStatus" class="status-badge idle"><span class="status-dot"></span><span>No run</span></span>
           </div>
           <p id="testsRunMeta" class="section-description">API tests run automatically when the runner starts.</p>
@@ -94,7 +94,7 @@
       </section>
 
       <section class="metric-grid" aria-label="Test metrics">
-        <article class="metric-card panel"><span class="metric-label">Total</span><strong id="testsTotal" class="metric-value">--</strong><small>cas executes</small></article>
+        <article class="metric-card panel"><span class="metric-label">Total</span><strong id="testsTotal" class="metric-value">--</strong><small>executed cases</small></article>
         <article class="metric-card panel metric-success"><span class="metric-label">Passed</span><strong id="testsPassed" class="metric-value">--</strong><small>successful checks</small></article>
         <article class="metric-card panel metric-danger"><span class="metric-label">Failures</span><strong id="testsFailures" class="metric-value">--</strong><small id="testsErrorsMeta">0 errors</small></article>
         <article class="metric-card panel"><span class="metric-label">Duration</span><strong id="testsDuration" class="metric-value">--</strong><small>pytest duration</small></article>
@@ -108,7 +108,7 @@
             <div><h3>Failed tests</h3><p>Errors and assertions from the latest run.</p></div>
             <span id="failedCasesCount" class="count-pill">0</span>
           </div>
-          <div id="failedCases" class="empty-state compact">No results disponible.</div>
+          <div id="failedCases" class="empty-state compact">No results available.</div>
         </article>
 
         <article class="panel">
@@ -139,7 +139,7 @@
           </div>
         </div>
         <div id="formatResults" class="format-list">
-          <div class="empty-state">No results de formatage disponible.</div>
+          <div class="empty-state">No formatting results available.</div>
         </div>
         <div class="load-more-row">
           <button id="formatLoadMore" class="button button-secondary" type="button" hidden>Load more</button>
@@ -187,7 +187,7 @@
         <article class="metric-card panel"><span class="metric-label">HTTP reference</span><strong id="benchmarkHttpCount" class="metric-value">--</strong><small>direct measurements</small></article>
         <article class="metric-card panel metric-warning"><span class="metric-label">Median wire overhead</span><strong id="benchmarkOverhead" class="metric-value">--</strong><small id="benchmarkRatioMeta">vs raw HTTP transport</small></article>
         <article class="metric-card panel metric-danger"><span class="metric-label">Errors</span><strong id="benchmarkIssues" class="metric-value">--</strong><small>blocking findings</small></article>
-        <article class="metric-card panel metric-warning"><span class="metric-label">Warnings</span><strong id="benchmarkWarnings" class="metric-value">--</strong><small>expected or non-blocking differences</small></article>
+        <article class="metric-card panel metric-warning"><span class="metric-label">Warnings</span><strong id="benchmarkWarnings" class="metric-value">--</strong><small>source transport warnings</small></article>
       </section>
 
       <section class="panel benchmark-results-panel">
@@ -216,7 +216,7 @@
       </section>
 
       <section id="benchmarkWarningsPanel" class="panel issues-panel warning-panel" hidden>
-        <div class="panel-heading"><div><h3>Non-blocking differences</h3><p>Expected batching, timing cadence, historical-release, and telemetry-schema differences.</p></div><span id="benchmarkWarningsCount" class="count-pill">0</span></div>
+        <div class="panel-heading"><div><h3>Source transport warnings</h3><p>Non-blocking transport observations from the source build only.</p></div><span id="benchmarkWarningsCount" class="count-pill">0</span></div>
         <div id="benchmarkWarningList" class="issue-list"></div>
       </section>
 

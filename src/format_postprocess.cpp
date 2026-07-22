@@ -220,7 +220,8 @@ string normalize_code_spacing(string_view s) {
       const bool needs_space = out_word_before("IN") || out_word_before("GLOBAL IN") ||
                                out_word_before("OVER") || out_word_before("AND") ||
                                out_word_before("OR") || out_word_before("BY") ||
-                               out_word_before("USING") || prev_non_space() == '=' ||
+                               out_word_before("USING") || out_word_before("JOIN") ||
+                               prev_non_space() == '=' ||
                                prev_non_space() == '>' || prev_non_space() == '<';
       if (needs_space) append_space();
       out.push_back(c);
@@ -496,6 +497,7 @@ string indent_after_first_line(string_view s, size_t spaces) {
 
 struct ScanState {
   bool in_str = false;
+  bool in_double_quote = false;
   bool in_backtick = false;
   bool in_line_comment = false;
   bool in_block_comment = false;
@@ -506,7 +508,9 @@ struct ScanState {
 };
 
 bool is_top_level(const ScanState& st) {
-  return !st.in_str && !st.in_backtick && !st.in_line_comment && !st.in_block_comment && st.par == 0 && st.br == 0 && st.brc == 0;
+  return !st.in_str && !st.in_double_quote && !st.in_backtick &&
+         !st.in_line_comment && !st.in_block_comment &&
+         st.par == 0 && st.br == 0 && st.brc == 0;
 }
 
 void step_scan(ScanState& st, string_view s, size_t& i) {
@@ -515,11 +519,20 @@ void step_scan(ScanState& st, string_view s, size_t& i) {
   if (st.in_str) {
     if (st.esc) st.esc = false;
     else if (c == '\\') st.esc = true;
+    else if (c == '\'' && n == '\'') ++i;
     else if (c == '\'') st.in_str = false;
     return;
   }
+  if (st.in_double_quote) {
+    if (st.esc) st.esc = false;
+    else if (c == '\\') st.esc = true;
+    else if (c == '"' && n == '"') ++i;
+    else if (c == '"') st.in_double_quote = false;
+    return;
+  }
   if (st.in_backtick) {
-    if (c == '`') st.in_backtick = false;
+    if (c == '`' && n == '`') ++i;
+    else if (c == '`') st.in_backtick = false;
     return;
   }
   if (st.in_line_comment) {
@@ -536,6 +549,11 @@ void step_scan(ScanState& st, string_view s, size_t& i) {
 
   if (c == '\'') {
     st.in_str = true;
+    st.esc = false;
+    return;
+  }
+  if (c == '"') {
+    st.in_double_quote = true;
     st.esc = false;
     return;
   }
@@ -571,7 +589,7 @@ size_t find_matching_paren(string_view s, size_t open_pos) {
   ScanState st;
   st.par = 1;
   for (size_t i = open_pos + 1; i < s.size(); ++i) {
-    if (!st.in_str && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
+    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
       if (s[i] == '(') ++st.par;
       else if (s[i] == ')') {
         --st.par;
@@ -594,6 +612,49 @@ int find_top_level_keyword(string_view s, string_view kw, size_t start = 0) {
     step_scan(st, s, i);
   }
   return -1;
+}
+
+bool previous_word_is_as(string_view s, size_t pos) {
+  size_t end = pos;
+  while (end > 0 && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+  size_t begin = end;
+  while (begin > 0 && is_ident_char(s[begin - 1])) --begin;
+  return begin < end && iequals_ascii(s.substr(begin, end - begin), "AS");
+}
+
+vector<std::pair<int, string>> find_select_clauses(
+    string_view text,
+    size_t start,
+    const vector<string_view>& clauses
+) {
+  vector<std::pair<int, string>> positions;
+  ScanState state;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (i >= start && is_top_level(state)) {
+      string_view matched;
+      for (const string_view clause : clauses) {
+        if (i + clause.size() > text.size() || !iequals_ascii(text.substr(i, clause.size()), clause)) continue;
+        const char previous = i == 0 ? '\0' : text[i - 1];
+        const char next = i + clause.size() < text.size() ? text[i + clause.size()] : '\0';
+        if ((previous != '\0' && is_ident_char(previous)) ||
+            (next != '\0' && is_ident_char(next))) {
+          continue;
+        }
+        // `AS FROM`, `AS WHERE`, and similar constructs are aliases. Treating
+        // the alias token as a clause truncates the SELECT projection before
+        // the formatter gets a chance to quote the reserved identifier.
+        if (previous_word_is_as(text, i)) continue;
+        if (matched.empty() || clause.size() > matched.size()) matched = clause;
+      }
+      if (!matched.empty()) {
+        positions.emplace_back(static_cast<int>(i), string(matched));
+        i += matched.size() - 1;
+        continue;
+      }
+    }
+    step_scan(state, text, i);
+  }
+  return positions;
 }
 
 vector<string> split_top_level(string_view s, char delim) {
@@ -660,7 +721,7 @@ string unwrap_outer_parens(string_view s) {
   ScanState st;
   for (size_t i = 0; i < text.size(); ++i) {
     const char c = text[i];
-    if (!st.in_str && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
+    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
       if (c == '(') ++depth;
       else if (c == ')') {
         --depth;
@@ -853,7 +914,7 @@ int find_alias_marker_for_alignment(string_view line) {
   ScanState st;
   int last = -1;
   for (size_t i = 0; i + 4 <= line.size(); ++i) {
-    if (!st.in_str && !st.in_backtick && !st.in_line_comment && !st.in_block_comment && line.substr(i, 4) == " AS ") {
+    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment && line.substr(i, 4) == " AS ") {
       last = static_cast<int>(i);
     }
     step_scan(st, line, i);
@@ -872,7 +933,9 @@ string align_alias_line(string_view line, size_t target_as) {
 
 bool line_is_alignable_alias(string_view line) {
   const string t = trim_ascii_spaces(line);
-  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "FROM ") || starts_with_ci(t, "JOIN ")) return false;
+  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "FROM ") ||
+      starts_with_ci(t, "JOIN ") || starts_with_ci(t, "ARRAY JOIN ") ||
+      starts_with_ci(t, "GLOBAL ARRAY JOIN ")) return false;
   const int as_pos = find_alias_marker_for_alignment(line);
   if (as_pos < 0) return false;
   const string rhs = trim_ascii_spaces(line.substr(static_cast<size_t>(as_pos) + 4));
@@ -1198,39 +1261,27 @@ string Formatter::format_select_like(string_view s) {
     }
   }
 
-  static const char* clauses[] = {
-      "FROM",
-      "SAMPLE",
+  static const vector<string_view> clauses = {
       "GLOBAL ARRAY JOIN",
       "ARRAY JOIN",
+      "GROUP BY",
+      "ORDER BY",
+      "LIMIT BY",
+      "FROM",
+      "SAMPLE",
       "PREWHERE",
       "WHERE",
-      "GROUP BY",
       "HAVING",
       "WINDOW",
       "QUALIFY",
-      "ORDER BY",
-      "LIMIT BY",
       "LIMIT",
       "OFFSET",
       "SETTINGS",
       "FORMAT",
   };
-  vector<std::pair<int, string>> poses;
-  for (const char* kw : clauses) {
-    const int pos = find_top_level_keyword(text, kw, 6);
-    if (pos >= 0) poses.push_back({pos, kw});
-  }
-  std::sort(poses.begin(), poses.end(), [](const auto& a, const auto& b) {
-    if (a.first != b.first) return a.first < b.first;
-    return a.second.size() > b.second.size();
-  });
-  vector<std::pair<int, string>> deduped_poses;
-  for (const auto& p : poses) {
-    if (!deduped_poses.empty() && deduped_poses.back().first == p.first) continue;
-    deduped_poses.push_back(p);
-  }
-  poses = std::move(deduped_poses);
+  // Find every top-level occurrence. Repeated ARRAY JOIN clauses are legal and
+  // must remain distinct instead of being absorbed into the first clause body.
+  vector<std::pair<int, string>> poses = find_select_clauses(text, 6, clauses);
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
   const string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
@@ -1792,12 +1843,6 @@ string Formatter::format_function_call(string_view expr) {
       const int arrow = find_top_level_arrow(args.front());
       string rhs = arrow > 0 ? trim_ascii_spaces(string_view(args.front()).substr(static_cast<size_t>(arrow) + 2)) : string();
       if (!rhs.empty() && rhs.find('(') == string::npos && find_top_level_keyword(rhs, "AND") < 0 && find_top_level_keyword(rhs, "OR") < 0) return {};
-    }
-    if (compact_fits && iequals_ascii(name, "arrayStringConcat") && args.size() >= 2 && trim_ascii_spaces(args[1]) == "','") {
-      string out = name + "(" + cleanup_surface(args[0]) + ", ', '";
-      for (size_t i = 2; i < args.size(); ++i) out += ", " + cleanup_surface(args[i]);
-      out += ")";
-      return out;
     }
   }
 

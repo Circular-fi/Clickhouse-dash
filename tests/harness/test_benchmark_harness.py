@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import threading
@@ -111,6 +112,17 @@ def test_direct_http_chunked_stream_is_consumed_by_one_iterator() -> None:
     assert aggregate["time_to_first_result_rows_ms"] is not None
     assert aggregate["raw_stream_bytes"] == len(body)
     assert aggregate["json_decode_errors"] == 0
+
+
+def test_cross_transport_hash_normalizes_integral_float_spelling() -> None:
+    def digest(value: object) -> str:
+        hasher = hashlib.sha256()
+        benchmark.canonical_hash_update(hasher, value)
+        return hasher.hexdigest()
+
+    assert digest([0.0, 999999, None]) == digest([0, 999999, None])
+    assert digest([-0.0]) == digest([0])
+    assert digest([0.5]) != digest([0])
 
 
 def test_direct_http_content_length_response_is_supported() -> None:
@@ -234,14 +246,14 @@ def dashboard_summary(
         "columns_signatures_seen": ["same-columns"],
         "core_event_sequences_seen": [["meta", "result_meta", "result_rows", "done"]],
         "tick_schemas_seen": [tick_schema],
-        "telemetry_sources_seen": ["clickhouse_native_tcp" if tick_schema == "v2" else "legacy"],
+        "telemetry_sources_seen": ["clickhouse_native_tcp" if tick_schema == "v3" else "legacy"],
     }
 
 
-def test_operational_event_count_differences_are_non_blocking() -> None:
+def test_operational_event_count_differences_are_non_blocking_and_quiet() -> None:
     summaries = [
-        dashboard_summary("source", result_row_events=10, tick_events=2, tick_schema="v2"),
-        dashboard_summary("release", result_row_events=50, tick_events=3, tick_schema="legacy"),
+        dashboard_summary("source", result_row_events=10, tick_events=2, tick_schema="legacy_array"),
+        dashboard_summary("release", result_row_events=50, tick_events=3, tick_schema="legacy_release"),
     ]
     comparisons = benchmark.compare_targets(
         summaries,
@@ -266,15 +278,13 @@ def test_operational_event_count_differences_are_non_blocking() -> None:
         baseline_name="source",
     )
     assert issues == []
-    assert any("result_rows count differs" in warning for warning in warnings)
-    assert any("tick count differs" in warning for warning in warnings)
-    assert any("telemetry schema differs" in warning for warning in warnings)
+    assert warnings == []
 
 
 def test_strict_mode_can_promote_operational_event_count_differences() -> None:
     summaries = [
-        dashboard_summary("source", result_row_events=10, tick_events=2, tick_schema="v2"),
-        dashboard_summary("release", result_row_events=50, tick_events=3, tick_schema="legacy"),
+        dashboard_summary("source", result_row_events=10, tick_events=2, tick_schema="legacy_array"),
+        dashboard_summary("release", result_row_events=50, tick_events=3, tick_schema="legacy_release"),
     ]
     comparisons = benchmark.compare_targets(
         summaries,
@@ -290,3 +300,38 @@ def test_strict_mode_can_promote_operational_event_count_differences() -> None:
         baseline_name="source",
     )
     assert any("strict operational event count mismatch" in issue for issue in issues)
+
+
+def test_historical_reference_failures_do_not_create_global_warnings() -> None:
+    results = [
+        {
+            "target": "source",
+            "transport": "dashboard_sse",
+            "host_id": "local",
+            "query_name": "q",
+            "run_index": 1,
+            "warmup": False,
+            "validation_issues": [],
+        },
+        {
+            "target": "release",
+            "transport": "dashboard_sse",
+            "host_id": "local",
+            "query_name": "q",
+            "run_index": 1,
+            "warmup": False,
+            "validation_issues": [
+                "error_event_present",
+                "invalid_sse_content_type_values:'text/event-stream, text/event-stream'",
+            ],
+        },
+    ]
+    issues, warnings = benchmark.compute_findings(
+        results=results,
+        comparisons=[],
+        direct_http_overheads=[],
+        strict_event_counts=False,
+        baseline_name="source",
+    )
+    assert issues == []
+    assert warnings == []
