@@ -1,7 +1,10 @@
+import os
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])
+).resolve()
 
 
 def read(relative_path: str) -> str:

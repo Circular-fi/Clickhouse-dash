@@ -37,6 +37,12 @@ static std::vector<uint8_t> random_bytes(size_t n) {
   return out;
 }
 
+static std::int64_t file_time_nanoseconds(std::filesystem::file_time_type value) {
+  const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      value.time_since_epoch());
+  return static_cast<std::int64_t>(nanoseconds.count());
+}
+
 struct FsStaticAsset {
   std::string body;
   std::string mime;
@@ -83,7 +89,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
       loaded->modified = modified;
       loaded->size = size;
       loaded->etag = "\"" + std::to_string(size) + "-" +
-          std::to_string(modified.time_since_epoch().count()) + "\"";
+          std::to_string(file_time_nanoseconds(modified)) + "\"";
       g_fs_static_cache[cache_key] = loaded;
       asset = std::move(loaded);
     }

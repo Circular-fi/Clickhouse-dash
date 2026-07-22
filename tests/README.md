@@ -174,3 +174,8 @@ BENCH_TRACE_COMPRESSION_LEVEL=3
 ```
 
 Health checks use `/api/health` and do not parse reports or scan artifact trees. Completed benchmark measurements are appended to `runs.partial.jsonl` and atomically promoted to `runs.jsonl`; the partial file remains only after a real interruption.
+
+## Repository contract checks
+
+The test runner mounts the repository at `/repo` in read-only mode. Static harness tests inspect the exact source tree, release workflow, formatting fixtures, and frontend resources that are used to build the source container.
+

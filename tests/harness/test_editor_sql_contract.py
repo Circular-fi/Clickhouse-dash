@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,7 +9,9 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])
+).resolve()
 NODE = shutil.which("node")
 
 

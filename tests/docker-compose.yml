@@ -197,8 +197,8 @@ services:
         target: /tests/benchmark/queries.json
         read_only: true
       - type: bind
-        source: ../.github/workflows/release.yaml
-        target: /repo/.github/workflows/release.yaml
+        source: ..
+        target: /repo
         read_only: true
     ports:
       - "${TEST_UI_PORT:-18082}:8080"

@@ -88,7 +88,7 @@ if (CHDASH_BUILD_APP)
     )
   endif()
 
-  target_include_directories(chdash PRIVATE
+  target_include_directories(chdash SYSTEM PRIVATE
     ${clickhouse_cpp_SOURCE_DIR}
     ${httplib_SOURCE_DIR}
     ${rapidjson_SOURCE_DIR}/include
