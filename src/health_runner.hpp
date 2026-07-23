@@ -84,7 +84,9 @@ private:
   std::vector<HostSpec> hosts_;
   HealthSettings settings_;
 
-  // One system client per host, owned by the runner thread.
+  // One runner client per host, owned by the health thread. Query
+  // availability must be measured with the same credentials used for user
+  // queries; the system account is probed separately for diagnostics.
   struct HostCtx {
     HostSpec spec;
     std::shared_ptr<clickhouse::Client> client;

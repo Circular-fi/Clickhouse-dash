@@ -148,39 +148,52 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
 
+  std::shared_ptr<QuerySession> session;
   {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<std::mutex> lock(mu_);
     auto it = sessions_.find(qid);
-    if (it != sessions_.end()) {
-      it->second->request_cancel();
-    }
+    if (it != sessions_.end()) session = it->second;
   }
 
-  try {
-    std::string err;
-    const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-    auto c = client_pool_ ? client_pool_->acquire(
-      cancel_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &err
-    ) : make_client_from_uri(
-      cancel_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &err
-    );
-    if (!c) {
-      std::cerr << "[cancel] host=" << host_id << " qid=" << qid << " connect error: " << err << "\n";
-    } else {
-      const std::string qid_esc = escape_single_quotes(qid);
-      const std::string kill_sql = "KILL QUERY WHERE query_id = '" + qid_esc + "'";
-      c->Execute(kill_sql);
+  if (session) {
+    session->request_cancel();
+    // Compatibility retries use distinct native ids while keeping the public
+    // browser id stable. Cancel every native attempt owned by the session.
+    session->cancel_native_queries_best_effort(false);
+  } else {
+    // The session may already have been reaped while ClickHouse still finishes
+    // removing a compatibility attempt. Match both the public id and the
+    // deterministic retry prefix without relying on in-memory session state.
+    try {
+      std::string err;
+      const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+      auto client = client_pool_ ? client_pool_->acquire(
+        cancel_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        &err
+      ) : make_client_from_uri(
+        cancel_uri,
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        std::chrono::seconds(5),
+        &err
+      );
+      if (!client) {
+        std::cerr << "[cancel] host=" << host_id << " qid=" << qid
+                  << " connect error: " << err << "\n";
+      } else {
+        const std::string qid_esc = escape_single_quotes(qid);
+        const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
+        client->Execute(
+            "KILL QUERY WHERE query_id = '" + qid_esc +
+            "' OR startsWith(query_id, '" + retry_prefix_esc + "') ASYNC");
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "[cancel] host=" << host_id << " qid=" << qid
+                << " error: " << e.what() << "\n";
     }
-  } catch (const std::exception& e) {
-    std::cerr << "[cancel] host=" << host_id << " qid=" << qid << " error: " << e.what() << "\n";
   }
 
 

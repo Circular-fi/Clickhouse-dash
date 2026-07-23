@@ -111,7 +111,11 @@ Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
       health_(std::make_unique<HealthRunner>(cfg_.hosts, cfg_.health)),
       jwt_(random_bytes(32)),
-      client_pool_(std::make_shared<ClickHouseClientPool>(cfg_.client_pool_max_idle_per_key)),
+      client_pool_(std::make_shared<ClickHouseClientPool>(
+          cfg_.client_pool_max_idle_per_key,
+          std::chrono::milliseconds(cfg_.client_pool_idle_ttl_ms),
+          std::chrono::milliseconds(cfg_.client_pool_validate_after_idle_ms),
+          std::chrono::milliseconds(cfg_.client_pool_reaper_interval_ms))),
       format_cache_(std::make_unique<FormatCache>(
           cfg_.format_cache_max_entries,
           cfg_.format_cache_max_bytes,
@@ -168,7 +172,9 @@ Server::~Server() {
     sessions_.clear();
   }
   for (const auto& session : remaining) {
-    if (session) session->request_cancel();
+    if (!session) continue;
+    session->request_cancel();
+    session->cancel_native_queries_best_effort(false);
   }
   remaining.clear(); // joins query workers before shared infrastructure is destroyed
 
@@ -201,7 +207,16 @@ void Server::reap_sessions_once() {
     }
   }
   for (const auto& item : expired) {
-    if (item.second) item.second->request_cancel();
+    if (!item.second) continue;
+    const auto status = item.second->snapshot().status;
+    const bool terminal = status == SessionStatus::Finished ||
+                          status == SessionStatus::Error ||
+                          status == SessionStatus::Canceled ||
+                          status == SessionStatus::ResultLimitReached;
+    if (!terminal) {
+      item.second->request_cancel();
+      item.second->cancel_native_queries_best_effort(false);
+    }
   }
 }
 
@@ -238,13 +253,13 @@ bool Server::health_check(std::string* error_message) {
   for (const auto& h : cfg_.hosts) {
     std::string err;
     auto c = client_pool_ ? client_pool_->acquire(
-      h.system_uri,
+      h.runner_uri,
       std::chrono::milliseconds(cfg_.health.timeout_ms),
       std::chrono::milliseconds(cfg_.health.timeout_ms),
       std::chrono::milliseconds(cfg_.health.timeout_ms),
       &err
     ) : make_client_from_uri(
-      h.system_uri,
+      h.runner_uri,
       std::chrono::milliseconds(cfg_.health.timeout_ms),
       std::chrono::milliseconds(cfg_.health.timeout_ms),
       std::chrono::milliseconds(cfg_.health.timeout_ms),

@@ -11,6 +11,7 @@ def main() -> int:
             [
                 "-q",
                 "/tests/api/format/check_format.py",
+                "/tests/api/meta/check_meta.py",
                 "/tests/api/query_types/check_query_types.py",
             ]
         )

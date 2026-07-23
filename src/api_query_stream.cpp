@@ -214,16 +214,21 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   state->session = session;
   state->query_id = query_id;
   Server* self = this;
+  auto cancel_session = [](const std::shared_ptr<QuerySession>& value) {
+    if (!value) return;
+    value->request_cancel();
+    value->cancel_native_queries_best_effort(false);
+  };
 
   res.set_chunked_content_provider(
       "text/event-stream; charset=utf-8",
-      [state, self](size_t, httplib::DataSink& sink) {
+      [state, self, cancel_session](size_t, httplib::DataSink& sink) {
         if (!state->connected_event_sent) {
           state->connected_event_sent = true;
           const std::string connected = sse_json_event(
               "meta", build_meta_json(state->query_id));
           if (!sink.write(connected.data(), connected.size())) {
-            state->session->request_cancel();
+            cancel_session(state->session);
             return false;
           }
 
@@ -249,7 +254,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
             produced += sse_json_event("tick", build_tick_json(live, *state));
           }
           if (!sink.write(produced.data(), produced.size())) {
-            state->session->request_cancel();
+            cancel_session(state->session);
             return false;
           }
           return true;
@@ -271,7 +276,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
             terminal += tick;
             terminal += done;
             if (!sink.write(terminal.data(), terminal.size())) {
-              state->session->request_cancel();
+              cancel_session(state->session);
             }
           }
           sink.done();
@@ -287,15 +292,15 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           const std::string tick = sse_json_event(
               "tick", build_tick_json(snapshot, *state));
           if (!sink.write(tick.data(), tick.size())) {
-            state->session->request_cancel();
+            cancel_session(state->session);
             return false;
           }
         }
         return true;
       },
-      [session, query_id, self](bool success) {
+      [session, query_id, self, cancel_session](bool success) {
         session->detach_stream();
-        if (!success) session->request_cancel();
+        if (!success) cancel_session(session);
         std::lock_guard<std::mutex> lock(self->mu_);
         self->sessions_.erase(query_id);
       });

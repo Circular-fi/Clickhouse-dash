@@ -38,8 +38,14 @@ struct AppConfig {
   // Native TCP query execution knobs. Defaults favor low interactive latency.
   QuerySessionOptions query_options;
 
-  // Number of idle clickhouse::Client TCP connections to keep per URI/timeout key.
+  // Native TCP pool lifecycle. Idle sockets are closed proactively before
+  // ClickHouse or an intermediary reaches its receive/idle timeout. Reused
+  // sockets are validated only after a meaningful idle period to keep the hot
+  // path free of an extra round trip.
   size_t client_pool_max_idle_per_key = 4;
+  int client_pool_idle_ttl_ms = 60 * 1000;
+  int client_pool_validate_after_idle_ms = 15 * 1000;
+  int client_pool_reaper_interval_ms = 5 * 1000;
 
   // SQL formatting is frequently triggered repeatedly by editor actions. Cache
   // deterministic results to avoid a ClickHouse round trip and formatter pass.
@@ -90,6 +96,8 @@ private:
 
   struct MetaKeywords {
     uint64_t updated_at_ms = 0;
+    std::string source = "clickhouse";
+    std::string credential_scope = "system";
     std::vector<std::string> items;
   };
 
@@ -103,6 +111,7 @@ private:
 
   struct MetaFunctions {
     uint64_t updated_at_ms = 0;
+    std::string credential_scope = "system";
     std::vector<MetaFunction> items;
   };
 
@@ -117,6 +126,7 @@ private:
 
   struct MetaCatalog {
     uint64_t updated_at_ms = 0;
+    std::string credential_scope;
     std::vector<MetaCatalogItem> items;
   };
 

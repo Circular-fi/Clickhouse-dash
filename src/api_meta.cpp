@@ -5,6 +5,8 @@
 #include "host_util.hpp"
 #include "time_util.hpp"
 
+#include <clickhouse/exceptions.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -12,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -85,6 +88,58 @@ bool is_system_info_database(std::string_view db) {
   return db == "INFORMATION_SCHEMA" || db == "information_schema";
 }
 
+enum class MetaCredentialScope {
+  Runner,
+  System,
+};
+
+const char* meta_credential_scope_name(MetaCredentialScope scope) {
+  return scope == MetaCredentialScope::Runner ? "runner" : "system";
+}
+
+bool metadata_uses_runner_credentials(std::string_view type) {
+  // Visibility of databases, tables, and columns must match the account that
+  // executes the user's query. The remaining catalogs describe the ClickHouse
+  // server/dialect and are fetched with the system account.
+  return type == "databases" || type == "tables" || type == "columns";
+}
+
+void load_builtin_keywords(std::vector<std::string>& out) {
+  // system.keywords was added in ClickHouse 24.3. Older servers still need a
+  // useful syntax/highlighting catalog, so retain a conservative built-in set.
+  static constexpr std::string_view keywords[] = {
+    "ADD", "ADD COLUMN", "AFTER", "ALIAS", "ALL", "ALTER", "AND",
+    "ANTI", "ANY", "ARRAY", "ARRAY JOIN", "AS", "ASC", "ASOF",
+    "ATTACH", "BETWEEN", "BOTH", "BY", "CASE", "CAST", "CHECK",
+    "CLEAR", "CLUSTER", "CODEC", "COLLATE", "COLUMN", "COMMENT",
+    "CONSTRAINT", "CREATE", "CROSS", "CUBE", "CURRENT", "DATABASE",
+    "DATABASES", "DEDUPLICATE", "DEFAULT", "DELETE", "DESC",
+    "DESCRIBE", "DETACH", "DICTIONARY", "DISTINCT", "DISTRIBUTED",
+    "DROP", "ELSE", "END", "ENGINE", "EXCEPT", "EXISTS", "EXPLAIN",
+    "EXPRESSION", "EXTRACT", "FETCH", "FINAL", "FIRST", "FLUSH",
+    "FOLLOWING", "FOR", "FORMAT", "FREEZE", "FROM", "FULL",
+    "FUNCTION", "GLOBAL", "GRANT", "GROUP", "HAVING", "IF", "ILIKE",
+    "IN", "INDEX", "INNER", "INSERT", "INTERSECT", "INTERVAL",
+    "INTO", "IS", "JOIN", "KILL", "LAST", "LAYOUT", "LEADING",
+    "LEFT", "LIKE", "LIMIT", "LIVE", "LOCAL", "MATERIALIZE",
+    "MATERIALIZED", "MODIFY", "MOVE", "MUTATION", "NO", "NOT",
+    "NULL", "NULLS", "OFFSET", "ON", "OPTIMIZE", "OR", "ORDER",
+    "OUTER", "OVER", "PARTITION", "POPULATE", "PRECEDING",
+    "PREWHERE", "PRIMARY KEY", "PROJECTION", "QUALIFY", "RANGE",
+    "RELOAD", "REMOVE", "RENAME", "REPLACE", "REPLICA", "REVOKE",
+    "RIGHT", "ROLLUP", "SAMPLE", "SELECT", "SEMI", "SET", "SETTINGS",
+    "SHOW", "SOURCE", "SYNC", "SYSTEM", "TABLE", "TABLES",
+    "TEMPORARY", "THEN", "TIES", "TO", "TOP", "TOTALS", "TRAILING",
+    "TRUNCATE", "TTL", "TYPE", "UNBOUNDED", "UNION", "UPDATE",
+    "USE", "USER", "USING", "VALUES", "VIEW", "VOLUME", "WATCH",
+    "WHEN", "WHERE", "WINDOW", "WITH"
+  };
+
+  out.clear();
+  out.reserve(std::size(keywords));
+  for (const std::string_view keyword : keywords) out.emplace_back(keyword);
+}
+
 } // namespace
 
 void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res) {
@@ -150,44 +205,89 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   w.Key("data");
   w.StartObject();
 
-  struct ErrItem { std::string type; std::string code; std::string message; bool stale = false; };
+  struct ErrItem {
+    std::string type;
+    std::string code;
+    std::string message;
+    std::string credential_scope;
+    bool stale = false;
+  };
   std::vector<ErrItem> errors;
+  size_t successful_types = 0;
 
-  // A multi-type metadata request is sequential. Reuse one exclusive pooled
-  // connection instead of acquiring/releasing a client for every cache miss.
-  std::shared_ptr<clickhouse::Client> request_client;
-  std::string request_client_error;
-  bool request_client_attempted = false;
-  auto make_client = [&]() {
-    if (request_client) return std::pair{request_client, std::string{}};
-    if (request_client_attempted) return std::pair{request_client, request_client_error};
-    request_client_attempted = true;
-    request_client = client_pool_ ? client_pool_->acquire(
-        host->runner_uri,
+  struct RequestClientSlot {
+    std::string uri;
+    std::shared_ptr<clickhouse::Client> client;
+    std::string error;
+    bool attempted = false;
+  };
+
+  RequestClientSlot runner_slot{host->runner_uri, {}, {}, false};
+  RequestClientSlot system_slot{
+      host->system_uri.empty() ? host->runner_uri : host->system_uri,
+      {},
+      {},
+      false};
+
+  auto slot_for_scope = [&](MetaCredentialScope scope) -> RequestClientSlot& {
+    if (scope == MetaCredentialScope::System && system_slot.uri != runner_slot.uri) {
+      return system_slot;
+    }
+    return runner_slot;
+  };
+
+  // A multi-type metadata request is sequential. Reuse at most one exclusive
+  // pooled client for each credential scope. Global dialect catalogs use the
+  // system account; visibility-sensitive catalogs use the query runner account.
+  auto make_client = [&](MetaCredentialScope scope) {
+    RequestClientSlot& slot = slot_for_scope(scope);
+    if (slot.client) return std::pair{slot.client, std::string{}};
+    if (slot.attempted) return std::pair{slot.client, slot.error};
+    slot.attempted = true;
+    slot.client = client_pool_ ? client_pool_->acquire(
+        slot.uri,
         std::chrono::seconds(5),
         std::chrono::seconds(10),
         std::chrono::seconds(10),
-        &request_client_error
+        &slot.error
     ) : make_client_from_uri(
-        host->runner_uri,
+        slot.uri,
         std::chrono::seconds(5),
         std::chrono::seconds(10),
         std::chrono::seconds(10),
-        &request_client_error
+        &slot.error
     );
-    return std::pair{request_client, request_client_error};
+    return std::pair{slot.client, slot.error};
+  };
+
+  auto invalidate_client = [&](
+      MetaCredentialScope scope,
+      const std::shared_ptr<clickhouse::Client>& client) {
+    if (client_pool_ && client) client_pool_->invalidate(client);
+    RequestClientSlot& slot = slot_for_scope(scope);
+    if (slot.client == client) {
+      slot.client.reset();
+      slot.error.clear();
+      slot.attempted = false;
+    }
   };
 
   auto fetch_keywords = [&](MetaKeywords& out, std::string& err_code, std::string& err_msg) -> bool {
+    constexpr MetaCredentialScope scope = MetaCredentialScope::System;
     out.updated_at_ms = ts_ms;
+    out.credential_scope = meta_credential_scope_name(scope);
 
-    auto client_result = make_client();
+    auto client_result = make_client(scope);
     auto client = std::move(client_result.first);
     std::string err = std::move(client_result.second);
     if (!client) {
-      err_code = "clickhouse_connect";
-      err_msg = err;
-      return false;
+      // Keywords are part of the SQL dialect rather than user-visible data.
+      // Keep highlighting and parsing available even when the system account
+      // is temporarily unreachable; other global catalogs still report their
+      // connection error independently.
+      load_builtin_keywords(out.items);
+      out.source = "builtin";
+      return true;
     }
 
     try {
@@ -202,6 +302,25 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           out.items.emplace_back(sv.data(), sv.size());
         }
       });
+      if (out.items.empty()) {
+        load_builtin_keywords(out.items);
+        out.source = "builtin";
+      }
+    } catch (const clickhouse::ServerException&) {
+      // ClickHouse versions before 24.3 do not provide system.keywords. The
+      // fallback is deterministic and independent of user permissions.
+      load_builtin_keywords(out.items);
+      out.source = "builtin";
+    } catch (const std::system_error& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
+    } catch (const clickhouse::ProtocolError& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
     } catch (const std::exception& e) {
       err_code = "clickhouse_error";
       err_msg = e.what();
@@ -212,9 +331,11 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   };
 
   auto fetch_functions = [&](MetaFunctions& out, std::string& err_code, std::string& err_msg) -> bool {
+    constexpr MetaCredentialScope scope = MetaCredentialScope::System;
     out.updated_at_ms = ts_ms;
+    out.credential_scope = meta_credential_scope_name(scope);
 
-    auto client_result = make_client();
+    auto client_result = make_client(scope);
     auto client = std::move(client_result.first);
     std::string err = std::move(client_result.second);
     if (!client) {
@@ -341,6 +462,16 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         if (ci != 0) return ci < 0;
         return a.name < b.name;
       });
+    } catch (const std::system_error& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
+    } catch (const clickhouse::ProtocolError& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
     } catch (const std::exception& e) {
       err_code = "clickhouse_error";
       err_msg = e.what();
@@ -351,9 +482,13 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   };
 
   auto fetch_catalog = [&](const std::string& type, MetaCatalog& out, std::string& err_code, std::string& err_msg) -> bool {
+    const MetaCredentialScope scope = metadata_uses_runner_credentials(type)
+      ? MetaCredentialScope::Runner
+      : MetaCredentialScope::System;
     out.updated_at_ms = ts_ms;
+    out.credential_scope = meta_credential_scope_name(scope);
 
-    auto client_result = make_client();
+    auto client_result = make_client(scope);
     auto client = std::move(client_result.first);
     std::string err = std::move(client_result.second);
     if (!client) {
@@ -654,6 +789,16 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         if (ci != 0) return ci < 0;
         return a.name < b.name;
       });
+    } catch (const std::system_error& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
+    } catch (const clickhouse::ProtocolError& e) {
+      invalidate_client(scope, client);
+      err_code = "clickhouse_transport";
+      err_msg = e.what();
+      return false;
     } catch (const std::exception& e) {
       err_code = "clickhouse_error";
       err_msg = e.what();
@@ -667,6 +812,9 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     w.Key(type.c_str());
     w.StartObject();
     w.Key("updated_at_ms"); w.Uint64(cat.updated_at_ms);
+    if (!cat.credential_scope.empty()) {
+      w.Key("credential_scope"); w.String(cat.credential_scope.c_str());
+    }
     if (stale) {
       w.Key("stale"); w.Bool(true);
     }
@@ -691,17 +839,33 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   for (const auto& t : types) {
     if (t == "keywords") {
-      auto r = meta_keywords_cache_.get_or_refresh(host_id, ts_ms, ttl_ms, 5000, fetch_keywords);
+      constexpr MetaCredentialScope scope = MetaCredentialScope::System;
+      const std::string cache_key = host_id + "::system::keywords";
+      auto r = meta_keywords_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch_keywords);
       if (!r.has_value) {
-        errors.push_back({"keywords", r.error_code.empty() ? "clickhouse_error" : r.error_code, r.error_message, false});
+        errors.push_back({
+            "keywords",
+            r.error_code.empty() ? "clickhouse_error" : r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            false});
         continue;
       }
-      if (r.had_error) errors.push_back({"keywords", r.error_code, r.error_message, true});
+      if (r.had_error) {
+        errors.push_back({
+            "keywords",
+            r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            true});
+      }
+      ++successful_types;
       w.Key("keywords");
       w.StartObject();
       w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
-      if (r.stale) w.Key("stale");
-      if (r.stale) w.Bool(true);
+      w.Key("source"); w.String(r.value->source.c_str());
+      w.Key("credential_scope"); w.String(r.value->credential_scope.c_str());
+      if (r.stale) { w.Key("stale"); w.Bool(true); }
       w.Key("items");
       w.StartArray();
       for (const auto& kw : r.value->items) w.String(kw.c_str());
@@ -711,18 +875,32 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     }
 
     if (t == "functions") {
-      auto r = meta_functions_cache_.get_or_refresh(host_id, ts_ms, ttl_ms, 5000, fetch_functions);
+      constexpr MetaCredentialScope scope = MetaCredentialScope::System;
+      const std::string cache_key = host_id + "::system::functions";
+      auto r = meta_functions_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch_functions);
       if (!r.has_value) {
-        errors.push_back({"functions", r.error_code.empty() ? "clickhouse_error" : r.error_code, r.error_message, false});
+        errors.push_back({
+            "functions",
+            r.error_code.empty() ? "clickhouse_error" : r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            false});
         continue;
       }
-      if (r.had_error) errors.push_back({"functions", r.error_code, r.error_message, true});
+      if (r.had_error) {
+        errors.push_back({
+            "functions",
+            r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            true});
+      }
+      ++successful_types;
       w.Key("functions");
       w.StartObject();
       w.Key("updated_at_ms"); w.Uint64(r.value->updated_at_ms);
-      if (r.stale) {
-        w.Key("stale"); w.Bool(true);
-      }
+      w.Key("credential_scope"); w.String(r.value->credential_scope.c_str());
+      if (r.stale) { w.Key("stale"); w.Bool(true); }
       w.Key("items");
       w.StartArray();
       for (const auto& fn : r.value->items) {
@@ -740,7 +918,10 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     }
 
     if (catalog_types.find(t) != catalog_types.end()) {
-      std::string cache_key = host_id + "::" + t;
+      const MetaCredentialScope scope = metadata_uses_runner_credentials(t)
+        ? MetaCredentialScope::Runner
+        : MetaCredentialScope::System;
+      std::string cache_key = host_id + "::" + meta_credential_scope_name(scope) + "::" + t;
       if (t == "columns" && scoped_columns) {
         cache_key += "::" + column_database + "::" + column_table;
       }
@@ -749,18 +930,36 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       };
       auto r = meta_catalog_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch);
       if (!r.has_value) {
-        errors.push_back({t, r.error_code.empty() ? "clickhouse_error" : r.error_code, r.error_message, false});
+        errors.push_back({
+            t,
+            r.error_code.empty() ? "clickhouse_error" : r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            false});
         continue;
       }
-      if (r.had_error) errors.push_back({t, r.error_code, r.error_message, true});
+      if (r.had_error) {
+        errors.push_back({
+            t,
+            r.error_code,
+            r.error_message,
+            meta_credential_scope_name(scope),
+            true});
+      }
+      ++successful_types;
       write_catalog(t, *r.value, r.stale);
       continue;
     }
 
-    errors.push_back({t, "unsupported_type", "unsupported type", false});
+    errors.push_back({t, "unsupported_type", "unsupported type", "request", false});
   }
 
   w.EndObject();
+
+  w.Key("partial");
+  w.Bool(successful_types > 0 && !errors.empty());
+  w.Key("successful_type_count");
+  w.Uint64(static_cast<uint64_t>(successful_types));
 
   w.Key("errors");
   w.StartArray();
@@ -769,6 +968,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     w.Key("type"); w.String(e.type.c_str());
     w.Key("code"); w.String(e.code.c_str());
     w.Key("message"); w.String(e.message.c_str());
+    w.Key("credential_scope"); w.String(e.credential_scope.c_str());
     w.Key("stale"); w.Bool(e.stale);
     w.EndObject();
   }
@@ -776,20 +976,18 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
   w.EndObject();
 
-  if (!errors.empty()) {
-    bool fatal = true;
-    for (const auto& e : errors) {
-      if (e.stale) { fatal = false; break; }
-    }
-    if (fatal) {
-      res.status = 503;
-      res.set_content(sb.GetString(), sb.GetSize(), "application/json");
-      return;
-    }
+  if (successful_types == 0 && !errors.empty()) {
+    const bool request_error = std::all_of(errors.begin(), errors.end(), [](const ErrItem& error) {
+      return error.code == "unsupported_type";
+    });
+    res.status = request_error ? 400 : 503;
+  } else {
+    // A metadata request is allowed to succeed partially. The frontend applies
+    // every returned catalog independently and retries only missing types later.
+    res.status = 200;
   }
-
-  res.status = 200;
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
+
 }
 
 } // namespace chdash

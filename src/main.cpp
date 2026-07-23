@@ -132,6 +132,12 @@ int main(int argc, char** argv) {
   cfg.query_options.describe_cache_ttl_ms = std::max(0, envi("QUERY_DESCRIBE_CACHE_TTL_MS", 60 * 1000));
   cfg.client_pool_max_idle_per_key = static_cast<size_t>(std::max(0, std::min(64,
       envi("CH_CLIENT_POOL_MAX_IDLE", 4))));
+  cfg.client_pool_idle_ttl_ms = std::max(0, std::min(24 * 60 * 60 * 1000,
+      envi("CH_CLIENT_POOL_IDLE_TTL_MS", 60 * 1000)));
+  cfg.client_pool_validate_after_idle_ms = std::max(0, std::min(24 * 60 * 60 * 1000,
+      envi("CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS", 15 * 1000)));
+  cfg.client_pool_reaper_interval_ms = std::max(250, std::min(60 * 1000,
+      envi("CH_CLIENT_POOL_REAPER_INTERVAL_MS", 5 * 1000)));
   cfg.format_cache_max_entries = static_cast<size_t>(std::max(0, std::min(100'000,
       envi("FORMAT_CACHE_MAX_ENTRIES", 512))));
   cfg.format_cache_max_bytes = static_cast<size_t>(std::max(0, std::min(1024 * 1024 * 1024,
@@ -185,6 +191,9 @@ int main(int argc, char** argv) {
     std::cerr << "listen=http://" << cfg.listen << "\n";
     std::cerr << "hosts=" << cfg.hosts.size() << " health_interval_ms=" << cfg.health.interval_ms << " timeout_ms=" << cfg.health.timeout_ms
               << " client_pool_max_idle=" << cfg.client_pool_max_idle_per_key
+              << " client_pool_idle_ttl_ms=" << cfg.client_pool_idle_ttl_ms
+              << " client_pool_validate_after_idle_ms=" << cfg.client_pool_validate_after_idle_ms
+              << " client_pool_reaper_interval_ms=" << cfg.client_pool_reaper_interval_ms
               << " query_sample_interval_ms=" << cfg.query_options.sample_interval_ms
               << " query_batch_rows=" << cfg.query_options.result_rows_batch_size
               << " query_batch_bytes=" << cfg.query_options.result_rows_batch_bytes

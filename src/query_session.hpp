@@ -114,6 +114,12 @@ public:
   void start();
   void request_cancel();
 
+  // The browser-facing query id is stable, while compatibility retries may
+  // use distinct native ClickHouse ids. Cancellation must target every native
+  // attempt that belongs to this session.
+  std::vector<std::string> native_query_ids() const;
+  void cancel_native_queries_best_effort(bool synchronous);
+
   // A query has one consuming SSE stream. Tracking attachment lets the server
   // reap abandoned POST /run sessions without touching active downloads.
   bool attach_stream();
@@ -134,6 +140,12 @@ public:
 
 private:
   void run_query();
+  std::string begin_native_query_attempt();
+  std::string latest_native_query_id() const;
+  void cancel_native_query_ids_best_effort(
+    const std::vector<std::string>& query_ids,
+    bool synchronous
+  );
 
   // Records a sample point at most every options_.sample_interval_ms (called from driver callbacks).
   // Caller must hold mu_.
@@ -171,6 +183,11 @@ private:
   std::chrono::steady_clock::time_point started_at_{};
   std::chrono::steady_clock::time_point finished_at_{};
   bool stream_attached_ = false;
+
+  // First native attempt keeps the public UUID for observability. Any retry
+  // receives a unique suffix so ClickHouse never sees two concurrent queries
+  // with the same id while the previous socket is being torn down.
+  std::vector<std::string> native_query_ids_;
 
   uint64_t read_rows_total_ = 0;
   uint64_t read_bytes_total_ = 0;

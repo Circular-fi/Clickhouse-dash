@@ -89,7 +89,10 @@ The default build embeds frontend assets into the binary.
 | `QUERY_DESCRIBE_MODE` | `auto` | `auto`, `always`, or `never` compatibility planning |
 | `QUERY_DESCRIBE_CACHE_ENTRIES` | `256` | Maximum cached result transport plans |
 | `QUERY_DESCRIBE_CACHE_TTL_MS` | `60000` | Transport-plan cache lifetime |
-| `CH_CLIENT_POOL_MAX_IDLE` | `4` | Maximum idle native clients per pool |
+| `CH_CLIENT_POOL_MAX_IDLE` | `4` | Maximum idle native clients per URI/timeout key |
+| `CH_CLIENT_POOL_IDLE_TTL_MS` | `60000` | Close idle native sockets before server/proxy idle timeouts; `0` disables expiry |
+| `CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS` | `15000` | Validate bounded-timeout clients after this idle duration; long-query clients are replaced instead of pinged; `0` disables validation |
+| `CH_CLIENT_POOL_REAPER_INTERVAL_MS` | `5000` | Idle-socket cleanup interval |
 | `FORMAT_CACHE_MAX_ENTRIES` | `512` | SQL formatting cache entries |
 | `FORMAT_CACHE_MAX_BYTES` | `16777216` | SQL formatting cache byte limit |
 
@@ -110,14 +113,26 @@ clickhouse {
 }
 ```
 
+`runner_uri` defines query visibility and is used for the host health check,
+database/table/column autocomplete, formatting, and user queries. `system_uri`
+is used for server-wide catalogs, diagnostics, final statistics, and query
+cancellation. A system-account failure therefore does not mark an otherwise
+queryable host as down.
+
 ## HTTP API
 
 - `GET /healthz` strict process health.
 - `GET /api/meta` build metadata and optional scoped autocomplete catalogs.
+  Server-wide catalogs (`keywords`, `functions`, `table_functions`, `formats`,
+  `settings`, and `data_types`) use `system_uri`; visibility-sensitive catalogs
+  (`databases`, `tables`, and `columns`) use `runner_uri`. Mixed requests return
+  HTTP 200 with `partial=true` when at least one requested catalog succeeds.
+  Keywords have a deterministic built-in fallback for old or temporarily
+  unreachable system accounts.
 - `GET /api/hosts` host health snapshot.
 - `GET /api/hosts/stream` host health SSE stream.
 - `POST /api/format` SQL formatting batch. Stale pooled native connections are reconnected and retried once without adding a healthy-path round trip. Persistent transport failures return HTTP 502 with `error_code=clickhouse_transport_error`; SQL formatting errors return HTTP 422.
-- `POST /api/query/run` start a query and obtain its stream URL and cancel token.
+- `POST /api/query/run` start a query and obtain its stream URL and cancel token. Compatibility retries keep the public id stable while using unique native ClickHouse attempt ids, synchronously stopping a failed native attempt before retrying so ClickHouse never sees two running attempts with the same id.
 - `GET /api/query/stream?query_id=...` query results and telemetry SSE stream.
 - `POST /api/query/cancel` cancel a query with its signed token.
 

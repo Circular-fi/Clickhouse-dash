@@ -614,3 +614,46 @@ def test_native_telemetry_keeps_original_metrics_without_threads() -> None:
     assert isinstance(done, dict)
     assert done.get("status") == "finished"
     assert "telemetry" not in done
+
+
+def test_hidden_json_column_compat_retry_does_not_reuse_a_running_query_id() -> None:
+    table = f"chdash_query_id_retry_{time.time_ns()}"
+    create_sql = f"CREATE TABLE default.{table} (payload JSON) ENGINE = Memory"
+    insert_sql = (
+        f"INSERT INTO default.{table} VALUES "
+        "('{\"value\":1,\"nested\":{\"ok\":true}}')"
+    )
+
+    try:
+        for statement in (create_sql, insert_sql):
+            result, _events = execute_case(statement, base_url=BASE_URL, session=SESSION)
+            assert (result.get("outcome") or {}).get("success"), concise_result(result)
+
+        # The SELECT text does not mention JSON, so auto mode first takes the
+        # native fast path and must fall back after the driver rejects the
+        # column type. The retry must use a distinct native ClickHouse id.
+        result, events = execute_case(
+            f"SELECT payload FROM default.{table}",
+            base_url=BASE_URL,
+            session=SESSION,
+        )
+        outcome = result.get("outcome") or {}
+        assert outcome.get("success"), concise_result(result)
+        assert outcome.get("types") == ["String"]
+        assert outcome.get("transport_modes") == ["stringify"]
+        assert json.loads((outcome.get("first_row") or [""])[0]) == {
+            "value": 1,
+            "nested": {"ok": True},
+        }
+        messages = [
+            str((event.get("data") or {}).get("message") or "")
+            for event in events
+            if event.get("event") == "error" and isinstance(event.get("data"), dict)
+        ]
+        assert not any("already running" in message.lower() for message in messages)
+    finally:
+        execute_case(
+            f"DROP TABLE IF EXISTS default.{table}",
+            base_url=BASE_URL,
+            session=SESSION,
+        )

@@ -7,6 +7,7 @@
 
 #include <clickhouse/query.h>
 #include <clickhouse/columns/enum.h>
+#include <clickhouse/exceptions.h>
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -19,6 +20,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
@@ -180,6 +182,76 @@ void QuerySession::request_cancel() {
     }
   }
   cv_.notify_all();
+}
+
+
+std::vector<std::string> QuerySession::native_query_ids() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return native_query_ids_;
+}
+
+std::string QuerySession::begin_native_query_attempt() {
+  std::lock_guard<std::mutex> lock(mu_);
+  const size_t attempt_index = native_query_ids_.size();
+  std::string native_id = query_id_;
+  if (attempt_index > 0) {
+    native_id += "-attempt-";
+    native_id += std::to_string(attempt_index + 1);
+  }
+  native_query_ids_.push_back(native_id);
+  return native_id;
+}
+
+std::string QuerySession::latest_native_query_id() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return native_query_ids_.empty() ? query_id_ : native_query_ids_.back();
+}
+
+void QuerySession::cancel_native_query_ids_best_effort(
+  const std::vector<std::string>& query_ids,
+  bool synchronous
+) {
+  if (query_ids.empty()) return;
+
+  std::string error;
+  auto client = client_pool_ ? client_pool_->acquire(
+      stats_uri_.empty() ? runner_uri_ : stats_uri_,
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      &error)
+    : make_client_from_uri(
+      stats_uri_.empty() ? runner_uri_ : stats_uri_,
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      std::chrono::seconds(5),
+      &error);
+  if (!client) return;
+
+  std::string sql = "KILL QUERY WHERE query_id IN (";
+  for (size_t i = 0; i < query_ids.size(); ++i) {
+    if (i > 0) sql += ", ";
+    sql += sql_quote_string(query_ids[i]);
+  }
+  sql += ") ";
+  sql += synchronous ? "SYNC" : "ASYNC";
+
+  try {
+    client->Execute(sql);
+  } catch (const std::system_error&) {
+    if (client_pool_) client_pool_->invalidate(client);
+  } catch (const clickhouse::ProtocolError&) {
+    if (client_pool_) client_pool_->invalidate(client);
+  } catch (...) {
+    // Permission failures and already-finished queries do not corrupt the
+    // native connection. Cancellation remains best effort.
+  }
+}
+
+void QuerySession::cancel_native_queries_best_effort(bool synchronous) {
+  auto ids = native_query_ids();
+  if (ids.empty()) ids.push_back(query_id_);
+  cancel_native_query_ids_best_effort(ids, synchronous);
 }
 
 bool QuerySession::attach_stream() {
@@ -397,7 +469,7 @@ void QuerySession::refresh_stats_from_query_log_best_effort() {
     "SELECT toUInt64(read_rows) AS read_rows, toUInt64(read_bytes) AS read_bytes, "
     "toInt64(memory_usage) AS memory_usage "
     "FROM system.query_log "
-    "WHERE query_id = " + sql_quote_string(query_id_) + " "
+    "WHERE query_id = " + sql_quote_string(latest_native_query_id()) + " "
     "ORDER BY event_time_microseconds DESC "
     "LIMIT 1";
 
@@ -797,10 +869,29 @@ static std::string build_transport_wrapper_sql(
 
 
 void QuerySession::run_query() {
-  auto reset_query_connection_best_effort = [&]() {
-    try {
-      if (client_query_) client_query_->ResetConnection();
-    } catch (...) {
+  auto discard_query_connection = [&]() {
+    if (!client_query_) return;
+    if (client_pool_) client_pool_->invalidate(client_query_);
+    client_query_.reset();
+  };
+
+  auto acquire_query_connection = [&]() {
+    std::string error;
+    client_query_ = client_pool_ ? client_pool_->acquire(
+        runner_uri_,
+        std::chrono::seconds(5),
+        std::chrono::milliseconds(0),
+        std::chrono::milliseconds(0),
+        &error)
+      : make_client_from_uri(
+        runner_uri_,
+        std::chrono::seconds(5),
+        std::chrono::milliseconds(0),
+        std::chrono::milliseconds(0),
+        &error);
+    if (!client_query_) {
+      throw std::runtime_error(
+          error.empty() ? "Could not connect to ClickHouse." : error);
     }
   };
 
@@ -833,21 +924,10 @@ void QuerySession::run_query() {
     // Acquire the TCP connection only when the SSE consumer is attached. This
     // makes POST /api/query/run allocation-only, avoids holding pooled sockets
     // for abandoned runs, and keeps connection latency in the measured stream.
-    std::string client_error;
-    client_query_ = client_pool_ ? client_pool_->acquire(
-        runner_uri_,
-        std::chrono::seconds(5),
-        std::chrono::milliseconds(0),
-        std::chrono::milliseconds(0),
-        &client_error)
-      : make_client_from_uri(
-        runner_uri_,
-        std::chrono::seconds(5),
-        std::chrono::milliseconds(0),
-        std::chrono::milliseconds(0),
-        &client_error);
-    if (!client_query_) {
-      finish_error(client_error.empty() ? "Could not connect to ClickHouse." : client_error);
+    try {
+      acquire_query_connection();
+    } catch (const std::exception& e) {
+      finish_error(e.what() ? e.what() : "Could not connect to ClickHouse.");
       return;
     }
 
@@ -861,7 +941,14 @@ void QuerySession::run_query() {
                                 first_keyword == "explain";
 
     if (!is_select_like) {
-      client_query_->Execute(sql_);
+      if (cancel_requested_.load(std::memory_order_relaxed)) {
+        throw std::runtime_error("canceled");
+      }
+      clickhouse::Query command(sql_, begin_native_query_attempt());
+      if (cancel_requested_.load(std::memory_order_relaxed)) {
+        throw std::runtime_error("canceled");
+      }
+      client_query_->Execute(command);
       {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -910,6 +997,9 @@ void QuerySession::run_query() {
     };
 
     auto execute_select_attempt = [&](bool use_describe, bool allow_cached_plan) {
+      if (cancel_requested_.load(std::memory_order_relaxed)) {
+        throw std::runtime_error("canceled");
+      }
       // The fast path intentionally skips DESCRIBE. Auto mode pre-plans SQL
       // that visibly produces driver-incompatible result types, and otherwise
       // retries once only if the native decoder fails before any SSE payload.
@@ -970,7 +1060,8 @@ void QuerySession::run_query() {
         effective_sql = build_transport_wrapper_sql(sql_, result_plan, &used_transport_wrapper);
       }
 
-      clickhouse::Query q(effective_sql, query_id_);
+      const std::string native_query_id = begin_native_query_attempt();
+      clickhouse::Query q(effective_sql, native_query_id);
 
       // Ensure ClickHouse sends query-group ProfileEvents over native TCP.
       // Only counters and gauges emitted by ClickHouse are exposed. Missing
@@ -1234,6 +1325,10 @@ void QuerySession::run_query() {
         }
       });
 
+      if (cancel_requested_.load(std::memory_order_relaxed)) {
+        cancel_native_query_ids_best_effort({native_query_id}, false);
+        throw std::runtime_error("canceled");
+      }
       client_query_->Select(q);
       if (cache_new_plan_after_success) {
         put_cached_describe_plan(plan_cache_key, result_plan, options_);
@@ -1257,18 +1352,27 @@ void QuerySession::run_query() {
           !cancel_requested_.load(std::memory_order_relaxed);
 
       if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_data) {
-        // Schema changed while a plan was cached. Retry the DESCRIBE once on a
-        // fresh native connection rather than returning a stale-plan failure.
+        // Schema changed while a plan was cached. The failed native attempt may
+        // remain visible in system.processes briefly after its socket closes.
+        // Stop it synchronously and use a distinct id for the retry so a slow
+        // cleanup can never trigger QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING.
+        const std::string failed_native_id = latest_native_query_id();
         invalidate_cached_describe_plan(plan_cache_key);
-        reset_query_connection_best_effort();
+        discard_query_connection();
+        cancel_native_query_ids_best_effort({failed_native_id}, true);
+        acquire_query_connection();
         apply_database_best_effort();
         reset_stats_for_compat_retry();
         execute_select_attempt(true, false);
       } else if (allow_describe_retry && can_retry_without_emitted_data &&
                  should_retry_with_describe_after_fast_path_error(msg)) {
-        // A failed native decode can leave the connection mid-packet. Reset it
-        // before the compatibility retry, but do not emit anything yet.
-        reset_query_connection_best_effort();
+        // A failed native decode can leave both the connection mid-packet and
+        // the server-side query alive for a short period. Discard the transport,
+        // synchronously stop the failed attempt, then retry under a unique id.
+        const std::string failed_native_id = latest_native_query_id();
+        discard_query_connection();
+        cancel_native_query_ids_best_effort({failed_native_id}, true);
+        acquire_query_connection();
         apply_database_best_effort();
         reset_stats_for_compat_retry();
         meta_sent = false;
@@ -1285,7 +1389,10 @@ void QuerySession::run_query() {
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
     // Do not return possibly mid-stream/error-state clients to the idle pool as-is.
-    reset_query_connection_best_effort();
+    // Also stop any native attempt that may still be executing after a transport
+    // failure or browser disconnect. This path runs only after an error.
+    discard_query_connection();
+    cancel_native_queries_best_effort(false);
     refresh_stats_from_query_log_best_effort();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();

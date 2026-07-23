@@ -12,6 +12,12 @@ x-chdash-config-volume: &chdash-config-volume
   target: /config/CH_HOSTS.hcl
   read_only: true
 
+x-chdash-source-config-volume: &chdash-source-config-volume
+  type: bind
+  source: ${CH_HOSTS_SOURCE_CONFIG:-./config/CH_HOSTS.source.hcl}
+  target: /config/CH_HOSTS.hcl
+  read_only: true
+
 services:
   clickhouse:
     image: "${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:latest}"
@@ -78,8 +84,11 @@ services:
       FORMAT_CACHE_MAX_BYTES: "${FORMAT_CACHE_MAX_BYTES:-16777216}"
       FORMAT_CACHE_TTL_MS: "${FORMAT_CACHE_TTL_MS:-600000}"
       CH_CLIENT_POOL_MAX_IDLE: "${CH_CLIENT_POOL_MAX_IDLE:-8}"
+      CH_CLIENT_POOL_IDLE_TTL_MS: "${CH_CLIENT_POOL_IDLE_TTL_MS:-60000}"
+      CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS: "${CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS:-15000}"
+      CH_CLIENT_POOL_REAPER_INTERVAL_MS: "${CH_CLIENT_POOL_REAPER_INTERVAL_MS:-5000}"
     volumes:
-      - *chdash-config-volume
+      - *chdash-source-config-volume
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

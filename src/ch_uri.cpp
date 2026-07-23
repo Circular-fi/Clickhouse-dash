@@ -275,6 +275,11 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   opt.SetConnectionRecvTimeout(recv_timeout);
   opt.SetConnectionSendTimeout(send_timeout);
 
+  // Kernel keepalive detects dead peers during long-running native queries
+  // without adding an application-level Ping before every query. Idle pooled
+  // clients are still closed proactively by ClickHouseClientPool.
+  opt.TcpKeepAlive(true);
+
   // TLS via query params
   const bool secure = query_param_truthy(pu->query, "secure", false);
   if (secure) {

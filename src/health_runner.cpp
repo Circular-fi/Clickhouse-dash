@@ -24,6 +24,10 @@ int normalize_health_interval_ms(int interval_ms) {
 
 static constexpr int64_t kSystemTablesRefreshMs = 10 * 60 * 1000;
 static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
+// A health connection is useful only while checks are frequent. Close it
+// before a long sleep so ClickHouse never has to reap an idle dashboard socket
+// through its receive/idle timeout path.
+static constexpr int kMaxPersistentHealthClientIdleMs = 60 * 1000;
 
 static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
   HostSystemTables out;
@@ -176,7 +180,7 @@ void HealthRunner::loop() {
       std::lock_guard<std::mutex> lk(mu_);
       init_jobs.reserve(ctx_.size());
       for (size_t i = 0; i < ctx_.size(); ++i) {
-        if (!ctx_[i].client) init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.system_uri});
+        if (!ctx_[i].client) init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.runner_uri});
       }
     }
 
@@ -218,12 +222,14 @@ void HealthRunner::loop() {
     struct PingResult {
       size_t index = 0;
       bool ok = false;
+      bool discard_client = false;
       int64_t ping_ms = -1;
       std::string error;
     };
     struct AuxiliaryJob {
       size_t index = 0;
       std::shared_ptr<clickhouse::Client> client;
+      std::string uri;
     };
 
     std::vector<PingJob> ping_jobs;
@@ -240,12 +246,17 @@ void HealthRunner::loop() {
         if (ctx.client &&
             (ctx.last.system_tables.checked_at_ms == 0 ||
              ts - ctx.last.system_tables.checked_at_ms >= kSystemTablesRefreshMs)) {
-          caps_jobs.push_back(AuxiliaryJob{i, ctx.client});
+          const bool same_credentials = ctx.spec.system_uri == ctx.spec.runner_uri;
+          caps_jobs.push_back(AuxiliaryJob{
+              i,
+              same_credentials ? ctx.client : std::shared_ptr<clickhouse::Client>{},
+              same_credentials ? std::string{} : ctx.spec.system_uri,
+          });
         }
         if (ctx.client &&
             (ctx.last.version_checked_at_ms == 0 ||
              ts - ctx.last.version_checked_at_ms >= kHostVersionRefreshMs)) {
-          version_jobs.push_back(AuxiliaryJob{i, ctx.client});
+          version_jobs.push_back(AuxiliaryJob{i, ctx.client, {}});
         }
       }
     }
@@ -265,14 +276,36 @@ void HealthRunner::loop() {
       } catch (const std::exception& e) {
         result.error = e.what();
         try {
+          const auto started = steady_clock::now();
           job.client->ResetConnection();
+          job.client->Ping();
+          result.ok = true;
+          result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
+          result.error.clear();
+        } catch (const std::exception& reconnect_error) {
+          result.discard_client = true;
+          result.error += "; reconnect failed: ";
+          result.error += reconnect_error.what();
         } catch (...) {
+          result.discard_client = true;
+          result.error += "; reconnect failed";
         }
       } catch (...) {
         result.error = "unknown ping failure";
         try {
+          const auto started = steady_clock::now();
           job.client->ResetConnection();
+          job.client->Ping();
+          result.ok = true;
+          result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
+          result.error.clear();
+        } catch (const std::exception& reconnect_error) {
+          result.discard_client = true;
+          result.error += "; reconnect failed: ";
+          result.error += reconnect_error.what();
         } catch (...) {
+          result.discard_client = true;
+          result.error += "; reconnect failed";
         }
       }
       return result;
@@ -302,7 +335,26 @@ void HealthRunner::loop() {
     caps_results.reserve(caps_jobs.size());
     for (const auto& job : caps_jobs) {
       if (job.index < ping_ok.size() && ping_ok[job.index]) {
-        caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
+        if (job.client) {
+          caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
+          continue;
+        }
+
+        std::string error;
+        auto system_client = make_client_from_uri(
+            job.uri,
+            milliseconds(settings_.timeout_ms),
+            milliseconds(settings_.timeout_ms),
+            milliseconds(settings_.timeout_ms),
+            &error);
+        if (system_client) {
+          caps_results.emplace_back(job.index, detect_system_tables(system_client.get(), ts));
+        } else {
+          HostSystemTables unavailable;
+          unavailable.checked = true;
+          unavailable.checked_at_ms = ts;
+          caps_results.emplace_back(job.index, std::move(unavailable));
+        }
       }
     }
 
@@ -325,13 +377,14 @@ void HealthRunner::loop() {
         ctx.last.ping_ms = result.ok ? result.ping_ms : -1;
         if (result.ok) {
           ctx.last_error.clear();
-        } else if (ctx.client) {
+        } else {
           const std::string message = result.error.empty() ? "ping failed" : result.error;
           if (was_healthy || ctx.last_error != message) {
             std::cerr << "[health] host=" << ctx.spec.id << " down: " << message << "\n";
           }
           ctx.last_error = message;
         }
+        if (result.discard_client) ctx.client.reset();
       }
       for (auto& result : caps_results) {
         if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = std::move(result.second);
@@ -356,6 +409,20 @@ void HealthRunner::loop() {
           break;
         }
       }
+    }
+
+    const bool release_clients_before_wait =
+        effective_interval_ms > kMaxPersistentHealthClientIdleMs;
+    if (release_clients_before_wait) {
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        for (auto& ctx : ctx_) ctx.client.reset();
+      }
+      // The job vectors also own shared references. Release them before the
+      // sleep so the TCP sockets are actually closed now, not next cycle.
+      ping_jobs.clear();
+      caps_jobs.clear();
+      version_jobs.clear();
     }
 
     const auto remaining = milliseconds(effective_interval_ms) - elapsed;

@@ -116,7 +116,7 @@ SSE events are classified as:
 
 Operational counts may differ when batching or telemetry cadence changes. Source/release differences remain visible in the comparison tables but do not create top-level warnings when row order, row hash, result types, and deterministic control events remain equivalent. Set `BENCH_STRICT_EVENT_COUNTS=1` only when exact operational counts are intentionally part of the compatibility contract.
 
-The benchmark also includes a forced two-level `GROUP BY` case. It validates that the source reports native aggregation activity through ClickHouse `ProfileEvents`, while keeping the progress percentage scoped to input reading. No aggregate or overall completion percentage is inferred.
+The source and release may emit different operational event counts because their result batch sizes and telemetry cadence differ. Those differences remain visible without being promoted to failures when the returned data and deterministic control events are equivalent.
 
 Common settings:
 
@@ -141,6 +141,7 @@ host {
 ```bash
 BENCH_HOST_IDS="local,active" \
 BENCH_CLICKHOUSE_HTTP_TARGETS="local=http://clickhouse:8123,active=https://user:password@clickhouse-active.example.com:8443" \
+CH_HOSTS_SOURCE_CONFIG=./config/CH_HOSTS.hcl \
 docker compose up -d --build
 ```
 
@@ -179,3 +180,35 @@ Health checks use `/api/health` and do not parse reports or scan artifact trees.
 
 The test runner mounts the repository at `/repo` in read-only mode. Static harness tests inspect the exact source tree, release workflow, formatting fixtures, and frontend resources that are used to build the source container.
 
+The source container uses `config/CH_HOSTS.source.hcl` by default. Its
+`meta-partial` host intentionally combines a working `runner_uri` with invalid
+`system_uri` credentials. This verifies that query health and visible
+database/table catalogs remain available while server-wide metadata is
+reported as a partial response rather than an HTTP 503. The release and
+benchmark containers continue to use `config/CH_HOSTS.hcl` and only benchmark
+the normal `local` host.
+
+
+## Native TCP pool diagnostics
+
+The source container expires idle native clients before ClickHouse reaches its server-side socket timeout. The default settings are:
+
+```bash
+CH_CLIENT_POOL_MAX_IDLE=8
+CH_CLIENT_POOL_IDLE_TTL_MS=60000
+CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS=15000
+CH_CLIENT_POOL_REAPER_INTERVAL_MS=5000
+```
+
+Set `CH_CLIENT_POOL_MAX_IDLE=0` for a no-pooling diagnostic run. This removes idle sockets completely at the cost of a new native connection for every operation.
+
+The health runner pings `runner_uri`, because this is the account and endpoint
+that determine whether user queries can run. `system_uri` is opened only for
+server-wide diagnostics and metadata. An unavailable admin account can make
+those individual catalogs partial, but it does not make the query host itself
+unhealthy.
+
+Compatibility fallbacks use a distinct native query id per attempt. The public
+browser id stays unchanged, cancellation targets every attempt, and the failed
+native attempt is stopped synchronously before retrying. This specifically
+guards against `QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING` during driver fallback.
