@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace chdash {
@@ -31,6 +32,10 @@ public:
     std::string* err
   );
 
+  // Mark a leased client as unsafe so its custom deleter destroys it instead
+  // of returning it to the idle pool.
+  void invalidate(const std::shared_ptr<clickhouse::Client>& client) noexcept;
+
   void clear();
 
 private:
@@ -50,6 +55,7 @@ private:
   size_t max_idle_per_key_ = 4;
   std::mutex mu_;
   std::unordered_map<std::string, IdleBucket> idle_;
+  std::unordered_set<clickhouse::Client*> invalidated_;
 };
 
 } // namespace chdash

@@ -116,7 +116,7 @@ clickhouse {
 - `GET /api/meta` build metadata and optional scoped autocomplete catalogs.
 - `GET /api/hosts` host health snapshot.
 - `GET /api/hosts/stream` host health SSE stream.
-- `POST /api/format` SQL formatting batch.
+- `POST /api/format` SQL formatting batch. Stale pooled native connections are reconnected and retried once without adding a healthy-path round trip. Persistent transport failures return HTTP 502 with `error_code=clickhouse_transport_error`; SQL formatting errors return HTTP 422.
 - `POST /api/query/run` start a query and obtain its stream URL and cancel token.
 - `GET /api/query/stream?query_id=...` query results and telemetry SSE stream.
 - `POST /api/query/cancel` cancel a query with its signed token.

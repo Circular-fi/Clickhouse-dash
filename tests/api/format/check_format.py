@@ -587,3 +587,36 @@ def test_expected_format_fixtures_are_idempotent_in_batch() -> None:
             if wanted != got
         ]
         assert not mismatches, "non-idempotent formatter fixtures: " + ", ".join(mismatches)
+
+
+def test_format_batch_supports_cte_with_repeated_long_literal() -> None:
+    signature = (
+        "2jGc2VHLZE74hTf9MiadooKQFcn9Tsm8NQ7EzuupGnhy4QZzJAkma1zfeoU97mfE21TACp49kcVXzRrkY9q8ANMm"
+    )
+    sql = f"""WITH
+    data AS
+    (
+        SELECT
+            signature,
+            timestamp,
+            block,
+            index
+        FROM circular.transactions
+        WHERE signature = '{signature}'
+    )
+SELECT *
+FROM circular.transactions
+WHERE
+    timestamp = (
+        SELECT timestamp
+        FROM data
+    )
+    AND signature = '{signature}'"""
+
+    response = post_format_payload({"sqls": [sql]})
+    payload = response.json()
+    assert len(payload["formatted_sqls"]) == 1
+    formatted = payload["formatted_sqls"][0]
+    assert formatted.count(signature) == 2
+    assert "WITH" in formatted
+    assert "FROM circular.transactions" in formatted

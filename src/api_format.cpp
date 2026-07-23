@@ -186,6 +186,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   std::shared_ptr<clickhouse::Client> format_client;
   std::string format_client_error;
   bool format_client_attempted = false;
+  bool format_reconnect_attempted = false;
   auto get_format_client = [&]() -> std::shared_ptr<clickhouse::Client> {
     if (format_client) return format_client;
     if (format_client_attempted) return {};
@@ -215,13 +216,21 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   using FormatValue = FormatCache::ValuePtr;
   std::unordered_map<std::string, FormatValue> request_results;
 
-  auto format_one = [&](std::string sql_raw, FormatValue* out_pretty, std::string* err) -> bool {
+  auto format_one = [&](
+      std::string sql_raw,
+      FormatValue* out_pretty,
+      std::string* err,
+      FormatQueryFailureKind* failure_kind
+  ) -> bool {
+    if (failure_kind) *failure_kind = FormatQueryFailureKind::none;
     std::string sql = trim_sql(std::move(sql_raw));
     if (sql.empty()) {
+      if (failure_kind) *failure_kind = FormatQueryFailureKind::input;
       if (err) *err = "Missing SQL text.";
       return false;
     }
     if (sql.size() > kMaxFormatSqlBytes) {
+      if (failure_kind) *failure_kind = FormatQueryFailureKind::input;
       if (err) *err = "SQL text is too large to format.";
       return false;
     }
@@ -251,6 +260,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     } else {
       auto client = get_format_client();
       if (!client) {
+        if (failure_kind) *failure_kind = FormatQueryFailureKind::transport;
         if (err) {
           *err = format_client_error.empty()
             ? "Failed to connect to ClickHouse for formatQuery."
@@ -259,18 +269,30 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
         return false;
       }
 
-      std::string fmt_err;
       const std::string parseable_sql = quote_reserved_aliases_for_format_query(sql);
-      const auto formatted = try_format_query_with_client(*client, parseable_sql, kMaxFormatSqlBytes, &fmt_err);
-      if (!formatted.has_value()) {
-        if (err) *err = fmt_err.empty() ? "Failed to format query." : fmt_err;
+      FormatQueryResult format_result = format_query_with_client(
+          *client,
+          parseable_sql,
+          kMaxFormatSqlBytes);
+      format_reconnect_attempted =
+          format_reconnect_attempted || format_result.reconnect_attempted;
+      if (!format_result.connection_reusable && client_pool_) {
+        client_pool_->invalidate(client);
+      }
+      if (!format_result) {
+        if (failure_kind) *failure_kind = format_result.failure;
+        if (err) {
+          *err = format_result.message.empty()
+            ? "Failed to format query."
+            : format_result.message;
+        }
         return false;
       }
 
       // formatQuery may normalize literal escaping. Restore the user's exact
       // literal spelling, including doubled SQL quotes, before line wrapping.
       pretty = postprocess_format_query(
-          restore_sql_single_quoted_literals(*formatted, sql),
+          restore_sql_single_quoted_literals(*format_result.formatted_sql, sql),
           line_width);
     }
 
@@ -298,6 +320,22 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     w.Key("line_width"); w.Int(line_width);
   };
 
+  auto set_format_retry_header = [&]() {
+    if (format_reconnect_attempted) {
+      res.set_header("X-Chdash-Format-Reconnect", "1");
+    }
+  };
+
+  auto format_error_status = [](FormatQueryFailureKind kind) {
+    return is_format_transport_failure(kind) ? 502 : 422;
+  };
+
+  auto format_error_code = [](FormatQueryFailureKind kind) -> const char* {
+    return is_format_transport_failure(kind)
+      ? "clickhouse_transport_error"
+      : "format_failed";
+  };
+
   if (doc.HasMember("sqls") && doc["sqls"].IsArray()) {
     const auto& arr = doc["sqls"];
     if (arr.Size() > kMaxBatchItems) {
@@ -314,13 +352,26 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
       FormatValue pretty;
       std::string err;
-      if (!format_one(std::string(arr[i].GetString(), arr[i].GetStringLength()), &pretty, &err)) {
+      FormatQueryFailureKind failure_kind = FormatQueryFailureKind::none;
+      if (!format_one(
+              std::string(arr[i].GetString(), arr[i].GetStringLength()),
+              &pretty,
+              &err,
+              &failure_kind)) {
         const std::string sql_trimmed = trim_sql(arr[i].GetString());
         const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
         const ClickHouseErrorLocation* locp =
           (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
         const int idx = static_cast<int>(i);
-        return json_error_with_payload(res, 422, "format_failed", err, locp, nullptr, &idx);
+        set_format_retry_header();
+        return json_error_with_payload(
+            res,
+            format_error_status(failure_kind),
+            format_error_code(failure_kind),
+            err,
+            locp,
+            nullptr,
+            &idx);
       }
       formatted_sqls.push_back(std::move(pretty));
     }
@@ -338,6 +389,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     w.EndObject();
 
     set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
+    set_format_retry_header();
     res.status = 200;
     res.set_content(sb.GetString(), sb.GetSize(), "application/json");
     return;
@@ -349,12 +401,25 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
   FormatValue pretty;
   std::string err;
-  if (!format_one(std::string(doc["sql"].GetString(), doc["sql"].GetStringLength()), &pretty, &err)) {
+  FormatQueryFailureKind failure_kind = FormatQueryFailureKind::none;
+  if (!format_one(
+          std::string(doc["sql"].GetString(), doc["sql"].GetStringLength()),
+          &pretty,
+          &err,
+          &failure_kind)) {
     const std::string sql_trimmed = trim_sql(doc["sql"].GetString());
     const auto loc = parse_clickhouse_error_location(err, sql_trimmed);
     const ClickHouseErrorLocation* locp =
       (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
-    return json_error_with_payload(res, 422, "format_failed", err, locp, nullptr, nullptr);
+    set_format_retry_header();
+    return json_error_with_payload(
+        res,
+        format_error_status(failure_kind),
+        format_error_code(failure_kind),
+        err,
+        locp,
+        nullptr,
+        nullptr);
   }
 
   rapidjson::StringBuffer sb(nullptr, std::max<size_t>(1024, pretty->size() + 128));
@@ -366,6 +431,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   w.EndObject();
 
   set_format_cache_header(res, cache_hits + request_deduplicated, cache_misses);
+  set_format_retry_header();
   res.status = 200;
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }

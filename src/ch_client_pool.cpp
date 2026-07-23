@@ -69,16 +69,30 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   });
 }
 
+void ClickHouseClientPool::invalidate(
+  const std::shared_ptr<clickhouse::Client>& client
+) noexcept {
+  if (!client) return;
+
+  try {
+    std::lock_guard<std::mutex> lk(mu_);
+    invalidated_.insert(client.get());
+  } catch (...) {
+    // If bookkeeping allocation fails, the caller can still reconnect the
+    // client. Avoid throwing from an error-recovery path.
+  }
+}
+
 void ClickHouseClientPool::release(std::string key, clickhouse::Client* client) noexcept {
   if (!client) return;
 
   std::unique_ptr<clickhouse::Client> owned(client);
-  if (max_idle_per_key_ == 0) {
-    return;
-  }
 
   try {
     std::lock_guard<std::mutex> lk(mu_);
+    if (invalidated_.erase(client) != 0 || max_idle_per_key_ == 0) {
+      return;
+    }
     auto& bucket = idle_[key];
     if (bucket.clients.size() < max_idle_per_key_) {
       bucket.clients.push_back(std::move(owned));
