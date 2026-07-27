@@ -21,7 +21,7 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
   clickhouse_cpp
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
-  GIT_TAG        v2.6.0
+  GIT_TAG        v2.6.2
 )
 FetchContent_MakeAvailable(clickhouse_cpp)
 

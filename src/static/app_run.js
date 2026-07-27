@@ -1193,9 +1193,25 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       es.addEventListener("result_meta", (ev) => {
         const data = parseSseJson(ev);
         if (!data) return;
-        const cols = Array.isArray(data.columns) ? data.columns : [];
-        const types = Array.isArray(data.types) ? data.types : [];
-        streamSink.renderTableMeta(cols, types);
+
+        const cols = Array.isArray(data.columns)
+          ? data.columns
+          : [];
+        const transportTypes = Array.isArray(data.types)
+          ? data.types
+          : [];
+        const originalTypes = Array.isArray(data.original_types)
+          ? data.original_types
+          : [];
+        const displayTypes = cols.map((_, index) => {
+          const originalType = originalTypes[index];
+          if (typeof originalType === "string" && originalType.trim()) {
+            return originalType;
+          }
+          return transportTypes[index] ?? "";
+        });
+
+        streamSink.renderTableMeta(cols, displayTypes);
       });
 
       es.addEventListener("result_rows", (ev) => {
