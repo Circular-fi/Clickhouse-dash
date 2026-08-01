@@ -213,7 +213,9 @@ struct Parser {
     }
     consume(TokKind::Equal, "'='");
     HclValue v = parse_value();
-    out.attrs[name] = std::move(v);
+    if (!out.attrs.emplace(name, std::move(v)).second) {
+      lex.fail("duplicate attribute '" + name + "'");
+    }
   }
 
   HclObject parse_root() {

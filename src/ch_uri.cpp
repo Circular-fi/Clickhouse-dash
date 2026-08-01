@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cctype>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace chdash {
@@ -71,6 +73,31 @@ static void parse_query(std::string_view qs, std::unordered_map<std::string, std
     }
     i = amp + 1;
   }
+}
+
+static std::optional<std::string> read_password_file(const std::string& path, std::string* err) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    if (err) *err = "cannot open password_file: " + path;
+    return std::nullopt;
+  }
+  std::string password((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  if (input.bad()) {
+    if (err) *err = "cannot read password_file: " + path;
+    return std::nullopt;
+  }
+  if (password.find('\0') != std::string::npos) {
+    if (err) *err = "password_file contains a NUL byte: " + path;
+    return std::nullopt;
+  }
+  // Secret files produced by Docker do not add a newline, while files created
+  // by common shell tools usually do. Remove one conventional line ending but
+  // preserve every other byte, including intentional leading/trailing spaces.
+  if (!password.empty() && password.back() == '\n') {
+    password.pop_back();
+    if (!password.empty() && password.back() == '\r') password.pop_back();
+  }
+  return password;
 }
 
 static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& port, std::string* err) {
@@ -266,7 +293,22 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   opt.SetHost(pu->host);
   opt.SetPort(pu->port);
   if (!pu->user.empty()) opt.SetUser(pu->user);
-  if (!pu->password.empty()) opt.SetPassword(pu->password);
+  auto password_file = pu->query.find("password_file");
+  if (!pu->password.empty() && password_file != pu->query.end()) {
+    if (err) *err = "URI password and password_file are mutually exclusive";
+    return std::nullopt;
+  }
+  if (password_file != pu->query.end()) {
+    if (password_file->second.empty()) {
+      if (err) *err = "password_file query parameter cannot be empty";
+      return std::nullopt;
+    }
+    auto password = read_password_file(password_file->second, err);
+    if (!password) return std::nullopt;
+    opt.SetPassword(*password);
+  } else if (!pu->password.empty()) {
+    opt.SetPassword(pu->password);
+  }
   // Default database is intentionally "default". Users can always query db.table.
   opt.SetDefaultDatabase("default");
 

@@ -21,7 +21,9 @@ struct ParsedUri {
   std::unordered_map<std::string, std::string> query;
 };
 
-// Parse clickhouse://user:pass@host:port?secure=1&ca=/path&verify=1
+// Parse clickhouse://user:pass@host:port?secure=1&ca=/path&verify=1.
+// client_options_from_uri also accepts password_file=/path as a native secret
+// source; it is mutually exclusive with a password embedded in userinfo.
 // Only the subset we need.
 std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::string* err);
 

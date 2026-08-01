@@ -14,7 +14,7 @@
 namespace chdash {
 
 // Minimal HCL subset parser.
-// Supported grammar (sufficient for CH_HOSTS):
+// Supported grammar (sufficient for the complete application config):
 //   - Blocks:  ident "{" ... "}"
 //   - Assignments: ident "=" (string|number|bool)
 //   - Repeated blocks with same name (stored as vector)

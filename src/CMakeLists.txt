@@ -42,6 +42,7 @@ FetchContent_MakeAvailable(rapidjson)
 if (CHDASH_BUILD_APP)
   add_executable(chdash
     main.cpp
+    config.cpp
     server.cpp
     api_error.cpp
     http_json.cpp

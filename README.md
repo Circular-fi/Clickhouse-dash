@@ -77,41 +77,21 @@ The default build embeds frontend assets into the binary.
 
 ## Configuration
 
-| Variable | Default | Description |
-|---|---:|---|
-| `LISTEN_HOST` | `0.0.0.0` | HTTP listen host |
-| `LISTEN_PORT` | `8080` | HTTP listen port |
-| `CH_HOSTS` | required | Multi-host HCL configuration |
-| `RESULT_PREVIEW_ROW_LIMIT` | `10000` | Maximum rows returned to the browser |
-| `QUERY_RESULT_BATCH_ROWS` | `1000` | Maximum rows per SSE result batch |
-| `QUERY_RESULT_BATCH_BYTES` | `262144` | Approximate byte limit per SSE result batch |
-| `QUERY_SSE_QUEUE_MAX_BYTES` | `8388608` | Per-query backpressure queue limit |
-| `QUERY_DESCRIBE_MODE` | `auto` | `auto`, `always`, or `never` compatibility planning |
-| `QUERY_DESCRIBE_CACHE_ENTRIES` | `256` | Maximum cached result transport plans |
-| `QUERY_DESCRIBE_CACHE_TTL_MS` | `60000` | Transport-plan cache lifetime |
-| `CH_CLIENT_POOL_MAX_IDLE` | `4` | Maximum idle native clients per URI/timeout key |
-| `CH_CLIENT_POOL_IDLE_TTL_MS` | `60000` | Close idle native sockets before server/proxy idle timeouts; `0` disables expiry |
-| `CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS` | `15000` | Validate bounded-timeout clients after this idle duration; long-query clients are replaced instead of pinged; `0` disables validation |
-| `CH_CLIENT_POOL_REAPER_INTERVAL_MS` | `5000` | Idle-socket cleanup interval |
-| `FORMAT_CACHE_MAX_ENTRIES` | `512` | SQL formatting cache entries |
-| `FORMAT_CACHE_MAX_BYTES` | `16777216` | SQL formatting cache byte limit |
+The preferred mode is a complete HCL file:
 
-Example `CH_HOSTS`:
-
-```hcl
-health {
-  interval_ms = 5000
-  timeout_ms  = 800
-}
-
-clickhouse {
-  host {
-    name       = "local"
-    runner_uri = "clickhouse://user:pass@clickhouse:9000"
-    system_uri = "clickhouse://system:pass@clickhouse:9000"
-  }
-}
+```bash
+chdash --config /etc/clickhouse-dash/config.hcl
+chdash --config /etc/clickhouse-dash/config.hcl --health
 ```
+
+When `--config` is present, the application ignores all configuration
+environment variables. Every legacy environment option has an HCL equivalent.
+See [`config.example.hcl`](config.example.hcl) for the complete schema and
+[`docs/configuration.md`](docs/configuration.md) for the exhaustive mapping and
+the code-verified effect of every option.
+
+Without `--config`, the legacy environment mode remains supported and
+`CH_HOSTS` remains required.
 
 `runner_uri` defines query visibility and is used for the host health check,
 database/table/column autocomplete, formatting, and user queries. `system_uri`

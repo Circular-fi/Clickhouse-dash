@@ -16,26 +16,28 @@ def read(relative_path: str) -> str:
 def test_idle_native_clients_have_a_proactive_ttl_reaper() -> None:
     header = read("src/ch_client_pool.hpp")
     source = read("src/ch_client_pool.cpp")
-    main = read("src/main.cpp")
+    config = read("src/config.cpp")
 
     assert "std::chrono::steady_clock::time_point returned_at" in header
     assert "void reaper_loop();" in header
     assert "collect_expired_locked" in header
     assert "reaper_thread_ = std::thread" in source
     assert "now - entry.returned_at >= idle_ttl_" in source
-    assert 'envi("CH_CLIENT_POOL_IDLE_TTL_MS", 60 * 1000)' in main
+    assert 'env_int("CH_CLIENT_POOL_IDLE_TTL_MS", 60 * 1000)' in config
+    assert '"idle_ttl_ms"' in config
 
 
 def test_reused_clients_are_validated_only_after_a_configurable_idle_period() -> None:
     source = read("src/ch_client_pool.cpp")
-    main = read("src/main.cpp")
+    config = read("src/config.cpp")
 
     assert "idle_for >= validate_after_idle_" in source
     assert "if (client && validate)" in source
     assert "client->Ping();" in source
     assert "validation_due && !entry.bounded_receive_timeout" in source
     assert "Never Ping such a" in source
-    assert 'envi("CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS", 15 * 1000)' in main
+    assert 'env_int("CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS", 15 * 1000)' in config
+    assert '"validate_after_idle_ms"' in config
 
 
 def test_compatibility_retries_use_distinct_native_query_ids() -> None:
