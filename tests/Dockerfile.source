@@ -3,7 +3,7 @@ ARG CHDASH_GIT_SHA=local
 ARG CHDASH_BUILD_TIME=tests
 ARG SOURCE_CMAKE_BUILD_TYPE=Release
 
-FROM alpine:3.20 AS toolchain
+FROM alpine:3.24 AS toolchain
 WORKDIR /work
 
 RUN apk add --no-cache \
@@ -47,7 +47,7 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
  && cmake --build /work/build --target chdash -j$(nproc) \
  && cp /work/build/chdash /work/chdash
 
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
 COPY --from=builder /work/chdash /app/chdash
