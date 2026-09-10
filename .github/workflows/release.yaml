@@ -295,14 +295,18 @@ jobs:
 
           path = Path(os.environ["FETCHCONTENT_DIR"]) / "rapidjson-src/include/rapidjson/document.h"
           text = path.read_text()
-          old = "GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }"
-          new = "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;"
+          historical = "GenericStringRef& operator=(const GenericStringRef& rhs) { s = rhs.s; length = rhs.length; }"
+          compatibility = "GenericStringRef& operator=(const GenericStringRef& rhs) /* = delete */;"
+          deleted = "GenericStringRef& operator=(const GenericStringRef& rhs) = delete;"
 
-          if new in text:
+          if deleted in text:
               print(f"RapidJSON already patched: {path}")
-          elif old in text:
-              path.write_text(text.replace(old, new, 1))
-              print(f"Patched RapidJSON GenericStringRef assignment: {path}")
+          elif compatibility in text:
+              path.write_text(text.replace(compatibility, deleted, 1))
+              print(f"Patched RapidJSON C++11 deleted assignment: {path}")
+          elif historical in text:
+              path.write_text(text.replace(historical, deleted, 1))
+              print(f"Patched historical RapidJSON assignment: {path}")
           else:
               print("Could not find the expected RapidJSON assignment operator", file=sys.stderr)
               for line_number, line in enumerate(text.splitlines(), start=1):

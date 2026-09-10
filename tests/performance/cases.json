@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "host_id": "local",
+  "cases": [
+    {
+      "name": "select_literal",
+      "sql": "SELECT 1 AS one, 'ok' AS label"
+    },
+    {
+      "name": "select_numbers_100k",
+      "sql": "SELECT sum(number) AS total, avg(number) AS average FROM numbers(100000)"
+    },
+    {
+      "name": "create_table",
+      "before_each": [
+        "DROP TABLE IF EXISTS chdash_perf.create_target"
+      ],
+      "sql": "CREATE TABLE chdash_perf.create_target (id UInt64, payload String) ENGINE = Memory"
+    },
+    {
+      "name": "insert_1000_rows",
+      "before_each": [
+        "CREATE TABLE IF NOT EXISTS chdash_perf.events (id UInt64, payload String) ENGINE = Memory",
+        "TRUNCATE TABLE chdash_perf.events"
+      ],
+      "sql": "INSERT INTO chdash_perf.events SELECT number, concat('row-', toString(number)) FROM numbers(1000)"
+    },
+    {
+      "name": "select_inserted_aggregate",
+      "before_each": [
+        "CREATE TABLE IF NOT EXISTS chdash_perf.events (id UInt64, payload String) ENGINE = Memory",
+        "TRUNCATE TABLE chdash_perf.events",
+        "INSERT INTO chdash_perf.events SELECT number, concat('row-', toString(number)) FROM numbers(10000)"
+      ],
+      "sql": "SELECT count() AS rows, sum(id) AS id_sum FROM chdash_perf.events"
+    }
+  ]
+}

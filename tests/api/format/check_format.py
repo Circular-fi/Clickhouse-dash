@@ -1,6 +1,7 @@
 import difflib
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -519,7 +520,13 @@ def post_format_payload(payload: dict) -> requests.Response:
         json={"host_id": "local", **payload},
         timeout=TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
+    if not response.ok:
+        body = response.text
+        if len(body) > 8_000:
+            body = body[:8_000] + "\n... response truncated ..."
+        raise AssertionError(
+            f"POST /api/format failed with HTTP {response.status_code}:\n{body}"
+        )
     return response
 
 
@@ -548,11 +555,46 @@ def test_format_preserves_exact_literal_spelling() -> None:
     assert "'it''s \\\\ exact'" in formatted
 
 
+def test_format_create_view_query_boundary_is_not_treated_as_reserved_alias() -> None:
+    sql = "CREATE VIEW default.chdash_format_view_probe AS SELECT 1 AS FROM"
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert "AS `SELECT`" not in formatted
+    assert "AS\nSELECT" in formatted or "AS SELECT" in formatted
+    assert "AS `FROM`" in formatted
+
+
+def test_format_quoted_alias_does_not_consume_following_from_clause() -> None:
+    sql = """SELECT
+    database,
+    table,
+    sum(data_compressed_bytes) AS `comp_bytes`,
+    sum(data_uncompressed_bytes) AS `uncomp_bytes`,
+    sum(rows) AS `rows_cnt`,
+    count() AS `part_count`
+FROM system.parts
+WHERE active = 1
+GROUP BY database, `table`"""
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert "`FROM` system.parts" not in formatted
+    assert "FROM system.parts" in formatted
+    assert "AS `part_count`" in formatted
+
+
+def test_format_quoted_alias_with_comment_does_not_consume_following_from_clause() -> None:
+    sql = "SELECT count() AS `part_count` /* keep alias */ FROM system.parts WHERE active = 1"
+    formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
+    assert "`FROM` system.parts" not in formatted
+    assert "FROM system.parts" in formatted
+    assert "AS `part_count`" in formatted
+
+
 def test_format_preserves_function_delimiter_literal() -> None:
     sql = "SELECT arrayStringConcat(['a', 'b'], ',') AS joined"
     formatted = post_format_payload({"sql": sql}).json()["formatted_sql"]
-    assert "arrayStringConcat(['a', 'b'], ',')" in formatted
-    assert "arrayStringConcat(['a', 'b'], ', ')" not in formatted
+    # Formatting may wrap function arguments across lines. What must remain
+    # byte-for-byte stable is the SQL string literal used as delimiter.
+    assert re.search(r"\]\s*,\s*','\s*\)", formatted), formatted
+    assert not re.search(r"\]\s*,\s*', '\s*\)", formatted), formatted
 
 
 def test_format_preserves_quoted_identifier_after_unquoted_alias() -> None:
@@ -579,7 +621,13 @@ def test_expected_format_fixtures_are_idempotent_in_batch() -> None:
     for offset in range(0, len(fixtures), 20):
         batch = fixtures[offset : offset + 20]
         expected = [load_sql_text(path) for path in batch]
-        payload = post_format_payload({"sqls": expected}).json()
+        try:
+            payload = post_format_payload({"sqls": expected}).json()
+        except AssertionError as exc:
+            names = ", ".join(path.name for path in batch)
+            raise AssertionError(
+                f"formatter idempotence batch offset={offset}, fixtures=[{names}]\n{exc}"
+            ) from exc
         actual = [normalize_sql_file_content(value) for value in payload["formatted_sqls"]]
         mismatches = [
             path.name
@@ -601,11 +649,11 @@ def test_format_batch_supports_cte_with_repeated_long_literal() -> None:
             timestamp,
             block,
             index
-        FROM circular.transactions
+        FROM analytics.transactions
         WHERE signature = '{signature}'
     )
 SELECT *
-FROM circular.transactions
+FROM analytics.transactions
 WHERE
     timestamp = (
         SELECT timestamp
@@ -619,4 +667,4 @@ WHERE
     formatted = payload["formatted_sqls"][0]
     assert formatted.count(signature) == 2
     assert "WITH" in formatted
-    assert "FROM circular.transactions" in formatted
+    assert "FROM analytics.transactions" in formatted

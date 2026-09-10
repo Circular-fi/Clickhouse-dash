@@ -28,14 +28,14 @@ FetchContent_MakeAvailable(clickhouse_cpp)
 FetchContent_Declare(
   httplib
   GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-  GIT_TAG        v0.15.3
+  GIT_TAG        9d6a7ee2c1aaeb1fd9ae15d14f06f487149d147f
 )
 FetchContent_MakeAvailable(httplib)
 
 FetchContent_Declare(
   rapidjson
   GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-  GIT_TAG        v1.1.0
+  GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f
 )
 FetchContent_MakeAvailable(rapidjson)
 
@@ -53,10 +53,25 @@ if (CHDASH_BUILD_APP)
     format_cache.cpp
     format_postprocess.cpp
     api_query.cpp
+    user_sql_policy.cpp
     api_query_stream.cpp
+    api_analysis.cpp
     query_session.cpp
     hcl.cpp
     jwt.cpp
+    query_registry.cpp
+    query_analysis.cpp
+    query_execution.cpp
+    api_query_execution.cpp
+    deep_analysis.cpp
+    api_export.cpp
+    export_job.cpp
+    export_serializer.cpp
+    zip_stream.cpp
+    allowed_objects.cpp
+    explorer_catalog.cpp
+    explorer_graph.cpp
+    api_explorer.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp

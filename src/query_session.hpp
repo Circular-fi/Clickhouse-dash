@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -30,20 +31,13 @@ enum class SessionStatus {
 };
 
 enum class QueryDescribeMode {
-  Auto,    // fast path: run directly, retry once with DESCRIBE+wrapper before streaming any rows
+  Auto,    // direct path: run immediately, retry once with DESCRIBE+wrapper before streaming any rows
   Always,  // old behavior: DESCRIBE before every SELECT/WITH
-  Never,   // fastest, but complex ClickHouse types may be degraded or fail
+  Never,   // lowest overhead, but complex ClickHouse types may be degraded or fail
 };
 
 struct QuerySessionOptions {
   QueryDescribeMode describe_mode = QueryDescribeMode::Auto;
-
-  // Querying system.query_log is intentionally disabled by default: it adds an
-  // extra system query after every run and the old SYSTEM FLUSH LOGS path was
-  // especially expensive for interactive dashboards. Progress/ProfileEvents
-  // remain available through the native TCP query stream.
-  bool final_stats_from_query_log = false;
-  bool flush_query_log_for_final_stats = false;
 
   int sample_interval_ms = 40;
   int result_rows_batch_size = 1000;
@@ -54,6 +48,11 @@ struct QuerySessionOptions {
   size_t sse_write_batch_events = 8;
   size_t sse_write_batch_bytes = 256 * 1024;
   size_t sse_queue_max_bytes = 8 * 1024 * 1024;
+
+  // Hard limits for interactive result serialization. Massive export has its
+  // own streaming path and is intentionally not constrained by these values.
+  size_t max_result_cell_bytes = 32 * 1024 * 1024;
+  size_t max_result_event_bytes = 32 * 1024 * 1024;
 
   // Compatibility plans are deterministic for a query/schema pair. Reusing a
   // recent DESCRIBE result removes the extra round trip on repeated complex SQL.
@@ -69,8 +68,13 @@ struct SessionSnapshot {
   uint64_t read_bytes_total = 0;
   uint64_t total_rows_to_read = 0;
 
-  uint64_t wrote_rows_total = 0;
-  uint64_t wrote_bytes_total = 0;
+  // Result payload emitted to the browser. This is not ClickHouse write I/O.
+  uint64_t result_rows_emitted = 0;
+  uint64_t result_bytes_emitted = 0;
+
+  // Rows/bytes written by ClickHouse, accumulated from native Progress packets.
+  uint64_t written_rows_total = 0;
+  uint64_t written_bytes_total = 0;
 
   int64_t user_time_us_total = 0;
   int64_t system_time_us_total = 0;
@@ -89,6 +93,8 @@ struct SamplePoint {
   int64_t elapsed_ms = 0;
   uint64_t read_rows_total = 0;
   uint64_t read_bytes_total = 0;
+  uint64_t written_rows_total = 0;
+  uint64_t written_bytes_total = 0;
   int64_t cpu_centi = -1;  // centi-percent, -1 means unavailable
   int64_t mem_bytes = -1;  // -1 means unavailable
 };
@@ -104,7 +110,10 @@ public:
     std::string stats_uri,
     std::shared_ptr<ClickHouseClientPool> client_pool,
     int result_preview_row_limit,
-    QuerySessionOptions options = {}
+    QuerySessionOptions options = {},
+    bool detailed_profiling = false,
+    std::function<void(const std::string&)> native_query_id_observer = {},
+    std::function<void(SessionStatus, int64_t)> terminal_status_observer = {}
   );
 
   ~QuerySession();
@@ -156,7 +165,8 @@ private:
   void finish_ok();
   void finish_error(const std::string& message);
   void finish_canceled();
-  void refresh_stats_from_query_log_best_effort();
+  void finish_result_limit_reached();
+  void notify_terminal_status(SessionStatus status);
 
   std::string query_id_;
   std::string host_id_;
@@ -168,10 +178,13 @@ private:
   std::shared_ptr<ClickHouseClientPool> client_pool_;
 
   std::shared_ptr<clickhouse::Client> client_query_;
-  std::shared_ptr<clickhouse::Client> client_stats_;
 
   const int result_preview_row_limit_ = 0;
   QuerySessionOptions options_;
+  bool detailed_profiling_ = false;
+  std::function<void(const std::string&)> native_query_id_observer_;
+  std::function<void(SessionStatus, int64_t)> terminal_status_observer_;
+  std::atomic<bool> terminal_status_notified_{false};
 
   std::atomic<bool> started_{false};
   std::atomic<bool> cancel_requested_{false};
@@ -193,8 +206,10 @@ private:
   uint64_t read_bytes_total_ = 0;
   uint64_t total_rows_to_read_ = 0;
 
-  uint64_t wrote_rows_total_ = 0;
-  uint64_t wrote_bytes_total_ = 0;
+  uint64_t result_rows_emitted_ = 0;
+  uint64_t result_bytes_emitted_ = 0;
+  uint64_t written_rows_total_ = 0;
+  uint64_t written_bytes_total_ = 0;
 
   int64_t user_time_us_total_ = 0;
   int64_t system_time_us_total_ = 0;

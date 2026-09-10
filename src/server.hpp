@@ -2,9 +2,14 @@
 
 #include "ch_client_pool.hpp"
 #include "format_cache.hpp"
+#include "allowed_objects.hpp"
+#include "explorer_catalog.hpp"
+#include "explorer_graph.hpp"
+#include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
 #include "query_session.hpp"
+#include "query_registry.hpp"
 #include "stale_cache.hpp"
 
 #include <httplib.h>
@@ -13,12 +18,49 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
 namespace chdash {
+
+struct ExplorerSettings {
+  bool browse = true;
+  bool lineage = true;
+  bool storage_topology = true;
+
+  bool graph_enabled() const { return lineage || storage_topology; }
+  bool enabled() const { return browse || graph_enabled(); }
+  int cache_ttl_ms = 5000;
+  int live_refresh_ms = 2000;
+  int function_cache_ttl_ms = 60 * 60 * 1000;
+  // Markdown links in ClickHouse function documentation are disabled by
+  // default. When enabled, the browser still accepts only ClickHouse-relative
+  // references (/... or ./...) and strips every arbitrary external URL.
+  bool function_markdown_links = false;
+};
+
+struct AnalysisSettings {
+  int registry_ttl_ms = 60 * 60 * 1000;
+  size_t registry_max_entries = 10000;
+  size_t registry_sql_max_bytes = 32 * 1024 * 1024;
+  int log_lookup_timeout_ms = 2000;
+  bool flush_logs = false;
+  bool allow_deep_analyze = false;
+};
+
+struct ExportSettings {
+  size_t max_concurrent = 1;
+  size_t output_buffer_bytes = 256 * 1024;
+  std::string archive_format = "zip";
+  bool compression = false;
+  int token_ttl_ms = 120 * 1000;
+  size_t pending_max_entries = 32;
+  size_t pending_sql_max_bytes = 16 * 1024 * 1024;
+  size_t max_queries = 256;
+};
 
 struct AppConfig {
   std::string listen = "0.0.0.0:8080";
@@ -60,6 +102,15 @@ struct AppConfig {
   int query_session_terminal_ttl_ms = 30 * 1000;
   int query_session_reaper_interval_ms = 5 * 1000;
 
+  // Internal cancel capability lifetime. Tokens are additionally invalidated by
+  // a server restart because the signing secret is generated at boot.
+  int cancel_token_ttl_ms = 48 * 60 * 60 * 1000;
+
+  // Explorer, analysis, and export feature settings.
+  ExplorerSettings explorer;
+  AnalysisSettings analysis;
+  ExportSettings export_settings;
+
   // /api/version
   std::string version_semver = "dev";
   std::string version_git_sha = "unknown";
@@ -90,6 +141,19 @@ private:
   void handle_query_run(const httplib::Request& req, httplib::Response& res);
   void handle_query_stream(const httplib::Request& req, httplib::Response& res);
   void handle_query_cancel(const httplib::Request& req, httplib::Response& res);
+  void handle_query_analysis(const httplib::Request& req, httplib::Response& res);
+  void handle_query_deep_analysis(const httplib::Request& req, httplib::Response& res);
+  void handle_query_execution(const httplib::Request& req, httplib::Response& res);
+
+  void handle_export_run(const httplib::Request& req, httplib::Response& res);
+  void handle_export_stream(const httplib::Request& req, httplib::Response& res);
+
+  void handle_explorer_catalog(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_table(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_activity(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();
   void reap_sessions_once();
@@ -133,12 +197,19 @@ private:
   StaleCache<std::string, MetaKeywords> meta_keywords_cache_;
   StaleCache<std::string, MetaFunctions> meta_functions_cache_;
   StaleCache<std::string, MetaCatalog> meta_catalog_cache_;
+  StaleCache<std::string, AllowedObjectSet> explorer_allowed_cache_;
+  StaleCache<std::string, ExplorerCatalog> explorer_catalog_cache_;
+  StaleCache<std::string, ExplorerGraph> explorer_graph_cache_;
+  StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
 
   AppConfig cfg_;
   httplib::Server http_;
 
   std::unique_ptr<HealthRunner> health_;
   JwtService jwt_;
+  std::shared_ptr<QueryRegistry> query_registry_;
+  std::shared_ptr<ExportJobStore> export_jobs_;
+  std::atomic<size_t> active_exports_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
 

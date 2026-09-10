@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "ch_block_value.hpp"
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
@@ -50,11 +51,7 @@ int compare_ascii_ci(std::string_view a, std::string_view b) {
 }
 
 std::string block_string_at(const clickhouse::Block& b, size_t col, size_t row) {
-  if (col >= b.GetColumnCount()) return {};
-  auto c = b[col]->As<clickhouse::ColumnString>();
-  if (!c) return {};
-  const std::string_view sv = c->At(row);
-  return std::string(sv.data(), sv.size());
+  return ch_block_text_at(b, col, row);
 }
 
 bool block_truthy_at(const clickhouse::Block& b, size_t col, size_t row) {
@@ -118,7 +115,7 @@ void load_builtin_keywords(std::vector<std::string>& out) {
     "DROP", "ELSE", "END", "ENGINE", "EXCEPT", "EXISTS", "EXPLAIN",
     "EXPRESSION", "EXTRACT", "FETCH", "FINAL", "FIRST", "FLUSH",
     "FOLLOWING", "FOR", "FORMAT", "FREEZE", "FROM", "FULL",
-    "FUNCTION", "GLOBAL", "GRANT", "GROUP", "HAVING", "IF", "ILIKE",
+    "FUNCTION", "GLOBAL", "GRANULARITY", "GRANT", "GROUP", "HAVING", "IF", "ILIKE",
     "IN", "INDEX", "INNER", "INSERT", "INTERSECT", "INTERVAL",
     "INTO", "IS", "JOIN", "KILL", "LAST", "LAYOUT", "LEADING",
     "LEFT", "LIKE", "LIMIT", "LIVE", "LOCAL", "MATERIALIZE",
@@ -305,6 +302,24 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       if (out.items.empty()) {
         load_builtin_keywords(out.items);
         out.source = "builtin";
+      } else {
+        // system.keywords is useful but does not consistently expose every
+        // contextual ClickHouse DDL token across server versions. Merge the
+        // conservative built-in dialect set so INDEX / PROJECTION / TYPE /
+        // GRANULARITY and similar CREATE TABLE grammar are always highlighted.
+        std::vector<std::string> builtin;
+        load_builtin_keywords(builtin);
+        std::unordered_set<std::string> seen;
+        seen.reserve(out.items.size() + builtin.size());
+        for (const auto& item : out.items) seen.insert(lower_ascii(item));
+        for (const auto& item : builtin) {
+          if (seen.insert(lower_ascii(item)).second) out.items.push_back(item);
+        }
+        std::sort(out.items.begin(), out.items.end(), [](const std::string& a, const std::string& b) {
+          const int ci = compare_ascii_ci(a, b);
+          return ci != 0 ? ci < 0 : a < b;
+        });
+        out.source = "clickhouse+builtin";
       }
     } catch (const clickhouse::ServerException&) {
       // ClickHouse versions before 24.3 do not provide system.keywords. The
@@ -712,23 +727,23 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           out.items.push_back(std::move(item));
         }
       } else if (type == "tables") {
-        if (auto fast_tables = fetch_all_tables_system(); fast_tables.has_value()) {
-          out.items = std::move(*fast_tables);
+        if (auto direct_tables = fetch_all_tables_system(); direct_tables.has_value()) {
+          out.items = std::move(*direct_tables);
         } else {
           out.items = fetch_all_tables_acl();
         }
       } else if (type == "columns") {
         if (scoped_columns) {
-          if (auto fast_columns = fetch_scoped_columns_system(); fast_columns.has_value()) {
-            out.items = std::move(*fast_columns);
+          if (auto direct_columns = fetch_scoped_columns_system(); direct_columns.has_value()) {
+            out.items = std::move(*direct_columns);
           } else {
             MetaCatalogItem table;
             table.database = column_database;
             table.name = column_table;
             out.items = describe_table_acl(table);
           }
-        } else if (auto fast_columns = fetch_all_columns_system(); fast_columns.has_value()) {
-          out.items = std::move(*fast_columns);
+        } else if (auto direct_columns = fetch_all_columns_system(); direct_columns.has_value()) {
+          out.items = std::move(*direct_columns);
         } else {
           const auto tables = fetch_all_tables_acl();
           for (const auto& table : tables) {

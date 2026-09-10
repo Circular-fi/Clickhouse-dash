@@ -24,6 +24,8 @@
   let textarea = null;
   let menu = null;
   let activeIndex = 0;
+  let selectionArmed = false;
+  let armNextRender = false;
   let suggestions = [];
   let replaceRange = null;
   let closeTimer = 0;
@@ -1874,6 +1876,7 @@
       addColumnsFromSources(false);
       if (!sources.length && explicit) addColumns(Array.isArray(meta.columns?.items) ? topLevelColumns(meta.columns.items) : [], true);
       addFunctions();
+      addDataTypes();
       addKeywords();
     }
 
@@ -2055,6 +2058,11 @@
   }
 
   function relationReferenceIsKnown(refName, meta, ctes) {
+    // Missing catalog data is an unknown state, not an unknown relation. On a
+    // page reload the editor can be restored before the host metadata request
+    // completes; emitting a warning in that window creates a false red squiggle
+    // for perfectly valid database.table references.
+    if (!Array.isArray(meta?.tables?.items)) return { ok: true, pending: true };
     const name = normalizeQualifiedName(refName);
     const parts = name.split(".").filter(Boolean);
     if (!parts.length) return { ok: true };
@@ -2302,9 +2310,9 @@
     const value = String(text || "");
     const masked = maskSql(value);
     const issues = [];
-    if (isTableWarningsEnabled()) issues.push(...collectRelationDiagnostics(value, meta));
-    if (isColumnWarningsEnabled() && /\bFROM\b/i.test(masked)) issues.push(...collectSelectReferenceDiagnostics(value, meta));
-    if (isFunctionWarningsEnabled()) issues.push(...collectFunctionDiagnostics(value, meta));
+    if (isTableWarningsEnabled() && Array.isArray(meta?.tables?.items)) issues.push(...collectRelationDiagnostics(value, meta));
+    if (isColumnWarningsEnabled() && Array.isArray(meta?.tables?.items) && /\bFROM\b/i.test(masked)) issues.push(...collectSelectReferenceDiagnostics(value, meta));
+    if (isFunctionWarningsEnabled() && Array.isArray(meta?.functions?.items)) issues.push(...collectFunctionDiagnostics(value, meta));
     issues.sort((a, b) => a.start - b.start || a.end - b.end);
     const dedup = [];
     const seen = new Set();
@@ -2369,6 +2377,15 @@
         top = domRect.top - wrapRect.top;
         width = Math.max(charWidth, domRect.width);
       }
+      // Never paint diagnostics into the line-number gutter. Horizontal
+      // scrolling can move highlighted text underneath the gutter, while the
+      // textarea itself clips text at the content boundary. Mirror that clip
+      // explicitly for the absolutely-positioned diagnostic marks.
+      const contentLeft = Math.max(0, padLeft);
+      const originalRight = left + width;
+      left = Math.max(contentLeft, left);
+      width = Math.max(1, originalRight - left);
+      if (originalRight <= contentLeft) continue;
       const mark = document.createElement("span");
       mark.className = `editorDiagnostic editorDiagnostic--${issue.kind || "warning"}`;
       mark.style.left = `${left.toFixed(2)}px`;
@@ -2664,6 +2681,8 @@
     replaceRange = token ? { start: token.replaceStart, end: token.replaceEnd } : null;
     const moreCount = Math.max(0, Number(totalAvailable || 0) - suggestions.length);
     activeIndex = Math.max(0, Math.min(activeIndex, suggestions.length - 1));
+    selectionArmed = armNextRender;
+    armNextRender = false;
     // Suggestions are about to be rebuilt. Any ghost preview from the previous
     // menu is now stale until the current pointer position is reconciled against
     // the new rows. This prevents an old hovered suggestion from staying painted
@@ -3074,6 +3093,7 @@
 
   function setActive(next, scrollIntoView = true) {
     if (!isOpen()) return;
+    selectionArmed = true;
     activeIndex = (next + suggestions.length) % suggestions.length;
     const rows = menu.querySelectorAll(".autocompleteItem");
     rows.forEach((row, i) => row.setAttribute("aria-selected", String(i === activeIndex)));
@@ -3238,7 +3258,11 @@
       if (ev.isComposing) return;
       if ((ev.ctrlKey || ev.metaKey) && ev.key === " ") {
         ev.preventDefault();
-        if (isAutocompleteEnabled()) scheduleUpdate(true);
+        if (isAutocompleteEnabled()) {
+          armNextRender = true;
+          selectionArmed = isOpen();
+          scheduleUpdate(true);
+        }
         return;
       }
       if (!isOpen()) return;
@@ -3252,7 +3276,20 @@
         setActive(activeIndex - 1);
         return;
       }
-      if (ev.key === "Enter" || ev.key === "Tab") {
+      if (ev.key === "Enter") {
+        // An automatically opened menu must never steal a normal newline.
+        // Enter accepts only after the user has explicitly navigated/hovered
+        // a choice (or opened completion with Ctrl/Cmd+Space). Tab remains an
+        // explicit completion key.
+        if (!selectionArmed) {
+          close();
+          return;
+        }
+        ev.preventDefault();
+        commit(activeIndex);
+        return;
+      }
+      if (ev.key === "Tab") {
         ev.preventDefault();
         commit(activeIndex);
         return;
@@ -3288,13 +3325,15 @@
       if (isOpen()) positionMenu(ta);
       renderDiagnosticsLayer();
     }, true);
-    document.addEventListener("mousedown", (ev) => {
+    document.addEventListener("pointerdown", (ev) => {
       const target = ev.target instanceof Node ? ev.target : null;
       if (autocompleteControl && target && !autocompleteControl.contains(target)) closeAutocompleteControlMenu();
       if (!menu || menu.hidden) return;
       if (target && (menu.contains(target) || ta.contains(target))) return;
+      // Capture-phase close prevents the floating suggestion layer from
+      // swallowing Run / Run with profiling clicks at narrower viewports.
       close();
-    });
+    }, true);
 
     scheduleDiagnostics(true);
 

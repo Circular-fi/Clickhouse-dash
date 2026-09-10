@@ -1,19 +1,19 @@
 WITH
     [
         (
-            'Hk9sLm4Qp2vTx7ZaNc5Re8WuJy3Bd6FgMi1KoPrStUvX',
+            'WX-STN-01',
             toDate(now() - toIntervalDay(2))
         )
-    ]                                           AS `user_plans`,
-    arrayMin(arrayMap(p -> p.2, user_plans))    AS `min_plan_date`
+    ]                                           AS `site_dates`,
+    arrayMin(arrayMap(p -> p.2, site_dates))    AS `min_site_date`
 SELECT
-    user_id,
+    station,
     date,
-    consumed
-FROM anon.user_credits_consumption AS c
-PREWHERE date >= min_plan_date
+    rainfall
+FROM anon.weather_samples AS c
+PREWHERE date >= min_site_date
 WHERE arrayExists(
-        p -> user_id = p.1
+        p -> station = p.1
             AND date >= p.2,
-        user_plans
+        site_dates
     )

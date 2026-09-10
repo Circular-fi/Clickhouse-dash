@@ -36,6 +36,8 @@ struct StreamState {
   std::chrono::steady_clock::time_point last_publish{};
   uint64_t prev_read_rows = 0;
   uint64_t prev_read_bytes = 0;
+  uint64_t prev_written_rows = 0;
+  uint64_t prev_written_bytes = 0;
   int64_t prev_cpu_total_us = 0;
   int64_t cpu_inst_max_centi = -1;
 };
@@ -70,6 +72,8 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
 
   int64_t rows_per_second = 0;
   int64_t bytes_per_second = 0;
+  int64_t written_rows_per_second = 0;
+  int64_t written_bytes_per_second = 0;
   int64_t cpu_centi = -1;
   const int64_t cpu_total_us = snapshot.user_time_us_total + snapshot.system_time_us_total;
 
@@ -87,6 +91,16 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
           static_cast<__int128>(delta_rows) * 1000000 / elapsed_us);
       bytes_per_second = static_cast<int64_t>(
           static_cast<__int128>(delta_bytes) * 1000000 / elapsed_us);
+      const uint64_t delta_written_rows = snapshot.written_rows_total >= state.prev_written_rows
+        ? snapshot.written_rows_total - state.prev_written_rows
+        : 0;
+      const uint64_t delta_written_bytes = snapshot.written_bytes_total >= state.prev_written_bytes
+        ? snapshot.written_bytes_total - state.prev_written_bytes
+        : 0;
+      written_rows_per_second = static_cast<int64_t>(
+          static_cast<__int128>(delta_written_rows) * 1000000 / elapsed_us);
+      written_bytes_per_second = static_cast<int64_t>(
+          static_cast<__int128>(delta_written_bytes) * 1000000 / elapsed_us);
 
       const int64_t delta_cpu_us = cpu_total_us - state.prev_cpu_total_us;
       if (snapshot.cpu_time_available && delta_cpu_us >= 0) {
@@ -99,6 +113,8 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
 
   state.prev_read_rows = snapshot.read_rows_total;
   state.prev_read_bytes = snapshot.read_bytes_total;
+  state.prev_written_rows = snapshot.written_rows_total;
+  state.prev_written_bytes = snapshot.written_bytes_total;
   state.prev_cpu_total_us = cpu_total_us;
   state.last_publish = now;
 
@@ -129,17 +145,25 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
   } else {
     writer.StartArray();
     for (const auto& sample : samples) {
-      // [elapsed_ms, read_rows, read_bytes, cpu_centi, memory_bytes]
+      // [elapsed_ms, read_rows, read_bytes, cpu_centi, memory_bytes, written_rows, written_bytes]
       writer.StartArray();
       writer.Int64(sample.elapsed_ms);
       writer.Uint64(sample.read_rows_total);
       writer.Uint64(sample.read_bytes_total);
       write_nullable_int64(writer, sample.cpu_centi);
       write_nullable_int64(writer, sample.mem_bytes);
+      writer.Uint64(sample.written_rows_total);
+      writer.Uint64(sample.written_bytes_total);
       writer.EndArray();
     }
     writer.EndArray();
   }
+  // Append write telemetry after the legacy-compatible positions and sample
+  // payload so older frontends can ignore it safely.
+  writer.Uint64(snapshot.written_rows_total);
+  writer.Uint64(snapshot.written_bytes_total);
+  writer.Int64(written_rows_per_second);
+  writer.Int64(written_bytes_per_second);
   writer.EndArray();
   return std::string(buffer.GetString(), buffer.GetSize());
 }
@@ -161,7 +185,12 @@ static std::string build_done_json(const SessionSnapshot& snapshot, bool truncat
   writer.Double(static_cast<double>(snapshot.elapsed_ms) / 1000.0);
   writer.Key("read_rows"); writer.Uint64(snapshot.read_rows_total);
   writer.Key("read_bytes"); writer.Uint64(snapshot.read_bytes_total);
-  writer.Key("result_rows_returned"); writer.Uint64(snapshot.wrote_rows_total);
+  writer.Key("written_rows"); writer.Uint64(snapshot.written_rows_total);
+  writer.Key("written_bytes"); writer.Uint64(snapshot.written_bytes_total);
+  writer.Key("result_rows_emitted"); writer.Uint64(snapshot.result_rows_emitted);
+  writer.Key("result_bytes_emitted"); writer.Uint64(snapshot.result_bytes_emitted);
+  // Backward-compatible alias consumed by older frontends.
+  writer.Key("result_rows_returned"); writer.Uint64(snapshot.result_rows_emitted);
   writer.Key("result_truncated"); writer.Bool(truncated);
   writer.EndObject();
   return std::string(buffer.GetString(), buffer.GetSize());
@@ -236,6 +265,8 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           const auto baseline = state->session->snapshot();
           state->prev_read_rows = baseline.read_rows_total;
           state->prev_read_bytes = baseline.read_bytes_total;
+          state->prev_written_rows = baseline.written_rows_total;
+          state->prev_written_bytes = baseline.written_bytes_total;
           state->prev_cpu_total_us =
               baseline.user_time_us_total + baseline.system_time_us_total;
           state->last_publish = std::chrono::steady_clock::now();

@@ -60,6 +60,10 @@
   --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
 }
 
+[hidden] {
+  display: none !important;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color-scheme: light;
@@ -197,7 +201,7 @@ html[data-theme="light"] {
 html {
   font-size: 16px;
   height: 100%;
-  overflow-y: scroll;
+  overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollThumb) var(--scrollTrack);
   -webkit-font-smoothing: antialiased;
@@ -215,13 +219,9 @@ body {
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22vh),
     var(--bg);
   color: var(--text);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    Helvetica, Arial;
+  font-family: Arial, Helvetica, sans-serif;
   overflow-x: hidden;
   min-height: 100vh;
-}
-body {
-      overflow-y: hidden;
 }
 
 * {
@@ -1013,9 +1013,6 @@ button.button:not(:disabled):hover {
   border-color: rgba(239, 68, 68, 0.78);
 }
 
-#cancelButton {
-  min-width: 4.2rem;
-}
 
 
 .metricColumn {
@@ -1028,6 +1025,10 @@ button.button:not(:disabled):hover {
   grid-column: span 2;
   width: 100%;
   display: block;
+}
+
+.metricColumn > .metricCompact.is-hidden {
+  display: none;
 }
 
 .metricColumn > .metricCompact:nth-child(1),
@@ -1206,8 +1207,6 @@ button.button:not(:disabled):hover {
   overflow-anchor: none;
 }
 
-.panel--results.is-multiquery #copySplit,
-.panel--results.is-multiquery #copyJsonToast,
 .panel--results.is-multiquery #resultColumnsText {
   display: none;
 }
@@ -1952,10 +1951,28 @@ button.button:not(:disabled):hover {
 
 .hostDot--good {
   background: rgba(34, 197, 94, 0.95);
+  animation: hostDotHealthyPulse 1.8s ease-in-out infinite;
+}
+
+.hostDot--warning {
+  background: rgba(251, 191, 36, 0.95);
 }
 
 .hostDot--bad {
   background: rgba(239, 68, 68, 0.95);
+}
+
+@keyframes hostDotHealthyPulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 0 0 3px rgba(34, 197, 94, 0.16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hostDot--good { animation: none; }
 }
 
 .hostVersion {
@@ -2968,4 +2985,4407 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 .editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
 html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   padding-left: 14px;
+}
+
+/* ---- Explorer --------------------------------------------------------- */
+
+.appNav__item[type="button"] {
+  font: inherit;
+  cursor: pointer;
+  background: transparent;
+}
+
+.srOnly {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.explorerWorkspace[hidden],
+#queryWorkspace[hidden] {
+  display: none !important;
+}
+
+.explorerWorkspace {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  padding: 10px 16px 16px;
+  overflow: hidden;
+}
+
+.explorerShell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panelBg);
+  box-shadow: var(--shadow1);
+  overflow: hidden;
+}
+
+.explorerToolbar {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+}
+
+.explorerModeTabs,
+.explorerDetailTabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.explorerModeTab,
+.explorerDetailTab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  padding: 7px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.explorerModeTab:hover:not(:disabled),
+.explorerDetailTab:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.explorerModeTab.is-active,
+.explorerDetailTab.is-active {
+  color: var(--text);
+  border-color: var(--accentBorder);
+  background: color-mix(in srgb, var(--accentBorder) 12%, transparent);
+}
+
+.explorerModeTab:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.explorerField {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.explorerSelect,
+.explorerSearch input {
+  min-height: 34px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 9px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.explorerSelect {
+  max-width: 220px;
+  padding: 0 30px 0 9px;
+}
+
+.explorerSearch {
+  flex: 1 1 260px;
+  max-width: 460px;
+}
+
+.explorerSearch input {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.explorerSelect:focus,
+.explorerSearch input:focus {
+  border-color: var(--accentBorder);
+  box-shadow: var(--ring);
+}
+
+
+.explorerError {
+  margin: 10px 12px 0;
+}
+
+.explorerGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(250px, 340px) minmax(0, 1fr);
+}
+
+.explorerListPane {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tableBg) 80%, transparent);
+}
+
+.explorerListHeader {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.explorerListCount {
+  min-width: 28px;
+  padding: 2px 7px;
+  border-radius: var(--radiusPill);
+  text-align: center;
+  background: var(--pillBg);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.explorerTableList {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 6px;
+}
+
+.explorerListEmpty,
+.explorerEmptySection,
+.explorerUnavailable {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.explorerUnavailable {
+  border: 1px dashed var(--borderStrong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--error-bg) 45%, transparent);
+}
+
+.explorerTableItem {
+  width: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 9px 10px;
+  margin-bottom: 3px;
+}
+
+.explorerTableItem:hover {
+  border-color: var(--border);
+  background: var(--rowHover);
+}
+
+.explorerTableItem.is-selected {
+  border-color: var(--accentBorder);
+  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+}
+
+.explorerTableItem__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.explorerTableItem__nameWrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.explorerTableItem__db {
+  color: var(--muted);
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerTableItem__name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerTableItem__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.explorerMiniHealth,
+.explorerHealthBadge {
+  border-radius: var(--radiusPill);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.explorerMiniHealth {
+  padding: 2px 6px;
+  font-size: 0.6rem;
+}
+
+.explorerHealthBadge {
+  padding: 5px 9px;
+  font-size: 0.7rem;
+}
+
+.explorerMiniHealth--healthy,
+.explorerHealthBadge--healthy {
+  color: #34d399;
+  border-color: color-mix(in srgb, #34d399 32%, transparent);
+  background: color-mix(in srgb, #34d399 8%, transparent);
+}
+
+.explorerMiniHealth--warning,
+.explorerHealthBadge--warning {
+  color: #fbbf24;
+  border-color: color-mix(in srgb, #fbbf24 32%, transparent);
+  background: color-mix(in srgb, #fbbf24 8%, transparent);
+}
+
+.explorerMiniHealth--error,
+.explorerHealthBadge--error {
+  color: #f87171;
+  border-color: color-mix(in srgb, #f87171 35%, transparent);
+  background: color-mix(in srgb, #f87171 9%, transparent);
+}
+
+.explorerDetailPane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.explorerEmptyState[hidden] {
+  display: none !important;
+}
+
+.explorerEmptyState {
+  min-height: 260px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.explorerEmptyState strong {
+  color: var(--text);
+  font-size: 0.96rem;
+}
+
+.explorerDetailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.explorerDetailName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.explorerDetailMeta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.explorerWarnings {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.explorerWarning {
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, #fbbf24 24%, transparent);
+  background: color-mix(in srgb, #fbbf24 7%, transparent);
+  color: color-mix(in srgb, #fbbf24 80%, var(--text));
+  font-size: 0.72rem;
+}
+
+.explorerSummaryCards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.explorerSummaryCard {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--metricBg);
+  padding: 9px 10px;
+}
+
+.explorerSummaryCard__label {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 650;
+}
+
+.explorerSummaryCard__value {
+  margin-top: 4px;
+  font-size: 0.83rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerSummaryCard__sub {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.6rem;
+}
+
+.explorerDetailTabs {
+  margin-top: 14px;
+  padding-bottom: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerDetailContent {
+  padding: 12px 0 4px;
+}
+
+.explorerDataTableWrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tableBg);
+}
+
+.explorerDataTableWrap--wide .explorerDataTable {
+  min-width: 900px;
+}
+
+.explorerDataTableWrap--preview {
+  max-height: 55vh;
+}
+
+.explorerDataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+
+.explorerDataTable th,
+.explorerDataTable td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--rowDivider);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.explorerDataTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--theadBg);
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.explorerDataTable tbody tr:hover {
+  background: var(--rowHover);
+}
+
+.explorerFootnote {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  margin-top: 9px;
+}
+
+.explorerDataToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.explorerDataToolbar .explorerFootnote {
+  margin: 0;
+}
+
+.explorerSectionTitle {
+  margin: 14px 0 8px;
+  font-size: 0.78rem;
+}
+
+.explorerDdl {
+  margin: 0;
+  max-height: 58vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font: 0.72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1150px) {
+  .explorerSummaryCards {
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .explorerWorkspace {
+    height: auto;
+    min-height: calc(100vh - 62px);
+    overflow: visible;
+  }
+  .explorerToolbar {
+    flex-wrap: wrap;
+  }
+  .explorerGrid {
+    grid-template-columns: 1fr;
+  }
+  .explorerListPane {
+    max-height: 320px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* Explorer graph: Canvas keeps large schemas out of the DOM hot path. */
+.explorerGraphControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.explorerGraphControls[hidden],
+.explorerGraphPane[hidden],
+.explorerGrid[hidden] {
+  display: none !important;
+}
+
+.explorerGraphPane {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panelBg);
+}
+
+.explorerGraphCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  outline: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.explorerGraphCanvas.is-node-clickable {
+  cursor: pointer;
+}
+
+.explorerGraphCanvas.is-node-disabled {
+  cursor: default;
+}
+
+.explorerGraphCanvas.is-dragging {
+  cursor: grabbing;
+}
+
+.explorerGraphCanvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accentBorder);
+}
+
+.explorerGraphStatus {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  max-width: calc(100% - 230px);
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radiusPill);
+  background: color-mix(in srgb, var(--panelBg) 90%, transparent);
+  color: var(--muted);
+  font-size: 0.64rem;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.explorerGraphLegend {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panelBg) 90%, transparent);
+  color: var(--muted);
+  font-size: 0.61rem;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.explorerGraphLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerLegendLine {
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 2px solid var(--accentBorder);
+}
+
+.explorerLegendLine--logical {
+  border-top-style: dashed;
+  border-top-width: 1px;
+  border-top-color: var(--muted);
+}
+
+.explorerLegendLine--route {
+  border-top-style: dotted;
+  border-top-width: 1px;
+}
+
+.explorerLegendLine--ttl {
+  border-top-style: dashed;
+  border-top-width: 1.5px;
+  border-top-color: var(--accentBorder);
+}
+
+.explorerGraphMinimap {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 180px;
+  height: 110px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 9px;
+  background: var(--panelBg);
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+@media (max-width: 820px) {
+  .explorerGraphControls {
+    order: 5;
+    width: 100%;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .explorerGraphPane {
+    min-height: 68vh;
+  }
+  .explorerGraphCanvas {
+    min-height: 68vh;
+  }
+  .explorerGraphLegend {
+    display: none;
+  }
+  .explorerGraphMinimap {
+    width: 130px;
+    height: 80px;
+  }
+  .explorerGraphStatus {
+    max-width: calc(100% - 160px);
+  }
+}
+
+.runMenu__divider {
+  height: 1px;
+  margin: 0.2rem 0.35rem;
+  background: var(--border);
+}
+
+.analysisModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.56);
+  backdrop-filter: blur(3px);
+}
+
+.analysisModalBackdrop[hidden] { display: none; }
+
+.analysisModal {
+  width: min(1800px, calc(100vw - 12px));
+  height: calc(100vh - 12px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--borderStrong);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.analysisModal__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.analysisModal__title { font-size: 1rem; font-weight: 950; }
+.analysisModal__summary { margin-top: .35rem; color: var(--muted); font-size: .75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.analysisModal__notice { margin: 4px 8px 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: .76rem; }
+.analysisModal__notice[data-kind="warning"] { border-color: rgba(245, 158, 11, .45); }
+.analysisModal__notice[data-kind="error"] { border-color: rgba(239, 68, 68, .55); }
+.analysisModal__content { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px 8px 8px; }
+.analysisKv { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .7rem; }
+.analysisKv__item { border: 1px solid var(--border); border-radius: 10px; padding: .7rem; min-width: 0; }
+.analysisKv__label { color: var(--muted); font-size: .68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+.analysisKv__value { margin-top: .28rem; font-size: .78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.analysisPipeline { display: flex; flex-direction: column; gap: .55rem; }
+.analysisPipeline__node { position: relative; border: 1px solid var(--border); border-radius: 11px; padding: .7rem .8rem; }
+.analysisPipeline__node:not(:last-child)::after { content: ""; position: absolute; left: 1.25rem; bottom: -.58rem; width: 1px; height: .58rem; background: var(--borderStrong); }
+.analysisPipeline__title { font-size: .78rem; font-weight: 900; }
+.analysisPipeline__sub { margin-top: .3rem; color: var(--muted); font-size: .7rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.analysisTableWrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.analysisTable { width: 100%; border-collapse: collapse; font-size: .72rem; }
+.analysisTable th, .analysisTable td { padding: .6rem .7rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.analysisTable th { position: sticky; top: 0; background: var(--panel); font-weight: 900; z-index: 1; }
+.analysisFootnote, .analysisEmpty { color: var(--muted); font-size: .76rem; padding: .6rem 0; }
+
+@media (max-width: 720px) {
+  .analysisModalBackdrop { padding: 8px; }
+  .analysisModal { width: 100%; height: calc(100vh - 16px); }
+}
+
+/* Explorer Functions */
+.explorerSectionTabs {
+  padding-right: 8px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+
+.explorerFunctionFilters {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerFunctionFilter {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.explorerFunctionFilter .explorerSelect {
+  min-width: 0;
+  max-width: 190px;
+}
+
+.explorerFunctionDescription {
+  margin: 14px 0 0;
+  min-height: 180px;
+  max-height: 68vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font: 0.76rem/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Production UI consolidation: dense desktop surfaces with one visual hierarchy. */
+:root {
+  --radius: 10px;
+  --radiusSm: 7px;
+  --ui-gap-1: 4px;
+  --ui-gap-2: 8px;
+  --ui-gap-3: 12px;
+  --ui-gap-4: 16px;
+}
+
+/* The editor should be useful without consuming an entire desktop viewport. */
+.editorWrap {
+  height: var(--initialEditorHeight, clamp(240px, 34vh, 360px));
+  min-height: 220px;
+  max-height: 62vh;
+  border-radius: var(--radiusSm);
+}
+
+.panel {
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.panel__title,
+.statusPill__label,
+.metricCompact__label {
+  font-weight: 700;
+}
+
+.statusPill__value,
+.metaItem,
+.metricCompact__sub {
+  font-weight: 600;
+}
+
+/* Explorer has a navigation row and a separate contextual tools row. */
+.explorerHeader {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+}
+
+.explorerHeader__primary,
+.explorerHeader__tools {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.explorerHeader__primary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.explorerHeader__tools {
+  min-height: 46px;
+}
+
+.explorerSectionTabs {
+  padding-right: 0;
+  margin-right: 0;
+  border-right: 0;
+}
+
+
+.explorerHeader__tools .explorerSearch {
+  margin-left: auto;
+}
+
+.explorerModeTab,
+.explorerDetailTab {
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.explorerGraphControls {
+  gap: 5px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.explorerGrid {
+  grid-template-columns: minmax(260px, 310px) minmax(0, 1fr);
+}
+
+.explorerListPane {
+  background: color-mix(in srgb, var(--tableBg) 58%, transparent);
+}
+
+.explorerTableList {
+  padding: 5px 6px 10px;
+}
+
+/* Database > object file-tree. */
+.explorerTreeGroup + .explorerTreeGroup {
+  margin-top: 3px;
+}
+
+.explorerTreeDatabase {
+  width: 100%;
+  min-height: 31px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerTreeDatabase:hover {
+  background: var(--rowHover);
+}
+
+.explorerTreeDatabase__chevron {
+  color: var(--muted);
+  font-size: .8rem;
+  text-align: center;
+}
+
+.explorerTreeDatabase__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .73rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.explorerTreeDatabase__count {
+  color: var(--muted);
+  font-size: .62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerTreeChildren {
+  position: relative;
+  margin-left: 11px;
+  padding-left: 9px;
+}
+
+.explorerTreeChildren::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 7px;
+  width: 1px;
+  background: var(--border);
+}
+
+.explorerTreeObject {
+  width: 100%;
+  min-height: 39px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 10px;
+  align-items: center;
+  gap: 6px;
+  margin: 1px 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerTreeObject:hover {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--rowHover);
+}
+
+.explorerTreeObject.is-storage-blocked,
+.explorerTreeObject:disabled.is-storage-blocked {
+  opacity: 0.42;
+  color: var(--muted);
+  cursor: default;
+}
+
+.explorerTreeObject.is-storage-blocked:hover,
+.explorerTreeObject:disabled.is-storage-blocked:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.explorerTreeObject.is-selected {
+  border-color: color-mix(in srgb, var(--accentBorder) 65%, var(--border));
+  background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
+}
+
+.explorerTreeObject__icon {
+  color: var(--muted);
+  font-size: .76rem;
+  text-align: center;
+}
+
+.explorerTreeObject__labels {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.explorerTreeObject__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 .72rem/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.explorerTreeObject__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: .59rem;
+}
+
+.explorerTreeHealthDot {
+  justify-self: end;
+  width: 0.42rem;
+  height: 0.42rem;
+}
+
+.explorerTreeHealthDot.hostDot--good {
+  animation-name: explorerTreeHealthPulse;
+}
+
+@keyframes explorerTreeHealthPulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 0 0 2px rgba(34, 197, 94, 0.14);
+  }
+}
+
+.explorerDetailPane {
+  padding: 6px 8px 8px;
+}
+
+.explorerDetailHeader {
+  min-height: 38px;
+}
+
+.explorerSummaryCards {
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.explorerSummaryCard {
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: transparent;
+}
+
+.explorerSummaryCard__value {
+  font-size: .78rem;
+  font-weight: 650;
+}
+
+.explorerDetailTabs {
+  gap: 1px;
+  margin-top: 12px;
+  padding-bottom: 5px;
+}
+
+.explorerDetailContent {
+  padding-top: 10px;
+}
+
+.explorerSectionTitle {
+  margin: 14px 0 7px;
+  color: var(--text);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.explorerSectionToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.explorerDisclosure {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.explorerDisclosure > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 650;
+}
+
+.explorerDisclosure__body {
+  margin-top: 8px;
+}
+
+/* Rendered/sanitized function documentation, not a preformatted text blob. */
+.explorerFunctionDescription {
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  white-space: normal;
+}
+
+.functionDoc {
+  max-width: 980px;
+  color: var(--text);
+}
+
+.functionDoc__section {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.functionDoc__section:last-child {
+  border-bottom: 0;
+}
+
+.functionDoc__sectionTitle,
+.functionDoc__heading {
+  margin: 0 0 7px;
+  color: var(--text);
+  font-size: .76rem;
+  font-weight: 700;
+}
+
+.functionDoc__paragraph,
+.functionDoc__list,
+.functionDoc__markdown {
+  margin: 0;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  font-size: .76rem;
+  line-height: 1.58;
+}
+
+.functionDoc__paragraph + .functionDoc__paragraph,
+.functionDoc__list + .functionDoc__paragraph {
+  margin-top: 7px;
+}
+
+.functionDoc__list {
+  padding-left: 18px;
+}
+
+.functionDoc__code {
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editorSolidBg);
+  color: var(--text);
+  font: .72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.functionDoc__inlineCode {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--editorSolidBg);
+  font: .71rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.functionDoc__link,
+.functionDoc__source {
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  text-decoration: none;
+}
+
+.functionDoc__link:hover,
+.functionDoc__source:hover {
+  text-decoration: underline;
+}
+
+/* Analysis: dense sections plus processor phase trace. */
+.analysisModal {
+  width: min(1800px, calc(100vw - 12px));
+  height: calc(100vh - 12px);
+  border-radius: 10px;
+  box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, .38);
+}
+
+.analysisModal__header {
+  padding: 7px 10px 6px;
+}
+
+.analysisModal__title {
+  font-size: .92rem;
+  font-weight: 700;
+}
+
+.analysisModal__summary {
+  margin-top: 3px;
+  font-size: .68rem;
+}
+
+
+.analysisModal__content {
+  padding: 6px 8px 8px;
+}
+
+.analysisContextStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .67rem;
+}
+
+.analysisContextStrip strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.analysisMetricGroup,
+.analysisScope {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.analysisMetricGroup:last-child,
+.analysisScope:last-child {
+  border-bottom: 0;
+}
+
+.analysisMetricGroup__title {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.analysisMetricGroup__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.analysisMetric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.analysisMetric__label {
+  color: var(--muted);
+  font-size: .61rem;
+}
+
+.analysisMetric__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font: 600 .76rem/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.analysisKv {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.analysisKv__item {
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 7px 9px;
+}
+
+.analysisKv__label {
+  font-size: .61rem;
+  font-weight: 650;
+}
+
+.analysisKv__value {
+  margin-top: 3px;
+  font-size: .71rem;
+}
+
+.analysisTableWrap {
+  border-radius: 6px;
+}
+
+.analysisTable {
+  font-size: .68rem;
+}
+
+.analysisTable th,
+.analysisTable td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--rowDivider);
+}
+
+.analysisTable th {
+  font-weight: 650;
+}
+
+.analysisEmpty {
+  display: flex;
+  align-items: center;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px dashed var(--borderStrong);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tableBg) 42%, transparent);
+}
+
+@media (max-width: 1150px) {
+  .analysisMetricGroup__grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .analysisKv { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+  .explorerSummaryCards { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .explorerHeader__primary,
+  .explorerHeader__tools { flex-wrap: wrap; }
+  .explorerHeader__tools .explorerSearch { order: 5; flex-basis: 100%; max-width: none; margin-left: 0; }
+  .explorerGrid { grid-template-columns: 1fr; }
+  .analysisMetricGroup__grid,
+  .analysisKv { grid-template-columns: 1fr; }
+}
+
+/* Query workspace keeps the original desktop telemetry rail at the right.
+   The base .layout/.metricColumn rules above are authoritative. */
+
+/* Numeric gauges remain informative but no longer dominate result readability. */
+.resultTable tbody td.resultTable__gaugeCell,
+.resultTable tbody tr:hover td.resultTable__gaugeCell {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accentBorder) 8%, transparent),
+    color-mix(in srgb, var(--accentBorder) 8%, transparent)
+  );
+}
+
+/* Analysis uses almost the full viewport. The header remains fixed while the
+   trace body owns vertical scrolling. */
+.analysisModal {
+  width: min(1800px, calc(100vw - 12px));
+  height: calc(100vh - 12px);
+  max-height: none;
+}
+
+
+/* Explorer summaries are data grids, not nested cards. */
+.explorerSummaryCards {
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.explorerSummaryCard {
+  min-height: 58px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 8px 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.explorerEmptyState {
+  min-height: 160px;
+}
+
+/* 2026-09 Explorer/query compactness and typography pass. */
+html,
+body {
+  height: 100%;
+  min-height: 0;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.appHeader {
+  flex: 0 0 auto;
+}
+
+#queryWorkspace,
+.explorerWorkspace {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#queryWorkspace {
+  overflow: auto;
+}
+
+.explorerWorkspace {
+  height: auto;
+  overflow: hidden;
+}
+
+.explorerShell,
+.explorerGrid,
+.explorerListPane,
+.explorerDetailPane {
+  min-height: 0;
+}
+
+.explorerDetailPane,
+.explorerTableList {
+  overscroll-behavior: contain;
+}
+
+.explorerFunctionToolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.explorerFunctionToolbar[hidden] {
+  display: none !important;
+}
+
+.explorerFunctionToolbar__count {
+  color: var(--muted);
+  font-size: .72rem;
+}
+
+.explorerFunctionToolbar__count strong {
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerFunctionToolbar .explorerSelect {
+  max-width: 150px;
+  min-height: 32px;
+}
+
+.explorerRefreshButton {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.refreshGlyph {
+  width: 14px;
+  height: 14px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.explorerGraphViewportControl .refreshGlyph {
+  width: 13px;
+  height: 13px;
+  margin: auto;
+}
+
+.themeSelect--icons .themeSelect__button--icon {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+
+.themeSelect--icons .themeSelect__button--icon::after {
+  display: none;
+}
+
+.themeIcon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.themeSelect__menu--icons {
+  min-width: 42px;
+  width: 42px;
+  padding: 4px;
+}
+
+.themeSelect__option--icon {
+  min-width: 32px;
+  min-height: 30px;
+  justify-content: center;
+  padding: 4px;
+  font-size: 1rem;
+}
+
+.functionDoc__inlineCode {
+  color: color-mix(in srgb, var(--accentBorder) 78%, var(--text));
+  font-weight: 600;
+}
+
+.functionDoc__code .tok-kw,
+.functionDoc__code .tok-fn,
+.functionDoc__code .tok-str,
+.functionDoc__code .tok-num,
+.functionDoc__code .tok-null,
+.functionDoc__code .tok-com,
+.functionDoc__code .tok-err {
+  font-family: inherit;
+}
+
+.functionDoc__alias {
+  border-left: 2px solid color-mix(in srgb, var(--accentBorder) 60%, transparent);
+  padding-left: 12px;
+}
+
+.metricCompact--elapsed .metricCompact__content {
+  display: block;
+}
+
+.metricCompact__systemLine {
+  margin-top: .35rem;
+  padding-top: .35rem;
+  border-top: 1px solid var(--rowDivider);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  color: var(--muted);
+  font-size: .625rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.metricCompact__systemLine[hidden] {
+  display: none !important;
+}
+
+.metricCompact__systemLine strong {
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+
+.panel__title--withAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resultsClearButton {
+  font-size: .68rem;
+  font-weight: 600;
+}
+
+@media (max-width: 820px) {
+  html,
+  body {
+    overflow: auto;
+  }
+  .explorerWorkspace {
+    height: auto;
+    min-height: calc(100dvh - 62px);
+    overflow: visible;
+  }
+  .explorerFunctionToolbar {
+    order: 2;
+  }
+}
+
+/* Query editor size is persisted by ResizeObserver; interaction is handled by
+   the centered .editorResizeHandle so the browser corner grip stays hidden. */
+
+#runButton.runSplit__main--cancel,
+#runButton.runSplit__main--cancel:hover {
+  border-right: 1px solid var(--buttonBorder);
+  border-radius: .75rem;
+}
+
+#runMenuButton[hidden] {
+  display: none !important;
+}
+
+/* Explorer section navigation and tools intentionally occupy one compact row. */
+.explorerHeader {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+
+.explorerHeader__primary,
+.explorerHeader__tools {
+  min-height: 46px;
+  border-bottom: 0;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.explorerHeader__primary {
+  flex: 0 0 auto;
+  padding-right: 4px;
+}
+
+.explorerHeader__tools {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-left: 4px;
+}
+
+.explorerHeader__tools .explorerSearch {
+  margin-left: auto;
+  width: min(360px, 34vw);
+}
+
+.explorerFunctionFilter {
+  width: auto;
+  min-width: 120px;
+  max-width: 150px;
+}
+
+/* Database inventory is a first-class Explorer page. */
+.explorerDatabasesPane {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px 14px 18px;
+  overscroll-behavior: contain;
+}
+
+.explorerDatabaseCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 10px;
+}
+
+.explorerDatabaseCard {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  overflow: hidden;
+}
+
+.explorerDatabaseCard__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerDatabaseCard__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 700 .82rem/1.3 Arial, Helvetica, sans-serif;
+}
+
+.explorerDatabaseCard__stats,
+.explorerDatabaseDisk {
+  color: var(--muted);
+  font-size: .68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerDatabaseCard__stats {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.explorerDatabaseCard__disks {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerDatabaseCard__tables {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 12px 10px;
+}
+
+.explorerDatabaseTable {
+  max-width: 220px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 7px;
+  background: transparent;
+  color: var(--text);
+  font: 500 .68rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.explorerDatabaseTable:hover,
+.explorerDatabaseTable:focus-visible {
+  border-color: var(--accentBorder);
+  background: var(--rowHover);
+  outline: none;
+}
+
+/* Theme selector: proper vector icons, aligned horizontal dropdown. */
+.themeIcon {
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  background: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.themeIcon--system {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6v2h3v2H7v-2h3v-2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v10h16V6H4Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6v2h3v2H7v-2h3v-2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v10h16V6H4Z'/%3E%3C/svg%3E");
+}
+
+.themeIcon--dark {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 9 9 0 1 0 20.4 15.2ZM4.5 12a7.5 7.5 0 0 1 2-5.1 10.5 10.5 0 0 0 10.6 10.6A7.5 7.5 0 0 1 4.5 12Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 9 9 0 1 0 20.4 15.2ZM4.5 12a7.5 7.5 0 0 1 2-5.1 10.5 10.5 0 0 0 10.6 10.6A7.5 7.5 0 0 1 4.5 12Z'/%3E%3C/svg%3E");
+}
+
+.themeIcon--light {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm13.5 13.5 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4ZM19.8 4.2l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM6.3 17.7l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM12 6a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm13.5 13.5 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4ZM19.8 4.2l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM6.3 17.7l-2.1 2.1-1.4-1.4 2.1-2.1 1.4 1.4ZM12 6a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'/%3E%3C/svg%3E");
+}
+
+.themeSelect__menu--icons {
+  left: auto;
+  right: 0;
+  width: 118px;
+  min-width: 118px;
+  display: grid;
+  grid-template-columns: repeat(3, 34px);
+  justify-content: center;
+  gap: 2px;
+  padding: 5px;
+  border-top: 1px solid var(--borderStrong);
+  border-radius: 8px;
+  margin-top: 5px;
+  transform-origin: top right;
+}
+
+.themeSelect.themeSelect--open .themeSelect__menu--icons {
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.themeSelect--icons.themeSelect--open .themeSelect__button {
+  border-radius: var(--radiusSm);
+  border-bottom-color: var(--buttonBorder);
+}
+
+.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
+.themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
+  display: flex;
+}
+
+.themeSelect__option--icon {
+  width: 34px;
+  min-width: 34px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Jaeger-like processor phase decomposition. */
+.analysisTraceIntro {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: .67rem;
+  line-height: 1.45;
+}
+
+.analysisTraceLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: .65rem;
+}
+
+.analysisTraceLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.analysisTraceLegend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.analysisTraceLegend__swatch--input,
+.analysisTraceRow__phase--input { background: color-mix(in srgb, #3b82f6 72%, var(--panel)); }
+.analysisTraceLegend__swatch--work,
+.analysisTraceRow__phase--work { background: color-mix(in srgb, #22c55e 72%, var(--panel)); }
+.analysisTraceLegend__swatch--output,
+.analysisTraceRow__phase--output { background: color-mix(in srgb, #f59e0b 74%, var(--panel)); }
+
+.analysisTrace {
+  min-width: 760px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--editorSolidBg);
+}
+
+.analysisTraceAxis,
+.analysisTraceRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(420px, 1fr);
+}
+
+.analysisTraceAxis {
+  min-height: 34px;
+  border-bottom: 1px solid var(--borderStrong);
+  background: color-mix(in srgb, var(--theadBg) 70%, transparent);
+}
+
+.analysisTraceAxis__label {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.analysisTraceAxis__ticks,
+.analysisTraceRow__timeline {
+  position: relative;
+  background-image: linear-gradient(to right, transparent calc(25% - .5px), var(--border) 25%, transparent calc(25% + .5px)),
+    linear-gradient(to right, transparent calc(50% - .5px), var(--border) 50%, transparent calc(50% + .5px)),
+    linear-gradient(to right, transparent calc(75% - .5px), var(--border) 75%, transparent calc(75% + .5px));
+}
+
+.analysisTraceAxis__ticks span {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font: .61rem/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.analysisTraceAxis__ticks span:first-child { transform: none; }
+.analysisTraceAxis__ticks span:last-child { transform: translateX(-100%); }
+
+.analysisTraceRow {
+  min-height: 46px;
+  border-bottom: 1px solid var(--rowDivider);
+}
+
+.analysisTraceRow:last-child { border-bottom: 0; }
+
+.analysisTraceRow__label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-right: 1px solid var(--border);
+}
+
+.analysisTraceRow__label strong {
+  overflow: hidden;
+  color: var(--text);
+  font: 600 .67rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysisTraceRow__label span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .59rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysisTraceRow__timeline {
+  display: flex;
+  align-items: center;
+  padding: 8px 52px 8px 0;
+}
+
+.analysisTraceRow__bar {
+  position: relative;
+  height: 22px;
+  display: flex;
+  min-width: 2px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--borderStrong) 88%, transparent);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.analysisTraceRow__phase {
+  height: 100%;
+  min-width: 1px;
+}
+
+.analysisTraceRow__duration {
+  position: absolute;
+  right: 7px;
+  color: var(--muted);
+  font: .6rem/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 900px) {
+  .explorerHeader { flex-wrap: wrap; }
+  .explorerHeader__primary,
+  .explorerHeader__tools { width: 100%; }
+  .explorerHeader__tools { flex-wrap: wrap; }
+  .explorerHeader__tools .explorerSearch { width: 100%; max-width: none; margin-left: 0; }
+  .explorerDatabaseCards { grid-template-columns: 1fr; }
+}
+
+
+/* Explorer typography is explicitly Arial; only actual SQL/code remains monospace. */
+.explorerWorkspace,
+.explorerWorkspace button,
+.explorerWorkspace input,
+.explorerWorkspace select,
+.explorerTreeDatabase__name,
+.explorerTreeObject__name,
+.explorerDetailName,
+.explorerDetailMeta,
+.explorerDataTable,
+.explorerDatabaseTable {
+  font-family: Arial, Helvetica, sans-serif;
+}
+.explorerDdl,
+.explorerDdl code,
+.functionDoc__code,
+.functionDoc__inlineCode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Theme choices are a true vertical dropdown. The active choice remains on the
+   trigger and is deliberately omitted from the menu. */
+.themeSelect__menu--icons {
+  left: 0;
+  right: auto;
+  top: 100%;
+  margin-top: -1px;
+  width: 34px;
+  min-width: 34px;
+  grid-template-columns: 32px;
+  grid-auto-flow: row;
+  justify-items: center;
+  gap: 2px;
+  padding: 3px 0;
+  border-top: 0;
+}
+
+.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
+.themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
+  display: none !important;
+}
+
+/* A separator makes Tables/Functions and Browse/Graph read as two distinct
+   control groups, matching the separator before Lineage/Storage topology. */
+#explorerTableModeTabs {
+  margin-left: 4px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border);
+}
+
+/* Database rows combine an independent disclosure control with a clickable
+   database summary target. */
+.explorerTreeDatabaseRow {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-height: 31px;
+  border-radius: 5px;
+}
+
+.explorerTreeDatabaseRow.is-selected {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.explorerTreeDatabaseToggle {
+  width: 24px;
+  height: 28px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 .82rem/1 Arial, Helvetica, sans-serif;
+}
+
+.explorerTreeDatabaseToggle:hover,
+.explorerTreeDatabaseToggle:focus-visible,
+.explorerTreeDatabase:hover,
+.explorerTreeDatabase:focus-visible {
+  background: var(--rowHover);
+  outline: none;
+}
+
+.explorerTreeDatabase {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 31px;
+  padding-left: 4px;
+}
+
+.explorerTreeDatabase__count {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerDatabaseDetailTables {
+  display: grid;
+  gap: 4px;
+}
+
+.explorerDatabaseDetailTable {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorerDatabaseDetailTable:hover,
+.explorerDatabaseDetailTable:focus-visible {
+  border-color: var(--border);
+  background: var(--rowHover);
+  outline: none;
+}
+
+.explorerDatabaseDetailTable__labels {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.explorerDatabaseDetailTable__labels strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .72rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.explorerDatabaseDetailTable__labels span,
+.explorerDatabaseDetailTable__stats {
+  color: var(--muted);
+  font-size: .64rem;
+}
+
+.explorerDatabaseDetailTable__stats {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Viewport controls belong to the graph rather than the global Explorer bar. */
+.explorerGraphViewportControls {
+  position: absolute;
+  z-index: 7;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panelBg) 92%, transparent);
+  box-shadow: var(--shadow1);
+  backdrop-filter: blur(8px);
+}
+
+.explorerGraphViewportControls__label,
+.explorerGraphViewportControls__value {
+  color: var(--muted);
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerGraphViewportControls__value {
+  min-width: 12px;
+  color: var(--text);
+  text-align: center;
+}
+
+.explorerGraphViewportControl {
+  min-width: 25px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: 600 .72rem/1 Arial, Helvetica, sans-serif;
+}
+
+.explorerGraphViewportControl--text {
+  min-width: auto;
+}
+
+.explorerGraphViewportControl:hover:not(:disabled),
+.explorerGraphViewportControl:focus-visible {
+  background: var(--rowHover);
+  outline: none;
+}
+
+.explorerGraphViewportControl:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.explorerGraphViewportControls__separator {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
+/* Profiling is an aggregate processor-duration profile, not a fabricated span
+   timeline. The global scale compares elapsed duration while explicit metric
+   columns expose the phase decomposition. */
+.analysisProfileIntro {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.45;
+}
+
+.analysisProfile {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--editorSolidBg) 92%, transparent);
+}
+
+.analysisProfile__head,
+.analysisProfileRow {
+  min-width: 1120px;
+  display: grid;
+  grid-template-columns: 290px minmax(330px, 1fr) 78px 78px 78px 78px 120px;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.analysisProfile__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .025em;
+}
+
+.analysisProfile__scale {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.analysisProfile__scale span {
+  position: absolute;
+  top: 13px;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font: 500 .6rem/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.analysisProfile__scale span:first-child { transform: none; }
+.analysisProfile__scale span:last-child { transform: translateX(-100%); }
+
+.analysisProfileRow {
+  min-height: 58px;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
+.analysisProfileRow:last-child { border-bottom: 0; }
+.analysisProfileRow:hover { background: var(--rowHover); }
+
+.analysisProfileRow__label {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.analysisProfileRow__label strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .7rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.analysisProfileRow__label span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .6rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysisProfileRow__timeline {
+  position: relative;
+  height: 18px;
+  border-left: 1px solid var(--border);
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 25% 100%;
+}
+
+.analysisProfileRow__bar {
+  display: flex;
+  height: 100%;
+  min-width: 2px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.analysisProfileRow__phase { height: 100%; min-width: 1px; }
+.analysisProfileRow__phase--input { background: color-mix(in srgb, #3b82f6 74%, var(--panel)); }
+.analysisProfileRow__phase--work { background: color-mix(in srgb, #22c55e 74%, var(--panel)); }
+.analysisProfileRow__phase--output { background: color-mix(in srgb, #f59e0b 76%, var(--panel)); }
+
+.analysisProfileRow__metric {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.analysisProfileRow__metric strong {
+  font: 600 .66rem/1.15 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.analysisProfileRow__metric small {
+  color: var(--muted);
+  font-size: .56rem;
+}
+
+.analysisProfileRow__metric--total strong { color: var(--text); }
+
+.analysisProfileRow__io {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .62rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.analysisProfileRow__metric.has-counter-overlap strong {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/* 2026-09-06 follow-up: restore the production sizing model.
+   The query panel owns its natural grid-row height; only a persisted user
+   resize sets --initialEditorHeight. The interaction handle is custom. */
+.editorWrap {
+  height: var(--initialEditorHeight, 100%);
+  min-height: calc(100% - 3.25rem);
+  max-height: none;
+  resize: none;
+}
+
+/* Explorer navigation keeps section and mode groups visually separate. */
+.explorerModeTabs--view {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+/* Search/filter/refresh belong to the left browser, leaving the content pane
+   free to start at the top edge. */
+.explorerSidebarToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+
+.explorerSidebarToolbar--functions {
+  grid-template-columns: 1fr 32px;
+}
+
+.explorerSidebarToolbar--functions .explorerFunctionToolbar__count,
+.explorerSidebarToolbar--functions .explorerSearch,
+.explorerSidebarToolbar--functions .explorerFunctionFilter {
+  grid-column: 1 / -1;
+}
+
+.explorerSidebarToolbar .explorerSearch,
+.explorerSidebarToolbar .explorerSearch input,
+.explorerSidebarToolbar .explorerSelect {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.explorerSidebarToolbar--functions .explorerFunctionToolbar__count {
+  padding: 0 2px;
+}
+
+/* Browse remains the first grid column in Graph mode. */
+.explorerGrid > .explorerGraphPane {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border-left: 0;
+}
+
+.explorerGraphCanvas {
+  min-height: 0;
+  height: 100%;
+}
+
+.explorerCompactStorageSummary {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panelBg) 88%, var(--rowHover));
+  color: var(--muted);
+  font-size: .67rem;
+  line-height: 1.4;
+}
+
+/* The icon theme picker uses the original connected expanding dropdown motion:
+   the menu visually extends the current button instead of floating below it. */
+.themeSelect__menu--icons {
+  left: 0;
+  right: auto;
+  top: 100%;
+  width: 34px;
+  min-width: 34px;
+  margin-top: -1px;
+  padding: 3px 2px 4px;
+  grid-template-columns: 1fr;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  transform-origin: top center;
+}
+
+.themeSelect--icons.themeSelect--open .themeSelect__button,
+.themeSelect--icons.themeSelect--closing .themeSelect__button {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+.themeSelect.themeSelect--open .themeSelect__menu--icons,
+.themeSelect.themeSelect--closing .themeSelect__menu--icons {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  margin-top: -1px;
+}
+
+.themeSelect--icons.themeSelect--open .themeSelect__option--icon[aria-selected="true"],
+.themeSelect--icons.themeSelect--closing .themeSelect__option--icon[aria-selected="true"] {
+  display: none;
+}
+
+.explorerGraphViewportControl.is-active {
+  background: var(--rowHover);
+  color: var(--accentText, var(--text));
+}
+
+@media (max-width: 820px) {
+  .explorerModeTabs--view {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+  .explorerGrid > .explorerGraphPane {
+    min-height: 68vh;
+  }
+}
+
+/* Keep this final icon-menu rule last so the connected vertical selector wins
+   over older consolidation blocks. */
+.themeSelect__menu--icons {
+  grid-template-columns: 34px;
+}
+.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
+.themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
+  display: none !important;
+}
+
+.explorerSidebarToolbar--functions {
+  grid-template-columns: minmax(0, 1fr) minmax(92px, 118px) 32px;
+}
+.explorerSidebarToolbar--functions .explorerFunctionToolbar__count {
+  grid-column: 1 / -1;
+}
+.explorerSidebarToolbar--functions .explorerSearch,
+.explorerSidebarToolbar--functions .explorerFunctionFilter {
+  grid-column: auto;
+}
+
+/* 2026-09-06 resize follow-up: keep the historical query-panel sizing model,
+   but expose a centered bottom drag handle instead of the browser corner grip.
+   The fixed-height workspace must not stretch its auto grid rows: that stretch
+   was the regression that created the large empty query panel. */
+#queryWorkspace {
+  align-content: start;
+}
+
+.editorWrap {
+  resize: none;
+}
+
+.editorResizeHandle {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 7;
+  width: 58px;
+  height: 15px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.editorResizeHandle span {
+  display: block;
+  width: 34px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  transition: width 120ms ease, background 120ms ease;
+}
+
+.editorResizeHandle:hover span,
+.editorResizeHandle.is-dragging span {
+  width: 42px;
+  background: color-mix(in srgb, var(--text) 60%, transparent);
+}
+
+.explorerColumnStorageSummary {
+  margin-bottom: 8px;
+}
+.explorerColumnStorageSummary .explorerDataTableWrap {
+  max-width: 620px;
+}
+
+/* First-release polish: restore the production surface proportions. */
+:root {
+  --radius: 0.95rem;
+  --radiusSm: 0.8rem;
+}
+
+.panel--query,
+.panel--results,
+.panel--metrics {
+  border-radius: var(--radius);
+}
+
+/* Reserve scrollbar space on every persistent scroll surface so content does
+   not shift when a scrollbar appears. */
+#queryTextArea,
+.tableWrap,
+.resultsStack__body,
+.queryLibraryMenu__content,
+.explorerListPane,
+.explorerTableList,
+.explorerDetailContent,
+.explorerFunctionDescription,
+.analysisModal__content {
+  scrollbar-gutter: stable;
+}
+
+/* Connected page selector, same expanding motion as the theme control. */
+.pageSelect .pageSelect__button {
+  width: 6.4rem;
+  min-width: 6.4rem;
+  text-align: left;
+}
+.pageSelect__menu {
+  width: 6.4rem;
+  min-width: 6.4rem;
+}
+.pageSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
+.pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
+  display: none !important;
+}
+
+/* Small settings cog immediately before Run. The menu expands from the cog but
+   the cog itself has no redundant dropdown chevron. */
+.runSettings .runSettings__button {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.runSettings .runSettings__button::after { display: none; }
+.runSettings__gear {
+  display: block;
+  width: 15px;
+  height: 15px;
+  background-color: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm8.1 4.9v-2.6l-2.1-.5a6.7 6.7 0 0 0-.7-1.7l1.1-1.9-1.9-1.9-1.9 1.1c-.5-.3-1.1-.5-1.7-.7L12.4 3H9.8l-.5 2.1c-.6.2-1.2.4-1.7.7L5.7 4.7 3.8 6.6l1.1 1.9c-.3.5-.5 1.1-.7 1.7l-2.1.5v2.6l2.1.5c.2.6.4 1.2.7 1.7l-1.1 1.9 1.9 1.9 1.9-1.1c.5.3 1.1.5 1.7.7l.5 2.1h2.6l.5-2.1c.6-.2 1.2-.4 1.7-.7l1.9 1.1 1.9-1.9-1.1-1.9c.3-.5.5-1.1.7-1.7l2.1-.5Z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Zm8.1 4.9v-2.6l-2.1-.5a6.7 6.7 0 0 0-.7-1.7l1.1-1.9-1.9-1.9-1.9 1.1c-.5-.3-1.1-.5-1.7-.7L12.4 3H9.8l-.5 2.1c-.6.2-1.2.4-1.7.7L5.7 4.7 3.8 6.6l1.1 1.9c-.3.5-.5 1.1-.7 1.7l-2.1.5v2.6l2.1.5c.2.6.4 1.2.7 1.7l-1.1 1.9 1.9 1.9 1.9-1.1c.5.3 1.1.5 1.7.7l.5 2.1h2.6l.5-2.1c.6-.2 1.2-.4 1.7-.7l1.9 1.1 1.9-1.9-1.1-1.9c.3-.5.5-1.1.7-1.7l2.1-.5Z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+.runSettings__menu {
+  left: 0;
+  right: auto;
+  width: 11.5rem;
+  min-width: 11.5rem;
+  padding: .25rem;
+}
+.runSettings.themeSelect--open .runSettings__button,
+.runSettings.themeSelect--closing .runSettings__button {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+/* Metric cards keep exactly the same footprint before and after System arrives. */
+.metricCompact {
+  box-sizing: border-box;
+  height: 4.5rem;
+  min-height: 4.5rem;
+  padding: .68rem .75rem;
+}
+.metricCompact__label {
+  font-size: .6875rem;
+  font-weight: 850;
+}
+.metricCompact__value {
+  font-size: .95rem;
+  font-weight: 950;
+}
+.metricCompact__sub {
+  font-size: .6875rem;
+  font-weight: 850;
+}
+.metricCompact--elapsed .metricCompact__content {
+  height: 100%;
+  position: relative;
+}
+.metricCompact--elapsed .metricCompact__value.metricCompact__value--split {
+  width: 100%;
+  justify-content: flex-end;
+}
+.metricCompact__systemLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding-top: .22rem;
+  font-size: .57rem;
+  line-height: 1;
+}
+
+.resultsClearButton {
+  margin-left: 2px;
+}
+
+/* 2026-09-06 final Explorer navigation: use the same connected dropdown model
+   as Query/Explorer and Theme, but keep those controls inside the left rail so
+   the detail/graph content can start at the shell's top edge. */
+.explorerShell {
+  position: relative;
+}
+
+.explorerHeader--sidebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 12;
+  width: 310px;
+  min-height: 46px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+
+.explorerNavSelect {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.explorerNavSelect__button {
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: .74rem;
+  font-weight: 750;
+}
+
+.explorerNavSelect__menu {
+  left: 0;
+  right: 0;
+  top: 100%;
+  width: 100%;
+  min-width: 100%;
+  margin-top: -1px;
+}
+
+.explorerGrid {
+  height: 100%;
+}
+
+.explorerListPane {
+  padding-top: 46px;
+}
+
+.explorerSidebarToolbar {
+  position: relative;
+  top: auto;
+  z-index: 3;
+}
+
+/* Graph type is another connected dropdown; viewport/depth controls remain
+   directly on the graph because they describe the canvas rather than Explorer
+   navigation. */
+.explorerGraphTypeSelect {
+  position: relative;
+  min-width: 122px;
+}
+
+.explorerGraphTypeSelect[hidden] {
+  display: none !important;
+}
+
+.explorerGraphTypeSelect__menu {
+  left: 0;
+  right: auto;
+  top: 100%;
+  min-width: 150px;
+  width: 150px;
+  margin-top: -1px;
+}
+
+.explorerGraphTypeSelect .themeSelect__button {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* CREATE statements reuse the editor language: a dedicated line-number gutter,
+   syntax-highlighted code and the exact same copy icon as the query editor. */
+.explorerDdlWrap {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 4.2ch minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--inputBg);
+  overflow: hidden;
+}
+
+.explorerDdlGutter {
+  margin: 0;
+  padding: 10px 8px 10px 4px;
+  border-right: 1px solid var(--border);
+  color: var(--lineNum);
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+  text-align: right;
+  user-select: none;
+  font: 500 .72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.explorerDdlWrap .explorerDdl {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 42px 10px 12px;
+  border: 0;
+  border-radius: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font: 500 .72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.explorerDdlCopy {
+  top: 8px;
+  right: 8px;
+}
+
+.explorerFunctionGroup .explorerTreeDatabase__count {
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerFunctionObject .explorerTreeObject__icon--function {
+  font-family: Georgia, serif;
+  font-size: .82rem;
+}
+
+@media (max-width: 820px) {
+  .explorerHeader--sidebar {
+    width: 100%;
+    border-right: 0;
+  }
+}
+
+.explorerDependencyMatrix {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.explorerDependencyGroup {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  gap: 6px;
+  margin: 8px 0 12px;
+  min-width: 0;
+}
+.explorerDependencyGroup__title {
+  margin: 0;
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .035em;
+}
+.explorerDependencyList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 36px;
+  align-content: start;
+  gap: 6px;
+}
+.explorerDependencyItem {
+  min-width: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--tableBg) 72%, transparent);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.explorerDependencyItem:hover { border-color: var(--accentBorder); background: var(--rowHover); }
+.explorerDependencyItem__qualified {
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: .68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerDependencyEmpty {
+  display: grid;
+  place-items: center start;
+  height: 36px;
+  padding: 6px 8px;
+  border: 1px dashed color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 7px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+@media (max-width: 820px) {
+  .explorerDependencyMatrix { grid-template-columns: 1fr; }
+  .explorerDependencyList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Analysis v1: Overview owns the processor summary; Trace is a compact,
+   shared-duration view. processor_profile_log does not contain processor start
+   timestamps, so phase segments are accumulated from each processor's own
+   lifecycle without fabricating wall-clock offsets. */
+.analysisPipelineSection {
+  margin-top: 14px;
+}
+
+.analysisProfile--trace .analysisProfile__head,
+.analysisProfile--trace .analysisProfileRow {
+  min-width: 920px;
+  grid-template-columns: 270px minmax(390px, 1fr) 84px 126px;
+  column-gap: 9px;
+}
+
+.analysisProfile--trace .analysisProfile__head {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.analysisProfile--trace .analysisProfile__scale span {
+  top: 10px;
+}
+
+.analysisProfileRow--trace,
+.analysisProfileRow--query {
+  min-height: 42px;
+  padding: 4px 10px;
+}
+
+.analysisProfile--trace .analysisProfileRow__label {
+  padding-left: calc(min(5, var(--trace-depth, 0)) * 10px);
+}
+
+.analysisProfile--trace .analysisProfileRow__label strong {
+  font-size: .66rem;
+}
+
+.analysisProfile--trace .analysisProfileRow__label span {
+  font-size: .56rem;
+}
+
+.analysisProfile--trace .analysisProfileRow__timeline {
+  height: 14px;
+  overflow: hidden;
+}
+
+.analysisProfile--trace .analysisProfileRow__phase {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  border-radius: 2px;
+}
+
+.analysisProfileRow__queryBar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 54%, var(--panel));
+}
+
+.analysisProfileRow--query {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* Explorer rail selectors keep a stable footprint. Tables/Functions must not
+   resize when Browse/Graph is unavailable (for example in Functions), and the
+   two selectors no longer need an artificial separator between them. */
+.explorerHeader--sidebar .explorerNavSelect {
+  /* Browse/Graph is now icon-only; give the recovered rail width to the
+     Tables/Functions selector instead of leaving dead space. */
+  flex: 1 1 auto;
+  width: auto;
+}
+
+#explorerTableModeTabs {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+/* AggregateFunction previews deliberately finalize state values for readability. */
+.explorerPreviewFinalizeNotice {
+  margin: 0 0 0.65rem;
+  padding: 0.48rem 0.62rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--panelBg) 86%, var(--accent) 14%);
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+.explorerPreviewFinalizeNotice strong { color: var(--text); font-weight: 700; }
+
+/* Run settings reuses the editor-options trigger language and sits after Queries. */
+.runSettings {
+  position: relative;
+  align-self: center;
+}
+.runSettings .runSettings__button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  cursor: pointer;
+}
+.runSettings .runSettings__button:hover,
+.runSettings.themeSelect--open .runSettings__button,
+.runSettings.themeSelect--closing .runSettings__button {
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+.runSettings .runSettings__button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 1px;
+}
+.runSettings__menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  width: 11.5rem;
+  min-width: 11.5rem;
+  padding: .28rem;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 12px;
+  background: var(--menuBg, var(--panelBg));
+  box-shadow: 0 1rem 2.4rem color-mix(in srgb, #000 26%, transparent);
+}
+.runSettings.themeSelect--open .runSettings__menu,
+.runSettings.themeSelect--closing .runSettings__menu {
+  border-radius: 12px;
+  margin: 0;
+}
+
+.explorerGraphDepthControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.explorerGraphDepthControls[hidden] { display: none !important; }
+
+/* Graph-type selector is a connected control: trigger and menu share exactly
+   the same width so switching Lineage/Storage never produces the offset menu
+   seen with the old 122px/150px mismatch. */
+.explorerGraphTypeSelect {
+  width: 154px;
+  min-width: 154px;
+}
+.explorerGraphTypeSelect .themeSelect__button,
+.explorerGraphTypeSelect__menu {
+  box-sizing: border-box;
+  width: 154px;
+  min-width: 154px;
+}
+.explorerGraphTypeSelect__menu {
+  left: -6px;
+  right: auto;
+  top: 100%;
+  width: 160px;
+  min-width: 160px;
+  margin-top: -1px;
+}
+.explorerGraphTypeSelect__menu .themeSelect__option {
+  padding-left: calc(var(--menu-item-padding-x, 10px) + 6px);
+}
+.explorerGraphTypeSelect.themeSelect--open .themeSelect__button,
+.explorerGraphTypeSelect.themeSelect--closing .themeSelect__button {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+
+/* Analysis trace UI is rendered by the reusable traceViewer component below. */
+
+/* Review 10: smaller run-option labels. */
+#runOptAutoFormat,
+#runOptMultiQuery { font-size: .8rem; }
+
+.analysisPipelineSection { margin-top: 9px; }
+
+/* Review 10: borderless close affordance. */
+#analysisCloseButton {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 1.05rem;
+}
+#analysisCloseButton:hover { background: var(--rowHover); }
+/* Reusable Jaeger-like wall-clock trace viewer. Kept independent from the
+ * Analysis modal so the same component can later be mounted full-page. */
+.traceViewerHost {
+  min-width: 0;
+}
+
+.traceViewer {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.traceViewer__notice {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  color: color-mix(in srgb, var(--warning, #f59e0b) 74%, var(--text));
+  font-size: .56rem;
+}
+
+.traceViewer__attempts {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 97%, var(--muted));
+}
+
+.traceViewer__attempt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: .55rem;
+}
+
+.traceViewer__attempt > i {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--trace-attempt-color);
+}
+
+/* Header and rows intentionally share this same scroll container. That keeps
+ * the timeline ticks aligned with bars even when the vertical scrollbar is
+ * present. */
+.traceViewer__table {
+  max-height: calc(100vh - 92px);
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.traceViewer__head,
+.traceViewer__row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, var(--trace-name-column, 44%)) minmax(0, 1fr);
+}
+
+.traceViewer__head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  min-height: 29px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 95%, var(--muted));
+  color: var(--muted);
+  font-size: .56rem;
+  font-weight: 620;
+}
+
+.traceViewer__nameHead {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: .025em;
+}
+
+.traceViewer__columnResize {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: 0;
+}
+
+.traceViewer__columnResize::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+
+.traceViewer__columnResize:hover::after,
+.traceViewer__columnResize:focus-visible::after,
+.traceViewer__columnResize.is-dragging::after {
+  background: color-mix(in srgb, var(--accent) 72%, var(--border));
+}
+
+.traceViewer__body {
+  display: contents;
+}
+
+.traceViewer__row {
+  min-height: 26px;
+  background: var(--panel);
+}
+
+.traceViewer__row:hover {
+  background: var(--rowHover);
+}
+
+.traceViewer__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.traceViewer__guides {
+  position: relative;
+  align-self: stretch;
+  flex: 0 0 auto;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 5px,
+    color-mix(in srgb, var(--border) 66%, transparent) 5px 6px,
+    transparent 6px 12px
+  );
+}
+
+.traceViewer__toggle {
+  width: 18px;
+  height: 20px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: 650 .72rem/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+}
+
+.traceViewer__toggle:hover,
+.traceViewer__toggle:focus-visible {
+  background: color-mix(in srgb, var(--trace-attempt-color) 12%, transparent);
+  color: var(--text);
+  outline: 0;
+}
+
+.traceViewer__toggle--blank {
+  pointer-events: none;
+}
+
+.traceViewer__name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.traceViewer__serviceMarker {
+  width: 2px;
+  height: 11px;
+  flex: 0 0 2px;
+  border-radius: 1px;
+  background: var(--trace-service-color);
+}
+
+.traceViewer__operation {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: 560 .63rem/1.15 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+}
+
+.traceViewer__foldedCount {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--trace-attempt-color) 11%, transparent);
+  color: var(--muted);
+  font-size: .51rem;
+}
+
+.traceViewer__timeline {
+  position: relative;
+  min-width: 0;
+  min-height: 26px;
+  overflow: hidden;
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(25% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(25% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(25% + .5px),
+    transparent calc(25% + .5px),
+    transparent calc(50% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(50% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(50% + .5px),
+    transparent calc(50% + .5px),
+    transparent calc(75% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(75% - .5px),
+    color-mix(in srgb, var(--border) 56%, transparent) calc(75% + .5px),
+    transparent calc(75% + .5px)
+  );
+}
+
+.traceViewer__timeline--head {
+  min-height: 29px;
+  background-image: none;
+}
+
+.traceViewer__tick {
+  position: absolute;
+  inset-block: 0;
+  border-left: 1px solid color-mix(in srgb, var(--border) 56%, transparent);
+  pointer-events: none;
+}
+
+.traceViewer__tick > b {
+  position: absolute;
+  top: 8px;
+  left: 4px;
+  color: var(--muted);
+  font: 500 .54rem/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.traceViewer__tick:last-child > b {
+  right: 4px;
+  left: auto;
+}
+
+.traceViewer__bar {
+  position: absolute;
+  top: 8px;
+  height: 9px;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--trace-attempt-color);
+}
+
+.traceViewer__barLabel {
+  position: absolute;
+  top: -2px;
+  z-index: 2;
+  color: var(--text);
+  font: 560 .53rem/12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.traceViewer__barLabel.is-after {
+  left: calc(100% + 5px);
+}
+
+.traceViewer__barLabel.is-before {
+  right: calc(100% + 5px);
+}
+
+.traceViewer__rowLimit {
+  padding: 7px 9px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .56rem;
+}
+
+.traceViewer__empty {
+  padding: 18px;
+  color: var(--muted);
+  font-size: .68rem;
+}
+
+@media (max-width: 920px) {
+  .traceViewer__head,
+  .traceViewer__row {
+    grid-template-columns: minmax(0, var(--trace-name-column, 42%)) minmax(0, 1fr);
+  }
+}
+
+
+/* Release 15: Explorer table visibility settings live between search and refresh. */
+.explorerSidebarToolbar {
+  grid-template-columns: minmax(0, 1fr) 28px 32px;
+}
+.explorerTableSettings { position: relative; }
+.explorerTableSettings__button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.explorerTableSettings__button:hover,
+.explorerTableSettings.themeSelect--open .explorerTableSettings__button { background: var(--rowHover); }
+.explorerTableSettings__menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  width: 220px;
+  min-width: 220px;
+  padding: 5px;
+}
+.explorerTableSettings__option {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: .68rem;
+  cursor: pointer;
+}
+.explorerTableSettings__option:hover { background: var(--rowHover); }
+.explorerTableSettings__option input { margin: 0; }
+
+/* Camera controls are intentionally separate from topology/depth controls. */
+.explorerGraphCameraControls {
+  position: absolute;
+  z-index: 7;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  padding: 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panelBg) 92%, transparent);
+  box-shadow: var(--shadow1);
+  backdrop-filter: blur(8px);
+}
+.explorerGraphViewportControl--icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* CREATE text and gutter grow together; the table detail pane owns scrolling. */
+.explorerDdl,
+.explorerDdlWrap .explorerDdl {
+  max-height: none;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
+/* Analysis is deliberately inset again: enough workspace remains visible around
+   the dialog to make the blurred click-to-dismiss backdrop obvious. */
+.analysisModalBackdrop {
+  align-items: center;
+  padding: 28px 18px;
+  background: rgba(0, 0, 0, .48);
+  backdrop-filter: blur(7px);
+}
+.analysisModal {
+  width: min(1680px, calc(100vw - 36px));
+  height: calc(100vh - 56px);
+  max-height: calc(100vh - 56px);
+}
+@media (max-width: 720px) {
+  .analysisModalBackdrop { padding: 14px 8px; }
+  .analysisModal { width: calc(100vw - 16px); height: calc(100vh - 28px); max-height: calc(100vh - 28px); }
+}
+
+/* Release 16: function-filter cog uses the exact same compact menu language as
+   the Run-settings cog. The native select remains only as a state bridge. */
+.explorerSidebarToolbar--functions {
+  grid-template-columns: minmax(0, 1fr) 28px 32px;
+}
+.explorerFunctionFilter--native[hidden] { display: none !important; }
+.explorerFunctionSettings { position: relative; }
+.explorerFunctionSettings .runSettings__button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.explorerFunctionSettings.themeSelect--open .runSettings__button,
+.explorerFunctionSettings.themeSelect--closing .runSettings__button {
+  border-radius: 0;
+  background: var(--rowHover);
+}
+
+/* Zoom/fit is a separate subgroup, but it now lives immediately after the
+   Lineage/Storage + depth controls on the left instead of floating right. */
+.explorerGraphCameraControls {
+  position: static;
+  z-index: auto;
+  top: auto;
+  right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding: 0 0 0 5px;
+  margin-left: 1px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* Hover is intentionally silent on the canvas. Graph information is expressed
+   by the nodes/edges themselves; no mouse-following popup is rendered. */
+
+/* Release 16: analysis is deliberately smaller than the viewport. */
+.analysisModalBackdrop { padding: 96px 72px; }
+.analysisModal {
+  width: min(1460px, calc(100vw - 144px));
+  height: calc(100vh - 192px);
+  max-height: calc(100vh - 192px);
+}
+@media (max-width: 920px) {
+  .analysisModalBackdrop { padding: 32px 20px; }
+  .analysisModal {
+    width: calc(100vw - 40px);
+    height: calc(100vh - 64px);
+    max-height: calc(100vh - 64px);
+  }
+}
+
+/* Release 17: explorer graph control grouping, larger legend, fixed trace header,
+   and complex type readability tweaks. */
+.explorerGraphViewportControls {
+  position: absolute;
+  z-index: 7;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.explorerGraphViewportGroup,
+.explorerGraphCameraControls,
+.explorerGraphViewportAux {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panelBg) 92%, transparent);
+  box-shadow: var(--shadow1);
+  backdrop-filter: blur(8px);
+}
+
+.explorerGraphViewportGroup {
+  gap: 6px;
+}
+
+.explorerGraphCameraControls {
+  position: static;
+  z-index: auto;
+  top: auto;
+  right: auto;
+  gap: 2px;
+  min-height: 32px;
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 0.64rem;
+  pointer-events: auto;
+}
+
+.explorerGraphViewportAux {
+  padding-inline: 3px;
+}
+
+.explorerGraphViewportControl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.explorerGraphViewportControls__separator {
+  display: none;
+}
+
+.explorerGraphTypeSelect .themeSelect__button,
+.explorerGraphTypeSelect .themeSelect__option {
+  justify-content: center;
+  text-align: center;
+}
+
+.themeSelect__button--singleOption {
+  cursor: default;
+}
+
+.themeSelect__button--singleOption::after {
+  opacity: 0;
+}
+
+.explorerGraphLegend {
+  top: 12px;
+  right: 12px;
+  gap: 7px 14px;
+  padding: 9px 12px;
+  font-size: 0.69rem;
+}
+
+.explorerGraphLegend span {
+  gap: 8px;
+}
+
+.explorerLegendLine {
+  width: 30px;
+  border-top-width: 2px;
+}
+
+.explorerLegendLine--logical,
+.explorerLegendLine--route,
+.explorerLegendLine--ttl {
+  border-top-width: 1.5px;
+}
+
+.traceViewer {
+  width: 100%;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+.traceViewer__table {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.traceViewer__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 96%, transparent);
+}
+
+.traceViewer__scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+.traceViewer__body {
+  overflow: visible;
+}
+
+/* Buffer is RAM-backed routing state, not part of the database disk footprint. */
+.explorerBufferRuntime {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panelBg);
+}
+.explorerBufferRuntime__item {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+.explorerBufferRuntime__item:first-child { border-left: 0; }
+.explorerBufferRuntime__label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.explorerBufferRuntime__value,
+.explorerBufferRuntime__target {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerBufferRuntime__target {
+  width: max-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.explorerBufferRuntime__target:hover { color: var(--accent); text-decoration: underline; }
+@media (max-width: 820px) {
+  .explorerBufferRuntime { grid-template-columns: 1fr; }
+  .explorerBufferRuntime__item { border-left: 0; border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent); }
+  .explorerBufferRuntime__item:first-child { border-top: 0; }
+}
+
+/* Explorer Browse storage breakdown: dense one-line rows instead of cards/KV tiles. */
+.explorerSimpleList,
+.explorerShareList,
+.explorerStorageBreakdown {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panelBg);
+}
+
+.explorerSimpleRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: baseline;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+.explorerSimpleRow:first-child { border-top: 0; }
+.explorerSimpleRow__label { color: var(--muted); }
+.explorerSimpleRow__value { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+
+.explorerShareList { margin-top: 10px; }
+.explorerShareRow {
+  padding: 8px 10px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+.explorerShareRow:first-child { border-top: 0; }
+.explorerShareRow__head,
+.explorerWideSummary__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.explorerShareRow__label,
+.explorerWideSummary__label { color: var(--muted); }
+.explorerShareRow__value,
+.explorerWideSummary__value { color: var(--text); text-align: right; }
+
+.explorerPercentBar {
+  position: relative;
+  height: 16px;
+  min-width: 74px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tableBg) 78%, var(--panelBg));
+}
+.explorerPercentBar__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 48%, transparent);
+}
+.explorerPercentBar__text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 600 10px/14px var(--mono);
+  color: var(--text);
+  pointer-events: none;
+}
+.explorerPercentBar.is-unknown .explorerPercentBar__text { color: var(--muted); }
+
+.explorerWideSummary {
+  padding: 9px 10px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerWideSummary--compact { opacity: .88; }
+
+.explorerStorageBreakdown {
+  --explorer-storage-cols: minmax(190px, 1.7fr) minmax(150px, 1.15fr) minmax(100px, .8fr) minmax(110px, .85fr) minmax(100px, .8fr);
+}
+.explorerStorageBreakdown__header,
+.explorerStorageBreakdown__row {
+  display: grid;
+  grid-template-columns: var(--explorer-storage-cols);
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+.explorerStorageBreakdown__header {
+  min-height: 30px;
+  color: var(--muted);
+  font-size: 11px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 84%, var(--tableBg));
+}
+.explorerStorageBreakdown__row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+.explorerStorageBreakdown__header + .explorerStorageBreakdown__row { border-top: 0; }
+.explorerStorageBreakdown__row:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.explorerStorageBreakdown__row.is-subcolumn {
+  background: color-mix(in srgb, var(--tableBg) 46%, transparent);
+}
+.explorerStorageBreakdown__row.is-subcolumn .explorerStorageBreakdown__name {
+  padding-left: 14px;
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+}
+.explorerStorageBreakdown__row.is-structure {
+  background: color-mix(in srgb, var(--panelBg) 82%, var(--tableBg));
+}
+.explorerStorageBreakdown__name,
+.explorerStorageBreakdown__codec,
+.explorerStorageBreakdown__bytes {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerStorageBreakdown__codec { color: var(--muted); }
+.explorerStorageBreakdown__bytes { color: var(--text); }
+.explorerStorageBreakdown__subheading {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--panelBg) 84%, var(--tableBg));
+}
+
+@media (max-width: 980px) {
+  .explorerStorageBreakdown { overflow-x: auto; }
+  .explorerStorageBreakdown__header,
+  .explorerStorageBreakdown__row { min-width: 760px; }
+}
+
+/* Explorer Browse v16: compact footprint/composition rows and sortable storage metrics. */
+.explorerShareList--inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+.explorerShareList--inline .explorerShareRow {
+  border-top: 0;
+  min-width: 0;
+}
+.explorerShareList--inline .explorerShareRow + .explorerShareRow {
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.explorerStorageComposition {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.explorerStorageComposition__metric {
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerStorageComposition__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.explorerStorageComposition__label { color: var(--muted); }
+.explorerStorageComposition__bytes {
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerPercentBar { --explorer-bar-color: var(--accentBorder); }
+.explorerPercentBar__fill {
+  background: color-mix(in srgb, var(--explorer-bar-color) 56%, transparent);
+}
+.explorerPercentBar--wide { --explorer-bar-color: #2563eb; }
+.explorerPercentBar--compact { --explorer-bar-color: #8b5cf6; }
+.explorerPercentBar--projection { --explorer-bar-color: #06b6d4; }
+.explorerPercentBar--index { --explorer-bar-color: #f59e0b; }
+.explorerPercentBar--database { --explorer-bar-color: #22c55e; }
+.explorerPercentBar--clickhouse { --explorer-bar-color: #14b8a6; }
+.explorerPercentBar--column { --explorer-bar-color: var(--accentBorder); }
+.explorerPercentBar--merge { --explorer-bar-color: #a855f7; }
+
+.explorerStorageBreakdown__header > :nth-child(3),
+.explorerStorageBreakdown__header > :nth-child(4),
+.explorerStorageBreakdown__header > :nth-child(5),
+.explorerStorageBreakdown__row > :nth-child(3),
+.explorerStorageBreakdown__row > :nth-child(4) {
+  justify-self: end;
+  text-align: right;
+}
+.explorerStorageBreakdown__bytes {
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.explorerStorageSortLabel,
+.explorerStorageSortButton {
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+}
+.explorerStorageSortButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  width: max-content;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.explorerStorageBreakdown__header > :nth-child(n+3) .explorerStorageSortButton,
+.explorerStorageBreakdown__header > .explorerStorageSortButton:nth-child(n+3) {
+  justify-content: flex-end;
+}
+.explorerStorageSortButton:hover,
+.explorerStorageSortButton.is-active { color: var(--text); }
+.explorerStorageSortButton__arrow {
+  width: 12px;
+  color: color-mix(in srgb, var(--muted) 80%, transparent);
+  text-align: center;
+}
+.explorerStorageSortButton.is-active .explorerStorageSortButton__arrow { color: var(--accentBorder); }
+
+.explorerStorageMetaLine {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.explorerStorageMetaLine__item {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerStorageMetaLine__label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.explorerStorageMetaLine__value {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerMetricBars {
+  display: grid;
+  gap: 6px;
+}
+.explorerMetricBars__row {
+  display: grid;
+  grid-template-columns: minmax(120px, .8fr) minmax(140px, 2fr) minmax(76px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 28px;
+}
+.explorerMetricBars__label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerMetricBars__track {
+  position: relative;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tableBg) 82%, var(--panelBg));
+}
+.explorerMetricBars__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accentBorder) 62%, transparent);
+}
+.explorerMetricBars--storage .explorerMetricBars__fill { background: color-mix(in srgb, #14b8a6 64%, transparent); }
+.explorerMetricBars--ingestion .explorerMetricBars__fill { background: color-mix(in srgb, #3b82f6 58%, transparent); }
+.explorerMetricBars__track.is-unknown::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 5px, color-mix(in srgb, var(--muted) 24%, transparent) 5px 7px);
+}
+.explorerMetricBars__value {
+  justify-self: end;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.explorerMetricBars__meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerActivityCharts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.explorerActivityChart {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerActivityChart__title {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.explorerMergeProgressList {
+  display: grid;
+  gap: 8px;
+}
+.explorerMergeProgress {
+  padding: 9px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerMergeProgress__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+.explorerMergeProgress__part {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerMergeProgress__meta {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 980px) {
+  .explorerShareList--inline,
+  .explorerActivityCharts { grid-template-columns: 1fr; }
+  .explorerShareList--inline .explorerShareRow + .explorerShareRow {
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  }
+  .explorerStorageComposition,
+  .explorerStorageMetaLine { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .explorerMetricBars__row { grid-template-columns: minmax(100px, .8fr) minmax(120px, 2fr) minmax(70px, auto); }
+  .explorerMetricBars__meta { display: none; }
+}
+
+/* Explorer Browse v17: one stacked storage-composition bar and three sortable metric tables. */
+.explorerStorageComposition--stacked {
+  display: block;
+  padding: 9px 10px 10px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panelBg);
+}
+.explorerStorageStackedBar {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tableBg) 78%, var(--panelBg));
+}
+.explorerStorageStackedBar__segment {
+  height: 100%;
+  flex: 0 0 auto;
+}
+.explorerStorageStackedBar__segment--wide,
+.explorerStorageCompositionLegend__swatch--wide { background: #2563eb; }
+.explorerStorageStackedBar__segment--compact,
+.explorerStorageCompositionLegend__swatch--compact { background: #8b5cf6; }
+.explorerStorageStackedBar__segment--projection,
+.explorerStorageCompositionLegend__swatch--projection { background: #06b6d4; }
+.explorerStorageStackedBar__segment--index,
+.explorerStorageCompositionLegend__swatch--index { background: #f59e0b; }
+.explorerStorageCompositionLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  margin-top: 8px;
+}
+.explorerStorageCompositionLegend__item {
+  display: inline-grid;
+  grid-template-columns: 9px auto auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.explorerStorageCompositionLegend__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.explorerStorageCompositionLegend__label { color: var(--muted); }
+.explorerStorageCompositionLegend__percent {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.explorerStorageBreakdown__bytes {
+  min-width: 9.5ch;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* v18: a storage composition is either a complete bytes_on_disk partition or explicitly unknown. */
+.explorerStorageStackedBar.is-unknown {
+  align-items: center;
+  justify-content: center;
+}
+.explorerStorageStackedBar__unknown {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Release 22: Explorer reuses Query surfaces instead of maintaining visual forks. */
+.explorerModeSelect {
+  position: relative;
+  flex: 0 0 34px;
+  width: 34px;
+  min-width: 34px;
+}
+.explorerModeSelect__button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
+.explorerModeIcon {
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  background: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+.explorerModeIcon--browse {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4ZM6 6v0h12v0H6Zm0 6v0h12v0H6Zm0 6v0h12v0H6Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4ZM6 6v0h12v0H6Zm0 6v0h12v0H6Zm0 6v0h12v0H6Z'/%3E%3C/svg%3E");
+}
+.explorerModeIcon--graph {
+  -webkit-mask-image: url("images/network-wired-svgrepo-com.svg");
+  mask-image: url("images/network-wired-svgrepo-com.svg");
+}
+
+/* Profiling has exactly one vertical scroll owner. The modal content and
+   trace table are clipping/layout containers; traceViewer__scroll owns the
+   scrolling so the sticky trace header stays aligned without nested bars. */
+.analysisModal__content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.traceViewerHost {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+.traceViewer {
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.traceViewer__table {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.traceViewer__scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* Aggregate-state preview annotation lives in the shared result-table header. */
+.explorerFinalizeInfo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  color: var(--muted);
+  cursor: help;
+  outline: none;
+}
+.explorerFinalizeInfo__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 700 9px/1 Arial, Helvetica, sans-serif;
+}
+.explorerFinalizeInfo__tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: -7px;
+  z-index: 20;
+  display: none;
+  width: 270px;
+  padding: 7px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 7px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font: 500 11px/1.35 Arial, Helvetica, sans-serif;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+}
+.explorerFinalizeInfo:hover .explorerFinalizeInfo__tooltip,
+.explorerFinalizeInfo:focus .explorerFinalizeInfo__tooltip,
+.explorerFinalizeInfo:focus-visible .explorerFinalizeInfo__tooltip {
+  display: block;
+}
+
+/* Columns / indexes / projections are now the exact shared Query result table.
+   Only the % cell keeps Explorer's storage-specific bar rendering. */
+.explorerStorageResultTable {
+  margin-top: 8px;
+}
+.explorerStorageResultTable + .explorerStorageResultTable,
+.explorerStorageResultTable + .explorerEmptySection,
+.explorerEmptySection + .explorerStorageResultTable {
+  margin-top: 8px;
+}
+.explorerStorageResultTable .explorerStoragePercentCell {
+  min-width: 150px;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+.explorerStorageResultTable .explorerStoragePercentCell .explorerPercentBar {
+  min-width: 130px;
+  margin: 0;
+}
+
+/* CREATE uses the same editor classes as Query. Only read-only auto-height
+   behavior differs; gutter/token/copy styling comes from the shared classes. */
+.explorerDdlWrap.editorWrap {
+  --gutterW: 6ch;
+  display: block;
+  height: auto;
+  min-height: 0;
+  margin-top: 10px;
+  resize: none;
+  overflow: visible;
+}
+.explorerDdlWrap .editorGutter.explorerDdlGutter {
+  width: var(--gutterW);
+  margin: 0;
+  box-sizing: border-box;
+  padding: 14px 9px;
+  border-radius: var(--radiusSm) 0 0 var(--radiusSm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 21px;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  background: var(--panelBg);
+  border-right: 1px solid var(--border);
+}
+.explorerDdlWrap .editorHighlight.explorerDdl {
+  position: relative;
+  max-height: none;
+  inset: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  padding-right: 84px;
+  padding-left: calc(14px + var(--gutterW));
+  border: 0;
+  border-radius: var(--radiusSm);
+  overflow: visible;
+  scrollbar-gutter: auto;
+  color: var(--text);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  line-height: 21px;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: pre !important;
+  pointer-events: auto;
+}
+.explorerDdlWrap .explorerDdlCopy {
+  top: 10px;
+  right: 42px;
+}
+
+/* Release 24: trace geometry is one viewport. The analysis content itself is
+   the TraceViewer host, so remove its inset and let the trace consume the full
+   available width. Header and rows live inside the same scroll box, ensuring
+   identical grid widths while the native scrollbar stays at the far right. */
+.analysisModal__content.traceViewerHost {
+  width: 100%;
+  padding: 0;
+  scrollbar-gutter: auto;
+}
+.traceViewerHost,
+.traceViewer,
+.traceViewer__table,
+.traceViewer__scroll {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.traceViewer__table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.traceViewer__scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.traceViewer__head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  width: 100%;
+}
+.traceViewer__row {
+  width: 100%;
+}
+.traceViewer__serviceMarker {
+  background: var(--trace-attempt-color);
+}
+
+/* Keep the finalize hint subordinate to the shared Query sort affordance: sort
+   arrow first, tiny info glyph at the extreme top-right. */
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
+  padding-right: 2.8rem;
+}
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
+  right: 0.8rem;
+  margin-left: 0;
+}
+.explorerFinalizeInfo {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 9px;
+  height: 9px;
+  margin: 0;
+  vertical-align: 0;
+  z-index: 5;
+}
+.explorerFinalizeInfo__icon {
+  width: 8px;
+  height: 8px;
+  border-width: 1px;
+  font: 700 6px/1 Arial, Helvetica, sans-serif;
+}
+.explorerFinalizeInfo__tooltip {
+  top: calc(100% + 5px);
+  right: -2px;
+  left: auto;
 }

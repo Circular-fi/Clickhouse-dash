@@ -1,0 +1,32 @@
+FROM mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    CI=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv python3-pip ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/chdash-tests
+
+ENV PATH="/opt/chdash-tests/bin:${PATH}"
+WORKDIR /tests
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY frontend/package.json /work/frontend/package.json
+WORKDIR /work/frontend
+RUN npm install --no-audit --no-fund
+
+WORKDIR /tests
+COPY api /tests/api
+COPY backend-functional /tests/backend-functional
+COPY performance /tests/performance
+COPY frontend /work/frontend
+COPY test-suite /tests/test-suite
+
+CMD ["python", "/tests/test-suite/run-all-tests.py"]

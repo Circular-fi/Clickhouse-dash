@@ -1,0 +1,26 @@
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <fixture_hot>
+                <type>local</type>
+                <path>/var/lib/clickhouse/disks/fixture_hot/</path>
+            </fixture_hot>
+            <fixture_warm>
+                <type>local</type>
+                <path>/var/lib/clickhouse/disks/fixture_warm/</path>
+            </fixture_warm>
+        </disks>
+        <policies>
+            <fixture_tiered>
+                <volumes>
+                    <hot>
+                        <disk>fixture_hot</disk>
+                    </hot>
+                    <warm>
+                        <disk>fixture_warm</disk>
+                    </warm>
+                </volumes>
+            </fixture_tiered>
+        </policies>
+    </storage_configuration>
+</clickhouse>

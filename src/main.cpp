@@ -42,9 +42,9 @@ CliOptions parse_cli(int argc, char** argv) {
 
 void print_help() {
   std::cout
-      << "Usage: chdash [--config <path>] [--health]\n"
+      << "Usage: chdash --config <path> [--health]\n"
       << "       chdash --version\n\n"
-      << "When --config is present, application environment variables are ignored.\n";
+      << "Application configuration is HCL-only; --config is required for server and health modes.\n";
 }
 
 void print_version() {
@@ -77,13 +77,14 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  if (!cli.config_path) {
+    std::cerr << "config error: --config is required (configuration is HCL-only)." << std::endl;
+    return 2;
+  }
+
   chdash::AppConfig cfg;
   try {
-    // This branch is the environment isolation boundary: the file loader does
-    // not call getenv, and the environment loader is never reached.
-    cfg = cli.config_path
-        ? chdash::load_config_from_file(*cli.config_path)
-        : chdash::load_config_from_environment();
+    cfg = chdash::load_config_from_file(*cli.config_path);
   } catch (const std::exception& error) {
     std::cerr << "config error: " << error.what() << std::endl;
     return 1;
@@ -115,11 +116,19 @@ int main(int argc, char** argv) {
               << " sse_queue_max_bytes=" << cfg.query_options.sse_queue_max_bytes
               << " describe_cache_entries=" << cfg.query_options.describe_cache_entries
               << " describe_cache_ttl_ms=" << cfg.query_options.describe_cache_ttl_ms
-              << " final_query_log_stats=" << (cfg.query_options.final_stats_from_query_log ? "on" : "off")
               << " format_cache_entries=" << cfg.format_cache_max_entries
               << " format_cache_ttl_ms=" << cfg.format_cache_ttl_ms
               << " query_session_max_count=" << cfg.query_session_max_count
               << " query_session_abandoned_ttl_ms=" << cfg.query_session_abandoned_ttl_ms
+              << " explorer_cache_ttl_ms=" << cfg.explorer.cache_ttl_ms
+              << " explorer_live_refresh_ms=" << cfg.explorer.live_refresh_ms
+              << " max_result_cell_bytes=" << cfg.query_options.max_result_cell_bytes
+              << " max_result_event_bytes=" << cfg.query_options.max_result_event_bytes
+              << " cancel_token_ttl_ms=" << cfg.cancel_token_ttl_ms
+              << " analysis_registry_ttl_ms=" << cfg.analysis.registry_ttl_ms
+              << " analysis_registry_max_entries=" << cfg.analysis.registry_max_entries
+              << " export_max_concurrent=" << cfg.export_settings.max_concurrent
+              << " export_output_buffer_bytes=" << cfg.export_settings.output_buffer_bytes
               << "\n";
     for (const auto& host : cfg.hosts) {
       std::cerr << "host=" << host.id

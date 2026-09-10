@@ -1,0 +1,17 @@
+{
+  "name": "chdash-browser-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "functional": "playwright test specs/functional.spec.js --project=desktop-1440",
+    "design": "playwright test specs/design.spec.js specs/accessibility.spec.js specs/visual-regression.spec.js",
+    "snapshots:update": "VISUAL_COMPARE=1 playwright test specs/visual-regression.spec.js --update-snapshots",
+    "snapshots:check": "VISUAL_COMPARE=1 playwright test specs/visual-regression.spec.js"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.62.1",
+    "axe-core": "4.13.0"
+  }
+}

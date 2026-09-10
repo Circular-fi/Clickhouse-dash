@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <fstream>
 #include <initializer_list>
 #include <limits>
@@ -17,32 +16,6 @@
 namespace chdash {
 namespace {
 
-std::string env_string(const char* key, const std::string& fallback = "") {
-  const char* value = std::getenv(key);
-  if (!value || !*value) return fallback;
-  return std::string(value);
-}
-
-int env_int(const char* key, int fallback) {
-  const char* value = std::getenv(key);
-  if (!value || !*value) return fallback;
-  try {
-    return std::stoi(value);
-  } catch (...) {
-    return fallback;
-  }
-}
-
-bool env_bool(const char* key, bool fallback) {
-  const char* value = std::getenv(key);
-  if (!value || !*value) return fallback;
-  std::string text(value);
-  for (auto& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-  if (text == "1" || text == "true" || text == "yes" || text == "on") return true;
-  if (text == "0" || text == "false" || text == "no" || text == "off") return false;
-  return fallback;
-}
-
 QueryDescribeMode parse_describe_mode(std::string text, QueryDescribeMode fallback, bool strict) {
   for (auto& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
   if (text == "always" || text == "on" || text == "1" || text == "true") return QueryDescribeMode::Always;
@@ -52,16 +25,9 @@ QueryDescribeMode parse_describe_mode(std::string text, QueryDescribeMode fallba
   return fallback;
 }
 
-QueryDescribeMode env_describe_mode(const char* key, QueryDescribeMode fallback) {
-  const char* value = std::getenv(key);
-  if (!value || !*value) return fallback;
-  return parse_describe_mode(value, fallback, false);
-}
-
 AppConfig default_config() {
   AppConfig cfg;
-  // The historical environment loader used 10000 even though AppConfig's
-  // member initializer was zero. Keep the effective runtime default stable.
+  // Keep the established interactive preview default explicit in the HCL path.
   cfg.result_preview_row_limit = 10000;
   return cfg;
 }
@@ -89,6 +55,8 @@ void normalize_config(AppConfig& cfg) {
   cfg.query_options.sse_write_batch_events = std::max<size_t>(1, cfg.query_options.sse_write_batch_events);
   cfg.query_options.sse_write_batch_bytes = std::max<size_t>(0, cfg.query_options.sse_write_batch_bytes);
   cfg.query_options.sse_queue_max_bytes = std::max<size_t>(0, cfg.query_options.sse_queue_max_bytes);
+  cfg.query_options.max_result_cell_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, cfg.query_options.max_result_cell_bytes));
+  cfg.query_options.max_result_event_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, cfg.query_options.max_result_event_bytes));
   cfg.query_options.describe_cache_ttl_ms = std::max(0, cfg.query_options.describe_cache_ttl_ms);
 
   cfg.client_pool_max_idle_per_key = std::min<size_t>(64, cfg.client_pool_max_idle_per_key);
@@ -104,6 +72,28 @@ void normalize_config(AppConfig& cfg) {
   cfg.query_session_abandoned_ttl_ms = std::max(1000, cfg.query_session_abandoned_ttl_ms);
   cfg.query_session_terminal_ttl_ms = std::max(0, cfg.query_session_terminal_ttl_ms);
   cfg.query_session_reaper_interval_ms = std::max(250, cfg.query_session_reaper_interval_ms);
+  cfg.cancel_token_ttl_ms = std::max(1000, std::min(48 * 60 * 60 * 1000, cfg.cancel_token_ttl_ms));
+
+  cfg.explorer.cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, cfg.explorer.cache_ttl_ms));
+  cfg.explorer.live_refresh_ms = std::max(250, std::min(60 * 1000, cfg.explorer.live_refresh_ms));
+  cfg.explorer.function_cache_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.explorer.function_cache_ttl_ms));
+  cfg.analysis.registry_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.analysis.registry_ttl_ms));
+  cfg.analysis.registry_max_entries = std::max<size_t>(1, std::min<size_t>(1'000'000, cfg.analysis.registry_max_entries));
+  cfg.analysis.registry_sql_max_bytes = std::min<size_t>(512 * 1024 * 1024, cfg.analysis.registry_sql_max_bytes);
+  cfg.analysis.log_lookup_timeout_ms = std::max(0, std::min(60 * 1000, cfg.analysis.log_lookup_timeout_ms));
+  cfg.export_settings.max_concurrent = std::max<size_t>(1, std::min<size_t>(64, cfg.export_settings.max_concurrent));
+  cfg.export_settings.output_buffer_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(16 * 1024 * 1024, cfg.export_settings.output_buffer_bytes));
+  cfg.export_settings.token_ttl_ms = std::max(5000, std::min(10 * 60 * 1000, cfg.export_settings.token_ttl_ms));
+  cfg.export_settings.pending_max_entries = std::max<size_t>(1, std::min<size_t>(4096, cfg.export_settings.pending_max_entries));
+  cfg.export_settings.pending_sql_max_bytes = std::max<size_t>(1024 * 1024, std::min<size_t>(512 * 1024 * 1024, cfg.export_settings.pending_sql_max_bytes));
+  cfg.export_settings.max_queries = std::max<size_t>(1, std::min<size_t>(4096, cfg.export_settings.max_queries));
+  if (cfg.export_settings.archive_format != "zip") {
+    throw std::runtime_error("export.archive_format must be zip");
+  }
+  if (cfg.export_settings.compression) {
+    throw std::runtime_error("export.compression=true is not supported in ZIP64 V1; use false");
+  }
+
   cfg.health.interval_ms = std::min(600 * 1000, cfg.health.interval_ms);
 }
 
@@ -266,7 +256,9 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
 }
 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
-  validate_object(root, source, {}, {"server", "query", "client_pool", "format_cache", "health", "clickhouse"});
+  validate_object(root, source, {}, {
+      "server", "query", "client_pool", "format_cache", "health",
+      "explorer", "analysis", "export", "clickhouse"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -286,28 +278,30 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   if (const auto* query = optional_block(root, "query", source)) {
     validate_object(*query, "query", {
         "result_preview_row_limit", "max_sql_bytes", "describe_mode",
-        "final_stats_from_query_log", "final_stats_flush_logs", "sample_interval_ms",
+        "sample_interval_ms",
         "result_batch_rows", "result_batch_bytes", "sse_batch_events", "sse_batch_bytes",
-        "sse_queue_max_bytes", "describe_cache_entries", "describe_cache_ttl_ms",
+        "sse_queue_max_bytes", "max_result_cell_bytes", "max_result_event_bytes",
+        "describe_cache_entries", "describe_cache_ttl_ms",
         "session_max_count", "session_abandoned_ttl_ms", "session_terminal_ttl_ms",
-        "session_reaper_interval_ms"}, {});
+        "session_reaper_interval_ms", "cancel_token_ttl_ms"}, {});
     if (auto v = int_attr(*query, "result_preview_row_limit", "query")) cfg.result_preview_row_limit = int_value(*v, "query.result_preview_row_limit");
     if (auto v = int_attr(*query, "max_sql_bytes", "query")) cfg.query_max_sql_bytes = size_value(*v, "query.max_sql_bytes");
     if (auto v = string_attr(*query, "describe_mode", "query")) cfg.query_options.describe_mode = parse_describe_mode(*v, QueryDescribeMode::Auto, true);
-    if (auto v = bool_attr(*query, "final_stats_from_query_log", "query")) cfg.query_options.final_stats_from_query_log = *v;
-    if (auto v = bool_attr(*query, "final_stats_flush_logs", "query")) cfg.query_options.flush_query_log_for_final_stats = *v;
     if (auto v = int_attr(*query, "sample_interval_ms", "query")) cfg.query_options.sample_interval_ms = int_value(*v, "query.sample_interval_ms");
     if (auto v = int_attr(*query, "result_batch_rows", "query")) cfg.query_options.result_rows_batch_size = int_value(*v, "query.result_batch_rows");
     if (auto v = int_attr(*query, "result_batch_bytes", "query")) cfg.query_options.result_rows_batch_bytes = size_value(*v, "query.result_batch_bytes");
     if (auto v = int_attr(*query, "sse_batch_events", "query")) cfg.query_options.sse_write_batch_events = size_value(*v, "query.sse_batch_events");
     if (auto v = int_attr(*query, "sse_batch_bytes", "query")) cfg.query_options.sse_write_batch_bytes = size_value(*v, "query.sse_batch_bytes");
     if (auto v = int_attr(*query, "sse_queue_max_bytes", "query")) cfg.query_options.sse_queue_max_bytes = size_value(*v, "query.sse_queue_max_bytes");
+    if (auto v = int_attr(*query, "max_result_cell_bytes", "query")) cfg.query_options.max_result_cell_bytes = size_value(*v, "query.max_result_cell_bytes");
+    if (auto v = int_attr(*query, "max_result_event_bytes", "query")) cfg.query_options.max_result_event_bytes = size_value(*v, "query.max_result_event_bytes");
     if (auto v = int_attr(*query, "describe_cache_entries", "query")) cfg.query_options.describe_cache_entries = size_value(*v, "query.describe_cache_entries");
     if (auto v = int_attr(*query, "describe_cache_ttl_ms", "query")) cfg.query_options.describe_cache_ttl_ms = int_value(*v, "query.describe_cache_ttl_ms");
     if (auto v = int_attr(*query, "session_max_count", "query")) cfg.query_session_max_count = size_value(*v, "query.session_max_count");
     if (auto v = int_attr(*query, "session_abandoned_ttl_ms", "query")) cfg.query_session_abandoned_ttl_ms = int_value(*v, "query.session_abandoned_ttl_ms");
     if (auto v = int_attr(*query, "session_terminal_ttl_ms", "query")) cfg.query_session_terminal_ttl_ms = int_value(*v, "query.session_terminal_ttl_ms");
     if (auto v = int_attr(*query, "session_reaper_interval_ms", "query")) cfg.query_session_reaper_interval_ms = int_value(*v, "query.session_reaper_interval_ms");
+    if (auto v = int_attr(*query, "cancel_token_ttl_ms", "query")) cfg.cancel_token_ttl_ms = int_value(*v, "query.cancel_token_ttl_ms");
   }
 
   if (const auto* pool = optional_block(root, "client_pool", source)) {
@@ -325,6 +319,43 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*cache, "ttl_ms", "format_cache")) cfg.format_cache_ttl_ms = int_value(*v, "format_cache.ttl_ms");
   }
 
+
+  if (const auto* explorer = optional_block(root, "explorer", source)) {
+    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph"});
+    if (auto v = bool_attr(*explorer, "browse", "explorer")) cfg.explorer.browse = *v;
+    if (const auto* graph = optional_block(*explorer, "graph", "explorer")) {
+      validate_object(*graph, "explorer.graph", {"lineage", "storage_topology"}, {});
+      if (auto v = bool_attr(*graph, "lineage", "explorer.graph")) cfg.explorer.lineage = *v;
+      if (auto v = bool_attr(*graph, "storage_topology", "explorer.graph")) cfg.explorer.storage_topology = *v;
+    }
+    if (auto v = int_attr(*explorer, "cache_ttl_ms", "explorer")) cfg.explorer.cache_ttl_ms = int_value(*v, "explorer.cache_ttl_ms");
+    if (auto v = int_attr(*explorer, "live_refresh_ms", "explorer")) cfg.explorer.live_refresh_ms = int_value(*v, "explorer.live_refresh_ms");
+    if (auto v = int_attr(*explorer, "function_cache_ttl_ms", "explorer")) cfg.explorer.function_cache_ttl_ms = int_value(*v, "explorer.function_cache_ttl_ms");
+    if (auto v = bool_attr(*explorer, "function_markdown_links", "explorer")) cfg.explorer.function_markdown_links = *v;
+  }
+
+  if (const auto* analysis = optional_block(root, "analysis", source)) {
+    validate_object(*analysis, "analysis", {"registry_ttl_ms", "registry_max_entries", "registry_sql_max_bytes", "log_lookup_timeout_ms", "flush_logs", "allow_deep_analyze"}, {});
+    if (auto v = int_attr(*analysis, "registry_ttl_ms", "analysis")) cfg.analysis.registry_ttl_ms = int_value(*v, "analysis.registry_ttl_ms");
+    if (auto v = int_attr(*analysis, "registry_max_entries", "analysis")) cfg.analysis.registry_max_entries = size_value(*v, "analysis.registry_max_entries");
+    if (auto v = int_attr(*analysis, "registry_sql_max_bytes", "analysis")) cfg.analysis.registry_sql_max_bytes = size_value(*v, "analysis.registry_sql_max_bytes");
+    if (auto v = int_attr(*analysis, "log_lookup_timeout_ms", "analysis")) cfg.analysis.log_lookup_timeout_ms = int_value(*v, "analysis.log_lookup_timeout_ms");
+    if (auto v = bool_attr(*analysis, "flush_logs", "analysis")) cfg.analysis.flush_logs = *v;
+    if (auto v = bool_attr(*analysis, "allow_deep_analyze", "analysis")) cfg.analysis.allow_deep_analyze = *v;
+  }
+
+  if (const auto* export_block = optional_block(root, "export", source)) {
+    validate_object(*export_block, "export", {"max_concurrent", "output_buffer_bytes", "archive_format", "compression", "token_ttl_ms", "pending_max_entries", "pending_sql_max_bytes", "max_queries"}, {});
+    if (auto v = int_attr(*export_block, "max_concurrent", "export")) cfg.export_settings.max_concurrent = size_value(*v, "export.max_concurrent");
+    if (auto v = int_attr(*export_block, "output_buffer_bytes", "export")) cfg.export_settings.output_buffer_bytes = size_value(*v, "export.output_buffer_bytes");
+    if (auto v = string_attr(*export_block, "archive_format", "export")) cfg.export_settings.archive_format = *v;
+    if (auto v = bool_attr(*export_block, "compression", "export")) cfg.export_settings.compression = *v;
+    if (auto v = int_attr(*export_block, "token_ttl_ms", "export")) cfg.export_settings.token_ttl_ms = int_value(*v, "export.token_ttl_ms");
+    if (auto v = int_attr(*export_block, "pending_max_entries", "export")) cfg.export_settings.pending_max_entries = size_value(*v, "export.pending_max_entries");
+    if (auto v = int_attr(*export_block, "pending_sql_max_bytes", "export")) cfg.export_settings.pending_sql_max_bytes = size_value(*v, "export.pending_sql_max_bytes");
+    if (auto v = int_attr(*export_block, "max_queries", "export")) cfg.export_settings.max_queries = size_value(*v, "export.max_queries");
+  }
+
   if (const auto* health = optional_block(root, "health", source)) {
     validate_object(*health, "health", {"interval_ms", "timeout_ms"}, {});
     if (auto v = int_attr(*health, "interval_ms", "health")) cfg.health.interval_ms = int_value(*v, "health.interval_ms");
@@ -335,49 +366,6 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 }
 
 } // namespace
-
-AppConfig load_config_from_environment() {
-  AppConfig cfg = default_config();
-  cfg.listen = env_string("LISTEN_HOST", "0.0.0.0") + ":" + std::to_string(env_int("LISTEN_PORT", 8080));
-  cfg.result_preview_row_limit = env_int("RESULT_PREVIEW_ROW_LIMIT", 10000);
-  cfg.query_max_sql_bytes = static_cast<size_t>(std::max(0, env_int("QUERY_MAX_SQL_BYTES", 4 * 1024 * 1024)));
-  cfg.query_options.describe_mode = env_describe_mode("QUERY_DESCRIBE_MODE", QueryDescribeMode::Auto);
-  cfg.query_options.final_stats_from_query_log = env_bool("QUERY_FINAL_STATS_FROM_QUERY_LOG", false);
-  cfg.query_options.flush_query_log_for_final_stats = env_bool("QUERY_FINAL_STATS_FLUSH_LOGS", false);
-  cfg.query_options.sample_interval_ms = env_int("QUERY_SAMPLE_INTERVAL_MS", 40);
-  cfg.query_options.result_rows_batch_size = env_int("QUERY_RESULT_BATCH_ROWS", 1000);
-  cfg.query_options.result_rows_batch_bytes = static_cast<size_t>(std::max(0, env_int("QUERY_RESULT_BATCH_BYTES", 256 * 1024)));
-  cfg.query_options.sse_write_batch_events = static_cast<size_t>(std::max(1, env_int("QUERY_SSE_BATCH_EVENTS", 8)));
-  cfg.query_options.sse_write_batch_bytes = static_cast<size_t>(std::max(0, env_int("QUERY_SSE_BATCH_BYTES", 256 * 1024)));
-  cfg.query_options.sse_queue_max_bytes = static_cast<size_t>(std::max(0, env_int("QUERY_SSE_QUEUE_MAX_BYTES", 8 * 1024 * 1024)));
-  cfg.query_options.describe_cache_entries = static_cast<size_t>(std::max(0, env_int("QUERY_DESCRIBE_CACHE_ENTRIES", 256)));
-  cfg.query_options.describe_cache_ttl_ms = env_int("QUERY_DESCRIBE_CACHE_TTL_MS", 60 * 1000);
-  cfg.client_pool_max_idle_per_key = static_cast<size_t>(std::max(0, env_int("CH_CLIENT_POOL_MAX_IDLE", 4)));
-  cfg.client_pool_idle_ttl_ms = env_int("CH_CLIENT_POOL_IDLE_TTL_MS", 60 * 1000);
-  cfg.client_pool_validate_after_idle_ms = env_int("CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS", 15 * 1000);
-  cfg.client_pool_reaper_interval_ms = env_int("CH_CLIENT_POOL_REAPER_INTERVAL_MS", 5 * 1000);
-  cfg.format_cache_max_entries = static_cast<size_t>(std::max(0, env_int("FORMAT_CACHE_MAX_ENTRIES", 512)));
-  cfg.format_cache_max_bytes = static_cast<size_t>(std::max(0, env_int("FORMAT_CACHE_MAX_BYTES", 16 * 1024 * 1024)));
-  cfg.format_cache_ttl_ms = env_int("FORMAT_CACHE_TTL_MS", 10 * 60 * 1000);
-  cfg.query_session_max_count = static_cast<size_t>(std::max(0, env_int("QUERY_SESSION_MAX_COUNT", 256)));
-  cfg.query_session_abandoned_ttl_ms = env_int("QUERY_SESSION_ABANDONED_TTL_MS", 60 * 1000);
-  cfg.query_session_terminal_ttl_ms = env_int("QUERY_SESSION_TERMINAL_TTL_MS", 30 * 1000);
-  cfg.query_session_reaper_interval_ms = env_int("QUERY_SESSION_REAPER_INTERVAL_MS", 5 * 1000);
-
-  const std::string hosts_hcl = env_string("CH_HOSTS");
-  if (hosts_hcl.empty()) throw std::runtime_error("CH_HOSTS is required");
-  const HclObject root = parse_hcl(hosts_hcl);
-  validate_object(root, "CH_HOSTS", {}, {"health", "clickhouse"});
-  if (const auto* health = optional_block(root, "health", "CH_HOSTS")) {
-    validate_object(*health, "health", {"interval_ms", "timeout_ms"}, {});
-    if (auto v = int_attr(*health, "interval_ms", "health")) cfg.health.interval_ms = int_value(*v, "health.interval_ms");
-    if (auto v = int_attr(*health, "timeout_ms", "health")) cfg.health.timeout_ms = int_value(*v, "health.timeout_ms");
-  }
-  load_hosts(cfg, root, "CH_HOSTS");
-  normalize_config(cfg);
-  set_version_info(cfg);
-  return cfg;
-}
 
 AppConfig load_config_from_file(const std::string& path) {
   if (path.empty()) throw std::runtime_error("--config path cannot be empty");

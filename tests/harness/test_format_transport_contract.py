@@ -36,3 +36,5 @@ def test_transport_failures_are_not_reported_as_sql_validation_errors() -> None:
     assert '"clickhouse_transport_error"' in source
     assert "is_format_transport_failure(kind) ? 502 : 422" in source
     assert '"X-Chdash-Format-Reconnect"' in source
+    assert "canonical_key = format_cache_key(host_id, line_width, *value)" in source
+    assert "format_cache_->put(canonical_key, value)" in source

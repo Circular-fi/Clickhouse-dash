@@ -35,6 +35,7 @@ struct HostSystemTables {
   bool query_thread_log = false;
   bool trace_log = false;
   bool processors_profile_log = false;
+  bool opentelemetry_span_log = false;
   bool jemalloc_profile_text = false;
   bool logs_table_available = false;
   bool flamegraph_tables_available = false;

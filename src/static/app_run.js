@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, state, storage, api, sql, results, util, ui } = ns;
+  const { dom, state, storage, api, sql, results, util, ui, analysis, download } = ns;
 
   let activeEventSource = null;
   let lockProgressIndeterminate = false;
@@ -12,6 +12,8 @@
   const series = {
     readRowsPerSec: [],
     readBytesPerSec: [],
+    writtenRowsPerSec: [],
+    writtenBytesPerSec: [],
     cpu: [],
     memBytes: [],
   };
@@ -193,6 +195,8 @@
   const chartCanvases = () => [
     dom.readRowsChart,
     dom.readBytesChart,
+    dom.writtenRowsChart,
+    dom.writtenBytesChart,
     dom.cpuChart,
     dom.memoryChart,
   ].filter(Boolean);
@@ -209,6 +213,8 @@
 
     drawSparkline(dom.readRowsChart, series.readRowsPerSec, { min: 0 });
     drawSparkline(dom.readBytesChart, series.readBytesPerSec, { min: 0 });
+    drawSparkline(dom.writtenRowsChart, series.writtenRowsPerSec, { min: 0 });
+    drawSparkline(dom.writtenBytesChart, series.writtenBytesPerSec, { min: 0 });
 
     drawSparkline(dom.cpuChart, series.cpu, {
       min: 0,
@@ -232,6 +238,8 @@
   function resetCharts() {
     series.readRowsPerSec.length = 0;
     series.readBytesPerSec.length = 0;
+    series.writtenRowsPerSec.length = 0;
+    series.writtenBytesPerSec.length = 0;
     series.cpu.length = 0;
     series.memBytes.length = 0;
     releaseChartBuffers();
@@ -260,6 +268,7 @@
   function formatSecondsFromMs(ms) {
     const n = Number(ms);
     if (!Number.isFinite(n) || n < 0) return "-";
+    if (n < 1000) return `${Math.max(0, Math.round(n))}ms`;
     const s = n / 1000;
     if (s < 10) return `${s.toFixed(3)}s`;
     if (s < 100) return `${s.toFixed(2)}s`;
@@ -275,12 +284,21 @@
 
   function resetMetrics() {
     lockProgressIndeterminate = false;
-    util.setText(dom.elapsedSecondsText, "-");
+    util.setMetricText(dom.elapsedSecondsText, "-");
+    util.setText(dom.clickhouseElapsedText, "");
+    if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
+    if (dom.clickhouseElapsedText) dom.clickhouseElapsedText.removeAttribute("title");
     util.setText(dom.progressPercentText, "-");
     util.setMetricText(dom.readRowsRateText, "-");
     util.setMetricText(dom.readRowsTotalText, "-");
     util.setMetricText(dom.readBytesRateText, "-");
     util.setMetricText(dom.readBytesTotalText, "-");
+    util.setMetricText(dom.writtenRowsRateText, "-");
+    util.setMetricText(dom.writtenRowsTotalText, "-");
+    util.setMetricText(dom.writtenBytesRateText, "-");
+    util.setMetricText(dom.writtenBytesTotalText, "-");
+    if (dom.writtenRowsCard) dom.writtenRowsCard.classList.add("is-hidden");
+    if (dom.writtenBytesCard) dom.writtenBytesCard.classList.add("is-hidden");
     util.setText(dom.cpuText, "-");
     util.setText(dom.cpuMaxText, "-");
     util.setMetricText(dom.memoryText, "-");
@@ -294,10 +312,12 @@
 
   function resetLiveMetrics() {
     lockProgressIndeterminate = false;
-    // util.setText(dom.elapsedSecondsText, "-");
+    // util.setMetricText(dom.elapsedSecondsText, "-");
     // util.setText(dom.progressPercentText, "-");
     util.setMetricText(dom.readRowsRateText, "-");
     util.setMetricText(dom.readBytesRateText, "-");
+    util.setMetricText(dom.writtenRowsRateText, "-");
+    util.setMetricText(dom.writtenBytesRateText, "-");
     util.setText(dom.cpuText, "-");
     util.setMetricText(dom.memoryText, "-");
   }
@@ -305,6 +325,29 @@
   function setProgressIndeterminate(enabled) {
     if (!dom.progressCard) return;
     dom.progressCard.classList.toggle("is-indeterminate", !!enabled);
+  }
+
+  async function refreshClickHouseElapsed(hostId, queryId) {
+    if (!dom.clickhouseElapsedText || !hostId || !queryId || !api || typeof api.getQueryExecution !== "function") return;
+    if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
+    dom.clickhouseElapsedText.removeAttribute("title");
+    try {
+      const payload = await api.getQueryExecution(hostId, queryId);
+      if (payload && payload.available === true && Number.isFinite(Number(payload.duration_ms))) {
+        util.setText(dom.clickhouseElapsedText, formatSecondsFromMs(Number(payload.duration_ms)));
+        if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
+        return;
+      }
+      const detail = payload && payload.error ? String(payload.error)
+        : (payload && payload.logs_pending ? "ClickHouse query_log has not published this execution yet." : "ClickHouse elapsed is unavailable.");
+      util.setText(dom.clickhouseElapsedText, payload && payload.logs_pending ? "pending" : "unavailable");
+      if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
+      dom.clickhouseElapsedText.title = detail;
+    } catch (e) {
+      util.setText(dom.clickhouseElapsedText, "error");
+      if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
+      dom.clickhouseElapsedText.title = e instanceof Error ? e.message : String(e || "ClickHouse execution lookup failed.");
+    }
   }
 
   function applyTickMetrics(arr, agg) {
@@ -325,8 +368,12 @@
     // dashboard always sends null because ClickHouse does not expose a stable
     // live active-thread count in native query telemetry.
     const samples = Array.isArray(arr[14]) ? arr[14] : null;
+    const writtenRowsTotal = arr[15] == null ? null : Number(arr[15]);
+    const writtenBytesTotal = arr[16] == null ? null : Number(arr[16]);
+    const writtenRowsPerSec = arr[17] == null ? null : Number(arr[17]);
+    const writtenBytesPerSec = arr[18] == null ? null : Number(arr[18]);
 
-    if (Number.isFinite(elapsedMs)) util.setText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
+    if (Number.isFinite(elapsedMs)) util.setMetricText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
 
     if (percentKnown && Number.isFinite(percentCenti)) {
       const pct = Math.max(0, Math.min(100, percentCenti / 100));
@@ -345,6 +392,17 @@
     if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
     if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
 
+    const hasWrites = (Number.isFinite(writtenRowsTotal) && writtenRowsTotal > 0) ||
+      (Number.isFinite(writtenBytesTotal) && writtenBytesTotal > 0);
+    if (hasWrites) {
+      if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
+      if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
+      if (Number.isFinite(writtenRowsPerSec)) util.setMetricText(dom.writtenRowsRateText, `${formatShort(writtenRowsPerSec)}/s`);
+      if (Number.isFinite(writtenRowsTotal)) util.setMetricText(dom.writtenRowsTotalText, formatShort(writtenRowsTotal));
+      if (Number.isFinite(writtenBytesPerSec)) util.setMetricText(dom.writtenBytesRateText, `${formatBytesShort(writtenBytesPerSec)}/s`);
+      if (Number.isFinite(writtenBytesTotal)) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(writtenBytesTotal));
+    }
+
     util.setText(dom.cpuText, cpuCenti == null ? "-" : formatPercentFromCenti(cpuCenti));
     util.setText(dom.cpuMaxText, cpuMaxCenti == null ? "-" : formatPercentFromCenti(cpuMaxCenti));
 
@@ -354,6 +412,8 @@
     if (agg) {
       if (Number.isFinite(readRowsTotal)) agg.lastReadRows = readRowsTotal;
       if (Number.isFinite(readBytesTotal)) agg.lastReadBytes = readBytesTotal;
+      if (Number.isFinite(writtenRowsTotal)) agg.lastWrittenRows = writtenRowsTotal;
+      if (Number.isFinite(writtenBytesTotal)) agg.lastWrittenBytes = writtenBytesTotal;
       if (Number.isFinite(cpuMaxCenti)) agg.cpuMaxCenti = Math.max(agg.cpuMaxCenti, cpuMaxCenti);
       if (Number.isFinite(memMax)) agg.memMax = Math.max(agg.memMax, memMax);
 
@@ -361,6 +421,8 @@
       if (tSec != null) {
         if (Number.isFinite(rowsPerSec) && rowsPerSec >= 0) pushPointMonotone(series.readRowsPerSec, tSec, rowsPerSec);
         if (Number.isFinite(bytesPerSec) && bytesPerSec >= 0) pushPointMonotone(series.readBytesPerSec, tSec, bytesPerSec);
+        if (Number.isFinite(writtenRowsPerSec) && writtenRowsPerSec >= 0) pushPointMonotone(series.writtenRowsPerSec, tSec, writtenRowsPerSec);
+        if (Number.isFinite(writtenBytesPerSec) && writtenBytesPerSec >= 0) pushPointMonotone(series.writtenBytesPerSec, tSec, writtenBytesPerSec);
         if (Number.isFinite(cpuCenti)) pushPointMonotone(series.cpu, tSec, cpuCenti / 100);
         if (memInst != null && Number.isFinite(memInst)) pushPointMonotone(series.memBytes, tSec, memInst);
       }
@@ -373,8 +435,9 @@
           if (st == null) continue;
 
           // Current source layout (five values):
-          // [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes].
-          // Release 2.8.x may append a sixth legacy thread value; it is ignored.
+          // [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes, writtenRowsTotal, writtenBytesTotal].
+          // Older releases may append legacy fields after memory; values are
+          // treated as write telemetry only when both appended counters exist.
           const hasReadRows = s.length >= 5;
           const rr = hasReadRows ? Number(s[1]) : null;
           const rb = hasReadRows ? Number(s[2]) : Number(s[1]);
@@ -382,6 +445,8 @@
           const memoryIndex = hasReadRows ? 4 : 3;
           const cpu = s[cpuIndex] == null ? null : Number(s[cpuIndex]);
           const mem = s[memoryIndex] == null ? null : Number(s[memoryIndex]);
+          const swr = s.length >= 7 ? Number(s[5]) : null;
+          const swb = s.length >= 7 ? Number(s[6]) : null;
 
           if (cpu != null && Number.isFinite(cpu)) pushPointMonotone(series.cpu, st, cpu / 100);
           if (mem != null && Number.isFinite(mem)) pushPointMonotone(series.memBytes, st, mem);
@@ -400,6 +465,31 @@
               const bps = (rb - agg.lastSampleReadBytes) / dt;
               if (Number.isFinite(bps) && bps >= 0) pushPointMonotone(series.readBytesPerSec, st, bps);
             }
+          }
+
+          if (Number.isFinite(swr) && agg.lastSampleWrittenRows != null && agg.lastSampleWrittenRowsT != null) {
+            const dt = st - agg.lastSampleWrittenRowsT;
+            if (dt > 1e-9) {
+              const rps = (swr - agg.lastSampleWrittenRows) / dt;
+              if (Number.isFinite(rps) && rps >= 0) pushPointMonotone(series.writtenRowsPerSec, st, rps);
+            }
+          }
+
+          if (Number.isFinite(swb) && agg.lastSampleWrittenBytes != null && agg.lastSampleWrittenBytesT != null) {
+            const dt = st - agg.lastSampleWrittenBytesT;
+            if (dt > 1e-9) {
+              const bps = (swb - agg.lastSampleWrittenBytes) / dt;
+              if (Number.isFinite(bps) && bps >= 0) pushPointMonotone(series.writtenBytesPerSec, st, bps);
+            }
+          }
+
+          if (Number.isFinite(swr)) {
+            agg.lastSampleWrittenRows = swr;
+            agg.lastSampleWrittenRowsT = st;
+          }
+          if (Number.isFinite(swb)) {
+            agg.lastSampleWrittenBytes = swb;
+            agg.lastSampleWrittenBytesT = st;
           }
 
           if (Number.isFinite(rr)) {
@@ -421,16 +511,27 @@
   function applyDoneMetrics(done, agg) {
     if (!done || typeof done !== "object") return;
     lockProgressIndeterminate = true;
-    if (done.elapsed_seconds != null) util.setText(dom.elapsedSecondsText, util.formatSeconds(done.elapsed_seconds));
+    if (done.elapsed_seconds != null) util.setMetricText(dom.elapsedSecondsText, util.formatSeconds(done.elapsed_seconds));
 
     const rr = done.read_rows != null ? Number(done.read_rows) : null;
     const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
+    const wr = done.written_rows != null ? Number(done.written_rows) : null;
+    const wb = done.written_bytes != null ? Number(done.written_bytes) : null;
 
     if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, formatShort(rr));
     else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, formatShort(agg.lastReadRows));
 
     if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, formatBytesShort(rb));
     else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
+
+    const finalWrittenRows = wr != null && Number.isFinite(wr) ? wr : (agg ? agg.lastWrittenRows : null);
+    const finalWrittenBytes = wb != null && Number.isFinite(wb) ? wb : (agg ? agg.lastWrittenBytes : null);
+    if ((finalWrittenRows != null && finalWrittenRows > 0) || (finalWrittenBytes != null && finalWrittenBytes > 0)) {
+      if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
+      if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
+      if (finalWrittenRows != null) util.setMetricText(dom.writtenRowsTotalText, formatShort(finalWrittenRows));
+      if (finalWrittenBytes != null) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(finalWrittenBytes));
+    }
 
     setProgressIndeterminate(false);
   }
@@ -503,14 +604,41 @@
     const busy = state.isRunning || state.isFormatting;
     const offline = state.apiOnline === false;
 
-    if (dom.runButton) dom.runButton.disabled = busy || offline;
-    if (dom.runMenuButton) dom.runMenuButton.disabled = busy || offline;
-    if (dom.formatButton) dom.formatButton.disabled = busy || offline || isFormatLocked();
-
-    if (dom.cancelButton) {
-      dom.cancelButton.disabled = state.isFormatting || (offline && state.isRunning);
-      dom.cancelButton.textContent = state.isRunning ? "Cancel" : "Clear";
+    // During execution the primary action becomes Cancel in-place. Keeping the
+    // control in the same location avoids a moving target and removes the old
+    // duplicate Cancel button beside the split Run control.
+    if (dom.runButton) {
+      dom.runButton.textContent = state.isRunning ? "Cancel" : "Run";
+      dom.runButton.classList.toggle("runSplit__main--cancel", state.isRunning);
+      dom.runButton.disabled = state.isRunning
+        ? (state.isFormatting || offline || !state.cancelToken)
+        : (state.isFormatting || offline);
     }
+    if (dom.runMenuButton) {
+      dom.runMenuButton.hidden = state.isRunning;
+      dom.runMenuButton.disabled = busy || offline;
+    }
+    const editorStatements = sql.splitSqlStatements(String(dom.queryTextArea?.value || "").trim());
+    const editorIsMulti = editorStatements.length > 1;
+    if (dom.runWithProfilingButton) {
+      dom.runWithProfilingButton.hidden = editorIsMulti;
+      dom.runWithProfilingButton.disabled = busy || offline || editorStatements.length !== 1;
+    }
+    const exportBusy = ns.massExport && typeof ns.massExport.isPreparing === "function" && ns.massExport.isPreparing();
+    if (dom.downloadCsvButton) {
+      dom.downloadCsvButton.hidden = editorIsMulti;
+      dom.downloadCsvButton.disabled = busy || offline || exportBusy || editorStatements.length !== 1;
+    }
+    if (dom.downloadJsonButton) dom.downloadJsonButton.disabled = busy || offline || exportBusy || editorStatements.length < 1;
+    if (dom.downloadDebugButton) dom.downloadDebugButton.disabled = busy || offline || editorStatements.length < 1;
+    const editorEmpty = !String(dom.queryTextArea?.value || "").trim();
+    if (dom.formatButton) dom.formatButton.disabled = busy || offline || editorEmpty || isFormatLocked();
+
+    const hasClearableState = !!state.activeQueryId
+      || String(state.queryStatusText || "-") !== "-"
+      || !!(results && typeof results.getErrorText === "function" && results.getErrorText())
+      || !!(results && typeof results.getRowCount === "function" && results.getRowCount() > 0);
+    if (dom.clearResultsButton) dom.clearResultsButton.disabled = state.isRunning || state.isFormatting || !hasClearableState;
   }
 
   function setBusy({ running, formatting, batch }) {
@@ -526,7 +654,9 @@
 
   async function handleCopyLiveJson() {
     if (!dom.copyJsonButton) return;
-    const copyText = results && typeof results.buildCopyText === "function" ? results.buildCopyText("json") : "";
+    const copyText = state.lastRunMode === "batch" && download && typeof download.buildGlobalJson === "function"
+      ? download.buildGlobalJson()
+      : (results && typeof results.buildCopyText === "function" ? results.buildCopyText("json") : "");
     util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
     try {
       await util.copyTextToClipboard(copyText);
@@ -1120,12 +1250,18 @@ function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg
     return {
       lastReadRows: null,
       lastReadBytes: null,
+      lastWrittenRows: null,
+      lastWrittenBytes: null,
       cpuMaxCenti: 0,
       memMax: 0,
       lastSampleReadRows: null,
       lastSampleReadRowsT: null,
       lastSampleReadBytes: null,
       lastSampleReadBytesT: null,
+      lastSampleWrittenRows: null,
+      lastSampleWrittenRowsT: null,
+      lastSampleWrittenBytes: null,
+      lastSampleWrittenBytesT: null,
       terminal: false,
     };
   }
@@ -1344,15 +1480,16 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     return parts.join(" · ");
   }
 
-  async function runOneStatement(statement, sink, ctx = null) {
+  async function runOneStatement(statement, sink, ctx = null, runMode = "normal") {
     resetMetrics();
     setProgressIndeterminate(true);
 
     const hostId = getSelectedHostId();
-    const { queryId, cancelToken, streamUrl } = await api.runSql(hostId, statement);
+    const { queryId, cancelToken, streamUrl, analysisAvailable } = await api.runSql(hostId, statement, runMode);
 
     state.activeQueryId = queryId;
     state.cancelToken = cancelToken;
+    updateActionButtons();
 
     setQueryIdText(queryId);
     // New run should always reset the status indicator, even if a previous run ended in a terminal state.
@@ -1374,10 +1511,21 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     state.cancelToken = null;
     state.cancelRequested = false;
 
-    return { done, agg };
+    return { done, agg, queryId, runMode, analysisAvailable };
   }
 
-  async function handleRun() {
+  async function performRequestedDownload(kind) {
+    if (!kind || !download) return;
+    let ok = true;
+    if (kind === "json" && typeof download.downloadJson === "function") ok = download.downloadJson() !== false;
+    else if (kind === "csv" && typeof download.downloadCsv === "function") ok = download.downloadCsv() !== false;
+    else if (kind === "debug" && typeof download.downloadDebug === "function") ok = await download.downloadDebug({ throwOnError: true });
+    if (!ok) throw new Error(`Download ${kind} failed.`);
+  }
+
+  async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
+    const downloadKind = ["json", "csv", "debug"].includes(String(downloadAfter)) ? String(downloadAfter) : "";
+    let downloadRunFailed = false;
     if (state.isRunning || state.isFormatting) return;
     if (state.apiOnline === false) {
       results.setError("API is offline.");
@@ -1385,10 +1533,13 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       return;
     }
 
+    state.suppressResultsVisibility = !!downloadKind;
     results.clearResultsStack();
     results.clearLiveResults();
+    if (downloadKind) results.setResultsVisible(false);
     resetMetrics();
     setQueryIdText(null);
+    if (analysis && typeof analysis.setContext === "function") analysis.setContext(null);
 
     results.setError("");
     if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
@@ -1396,6 +1547,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     const hostId = getSelectedHostId();
     if (!hostId) {
+      state.suppressResultsVisibility = false;
       results.setError("No host selected.");
       results.setStatus("error");
       return;
@@ -1404,6 +1556,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     const raw = dom.queryTextArea ? dom.queryTextArea.value : "";
     const trimmed = String(raw || "").trim();
     if (!trimmed) {
+      state.suppressResultsVisibility = false;
       results.setError("Query is empty.");
       results.setStatus("error");
       return;
@@ -1411,13 +1564,29 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     let statements = sql.splitSqlStatements(trimmed);
     if (!statements.length) {
+      state.suppressResultsVisibility = false;
       results.setError("Query is empty.");
       results.setStatus("error");
       return;
     }
 
+    if (downloadKind === "csv" && statements.length !== 1) {
+      state.suppressResultsVisibility = false;
+      results.setError("Download CSV is available only for a single query.");
+      results.setStatus("error");
+      return;
+    }
+
+    if (runMode === "profiling" && statements.length !== 1 && downloadKind !== "debug") {
+      state.suppressResultsVisibility = false;
+      results.setError("Run with profiling is available only for a single query.");
+      results.setStatus("error");
+      return;
+    }
+
     if (statements.length > 1 && !state.runOptMultiQuery) {
-      results.setError("Multiquery is disabled. Enable “Allow multiquery” in the Run menu.");
+      state.suppressResultsVisibility = false;
+      results.setError("Multiquery is disabled. Enable “Allow multiquery” in Run settings.");
       results.setStatus("error");
       return;
     }
@@ -1434,6 +1603,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     } else {
       state.lastRunMode = "single";
       results.setMultiqueryMode(false);
+    }
+    if (download && typeof download.resetRun === "function") {
+      download.resetRun({ hostId, multi: statements.length > 1 });
     }
 
     setBusy({ running: true, formatting: false, batch: statements.length > 1 });
@@ -1455,9 +1627,46 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       });
 
       if (statements.length === 1) {
-        await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 });
-        resetLiveMetrics()
-        if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
+        const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode);
+        if (analysis && typeof analysis.setContext === "function" && out && out.queryId && out.analysisAvailable) {
+          analysis.setContext({ hostId, queryId: out.queryId, runMode });
+        }
+        if (download && typeof download.recordQuery === "function") {
+          const done = out && out.done ? out.done : {};
+          download.recordQuery({
+            index: 0,
+            hostId,
+            runMode,
+            sql: statements[0],
+            queryId: out && out.queryId ? out.queryId : null,
+            status: done.status || "done",
+            partial: !!done.result_truncated || String(done.status || "").toLowerCase() === "result_limit_reached",
+            errorText: results && typeof results.getErrorText === "function" ? results.getErrorText() : "",
+            snapshot: results && typeof results.getSnapshot === "function" ? results.getSnapshot() : null,
+          });
+        }
+        if (out && out.queryId) await refreshClickHouseElapsed(hostId, out.queryId);
+        resetLiveMetrics();
+        const terminalStatus = String(out?.done?.status || "done").toLowerCase();
+        if (downloadKind && statusIsStopping(terminalStatus)) {
+          downloadRunFailed = true;
+          state.suppressResultsVisibility = false;
+          if (!results.getErrorText?.()) results.setError(`Query ended with status ${terminalStatus}.`);
+          if (downloadKind === "debug") await performRequestedDownload(downloadKind);
+          results.setResultsVisible(true);
+        } else if (downloadKind) {
+          await performRequestedDownload(downloadKind);
+          results.setResultsVisible(false);
+        } else if (statusIsStopping(terminalStatus)) {
+          // Keep the error banner, but never resurrect the result table after
+          // setError() hid it. A terminal query failure is not a result set.
+          if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
+          results.setResultsVisible(true);
+        } else if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
+
+        if (runMode === "profiling" && !downloadKind && out?.queryId && out?.analysisAvailable && analysis && typeof analysis.open === "function") {
+          await analysis.open({ hostId, queryId: out.queryId, runMode: "profiling" });
+        }
         return;
       }
 
@@ -1483,10 +1692,15 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         const stmt = statements[i];
         let done = null;
         let agg = null;
+        let statementQueryId = null;
         try {
-          const out = await runOneStatement(stmt, perQuerySink, { editorText: editorTextForErrors, statementIndex: i });
+          const out = await runOneStatement(stmt, perQuerySink, { editorText: editorTextForErrors, statementIndex: i }, runMode);
           done = out.done;
           agg = out.agg;
+          statementQueryId = out.queryId || null;
+          if (perQuerySink && typeof perQuerySink.setAnalyzeAction === "function" && out.queryId && analysis && typeof analysis.open === "function") {
+            if (out.analysisAvailable) perQuerySink.setAnalyzeAction(() => analysis.open({ hostId, queryId: out.queryId, runMode }));
+          }
         } catch (err) {
           // Per-statement failure: show inside the active panel when in multiquery.
           const msg = err instanceof Error ? err.message : String(err);
@@ -1541,6 +1755,25 @@ function streamQuery(streamUrl, agg, sink, ctx) {
           results.pushResultsBlock(`Query ${i + 1}/${total}`, metaText, copyText, { expandedByDefault, errorText });
         }
 
+        if (download && typeof download.recordQuery === "function") {
+          const errorText = perQuerySink && typeof perQuerySink.getErrorText === "function"
+            ? perQuerySink.getErrorText()
+            : (results && typeof results.getErrorText === "function" ? results.getErrorText() : "");
+          download.recordQuery({
+            index: i,
+            hostId,
+            runMode,
+            sql: stmt,
+            queryId: statementQueryId,
+            status: st,
+            partial: !!(done && done.result_truncated) || String(st).toLowerCase() === "result_limit_reached",
+            errorText,
+            snapshot: perQuerySink && typeof perQuerySink.getSnapshot === "function"
+              ? perQuerySink.getSnapshot()
+              : (results && typeof results.getSnapshot === "function" ? results.getSnapshot() : null),
+          });
+        }
+
         if (statusIsStopping(st)) {
           state.batchStopRequested = true;
           break;
@@ -1554,7 +1787,19 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       resetMetrics();
       resetCharts();
       resetLiveMetrics();
+      if (downloadKind && (batchFinalStatus === "error" || batchFinalStatus === "canceled")) {
+        downloadRunFailed = true;
+        state.suppressResultsVisibility = false;
+        if (!results.getErrorText?.() && batchFinalStatus === "error") results.setError("Multiquery stopped on an error.");
+        if (downloadKind === "debug") await performRequestedDownload(downloadKind);
+        results.setResultsVisible(true);
+      } else if (downloadKind) {
+        await performRequestedDownload(downloadKind);
+        results.setResultsVisible(false);
+      }
     } catch (err) {
+      downloadRunFailed = !!downloadKind;
+      state.suppressResultsVisibility = false;
       if (isFormatFailedError(err)) {
         showFormatFailure(err);
       } else {
@@ -1563,14 +1808,35 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         results.setError(msg);
         results.setStatus("error");
         setQueryStatusText("error");
+        if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
         results.setResultsVisible(true);
       }
     } finally {
       closeActiveStream();
       state.cancelToken = null;
       state.activeQueryId = null;
+      state.suppressResultsVisibility = false;
+      if (downloadKind && !downloadRunFailed) results.setResultsVisible(false);
       setBusy({ running: false, formatting: false, batch: false });
     }
+  }
+
+  async function handleRun() {
+    return handleRunMode("normal");
+  }
+
+  async function handleRunWithProfiling() {
+    ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: true });
+    return handleRunMode("profiling");
+  }
+
+  async function handleDownloadRun(kind) {
+    ui?.closeRunMenu?.({ immediate: true });
+    // A debug download is a diagnostic run, not a normal export: execute every
+    // statement with profiling enabled so the archive can include the complete
+    // post-run analysis. CSV/JSON exports keep their normal execution mode.
+    const mode = String(kind || "") === "debug" ? "profiling" : "normal";
+    return handleRunMode(mode, { downloadAfter: kind });
   }
 
   async function handleFormat() {
@@ -1612,12 +1878,14 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       state.activeQueryId = null;
       state.lastRunMode = "single";
       results.setMultiqueryMode(false);
+      if (download && typeof download.resetRun === "function") download.resetRun({ hostId: getSelectedHostId(), multi: false });
       if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
       results.clearResultsStack();
       results.clearLiveResults();
+      results.setResultsVisible(false);
       resetMetrics();
       setQueryIdText(null);
-      setQueryStatusText("-");
+      setQueryStatusText("-", { force: true });
       updateActionButtons();
       return;
     }
@@ -1664,12 +1932,19 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     initCharts();
 
     if (dom.queryTextArea) dom.queryTextArea.addEventListener("input", updateActionButtons);
-    if (dom.runButton) dom.runButton.addEventListener("click", handleRun);
+    if (dom.runButton) dom.runButton.addEventListener("click", () => {
+      if (state.isRunning) void handleCancelOrClear();
+      else void handleRun();
+    });
+    if (dom.runWithProfilingButton) dom.runWithProfilingButton.addEventListener("click", handleRunWithProfiling);
+    if (dom.downloadJsonButton) dom.downloadJsonButton.addEventListener("click", () => handleDownloadRun("json"));
+    if (dom.downloadCsvButton) dom.downloadCsvButton.addEventListener("click", () => handleDownloadRun("csv"));
+    if (dom.downloadDebugButton) dom.downloadDebugButton.addEventListener("click", () => handleDownloadRun("debug"));
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
-    if (dom.cancelButton) dom.cancelButton.addEventListener("click", handleCancelOrClear);
+    if (dom.clearResultsButton) dom.clearResultsButton.addEventListener("click", handleCancelOrClear);
     if (dom.copyJsonButton) dom.copyJsonButton.addEventListener("click", handleCopyLiveJson);
     if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", handleCopyLiveCsv);
   }
 
-  ns.run = { init, handleRun, handleFormat, handleCancelOrClear, updateActionButtons };
+  ns.run = { init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };
 })();

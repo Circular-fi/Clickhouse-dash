@@ -6,8 +6,10 @@ services:
       - source: clickhouse_dash_config
         target: /etc/clickhouse-dash/config.hcl
     secrets:
-      - source: clickhouse_password
-        target: clickhouse_password
+      - source: chdash_runner_password
+        target: chdash_runner_password
+      - source: chdash_system_password
+        target: chdash_system_password
     ports:
       - "127.0.0.1:8080:8080"
     healthcheck:
@@ -30,8 +32,6 @@ configs:
         result_preview_row_limit = 10000
         max_sql_bytes = 4194304
         describe_mode = "auto"
-        final_stats_from_query_log = false
-        final_stats_flush_logs = false
         sample_interval_ms = 40
         result_batch_rows = 1000
         result_batch_bytes = 262144
@@ -67,12 +67,15 @@ configs:
       clickhouse {
         host {
           name = "local"
-          runner_uri = "clickhouse://internalsvc@clickhouse:9000"
-          system_uri = "clickhouse://internalsvc@clickhouse:9000"
-          password_file = "/run/secrets/clickhouse_password"
+          runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+          system_uri = "clickhouse://chdash_system@clickhouse:9000"
+          runner_password_file = "/run/secrets/chdash_runner_password"
+          system_password_file = "/run/secrets/chdash_system_password"
         }
       }
 
 secrets:
-  clickhouse_password:
-    environment: CLICKHOUSE_PASSWORD
+  chdash_runner_password:
+    file: ./secrets/chdash_runner_password.txt
+  chdash_system_password:
+    file: ./secrets/chdash_system_password.txt

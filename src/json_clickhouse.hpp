@@ -254,6 +254,21 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::UInt32: w.Uint(it.get<uint32_t>()); return;
     case Type::UInt64: w.Uint64(it.get<uint64_t>()); return;
 
+    case Type::Enum8: {
+      const auto* e = ty.As<clickhouse::EnumType>();
+      const auto value = it.get<int8_t>();
+      if (e) writer_string(w, e->GetEnumName(value));
+      else w.Int(value);
+      return;
+    }
+    case Type::Enum16: {
+      const auto* e = ty.As<clickhouse::EnumType>();
+      const auto value = it.get<int16_t>();
+      if (e) writer_string(w, e->GetEnumName(value));
+      else w.Int(value);
+      return;
+    }
+
     case Type::Float32: writer_finite_double(w, static_cast<double>(it.get<float>())); return;
     case Type::Float64: writer_finite_double(w, it.get<double>()); return;
 
@@ -309,7 +324,26 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::Decimal128: {
       const auto* d = ty.As<clickhouse::DecimalType>();
       const size_t scale = d ? d->GetScale() : 0;
-      const auto s = decimal_to_string(it.get<clickhouse::Int128>(), scale);
+      // clickhouse-cpp stores Decimal32/64 in their native 4/8-byte integer
+      // widths. Reading every decimal as Int128 triggers ItemView's strict size
+      // check (for example "Requested size: 16 stored size: 8" on
+      // Decimal(18,6)). Widen only after reading the runtime-width value.
+      clickhouse::Int128 raw = 0;
+      const size_t precision = d ? d->GetPrecision() : 38;
+      // ColumnDecimal::GetItem() intentionally reports the *logical* Decimal
+      // type code while carrying the bytes of its physical Int32/Int64/Int128
+      // storage column. Therefore checking ItemView::type alone is not enough:
+      // a Decimal(18,6) arrives as Type::Decimal with 8 stored bytes. Select the
+      // physical width from Decimal precision, matching clickhouse-cpp's own
+      // ColumnDecimal implementation (<=9 -> Int32, <=18 -> Int64, else Int128).
+      if (it.type == Type::Decimal32 || (it.type == Type::Decimal && precision <= 9)) {
+        raw = static_cast<clickhouse::Int128>(it.get<int32_t>());
+      } else if (it.type == Type::Decimal64 || (it.type == Type::Decimal && precision <= 18)) {
+        raw = static_cast<clickhouse::Int128>(it.get<int64_t>());
+      } else {
+        raw = it.get<clickhouse::Int128>();
+      }
+      const auto s = decimal_to_string(raw, scale);
       w.RawValue(s.c_str(), static_cast<rapidjson::SizeType>(s.size()), rapidjson::kNumberType);
       return;
     }
@@ -465,6 +499,29 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
                                      const clickhouse::ColumnRef& col,
                                      size_t row,
                                      const std::string& declared_type) {
+  // ClickHouse exposes Bool through the native UInt8 wire representation in
+  // several system tables. Preserve the declared SQL type in JSON instead of
+  // leaking the transport representation as 0/1.
+  if (detail::starts_with_ci(declared_type, "bool")) {
+    const auto code = col->Type()->GetCode();
+    if (code == clickhouse::Type::UInt8) {
+      w.Bool(col->GetItem(row).get<uint8_t>() != 0);
+      return;
+    }
+  }
+  if (detail::starts_with_ci(declared_type, "nullable(bool")) {
+    if (col->Type()->GetCode() == clickhouse::Type::Nullable) {
+      auto nullable = col->As<clickhouse::ColumnNullable>();
+      if (nullable && nullable->IsNull(row)) {
+        w.Null();
+        return;
+      }
+      if (nullable && nullable->Nested()->Type()->GetCode() == clickhouse::Type::UInt8) {
+        w.Bool(nullable->Nested()->GetItem(row).get<uint8_t>() != 0);
+        return;
+      }
+    }
+  }
   if (detail::starts_with_ci(declared_type, "json") || detail::starts_with_ci(declared_type, "object('json')")) {
     if (detail::column_is_stringish(col)) {
       const auto sv = col->GetItem(row).get<std::string_view>();

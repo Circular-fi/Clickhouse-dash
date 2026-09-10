@@ -6,6 +6,18 @@
 
   const { util } = ns;
 
+  function resolveUrl(path) {
+    const raw = String(path || "");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return raw;
+    if (typeof window.__chdashUrl === "function") return window.__chdashUrl(raw);
+    const base = String(window.__CHDASH_BASE_PATH__ || "/");
+    return `${base}${raw.replace(/^\/+/, "")}`;
+  }
+
+  function requestHeaders(base = {}) {
+    return { ...base };
+  }
+
   function setApiOnline(online) {
     const next = online !== false;
     const ui = ns.ui;
@@ -24,16 +36,20 @@
     try {
       return JSON.parse(text);
     } catch {
-      return {};
+      const contentType = String(response.headers.get("content-type") || "");
+      const err = new Error(`API returned a non-JSON response (${contentType || "unknown content type"}). Check the application/subpath routing.`);
+      err.code = "invalid_api_response";
+      err.responseText = text.slice(0, 240);
+      throw err;
     }
   }
 
   async function postJson(url, body) {
     let response;
     try {
-      response = await fetch(url, {
+      response = await fetch(resolveUrl(url), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
         cache: "no-store",
       });
@@ -73,7 +89,7 @@
     const qs = query.toString();
     let response;
     try {
-      response = await fetch(`api/meta?${qs}`, { cache: "no-store" });
+      response = await fetch(resolveUrl(`api/meta?${qs}`), { headers: requestHeaders(), cache: "no-store" });
     } catch (e) {
       setApiOnline(false);
       const norm = util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." });
@@ -99,6 +115,78 @@
     return payload;
   }
 
+
+  async function getJson(url) {
+    let response;
+    try {
+      response = await fetch(resolveUrl(url), { headers: requestHeaders(), cache: "no-store" });
+    } catch (e) {
+      setApiOnline(false);
+      const norm = util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." });
+      const err = new Error(util.buildApiErrorText(norm, "Network error."));
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
+    }
+    setApiOnline(true);
+    const payload = await readJsonBody(response);
+    if (!response.ok) {
+      const norm = util.buildApiErrorFromResponse(response.status, payload);
+      const err = new Error(util.buildApiErrorText(norm, `Request failed with status ${response.status}`));
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
+    }
+    return payload;
+  }
+
+  async function getExplorerCatalog(hostId, database = "", refresh = false) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (database) query.set("database", String(database));
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/catalog?${query.toString()}`);
+  }
+
+  async function getExplorerTable(hostId, database, table) {
+    if (!hostId || !database || !table) throw new Error("Explorer table scope is incomplete.");
+    const query = new URLSearchParams({ host_id: String(hostId), database: String(database), table: String(table) });
+    return getJson(`api/explorer/table?${query.toString()}`);
+  }
+
+  async function getExplorerTableData(hostId, database, table, limit = 100) {
+    if (!hostId || !database || !table) throw new Error("Explorer table scope is incomplete.");
+    return postJson("api/explorer/table/data", {
+      host_id: String(hostId),
+      database: String(database),
+      table: String(table),
+      limit: Math.max(1, Math.min(500, Number(limit) || 100)),
+    });
+  }
+
+
+  async function getExplorerGraph(hostId, database = "", refresh = false) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (database) query.set("database", String(database));
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/graph?${query.toString()}`);
+  }
+
+  async function getExplorerFunctions(hostId, refresh = false) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/functions?${query.toString()}`);
+  }
+
+  async function getExplorerActivity(hostId, database = "") {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (database) query.set("database", String(database));
+    return getJson(`api/explorer/activity?${query.toString()}`);
+  }
+
   async function formatSqls(hostId, sqls) {
     if (!hostId) throw new Error("No host selected.");
     if (!Array.isArray(sqls)) throw new Error("formatSqls expects an array.");
@@ -117,9 +205,11 @@
     return payload.formatted_sqls.map((s) => String(s || ""));
   }
 
-  async function runSql(hostId, sql) {
+  async function runSql(hostId, sql, mode = "normal") {
     if (!hostId) throw new Error("No host selected.");
-    const payload = await postJson("api/query/run", { host_id: hostId, sql: String(sql || "") });
+    const runMode = String(mode || "normal").toLowerCase();
+    if (runMode !== "normal" && runMode !== "profiling") throw new Error("Invalid run mode.");
+    const payload = await postJson("api/query/run", { host_id: hostId, sql: String(sql || ""), mode: runMode });
 
     if (!payload || typeof payload.query_id !== "string" || typeof payload.stream_url !== "string") {
       throw new Error("Invalid run response.");
@@ -128,8 +218,45 @@
     return {
       queryId: payload.query_id,
       cancelToken: payload.cancel_token ? String(payload.cancel_token) : null,
-      streamUrl: payload.stream_url,
+      streamUrl: resolveUrl(payload.stream_url),
+      runMode: payload.run_mode ? String(payload.run_mode) : runMode,
+      analysisAvailable: payload.analysis_available === true,
     };
+  }
+
+  async function analyzeQuery(hostId, queryId) {
+    if (!hostId) throw new Error("No host selected.");
+    if (!queryId) throw new Error("No query selected for analysis.");
+    return postJson("api/query/analysis", { host_id: String(hostId), query_id: String(queryId) });
+  }
+
+
+  async function prepareExport(hostId, format, queries) {
+    if (!hostId) throw new Error("No host selected.");
+    const normalizedFormat = String(format || "").toLowerCase();
+    if (normalizedFormat !== "csv" && normalizedFormat !== "json") throw new Error("Invalid export format.");
+    if (!Array.isArray(queries) || !queries.length) throw new Error("No export queries supplied.");
+    const payload = await postJson("api/export/run", {
+      host_id: String(hostId),
+      format: normalizedFormat,
+      queries: queries.map((query) => String(query || "")),
+    });
+    if (!payload || typeof payload.download_url !== "string" || !payload.download_url) {
+      throw new Error("Invalid export handshake response.");
+    }
+    return {
+      exportId: payload.export_id ? String(payload.export_id) : null,
+      downloadUrl: resolveUrl(payload.download_url),
+      expiresInMs: Number(payload.expires_in_ms) || 0,
+      format: payload.format ? String(payload.format) : normalizedFormat,
+    };
+  }
+
+  async function getQueryExecution(hostId, queryId) {
+    if (!hostId) throw new Error("No host selected.");
+    if (!queryId) throw new Error("No query selected for execution statistics.");
+    const query = new URLSearchParams({ host_id: String(hostId), query_id: String(queryId) });
+    return getJson(`api/query/execution?${query.toString()}`);
   }
 
   async function cancelQuery(cancelToken) {
@@ -138,5 +265,9 @@
     return !!(payload && payload.ok);
   }
 
-  ns.api = { formatSqls, runSql, cancelQuery, getMeta };
+  ns.api = { resolveUrl,
+    formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
+    getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
+    getExplorerGraph, getExplorerActivity,
+  };
 })();

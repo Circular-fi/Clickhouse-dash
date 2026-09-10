@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ClickHouse Dash · Explorer</title>
+  <script>
+    (function () {
+      try {
+        var pathname = String(window.location.pathname || "/");
+        var marker = pathname.indexOf("/explorer");
+        if (marker < 0) marker = pathname.indexOf("/query");
+        // Known browser routes delimit the application prefix. When the app is
+        // opened at a reverse-proxy root such as /clickhouse/, there is no route
+        // marker yet: in that case the current directory itself is the prefix.
+        var prefix = marker >= 0 ? pathname.slice(0, marker) : pathname.replace(/\/+$/g, "");
+        if (!prefix || prefix === "/") prefix = "";
+        var appBase = (prefix ? prefix : "") + "/";
+        window.__CHDASH_BASE_PATH__ = appBase;
+        window.__chdashUrl = function (path) {
+          var raw = String(path || "");
+          if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return raw;
+          return appBase + raw.replace(/^\/+/, "");
+        };
+
+        var css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = window.__chdashUrl("static/style.css");
+        document.head.appendChild(css);
+        var favicon = document.createElement("link");
+        favicon.rel = "icon"; favicon.type = "image/svg+xml";
+        favicon.href = window.__chdashUrl("static/images/logo.svg");
+        document.head.appendChild(favicon);
+        var fallbackIcon = document.createElement("link");
+        fallbackIcon.rel = "alternate icon"; fallbackIcon.sizes = "any";
+        fallbackIcon.href = window.__chdashUrl("static/images/favicon.ico");
+        document.head.appendChild(fallbackIcon);
+
+        var root = document.documentElement;
+        var mode = localStorage.getItem("chdash.theme");
+        if (mode !== "dark" && mode !== "light" && mode !== "system") mode = "system";
+        if (mode === "dark" || mode === "light") {
+          root.dataset.theme = mode;
+        } else {
+          delete root.dataset.theme;
+        }
+        root.dataset.themeMode = mode;
+
+        // Apply editor UI preferences before CSS loads to avoid a one-frame flash
+        // of disabled controls such as the copy button and line numbers.
+        var copyButton = localStorage.getItem("chdash.editor.copy_button.enabled");
+        var lineNumbers = localStorage.getItem("chdash.editor.line_numbers.enabled");
+        var copyHidden = copyButton === "false" || copyButton === "0";
+        var lineHidden = lineNumbers === "false" || lineNumbers === "0";
+        root.classList.toggle("chdash-copy-button-hidden", copyHidden);
+        root.classList.toggle("chdash-line-numbers-hidden", lineHidden);
+
+        // The editor size is stored in sessionStorage by the resize observer. Apply
+        // it as a CSS variable before style.css is parsed so the editor does not
+        // jump after app_ui.js starts.
+        var editorHeightRaw = sessionStorage.getItem("chdash.editorHeight.v1");
+        var editorHeight = editorHeightRaw == null ? NaN : Number(editorHeightRaw);
+        if (Number.isFinite(editorHeight) && editorHeight > 0) {
+          var roundedEditorHeight = Math.round(editorHeight);
+          root.style.setProperty("--initialEditorHeight", roundedEditorHeight + "px");
+          root.classList.add("chdash-has-initial-editor-height");
+          editorHeight = roundedEditorHeight;
+        } else {
+          editorHeight = null;
+        }
+
+        window.__chdashEarlyState = {
+          themeMode: mode,
+          copyButtonHidden: copyHidden,
+          lineNumbersHidden: lineHidden,
+          editorHeight: editorHeight
+        };
+      } catch (_) {}
+    })();
+  </script>
+</head>
+
+<body data-page="explorer">
+  <header class="appHeader" role="banner">
+    <div class="appHeader__left">
+      <div class="appBrand">
+        <span class="appBrand__name">ClickHouse Dash</span>
+        <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
+      </div>
+
+    </div>
+
+    <div class="appHeader__right">
+      <div id="hostPicker" class="picker" aria-label="Target host">
+        <button
+          id="hostPickerButton"
+          class="button picker__button"
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+          title="Target host">
+          <span id="hostPickerDot" class="hostDot hostDot--bad" aria-hidden="true"></span>
+          <span id="hostPickerText" class="picker__text">Host</span>
+          <span id="hostPickerVersion" class="hostVersion" aria-label="clickhouse version"></span>
+          <span id="hostPickerPing" class="hostPing" aria-label="ping"></span>
+        </button>
+
+        <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
+      </div>
+
+      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page" hidden>
+        <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Explorer</button>
+        <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
+          <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="false">Query</button>
+          <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="true">Explorer</button>
+        </div>
+      </div>
+
+      <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">
+        <button
+          id="themeSelectButton"
+          class="button themeSelect__button themeSelect__button--icon"
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+          aria-label="Theme: system"
+          title="Theme">
+          <span id="themeSelectText" class="themeIcon themeIcon--system" aria-hidden="true"></span>
+        </button>
+
+        <div id="themeSelectMenu" class="themeSelect__menu themeSelect__menu--icons" role="listbox" tabindex="-1" hidden>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="system" aria-label="System theme" title="System" aria-selected="true"><span class="themeIcon themeIcon--system" aria-hidden="true"></span></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="dark" aria-label="Dark theme" title="Dark" aria-selected="false"><span class="themeIcon themeIcon--dark" aria-hidden="true"></span></button>
+          <button type="button" class="themeSelect__option themeSelect__option--icon" role="option" data-value="light" aria-label="Light theme" title="Light" aria-selected="false"><span class="themeIcon themeIcon--light" aria-hidden="true"></span></button>
+        </div>
+      </div>
+      <script>
+        (function () {
+          try {
+            var early = window.__chdashEarlyState || {};
+            var mode = early.themeMode || "system";
+            if (mode !== "system" && mode !== "dark" && mode !== "light") mode = "system";
+            var text = document.getElementById("themeSelectText");
+            if (text) text.className = "themeIcon themeIcon--" + mode;
+            var trigger = document.getElementById("themeSelectButton");
+            if (trigger) trigger.setAttribute("aria-label", "Theme: " + mode);
+            var menu = document.getElementById("themeSelectMenu");
+            if (menu) {
+              var opts = menu.querySelectorAll(".themeSelect__option[data-value]");
+              for (var i = 0; i < opts.length; i += 1) {
+                opts[i].setAttribute("aria-selected", String(opts[i].getAttribute("data-value") === mode));
+              }
+            }
+          } catch (_) {}
+        })();
+      </script>
+    </div>
+  </header>
+
+  <main id="explorerWorkspace" class="explorerWorkspace" role="main">
+    <h1 class="srOnly">Explorer</h1>
+    <section class="explorerShell">
+      <header class="explorerHeader explorerHeader--sidebar" aria-label="Explorer navigation">
+        <div id="explorerSectionSelect" class="themeSelect explorerNavSelect">
+          <button id="explorerSectionSelectButton" class="button themeSelect__button explorerNavSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Tables</button>
+          <div id="explorerSectionSelectMenu" class="themeSelect__menu explorerNavSelect__menu" role="listbox" tabindex="-1" hidden>
+            <button id="explorerTablesSectionButton" class="themeSelect__option" type="button" role="option" data-value="tables" aria-selected="true">Tables</button>
+            <button id="explorerFunctionsSectionButton" class="themeSelect__option" type="button" role="option" data-value="functions" aria-selected="false">Functions</button>
+          </div>
+        </div>
+        <div id="explorerTableModeTabs" class="themeSelect themeSelect--icons explorerModeSelect" aria-label="Table view">
+          <button id="explorerModeSelectButton" class="button themeSelect__button themeSelect__button--icon explorerModeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Table view: Browse" title="Browse"><span class="explorerModeIcon explorerModeIcon--browse" aria-hidden="true"></span></button>
+          <div id="explorerModeSelectMenu" class="themeSelect__menu themeSelect__menu--icons explorerModeSelect__menu" role="listbox" tabindex="-1" hidden>
+            <button id="explorerListModeButton" class="themeSelect__option themeSelect__option--icon" type="button" role="option" data-value="list" aria-label="Browse" title="Browse" aria-selected="true"><span class="explorerModeIcon explorerModeIcon--browse" aria-hidden="true"></span></button>
+            <button id="explorerGraphModeButton" class="themeSelect__option themeSelect__option--icon" type="button" role="option" data-value="graph" aria-label="Graph" title="Graph" aria-selected="false"><span class="explorerModeIcon explorerModeIcon--graph" aria-hidden="true"></span></button>
+          </div>
+        </div>
+      </header>
+
+      <div id="explorerError" class="errorBanner explorerError" hidden></div>
+
+      <div id="explorerListView" class="explorerGrid">
+        <aside class="explorerListPane" aria-label="Tables">
+          <div class="explorerSidebarToolbar">
+            <label class="explorerSearch explorerSearch--sidebar">
+              <span class="srOnly">Search tables</span>
+              <input id="explorerSearchInput" type="search" placeholder="Search tables" autocomplete="off" />
+            </label>
+            <div id="explorerTableSettings" class="themeSelect explorerTableSettings">
+              <button id="explorerTableSettingsButton" class="button button--small explorerTableSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Table visibility settings" title="Table visibility settings"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
+              <div id="explorerTableSettingsMenu" class="themeSelect__menu explorerTableSettings__menu" role="menu" tabindex="-1" hidden>
+                <label class="explorerTableSettings__option"><input id="explorerIncludeSystem" type="checkbox" /> <span>Include system database</span></label>
+                <label class="explorerTableSettings__option"><input id="explorerIncludeNonStoring" type="checkbox" checked /> <span>Include non-storing objects</span></label>
+              </div>
+            </div>
+            <button id="explorerRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh tables" title="Refresh tables"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+          </div>
+          <div id="explorerTableList" class="explorerTableList"></div>
+        </aside>
+
+        <section id="explorerDetailPane" class="explorerDetailPane" aria-live="polite">
+          <div id="explorerEmptyState" class="explorerEmptyState">
+            <strong>Select a table</strong>
+            <span>Metadata is read from ClickHouse only after the runner ACL boundary has been established.</span>
+          </div>
+          <div id="explorerDetail" hidden>
+            <div class="explorerDetailHeader">
+              <div>
+                <div id="explorerDetailName" class="explorerDetailName"></div>
+                <div id="explorerDetailMeta" class="explorerDetailMeta"></div>
+              </div>
+              <div id="explorerHealthBadge" class="explorerHealthBadge"></div>
+            </div>
+            <div id="explorerWarnings" class="explorerWarnings" hidden></div>
+            <div id="explorerSummaryCards" class="explorerSummaryCards"></div>
+            <div id="explorerDetailTabs" class="explorerDetailTabs" role="tablist" aria-label="Table details"></div>
+            <div id="explorerDetailContent" class="explorerDetailContent"></div>
+          </div>
+        </section>
+
+        <section id="explorerGraphPane" class="explorerGraphPane" hidden aria-label="ClickHouse topology graph">
+          <canvas id="explorerGraphCanvas" class="explorerGraphCanvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph"></canvas>
+          <div class="explorerGraphViewportControls" aria-label="Graph viewport controls">
+            <div class="explorerGraphViewportGroup" aria-label="Graph scope controls">
+              <div id="explorerGraphTypeSelect" class="themeSelect explorerGraphTypeSelect">
+                <button id="explorerGraphTypeSelectButton" class="explorerGraphViewportControl explorerGraphViewportControl--text themeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Lineage</button>
+                <div id="explorerGraphTypeSelectMenu" class="themeSelect__menu explorerGraphTypeSelect__menu" role="listbox" tabindex="-1" hidden>
+                  <button id="explorerGraphLogicalButton" class="themeSelect__option" type="button" role="option" data-value="logical" aria-selected="true">Lineage</button>
+                  <button id="explorerGraphPhysicalButton" class="themeSelect__option" type="button" role="option" data-value="physical" aria-selected="false">Storage</button>
+                </div>
+              </div>
+              <span id="explorerGraphDepthControls" class="explorerGraphDepthControls">
+                <span class="explorerGraphViewportControls__label">Depth:</span>
+                <button id="explorerGraphContractButton" class="explorerGraphViewportControl" type="button" aria-label="Decrease graph depth">−</button>
+                <span id="explorerGraphDepthValue" class="explorerGraphViewportControls__value">1</span>
+                <button id="explorerGraphExpandButton" class="explorerGraphViewportControl" type="button" aria-label="Increase graph depth">+</button>
+              </span>
+            </div>
+            <div class="explorerGraphCameraControls" aria-label="Graph camera controls">
+              <button id="explorerGraphZoomOutButton" class="explorerGraphViewportControl" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+              <button id="explorerGraphFitButton" class="explorerGraphViewportControl explorerGraphViewportControl--icon" type="button" aria-label="Fit graph to viewport" title="Fit graph to viewport"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg></button>
+              <button id="explorerGraphZoomInButton" class="explorerGraphViewportControl" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+            </div>
+            <div class="explorerGraphViewportAux" aria-label="Graph actions">
+              <button id="explorerGraphRefreshButton" class="explorerGraphViewportControl explorerGraphViewportControl--text" type="button" title="Refresh graph" aria-label="Refresh graph"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+            </div>
+          </div>
+          <div id="explorerGraphStatus" class="explorerGraphStatus">Graph not loaded</div>
+          <div class="explorerGraphLegend" aria-label="Graph legend">
+            <span title="Insert-time movement, for example Buffer forwarding or Materialized View flow"><i class="explorerLegendLine explorerLegendLine--flow"></i> data flow</span>
+            <span title="Query-time dependency, for example an ordinary View; no insert-time data flow"><i class="explorerLegendLine explorerLegendLine--logical"></i> logical dependency</span>
+            <span title="Structural routing or containment, for example Distributed routing or physical topology"><i class="explorerLegendLine explorerLegendLine--route"></i> routing/topology</span>
+            <span id="explorerGraphLegendTtl" title="TTL lifecycle transition, for example MOVE TO VOLUME or terminal DELETE" hidden><i class="explorerLegendLine explorerLegendLine--ttl"></i> TTL lifecycle</span>
+          </div>
+          <canvas id="explorerGraphMinimap" class="explorerGraphMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
+        </section>
+      </div>
+
+      <div id="explorerFunctionsPane" class="explorerGrid" hidden>
+        <aside class="explorerListPane" aria-label="Functions">
+          <div id="explorerFunctionToolbar" class="explorerSidebarToolbar explorerSidebarToolbar--functions">
+            <label class="explorerSearch explorerSearch--sidebar">
+              <span class="srOnly">Search functions</span>
+              <input id="explorerFunctionSearchInput" type="search" placeholder="Search functions" autocomplete="off" />
+            </label>
+            <select id="explorerFunctionCategorySelect" class="explorerSelect explorerFunctionFilter explorerFunctionFilter--native" aria-label="Filter function kind" hidden>
+              <option value="">All</option>
+              <option value="Function">Function</option>
+              <option value="Aggregate Function">Aggregate</option>
+              <option value="Table Function">Table</option>
+              <option value="user-defined">User-defined</option>
+            </select>
+            <div id="explorerFunctionSettings" class="themeSelect runSettings explorerFunctionSettings" aria-label="Function filters">
+              <button id="explorerFunctionSettingsButton" class="runSettings__button explorerTableSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Function filters" title="Function filters"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
+              <div id="explorerFunctionSettingsMenu" class="themeSelect__menu runSettings__menu explorerFunctionSettings__menu" role="menu" tabindex="-1" hidden>
+                <button class="runMenu__opt is-checked" type="button" role="menuitemradio" data-function-kind="" aria-checked="true"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">All functions</span></button>
+                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Functions</span></button>
+                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Aggregate Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Aggregate</span></button>
+                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Table Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Table</span></button>
+                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="user-defined" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">User-defined</span></button>
+              </div>
+            </div>
+            <button id="explorerFunctionRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh functions" title="Refresh functions"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+          </div>
+          <div id="explorerFunctionList" class="explorerTableList"></div>
+        </aside>
+        <section class="explorerDetailPane" aria-live="polite">
+          <div id="explorerFunctionEmpty" class="explorerEmptyState">
+            <strong>Select a function</strong>
+            <span>Documentation is loaded from the selected ClickHouse server when available.</span>
+          </div>
+          <div id="explorerFunctionDetail" hidden>
+            <div class="explorerDetailHeader">
+              <div>
+                <div id="explorerFunctionDetailName" class="explorerDetailName"></div>
+                <div id="explorerFunctionDetailMeta" class="explorerDetailMeta"></div>
+              </div>
+            </div>
+            <div id="explorerFunctionDescription" class="explorerFunctionDescription functionDoc"></div>
+          </div>
+        </section>
+      </div>
+
+
+    </section>
+  </main>
+
+
+  <script>
+    (function () {
+      var script = document.createElement("script");
+      script.src = (window.__chdashUrl ? window.__chdashUrl("static/app.js") : "/static/app.js");
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>

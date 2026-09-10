@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -11,6 +12,7 @@
 namespace chdash {
 namespace {
 
+using std::optional;
 using std::size_t;
 using std::string;
 using std::string_view;
@@ -994,10 +996,81 @@ bool looks_like_create_column_line(string_view line) {
   return t.size() > 2 && t.front() == '`' && t.find('`', 1) != string::npos && t.find(' ') != string::npos;
 }
 
+bool in_create_schema_block(const vector<string>& lines, size_t line_index, size_t indent) {
+  if (line_index == 0) return false;
+  for (size_t b = line_index; b > 0; --b) {
+    const string prev = trim_ascii_spaces(lines[b - 1]);
+    if (prev.empty()) continue;
+    const size_t prev_indent = leading_space_count(lines[b - 1]);
+    if (prev == "(" && prev_indent < indent) {
+      for (size_t h = b - 1; h > 0; --h) {
+        const string head = trim_ascii_spaces(lines[h - 1]);
+        if (head.empty()) continue;
+        return starts_with_ci(head, "CREATE TABLE ") || starts_with_ci(head, "CREATE VIEW ") ||
+               starts_with_ci(head, "CREATE MATERIALIZED VIEW ");
+      }
+      return false;
+    }
+    if (prev_indent < indent && prev != "(") return false;
+  }
+  return false;
+}
+
 void align_create_columns(vector<string>& lines) {
   for (size_t i = 0; i < lines.size();) {
     if (!looks_like_create_column_line(lines[i])) { ++i; continue; }
     const size_t indent = leading_space_count(lines[i]);
+
+    // In CREATE TABLE / VIEW schemas, a multiline Tuple may place several
+    // deeper lines between top-level column declarations. Treat the whole
+    // schema column run as one alignment group rather than resetting after
+    // every nested type block.
+    if (in_create_schema_block(lines, i, indent)) {
+      vector<size_t> indexes;
+      size_t j = i;
+      while (j < lines.size()) {
+        const string t = trim_ascii_spaces(lines[j]);
+        if (t.empty()) { ++j; continue; }
+        const size_t current_indent = leading_space_count(lines[j]);
+        if (current_indent < indent) break;
+        if (current_indent == indent) {
+          if (looks_like_create_column_line(lines[j])) indexes.push_back(j);
+          else if (starts_with_ci(t, "INDEX ") || starts_with_ci(t, "PROJECTION ") ||
+                   starts_with_ci(t, "CONSTRAINT ") || starts_with_ci(t, "PRIMARY KEY ") ||
+                   starts_with_ci(t, "TTL ")) break;
+        }
+        ++j;
+      }
+
+      if (indexes.size() >= 2) {
+        size_t width = 0;
+        struct ColLine { string lhs; string rhs; bool comma; };
+        vector<ColLine> cols;
+        cols.reserve(indexes.size());
+        for (const size_t index : indexes) {
+          string t = trim_ascii_spaces(lines[index]);
+          bool comma = false;
+          if (!t.empty() && t.back() == ',') { comma = true; t.pop_back(); t = rtrim_spaces(t); }
+          const size_t close = t.find('`', 1);
+          const string lhs = t.substr(0, close + 1);
+          const string rhs = trim_ascii_spaces(t.substr(close + 1));
+          width = std::max(width, lhs.size());
+          cols.push_back({lhs, rhs, comma});
+        }
+        for (size_t k = 0; k < indexes.size(); ++k) {
+          string rendered(indent, ' ');
+          rendered += cols[k].lhs;
+          rendered += string(width - cols[k].lhs.size() + 1, ' ');
+          rendered += cols[k].rhs;
+          if (cols[k].comma) rendered += ',';
+          lines[indexes[k]] = std::move(rendered);
+        }
+      }
+      i = std::max(i + 1, j);
+      continue;
+    }
+
+    // Fallback for short standalone runs outside a CREATE schema.
     size_t j = i;
     size_t width = 0;
     struct ColLine { string lhs; string rhs; bool comma; };
@@ -1033,6 +1106,197 @@ void align_create_columns(vector<string>& lines) {
   }
 }
 
+struct IndexAlignmentLine {
+  string name;
+  string expression;
+  string type;
+  string granularity;
+  bool comma = false;
+};
+
+optional<IndexAlignmentLine> parse_index_alignment_line(string_view line) {
+  string t = trim_ascii_spaces(line);
+  bool comma = false;
+  if (!t.empty() && t.back() == ',') {
+    comma = true;
+    t.pop_back();
+    t = rtrim_spaces(t);
+  }
+  if (!starts_with_ci(t, "INDEX ")) return std::nullopt;
+  string rest = trim_ascii_spaces(t.substr(6));
+  const int type_pos = find_top_level_keyword(rest, "TYPE");
+  if (type_pos <= 0) return std::nullopt;
+  const int granularity_pos = find_top_level_keyword(rest, "GRANULARITY", static_cast<size_t>(type_pos + 4));
+  if (granularity_pos <= type_pos) return std::nullopt;
+
+  const string left = trim_ascii_spaces(rest.substr(0, static_cast<size_t>(type_pos)));
+  const size_t name_end = left.find_first_of(" \t\n");
+  if (name_end == string::npos) return std::nullopt;
+  IndexAlignmentLine out;
+  out.name = trim_ascii_spaces(left.substr(0, name_end));
+  out.expression = trim_ascii_spaces(left.substr(name_end + 1));
+  out.type = trim_ascii_spaces(rest.substr(static_cast<size_t>(type_pos) + 4,
+      static_cast<size_t>(granularity_pos - type_pos - 4)));
+  out.granularity = trim_ascii_spaces(rest.substr(static_cast<size_t>(granularity_pos) + 11));
+  out.comma = comma;
+  if (out.name.empty() || out.expression.empty() || out.type.empty() || out.granularity.empty()) return std::nullopt;
+  return out;
+}
+
+void align_create_index_groups(vector<string>& lines) {
+  for (size_t i = 0; i < lines.size();) {
+    auto first = parse_index_alignment_line(lines[i]);
+    if (!first) { ++i; continue; }
+    const size_t indent = leading_space_count(lines[i]);
+    vector<IndexAlignmentLine> group;
+    size_t j = i;
+    while (j < lines.size() && leading_space_count(lines[j]) == indent) {
+      auto parsed = parse_index_alignment_line(lines[j]);
+      if (!parsed) break;
+      group.push_back(std::move(*parsed));
+      ++j;
+    }
+    if (group.size() >= 2) {
+      size_t name_width = 0;
+      size_t expression_width = 0;
+      size_t type_width = 0;
+      for (const auto& row : group) {
+        name_width = std::max(name_width, row.name.size());
+        expression_width = std::max(expression_width, row.expression.size());
+        type_width = std::max(type_width, row.type.size());
+      }
+      for (size_t k = 0; k < group.size(); ++k) {
+        const auto& row = group[k];
+        string rendered(indent, ' ');
+        rendered += "INDEX " + row.name;
+        rendered += string(name_width - row.name.size() + 1, ' ');
+        rendered += row.expression;
+        rendered += string(expression_width - row.expression.size() + 1, ' ');
+        rendered += "TYPE " + row.type;
+        rendered += string(type_width - row.type.size() + 1, ' ');
+        rendered += "GRANULARITY " + row.granularity;
+        if (row.comma) rendered += ',';
+        lines[i + k] = std::move(rendered);
+      }
+    }
+    i = j;
+  }
+}
+
+string align_multiline_tuple_closers(string_view source) {
+  struct ParenFrame {
+    bool tuple = false;
+    size_t indent = 0;
+    size_t opened_line = 0;
+  };
+  vector<ParenFrame> stack;
+  string out;
+  out.reserve(source.size() + 64);
+  size_t line = 0;
+  size_t source_line_start = 0;
+  size_t output_line_start = 0;
+  bool in_single = false;
+  bool in_double = false;
+  bool in_backtick = false;
+  bool in_line_comment = false;
+  bool in_block_comment = false;
+
+  auto current_indent = [&](size_t pos) {
+    size_t n = 0;
+    for (size_t k = source_line_start; k < pos && source[k] == ' '; ++k) ++n;
+    return n;
+  };
+  auto current_output_line_is_blank = [&]() {
+    for (size_t k = output_line_start; k < out.size(); ++k) {
+      if (out[k] != ' ' && out[k] != '\t' && out[k] != '\r') return false;
+    }
+    return true;
+  };
+  auto preceding_identifier = [&](size_t pos) {
+    size_t end = pos;
+    while (end > source_line_start && (source[end - 1] == ' ' || source[end - 1] == '\t')) --end;
+    size_t begin = end;
+    while (begin > source_line_start) {
+      const char ch = source[begin - 1];
+      if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_')) break;
+      --begin;
+    }
+    return string(source.substr(begin, end - begin));
+  };
+
+  for (size_t i = 0; i < source.size(); ++i) {
+    const char c = source[i];
+    const char n = i + 1 < source.size() ? source[i + 1] : '\0';
+
+    if (in_line_comment) {
+      out.push_back(c);
+      if (c == '\n') {
+        in_line_comment = false;
+        ++line;
+        source_line_start = i + 1;
+        output_line_start = out.size();
+      }
+      continue;
+    }
+    if (in_block_comment) {
+      out.push_back(c);
+      if (c == '*' && n == '/') {
+        out.push_back(n);
+        ++i;
+        in_block_comment = false;
+      } else if (c == '\n') {
+        ++line;
+        source_line_start = i + 1;
+        output_line_start = out.size();
+      }
+      continue;
+    }
+    if (!in_single && !in_double && !in_backtick && c == '-' && n == '-') {
+      out.push_back(c); out.push_back(n); ++i; in_line_comment = true; continue;
+    }
+    if (!in_single && !in_double && !in_backtick && c == '/' && n == '*') {
+      out.push_back(c); out.push_back(n); ++i; in_block_comment = true; continue;
+    }
+
+    if (!in_double && !in_backtick && c == '\'' && (i == 0 || source[i - 1] != '\\')) in_single = !in_single;
+    else if (!in_single && !in_backtick && c == '"' && (i == 0 || source[i - 1] != '\\')) in_double = !in_double;
+    else if (!in_single && !in_double && c == '`') in_backtick = !in_backtick;
+
+    if (!in_single && !in_double && !in_backtick && c == '(') {
+      const string ident = preceding_identifier(i);
+      stack.push_back({iequals_ascii(ident, "Tuple"), current_indent(i), line});
+      out.push_back(c);
+      continue;
+    }
+
+    if (!in_single && !in_double && !in_backtick && c == ')' && !stack.empty()) {
+      const ParenFrame frame = stack.back();
+      stack.pop_back();
+      if (frame.tuple && line > frame.opened_line) {
+        if (current_output_line_is_blank()) {
+          out.resize(output_line_start);
+          out.append(frame.indent, ' ');
+        } else {
+          out.push_back('\n');
+          ++line;
+          output_line_start = out.size();
+          out.append(frame.indent, ' ');
+        }
+      }
+      out.push_back(c);
+      continue;
+    }
+
+    out.push_back(c);
+    if (c == '\n') {
+      ++line;
+      source_line_start = i + 1;
+      output_line_start = out.size();
+    }
+  }
+  return out;
+}
+
 void split_long_string_alias_lines(vector<string>& lines) {
   for (size_t i = 0; i < lines.size(); ++i) {
     if (lines[i].size() <= 80) continue;
@@ -1062,10 +1326,127 @@ void split_combined_limit_lines(vector<string>& lines) {
   }
 }
 
+
+string format_long_enum_type_lines(string_view source) {
+  const vector<string> lines = split_lines_keep(source);
+  vector<string> rendered;
+  rendered.reserve(lines.size() + 32);
+
+  const auto enum_at = [](string_view line, size_t start = 0) -> size_t {
+    ScanState st;
+    for (size_t i = 0; i < line.size(); ++i) {
+      const bool lexical = !st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment;
+      if (i >= start && lexical) {
+        const bool e8 = i + 6 <= line.size() && line.substr(i, 6) == "Enum8(";
+        const bool e16 = i + 7 <= line.size() && line.substr(i, 7) == "Enum16(";
+        if (e8 || e16) {
+          const char prev = i == 0 ? '\0' : line[i - 1];
+          if (prev == '\0' || !is_ident_char(prev)) return i;
+        }
+      }
+      step_scan(st, line, i);
+    }
+    return string::npos;
+  };
+
+  for (const string& line : lines) {
+    const size_t enum_pos = enum_at(line);
+    if (enum_pos == string::npos) {
+      rendered.push_back(line);
+      continue;
+    }
+    const size_t enum_open = line.find('(', enum_pos);
+    if (enum_open == string::npos) {
+      rendered.push_back(line);
+      continue;
+    }
+    const size_t enum_close = find_matching_paren(line, enum_open);
+    if (enum_close == string::npos) {
+      rendered.push_back(line);
+      continue;
+    }
+    const auto enum_items = split_top_level(line.substr(enum_open + 1, enum_close - enum_open - 1), ',');
+    // Short enums are more readable inline. Long ClickHouse system enums can
+    // contain dozens of values and must be one value per line.
+    if (enum_items.size() < 5 && line.size() <= 100) {
+      rendered.push_back(line);
+      continue;
+    }
+
+    const size_t indent = leading_space_count(line);
+    const string enum_name = string(line.substr(enum_pos, enum_open - enum_pos));
+
+    // Special-case Map(Enum*, ValueType): once the enum becomes multiline the
+    // containing Map must also become a structured block. Otherwise the output
+    // degenerates into `Map(Enum8( ... ), UInt32)` with mismatched closers.
+    size_t map_pos = string::npos;
+    for (size_t search = 0;;) {
+      const size_t candidate = line.find("Map(", search);
+      if (candidate == string::npos || candidate >= enum_pos) break;
+      map_pos = candidate;
+      search = candidate + 1;
+    }
+    if (map_pos != string::npos) {
+      const size_t map_open = line.find('(', map_pos);
+      const size_t map_close = map_open == string::npos ? string::npos : find_matching_paren(line, map_open);
+      if (map_close != string::npos && map_close >= enum_close) {
+        const auto map_items = split_top_level(line.substr(map_open + 1, map_close - map_open - 1), ',');
+        if (map_items.size() == 2) {
+          int enum_arg = -1;
+          for (size_t i = 0; i < map_items.size(); ++i) {
+            const string item = trim_ascii_spaces(map_items[i]);
+            if (starts_with_ci(item, "Enum8(") || starts_with_ci(item, "Enum16(")) {
+              enum_arg = static_cast<int>(i);
+              break;
+            }
+          }
+          if (enum_arg >= 0) {
+            rendered.push_back(line.substr(0, map_open + 1));
+            for (size_t arg = 0; arg < map_items.size(); ++arg) {
+              if (static_cast<int>(arg) == enum_arg) {
+                rendered.push_back(string(indent + 4, ' ') + enum_name + "(");
+                for (size_t i = 0; i < enum_items.size(); ++i) {
+                  string value(indent + 8, ' ');
+                  value += trim_ascii_spaces(enum_items[i]);
+                  if (i + 1 < enum_items.size()) value += ',';
+                  rendered.push_back(std::move(value));
+                }
+                string close(indent + 4, ' ');
+                close += ')';
+                if (arg + 1 < map_items.size()) close += ',';
+                rendered.push_back(std::move(close));
+              } else {
+                string value(indent + 4, ' ');
+                value += trim_ascii_spaces(map_items[arg]);
+                if (arg + 1 < map_items.size()) value += ',';
+                rendered.push_back(std::move(value));
+              }
+            }
+            rendered.push_back(string(indent, ' ') + ")" + string(line.substr(map_close + 1)));
+            continue;
+          }
+        }
+      }
+    }
+
+    rendered.push_back(line.substr(0, enum_open + 1));
+    for (size_t i = 0; i < enum_items.size(); ++i) {
+      string value(indent + 4, ' ');
+      value += trim_ascii_spaces(enum_items[i]);
+      if (i + 1 < enum_items.size()) value += ',';
+      rendered.push_back(std::move(value));
+    }
+    rendered.push_back(string(indent, ' ') + ")" + string(line.substr(enum_close + 1)));
+  }
+  return join_lines(rendered);
+}
+
 string normalize_final_layout(string_view s) {
-  vector<string> lines = split_lines_keep(s);
+  const string enum_formatted = format_long_enum_type_lines(s);
+  vector<string> lines = split_lines_keep(align_multiline_tuple_closers(enum_formatted));
   split_long_string_alias_lines(lines);
   align_create_columns(lines);
+  align_create_index_groups(lines);
   align_alias_groups(lines);
   split_combined_limit_lines(lines);
   return join_lines(lines);
@@ -1185,6 +1566,43 @@ string Formatter::take_leading_comments(string_view s, string* leading) const {
   return trim_ascii_spaces(s.substr(pos));
 }
 
+string align_multiline_settings(string text) {
+  vector<string> lines;
+  size_t start = 0;
+  while (start <= text.size()) {
+    const size_t nl = text.find('\n', start);
+    const size_t end = nl == string::npos ? text.size() : nl;
+    lines.push_back(text.substr(start, end - start));
+    if (nl == string::npos) break;
+    start = nl + 1;
+  }
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (!iequals_ascii(trim_ascii_spaces(lines[i]), "SETTINGS")) continue;
+    size_t end = i + 1;
+    size_t max_lhs = 0;
+    vector<std::pair<size_t, size_t>> positions;
+    while (end < lines.size() && lines[end].rfind("    ", 0) == 0) {
+      string body = trim_ascii_spaces(lines[end]);
+      const size_t eq = body.find('=');
+      if (eq != string::npos) {
+        const string lhs = rtrim_spaces(body.substr(0, eq));
+        max_lhs = std::max(max_lhs, lhs.size());
+        positions.push_back({end, lhs.size()});
+      }
+      ++end;
+    }
+    for (const auto& [line_index, lhs_len] : positions) {
+      string body = trim_ascii_spaces(lines[line_index]);
+      const size_t eq = body.find('=');
+      const string lhs = rtrim_spaces(body.substr(0, eq));
+      const string rhs = trim_ascii_spaces(body.substr(eq + 1));
+      lines[line_index] = "    " + lhs + string(max_lhs > lhs_len ? max_lhs - lhs_len : 0, ' ') + " = " + rhs;
+    }
+    i = end > 0 ? end - 1 : i;
+  }
+  return join_lines(lines);
+}
+
 string Formatter::format(string_view s) {
   string text = trim_ascii_spaces(repair_split_clause_keywords(repair_line_comments(normalize_newlines(s))));
   if (text.empty()) return text;
@@ -1193,7 +1611,7 @@ string Formatter::format(string_view s) {
   text = take_leading_comments(text, &leading);
   string out = format_statement(text);
   if (!leading.empty()) out = leading + "\n" + out;
-  return normalize_final_layout(cleanup_surface(out));
+  return align_multiline_settings(normalize_final_layout(cleanup_surface(out)));
 }
 
 string Formatter::format_statement(string_view s) {
@@ -2201,6 +2619,46 @@ string Formatter::format_bool_expr(string_view expr) {
   return format_bool_term(expr, false);
 }
 
+string format_comma_clause_body(string_view body, bool align_equals) {
+  auto parts = split_top_level(body, ',');
+  vector<string> items;
+  for (const auto& raw : parts) {
+    const string item = normalize_code_spacing(trim_ascii_spaces(raw));
+    if (!item.empty()) items.push_back(item);
+  }
+  if (items.size() <= 1) return items.empty() ? string{} : items.front();
+
+  vector<size_t> eq_positions(items.size(), string::npos);
+  size_t max_lhs = 0;
+  if (align_equals) {
+    for (size_t idx = 0; idx < items.size(); ++idx) {
+      ScanState st;
+      for (size_t i = 0; i < items[idx].size(); ++i) {
+        if (is_top_level(st) && items[idx][i] == '=') { eq_positions[idx] = i; break; }
+        step_scan(st, items[idx], i);
+      }
+      if (eq_positions[idx] != string::npos) {
+        const string lhs = rtrim_spaces(items[idx].substr(0, eq_positions[idx]));
+        max_lhs = std::max(max_lhs, lhs.size());
+      }
+    }
+  }
+
+  string out;
+  for (size_t idx = 0; idx < items.size(); ++idx) {
+    string rendered = items[idx];
+    if (align_equals && eq_positions[idx] != string::npos) {
+      const string lhs = rtrim_spaces(items[idx].substr(0, eq_positions[idx]));
+      const string rhs = trim_ascii_spaces(items[idx].substr(eq_positions[idx] + 1));
+      rendered = lhs + string(max_lhs > lhs.size() ? max_lhs - lhs.size() : 0, ' ') + " = " + rhs;
+    }
+    out += "    " + rendered;
+    if (idx + 1 < items.size()) out += ',';
+    if (idx + 1 < items.size()) out += '\n';
+  }
+  return "\n" + out;
+}
+
 string format_table_tail_clauses(string_view tail) {
   string text = normalize_code_spacing(trim_ascii_spaces(tail));
   if (text.empty()) return {};
@@ -2223,7 +2681,13 @@ string format_table_tail_clauses(string_view tail) {
       if (!body.empty() && body.front() == '=') body = trim_ascii_spaces(body.substr(1));
       out += "ENGINE = " + body;
     } else if (poses[i].second == "SETTINGS") {
-      out += "SETTINGS " + body;
+      const string formatted = format_comma_clause_body(body, true);
+      out += "SETTINGS";
+      if (!formatted.empty()) out += formatted.front() == '\n' ? formatted : " " + formatted;
+    } else if (poses[i].second == "TTL") {
+      const string formatted = format_comma_clause_body(body, false);
+      out += "TTL";
+      if (!formatted.empty()) out += formatted.front() == '\n' ? formatted : " " + formatted;
     } else {
       out += poses[i].second;
       if (!body.empty()) out += " " + body;
@@ -2234,19 +2698,65 @@ string format_table_tail_clauses(string_view tail) {
 
 string format_create_view_head_clauses(string_view raw_head) {
   string head = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw_head)));
-  bool has_as = false;
   if (ends_with_ci(head, " AS")) {
-    has_as = true;
     head = rtrim_spaces(head.substr(0, head.size() - 3));
   } else if (ends_with_ci(head, "AS")) {
-    has_as = true;
     head = rtrim_spaces(head.substr(0, head.size() - 2));
   }
+
+  // CREATE VIEW/MATERIALIZED VIEW may contain an explicit result schema before
+  // AS SELECT. Format it with the same readable one-column-per-line layout used
+  // for CREATE TABLE instead of collapsing the complete declaration on one line.
+  const size_t par = head.find('(');
   const int engine_pos = find_top_level_keyword(head, "ENGINE");
+  if (par != string::npos && (engine_pos < 0 || par < static_cast<size_t>(engine_pos))) {
+    const size_t close = find_matching_paren(head, par);
+    if (close != string::npos) {
+      const string prefix = normalize_code_spacing(trim_ascii_spaces(head.substr(0, par)));
+      const string cols = trim_ascii_spaces(head.substr(par + 1, close - par - 1));
+      const auto items = split_top_level(cols, ',');
+      vector<std::pair<string, string>> parsed;
+      size_t width = 0;
+      for (const auto& item : items) {
+        const string col = trim_ascii_spaces(item);
+        if (col.empty()) continue;
+        size_t split = 0;
+        if (col.front() == '`') {
+          split = col.find('`', 1);
+          if (split != string::npos) ++split;
+        } else {
+          split = col.find_first_of(" \t\n");
+        }
+        const string lhs = split == string::npos ? col : trim_ascii_spaces(col.substr(0, split));
+        const string rhs = split == string::npos ? string() : trim_ascii_spaces(col.substr(split));
+        width = std::max(width, lhs.size());
+        parsed.push_back({lhs, rhs});
+      }
+      if (!parsed.empty()) {
+        string out = prefix + "\n(\n";
+        for (size_t i = 0; i < parsed.size(); ++i) {
+          out += "    " + parsed[i].first;
+          if (!parsed[i].second.empty()) {
+            out += string(width - parsed[i].first.size() + 1, ' ') + parsed[i].second;
+          }
+          if (i + 1 < parsed.size()) out += ',';
+          out += '\n';
+        }
+        out += ")";
+        const string remainder = trim_ascii_spaces(head.substr(close + 1));
+        if (!remainder.empty()) {
+          const int remainder_engine = find_top_level_keyword(remainder, "ENGINE");
+          if (remainder_engine == 0) out += "\n" + format_table_tail_clauses(remainder);
+          else out += "\n" + normalize_code_spacing(collapse_whitespace(remainder));
+        }
+        return out + " AS";
+      }
+    }
+  }
+
   if (engine_pos < 0) return normalize_code_spacing(head) + " AS";
   string prefix = normalize_code_spacing(trim_ascii_spaces(head.substr(0, static_cast<size_t>(engine_pos))));
   string tail = format_table_tail_clauses(head.substr(static_cast<size_t>(engine_pos)));
-  (void)has_as;
   return prefix + "\n" + tail + " AS";
 }
 
@@ -2308,7 +2818,12 @@ string Formatter::format_create_view(string_view s, bool) {
   const int pos = find_top_level_keyword(text, "SELECT");
   if (pos < 0) return cleanup_surface(text);
   string head = format_create_view_head_clauses(text.substr(0, static_cast<size_t>(pos)));
-  return head + "\n" + format_statement(text.substr(static_cast<size_t>(pos)));
+  string body = format_statement(text.substr(static_cast<size_t>(pos)));
+  // CREATE VIEW/MV DDL is easier to scan when the projection is visually
+  // separated from SELECT, even for a single `*`. Force the same representation
+  // on every pass so formatter output is idempotent.
+  if (starts_with_ci(body, "SELECT ") && body.find('\n') != string::npos) body = expand_nested_select_head(std::move(body));
+  return head + "\n" + body;
 }
 
 string Formatter::format_alter_table(string_view s) {

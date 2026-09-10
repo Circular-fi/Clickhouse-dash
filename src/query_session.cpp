@@ -116,7 +116,10 @@ QuerySession::QuerySession(
   std::string stats_uri,
   std::shared_ptr<ClickHouseClientPool> client_pool,
   int result_preview_row_limit,
-  QuerySessionOptions options
+  QuerySessionOptions options,
+  bool detailed_profiling,
+  std::function<void(const std::string&)> native_query_id_observer,
+  std::function<void(SessionStatus, int64_t)> terminal_status_observer
 ) : query_id_(std::move(query_id)),
     host_id_(std::move(host_id)),
     sql_(std::move(sql)),
@@ -125,7 +128,10 @@ QuerySession::QuerySession(
     stats_uri_(std::move(stats_uri)),
     client_pool_(std::move(client_pool)),
     result_preview_row_limit_(result_preview_row_limit),
-    options_(std::move(options)) {
+    options_(std::move(options)),
+    detailed_profiling_(detailed_profiling),
+    native_query_id_observer_(std::move(native_query_id_observer)),
+    terminal_status_observer_(std::move(terminal_status_observer)) {
   if (options_.sample_interval_ms < 10) options_.sample_interval_ms = 10;
   if (options_.sample_interval_ms > 1000) options_.sample_interval_ms = 1000;
   if (options_.result_rows_batch_size <= 0) options_.result_rows_batch_size = 1000;
@@ -134,6 +140,8 @@ QuerySession::QuerySession(
   options_.sse_write_batch_events = std::max<size_t>(1, std::min<size_t>(64, options_.sse_write_batch_events));
   options_.sse_write_batch_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024, options_.sse_write_batch_bytes));
   options_.sse_queue_max_bytes = std::max<size_t>(options_.sse_write_batch_bytes, std::min<size_t>(128 * 1024 * 1024, options_.sse_queue_max_bytes));
+  options_.max_result_cell_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_cell_bytes));
+  options_.max_result_event_bytes = std::max<size_t>(1024, std::min<size_t>(128 * 1024 * 1024, options_.max_result_event_bytes));
   options_.describe_cache_entries = std::min<size_t>(4096, options_.describe_cache_entries);
   options_.describe_cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, options_.describe_cache_ttl_ms));
 }
@@ -161,11 +169,16 @@ void QuerySession::start() {
     if (cancel_requested_.load(std::memory_order_relaxed)) {
       status_ = SessionStatus::Canceled;
       finished_at_ = std::chrono::steady_clock::now();
-      cv_.notify_all();
-      return;
+    } else {
+      status_ = SessionStatus::Running;
+      started_at_ = std::chrono::steady_clock::now();
     }
-    status_ = SessionStatus::Running;
-    started_at_ = std::chrono::steady_clock::now();
+  }
+
+  if (cancel_requested_.load(std::memory_order_relaxed)) {
+    cv_.notify_all();
+    notify_terminal_status(SessionStatus::Canceled);
+    return;
   }
 
   query_thread_ = std::thread([self = shared_from_this()] { self->run_query(); });
@@ -174,14 +187,17 @@ void QuerySession::start() {
 void QuerySession::request_cancel() {
   cancel_requested_.store(true, std::memory_order_relaxed);
 
+  bool became_terminal = false;
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (status_ == SessionStatus::Running || status_ == SessionStatus::Created) {
       status_ = SessionStatus::Canceled;
       finished_at_ = std::chrono::steady_clock::now();
+      became_terminal = true;
     }
   }
   cv_.notify_all();
+  if (became_terminal) notify_terminal_status(SessionStatus::Canceled);
 }
 
 
@@ -191,14 +207,25 @@ std::vector<std::string> QuerySession::native_query_ids() const {
 }
 
 std::string QuerySession::begin_native_query_attempt() {
-  std::lock_guard<std::mutex> lock(mu_);
-  const size_t attempt_index = native_query_ids_.size();
-  std::string native_id = query_id_;
-  if (attempt_index > 0) {
-    native_id += "-attempt-";
-    native_id += std::to_string(attempt_index + 1);
+  std::string native_id;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    const size_t attempt_index = native_query_ids_.size();
+    native_id = query_id_;
+    if (attempt_index > 0) {
+      native_id += "-attempt-";
+      native_id += std::to_string(attempt_index + 1);
+    }
+    native_query_ids_.push_back(native_id);
   }
-  native_query_ids_.push_back(native_id);
+
+  if (native_query_id_observer_) {
+    try {
+      native_query_id_observer_(native_id);
+    } catch (...) {
+      // Registry/observability bookkeeping must never fail query execution.
+    }
+  }
   return native_id;
 }
 
@@ -294,8 +321,10 @@ SessionSnapshot QuerySession::snapshot() const {
   s.read_rows_total = read_rows_total_;
   s.read_bytes_total = read_bytes_total_;
   s.total_rows_to_read = total_rows_to_read_;
-  s.wrote_rows_total = wrote_rows_total_;
-  s.wrote_bytes_total = wrote_bytes_total_;
+  s.result_rows_emitted = result_rows_emitted_;
+  s.result_bytes_emitted = result_bytes_emitted_;
+  s.written_rows_total = written_rows_total_;
+  s.written_bytes_total = written_bytes_total_;
   s.user_time_us_total = user_time_us_total_;
   s.system_time_us_total = system_time_us_total_;
   s.cpu_time_available = cpu_time_available_;
@@ -376,6 +405,13 @@ void QuerySession::push_sse_json_event(std::string_view event_name, std::string_
   chunk += json;
   chunk += "\n\n";
 
+  if ((event_name == "result_rows" || event_name == "result_meta") &&
+      chunk.size() > options_.max_result_event_bytes) {
+    throw std::runtime_error(
+        "result_event_too_large: Result event exceeds query.max_result_event_bytes (" +
+        std::to_string(options_.max_result_event_bytes) + " bytes).");
+  }
+
   std::unique_lock<std::mutex> lk(mu_);
   cv_.wait(lk, [&] {
     return cancel_requested_.load(std::memory_order_relaxed) ||
@@ -389,14 +425,35 @@ void QuerySession::push_sse_json_event(std::string_view event_name, std::string_
   cv_.notify_all();
 }
 
+void QuerySession::notify_terminal_status(SessionStatus status) {
+  if (!terminal_status_observer_) return;
+  bool expected = false;
+  if (!terminal_status_notified_.compare_exchange_strong(expected, true)) return;
+
+  int64_t elapsed_ms = 0;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    elapsed_ms = ms_since(started_at_, finished_at_);
+  }
+
+  try {
+    terminal_status_observer_(status, elapsed_ms);
+  } catch (...) {
+    // Registry bookkeeping must never change query execution semantics.
+  }
+}
+
 void QuerySession::finish_ok() {
+  bool changed = false;
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (status_ == SessionStatus::Canceled) return;
     status_ = SessionStatus::Finished;
     finished_at_ = std::chrono::steady_clock::now();
+    changed = true;
   }
   cv_.notify_all();
+  if (changed) notify_terminal_status(SessionStatus::Finished);
 }
 
 void QuerySession::finish_canceled() {
@@ -406,6 +463,17 @@ void QuerySession::finish_canceled() {
     finished_at_ = std::chrono::steady_clock::now();
   }
   cv_.notify_all();
+  notify_terminal_status(SessionStatus::Canceled);
+}
+
+void QuerySession::finish_result_limit_reached() {
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    status_ = SessionStatus::ResultLimitReached;
+    finished_at_ = std::chrono::steady_clock::now();
+  }
+  cv_.notify_all();
+  notify_terminal_status(SessionStatus::ResultLimitReached);
 }
 
 void QuerySession::finish_error(const std::string& message) {
@@ -419,109 +487,34 @@ void QuerySession::finish_error(const std::string& message) {
       (location.has_code || location.has_position || location.has_line_col || location.has_near)
       ? &location
       : nullptr;
+  std::string error_code = "query_failed";
+  std::string public_message = message;
+  for (const char* code : {"result_cell_too_large", "result_event_too_large"}) {
+    const std::string prefix = std::string(code) + ":";
+    if (public_message.rfind(prefix, 0) == 0) {
+      error_code = code;
+      public_message.erase(0, prefix.size());
+      while (!public_message.empty() && public_message.front() == ' ') public_message.erase(public_message.begin());
+      break;
+    }
+  }
   const std::string payload = build_error_payload_json(
-      "query_failed", message, location_ptr, &query_id_, nullptr);
+      error_code, public_message, location_ptr, &query_id_, nullptr);
   push_sse_json_event("error", payload);
 
+  SessionStatus terminal = SessionStatus::Error;
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (status_ == SessionStatus::Canceled || cancel_requested_.load(std::memory_order_relaxed)) {
       status_ = SessionStatus::Canceled;
+      terminal = SessionStatus::Canceled;
     } else {
       status_ = SessionStatus::Error;
     }
     finished_at_ = std::chrono::steady_clock::now();
   }
   cv_.notify_all();
-}
-
-void QuerySession::refresh_stats_from_query_log_best_effort() {
-  if (!options_.final_stats_from_query_log) return;
-
-  // Keep the optional query_log connection out of the hot query path. Most
-  // installations leave these final stats disabled; when enabled, acquire the
-  // system client only after the result stream has completed. Reuse the query
-  // client when both roles use the same URI.
-  if (!client_stats_) {
-    if (stats_uri_.empty() || stats_uri_ == runner_uri_) {
-      client_stats_ = client_query_;
-    } else {
-      std::string err;
-      client_stats_ = client_pool_ ? client_pool_->acquire(
-          stats_uri_,
-          std::chrono::seconds(5),
-          std::chrono::seconds(5),
-          std::chrono::seconds(5),
-          &err)
-        : make_client_from_uri(
-          stats_uri_,
-          std::chrono::seconds(5),
-          std::chrono::seconds(5),
-          std::chrono::seconds(5),
-          &err);
-    }
-  }
-
-  auto client = client_stats_ ? client_stats_ : client_query_;
-  if (!client) return;
-
-  const std::string sql =
-    "SELECT toUInt64(read_rows) AS read_rows, toUInt64(read_bytes) AS read_bytes, "
-    "toInt64(memory_usage) AS memory_usage "
-    "FROM system.query_log "
-    "WHERE query_id = " + sql_quote_string(latest_native_query_id()) + " "
-    "ORDER BY event_time_microseconds DESC "
-    "LIMIT 1";
-
-  uint64_t log_read_rows = 0;
-  uint64_t log_read_bytes = 0;
-  int64_t log_memory_usage = -1;
-
-  for (int attempt = 0; attempt < 5; ++attempt) {
-    if (options_.flush_query_log_for_final_stats) {
-      try {
-        client->Execute("SYSTEM FLUSH LOGS query_log");
-      } catch (...) {
-      }
-    }
-
-    bool found = false;
-    try {
-      clickhouse::Query q(sql);
-      q.OnData([&](const clickhouse::Block& b) {
-        if (b.GetRowCount() == 0 || b.GetColumnCount() < 3) return;
-
-        auto c_read_rows = b[0]->As<clickhouse::ColumnUInt64>();
-        auto c_read_bytes = b[1]->As<clickhouse::ColumnUInt64>();
-        auto c_memory_i64 = b[2]->As<clickhouse::ColumnInt64>();
-        auto c_memory_u64 = b[2]->As<clickhouse::ColumnUInt64>();
-        if (!c_read_rows || !c_read_bytes || (!c_memory_i64 && !c_memory_u64)) return;
-
-        log_read_rows = c_read_rows->At(0);
-        log_read_bytes = c_read_bytes->At(0);
-        log_memory_usage = c_memory_i64 ? c_memory_i64->At(0) : static_cast<int64_t>(c_memory_u64->At(0));
-        found = true;
-      });
-      client->Select(q);
-    } catch (...) {
-    }
-
-    if (found) {
-      std::lock_guard<std::mutex> lk(mu_);
-      read_rows_total_ = std::max<uint64_t>(read_rows_total_, log_read_rows);
-      read_bytes_total_ = std::max<uint64_t>(read_bytes_total_, log_read_bytes);
-      total_rows_to_read_ = std::max<uint64_t>(total_rows_to_read_, read_rows_total_);
-      if (log_memory_usage >= 0) {
-        current_mem_bytes_ = std::max<int64_t>(current_mem_bytes_, log_memory_usage);
-        peak_mem_bytes_ = std::max<int64_t>(peak_mem_bytes_, log_memory_usage);
-      }
-      return;
-    }
-
-    if (attempt + 1 < 5) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-  }
+  notify_terminal_status(terminal);
 }
 
 void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::time_point& now) {
@@ -552,6 +545,8 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
       ms_since(started_at_, now),
       read_rows_total_,
       read_bytes_total_,
+      written_rows_total_,
+      written_bytes_total_,
       cpu_centi,
       current_mem_bytes_,
   });
@@ -790,10 +785,12 @@ static ResultTransportMode classify_result_transport(std::string_view type) {
 }
 
 
-static bool should_retry_with_describe_after_fast_path_error(std::string_view msg) {
+static bool should_retry_with_describe_after_direct_path_error(std::string_view msg) {
   return icontains(msg, "unimplemented") ||
          icontains(msg, "unsupported column type") ||
          icontains(msg, "unsupported custom serialization") ||
+         icontains(msg, "unsupported json serialization version") ||
+         icontains(msg, "output_format_native_write_json_as_string") ||
          icontains(msg, "cannot create column") ||
          icontains(msg, "cannot read data") ||
          icontains(msg, "cannot parse type");
@@ -900,9 +897,11 @@ void QuerySession::run_query() {
     read_rows_total_ = 0;
     read_bytes_total_ = 0;
     total_rows_to_read_ = 0;
-    wrote_rows_total_ = 0;
-    wrote_bytes_total_ = 0;
-    user_time_us_total_ = 0;
+    result_rows_emitted_ = 0;
+    result_bytes_emitted_ = 0;
+    written_rows_total_ = 0;
+    written_bytes_total_ = 0;
+        user_time_us_total_ = 0;
     system_time_us_total_ = 0;
     cpu_time_available_ = false;
     current_mem_bytes_ = -1;
@@ -931,20 +930,37 @@ void QuerySession::run_query() {
       return;
     }
 
-    try {
-      if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
-    } catch (...) {}
+    if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
     const std::string first_keyword = sql_first_keyword_lower(sql_);
     const bool is_wrappable_select = first_keyword == "select" || first_keyword == "with";
     const bool is_select_like = is_wrappable_select || first_keyword == "show" ||
                                 first_keyword == "describe" || first_keyword == "desc" ||
                                 first_keyword == "explain";
 
+    auto apply_explicit_profiling_settings = [this](clickhouse::Query& query) {
+      if (!detailed_profiling_) return;
+      const auto set_bool = [&query](const char* name) {
+        clickhouse::QuerySettingsField field;
+        field.value = "1";
+        query.SetSetting(name, field);
+      };
+      set_bool("log_queries");
+      set_bool("log_profile_events");
+      set_bool("log_processors_profiles");
+      set_bool("log_query_views");
+      // Profiling mode is explicitly opt-in, so collect a real wall-clock
+      // processor trace only for this query instead of globally sampling all
+      // dashboard traffic.
+      set_bool("opentelemetry_trace_processors");
+      set_bool("opentelemetry_start_trace_probability");
+    };
+
     if (!is_select_like) {
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
       clickhouse::Query command(sql_, begin_native_query_attempt());
+      apply_explicit_profiling_settings(command);
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
@@ -976,10 +992,9 @@ void QuerySession::run_query() {
 
       {
         std::lock_guard<std::mutex> lk(mu_);
-        wrote_rows_total_ = 1;
+        result_rows_emitted_ = 1;
       }
 
-      refresh_stats_from_query_log_best_effort();
       finish_ok();
       return;
     }
@@ -989,18 +1004,15 @@ void QuerySession::run_query() {
     const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
     bool attempt_used_cached_plan = false;
 
-    auto apply_database_best_effort = [&]() {
-      try {
-        if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
-      } catch (...) {
-      }
+    auto apply_database = [&]() {
+      if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
     };
 
     auto execute_select_attempt = [&](bool use_describe, bool allow_cached_plan) {
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
-      // The fast path intentionally skips DESCRIBE. Auto mode pre-plans SQL
+      // The direct path intentionally skips DESCRIBE. Auto mode pre-plans SQL
       // that visibly produces driver-incompatible result types, and otherwise
       // retries once only if the native decoder fails before any SSE payload.
       ResultPlan result_plan;
@@ -1062,6 +1074,7 @@ void QuerySession::run_query() {
 
       const std::string native_query_id = begin_native_query_attempt();
       clickhouse::Query q(effective_sql, native_query_id);
+      apply_explicit_profiling_settings(q);
 
       // Ensure ClickHouse sends query-group ProfileEvents over native TCP.
       // Only counters and gauges emitted by ClickHouse are exposed. Missing
@@ -1080,6 +1093,8 @@ void QuerySession::run_query() {
         std::lock_guard<std::mutex> lk(self->mu_);
         self->read_rows_total_ += p.rows;
         self->read_bytes_total_ += p.bytes;
+        self->written_rows_total_ += p.written_rows;
+        self->written_bytes_total_ += p.written_bytes;
         if (p.total_rows > 0) {
           self->total_rows_to_read_ = std::max<uint64_t>(self->total_rows_to_read_, p.total_rows);
         }
@@ -1254,7 +1269,7 @@ void QuerySession::run_query() {
           }
           w.EndArray();
           w.Key("used_transport_wrapper"); w.Bool(used_transport_wrapper);
-          w.Key("describe_mode"); w.String(use_describe ? "described" : "fast");
+          w.Key("describe_mode"); w.String(use_describe ? "described" : "direct");
           w.Key("describe_cache_hit"); w.Bool(attempt_used_cached_plan);
           w.EndObject();
           push_sse_json_event("result_meta", std::string_view(sb.GetString(), sb.GetSize()));
@@ -1288,19 +1303,30 @@ void QuerySession::run_query() {
               // Compatibility projections are already String columns. JSON and
               // 256-bit values stay strings for backwards compatibility. Opaque
               // aggregate states additionally get a valid-UTF8/hex safety guard.
+              rapidjson::StringBuffer cell_buffer(nullptr, 256);
+              rapidjson::Writer<rapidjson::StringBuffer> cell_writer(cell_buffer);
               if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
-                write_cell_json_declared(w, block[c], row, column_plans[c]->original_type);
+                write_cell_json_declared(cell_writer, block[c], row, column_plans[c]->original_type);
               } else {
-                write_cell_json(w, block[c], row);
+                write_cell_json(cell_writer, block[c], row);
               }
+              if (cell_buffer.GetSize() > options_.max_result_cell_bytes) {
+                throw std::runtime_error(
+                    "result_cell_too_large: Result cell exceeds query.max_result_cell_bytes (" +
+                    std::to_string(options_.max_result_cell_bytes) + " bytes).");
+              }
+              w.RawValue(
+                  cell_buffer.GetString(),
+                  static_cast<rapidjson::SizeType>(cell_buffer.GetSize()),
+                  rapidjson::kNullType);
             }
             w.EndArray();
             ++row;
             ++rows_in_event;
             ++rows_returned;
 
-            // A single large row is always allowed through; subsequent rows are
-            // deferred to avoid multi-megabyte events and browser main-thread stalls.
+            // Batch-size target: hard safety is enforced separately by
+            // max_result_cell_bytes and max_result_event_bytes.
             if (rows_in_event > 0 && sb.GetSize() >= max_bytes_per_event) break;
           }
 
@@ -1310,17 +1336,13 @@ void QuerySession::run_query() {
 
           {
             std::lock_guard<std::mutex> lk(mu_);
-            wrote_rows_total_ += rows_in_event;
-            wrote_bytes_total_ += sb.GetSize();
+            result_rows_emitted_ += rows_in_event;
+            result_bytes_emitted_ += sb.GetSize();
           }
         }
 
         if (row < block.GetRowCount()) {
-          {
-            std::lock_guard<std::mutex> lk(mu_);
-            status_ = SessionStatus::ResultLimitReached;
-            finished_at_ = std::chrono::steady_clock::now();
-          }
+          finish_result_limit_reached();
           throw std::runtime_error("result_limit_reached");
         }
       });
@@ -1347,11 +1369,16 @@ void QuerySession::run_query() {
       execute_select_attempt(initial_describe, true);
     } catch (const std::exception& e) {
       const std::string msg = e.what() ? std::string(e.what()) : std::string("error");
-      const bool can_retry_without_emitted_data = !meta_sent && rows_returned == 0 &&
+      // Result metadata may already have been emitted from a native header block
+      // before clickhouse-cpp fails while decoding the first data block (notably
+      // for JSON serialization compatibility). Retrying is still safe as long as
+      // no result row has reached the client: a second result_meta simply replaces
+      // the provisional schema before any rows are appended.
+      const bool can_retry_without_emitted_rows = rows_returned == 0 &&
           msg != "canceled" && msg != "result_limit_reached" &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
-      if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_data) {
+      if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_rows) {
         // Schema changed while a plan was cached. The failed native attempt may
         // remain visible in system.processes briefly after its socket closes.
         // Stop it synchronously and use a distinct id for the retry so a slow
@@ -1361,11 +1388,13 @@ void QuerySession::run_query() {
         discard_query_connection();
         cancel_native_query_ids_best_effort({failed_native_id}, true);
         acquire_query_connection();
-        apply_database_best_effort();
+        apply_database();
         reset_stats_for_compat_retry();
+        meta_sent = false;
+        rows_returned = 0;
         execute_select_attempt(true, false);
-      } else if (allow_describe_retry && can_retry_without_emitted_data &&
-                 should_retry_with_describe_after_fast_path_error(msg)) {
+      } else if (allow_describe_retry && can_retry_without_emitted_rows &&
+                 should_retry_with_describe_after_direct_path_error(msg)) {
         // A failed native decode can leave both the connection mid-packet and
         // the server-side query alive for a short period. Discard the transport,
         // synchronously stop the failed attempt, then retry under a unique id.
@@ -1373,7 +1402,7 @@ void QuerySession::run_query() {
         discard_query_connection();
         cancel_native_query_ids_best_effort({failed_native_id}, true);
         acquire_query_connection();
-        apply_database_best_effort();
+        apply_database();
         reset_stats_for_compat_retry();
         meta_sent = false;
         rows_returned = 0;
@@ -1383,7 +1412,6 @@ void QuerySession::run_query() {
       }
     }
 
-    refresh_stats_from_query_log_best_effort();
     finish_ok();
 
   } catch (const std::exception& e) {
@@ -1393,7 +1421,6 @@ void QuerySession::run_query() {
     // failure or browser disconnect. This path runs only after an error.
     discard_query_connection();
     cancel_native_queries_best_effort(false);
-    refresh_stats_from_query_log_best_effort();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
     } else if (msg == "result_limit_reached") {

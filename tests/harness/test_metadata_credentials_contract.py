@@ -42,13 +42,11 @@ def test_metadata_serves_partial_results_without_turning_every_error_into_503() 
     assert "res.status = 200;" in source
 
 
-def test_compose_covers_runner_health_with_an_unavailable_system_account() -> None:
-    compose = read("tests/docker-compose.yml")
-    config = read("tests/config/CH_HOSTS.source.hcl")
-    api_test = read("tests/api/meta/check_meta.py")
+def test_local_test_config_keeps_runner_and_system_credentials_separate() -> None:
+    config = read("tests/config/CH_HOSTS.local.hcl")
+    api_test = read("tests/backend-functional/test_routes.py")
 
-    assert "CH_HOSTS.source.hcl" in compose
-    assert 'name       = "meta-partial"' in config
-    assert 'runner_uri = "clickhouse://test:test@clickhouse:9000"' in config
-    assert "invalid-system-password" in config
-    assert "test_metadata_keeps_runner_catalogs_when_system_credentials_fail" in api_test
+    assert 'runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"' in config
+    assert 'system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"' in config
+    assert "/api/meta" in api_test
+    assert '"keywords,functions"' in api_test

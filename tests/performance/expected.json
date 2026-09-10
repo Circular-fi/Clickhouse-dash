@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "baseline": "first-local-docker-run-2026-09-05",
+  "cases": {
+    "select_literal": {
+      "median_ms_max": 12,
+      "p95_ms_max": 20
+    },
+    "select_numbers_100k": {
+      "median_ms_max": 20,
+      "p95_ms_max": 60
+    },
+    "create_table": {
+      "median_ms_max": 25,
+      "p95_ms_max": 40
+    },
+    "insert_1000_rows": {
+      "median_ms_max": 15,
+      "p95_ms_max": 25
+    },
+    "select_inserted_aggregate": {
+      "median_ms_max": 15,
+      "p95_ms_max": 80
+    }
+  }
+}

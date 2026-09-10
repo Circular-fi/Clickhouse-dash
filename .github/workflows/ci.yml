@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - '**'
@@ -19,7 +20,7 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -30,17 +31,26 @@ jobs:
           docker --version
           docker compose version
 
-      - name: Build and run integration tests
+      - name: Run single-container test profile
         run: |
-          docker compose -f tests/docker-compose.yml up -d --build
-          docker compose -f tests/docker-compose.yml exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
+          docker compose -f tests/docker-compose.yml --profile test up --build --abort-on-container-exit --exit-code-from tests
+
+      - name: Upload combined analysis bundle
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chdash-test-review
+          path: |
+            tests/artifacts/chdash-test-review.zip
+            tests/artifacts/test-run/manifest.json
+          if-no-files-found: ignore
 
       - name: Collect logs
         if: always()
         run: |
           mkdir -p artifacts
-          docker compose -f tests/docker-compose.yml ps -a > artifacts/compose-ps.txt || true
-          docker compose -f tests/docker-compose.yml logs --no-color > artifacts/compose.log || true
+          docker compose -f tests/docker-compose.yml --profile test ps -a > artifacts/compose-ps.txt || true
+          docker compose -f tests/docker-compose.yml --profile test logs --no-color > artifacts/compose.log || true
 
       - name: Upload logs
         if: always()
@@ -52,4 +62,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f tests/docker-compose.yml down -v --remove-orphans || true
+        run: docker compose -f tests/docker-compose.yml --profile test down -v --remove-orphans || true

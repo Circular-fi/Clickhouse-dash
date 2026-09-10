@@ -1,8 +1,8 @@
 # Complete file configuration. Start with:
 #   chdash --config /path/to/config.hcl
 #
-# When --config is present, none of the application environment variables are
-# read. Omitted attributes use the defaults shown below.
+# Application configuration is HCL-only. Environment variables are not an
+# application configuration interface. Omitted attributes use the defaults shown below.
 
 server {
   listen_host = "0.0.0.0"
@@ -14,15 +14,19 @@ query {
   max_sql_bytes            = 4194304
 
   describe_mode              = "auto"
-  final_stats_from_query_log = false
-  final_stats_flush_logs     = false
   sample_interval_ms         = 40
 
   result_batch_rows = 1000
   result_batch_bytes = 262144
   sse_batch_events  = 8
   sse_batch_bytes   = 262144
-  sse_queue_max_bytes = 8388608
+  sse_queue_max_bytes     = 8388608
+  max_result_cell_bytes  = 33554432
+  max_result_event_bytes = 33554432
+
+  # Signed cancel capabilities are valid for at most 48 hours. A server restart
+  # rotates the internal signing secret and therefore invalidates older tokens.
+  cancel_token_ttl_ms = 172800000
 
   describe_cache_entries = 256
   describe_cache_ttl_ms  = 60000
@@ -46,6 +50,40 @@ format_cache {
   ttl_ms      = 600000
 }
 
+explorer {
+  browse = true
+
+  graph {
+    lineage          = true
+    storage_topology = true
+  }
+
+  cache_ttl_ms            = 5000
+  live_refresh_ms         = 2000
+  function_cache_ttl_ms   = 3600000
+  function_markdown_links = false
+}
+
+analysis {
+  registry_ttl_ms      = 3600000
+  registry_max_entries = 10000
+  registry_sql_max_bytes = 33554432
+  log_lookup_timeout_ms = 2000
+  flush_logs            = false
+  allow_deep_analyze    = false
+}
+
+export {
+  max_concurrent        = 1
+  output_buffer_bytes   = 262144
+  archive_format        = "zip"
+  compression           = false
+  token_ttl_ms          = 120000
+  pending_max_entries   = 32
+  pending_sql_max_bytes = 16777216
+  max_queries           = 256
+}
+
 health {
   interval_ms = 5000
   timeout_ms  = 800
@@ -55,12 +93,13 @@ clickhouse {
   host {
     name       = "local"
     label      = "ClickHouse local"
-    runner_uri = "clickhouse://internalsvc@clickhouse:9000"
-    system_uri = "clickhouse://internalsvc@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
 
-    # Used for both URIs. The password is read by chdash and never copied into
-    # the HCL or the process environment. Per-role overrides are also accepted:
-    # runner_password_file and system_password_file.
-    password_file = "/run/secrets/clickhouse_password"
+    # Keep the runner and technical system credentials separate. The runner is
+    # the authorization boundary for panel SQL; the system account is reserved
+    # for backend-generated metadata/log queries and cancellation.
+    runner_password_file = "/run/secrets/chdash_runner_password"
+    system_password_file = "/run/secrets/chdash_system_password"
   }
 }

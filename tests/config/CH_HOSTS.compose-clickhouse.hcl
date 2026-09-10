@@ -8,7 +8,7 @@ health {
 clickhouse {
   host {
     name       = "local"
-    runner_uri = "clickhouse://test:test@clickhouse:9000"
-    system_uri = "clickhouse://test:test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
   }
 }

@@ -530,7 +530,7 @@ def test_query_classification_ignores_leading_comments() -> None:
     assert outcome.get("success"), concise_result(result)
     assert outcome.get("first_row") == [1]
     meta = outcome.get("result_meta") or {}
-    assert meta.get("describe_mode") == "fast"
+    assert meta.get("describe_mode") == "direct"
 
 
 
@@ -603,7 +603,15 @@ def test_native_telemetry_keeps_original_metrics_without_threads() -> None:
 
         samples = tick[14]
         assert samples is None or all(
-            isinstance(sample, list) and len(sample) == 5
+            isinstance(sample, list)
+            and len(sample) == 7
+            and isinstance(sample[0], int)  # elapsed ms
+            and isinstance(sample[1], int)  # read rows
+            and isinstance(sample[2], int)  # read bytes
+            and (sample[3] is None or isinstance(sample[3], int))  # CPU centi-percent
+            and (sample[4] is None or isinstance(sample[4], int))  # memory bytes
+            and isinstance(sample[5], int)  # written rows
+            and isinstance(sample[6], int)  # written bytes
             for sample in samples
         )
 
@@ -630,7 +638,7 @@ def test_hidden_json_column_compat_retry_does_not_reuse_a_running_query_id() -> 
             assert (result.get("outcome") or {}).get("success"), concise_result(result)
 
         # The SELECT text does not mention JSON, so auto mode first takes the
-        # native fast path and must fall back after the driver rejects the
+        # native direct path and must fall back after the driver rejects the
         # column type. The retry must use a distinct native ClickHouse id.
         result, events = execute_case(
             f"SELECT payload FROM default.{table}",

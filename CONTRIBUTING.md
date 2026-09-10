@@ -21,7 +21,7 @@ Thanks for contributing to `clickhouse-dash`.
 
 ```bash
 cd tests
-docker compose up -d --build
+docker compose up -d
 ```
 
 ### Local build
@@ -36,8 +36,8 @@ cmake --build build --target chdash
 
 ```bash
 cd tests
-docker compose up -d --build
-docker compose exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
+docker compose --profile test up -d --build
+docker compose --profile test exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
 ```
 
 ### Validate release builds

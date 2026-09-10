@@ -1,54 +1,152 @@
-# Configuration reference verified from the source
+# Configuration reference
 
-The binary has two mutually exclusive configuration paths:
+ClickHouse Dash is configured exclusively with an HCL file:
 
-- `chdash --config /path/config.hcl` reads only that file. Application
-  environment variables are not consulted, even when they are set.
-- `chdash` without `--config` keeps the legacy environment behavior. `CH_HOSTS`
-  remains required in this mode.
+```bash
+chdash --config /etc/clickhouse-dash/config.hcl
+chdash --config /etc/clickhouse-dash/config.hcl --health
+```
 
-`--health` can be combined in either order, for example
-`chdash --config /etc/clickhouse-dash/config.hcl --health`.
+Starting the server or running `--health` without `--config` is an error.
+Application environment variables are not read as configuration. This does not
+prevent a supervisor or container runtime from using environment variables for
+its own templating, but the `chdash` process itself only consumes the HCL file.
 
-The full syntax is shown in [`config.example.hcl`](../config.example.hcl).
+The complete syntax is shown in [`config.example.hcl`](../config.example.hcl).
 Unknown blocks, unknown attributes, duplicate attributes, and incorrect HCL
-types are startup errors. Missing optional attributes retain their historical
-defaults.
+types are startup errors.
 
-## Environment to HCL mapping and actual effect
+## Core blocks
 
-The effects below follow the value from the loader to its consumer in the C++
-source; they are not inferred from the previous README descriptions.
+- `server`: listen host and port.
+- `query`: interactive query limits, batching, SSE backpressure, compatibility
+  DESCRIBE behavior, and session lifecycle.
+- `client_pool`: native ClickHouse connection pool lifecycle.
+- `format_cache`: bounded SQL formatter cache.
+- `health`: host health polling.
+- `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
 
-| Environment variable | HCL equivalent | Default | Effect in the code |
-|---|---|---:|---|
-| `LISTEN_HOST` | `server.listen_host` | `0.0.0.0` | Forms `AppConfig.listen`; `Server::run()` passes the host to the HTTP listener. |
-| `LISTEN_PORT` | `server.listen_port` | `8080` | Forms `AppConfig.listen`; `Server::run()` passes the parsed port to the HTTP listener. |
-| `CH_HOSTS` | `health` and `clickhouse` blocks | required | Parses the health settings and repeated hosts. `runner_uri` is used for health, user queries, formatting, and visibility-scoped metadata; `system_uri` is used for global metadata, cancellation, capability checks, and optional final query-log statistics. |
-| `RESULT_PREVIEW_ROW_LIMIT` | `query.result_preview_row_limit` | `10000` | Stops emitting result rows at the limit, reports `result_limit_reached`, and marks the result as truncated. `0` means unlimited. Startup clamps it to `0..10000000`. |
-| `QUERY_MAX_SQL_BYTES` | `query.max_sql_bytes` | `4194304` | Rejects `/api/query/run` SQL larger than this value with HTTP 413 before allocating a session. Startup clamps it to `1024..67108864`. It does not control the separate formatter limit. |
-| `QUERY_DESCRIBE_MODE` | `query.describe_mode` | `auto` | Selects result-transport planning: `always` runs `DESCRIBE` first, `never` uses the fast native path, and `auto` describes likely complex results or retries a compatible query after a native decode failure. |
-| `QUERY_FINAL_STATS_FROM_QUERY_LOG` | `query.final_stats_from_query_log` | `false` | After the result stream completes, optionally queries `system.query_log` up to five times to refine read-row, read-byte, and memory totals. It adds an extra system-account query. |
-| `QUERY_FINAL_STATS_FLUSH_LOGS` | `query.final_stats_flush_logs` | `false` | When final query-log statistics are enabled, runs `SYSTEM FLUSH LOGS query_log` before each lookup attempt. It has no effect while final query-log statistics are disabled. |
-| `QUERY_SAMPLE_INTERVAL_MS` | `query.sample_interval_ms` | `40` | Minimum interval between in-memory telemetry sample points. Each session clamps it to `10..1000` ms, and retains at most 512 points. |
-| `QUERY_RESULT_BATCH_ROWS` | `query.result_batch_rows` | `1000` | Maximum rows encoded into one `result_rows` SSE event. Non-positive values become 1000 and values above 10000 become 10000. |
-| `QUERY_RESULT_BATCH_BYTES` | `query.result_batch_bytes` | `262144` | Approximate encoded-byte threshold for one `result_rows` SSE event; one oversized row is still allowed. Each session clamps it to `16384..4194304`. |
-| `QUERY_SSE_BATCH_EVENTS` | `query.sse_batch_events` | `8` | Maximum already-framed SSE events coalesced into one socket write. Each session clamps it to `1..64`. |
-| `QUERY_SSE_BATCH_BYTES` | `query.sse_batch_bytes` | `262144` | Byte threshold for a coalesced SSE socket write. Each session clamps it to `16384..4194304`. |
-| `QUERY_SSE_QUEUE_MAX_BYTES` | `query.sse_queue_max_bytes` | `8388608` | Bounds the per-query producer queue. When the browser/proxy is slower, the query thread waits until the stream drains data. A single event is always accepted into an empty queue. The value is clamped to at least the SSE write size and at most 128 MiB. |
-| `QUERY_DESCRIBE_CACHE_ENTRIES` | `query.describe_cache_entries` | `256` | Maximum global cached compatibility plans keyed by SQL/schema identity. `0` disables the cache; each session caps it at 4096. |
-| `QUERY_DESCRIBE_CACHE_TTL_MS` | `query.describe_cache_ttl_ms` | `60000` | Expiration time for cached compatibility plans. `0` disables the cache; each session caps it at one hour. |
-| `CH_CLIENT_POOL_MAX_IDLE` | `client_pool.max_idle` | `4` | Maximum returned native clients retained per URI-and-timeout key. `0` makes every released client close; startup caps it at 64. |
-| `CH_CLIENT_POOL_IDLE_TTL_MS` | `client_pool.idle_ttl_ms` | `60000` | Drops pooled sockets after this idle time, both during acquisition and in the reaper. `0` disables TTL expiry and prevents the pool reaper thread from starting. Startup caps it at 24 hours. |
-| `CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS` | `client_pool.validate_after_idle_ms` | `15000` | After this idle duration, bounded-timeout clients are pinged before reuse. Long-query clients have an unbounded receive timeout, so they are discarded and recreated instead of pinged. `0` disables this check. |
-| `CH_CLIENT_POOL_REAPER_INTERVAL_MS` | `client_pool.reaper_interval_ms` | `5000` | Sleep interval of the background idle-client cleanup loop. Startup clamps it to `250..60000` ms. |
-| `FORMAT_CACHE_MAX_ENTRIES` | `format_cache.max_entries` | `512` | LRU entry limit for deterministic formatted SQL results. `0` disables reads and writes. Startup caps it at 100000. |
-| `FORMAT_CACHE_MAX_BYTES` | `format_cache.max_bytes` | `16777216` | Total approximate bytes allowed for formatting cache keys and values. Oversized entries are skipped and LRU entries are evicted to stay below the limit. `0` disables the cache. |
-| `FORMAT_CACHE_TTL_MS` | `format_cache.ttl_ms` | `600000` | Lifetime of formatted SQL cache entries. `0` disables the cache; startup caps it at 24 hours. |
-| `QUERY_SESSION_MAX_COUNT` | `query.session_max_count` | `256` | Rejects a new `/api/query/run` with HTTP 429 when the in-memory session map reaches this size. Startup clamps it to `1..100000`. |
-| `QUERY_SESSION_ABANDONED_TTL_MS` | `query.session_abandoned_ttl_ms` | `60000` | Reaps a created query whose SSE consumer never attached after this age. Startup enforces at least 1000 ms. |
-| `QUERY_SESSION_TERMINAL_TTL_MS` | `query.session_terminal_ttl_ms` | `30000` | Retains finished, failed, canceled, or truncated sessions for this long before reaping. `0` makes terminal sessions immediately eligible. |
-| `QUERY_SESSION_REAPER_INTERVAL_MS` | `query.session_reaper_interval_ms` | `5000` | Controls how often the server scans sessions for abandoned or terminal entries. The server clamps it to `250..60000` ms. |
+## Authorization model
+
+ChDash has no end-user login, Bearer authentication, or per-user RBAC. Access to ClickHouse is defined entirely by the configured host credentials:
+
+- `runner_uri` is the ClickHouse authorization boundary and is the **only** connection on which panel-supplied SQL may execute;
+- `system_uri` is a technical backend connection used only for backend-generated metadata/log queries and cancellation.
+
+Every caller who can reach a given panel/host therefore has the same ClickHouse permissions: the permissions of its `runner_uri`. If different permission sets are required, expose different runner-backed deployments/hosts outside ChDash.
+
+The server still signs short-lived internal capability tokens with a random boot-time secret. These tokens are not user identities. In particular, `/api/query/cancel` requires the signed token issued for that query. Cancel tokens carry `purpose=cancel`, host/query IDs, `iat`, and `exp`; `query.cancel_token_ttl_ms` defaults to 48 hours. Restarting ChDash rotates the signing secret and invalidates older capabilities before their nominal expiry.
+
+## Evolution blocks
+
+The HCL contract exposes the settings required by Explorer, analysis, and massive export:
+
+```hcl
+explorer {
+  browse = true
+
+  graph {
+    lineage          = true
+    storage_topology = true
+  }
+
+  cache_ttl_ms            = 5000
+  live_refresh_ms         = 2000
+  function_cache_ttl_ms   = 3600000
+  function_markdown_links = false
+}
+
+analysis {
+  registry_ttl_ms      = 3600000
+  registry_max_entries = 10000
+  registry_sql_max_bytes = 33554432
+  log_lookup_timeout_ms = 2000
+  flush_logs            = false
+  allow_deep_analyze    = false
+}
+
+export {
+  max_concurrent      = 1
+  output_buffer_bytes = 262144
+  archive_format      = "zip"
+  compression         = false
+}
+```
+
+Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Query/Explorer page selector entirely.
+
+`explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
+
+`analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
+
+`export.archive_format` currently accepts only `zip`; this deliberately fixes
+the V1 archive contract to ZIP/ZIP64. Massive exports use the two-phase
+`/api/export/run` → `/api/export/stream` handshake and a forward-only ZIP64
+writer, as documented in `docs/massive-export.md`.
+
+Interactive result safety limits live in `query`:
+
+```hcl
+query {
+  max_result_cell_bytes  = 33554432
+  max_result_event_bytes = 33554432
+  cancel_token_ttl_ms     = 172800000
+}
+```
+
+The first two defaults are 32 MiB. Oversized cells/events fail explicitly with `result_cell_too_large` or `result_event_too_large`; data is not silently truncated. These limits apply to interactive SSE results, not the dedicated massive-export stream.
+
+## Query behavior
+
+Normal Run never performs an automatic `system.query_log` lookup and never
+forces `SYSTEM FLUSH LOGS`. The former final-query-log settings were removed
+because they conflict with the strict minimal Run contract. Persisted logs are
+read only through the explicit Analyze action. The existing
+`send_profile_events` native setting is kept because it feeds the interactive
+CPU/memory metrics and does not introduce a second query.
+
+The live telemetry now distinguishes ClickHouse write progress from result rows
+serialized to the browser. Native Progress packets provide `written_rows` and
+`written_bytes`; result payload counters are tracked separately as
+`result_rows_emitted` and `result_bytes_emitted`.
+
+## Recommended ClickHouse account separation
+
+ChDash rejects top-level `KILL QUERY` statements submitted as panel/export SQL. This is intentional: ClickHouse lets a user cancel its own queries even without the global `KILL QUERY` privilege, and all panel users share the same runner identity. Cancellation therefore goes through the ChDash cancel capability and the `system_uri` account only.
+
+Use two different ClickHouse users. `runner_uri` defines exactly what anyone
+with access to the panel may execute. The technical `system_uri` should not be
+used as a general SQL account.
+
+A typical starting point is:
+
+```sql
+CREATE USER chdash_runner IDENTIFIED WITH sha256_password BY '<runner-password>';
+CREATE USER chdash_system IDENTIFIED WITH sha256_password BY '<system-password>';
+
+-- Adapt the database scope and write privileges to what the panel is meant to do.
+GRANT SELECT, INSERT, ALTER, CREATE, DROP, TRUNCATE, OPTIMIZE ON analytics.* TO chdash_runner;
+
+-- Technical account used by ChDash for metadata/log lookups and cancellation.
+GRANT SELECT ON system.* TO chdash_system;
+GRANT KILL QUERY ON *.* TO chdash_system;
+GRANT SYSTEM FLUSH LOGS ON *.* TO chdash_system;
+```
+
+Do **not** grant `KILL QUERY`, `IMPERSONATE`, or access-management privileges to the runner. ChDash rejects direct `KILL QUERY` panel/export SQL regardless, but keeping those privileges off the runner also protects the boundary if the runner credentials are ever used outside ChDash. If `analysis.flush_logs = true`, the system account also needs the corresponding `SYSTEM FLUSH LOGS` privilege.
+
+Verify the important boundary from ClickHouse itself:
+
+```sql
+-- Run as chdash_runner: expected result is 0.
+CHECK GRANT KILL QUERY ON *.*;
+
+-- Run as chdash_system: expected result is 1.
+CHECK GRANT KILL QUERY ON *.*;
+```
+
+The integration stack under `tests/` provisions distinct `chdash_runner` and
+`chdash_system` users and checks these two conditions at runtime.
 
 ## Password files
 
@@ -60,9 +158,10 @@ role. The URI must contain the username but no password:
 clickhouse {
   host {
     name          = "local"
-    runner_uri    = "clickhouse://internalsvc@clickhouse:9000"
-    system_uri    = "clickhouse://internalsvc@clickhouse:9000"
-    password_file = "/run/secrets/clickhouse_password"
+    runner_uri            = "clickhouse://chdash_runner@clickhouse:9000"
+    system_uri            = "clickhouse://chdash_system@clickhouse:9000"
+    runner_password_file  = "/run/secrets/chdash_runner_password"
+    system_password_file  = "/run/secrets/chdash_system_password"
   }
 }
 ```
@@ -70,21 +169,4 @@ clickhouse {
 The file is read when a native ClickHouse client is created. One final LF or
 CRLF is removed; other whitespace is preserved. A NUL byte, an unreadable file,
 or combining a URI password with a password file causes client creation to
-fail. Docker Compose can provide the file without exposing its value to the
-application environment:
-
-```yaml
-services:
-  clickhouse-dash:
-    command: ["--config", "/etc/clickhouse-dash/config.hcl"]
-    configs:
-      - source: clickhouse_dash_config
-        target: /etc/clickhouse-dash/config.hcl
-    secrets:
-      - source: clickhouse_password
-        target: clickhouse_password
-
-secrets:
-  clickhouse_password:
-    environment: CLICKHOUSE_PASSWORD
-```
+fail.

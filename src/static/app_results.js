@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, util } = ns;
+  const { dom, util, state } = ns;
 
   let resultsStackElement = null;
 
@@ -30,6 +30,10 @@
   const virtualDefaultRowHeight = 32;
 
   let isVerticalResults = false;
+  // Do not commit to a horizontal result layout until the stream proves there
+  // are at least two rows. A one-row result is rendered vertically only after
+  // the terminal event, so the UI never flashes a wide header then flips.
+  let livePresentationCommitted = false;
 
   let rowIndexCounter = 0;
   let sortKey = null;
@@ -108,6 +112,10 @@
 
   function setResultsVisible(visible) {
     if (!dom.resultsPanel) return;
+    if (visible && state.suppressResultsVisibility) {
+      dom.resultsPanel.classList.add("is-hidden");
+      return;
+    }
     dom.resultsPanel.classList.toggle("is-hidden", !visible);
   }
 
@@ -121,6 +129,7 @@
     if (lastErrorMessage) {
       dom.errorBanner.hidden = false;
       dom.errorBanner.textContent = lastErrorMessage;
+      if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
       setResultsVisible(true);
     } else {
       dom.errorBanner.hidden = true;
@@ -198,6 +207,7 @@
     }
 
     resetTableMode();
+    livePresentationCommitted = false;
     clearTable();
 
     setLiveBodyHold(preservedBodyScrollHeight);
@@ -486,21 +496,12 @@
     td.removeAttribute("title");
   }
 
-  function isSqlCreateLikeText(text) {
-    const s = String(text ?? "");
-    return /\n/.test(s) && /^\s*(?:CREATE|ATTACH)\s+(?:TABLE|VIEW|MATERIALIZED\s+VIEW|DATABASE|DICTIONARY|FUNCTION)\b/i.test(s);
-  }
 
   function setStringCellHighlighted(td, text) {
     const s = decodeEscapedDisplayText(text);
     const reparsed = parseJsonStringIfLikely(s);
     if (reparsed && typeof reparsed === "object") {
       renderJsonHighlightedInto(td, JSON.stringify(coerceDeep(reparsed), null, 4));
-      return;
-    }
-    if (isSqlCreateLikeText(s) && ns.highlight && typeof ns.highlight.toHtml === "function") {
-      td.innerHTML = ns.highlight.toHtml(s);
-      td.removeAttribute("title");
       return;
     }
     td.textContent = "";
@@ -1367,13 +1368,54 @@
     renderLiveTableFull();
   }
 
+  function renderHorizontalHeader() {
+    if (!dom.resultTableHead) return;
+    dom.resultTableHead.innerHTML = "";
+    const tr = document.createElement("tr");
+
+    const thIndex = document.createElement("th");
+    thIndex.textContent = "#";
+    thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
+    thIndex.dataset.sortKey = "-1";
+    thIndex.addEventListener("click", () => setLiveSort(-1));
+    tr.appendChild(thIndex);
+
+    for (let i = 0; i < resultColumns.length; i++) {
+      const th = document.createElement("th");
+      th.textContent = resultColumns[i];
+      if (resultTypes[i]) th.title = resultTypes[i];
+      th.classList.add("resultTable__thSortable");
+      th.dataset.sortKey = String(i);
+      th.addEventListener("click", () => setLiveSort(i));
+      tr.appendChild(th);
+    }
+    dom.resultTableHead.appendChild(tr);
+    updateLiveSortIndicators();
+  }
+
+  function commitHorizontalPresentation() {
+    if (livePresentationCommitted) return;
+    livePresentationCommitted = true;
+    resetTableMode();
+    renderHorizontalHeader();
+    setResultsVisible(true);
+    if (allResultRows.length) {
+      pendingRows = allResultRows.slice();
+      if (allResultRows.length > virtualRowThreshold) scheduleLiveTableFullRender();
+      else scheduleFlush();
+    }
+    applyLiveBodyHold();
+  }
+
   function renderTableMeta(columns, types) {
+    if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
     resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
     resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
     resultTypeAsts = resultTypes.map(parseChType);
     resetLiveGaugeState();
 
     resetTableMode();
+    livePresentationCommitted = false;
     setResultColumnsText();
     clearTable();
 
@@ -1396,30 +1438,8 @@
       virtualScrollRafId = 0;
     }
     if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
-
-    if (!dom.resultTableHead) return;
-    const tr = document.createElement("tr");
-
-    const thIndex = document.createElement("th");
-    thIndex.textContent = "#";
-    thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
-    thIndex.dataset.sortKey = "-1";
-    thIndex.addEventListener("click", () => setLiveSort(-1));
-    tr.appendChild(thIndex);
-
-    for (let i = 0; i < resultColumns.length; i++) {
-      const th = document.createElement("th");
-      th.textContent = resultColumns[i];
-      if (resultTypes[i]) th.title = resultTypes[i];
-      th.classList.add("resultTable__thSortable");
-      th.dataset.sortKey = String(i);
-      th.addEventListener("click", () => setLiveSort(i));
-      tr.appendChild(th);
-    }
-    dom.resultTableHead.appendChild(tr);
-    updateLiveSortIndicators();
-    setResultsVisible(true);
-    applyLiveBodyHold();
+    // Deliberately do not reveal headers yet. We need either two rows (horizontal)
+    // or the terminal event (0 rows / one-row vertical) to choose the layout.
   }
 
   function scheduleFlush() {
@@ -1477,11 +1497,22 @@
       updateLiveGaugeMaximaFromRow(row);
       allResultRows.push(row);
 
-      if (!needsFullRender && allResultRows.length <= virtualRowThreshold) {
-        pendingRows.push(row);
-      } else {
-        needsFullRender = true;
+      if (livePresentationCommitted) {
+        if (!needsFullRender && allResultRows.length <= virtualRowThreshold) pendingRows.push(row);
+        else needsFullRender = true;
       }
+    }
+
+    if (!livePresentationCommitted && allResultRows.length >= 2) {
+      commitHorizontalPresentation();
+      updateCopyButtonState();
+      return;
+    }
+
+    if (!livePresentationCommitted) {
+      // Hold the first row in memory until we know whether it is the only row.
+      updateCopyButtonState();
+      return;
     }
 
     // Schedule at most one DOM update per SSE batch. Large batches previously
@@ -1611,6 +1642,17 @@
   }
 
   function finalizeAfterDone() {
+    if (!livePresentationCommitted) {
+      if (allResultRows.length === 1) {
+        livePresentationCommitted = true;
+        setResultsVisible(true);
+        renderVerticalSingleRow(allResultRows[0]);
+      } else {
+        // Zero-row results can finally expose their schema; 2+ is a defensive
+        // fallback for a terminal batch that bypassed the live threshold.
+        commitHorizontalPresentation();
+      }
+    }
     if (scheduledFlush || pendingRows.length) flushPendingRows();
 
     if (!liveGaugesEnabled) liveGaugesEnabled = true;
@@ -1730,6 +1772,18 @@
   function buildCopyText(format) {
     const v = String(format || "json").toLowerCase();
     return v === "csv" ? buildCopyCsvText() : buildCopyJsonText();
+  }
+
+  function getSnapshot() {
+    return {
+      columns: Array.isArray(resultColumns) ? resultColumns.slice() : [],
+      types: Array.isArray(resultTypes) ? resultTypes.slice() : [],
+      rows: Array.isArray(allResultRows) ? allResultRows.slice() : [],
+      jsonText: buildCopyJsonText(),
+      csvText: buildCopyCsvText(),
+      errorText: String(lastErrorMessage || ""),
+      status: String(currentStatusValue || ""),
+    };
   }
 
   function updateCopyButtonState() {
@@ -1959,23 +2013,31 @@
 
   function setMultiqueryMode(enabled) {
     if (!dom.resultsPanel) return;
-    dom.resultsPanel.classList.toggle("is-multiquery", !!enabled);
-    if (dom.copySplit) dom.copySplit.hidden = !!enabled;
+    const multi = !!enabled;
+    dom.resultsPanel.classList.toggle("is-multiquery", multi);
+    // Keep the global split visible in multiquery mode: its main action becomes
+    // the global JSON copy and its menu contains the cumulative ZIP download.
+    if (dom.copySplit) dom.copySplit.hidden = false;
+    if (dom.copyCsvButton) dom.copyCsvButton.hidden = multi;
+    if (dom.copyJsonButton) dom.copyJsonButton.textContent = "Copy JSON";
     if (dom.copyJsonToast) dom.copyJsonToast.hidden = true;
-    if (dom.resultColumnsText) dom.resultColumnsText.hidden = !!enabled;
+    if (dom.resultColumnsText) dom.resultColumnsText.hidden = multi;
   }
 
   function hideLiveWrapIfStackHasBlocks() {
     if (!dom.liveResultsWrap) return;
     const hasBlocks = !!(resultsStackElement && resultsStackElement.childElementCount > 0);
+    const multi = !!(dom.resultsPanel && dom.resultsPanel.classList.contains("is-multiquery"));
     dom.liveResultsWrap.hidden = hasBlocks;
     if (hasBlocks) {
-      if (dom.copySplit) dom.copySplit.hidden = true;
+      if (dom.copySplit) dom.copySplit.hidden = !multi;
       if (dom.resultColumnsText) dom.resultColumnsText.hidden = true;
     }
-    if (dom.copyJsonButton) dom.copyJsonButton.disabled = true;
-    if (dom.copyMenuButton) dom.copyMenuButton.disabled = true;
-    if (dom.copyCsvButton) dom.copyCsvButton.disabled = true;
+    if (!multi) {
+      if (dom.copyJsonButton) dom.copyJsonButton.disabled = true;
+      if (dom.copyMenuButton) dom.copyMenuButton.disabled = true;
+      if (dom.copyCsvButton) dom.copyCsvButton.disabled = true;
+    }
   }
 
   // --- Multiquery streaming panels (Query x/n) ---
@@ -2052,6 +2114,13 @@
     });
     right.appendChild(copyCtrl.el);
 
+    const analyzeBtn = document.createElement("button");
+    analyzeBtn.type = "button";
+    analyzeBtn.className = "button button--small resultsStack__analyze";
+    analyzeBtn.textContent = "Analyze";
+    analyzeBtn.hidden = true;
+    right.appendChild(analyzeBtn);
+
     const toggleBtn = document.createElement("button");
     toggleBtn.type = "button";
     toggleBtn.className = "button button--small resultsStack__toggle";
@@ -2103,6 +2172,7 @@
       isVertical: false,
       gaugesEnabled: false,
       gaugesPainted: false,
+      presentationCommitted: false,
       isVirtual: false,
       virtualViewRows: [],
       virtualRowHeight: virtualDefaultRowHeight,
@@ -2496,7 +2566,41 @@
       renderLocalTableFull();
     }
 
+    function renderLocalHorizontalHeader() {
+      if (!local.wrap) return;
+      const { thead } = findTablePartsIn(local.wrap);
+      if (!thead) return;
+      thead.innerHTML = "";
+      const tr = document.createElement("tr");
+      const thIndex = document.createElement("th");
+      thIndex.textContent = "#";
+      thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
+      thIndex.dataset.sortKey = "-1";
+      thIndex.addEventListener("click", () => setLocalSort(-1));
+      tr.appendChild(thIndex);
+      for (let i = 0; i < local.columns.length; i++) {
+        const th = document.createElement("th");
+        th.textContent = local.columns[i];
+        if (local.types[i]) th.title = local.types[i];
+        th.classList.add("resultTable__thSortable");
+        th.dataset.sortKey = String(i);
+        th.addEventListener("click", () => setLocalSort(i));
+        tr.appendChild(th);
+      }
+      thead.appendChild(tr);
+      updateLocalSortIndicators();
+    }
+
+    function commitLocalHorizontalPresentation() {
+      if (local.presentationCommitted) return;
+      local.presentationCommitted = true;
+      resetTableModeLocal();
+      renderLocalHorizontalHeader();
+      renderLocalTableFull();
+    }
+
     function renderTableMetaLocal(columns, types) {
+      if (local.wrap) local.wrap.hidden = false;
       local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
       local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
       local.typeAsts = local.types.map(parseChType);
@@ -2505,6 +2609,7 @@
       local.rowIndexCounter = 0;
       local.sortKey = null;
       local.sortDir = "";
+      local.presentationCommitted = false;
       localScheduledFullRender = false;
       localFullRenderToken++;
       if (localFullRenderRafId) {
@@ -2521,69 +2626,29 @@
         local.virtualScrollRafId = 0;
       }
       if (local.wrap) local.wrap.classList.remove("tableWrap--virtual");
-      if (!local.wrap) return;
-      resetTableModeLocal();
-      clearTableIn(local.wrap);
-      const { thead } = findTablePartsIn(local.wrap);
-      if (!thead) return;
-      const tr = document.createElement("tr");
-
-      const thIndex = document.createElement("th");
-      thIndex.textContent = "#";
-      thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
-      thIndex.dataset.sortKey = "-1";
-      thIndex.addEventListener("click", () => setLocalSort(-1));
-      tr.appendChild(thIndex);
-
-      for (let i = 0; i < local.columns.length; i++) {
-        const th = document.createElement("th");
-        th.textContent = local.columns[i];
-        if (local.types[i]) th.title = local.types[i];
-        th.classList.add("resultTable__thSortable");
-        th.dataset.sortKey = String(i);
-        th.addEventListener("click", () => setLocalSort(i));
-        tr.appendChild(th);
+      if (local.wrap) {
+        resetTableModeLocal();
+        clearTableIn(local.wrap);
       }
-      thead.appendChild(tr);
-      updateLocalSortIndicators();
+      // Do not commit a horizontal layout on result_meta alone. One-row
+      // statements are only rendered vertically after their terminal event.
       updateMetaText();
     }
 
     function appendRowsLocal(rowsChunk) {
-      if (!Array.isArray(rowsChunk)) return;
-      if (!local.wrap) {
-        for (const row of rowsChunk) {
-          local.rowIndexCounter++;
-          if (row && typeof row === "object") row.__chdashRowIndex = local.rowIndexCounter;
-          updateLocalGaugeMaximaFromRow(row);
-          local.allRows.push(row);
-        }
-        updateMetaText();
-        return;
-      }
-      const { tbody } = findTablePartsIn(local.wrap);
-      if (!tbody) return;
-
-      const shouldFullRender = isLocalSortActive() || local.isVirtual || (local.allRows.length + rowsChunk.length > virtualRowThreshold);
-
-      const frag = shouldFullRender ? null : document.createDocumentFragment();
-
+      if (!Array.isArray(rowsChunk) || rowsChunk.length === 0) return;
       for (const row of rowsChunk) {
         local.rowIndexCounter++;
         if (row && typeof row === "object") row.__chdashRowIndex = local.rowIndexCounter;
         updateLocalGaugeMaximaFromRow(row);
         local.allRows.push(row);
-
-        if (shouldFullRender) continue;
-
-        const tr = document.createElement("tr");
-        appendLocalRowCells(tr, row);
-        frag.appendChild(tr);
       }
-
-      if (shouldFullRender) scheduleLocalTableFullRender();
-      else tbody.appendChild(frag);
-
+      if (!local.presentationCommitted) {
+        if (local.allRows.length >= 2) commitLocalHorizontalPresentation();
+        updateMetaText();
+        return;
+      }
+      scheduleLocalTableFullRender();
       updateMetaText();
     }
 
@@ -2632,6 +2697,17 @@
       return v === "csv" ? buildCopyCsvTextLocal() : buildCopyJsonTextLocal();
     }
 
+    function getSnapshotLocal() {
+      return {
+        columns: Array.isArray(local.columns) ? local.columns.slice() : [],
+        types: Array.isArray(local.types) ? local.types.slice() : [],
+        rows: Array.isArray(local.allRows) ? local.allRows.slice() : [],
+        jsonText: buildCopyJsonTextLocal(),
+        csvText: buildCopyCsvTextLocal(),
+        errorText: String(local.errorText || ""),
+      };
+    }
+
     function setErrorLocal(message) {
       local.errorText = String(message || "").trim();
       updateCopyEnabledLocal();
@@ -2639,6 +2715,7 @@
       if (local.errorText) {
         local.errorBanner.hidden = false;
         local.errorBanner.textContent = local.errorText;
+        if (local.wrap) local.wrap.hidden = true;
       } else {
         local.errorBanner.hidden = true;
         local.errorBanner.textContent = "";
@@ -2657,6 +2734,7 @@
       getRowCount: () => local.allRows.length,
       getColumnCount: () => local.columns.length,
       buildCopyJsonText: buildCopyJsonTextLocal,
+      getSnapshot: getSnapshotLocal,
       setError: setErrorLocal,
       getErrorText: () => local.errorText,
       takeErrorText: () => {
@@ -2666,8 +2744,22 @@
         return t;
       },
       setMetaText: setMetaTextLocal,
+      setAnalyzeAction: (fn) => {
+        analyzeBtn.hidden = typeof fn !== "function";
+        analyzeBtn.onclick = typeof fn === "function" ? fn : null;
+      },
       setExpanded: (expanded) => setBlockExpandedLocal(blockObj, !!expanded),
       finalize: ({ expandedByDefault = false } = {}) => {
+        if (!local.presentationCommitted) {
+          if (local.allRows.length === 1) {
+            local.presentationCommitted = true;
+            renderVerticalSingleRowLocal(local.allRows[0]);
+          } else {
+            // Zero-row statements expose their schema only at the terminal
+            // event; 2+ is a defensive fallback if rows arrived in one batch.
+            commitLocalHorizontalPresentation();
+          }
+        }
         if (!local.gaugesEnabled) local.gaugesEnabled = true;
         const hasGaugeCols = local.allRows.length > 1 && Array.isArray(local.gaugeNumericCols) && local.gaugeNumericCols.some(Boolean);
         const needFinalGaugeRender = local.wrap && !local.isVertical && hasGaugeCols && local.allRows.length > 0 && !local.gaugesPainted;
@@ -2678,7 +2770,6 @@
           local.numericDirty = false;
           if (local.gaugesEnabled && hasGaugeCols) local.gaugesPainted = true;
         }
-        maybeSwitchToVerticalSingleRowLocal();
         maybeRenderSingleRowValueCellLocal();
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
       },
@@ -2688,6 +2779,141 @@
   function endMultiqueryPanel(sink, { expandedByDefault = false, metaText = null } = {}) {
     if (sink && typeof sink.setMetaText === "function" && metaText != null) sink.setMetaText(metaText);
     if (sink && typeof sink.finalize === "function") sink.finalize({ expandedByDefault });
+  }
+
+  function createStaticResultTable({
+    columns = [],
+    types = [],
+    rows = [],
+    className = "",
+    decorateHeader = null,
+    renderCell = null,
+  } = {}) {
+    const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
+    const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
+    const safeRows = Array.isArray(rows) ? rows.slice() : [];
+    const typeAsts = safeColumns.map((_, index) => parseChType(safeTypes[index] || ""));
+
+    const wrap = document.createElement("div");
+    wrap.className = `tableWrap ${String(className || "").trim()}`.trim();
+    const table = document.createElement("table");
+    table.className = "resultTable";
+    const thead = document.createElement("thead");
+    const tbody = document.createElement("tbody");
+    table.append(thead, tbody);
+    wrap.appendChild(table);
+
+    let sortKey = null;
+    let sortDir = "";
+
+    function compareRows(a, b, key) {
+      if (key === -1) return a.index - b.index;
+      const ast = typeAsts[key] || null;
+      if (isScalarNumericType(ast)) {
+        const av = extractFiniteNumber(Array.isArray(a.row) ? a.row[key] : null);
+        const bv = extractFiniteNumber(Array.isArray(b.row) ? b.row[key] : null);
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return av === bv ? 0 : av < bv ? -1 : 1;
+      }
+      const av = Array.isArray(a.row) ? formatCellForDisplayWithTypes(a.row[key], key, false, typeAsts) : String(a.row ?? "");
+      const bv = Array.isArray(b.row) ? formatCellForDisplayWithTypes(b.row[key], key, false, typeAsts) : String(b.row ?? "");
+      return compareTextForSort(av, bv);
+    }
+
+    function nextDirection(key) {
+      const numeric = key === -1 || isScalarNumericType(typeAsts[key] || null);
+      if (sortKey !== key) return numeric ? "desc" : "asc";
+      if (numeric) return sortDir === "desc" ? "asc" : sortDir === "asc" ? "" : "desc";
+      return sortDir === "asc" ? "desc" : sortDir === "desc" ? "" : "asc";
+    }
+
+    function render() {
+      thead.replaceChildren();
+      tbody.replaceChildren();
+      const head = document.createElement("tr");
+      const indexHead = document.createElement("th");
+      indexHead.textContent = "#";
+      indexHead.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
+      indexHead.dataset.sortKey = "-1";
+      if (sortKey === -1 && sortDir) indexHead.dataset.sort = sortDir;
+      indexHead.addEventListener("click", () => {
+        const next = nextDirection(-1);
+        sortKey = next ? -1 : null;
+        sortDir = next;
+        render();
+      });
+      head.appendChild(indexHead);
+
+      safeColumns.forEach((column, index) => {
+        const th = document.createElement("th");
+        th.textContent = column;
+        if (safeTypes[index]) th.title = safeTypes[index];
+        th.className = "resultTable__thSortable";
+        th.dataset.sortKey = String(index);
+        if (sortKey === index && sortDir) th.dataset.sort = sortDir;
+        th.addEventListener("click", () => {
+          const next = nextDirection(index);
+          sortKey = next ? index : null;
+          sortDir = next;
+          render();
+        });
+        if (typeof decorateHeader === "function") {
+          decorateHeader(th, {
+            column,
+            type: safeTypes[index] || "",
+            columnIndex: index,
+          });
+        }
+        head.appendChild(th);
+      });
+      thead.appendChild(head);
+
+      let display = safeRows.map((row, index) => ({ row, index: index + 1 }));
+      if (sortKey !== null && sortDir) {
+        const key = sortKey;
+        display.sort((a, b) => {
+          const cmp = compareRows(a, b, key);
+          if (cmp === 0) return a.index - b.index;
+          return sortDir === "desc" ? -cmp : cmp;
+        });
+      }
+
+      for (const entry of display) {
+        const tr = document.createElement("tr");
+        const indexCell = document.createElement("td");
+        indexCell.className = "resultTable__rowIndex resultTable__stickyLeft";
+        indexCell.textContent = String(entry.index);
+        tr.appendChild(indexCell);
+        if (Array.isArray(entry.row)) {
+          for (let index = 0; index < safeColumns.length; index++) {
+            const td = document.createElement("td");
+            const ast = typeAsts[index] || null;
+            if (isScalarNumericType(ast)) td.classList.add("resultTable__numeric");
+            const handled = typeof renderCell === "function" && renderCell(td, {
+              value: entry.row[index],
+              row: entry.row,
+              sourceRowIndex: entry.index - 1,
+              column: safeColumns[index],
+              type: safeTypes[index] || "",
+              columnIndex: index,
+            }) === true;
+            if (!handled) setCellTextFlat(td, formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
+            tr.appendChild(td);
+          }
+        } else {
+          const td = document.createElement("td");
+          td.colSpan = Math.max(1, safeColumns.length);
+          setCellTextFlat(td, entry.row);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+
+    render();
+    return wrap;
   }
 
   ns.results = {
@@ -2705,6 +2931,7 @@
     buildCopyJsonText,
     buildCopyCsvText,
     buildCopyText,
+    getSnapshot,
     getRowCount,
     getColCount,
     pushResultsBlock,
@@ -2712,5 +2939,6 @@
     hideLiveWrapIfStackHasBlocks,
     ensureResultsStack,
     setResultsVisible,
+    createStaticResultTable,
   };
 })();

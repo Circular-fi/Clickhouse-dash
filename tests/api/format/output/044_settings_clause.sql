@@ -6,5 +6,5 @@ GROUP BY entity_key
 ORDER BY total_metric_value DESC
 LIMIT 100
 SETTINGS
-    max_threads = 4,
+    max_threads    = 4,
     max_block_size = 65536

@@ -5,8 +5,9 @@
 #include <rapidjson/writer.h>
 
 #include <array>
+#include <climits>
 #include <cstring>
-#include <sstream>
+#include <utility>
 
 namespace chdash {
 namespace {
@@ -241,82 +242,177 @@ static std::string json_stringify(const rapidjson::Value& v) {
   return sb.GetString();
 }
 
-} // namespace
-
-JwtService::JwtService(std::vector<uint8_t> secret) : secret_(std::move(secret)) {}
-
-std::string JwtService::sign_cancel_token(const JwtClaims& c) const {
-  // Header
-  rapidjson::Document header;
-  header.SetObject();
-  auto& ha = header.GetAllocator();
-  header.AddMember("alg", "HS256", ha);
-  header.AddMember("typ", "JWT", ha);
-
-  // Payload
-  rapidjson::Document payload;
-  payload.SetObject();
-  auto& pa = payload.GetAllocator();
-  payload.AddMember("qid", rapidjson::Value(c.query_id.c_str(), pa), pa);
-  payload.AddMember("hid", rapidjson::Value(c.host_id.c_str(), pa), pa);
-  payload.AddMember("iat", c.issued_at_unix, pa);
-
-  const std::string header_json = json_stringify(header);
-  const std::string payload_json = json_stringify(payload);
-
-  const std::string header_b64 = b64url_encode(reinterpret_cast<const uint8_t*>(header_json.data()), header_json.size());
-  const std::string payload_b64 = b64url_encode(reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size());
-
-  std::string signing_input = header_b64 + "." + payload_b64;
-
-  auto sig = hmac_sha256(secret_.data(), secret_.size(), reinterpret_cast<const uint8_t*>(signing_input.data()), signing_input.size());
-  const std::string sig_b64 = b64url_encode(sig.data(), sig.size());
-  return signing_input + "." + sig_b64;
-}
-
-std::optional<JwtClaims> JwtService::verify_cancel_token(const std::string& token) const {
-  // Split into three parts
-  size_t p1 = token.find('.');
+static std::optional<rapidjson::Document> verify_hs256_payload(
+    const std::string& token,
+    const std::vector<uint8_t>& secret) {
+  const size_t p1 = token.find('.');
   if (p1 == std::string::npos) return std::nullopt;
-  size_t p2 = token.find('.', p1 + 1);
-  if (p2 == std::string::npos) return std::nullopt;
+  const size_t p2 = token.find('.', p1 + 1);
+  if (p2 == std::string::npos || token.find('.', p2 + 1) != std::string::npos) return std::nullopt;
 
   const std::string h64 = token.substr(0, p1);
   const std::string p64 = token.substr(p1 + 1, p2 - (p1 + 1));
   const std::string s64 = token.substr(p2 + 1);
   if (h64.empty() || p64.empty() || s64.empty()) return std::nullopt;
 
-  // Decode header
   std::vector<uint8_t> hb;
   if (!b64url_decode(h64, hb)) return std::nullopt;
-  rapidjson::Document hd;
-  hd.Parse(reinterpret_cast<const char*>(hb.data()), hb.size());
-  if (hd.HasParseError() || !hd.IsObject()) return std::nullopt;
-  if (!hd.HasMember("alg") || !hd["alg"].IsString()) return std::nullopt;
-  if (std::string(hd["alg"].GetString()) != "HS256") return std::nullopt;
+  rapidjson::Document header;
+  header.Parse(reinterpret_cast<const char*>(hb.data()), hb.size());
+  if (header.HasParseError() || !header.IsObject()) return std::nullopt;
+  if (!header.HasMember("alg") || !header["alg"].IsString() ||
+      std::string(header["alg"].GetString()) != "HS256") {
+    return std::nullopt;
+  }
 
-  // Verify signature
-  std::string signing_input = h64 + "." + p64;
-  auto sig = hmac_sha256(secret_.data(), secret_.size(), reinterpret_cast<const uint8_t*>(signing_input.data()), signing_input.size());
-  std::string expected_b64 = b64url_encode(sig.data(), sig.size());
+  const std::string signing_input = h64 + "." + p64;
+  const auto sig = hmac_sha256(
+      secret.data(), secret.size(),
+      reinterpret_cast<const uint8_t*>(signing_input.data()), signing_input.size());
+  const std::string expected_b64 = b64url_encode(sig.data(), sig.size());
   if (expected_b64.size() != s64.size()) return std::nullopt;
-  if (!constant_time_eq(reinterpret_cast<const uint8_t*>(expected_b64.data()), reinterpret_cast<const uint8_t*>(s64.data()), expected_b64.size())) return std::nullopt;
+  if (!constant_time_eq(
+          reinterpret_cast<const uint8_t*>(expected_b64.data()),
+          reinterpret_cast<const uint8_t*>(s64.data()),
+          expected_b64.size())) {
+    return std::nullopt;
+  }
 
-  // Decode payload
   std::vector<uint8_t> pb;
   if (!b64url_decode(p64, pb)) return std::nullopt;
-  rapidjson::Document pd;
-  pd.Parse(reinterpret_cast<const char*>(pb.data()), pb.size());
-  if (pd.HasParseError() || !pd.IsObject()) return std::nullopt;
+  rapidjson::Document payload;
+  payload.Parse(reinterpret_cast<const char*>(pb.data()), pb.size());
+  if (payload.HasParseError() || !payload.IsObject()) return std::nullopt;
+  return std::optional<rapidjson::Document>(std::move(payload));
+}
 
-  if (!pd.HasMember("qid") || !pd["qid"].IsString()) return std::nullopt;
-  if (!pd.HasMember("hid") || !pd["hid"].IsString()) return std::nullopt;
+static bool int64_claim(const rapidjson::Value& payload, const char* name, int64_t* out) {
+  if (!payload.HasMember(name)) return false;
+  const auto& value = payload[name];
+  if (value.IsInt64()) {
+    *out = value.GetInt64();
+    return true;
+  }
+  if (value.IsUint64() && value.GetUint64() <= static_cast<uint64_t>(INT64_MAX)) {
+    *out = static_cast<int64_t>(value.GetUint64());
+    return true;
+  }
+  return false;
+}
 
-  JwtClaims c;
-  c.query_id = pd["qid"].GetString();
-  c.host_id = pd["hid"].GetString();
-  if (pd.HasMember("iat") && pd["iat"].IsInt64()) c.issued_at_unix = pd["iat"].GetInt64();
-  return c;
+} // namespace
+
+JwtService::JwtService(std::vector<uint8_t> secret) : secret_(std::move(secret)) {}
+
+std::string JwtService::sign_cancel_token(const JwtClaims& c) const {
+  rapidjson::Document header;
+  header.SetObject();
+  auto& ha = header.GetAllocator();
+  header.AddMember("alg", "HS256", ha);
+  header.AddMember("typ", "JWT", ha);
+
+  rapidjson::Document payload;
+  payload.SetObject();
+  auto& pa = payload.GetAllocator();
+  payload.AddMember("purpose", "cancel", pa);
+  payload.AddMember("qid", rapidjson::Value(c.query_id.c_str(), pa), pa);
+  payload.AddMember("hid", rapidjson::Value(c.host_id.c_str(), pa), pa);
+  payload.AddMember("iat", c.issued_at_unix, pa);
+  payload.AddMember("exp", c.expires_at_unix, pa);
+
+  const std::string header_json = json_stringify(header);
+  const std::string payload_json = json_stringify(payload);
+  const std::string header_b64 = b64url_encode(
+      reinterpret_cast<const uint8_t*>(header_json.data()), header_json.size());
+  const std::string payload_b64 = b64url_encode(
+      reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size());
+  const std::string signing_input = header_b64 + "." + payload_b64;
+  const auto sig = hmac_sha256(
+      secret_.data(), secret_.size(),
+      reinterpret_cast<const uint8_t*>(signing_input.data()), signing_input.size());
+  return signing_input + "." + b64url_encode(sig.data(), sig.size());
+}
+
+std::optional<JwtClaims> JwtService::verify_cancel_token(
+    const std::string& token,
+    int64_t now_unix) const {
+  auto payload = verify_hs256_payload(token, secret_);
+  if (!payload) return std::nullopt;
+  if (!payload->HasMember("purpose") || !(*payload)["purpose"].IsString() ||
+      std::string((*payload)["purpose"].GetString()) != "cancel") return std::nullopt;
+  if (!payload->HasMember("qid") || !(*payload)["qid"].IsString() ||
+      !payload->HasMember("hid") || !(*payload)["hid"].IsString()) return std::nullopt;
+
+  int64_t issued_at = 0;
+  int64_t expires_at = 0;
+  if (!int64_claim(*payload, "iat", &issued_at) ||
+      !int64_claim(*payload, "exp", &expires_at)) return std::nullopt;
+  if (expires_at <= now_unix || issued_at > now_unix + 60 || expires_at <= issued_at ||
+      expires_at - issued_at > 48 * 60 * 60) {
+    return std::nullopt;
+  }
+
+  JwtClaims claims;
+  claims.query_id = (*payload)["qid"].GetString();
+  claims.host_id = (*payload)["hid"].GetString();
+  claims.issued_at_unix = issued_at;
+  claims.expires_at_unix = expires_at;
+  return claims;
+}
+
+std::string JwtService::sign_export_token(const ExportJwtClaims& c) const {
+  rapidjson::Document header;
+  header.SetObject();
+  auto& ha = header.GetAllocator();
+  header.AddMember("alg", "HS256", ha);
+  header.AddMember("typ", "JWT", ha);
+
+  rapidjson::Document payload;
+  payload.SetObject();
+  auto& pa = payload.GetAllocator();
+  payload.AddMember("purpose", "export", pa);
+  payload.AddMember("eid", rapidjson::Value(c.export_id.c_str(), pa), pa);
+  payload.AddMember("hid", rapidjson::Value(c.host_id.c_str(), pa), pa);
+  payload.AddMember("iat", c.issued_at_unix, pa);
+  payload.AddMember("exp", c.expires_at_unix, pa);
+
+  const std::string header_json = json_stringify(header);
+  const std::string payload_json = json_stringify(payload);
+  const std::string header_b64 = b64url_encode(
+      reinterpret_cast<const uint8_t*>(header_json.data()), header_json.size());
+  const std::string payload_b64 = b64url_encode(
+      reinterpret_cast<const uint8_t*>(payload_json.data()), payload_json.size());
+  const std::string signing_input = header_b64 + "." + payload_b64;
+  const auto sig = hmac_sha256(
+      secret_.data(), secret_.size(),
+      reinterpret_cast<const uint8_t*>(signing_input.data()), signing_input.size());
+  return signing_input + "." + b64url_encode(sig.data(), sig.size());
+}
+
+std::optional<ExportJwtClaims> JwtService::verify_export_token(
+    const std::string& token,
+    int64_t now_unix) const {
+  auto payload = verify_hs256_payload(token, secret_);
+  if (!payload) return std::nullopt;
+  if (!payload->HasMember("purpose") || !(*payload)["purpose"].IsString() ||
+      std::string((*payload)["purpose"].GetString()) != "export") return std::nullopt;
+  if (!payload->HasMember("eid") || !(*payload)["eid"].IsString() ||
+      !payload->HasMember("hid") || !(*payload)["hid"].IsString()) return std::nullopt;
+
+  int64_t issued_at = 0;
+  int64_t expires_at = 0;
+  if (!int64_claim(*payload, "iat", &issued_at) ||
+      !int64_claim(*payload, "exp", &expires_at)) return std::nullopt;
+  if (expires_at <= now_unix || issued_at > now_unix + 60 || expires_at <= issued_at) {
+    return std::nullopt;
+  }
+
+  ExportJwtClaims claims;
+  claims.export_id = (*payload)["eid"].GetString();
+  claims.host_id = (*payload)["hid"].GetString();
+  claims.issued_at_unix = issued_at;
+  claims.expires_at_unix = expires_at;
+  return claims;
 }
 
 } // namespace chdash

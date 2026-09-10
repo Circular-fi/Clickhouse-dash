@@ -303,6 +303,10 @@
     hostsSnapshot: null,
     selectedHostId: storage.getStoredHostId(),
     apiOnline: true,
+    features: {
+      explorer: { enabled: true, browse: true, graph: { enabled: true, lineage: true, storage_topology: true } },
+    },
+    suppressResultsVisibility: false,
 
     runOptAutoFormat: runOpts.autoFormat,
     runOptMultiQuery: runOpts.multiQuery,

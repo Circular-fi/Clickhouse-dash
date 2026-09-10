@@ -23,7 +23,7 @@ def test_idle_native_clients_have_a_proactive_ttl_reaper() -> None:
     assert "collect_expired_locked" in header
     assert "reaper_thread_ = std::thread" in source
     assert "now - entry.returned_at >= idle_ttl_" in source
-    assert 'env_int("CH_CLIENT_POOL_IDLE_TTL_MS", 60 * 1000)' in config
+    assert 'cfg.client_pool_idle_ttl_ms = int_value(*v, "client_pool.idle_ttl_ms")' in config
     assert '"idle_ttl_ms"' in config
 
 
@@ -36,7 +36,7 @@ def test_reused_clients_are_validated_only_after_a_configurable_idle_period() ->
     assert "client->Ping();" in source
     assert "validation_due && !entry.bounded_receive_timeout" in source
     assert "Never Ping such a" in source
-    assert 'env_int("CH_CLIENT_POOL_VALIDATE_AFTER_IDLE_MS", 15 * 1000)' in config
+    assert 'cfg.client_pool_validate_after_idle_ms = int_value(*v, "client_pool.validate_after_idle_ms")' in config
     assert '"validate_after_idle_ms"' in config
 
 
@@ -106,3 +106,11 @@ def test_native_clients_enable_kernel_keepalive_without_ping_before_every_query(
 
     assert "opt.TcpKeepAlive(true);" in source
     assert "SetPingBeforeQuery" not in source
+
+def test_json_native_serialization_mismatch_is_retryable_in_auto_mode() -> None:
+    source = read("src/query_session.cpp")
+    assert 'icontains(msg, "unsupported json serialization version")' in source
+    assert 'icontains(msg, "output_format_native_write_json_as_string")' in source
+    assert "should_retry_with_describe_after_direct_path_error(msg)" in source
+    assert "const bool can_retry_without_emitted_rows = rows_returned == 0" in source
+    assert "meta_sent = false;" in source

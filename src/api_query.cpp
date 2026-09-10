@@ -6,6 +6,7 @@
 #include "http_json.hpp"
 #include "sql_util.hpp"
 #include "time_util.hpp"
+#include "user_sql_policy.hpp"
 
 #include <array>
 #include <chrono>
@@ -41,6 +42,18 @@ static std::string gen_query_id() {
   return out;
 }
 
+static std::string terminal_status_name(SessionStatus status) {
+  switch (status) {
+    case SessionStatus::Finished: return "finished";
+    case SessionStatus::Error: return "error";
+    case SessionStatus::Canceled: return "canceled";
+    case SessionStatus::ResultLimitReached: return "result_limit_reached";
+    case SessionStatus::Created: return "created";
+    case SessionStatus::Running: return "running";
+  }
+  return "unknown";
+}
+
 
 }
 
@@ -64,11 +77,30 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   if (sql.size() > cfg_.query_max_sql_bytes) {
     return json_error(res, 413, "sql_too_large", "SQL text exceeds the configured query limit.");
   }
+  if (user_sql_is_forbidden(sql)) {
+    return json_error(
+        res,
+        403,
+        "cancel_requires_token",
+        "Direct KILL QUERY is disabled in panel SQL; use the query cancel capability.");
+  }
   const std::string host_id = doc["host_id"].GetString();
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) {
     return json_error(res, 404, "unknown_host", "Unknown host_id.");
   }
+
+  QueryRunMode run_mode = QueryRunMode::Normal;
+  if (doc.HasMember("mode")) {
+    if (!doc["mode"].IsString()) {
+      return json_error(res, 400, "invalid_run_mode", "mode must be either normal or profiling.");
+    }
+    const std::string mode = doc["mode"].GetString();
+    if (mode == "normal") run_mode = QueryRunMode::Normal;
+    else if (mode == "profiling") run_mode = QueryRunMode::Profiling;
+    else return json_error(res, 400, "invalid_run_mode", "mode must be either normal or profiling.");
+  }
+  const bool detailed_profiling = run_mode == QueryRunMode::Profiling;
 
   if (!is_host_healthy(health_.get(), host_id)) {
     return json_error(res, 503, "host_down", "Selected host is down.");
@@ -83,6 +115,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   }
 
   const std::string qid = gen_query_id();
+  const std::string registry_sql = sql;
 
   const std::string stats_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
   auto session = std::make_shared<QuerySession>(
@@ -94,13 +127,28 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
       stats_uri,
       client_pool_,
       cfg_.result_preview_row_limit,
-      cfg_.query_options);
+      cfg_.query_options,
+      detailed_profiling,
+      [registry = query_registry_, qid](const std::string& native_query_id) {
+        if (registry) registry->add_native_query_id(qid, native_query_id);
+      },
+      [registry = query_registry_, qid](SessionStatus status, int64_t session_elapsed_ms) {
+        if (!registry) return;
+        registry->mark_terminal(
+            qid,
+            terminal_status_name(status),
+            status == SessionStatus::ResultLimitReached,
+            session_elapsed_ms);
+      });
   {
     std::lock_guard<std::mutex> lk(mu_);
     if (sessions_.size() >= cfg_.query_session_max_count) {
       return json_error(res, 429, "too_many_queries", "Too many concurrent query sessions.");
     }
     sessions_.emplace(qid, session);
+  }
+  if (query_registry_) {
+    query_registry_->register_query(qid, host_id, run_mode, registry_sql);
   }
   // The query starts when the SSE consumer attaches. A client that abandons
   // POST /run therefore cannot execute an expensive query and fill the queue
@@ -110,12 +158,16 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   claims.query_id = qid;
   claims.host_id = host_id;
   claims.issued_at_unix = now_unix_sec();
+  claims.expires_at_unix = claims.issued_at_unix +
+      std::max<int64_t>(1, cfg_.cancel_token_ttl_ms / 1000);
   const std::string cancel_token = jwt_.sign_cancel_token(claims);
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("query_id"); w.String(qid.c_str());
+  w.Key("run_mode"); w.String(detailed_profiling ? "profiling" : "normal");
+  w.Key("analysis_available"); w.Bool(detailed_profiling);
   w.Key("cancel_token"); w.String(cancel_token.c_str());
   std::string stream = "api/query/stream?query_id=" + qid;
   w.Key("stream_url"); w.String(stream.c_str());
@@ -135,7 +187,7 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
   }
 
   const std::string token = doc["cancel_token"].GetString();
-  auto claims = jwt_.verify_cancel_token(token);
+  auto claims = jwt_.verify_cancel_token(token, now_unix_sec());
   if (!claims) {
     return json_error(res, 401, "invalid_token", "Invalid cancel_token.");
   }

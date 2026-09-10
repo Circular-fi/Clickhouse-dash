@@ -48,6 +48,7 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("query_thread_log"); w.Bool(h.system_tables.query_thread_log);
     w.Key("trace_log"); w.Bool(h.system_tables.trace_log);
     w.Key("processors_profile_log"); w.Bool(h.system_tables.processors_profile_log);
+    w.Key("opentelemetry_span_log"); w.Bool(h.system_tables.opentelemetry_span_log);
     w.Key("jemalloc_profile_text"); w.Bool(h.system_tables.jemalloc_profile_text);
     w.Key("logs_table_available"); w.Bool(h.system_tables.logs_table_available);
     w.Key("flamegraph_tables_available"); w.Bool(h.system_tables.flamegraph_tables_available);
@@ -72,7 +73,7 @@ void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
 void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
 
-  // The chunked provider sets Content-Type once. Avoid duplicate header
+  // The chunked response callback sets Content-Type once. Avoid duplicate header
   // values, which are legal at the HTTP layer but break strict SSE clients.
   res.set_header("Cache-Control", "no-cache");
   res.set_header("Connection", "keep-alive");

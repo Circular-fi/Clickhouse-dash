@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, state, storage, util } = ns;
+  const { dom, state, storage, util, api } = ns;
 
   (() => {
     const mode = storage && typeof storage.getSavedThemeMode === "function" ? storage.getSavedThemeMode() : null;
@@ -23,12 +23,26 @@
   async function loadMeta() {
     if (!dom.versionBadge) return;
     try {
-      const resp = await fetch("api/version", { cache: "no-store" });
+      const resp = await fetch(api.resolveUrl("api/version"), { cache: "no-store" });
       if (!resp.ok) {
         dom.versionBadge.textContent = "meta: error";
         return;
       }
       const data = await resp.json();
+      const explorer = data && data.features && data.features.explorer ? data.features.explorer : {};
+      const explorerGraph = explorer && explorer.graph && typeof explorer.graph === "object" ? explorer.graph : {};
+      const lineage = explorerGraph.lineage !== false;
+      const storageTopology = explorerGraph.storage_topology !== false;
+      state.features.explorer = {
+        enabled: explorer.enabled !== false,
+        browse: explorer.browse !== false,
+        graph: {
+          enabled: explorerGraph.enabled !== false && (lineage || storageTopology),
+          lineage,
+          storage_topology: storageTopology,
+        },
+      };
+      applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
       const sha = verObj && typeof verObj === "object" ? String(verObj.git_sha || "") : String(data.git_sha || "");
@@ -63,8 +77,14 @@
     if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
     applyHostPickerUi();
 
-    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
-      ns.meta.prepareHost(state.selectedHostId);
+    if (ns.meta && state.selectedHostId) {
+      if (typeof ns.meta.activateHost === "function") ns.meta.activateHost(state.selectedHostId);
+      else if (typeof ns.meta.prepareHost === "function") ns.meta.prepareHost(state.selectedHostId);
+      // Host selection is the authoritative point where editor diagnostics can
+      // become meaningful. Hydrate the cached catalog immediately and refresh
+      // stale catalog types in the background instead of briefly treating an
+      // empty metadata object as proof that every reference is unknown.
+      if (typeof ns.meta.maybeRefreshOnLoad === "function") ns.meta.maybeRefreshOnLoad();
     }
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") {
       state.highlightCtrl.refresh();
@@ -72,6 +92,9 @@
     if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") {
       state.editorSizeCtrl.apply(state.selectedHostId);
     }
+    try {
+      window.dispatchEvent(new CustomEvent("chdash:host-changed", { detail: { hostId: state.selectedHostId } }));
+    } catch (_) {}
   }
 
   function applyHostPickerUi() {
@@ -282,7 +305,7 @@
 
     const fetchHostsOnce = async () => {
       try {
-        const r = await fetch("api/hosts", { cache: "no-store" });
+        const r = await fetch(api.resolveUrl("api/hosts"), { cache: "no-store" });
         if (!r.ok) return false;
         const data = await r.json();
         useSnapshot(data);
@@ -317,7 +340,7 @@
 
       let next = null;
       try {
-        next = new EventSource("api/hosts/stream");
+        next = new EventSource(api.resolveUrl("api/hosts/stream"));
       } catch {
         schedulePoll();
         scheduleReconnect();
@@ -384,12 +407,74 @@
     }
   }
 
+  function applyProductFeatures() {
+    const f = state.features?.explorer || {};
+    const explorerEnabled = f.enabled !== false;
+    if (dom.pageSelect) dom.pageSelect.hidden = !explorerEnabled;
+    if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
+      const next = api.resolveUrl("query");
+      window.history.replaceState({ workspace: "query" }, "", next);
+      if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { historyMode: "none" });
+    }
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: f }));
+  }
+
+  function setPageSelectorValue(value) {
+    const page = value === "explorer" ? "explorer" : "query";
+    if (dom.pageSelectButton) dom.pageSelectButton.textContent = page === "explorer" ? "Explorer" : "Query";
+    if (dom.pageSelectMenu) {
+      for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) {
+        b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));
+      }
+    }
+  }
+
+  function isPageMenuOpen() { return !!(dom.pageSelect && dom.pageSelect.classList.contains("themeSelect--open")); }
+  function openPageMenu() {
+    if (!dom.pageSelect || !dom.pageSelectMenu || !dom.pageSelectButton || dom.pageSelect.hidden) return;
+    dom.pageSelectMenu.hidden = false;
+    dom.pageSelectButton.setAttribute("aria-expanded", "true");
+    dom.pageSelect.classList.remove("themeSelect--closing");
+    requestAnimationFrame(() => dom.pageSelect.classList.add("themeSelect--open"));
+    dom.pageSelectMenu.focus({ preventScroll: true });
+  }
+  function closePageMenu({ immediate = false } = {}) {
+    if (!dom.pageSelect || !dom.pageSelectMenu || !dom.pageSelectButton) return;
+    dom.pageSelectButton.setAttribute("aria-expanded", "false");
+    dom.pageSelect.classList.remove("themeSelect--open");
+    if (immediate) { dom.pageSelect.classList.remove("themeSelect--closing"); dom.pageSelectMenu.hidden = true; return; }
+    dom.pageSelect.classList.add("themeSelect--closing");
+    setTimeout(() => { if (!isPageMenuOpen()) dom.pageSelectMenu.hidden = true; dom.pageSelect.classList.remove("themeSelect--closing"); }, 160);
+  }
+  function togglePageMenu() { if (isPageMenuOpen()) closePageMenu(); else openPageMenu(); }
+
+  function isRunSettingsOpen() { return !!(dom.runSettings && dom.runSettings.classList.contains("themeSelect--open")); }
+  function openRunSettings() {
+    closeRunMenu({ immediate: true });
+    if (!dom.runSettings || !dom.runSettingsMenu || !dom.runSettingsButton) return;
+    dom.runSettingsMenu.hidden = false;
+    dom.runSettingsButton.setAttribute("aria-expanded", "true");
+    dom.runSettings.classList.remove("themeSelect--closing");
+    requestAnimationFrame(() => dom.runSettings.classList.add("themeSelect--open"));
+    dom.runSettingsMenu.focus({ preventScroll: true });
+  }
+  function closeRunSettings({ immediate = false } = {}) {
+    if (!dom.runSettings || !dom.runSettingsMenu || !dom.runSettingsButton) return;
+    dom.runSettingsButton.setAttribute("aria-expanded", "false");
+    dom.runSettings.classList.remove("themeSelect--open");
+    if (immediate) { dom.runSettings.classList.remove("themeSelect--closing"); dom.runSettingsMenu.hidden = true; return; }
+    dom.runSettings.classList.add("themeSelect--closing");
+    setTimeout(() => { if (!isRunSettingsOpen()) dom.runSettingsMenu.hidden = true; dom.runSettings.classList.remove("themeSelect--closing"); }, 160);
+  }
+  function toggleRunSettings() { if (isRunSettingsOpen()) closeRunSettings(); else openRunSettings(); }
+
   function applyTheme(mode) {
     const resolved = getResolvedTheme(mode);
     if (mode === "system") delete dom.root.dataset.theme;
     else dom.root.dataset.theme = resolved;
 
-    if (dom.themeSelectText) dom.themeSelectText.textContent = mode === "system" ? "System" : (resolved[0].toUpperCase() + resolved.slice(1));
+    if (dom.themeSelectText) dom.themeSelectText.className = `themeIcon themeIcon--${mode}`;
+    if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);
 
     if (dom.themeSelectMenu) {
       const btns = dom.themeSelectMenu.querySelectorAll(".themeSelect__option[data-value]");
@@ -398,6 +483,11 @@
         b.setAttribute("aria-selected", String(m === mode));
       }
     }
+
+    // Canvas pixels are not CSS-reactive. Keep Explorer's graph in the same
+    // visual transaction as the DOM theme switch instead of waiting for its
+    // next animation/activity frame.
+    ns.explorerGraph?.redrawThemeNow?.();
   }
 
   function isThemeMenuOpen() {
@@ -471,6 +561,7 @@
   }
 
   function openRunMenu() {
+    closeRunSettings({ immediate: true });
     if (!dom.runMenu || !dom.runMenuButton || !dom.runSplit) return;
     dom.runMenu.hidden = false;
     dom.runMenuButton.setAttribute("aria-expanded", "true");
@@ -1236,6 +1327,13 @@
       let lastSaved = null;
       let scheduled = 0;
 
+      const releasePrepaintHeight = () => {
+        const root = document.documentElement;
+        if (!root) return;
+        root.classList.remove("chdash-has-initial-editor-height");
+        root.style.removeProperty("--initialEditorHeight");
+      };
+
       const apply = (hostId) => {
         const target = getTarget();
         if (!target) return;
@@ -1245,6 +1343,10 @@
           target.style.height = `${v}px`;
           lastSaved = v;
         }
+        // index.html uses an !important pre-paint rule to avoid a startup jump.
+        // Once the persisted height has been copied to the real element, release
+        // that rule so the centered drag handle can change the used height.
+        releasePrepaintHeight();
       };
 
       const save = () => {
@@ -1271,6 +1373,37 @@
         } catch {
           null;
         }
+      }
+
+      const handle = document.querySelector(".editorResizeHandle");
+      const target = getTarget();
+      if (handle && target) {
+        let drag = null;
+        const finishDrag = (event) => {
+          if (!drag) return;
+          try { handle.releasePointerCapture(event.pointerId); } catch (_) {}
+          drag = null;
+          handle.classList.remove("is-dragging");
+          save();
+        };
+        handle.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          drag = { y: event.clientY, height: target.getBoundingClientRect().height };
+          try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+          handle.classList.add("is-dragging");
+          event.preventDefault();
+        });
+        handle.addEventListener("pointermove", (event) => {
+          if (!drag) return;
+          // Match the production resize semantics: only enforce the editor's
+          // minimum usable height. The containing query panel grows/shrinks
+          // naturally instead of forcing the whole workspace to viewport height.
+          const next = Math.round(Math.max(180, drag.height + event.clientY - drag.y));
+          target.style.height = `${next}px`;
+          event.preventDefault();
+        });
+        handle.addEventListener("pointerup", finishDrag);
+        handle.addEventListener("pointercancel", finishDrag);
       }
 
       state.editorSizeCtrl = { apply };
@@ -1312,6 +1445,12 @@
       if (dom.themeSelect && dom.themeSelectMenu && isThemeMenuOpen()) {
         if (t instanceof Node && !dom.themeSelect.contains(t)) closeThemeMenu();
       }
+      if (dom.pageSelect && dom.pageSelectMenu && isPageMenuOpen()) {
+        if (t instanceof Node && !dom.pageSelect.contains(t)) closePageMenu();
+      }
+      if (dom.runSettings && dom.runSettingsMenu && isRunSettingsOpen()) {
+        if (t instanceof Node && !dom.runSettings.contains(t)) closeRunSettings();
+      }
       if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
         if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
       }
@@ -1325,6 +1464,8 @@
         closeRunMenu({ immediate: true });
         closeHostMenu();
         closeThemeMenu({ immediate: true });
+        closePageMenu({ immediate: true });
+        closeRunSettings({ immediate: true });
         closeCopyMenu({ immediate: true });
         closeQueryLibraryMenu({ immediate: true });
       }
@@ -1343,6 +1484,12 @@
       if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("history");
       else setQueryLibraryMode("history");
     });
+
+    if (dom.pageSelectButton) dom.pageSelectButton.addEventListener("click", togglePageMenu);
+    if (dom.pageSelectMenu) {
+      for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) b.addEventListener("click", () => closePageMenu());
+    }
+    if (dom.runSettingsButton) dom.runSettingsButton.addEventListener("click", toggleRunSettings);
 
     if (dom.themeSelectButton) dom.themeSelectButton.addEventListener("click", toggleThemeMenu);
     if (dom.themeSelectMenu) {
@@ -1392,5 +1539,5 @@
     ctrl.clearError();
   }
 
-  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, applyRunOptionsUi, setEditorError, clearEditorError };
+  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue, applyProductFeatures, applyRunOptionsUi, setEditorError, clearEditorError };
 })();

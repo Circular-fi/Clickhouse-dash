@@ -48,7 +48,28 @@
       "null",
       "distinct",
       "union",
-      "all"
+      "all",
+      "index",
+      "projection",
+      "type",
+      "granularity",
+      "ttl",
+      "codec",
+      "engine",
+      "partition",
+      "settings",
+      "materialized",
+      "create",
+      "table",
+      "view",
+      "dictionary",
+      "database",
+      "alter",
+      "drop",
+      "attach",
+      "detach",
+      "rename",
+      "to",
     ].map((x) => x.toLowerCase())
   );
 
@@ -260,7 +281,7 @@
       const word = s.slice(i, j);
       const wLower = word.toLowerCase();
       const isCommon = commonKeywords.has(wLower);
-      const isKw = isCommon || (kwSet && kwSet.has(word));
+      const isKw = isCommon || (kwSet && kwSet.has(wLower));
       const isNull = isKw && wLower === "null";
 
       let isFn = false;
@@ -1219,5 +1240,13 @@
     return lexAll(String(text ?? "")).map((t) => t.html).join("");
   }
 
-  ns.highlight = { attach, toHtml };
+  function renderInto(element, text) {
+    if (!element) return;
+    // lexAll escapes every raw token before adding the small fixed set of span
+    // wrappers. Expose this shared renderer so Query and Explorer use the same
+    // keyword/function metadata without duplicating SQL tokenization.
+    element.innerHTML = toHtml(text);
+  }
+
+  ns.highlight = { attach, toHtml, renderInto };
 })();

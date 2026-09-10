@@ -8,7 +8,7 @@ health {
 clickhouse {
   host {
     name       = "local"
-    runner_uri = "clickhouse://test:test@host.docker.internal:9000"
-    system_uri = "clickhouse://test:test@host.docker.internal:9000"
+    runner_uri = "clickhouse://chdash_runner:runner_test@host.docker.internal:9000"
+    system_uri = "clickhouse://chdash_system:system_test@host.docker.internal:9000"
   }
 }

@@ -126,8 +126,31 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
 
   const auto masked = mask_sql_surface(sql);
   const std::string_view code(masked.code_lower);
+
+  std::vector<std::string> leading_keywords;
+  for (size_t pos = 0; pos < code.size() && leading_keywords.size() < 5;) {
+    if (!sql_is_ident_start(code[pos])) {
+      ++pos;
+      continue;
+    }
+    const size_t begin = pos++;
+    while (pos < code.size() && sql_is_ident_continue(code[pos])) ++pos;
+    leading_keywords.emplace_back(code.substr(begin, pos - begin));
+  }
+  bool create_view_statement = !leading_keywords.empty() && leading_keywords[0] == "create";
+  if (create_view_statement) {
+    size_t keyword = 1;
+    if (keyword < leading_keywords.size() && leading_keywords[keyword] == "or") {
+      ++keyword;
+      if (keyword < leading_keywords.size() && leading_keywords[keyword] == "replace") ++keyword;
+    }
+    if (keyword < leading_keywords.size() && leading_keywords[keyword] == "materialized") ++keyword;
+    create_view_statement = keyword < leading_keywords.size() && leading_keywords[keyword] == "view";
+  }
+
   struct Range { size_t begin; size_t end; };
   std::vector<Range> ranges;
+  bool view_query_boundary_consumed = false;
 
   for (size_t i = 0; i + 2 <= code.size(); ++i) {
     if (code.substr(i, 2) != "as") continue;
@@ -135,13 +158,45 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
     const char next = i + 2 < code.size() ? code[i + 2] : '\0';
     if (sql_is_ident_continue(previous) || sql_is_ident_continue(next)) continue;
 
+    // Locate the token following AS on the original SQL, not on the masked
+    // surface. Quoted identifiers are intentionally blanked by mask_sql_surface;
+    // advancing through those blanks would otherwise skip an existing alias and
+    // accidentally consume the next clause keyword (for example FROM).
     size_t begin = i + 2;
-    while (begin < code.size() && std::isspace(static_cast<unsigned char>(code[begin]))) ++begin;
-    if (begin >= code.size() || !sql_is_ident_start(code[begin])) continue;
+    for (;;) {
+      while (begin < sql.size() && std::isspace(static_cast<unsigned char>(sql[begin]))) ++begin;
+      if (begin + 1 < sql.size() && sql[begin] == '-' && sql[begin + 1] == '-') {
+        begin += 2;
+        while (begin < sql.size() && sql[begin] != '\n' && sql[begin] != '\r') ++begin;
+        continue;
+      }
+      if (begin + 1 < sql.size() && sql[begin] == '/' && sql[begin + 1] == '*') {
+        begin += 2;
+        while (begin + 1 < sql.size() && !(sql[begin] == '*' && sql[begin + 1] == '/')) ++begin;
+        if (begin + 1 < sql.size()) begin += 2;
+        continue;
+      }
+      break;
+    }
+    if (begin >= sql.size()) continue;
+    if (sql[begin] == '`' || sql[begin] == '"') continue;
+
+    if (!sql_is_ident_start(code[begin])) continue;
     size_t end = begin + 1;
     while (end < code.size() && sql_is_ident_continue(code[end])) ++end;
     const std::string candidate(code.substr(begin, end - begin));
     if (reserved_aliases.find(candidate) == reserved_aliases.end()) continue;
+
+    // In CREATE [MATERIALIZED] VIEW, the top-level `AS SELECT` / `AS WITH`
+    // introduces the view query; SELECT/WITH is not an alias. The formatter
+    // compatibility pass still has to quote reserved aliases *inside* that
+    // SELECT, e.g. `SELECT 1 AS FROM`.
+    if (create_view_statement && !view_query_boundary_consumed &&
+        (candidate == "select" || candidate == "with")) {
+      view_query_boundary_consumed = true;
+      continue;
+    }
+
     ranges.push_back({begin, end});
     i = end - 1;
   }
@@ -306,6 +361,18 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);
     if (format_cache_) format_cache_->put(key, value);
+
+    // A formatter output is itself a canonical formatter input. Cache that
+    // reverse key as well so re-formatting a freshly formatted editor buffer
+    // is guaranteed to be idempotent and does not need another parser round
+    // trip. This is especially important for surfaces that the post-processor
+    // deliberately preserves more exactly than ClickHouse formatQuery.
+    const std::string canonical_key = format_cache_key(host_id, line_width, *value);
+    if (canonical_key != key) {
+      request_results.emplace(canonical_key, value);
+      if (format_cache_) format_cache_->put(canonical_key, value);
+    }
+
     if (out_pretty) *out_pretty = std::move(value);
     return true;
   };

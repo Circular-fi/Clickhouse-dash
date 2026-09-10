@@ -111,6 +111,14 @@ Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
       health_(std::make_unique<HealthRunner>(cfg_.hosts, cfg_.health)),
       jwt_(random_bytes(32)),
+      query_registry_(std::make_shared<QueryRegistry>(
+          std::chrono::milliseconds(cfg_.analysis.registry_ttl_ms),
+          cfg_.analysis.registry_max_entries,
+          cfg_.analysis.registry_sql_max_bytes)),
+      export_jobs_(std::make_shared<ExportJobStore>(
+          std::chrono::milliseconds(cfg_.export_settings.token_ttl_ms),
+          cfg_.export_settings.pending_max_entries,
+          cfg_.export_settings.pending_sql_max_bytes)),
       client_pool_(std::make_shared<ClickHouseClientPool>(
           cfg_.client_pool_max_idle_per_key,
           std::chrono::milliseconds(cfg_.client_pool_idle_ttl_ms),
@@ -127,12 +135,29 @@ Server::Server(AppConfig cfg, bool start_background)
     session_reaper_thread_ = std::thread([this] { session_reaper_loop(); });
   }
 
-  http_.Get("/", [&](const auto& req, auto& res) {
-    if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
+  const auto serve_query_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/query.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
       res.status = 404;
-      res.set_content("index.html not found", "text/plain");
+      res.set_content("query.html not found", "text/plain");
     }
-  });
+  };
+  const auto serve_explorer_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/explorer.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("explorer.html not found", "text/plain");
+    }
+  };
+
+  http_.Get("/", serve_query_shell);
+  http_.Get("/query", serve_query_shell);
+  if (cfg_.explorer.enabled()) {
+    http_.Get("/explorer", serve_explorer_shell);
+    http_.Get(R"(/explorer/.*)", serve_explorer_shell);
+  }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
     if (!try_serve_embedded(req, res) && !try_serve_fs(req, res)) {
@@ -155,6 +180,23 @@ Server::Server(AppConfig cfg, bool start_background)
 
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
   http_.Post("/api/query/cancel", [&](const auto& req, auto& res) { handle_query_cancel(req, res); });
+  http_.Post("/api/query/analysis", [&](const auto& req, auto& res) { handle_query_analysis(req, res); });
+  http_.Post("/api/query/deep-analysis", [&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); });
+  http_.Get("/api/query/execution", [&](const auto& req, auto& res) { handle_query_execution(req, res); });
+
+  http_.Post("/api/export/run", [&](const auto& req, auto& res) { handle_export_run(req, res); });
+  http_.Get("/api/export/stream", [&](const auto& req, auto& res) { handle_export_stream(req, res); });
+
+  if (cfg_.explorer.enabled()) {
+    http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
+    http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
+    http_.Post("/api/explorer/table/data", [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); });
+    http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
+    if (cfg_.explorer.graph_enabled()) {
+      http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
+      http_.Get("/api/explorer/activity", [&](const auto& req, auto& res) { handle_explorer_activity(req, res); });
+    }
+  }
 
   (void)now_ms_local;
 }
@@ -297,6 +339,20 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("version"); w.String(cfg_.version_semver.c_str());
   w.Key("git_sha"); w.String(cfg_.version_git_sha.c_str());
   w.Key("build_time"); w.String(cfg_.version_build_time.c_str());
+  w.Key("features");
+  w.StartObject();
+  w.Key("explorer");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.explorer.enabled());
+  w.Key("browse"); w.Bool(cfg_.explorer.browse);
+  w.Key("graph");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.explorer.graph_enabled());
+  w.Key("lineage"); w.Bool(cfg_.explorer.lineage);
+  w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);
+  w.EndObject();
+  w.EndObject();
+  w.EndObject();
   w.EndObject();
   res.status = 200;
   res.set_content(sb.GetString(), "application/json");

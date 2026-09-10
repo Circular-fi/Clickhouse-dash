@@ -34,9 +34,13 @@ public:
       FetchFn fetch_fn,
       uint64_t failure_backoff_ms = 2000
   ) {
+    std::shared_ptr<Entry> entry;
     {
       std::unique_lock<std::mutex> lk(mu_);
-      auto& e = entries_[key];
+      auto [it, inserted] = entries_.try_emplace(key, std::make_shared<Entry>());
+      (void)inserted;
+      entry = it->second;
+      auto& e = *entry;
       const uint64_t age_ms = now_ms >= e.fetched_at_ms ? now_ms - e.fetched_at_ms : 0;
       if (e.value && age_ms <= ttl_ms) {
         return make_value_result(e, false);
@@ -44,7 +48,7 @@ public:
 
       if (e.refreshing) {
         if (wait_ms > 0) {
-          e.cv.wait_for(lk, std::chrono::milliseconds(wait_ms), [&] { return !e.refreshing; });
+          e.cv.wait_for(lk, std::chrono::milliseconds(wait_ms), [entry] { return !entry->refreshing; });
         }
         if (e.value) {
           return make_value_result(e, e.stale && !e.last_error_code.empty());
@@ -90,7 +94,7 @@ public:
     }
 
     std::unique_lock<std::mutex> lk(mu_);
-    auto& e = entries_[key];
+    auto& e = *entry;
     e.refreshing = false;
     if (ok) {
       e.fetched_at_ms = now_ms;
@@ -125,7 +129,12 @@ public:
   bool is_stale(const Key& key) const {
     std::lock_guard<std::mutex> lk(mu_);
     const auto it = entries_.find(key);
-    return it != entries_.end() && it->second.stale;
+    return it != entries_.end() && it->second && it->second->stale;
+  }
+
+  void erase(const Key& key) {
+    std::lock_guard<std::mutex> lk(mu_);
+    entries_.erase(key);
   }
 
   void clear() {
@@ -164,7 +173,7 @@ private:
   }
 
   mutable std::mutex mu_;
-  std::unordered_map<Key, Entry> entries_;
+  std::unordered_map<Key, std::shared_ptr<Entry>> entries_;
 };
 
 } // namespace chdash

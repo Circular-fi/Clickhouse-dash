@@ -110,7 +110,7 @@
     storage.writeMeta(hostId, "keywords", updatedAt, items);
 
     const hostMeta = getHostMeta(hostId);
-    hostMeta.keywords = { updated_at_ms: updatedAt, items, set: new Set(items) };
+    hostMeta.keywords = { updated_at_ms: updatedAt, items, set: new Set(items.map((value) => value.toLowerCase())) };
     notifyMetaChanged(hostId);
   }
 
@@ -360,7 +360,7 @@
     const keywords = storage.readMeta(normalizedHostId, "keywords");
     if (keywords && Array.isArray(keywords.items) && keywords.items.length) {
       const items = keywords.items.map((value) => String(value || "")).filter(Boolean);
-      hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items) };
+      hostMeta.keywords = { updated_at_ms: keywords.updated_at_ms, items, set: new Set(items.map((value) => value.toLowerCase())) };
     }
 
     const functions = storage.readMetaRaw(normalizedHostId, "functions");
