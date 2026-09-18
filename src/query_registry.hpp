@@ -31,6 +31,11 @@ struct QueryRegistryRecord {
 
   std::chrono::steady_clock::time_point created_at{};
   std::chrono::steady_clock::time_point updated_at{};
+  // Wall-clock bounds are retained separately so system.query_log lookups can
+  // prune by its ORDER BY prefix (event_date, event_time) instead of scanning
+  // every log part for a query_id match.
+  std::chrono::system_clock::time_point created_at_wall{};
+  std::chrono::system_clock::time_point updated_at_wall{};
 };
 
 class QueryRegistry {

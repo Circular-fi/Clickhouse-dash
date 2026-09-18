@@ -12,9 +12,8 @@ def test_graph_routes_share_runner_scoped_acl_boundary() -> None:
     api = read("src/api_explorer.cpp")
 
     assert 'http_.Get("/api/explorer/graph"' in server
-    assert 'http_.Get("/api/explorer/activity"' in server
+    assert 'http_.Get("/api/explorer/activity"' not in server
     assert "handle_explorer_graph" in api
-    assert "handle_explorer_activity" in api
     # Each route establishes the same runner ACL boundary before using system metadata.
     graph_handler = api[api.index("void Server::handle_explorer_graph"):]
     assert "authenticate_request" not in graph_handler
@@ -49,23 +48,21 @@ def test_graph_uses_structured_metadata_and_only_targeted_sql_parsing() -> None:
     assert "unknown" in graph and "omitted rather than guessed" in graph
 
 
-def test_activity_overlay_is_independent_and_never_swallows_clickhouse_errors() -> None:
-    graph = read("src/explorer_graph.cpp")
+def test_graph_has_no_live_activity_polling_and_animation_is_topological() -> None:
+    server = read("src/server.cpp")
     frontend = read("src/static/app_explorer_graph.js")
+    app_api = read("src/static/app_api.js")
 
-    assert "FROM system.query_log" in graph
-    assert "FROM system.part_log" in graph
-    assert "FROM system.replicas" in graph
-    assert "FROM system.view_refreshes" in graph
-    assert "Graph query activity query failed:" in graph
-    assert "Graph part activity query failed:" in graph
-    assert "Graph replication activity query failed:" in graph
-    assert "Graph refresh activity query failed:" in graph
-    assert "Activity is best-effort" not in graph
-    assert "api.getExplorerActivity" in frontend
-    assert "setInterval" in frontend
-    assert "lineageEdgeShouldAnimate(edge, activity)" in frontend
-    assert "activity?.active === true" in frontend
+    assert '/api/explorer/activity' not in server
+    assert 'getExplorerActivity' not in app_api
+    assert 'api.getExplorerActivity' not in frontend
+    assert 'setInterval' not in frontend
+    start = frontend.index("function lineageEdgeShouldAnimate")
+    end = frontend.index("function drawEdge", start)
+    block = frontend[start:end]
+    assert "model.focusedId" in block
+    assert "isFocusedDepthOneEdge(edge)" in block
+    assert "activity" not in block
 
 
 def test_graph_frontend_uses_canvas_dag_lod_zoom_pan_focus_and_minimap() -> None:

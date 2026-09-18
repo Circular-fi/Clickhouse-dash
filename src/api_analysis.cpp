@@ -6,17 +6,22 @@
 #include "host_util.hpp"
 #include "http_json.hpp"
 #include "query_analysis.hpp"
+#include "processor_json.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace chdash {
@@ -154,15 +159,15 @@ void write_processor(
   writer.Key("hostname"); writer.String(row.hostname.c_str());
   writer.Key("initial_query_id"); writer.String(row.initial_query_id.c_str());
   writer.Key("query_id"); writer.String(row.query_id.c_str());
-  writer.Key("id"); writer.Uint64(row.id);
+  writer.Key("id"); writer.String(std::to_string(row.id).c_str());
   writer.Key("parent_ids");
   writer.StartArray();
-  for (uint64_t id : row.parent_ids) writer.Uint64(id);
+  for (uint64_t id : row.parent_ids) writer.String(std::to_string(id).c_str());
   writer.EndArray();
-  writer.Key("plan_step"); writer.Uint64(row.plan_step);
+  writer.Key("plan_step"); writer.String(std::to_string(row.plan_step).c_str());
   writer.Key("plan_step_name"); writer.String(row.plan_step_name.c_str());
   writer.Key("plan_step_description"); writer.String(row.plan_step_description.c_str());
-  writer.Key("plan_group"); writer.Uint64(row.plan_group);
+  writer.Key("plan_group"); writer.String(std::to_string(row.plan_group).c_str());
   writer.Key("name"); writer.String(row.name.c_str());
   writer.Key("elapsed_us"); writer.Uint64(row.elapsed_us);
   writer.Key("input_wait_elapsed_us"); writer.Uint64(row.input_wait_elapsed_us);
@@ -174,22 +179,418 @@ void write_processor(
   writer.EndObject();
 }
 
-void write_otel_span(
+
+void write_processor_trace_summary(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
-    const OpenTelemetrySpanAnalysisRow& row) {
+    const ProcessorTraceSummaryRow& row) {
   writer.StartObject();
   writer.Key("hostname"); writer.String(row.hostname.c_str());
   writer.Key("trace_id"); writer.String(row.trace_id.c_str());
-  writer.Key("span_id"); writer.String(row.span_id.c_str());
+  writer.Key("query_id"); writer.String(row.query_id.c_str());
   writer.Key("parent_span_id"); writer.String(row.parent_span_id.c_str());
   writer.Key("operation_name"); writer.String(row.operation_name.c_str());
-  writer.Key("start_time_us"); writer.Uint64(row.start_time_us);
-  writer.Key("finish_time_us"); writer.Uint64(row.finish_time_us);
-  writer.Key("duration_us"); writer.Uint64(row.finish_time_us >= row.start_time_us ? row.finish_time_us - row.start_time_us : 0);
-  writer.Key("query_id"); writer.String(row.query_id.c_str());
-  writer.Key("thread_id"); writer.String(row.thread_id.c_str());
-  writer.Key("thread_number"); writer.String(row.thread_number.c_str());
+  writer.Key("first_start_time_us"); writer.Uint64(row.first_start_time_us);
+  writer.Key("last_finish_time_us"); writer.Uint64(row.last_finish_time_us);
+  writer.Key("active_time_us"); writer.Uint64(row.active_time_us);
+  writer.Key("event_count"); writer.Uint64(row.event_count);
   writer.EndObject();
+}
+
+constexpr uint64_t kTraceTimelinePixels = 3840;
+
+uint64_t trace_origin_us(const std::vector<OpenTelemetrySpanAnalysisRow>& rows) {
+  uint64_t origin = 0;
+  for (const auto& row : rows) {
+    if (row.start_time_us == 0) continue;
+    if (origin == 0 || row.start_time_us < origin) origin = row.start_time_us;
+  }
+  return origin;
+}
+
+uint64_t trace_finish_us(const std::vector<OpenTelemetrySpanAnalysisRow>& rows) {
+  uint64_t finish = 0;
+  for (const auto& row : rows) finish = std::max(finish, row.finish_time_us);
+  return finish;
+}
+
+uint64_t trace_bucket_floor(uint64_t offset_us, uint64_t duration_us) {
+  if (duration_us == 0) return 0;
+  const unsigned __int128 scaled = static_cast<unsigned __int128>(offset_us) * kTraceTimelinePixels;
+  return static_cast<uint64_t>(scaled / duration_us);
+}
+
+uint64_t trace_bucket_ceil(uint64_t offset_us, uint64_t duration_us) {
+  if (duration_us == 0) return 0;
+  const unsigned __int128 scaled = static_cast<unsigned __int128>(offset_us) * kTraceTimelinePixels;
+  return static_cast<uint64_t>((scaled + duration_us - 1) / duration_us);
+}
+
+struct TraceJsonNode {
+  uint64_t trace_index = 0;
+  uint64_t host_ref = 0;
+  uint64_t parent_ref = 0;
+  uint64_t operation_index = 0;
+  bool leaf_group = false;
+  std::vector<std::pair<uint16_t, uint16_t>> segments_px;
+};
+
+struct TraceJsonBuild {
+  uint64_t origin_us = 0;
+  uint64_t duration_us = 1;
+  std::vector<std::string> hosts;
+  std::vector<std::string> traces;
+  std::vector<std::string> operations;
+  std::vector<TraceJsonNode> nodes;
+  size_t source_span_count = 0;
+  size_t leaf_group_count = 0;
+  size_t segment_count_before_lod = 0;
+  size_t segment_count_after_lod = 0;
+  bool processor_summary_overlay = false;
+  uint64_t processor_summary_bucket_us = 0;
+};
+
+std::string trace_operation_instance_name(std::string_view value) {
+  size_t end = value.size();
+  while (end > 0) {
+    size_t digits = end;
+    while (digits > 0 && std::isdigit(static_cast<unsigned char>(value[digits - 1]))) --digits;
+    if (digits == end || digits == 0 || value[digits - 1] != '_') break;
+    end = digits - 1;
+  }
+  return std::string(value.substr(0, end));
+}
+
+std::string trace_operation_family(std::string_view value) {
+  const std::string instance_name = trace_operation_instance_name(value);
+  size_t end = instance_name.size();
+  size_t pos = end;
+  while (pos > 0 && std::isdigit(static_cast<unsigned char>(instance_name[pos - 1]))) --pos;
+  if (pos < end && pos > 0 && (instance_name[pos - 1] == '.' || instance_name[pos - 1] == '-')) --pos;
+  return std::string(instance_name.substr(0, pos));
+}
+
+TraceJsonBuild build_trace_json(
+    const std::vector<OpenTelemetrySpanAnalysisRow>& rows,
+    const std::vector<ProcessorTraceSummaryRow>& processor_summary = {},
+    const std::vector<ProcessorAnalysisRow>& processors = {},
+    bool use_processor_summary_overlay = false,
+    uint64_t processor_summary_bucket_us = 0) {
+  struct PendingNode {
+    std::string hostname;
+    std::string trace_id;
+    std::string parent_span_id;
+    std::string operation_name;
+    std::string source_span_id; // Server-side only: resolves local parent references.
+    bool leaf_group = false;
+    std::vector<std::pair<uint64_t, uint64_t>> segments;
+  };
+
+  TraceJsonBuild out;
+  out.source_span_count = rows.size();
+  out.origin_us = trace_origin_us(rows);
+  const uint64_t finish_us = trace_finish_us(rows);
+  out.duration_us = finish_us > out.origin_us ? finish_us - out.origin_us : 1;
+
+  std::unordered_set<std::string> parent_keys;
+  parent_keys.reserve(std::min<size_t>(rows.size(), 8192));
+  for (const auto& row : rows) {
+    if (row.parent_span_id.empty() || row.parent_span_id == "0") continue;
+    std::string key;
+    key.reserve(row.trace_id.size() + row.parent_span_id.size() + 1);
+    key.append(row.trace_id).push_back('\x1f');
+    key.append(row.parent_span_id);
+    parent_keys.insert(std::move(key));
+  }
+
+  std::vector<PendingNode> pending;
+  pending.reserve(std::min<size_t>(rows.size(), 1024));
+  std::unordered_map<std::string, size_t> leaf_groups;
+  leaf_groups.reserve(std::min<size_t>(rows.size(), 4096));
+
+  std::unordered_set<std::string> processor_families;
+  if (use_processor_summary_overlay) {
+    processor_families.reserve(processors.size());
+    for (const auto& processor : processors) {
+      const std::string family = trace_operation_family(processor.name);
+      if (!family.empty()) processor_families.insert(family);
+    }
+  }
+
+  auto leaf_group_key = [](std::string_view trace_id, std::string_view parent_span_id, std::string_view operation_name) {
+    std::string key;
+    key.reserve(trace_id.size() + parent_span_id.size() + operation_name.size() + 2);
+    key.append(trace_id).push_back('\x1f');
+    key.append(parent_span_id).push_back('\x1f');
+    key.append(operation_name);
+    return key;
+  };
+
+  for (const auto& row : rows) {
+    std::string own_key;
+    own_key.reserve(row.trace_id.size() + row.span_id.size() + 1);
+    own_key.append(row.trace_id).push_back('\x1f');
+    own_key.append(row.span_id);
+    const bool has_children = parent_keys.find(own_key) != parent_keys.end();
+
+    const std::string operation_name = trace_operation_instance_name(row.operation_name);
+
+    if (has_children) {
+      PendingNode node;
+      node.hostname = row.hostname;
+      node.trace_id = row.trace_id;
+      node.parent_span_id = row.parent_span_id;
+      node.operation_name = operation_name;
+      node.source_span_id = row.span_id;
+      node.segments.emplace_back(row.start_time_us, row.finish_time_us);
+      pending.push_back(std::move(node));
+      continue;
+    }
+
+    // Strict leaf-only aggregation: same trace + parent + operation, and only
+    // spans that are not parents of any other span are eligible.
+    const std::string group_key = leaf_group_key(row.trace_id, row.parent_span_id, operation_name);
+    auto [it, inserted] = leaf_groups.emplace(group_key, pending.size());
+    if (inserted) {
+      PendingNode node;
+      node.hostname = row.hostname;
+      node.trace_id = row.trace_id;
+      node.parent_span_id = row.parent_span_id;
+      node.operation_name = operation_name;
+      node.leaf_group = true;
+      pending.push_back(std::move(node));
+    } else if (pending[it->second].hostname != row.hostname) {
+      pending[it->second].hostname.clear();
+    }
+    pending[it->second].segments.emplace_back(row.start_time_us, row.finish_time_us);
+  }
+
+  // A breadth-first detailed trace cap preserves structure, but for very busy
+  // processor leaves it necessarily retains only a chronological prefix at the
+  // final retained depth. When that cap is hit, replace processor leaf groups
+  // with the independent full-trace temporal summary used by Pipeline. This
+  // keeps Tracing representative across the complete query without sending all
+  // raw processor calls. Structural/non-processor spans remain exact.
+  if (use_processor_summary_overlay && !processor_families.empty() && !processor_summary.empty()) {
+    std::unordered_set<size_t> replaced_groups;
+    replaced_groups.reserve(processor_families.size() * 2);
+    for (const auto& row : processor_summary) {
+      if (row.trace_id.empty() || row.parent_span_id.empty() || row.parent_span_id == "0" ||
+          row.operation_name.empty() || row.first_start_time_us == 0 ||
+          row.last_finish_time_us < row.first_start_time_us) continue;
+      if (!processor_families.count(trace_operation_family(row.operation_name))) continue;
+
+      const std::string operation_name = trace_operation_instance_name(row.operation_name);
+      const std::string group_key = leaf_group_key(row.trace_id, row.parent_span_id, operation_name);
+      auto it = leaf_groups.find(group_key);
+      size_t index = 0;
+      if (it == leaf_groups.end()) {
+        index = pending.size();
+        leaf_groups.emplace(group_key, index);
+        PendingNode node;
+        node.hostname = row.hostname;
+        node.trace_id = row.trace_id;
+        node.parent_span_id = row.parent_span_id;
+        node.operation_name = operation_name;
+        node.leaf_group = true;
+        pending.push_back(std::move(node));
+      } else {
+        index = it->second;
+      }
+
+      auto& node = pending[index];
+      if (!node.leaf_group) continue;
+      if (replaced_groups.insert(index).second) node.segments.clear();
+      if (!row.hostname.empty()) {
+        if (node.hostname.empty()) node.hostname = row.hostname;
+        else if (node.hostname != row.hostname) node.hostname.clear();
+      }
+      node.segments.emplace_back(row.first_start_time_us, row.last_finish_time_us);
+      out.processor_summary_overlay = true;
+    }
+    if (out.processor_summary_overlay) out.processor_summary_bucket_us = processor_summary_bucket_us;
+  }
+
+  // Exact overlap merge first. The 4K temporal LOD below then merges segments
+  // that are indistinguishable at a 3840-pixel timeline resolution.
+  for (auto& node : pending) {
+    if (!node.leaf_group || node.segments.size() < 2) continue;
+    std::sort(node.segments.begin(), node.segments.end());
+    std::vector<std::pair<uint64_t, uint64_t>> merged;
+    merged.reserve(node.segments.size());
+    for (const auto& interval : node.segments) {
+      if (merged.empty() || interval.first > merged.back().second) merged.push_back(interval);
+      else merged.back().second = std::max(merged.back().second, interval.second);
+    }
+    node.segments = std::move(merged);
+  }
+
+  std::sort(pending.begin(), pending.end(), [](const PendingNode& a, const PendingNode& b) {
+    const uint64_t as = a.segments.empty() ? 0 : a.segments.front().first;
+    const uint64_t bs = b.segments.empty() ? 0 : b.segments.front().first;
+    if (as != bs) return as < bs;
+    if (a.trace_id != b.trace_id) return a.trace_id < b.trace_id;
+    if (a.parent_span_id != b.parent_span_id) return a.parent_span_id < b.parent_span_id;
+    if (a.operation_name != b.operation_name) return a.operation_name < b.operation_name;
+    return a.source_span_id < b.source_span_id;
+  });
+
+  std::unordered_map<std::string, uint64_t> host_index;
+  std::unordered_map<std::string, uint64_t> trace_index;
+  std::unordered_map<std::string, uint64_t> operation_index;
+  auto intern = [](const std::string& value, std::vector<std::string>& values,
+                   std::unordered_map<std::string, uint64_t>& index) -> uint64_t {
+    auto it = index.find(value);
+    if (it != index.end()) return it->second;
+    const uint64_t id = static_cast<uint64_t>(values.size());
+    values.push_back(value);
+    index.emplace(value, id);
+    return id;
+  };
+
+  std::unordered_map<std::string, uint64_t> local_parent_index;
+  local_parent_index.reserve(pending.size());
+  for (size_t i = 0; i < pending.size(); ++i) {
+    auto& node = pending[i];
+    if (!node.hostname.empty()) intern(node.hostname, out.hosts, host_index);
+    intern(node.trace_id, out.traces, trace_index);
+    intern(node.operation_name, out.operations, operation_index);
+    if (!node.source_span_id.empty()) {
+      std::string key;
+      key.reserve(node.trace_id.size() + node.source_span_id.size() + 1);
+      key.append(node.trace_id).push_back('\x1f');
+      key.append(node.source_span_id);
+      local_parent_index.emplace(std::move(key), static_cast<uint64_t>(i));
+    }
+  }
+
+  out.nodes.reserve(pending.size());
+  for (const auto& source : pending) {
+    TraceJsonNode node;
+    node.trace_index = trace_index.at(source.trace_id);
+    node.host_ref = source.hostname.empty() ? 0 : host_index.at(source.hostname) + 1;
+    node.operation_index = operation_index.at(source.operation_name);
+    node.leaf_group = source.leaf_group;
+
+    if (!source.parent_span_id.empty() && source.parent_span_id != "0") {
+      std::string key;
+      key.reserve(source.trace_id.size() + source.parent_span_id.size() + 1);
+      key.append(source.trace_id).push_back('\x1f');
+      key.append(source.parent_span_id);
+      const auto it = local_parent_index.find(key);
+      if (it != local_parent_index.end()) node.parent_ref = it->second + 1;
+    }
+
+    out.segment_count_before_lod += source.segments.size();
+    std::vector<std::pair<uint16_t, uint16_t>> buckets;
+    buckets.reserve(source.segments.size());
+    for (const auto& segment : source.segments) {
+      const uint64_t start_offset = segment.first > out.origin_us ? segment.first - out.origin_us : 0;
+      const uint64_t finish_offset = segment.second > out.origin_us ? segment.second - out.origin_us : 0;
+      uint64_t start_px = std::min<uint64_t>(kTraceTimelinePixels - 1, trace_bucket_floor(start_offset, out.duration_us));
+      uint64_t finish_px = std::min<uint64_t>(kTraceTimelinePixels, trace_bucket_ceil(finish_offset, out.duration_us));
+      if (finish_px <= start_px) finish_px = std::min<uint64_t>(kTraceTimelinePixels, start_px + 1);
+      const auto pixel_interval = std::make_pair(static_cast<uint16_t>(start_px), static_cast<uint16_t>(finish_px));
+      if (source.leaf_group && !buckets.empty() && pixel_interval.first <= buckets.back().second) {
+        buckets.back().second = std::max(buckets.back().second, pixel_interval.second);
+      } else {
+        buckets.push_back(pixel_interval);
+      }
+    }
+    out.segment_count_after_lod += buckets.size();
+    node.segments_px = std::move(buckets);
+    out.nodes.push_back(std::move(node));
+  }
+
+  out.leaf_group_count = static_cast<size_t>(std::count_if(
+      out.nodes.begin(), out.nodes.end(), [](const TraceJsonNode& node) { return node.leaf_group; }));
+  return out;
+}
+
+void write_trace_json(
+    rapidjson::Writer<rapidjson::StringBuffer>& writer,
+    const TraceJsonBuild& trace) {
+  writer.StartObject();
+  writer.Key("format"); writer.String("chdash.trace.json.lod.v2");
+  writer.Key("timeline_px"); writer.Uint64(kTraceTimelinePixels);
+  writer.Key("origin_us"); writer.Uint64(trace.origin_us);
+  writer.Key("duration_us"); writer.Uint64(trace.duration_us);
+  writer.Key("source_span_count"); writer.Uint64(trace.source_span_count);
+  writer.Key("node_count"); writer.Uint64(trace.nodes.size());
+  writer.Key("leaf_group_count"); writer.Uint64(trace.leaf_group_count);
+  writer.Key("segment_count_before_lod"); writer.Uint64(trace.segment_count_before_lod);
+  writer.Key("segment_count_after_lod"); writer.Uint64(trace.segment_count_after_lod);
+  writer.Key("processor_summary_overlay"); writer.Bool(trace.processor_summary_overlay);
+  writer.Key("processor_summary_bucket_us"); writer.Uint64(trace.processor_summary_bucket_us);
+
+  writer.Key("hosts");
+  writer.StartArray();
+  for (const auto& value : trace.hosts) writer.String(value.c_str());
+  writer.EndArray();
+  writer.Key("traces");
+  writer.StartArray();
+  for (const auto& value : trace.traces) writer.String(value.c_str());
+  writer.EndArray();
+  writer.Key("operations");
+  writer.StartArray();
+  for (const auto& value : trace.operations) writer.String(value.c_str());
+  writer.EndArray();
+
+  writer.Key("node_schema");
+  writer.StartArray();
+  writer.String("trace_index");
+  writer.String("host_ref");
+  writer.String("parent_ref");
+  writer.String("operation_index");
+  writer.String("flags");
+  writer.String("segments_px");
+  writer.EndArray();
+  writer.Key("segment_schema");
+  writer.StartArray();
+  writer.String("start_px");
+  writer.String("finish_px");
+  writer.EndArray();
+
+  writer.Key("nodes");
+  writer.StartArray();
+  for (const auto& node : trace.nodes) {
+    writer.StartArray();
+    writer.Uint64(node.trace_index);
+    writer.Uint64(node.host_ref);
+    writer.Uint64(node.parent_ref);
+    writer.Uint64(node.operation_index);
+    writer.Uint(node.leaf_group ? 1u : 0u);
+    writer.StartArray();
+    for (const auto& segment : node.segments_px) {
+      writer.Uint(segment.first);
+      writer.Uint(segment.second);
+    }
+    writer.EndArray();
+    writer.EndArray();
+  }
+  writer.EndArray();
+  writer.EndObject();
+}
+
+void write_original_otel_spans(
+    rapidjson::Writer<rapidjson::StringBuffer>& writer,
+    const std::vector<OpenTelemetrySpanAnalysisRow>& rows) {
+  writer.StartArray();
+  for (const auto& row : rows) {
+    writer.StartObject();
+    writer.Key("hostname"); writer.String(row.hostname.c_str());
+    writer.Key("trace_id"); writer.String(row.trace_id.c_str());
+    writer.Key("span_id"); writer.String(row.span_id.c_str());
+    writer.Key("parent_span_id"); writer.String(row.parent_span_id.c_str());
+    writer.Key("operation_name"); writer.String(row.operation_name.c_str());
+    writer.Key("start_time_us"); writer.Uint64(row.start_time_us);
+    writer.Key("finish_time_us"); writer.Uint64(row.finish_time_us);
+    writer.Key("duration_us"); writer.Uint64(row.finish_time_us >= row.start_time_us ? row.finish_time_us - row.start_time_us : 0);
+    writer.Key("query_id"); writer.String(row.query_id.c_str());
+    writer.Key("thread_id"); writer.String(row.thread_id.c_str());
+    writer.Key("thread_number"); writer.String(row.thread_number.c_str());
+    writer.EndObject();
+  }
+  writer.EndArray();
 }
 
 void write_view(
@@ -230,6 +631,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
 
   const std::string host_id = doc["host_id"].GetString();
   const std::string query_id = doc["query_id"].GetString();
+  const bool include_original_trace = doc.HasMember("include_original_trace") && doc["include_original_trace"].IsBool() && doc["include_original_trace"].GetBool();
   const HostSpec* host = find_host(cfg_.hosts, host_id);
   if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
 
@@ -284,6 +686,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   QueryAnalysisOptions options;
   options.log_lookup_timeout_ms = cfg_.analysis.log_lookup_timeout_ms;
   options.flush_logs = cfg_.analysis.flush_logs;
+  options.include_original_trace_fields = include_original_trace;
   const std::string& system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
   auto analysis = collect_query_analysis(*record, system_uri, client_pool_, options);
   if (!analysis.fatal_error.empty()) {
@@ -317,10 +720,12 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.Key("query_log"); writer.Bool(analysis.query_log_available);
   writer.Key("processors_profile_log"); writer.Bool(analysis.processors_profile_available);
   writer.Key("opentelemetry_span_log"); writer.Bool(analysis.opentelemetry_span_log_available);
+  writer.Key("processor_trace_summary"); writer.Bool(analysis.processor_trace_summary_available);
   writer.Key("query_views_log"); writer.Bool(analysis.query_views_available);
   writer.Key("query_log_error"); writer.String(analysis.query_log_error.c_str());
   writer.Key("processors_profile_error"); writer.String(analysis.processors_profile_error.c_str());
   writer.Key("opentelemetry_span_log_error"); writer.String(analysis.opentelemetry_span_log_error.c_str());
+  writer.Key("processor_trace_summary_error"); writer.String(analysis.processor_trace_summary_error.c_str());
   writer.Key("query_views_error"); writer.String(analysis.query_views_error.c_str());
   writer.Key("distributed_error"); writer.String(analysis.distributed_error.c_str());
   writer.EndObject();
@@ -336,16 +741,32 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   for (const auto& row : analysis.query_log) write_query_log_row(writer, row, false);
   writer.EndArray();
 
-  writer.Key("processors");
-  writer.StartArray();
-  for (const auto& row : analysis.processors) write_processor(writer, row);
-  writer.EndArray();
+  writer.Key("processors_compact");
+  write_processors_json(writer, analysis.processors, analysis.processor_trace_summary);
 
   writer.Key("trace_truncated"); writer.Bool(analysis.trace_truncated);
-  writer.Key("trace_spans");
-  writer.StartArray();
-  for (const auto& row : analysis.trace_spans) write_otel_span(writer, row);
-  writer.EndArray();
+  writer.Key("processors_truncated"); writer.Bool(analysis.processors_truncated);
+  writer.Key("processor_trace_summary_truncated"); writer.Bool(analysis.processor_trace_summary_truncated);
+  writer.Key("processor_trace_bucket_us"); writer.Uint64(analysis.processor_trace_bucket_us);
+  const bool overlay_processor_activity = analysis.trace_truncated &&
+      analysis.processor_trace_summary_available && !analysis.processor_trace_summary_truncated;
+  const TraceJsonBuild trace_json = build_trace_json(
+      analysis.trace_spans, analysis.processor_trace_summary, analysis.processors,
+      overlay_processor_activity, analysis.processor_trace_bucket_us);
+  writer.Key("trace_compact");
+  write_trace_json(writer, trace_json);
+  if (include_original_trace) {
+    writer.Key("processors");
+    writer.StartArray();
+    for (const auto& row : analysis.processors) write_processor(writer, row);
+    writer.EndArray();
+    writer.Key("processor_trace_summary");
+    writer.StartArray();
+    for (const auto& row : analysis.processor_trace_summary) write_processor_trace_summary(writer, row);
+    writer.EndArray();
+    writer.Key("trace_spans_original");
+    write_original_otel_spans(writer, analysis.trace_spans);
+  }
 
   writer.Key("views");
   writer.StartArray();
@@ -360,7 +781,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.EndObject();
 
   res.status = 200;
-  res.set_content(buffer.GetString(), "application/json");
+  res.set_content(buffer.GetString(), buffer.GetSize(), "application/json; charset=utf-8");
 }
 
 

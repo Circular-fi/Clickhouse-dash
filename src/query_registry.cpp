@@ -20,6 +20,7 @@ void QueryRegistry::register_query(
     std::string original_sql) {
   if (query_id.empty() || host_id.empty()) return;
   const auto now = std::chrono::steady_clock::now();
+  const auto wall_now = std::chrono::system_clock::now();
   std::lock_guard<std::mutex> lock(mu_);
   prune_locked(now);
 
@@ -38,6 +39,8 @@ void QueryRegistry::register_query(
   }
   record.created_at = now;
   record.updated_at = now;
+  record.created_at_wall = wall_now;
+  record.updated_at_wall = wall_now;
   records_[query_id] = std::move(record);
 
   while (records_.size() > max_entries_) evict_oldest_locked();
@@ -49,6 +52,7 @@ void QueryRegistry::add_native_query_id(
     const std::string& native_query_id) {
   if (native_query_id.empty()) return;
   const auto now = std::chrono::steady_clock::now();
+  const auto wall_now = std::chrono::system_clock::now();
   std::lock_guard<std::mutex> lock(mu_);
   prune_locked(now);
   const auto it = records_.find(query_id);
@@ -57,6 +61,7 @@ void QueryRegistry::add_native_query_id(
   auto& ids = it->second.native_query_ids;
   if (std::find(ids.begin(), ids.end(), native_query_id) == ids.end()) ids.push_back(native_query_id);
   it->second.updated_at = now;
+  it->second.updated_at_wall = wall_now;
 }
 
 void QueryRegistry::mark_terminal(
@@ -65,6 +70,7 @@ void QueryRegistry::mark_terminal(
     bool partial_execution,
     int64_t session_elapsed_ms) {
   const auto now = std::chrono::steady_clock::now();
+  const auto wall_now = std::chrono::system_clock::now();
   std::lock_guard<std::mutex> lock(mu_);
   prune_locked(now);
   const auto it = records_.find(query_id);
@@ -73,6 +79,7 @@ void QueryRegistry::mark_terminal(
   it->second.partial_execution = partial_execution;
   it->second.session_elapsed_ms = std::max<int64_t>(0, session_elapsed_ms);
   it->second.updated_at = now;
+  it->second.updated_at_wall = wall_now;
 }
 
 std::optional<QueryRegistryRecord> QueryRegistry::find(

@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace chdash {
 namespace {
@@ -80,6 +81,19 @@ std::vector<std::string> split_unit_separator(const std::string& value) {
   return out;
 }
 
+
+std::pair<int64_t, int64_t> query_log_epoch_window(const QueryRegistryRecord& record) {
+  using namespace std::chrono;
+  constexpr auto kClockSkewGuard = seconds(5);
+  auto begin = record.created_at_wall;
+  auto end = record.updated_at_wall;
+  if (begin.time_since_epoch().count() == 0) begin = system_clock::now();
+  if (end.time_since_epoch().count() == 0 || end < begin) end = begin;
+  const int64_t begin_epoch = duration_cast<seconds>((begin - kClockSkewGuard).time_since_epoch()).count();
+  const int64_t end_epoch = duration_cast<seconds>((end + kClockSkewGuard).time_since_epoch()).count();
+  return {begin_epoch, std::max(begin_epoch, end_epoch)};
+}
+
 std::shared_ptr<clickhouse::Client> acquire_client(
     const std::shared_ptr<ClickHouseClientPool>& pool,
     const std::string& uri,
@@ -92,6 +106,12 @@ std::shared_ptr<clickhouse::Client> acquire_client(
 
 bool load_once(clickhouse::Client& client, const QueryRegistryRecord& record, QueryExecutionStats& out) {
   const std::string ids = sql_string_list(query_ids(record));
+  const auto [window_begin, window_end] = query_log_epoch_window(record);
+  const std::string time_scope =
+      "event_date BETWEEN toDate(toDateTime(" + std::to_string(window_begin) + ")) "
+      "AND toDate(toDateTime(" + std::to_string(window_end) + ")) "
+      "AND event_time BETWEEN toDateTime(" + std::to_string(window_begin) + ") "
+      "AND toDateTime(" + std::to_string(window_end) + ")";
   const std::string query =
       "SELECT query_id, toString(type), toString(event_time_microseconds), "
       "toUInt64(query_duration_ms), toUInt64(read_rows), toUInt64(read_bytes), "
@@ -99,7 +119,8 @@ bool load_once(clickhouse::Client& client, const QueryRegistryRecord& record, Qu
       "toUInt64(result_bytes), toInt64(memory_usage), toUInt64(peak_threads_usage), "
       "arrayStringConcat(databases, char(31)), arrayStringConcat(tables, char(31)), "
       "arrayStringConcat(projections, char(31)), toInt32(exception_code), exception "
-      "FROM system.query_log WHERE type != 'QueryStart' AND query_id IN " + ids + " "
+      "FROM system.query_log PREWHERE " + time_scope + " "
+      "WHERE type != 'QueryStart' AND query_id IN " + ids + " "
       "ORDER BY event_time_microseconds DESC LIMIT 1";
 
   bool found = false;

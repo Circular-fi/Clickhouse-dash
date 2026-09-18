@@ -68,7 +68,7 @@ def test_overview_has_no_redundant_lineage_title() -> None:
 
 def test_storage_composition_legend_omits_zero_or_nonexistent_categories() -> None:
     ui = read("src/static/app_explorer.js")
-    block = ui[ui.index("function renderStorageComposition"):ui.index("function renderOverview")]
+    block = ui[ui.index("function buildStorageComposition"):ui.index("function renderOverview")]
     assert 'composition.items.filter((item) => Number(item.bytes) > 0)' in block
     assert 'if (legendItems.length) wrap.appendChild(legend);' in block
     assert '{ label: "Wide", variant: "wide", percent: null, bytes: null }' not in block

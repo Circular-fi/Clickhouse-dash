@@ -9,7 +9,7 @@ def read(path: str) -> str:
 def test_explorer_and_results_modules_import_every_namespace_they_use() -> None:
     explorer = read('src/static/app_explorer.js')
     results = read('src/static/app_results.js')
-    assert 'const { dom, state, api, util, ui } = ns;' in explorer
+    assert 'const { dom, state, api, util, ui, storage } = ns;' in explorer
     assert 'const { dom, util, state } = ns;' in results
     assert 'ui?.setPageSelectorValue?.' in explorer
     assert 'state.suppressResultsVisibility' in results

@@ -194,7 +194,6 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
     if (cfg_.explorer.graph_enabled()) {
       http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
-      http_.Get("/api/explorer/activity", [&](const auto& req, auto& res) { handle_explorer_activity(req, res); });
     }
   }
 

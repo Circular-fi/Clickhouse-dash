@@ -26,6 +26,8 @@
     downloadJsonButton: byId("downloadJsonButton"),
     runOptAutoFormat: byId("runOptAutoFormat"),
     runOptMultiQuery: byId("runOptMultiQuery"),
+    runOptExecutionStats: byId("runOptExecutionStats"),
+    runOptFlattenTuple: byId("runOptFlattenTuple"),
 
     formatButton: byId("formatButton"),
     clearResultsButton: byId("clearResultsButton"),
@@ -160,6 +162,9 @@
     analysisCloseButton: byId("analysisCloseButton"),
     analysisSummary: byId("analysisSummary"),
     analysisNotice: byId("analysisNotice"),
+    analysisTabs: byId("analysisTabs"),
+    analysisPipelineTab: byId("analysisPipelineTab"),
+    analysisTraceTab: byId("analysisTraceTab"),
     analysisContent: byId("analysisContent"),
     copySplit: byId("copySplit"),
     copyMenuButton: byId("copyMenuButton"),

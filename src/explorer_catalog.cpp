@@ -177,6 +177,16 @@ std::vector<std::string> parse_engine_arguments_local(std::string_view engine_fu
   return args;
 }
 
+std::string resolve_buffer_database_arg(const std::string& arg, const std::string& source_database) {
+  std::string compact;
+  compact.reserve(arg.size());
+  for (char ch : arg) {
+    if (!std::isspace(static_cast<unsigned char>(ch))) compact.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+  }
+  if (compact == "currentdatabase()") return source_database;
+  return arg;
+}
+
 void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries) {
   // system.tables.total_rows for Buffer is the readable surface: resident rows
   // plus the underlying destination. Snapshot *those exact system.tables values*
@@ -199,7 +209,8 @@ void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries)
       continue;
     }
 
-    const auto target = raw_rows.find(table_key(args[0], args[1]));
+    const std::string target_database = resolve_buffer_database_arg(args[0], table.database);
+    const auto target = raw_rows.find(table_key(target_database, args[1]));
     if (target == raw_rows.end() || !target->second) {
       // The target may be hidden by the runner ACL or unable to expose an exact
       // lightweight row count. In either case, resident Buffer rows are unknown.
@@ -960,6 +971,392 @@ std::vector<std::string> allowed_columns_for_table(
 }
 
 } // namespace
+
+
+bool load_explorer_catalog_index(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    const AllowedObjectSet& allowed,
+    ExplorerCatalog& out,
+    std::string* error) {
+  out = ExplorerCatalog{};
+  out.generated_at_ms = now_ms();
+  out.databases = allowed.databases();
+  std::sort(out.databases.begin(), out.databases.end());
+
+  std::unordered_set<std::string> seen;
+  std::string table_filter = " WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') ";
+  if (out.databases.size() == 1) {
+    table_filter += "AND database = " + quote_string(out.databases.front()) + " ";
+  }
+  const std::string select_sql =
+      "SELECT toString(database), toString(name), toString(engine), "
+      "toString(total_rows), toString(total_bytes) FROM system.tables" + table_filter;
+
+  auto consume = [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      const std::string database = block_string_at(block, 0, row);
+      const std::string table = block_string_at(block, 1, row);
+      if (!allowed.allows_table(database, table)) continue;
+      const std::string key = table_key(database, table);
+      if (!seen.insert(key).second) continue;
+      ExplorerTableSummary item;
+      item.database = database;
+      item.name = table;
+      item.engine = block_string_at(block, 2, row);
+      item.rows = parse_u64(block_string_at(block, 3, row));
+      const auto total_bytes = parse_u64(block_string_at(block, 4, row));
+      if (item.engine == "Buffer" || item.engine == "Memory" || item.engine == "Dictionary") {
+        item.resident_bytes = total_bytes;
+      } else {
+        item.logical_bytes = total_bytes;
+        item.compressed_bytes = total_bytes;
+      }
+      out.tables.push_back(std::move(item));
+    }
+  };
+
+  std::string system_error;
+  bool loaded = try_select(system, select_sql + "ORDER BY database, name", consume, &system_error);
+  if (!loaded) {
+    out.tables.clear();
+    seen.clear();
+    std::string runner_error;
+    loaded = try_select(runner, select_sql + "ORDER BY database, name", consume, &runner_error);
+    if (!loaded) {
+      if (error) {
+        *error = "Lightweight system.tables catalog failed: " + system_error +
+            "; runner fallback failed: " + runner_error;
+      }
+      return false;
+    }
+  }
+
+  // Keep sidebar row/size statistics useful without loading the rich table
+  // detail payload. For a single lazily-expanded database, one bounded parts
+  // aggregation gives exact MergeTree rows/bytes for every visible table.
+  if (out.databases.size() == 1) {
+    std::unordered_map<std::string, ExplorerTableSummary*> by_name;
+    for (auto& item : out.tables) by_name.emplace(item.name, &item);
+    std::string ignored;
+    (void)try_select(system,
+      "SELECT toString(`table`), toString(sum(rows)), toString(sum(bytes_on_disk)) "
+      "FROM system.parts WHERE active AND database = " + quote_string(out.databases.front()) +
+      " GROUP BY `table`",
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          const auto it = by_name.find(block_string_at(block, 0, row));
+          if (it == by_name.end() || !it->second) continue;
+          it->second->rows = parse_u64(block_string_at(block, 1, row));
+          const auto bytes = parse_u64(block_string_at(block, 2, row));
+          it->second->logical_bytes = bytes;
+          it->second->physical_bytes = bytes;
+          it->second->compressed_bytes = bytes;
+        }
+      }, &ignored);
+  }
+
+  // The lightweight catalog intentionally asks only for identity + small
+  // sidebar statistics. Fill newly created runner-visible objects one by one
+  // if the technical
+  // system.tables snapshot lags behind ACL discovery.
+  for (const auto& entry : allowed.tables()) {
+    const std::string key = table_key(entry.database, entry.table);
+    if (seen.count(key)) continue;
+    const std::string sql = select_sql +
+        "AND database = " + quote_string(entry.database) +
+        " AND name = " + quote_string(entry.table) + " LIMIT 1";
+    std::string ignored;
+    (void)try_select(runner, sql, consume, &ignored);
+  }
+
+  std::sort(out.tables.begin(), out.tables.end(), [](const auto& a, const auto& b) {
+    if (a.database != b.database) return a.database < b.database;
+    return a.name < b.name;
+  });
+  return true;
+}
+
+bool load_explorer_database_summaries(
+    clickhouse::Client& runner,
+    const std::vector<std::string>& databases,
+    std::vector<ExplorerDatabaseSummary>& out,
+    std::string* error) {
+  out.clear();
+  if (databases.empty()) return true;
+
+  std::unordered_set<std::string> visible(databases.begin(), databases.end());
+  const std::string query =
+      "SELECT toString(database), toString(count()), "
+      "toString(sum(if(engine IN ('Buffer','Memory','Dictionary'), toUInt64(0), ifNull(total_rows, toUInt64(0))))), "
+      "toString(sum(if(engine IN ('Buffer','Memory','Dictionary'), toUInt64(0), ifNull(total_bytes, toUInt64(0))))) "
+      "FROM system.tables "
+      "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
+      "GROUP BY database ORDER BY database";
+
+  std::string section_error;
+  const bool loaded = try_select(runner, query, [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      const std::string database = block_string_at(block, 0, row);
+      if (!visible.count(database)) continue;
+      ExplorerDatabaseSummary summary;
+      summary.name = database;
+      summary.tables = parse_u64(block_string_at(block, 1, row)).value_or(0);
+      summary.rows = parse_u64(block_string_at(block, 2, row)).value_or(0);
+      summary.bytes = parse_u64(block_string_at(block, 3, row)).value_or(0);
+      out.push_back(std::move(summary));
+    }
+  }, &section_error);
+  if (!loaded) {
+    if (error) *error = section_error;
+    out.clear();
+    return false;
+  }
+
+  std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a.name < b.name;
+  });
+  return true;
+}
+
+
+bool load_explorer_table_summary(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    const AllowedObjectSet& allowed,
+    const std::string& database,
+    const std::string& table,
+    ExplorerTableSummary& out,
+    std::string* error) {
+  if (!allowed.allows_table(database, table)) {
+    if (error) *error = "object not found";
+    return false;
+  }
+
+  out = ExplorerTableSummary{};
+  const std::string db = quote_string(database);
+  const std::string tbl = quote_string(table);
+  const std::string base_sql =
+      "SELECT toString(database), toString(name), toString(engine), toString(engine_full), "
+      "toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), "
+      "toString(storage_policy), toString(total_rows), toString(total_bytes), "
+      "toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)) "
+      "FROM system.tables WHERE database = " + db + " AND name = " + tbl + " LIMIT 1";
+
+  auto consume_base = [&](const clickhouse::Block& block) {
+    if (!block.GetRowCount()) return;
+    out.database = block_string_at(block, 0, 0);
+    out.name = block_string_at(block, 1, 0);
+    out.engine = block_string_at(block, 2, 0);
+    out.engine_full = block_string_at(block, 3, 0);
+    out.sorting_key = block_string_at(block, 4, 0);
+    out.primary_key = block_string_at(block, 5, 0);
+    out.partition_key = block_string_at(block, 6, 0);
+    out.sampling_key = block_string_at(block, 7, 0);
+    out.storage_policy = block_string_at(block, 8, 0);
+    out.rows = parse_u64(block_string_at(block, 9, 0));
+    const auto total_bytes = parse_u64(block_string_at(block, 10, 0));
+    const auto total_uncompressed_bytes = parse_u64(block_string_at(block, 11, 0));
+    out.data_paths = split_unit_separator(block_string_at(block, 12, 0));
+    if (out.engine == "Buffer" || out.engine == "Memory" || out.engine == "Dictionary") {
+      out.resident_bytes = total_bytes;
+    } else {
+      out.logical_bytes = total_bytes;
+      out.compressed_bytes = total_bytes;
+      out.uncompressed_bytes = total_uncompressed_bytes;
+      if (out.engine == "TinyLog" || out.engine == "Log" || out.engine == "StripeLog") {
+        out.physical_bytes = total_bytes;
+      }
+    }
+  };
+
+  std::string base_error;
+  bool loaded = try_select(system, base_sql, consume_base, &base_error);
+  if (!loaded || out.database.empty()) {
+    out = ExplorerTableSummary{};
+    std::string runner_error;
+    loaded = try_select(runner, base_sql, consume_base, &runner_error);
+    if (!loaded || out.database.empty()) {
+      if (error) {
+        *error = "Table summary metadata failed for " + database + "." + table +
+            (runner_error.empty() ? std::string{} : ": " + runner_error);
+      }
+      return false;
+    }
+  }
+
+  // Resolve exact rows / resident allocation for engines that do not own
+  // MergeTree parts. All queries are restricted to the selected object.
+  //
+  // For Buffer, system.tables.total_rows is the readable Buffer surface and can
+  // include the destination table. Explorer must display resident buffered rows,
+  // not "buffer + destination". Subtract the destination's lightweight row
+  // count from the same system.tables source, and leave the value unknown if the
+  // two snapshots cannot be reconciled safely.
+  if (out.engine == "Buffer") {
+    const auto args = parse_engine_arguments_local(out.engine_full, "Buffer");
+    if (out.rows && args.size() >= 2 && !args[1].empty()) {
+      const std::string target_database = resolve_buffer_database_arg(args[0], database);
+      const std::string target_table = args[1];
+      std::optional<uint64_t> target_rows;
+      const std::string target_sql =
+          "SELECT toString(total_rows) FROM system.tables WHERE database = " + quote_string(target_database) +
+          " AND name = " + quote_string(target_table) + " LIMIT 1";
+      std::string target_error;
+      bool target_loaded = try_select(system, target_sql,
+        [&](const clickhouse::Block& block) {
+          if (block.GetRowCount()) target_rows = parse_u64(block_string_at(block, 0, 0));
+        }, &target_error);
+      if (!target_loaded || !target_rows) {
+        target_rows.reset();
+        std::string runner_error;
+        (void)try_select(runner, target_sql,
+          [&](const clickhouse::Block& block) {
+            if (block.GetRowCount()) target_rows = parse_u64(block_string_at(block, 0, 0));
+          }, &runner_error);
+      }
+      if (target_rows && *out.rows >= *target_rows) out.rows = *out.rows - *target_rows;
+      else out.rows.reset();
+    }
+  } else if (out.engine == "Dictionary") {
+    std::string ignored;
+    (void)try_select(system,
+      "SELECT toString(element_count), toString(bytes_allocated) FROM system.dictionaries "
+      "WHERE database = " + db + " AND name = " + tbl + " LIMIT 1",
+      [&](const clickhouse::Block& block) {
+        if (!block.GetRowCount()) return;
+        out.rows = parse_u64(block_string_at(block, 0, 0));
+        out.resident_bytes = parse_u64(block_string_at(block, 1, 0));
+      }, &ignored);
+  } else if ((out.engine == "TinyLog" || out.engine == "Log" || out.engine == "StripeLog") &&
+             (!out.rows || *out.rows == 0)) {
+    std::string ignored;
+    (void)try_select(runner, "SELECT toString(count()) FROM " + qualified_ident(database, table),
+      [&](const clickhouse::Block& block) {
+        if (block.GetRowCount()) out.rows = parse_u64(block_string_at(block, 0, 0));
+      }, &ignored);
+  }
+
+  if (out.engine.find("MergeTree") != std::string::npos) {
+    std::string section_error;
+    (void)try_select(system,
+      "SELECT toString(sum(rows)), toString(sum(bytes_on_disk)), toString(sum(data_compressed_bytes)), "
+      "toString(sum(data_uncompressed_bytes)), toString(count()), toString(uniqExact(partition)), "
+      "arrayStringConcat(arraySort(groupUniqArray(disk_name)), ','), toString(max(modification_time)) "
+      "FROM system.parts WHERE active AND database = " + db + " AND `table` = " + tbl,
+      [&](const clickhouse::Block& block) {
+        if (!block.GetRowCount()) return;
+        out.rows = parse_u64(block_string_at(block, 0, 0));
+        out.resident_bytes = parse_u64(block_string_at(block, 1, 0));
+        out.logical_bytes = parse_u64(block_string_at(block, 1, 0));
+        out.compressed_bytes = parse_u64(block_string_at(block, 2, 0));
+        out.uncompressed_bytes = parse_u64(block_string_at(block, 3, 0));
+        out.active_parts = parse_u64(block_string_at(block, 4, 0)).value_or(0);
+        out.partitions = parse_u64(block_string_at(block, 5, 0)).value_or(0);
+        const std::string disks = block_string_at(block, 6, 0);
+        std::stringstream input(disks);
+        for (std::string disk; std::getline(input, disk, ',');) if (!disk.empty()) out.disks.push_back(std::move(disk));
+        out.last_part_time = block_string_at(block, 7, 0);
+        if (out.engine.find("Replicated") == std::string::npos && out.engine != "Distributed") {
+          out.physical_bytes = out.logical_bytes;
+        }
+      }, &section_error);
+
+    section_error.clear();
+    (void)try_select(system,
+      "SELECT toString(sum(secondary_indices_compressed_bytes)) FROM system.parts "
+      "WHERE active AND database = " + db + " AND `table` = " + tbl,
+      [&](const clickhouse::Block& block) {
+        if (block.GetRowCount()) out.secondary_indices_bytes = parse_u64(block_string_at(block, 0, 0)).value_or(0);
+      }, &section_error);
+
+    section_error.clear();
+    (void)try_select(system,
+      "SELECT toString(sum(data_compressed_bytes)) FROM system.projection_parts "
+      "WHERE active AND database = " + db + " AND `table` = " + tbl,
+      [&](const clickhouse::Block& block) {
+        if (block.GetRowCount()) out.projection_bytes = parse_u64(block_string_at(block, 0, 0)).value_or(0);
+      }, &section_error);
+  }
+
+  // Ingress and replication are detail-only metrics. Keep them lazy and scope
+  // every system-log query to this exact table instead of scanning the server
+  // catalog whenever Explorer opens.
+  std::string ignored;
+  const std::string object = quote_string(database + "." + table);
+  (void)try_select(system,
+    "SELECT toString(sumIf(written_rows, event_time >= now() - INTERVAL 1 MINUTE) / 60.0), "
+    "toString(sumIf(written_rows, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
+    "toString(sum(written_rows) / 3600.0), "
+    "toString(sumIf(written_bytes, event_time >= now() - INTERVAL 1 MINUTE) / 60.0), "
+    "toString(sumIf(written_bytes, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
+    "toString(sum(written_bytes) / 3600.0), toString(sum(written_rows)), toString(sum(written_bytes)), "
+    "toString(max(event_time)) FROM system.query_log "
+    "WHERE event_time >= now() - INTERVAL 1 HOUR AND type = 'QueryFinish' AND written_rows > 0 "
+    "AND has(tables, " + object + ")",
+    [&](const clickhouse::Block& block) {
+      if (!block.GetRowCount()) return;
+      auto& rate = out.client_ingress;
+      rate.rows_per_second_1m = parse_double(block_string_at(block, 0, 0));
+      rate.rows_per_second_5m = parse_double(block_string_at(block, 1, 0));
+      rate.rows_per_second_1h = parse_double(block_string_at(block, 2, 0));
+      rate.bytes_per_second_1m = parse_double(block_string_at(block, 3, 0));
+      rate.bytes_per_second_5m = parse_double(block_string_at(block, 4, 0));
+      rate.bytes_per_second_1h = parse_double(block_string_at(block, 5, 0));
+      rate.rows_total_1h = parse_u64(block_string_at(block, 6, 0));
+      rate.bytes_total_1h = parse_u64(block_string_at(block, 7, 0));
+      rate.last_event_time = block_string_at(block, 8, 0);
+    }, &ignored);
+
+  ignored.clear();
+  (void)try_select(system,
+    "SELECT toString(sumIf(rows, event_time >= now() - INTERVAL 1 MINUTE) / 60.0), "
+    "toString(sumIf(rows, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
+    "toString(sum(rows) / 3600.0), "
+    "toString(sumIf(size_in_bytes, event_time >= now() - INTERVAL 1 MINUTE) / 60.0), "
+    "toString(sumIf(size_in_bytes, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
+    "toString(sum(size_in_bytes) / 3600.0), toString(sum(rows)), toString(sum(size_in_bytes)), "
+    "toString(countIf(event_time >= now() - INTERVAL 1 MINUTE)), toString(max(event_time)) "
+    "FROM system.part_log WHERE event_time >= now() - INTERVAL 1 HOUR AND event_type = 'NewPart' "
+    "AND database = " + db + " AND `table` = " + tbl,
+    [&](const clickhouse::Block& block) {
+      if (!block.GetRowCount()) return;
+      auto& rate = out.physical_ingress;
+      rate.rows_per_second_1m = parse_double(block_string_at(block, 0, 0));
+      rate.rows_per_second_5m = parse_double(block_string_at(block, 1, 0));
+      rate.rows_per_second_1h = parse_double(block_string_at(block, 2, 0));
+      rate.bytes_per_second_1m = parse_double(block_string_at(block, 3, 0));
+      rate.bytes_per_second_5m = parse_double(block_string_at(block, 4, 0));
+      rate.bytes_per_second_1h = parse_double(block_string_at(block, 5, 0));
+      rate.rows_total_1h = parse_u64(block_string_at(block, 6, 0));
+      rate.bytes_total_1h = parse_u64(block_string_at(block, 7, 0));
+      rate.new_parts_per_minute = parse_u64(block_string_at(block, 8, 0));
+      rate.last_event_time = block_string_at(block, 9, 0);
+    }, &ignored);
+
+  ignored.clear();
+  (void)try_select(system,
+    "SELECT toString(total_replicas), toString(active_replicas), toString(queue_size), "
+    "toString(absolute_delay), toString(is_readonly), toString(is_session_expired), "
+    "toString(replica_name), toString(zookeeper_path) FROM system.replicas "
+    "WHERE database = " + db + " AND `table` = " + tbl + " LIMIT 1",
+    [&](const clickhouse::Block& block) {
+      if (!block.GetRowCount()) return;
+      auto& replica = out.replication;
+      replica.available = true;
+      replica.total_replicas = parse_u64(block_string_at(block, 0, 0)).value_or(0);
+      replica.active_replicas = parse_u64(block_string_at(block, 1, 0)).value_or(0);
+      replica.queue_size = parse_u64(block_string_at(block, 2, 0)).value_or(0);
+      replica.absolute_delay_seconds = parse_u64(block_string_at(block, 3, 0)).value_or(0);
+      replica.readonly = truthy(block_string_at(block, 4, 0));
+      replica.session_expired = truthy(block_string_at(block, 5, 0));
+      replica.replica_name = block_string_at(block, 6, 0);
+      replica.zookeeper_path = block_string_at(block, 7, 0);
+    }, &ignored);
+
+  classify_health(out);
+  return true;
+}
 
 bool load_explorer_catalog(
     clickhouse::Client& system,
@@ -1836,6 +2233,33 @@ bool load_explorer_table_detail(
   if (!select_dependencies_loaded) {
     if (error) *error = "View lineage query failed: " + section_error;
     return false;
+  }
+
+  // Scope totals must be larger than the selected table. The per-table ACL
+  // object set intentionally contains only this table, so using it here makes
+  // Table / Database and Table / ClickHouse incorrectly report 100%. Aggregate
+  // the runner-visible catalog instead; only database-level totals are retained.
+  section_error.clear();
+  try {
+    const auto visible_databases = discover_visible_databases(runner);
+    std::vector<ExplorerDatabaseSummary> summaries;
+    if (load_explorer_database_summaries(runner, visible_databases, summaries, &section_error)) {
+      uint64_t clickhouse_bytes = 0;
+      bool database_seen = false;
+      for (const auto& summary_row : summaries) {
+        clickhouse_bytes += summary_row.bytes;
+        if (summary_row.name == database) {
+          out.database_footprint_bytes = summary_row.bytes;
+          database_seen = true;
+        }
+      }
+      if (!summaries.empty()) out.clickhouse_footprint_bytes = clickhouse_bytes;
+      if (!database_seen) out.database_footprint_bytes.reset();
+    } else {
+      out.unavailable_sections.push_back("footprint_scope");
+    }
+  } catch (const std::exception&) {
+    out.unavailable_sections.push_back("footprint_scope");
   }
 
   return true;

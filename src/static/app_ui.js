@@ -597,12 +597,31 @@
     if (dom.runOptMultiQuery) {
       dom.runOptMultiQuery.setAttribute("aria-checked", String(!!state.runOptMultiQuery));
     }
+    if (dom.runOptExecutionStats) {
+      dom.runOptExecutionStats.setAttribute("aria-checked", String(!!state.runOptExecutionStats));
+    }
+    if (dom.runOptFlattenTuple) {
+      dom.runOptFlattenTuple.setAttribute("aria-checked", String(state.runOptFlattenTuple !== false));
+    }
   }
 
   function toggleRunOption(key) {
     if (key === "autoFormat") state.runOptAutoFormat = !state.runOptAutoFormat;
     if (key === "multiQuery") state.runOptMultiQuery = !state.runOptMultiQuery;
-    storage.saveRunOptions({ autoFormat: state.runOptAutoFormat, multiQuery: state.runOptMultiQuery });
+    if (key === "executionStats") {
+      state.runOptExecutionStats = !state.runOptExecutionStats;
+      if (!state.runOptExecutionStats && dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
+    }
+    if (key === "flattenTuple") {
+      state.runOptFlattenTuple = !state.runOptFlattenTuple;
+      window.dispatchEvent(new CustomEvent("chdash:flatten-tuple-change", { detail: { enabled: state.runOptFlattenTuple } }));
+    }
+    storage.saveRunOptions({
+      autoFormat: state.runOptAutoFormat,
+      multiQuery: state.runOptMultiQuery,
+      executionStats: state.runOptExecutionStats,
+      flattenTuple: state.runOptFlattenTuple,
+    });
     applyRunOptionsUi();
   }
 
@@ -1431,6 +1450,8 @@
 
     if (dom.runOptAutoFormat) dom.runOptAutoFormat.addEventListener("click", () => toggleRunOption("autoFormat"));
     if (dom.runOptMultiQuery) dom.runOptMultiQuery.addEventListener("click", () => toggleRunOption("multiQuery"));
+    if (dom.runOptExecutionStats) dom.runOptExecutionStats.addEventListener("click", () => toggleRunOption("executionStats"));
+    if (dom.runOptFlattenTuple) dom.runOptFlattenTuple.addEventListener("click", () => toggleRunOption("flattenTuple"));
 
     if (dom.hostPickerButton) dom.hostPickerButton.addEventListener("click", toggleHostMenu);
 

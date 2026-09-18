@@ -12,7 +12,9 @@ def test_overview_is_storage_first_without_key_value_metadata_list() -> None:
     overview = ui[ui.index("function renderOverview") : ui.index("function isImplementationSubcolumn")]
     assert "simpleRows(" not in overview
     assert "renderTableFootprint(container, detail);" in overview
-    assert "renderStorageComposition(container, detail);" in overview
+    assert "renderTableFootprint(container, detail);" in overview
+    footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
+    assert "buildStorageComposition(detail, { embedded: true })" in footprint
     assert 'sectionTitle("Storage breakdown")' not in overview
 
 
@@ -21,7 +23,7 @@ def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> N
     assert "if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return null;" in ui
     assert 'unknownText = "unknown"' in ui
     assert 'wrap.appendChild(node("span", "explorerPercentBar__text", unknownText));' in ui
-    assert 'explorerShareList explorerShareList--inline' in ui
+    assert 'explorerShareList explorerShareList--footprint' in ui
     for label in ["Wide", "Compact", "Projections", "Indexes"]:
         assert f'["{label}",' in ui
 

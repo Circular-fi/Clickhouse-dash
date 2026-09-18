@@ -116,14 +116,16 @@ def test_list_detail_exposes_storage_parts_topology_and_replication_without_cros
     assert '"Files", "Level"' in explorer
 
 
-def test_table_detail_reuses_bulk_catalog_cache_instead_of_reloading_catalog() -> None:
+def test_table_detail_is_lazy_targeted_and_cached_per_object() -> None:
     api = read("src/api_explorer.cpp")
     catalog = read("src/explorer_catalog.cpp")
     detail = catalog[catalog.index("bool load_explorer_table_detail"):catalog.index("bool load_explorer_preview")]
 
-    assert "Reuse the same bulk catalog cache" in api
-    assert "explorer_catalog_cache_.get_or_refresh" in api
-    assert "load_explorer_catalog(system, allowed" not in detail
+    table_handler = api[api.index("void Server::handle_explorer_table"):api.index("void Server::handle_explorer_functions")]
+    assert "explorer_table_detail_cache_.get_or_refresh" in table_handler
+    assert "kExplorerTableDetailCacheTtlMs" in table_handler
+    assert "load_explorer_table_summary" in table_handler
+    assert "load_explorer_catalog(" not in table_handler
     assert "const ExplorerTableSummary& summary" in detail
 
 

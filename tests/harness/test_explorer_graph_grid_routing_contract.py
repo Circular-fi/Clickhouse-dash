@@ -30,7 +30,8 @@ def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> 
     explorer = read("src/static/app_explorer.js")
     assert 'function visibilityRequirements()' in graph
     assert 'required.includeSystem || options.includeSystem === true' in graph
-    assert 'required.includeNonStoring || options.includeNonStoring !== false' in graph
+    assert 'const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;' in graph
+    assert 'includeNonStoring: !!node && isNonStoringNode(node)' in graph
     assert 'function syncVisibilityOptionLocks' in explorer
     assert 'dom.explorerIncludeSystem.disabled = required.includeSystem;' in explorer
     assert 'dom.explorerIncludeNonStoring.disabled = required.includeNonStoring;' in explorer

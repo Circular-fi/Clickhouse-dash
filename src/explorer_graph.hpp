@@ -76,38 +76,6 @@ struct ExplorerGraph {
   std::vector<ExplorerGraphEdge> edges;
 };
 
-struct ExplorerGraphNodeActivity {
-  std::string node_id;
-  std::optional<double> read_rows_per_second;
-  std::optional<double> read_bytes_per_second;
-  std::optional<double> client_write_rows_per_second;
-  std::optional<double> client_write_bytes_per_second;
-  std::optional<double> physical_write_rows_per_second;
-  std::optional<double> physical_write_bytes_per_second;
-  uint64_t replication_queue = 0;
-  uint64_t replication_delay_seconds = 0;
-  std::string refresh_status;
-  std::string last_refresh_time;
-  std::string next_refresh_time;
-  std::optional<uint64_t> refresh_read_rows;
-  std::optional<uint64_t> refresh_written_rows;
-};
-
-struct ExplorerGraphEdgeActivity {
-  std::string edge_id;
-  double rows_per_second = 0.0;
-  double bytes_per_second = 0.0;
-  bool active = false;
-  std::string state;
-};
-
-struct ExplorerGraphActivity {
-  uint64_t generated_at_ms = 0;
-  std::string metric_scope = "local-replica";
-  std::vector<ExplorerGraphNodeActivity> nodes;
-  std::vector<ExplorerGraphEdgeActivity> edges;
-};
-
 bool load_explorer_graph(
     clickhouse::Client& system,
     const AllowedObjectSet& allowed,
@@ -115,11 +83,5 @@ bool load_explorer_graph(
     ExplorerGraph& out,
     std::string* error);
 
-bool load_explorer_graph_activity(
-    clickhouse::Client& system,
-    const AllowedObjectSet& allowed,
-    const ExplorerGraph& graph,
-    ExplorerGraphActivity& out,
-    std::string* error);
 
 } // namespace chdash

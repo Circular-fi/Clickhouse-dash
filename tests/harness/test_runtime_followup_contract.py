@@ -190,29 +190,22 @@ def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_pro
     assert 'add_edge_unique(out, seen_edges, {{}, physical_parent, disk_id, "contains", "disk", false});' in graph_backend
 
 
-def test_database_inventory_is_integrated_into_table_tree_with_totals_and_navigable_tables() -> None:
-    header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
+def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -> None:
     api = read("src/api_explorer.cpp")
     ui = read("src/static/app_explorer.js")
     html = read("src/static/explorer.html")
 
-    assert "struct ExplorerDatabaseSummary" in header
-    assert "struct ExplorerDatabaseDisk" in header
-    assert "std::vector<ExplorerDatabaseSummary> database_summaries" in header
-    assert "toString(hostName())" in catalog
-    assert "FROM system.disks" in catalog
-    assert "sum(bytes_on_disk)" in catalog
-    assert 'w.Key("database_summaries")' in api
+    catalog_handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
+    assert "load_explorer_catalog_index" in catalog_handler
+    assert 'w.Key("database_summaries")' in catalog_handler
+    assert 'w.Key("engine_full")' not in catalog_handler
+    assert 'w.Key("database")' in catalog_handler and 'w.Key("name")' in catalog_handler and 'w.Key("engine")' in catalog_handler
     assert 'id="explorerDatabasesSectionButton"' not in html
     assert 'id="explorerDatabaseCards"' not in html
     assert "function renderDatabaseDetail(database)" in ui
     assert "function selectDatabase(database" in ui
     assert 'model.selectedDatabase = name;' in ui
-    assert 'databaseInfo ? fmtInt(databaseInfo.tables) : fmtInt(items.length)' in ui
-    assert 'tables · ${databaseInfo ? fmtBytes(databaseInfo.bytes)' in ui
-    assert "disk.host_name" in ui
-    assert "disk.free_space" in ui
+    assert '`${fmtInt(tables.length)} tables`' in ui
     assert 'button.addEventListener("click", () => void selectTable(table.database, table.name));' in ui
 
 def test_table_switch_requires_requested_identity_instead_of_rendering_undefined() -> None:
@@ -269,9 +262,10 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'detail.default_compression_codecs' in render
     assert '`${observedDefaults[0]} (default)`' in render
     assert 'ctx.value == null ? "-" : fmtStorageBytes(ctx.value)' in ui
-    assert 'unknownText: "-"' in ui
+    assert 'ctx.value == null ? "-" : fmtPercent(ctx.value)' in ui
+    assert 'applyGauge(td, ctx.value, 100' in ui
     assert 'percentValue(compressed, tableFootprint)' in render
-    assert 'Compact parts share one physical data stream' in render
+    assert 'Compact parts share one physical data stream' not in render
     assert 'Wide ratio' not in render and 'Wide weight' not in render
 
 
@@ -294,7 +288,7 @@ def test_graph_controls_live_in_viewport_and_depth_can_increase_or_decrease() ->
     assert 'id="explorerGraphFitButton"' in html
     assert 'id="explorerGraphClearFocusButton"' not in html
     assert 'model.focusDepth -= 1' in graph
-    assert 'model.focusDepth += 1' in graph
+    assert 'model.focusDepth = Math.min(8, model.focusDepth + 1)' in graph
     assert '.explorerGraphViewportControls' in css
 
 
@@ -341,8 +335,8 @@ def test_graph_depth_preserves_focus_and_disables_plus_when_no_new_nodes() -> No
     assert 'stabilizeLayoutPositions' in graph
     recompute = graph[graph.index('function recomputePreservingFocus()'):graph.index('function setFocus(')]
     assert 'model.offsetX' not in recompute and 'model.offsetY' not in recompute
-    assert 'next.size > current.size' in graph
-    assert 'next.size <= current.size' in graph
+    assert 'model.graph?.scope_has_more === true' in graph
+    assert 'Number(model.graph?.scope_depth) === model.focusDepth' in graph
     assert 'fitToScreen();' not in graph[graph.index("function contractNeighborhood"):graph.index("function defaultFocusId")]
 
 
@@ -370,15 +364,17 @@ def test_view_like_details_are_single_overview_and_lineage_tab_is_conditional() 
     assert 'sectionTitle("Lineage")' not in overview
 
 
-def test_explorer_tools_live_in_sidebar_and_database_nodes_show_total_size() -> None:
+def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     html = read("src/static/explorer.html")
     ui = read("src/static/app_explorer.js")
     assert 'class="explorerSidebarToolbar"' in html
     assert 'id="explorerFunctionSearchInput"' in html
     assert 'id="explorerFunctionCategorySelect"' in html
     assert 'id="explorerFunctionRefreshButton"' in html
-    assert '${databaseInfo ? fmtBytes(databaseInfo.bytes) : "—"}' in ui
-    assert 'const metaBits = [humanEngine(table.engine)];' in ui
-    assert 'summaryRowsLabel(table, { compact: true })' in ui
-    assert 'const bytes = summaryFootprintBytes(table);' in ui
-    assert 'if (bytes != null) metaBits.push(isResidentMemorySummary(table) ? `${fmtBytes(bytes)} RAM` : fmtBytes(bytes));' in ui
+    tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
+    assert 'databaseMeta.join(" · ")' in tree
+    assert 'fmtStorageBytes(databaseSummary.bytes)' in tree
+    assert 'humanEngine(table.engine)' in tree
+    assert 'summaryRowsLabel(table' in tree
+    assert 'summaryFootprintBytes(table)' in tree
+    assert 'explorerTreeHealthDot' not in tree

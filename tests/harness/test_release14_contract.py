@@ -31,13 +31,14 @@ def test_trace_fold_updates_existing_dom_instead_of_repainting_all_rows() -> Non
     assert "addTicks(timeline, model.window, false)" not in viewer
 
 
-def test_analysis_has_no_tabs_and_uses_nearly_full_viewport() -> None:
+def test_analysis_has_two_profiling_tabs_and_uses_nearly_full_viewport() -> None:
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     css = read("src/static/style.css")
-    assert "analysisTabs" not in html
-    assert "data-analysis-tab" not in html
-    assert "activeTab" not in analysis
+    assert 'id="analysisTabs"' in html
+    assert 'id="analysisPipelineTab"' in html
+    assert 'id="analysisTraceTab"' in html
+    assert 'let activeTab = "pipeline";' in analysis
     assert 'width: min(1800px, calc(100vw - 12px));' in css
     assert 'height: calc(100vh - 12px);' in css
     assert '.analysisModal__content { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px 8px 8px; }' in css
@@ -62,7 +63,9 @@ def test_graph_refresh_discards_stale_scope_and_replays_latest_request() -> None
     assert "refreshQueued: false" in graph
     assert "const serial = ++model.refreshSerial;" in graph
     assert "serial !== model.refreshSerial" in graph
-    assert "requestDatabase" in graph
+    assert "graphRequestOptions" in graph
+    assert "graphRequestKey" in graph
+    assert "requestKey" in graph
     assert "model.refreshQueued = true;" in graph
     assert "queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));" in graph
 
@@ -124,7 +127,9 @@ def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_sin
     graph = read("src/static/app_explorer_graph.js")
     explorer = read("src/static/app_explorer.js")
     assert 'if (!exists) {' in graph
-    assert 'if (model.active) refresh(true);' in graph
+    assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
+    assert 'model.refreshQueuedForce = true;' in graph
+    assert 'queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));' in graph
     needle = 'dom.explorerModeSelectButton?.addEventListener("click"'
     assert explorer.count(needle) == 1
 

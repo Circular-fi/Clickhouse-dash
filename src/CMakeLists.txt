@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
 option(CHDASH_BUILD_APP "Build chdash executable" ON)
+option(CHDASH_BUILD_CODEC_TESTS "Build the processor JSON codec test driver" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -38,6 +39,12 @@ FetchContent_Declare(
   GIT_TAG        24b5e7a8b27f42fa16b96fc70aade9106cf7102f
 )
 FetchContent_MakeAvailable(rapidjson)
+
+if (CHDASH_BUILD_CODEC_TESTS)
+  add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
+  target_include_directories(chdash_processor_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_processor_codec_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+endif()
 
 if (CHDASH_BUILD_APP)
   add_executable(chdash

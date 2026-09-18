@@ -21,7 +21,7 @@ def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> 
     assert 'if (model.section !== "tables") setSection("tables");' in ui
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
-    assert 'Route intent is a one-shot bootstrap instruction.' in ui
+    assert 'refreshCatalog(true)' not in ui[ui.index('function openTableFromGraph'):ui.index('function init()', ui.index('function openTableFromGraph'))]
     assert ui.count('model.routeIntent = null;') >= 4
 
 
@@ -44,7 +44,7 @@ def test_hidden_views_and_materialized_views_are_contracted_before_depth() -> No
     graph = read("src/static/app_explorer_graph.js")
     assert 'function logicalProjection()' in graph
     assert 'const projection = logicalProjection();' in graph
-    assert 'if (!model.includeNonStoring && isNonStoringNode(node))' in graph
+    assert 'if (!model.includeNonStoring && isNonStoringNode(node) && node.id !== model.focusedId)' in graph
     assert 'id: `collapsed:${source}:${target}:${kind}:${hidden.join(">")}`' in graph
     assert 'via hidden object' in graph
     assert 'resolveBufferRepresentative' in graph

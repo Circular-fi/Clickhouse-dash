@@ -321,6 +321,12 @@
               <button id="runOptMultiQuery" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
                 <span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Allow multiquery</span>
               </button>
+              <button id="runOptExecutionStats" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="false">
+                <span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Load execution stats</span>
+              </button>
+              <button id="runOptFlattenTuple" class="runMenu__opt" type="button" role="menuitemcheckbox" aria-checked="true">
+                <span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Flatten tuple</span>
+              </button>
             </div>
           </div>
         </div>
@@ -409,7 +415,7 @@
         <div class="panel__title">Results</div>
         <div class="panel__meta">
           <span class="metaItem" id="resultColumnsText">-</span>
-          <button id="analyzeQueryButton" class="button button--small" type="button" hidden>Analyze</button>
+          <button id="analyzeQueryButton" class="button button--small" type="button" hidden>Profiling</button>
           <div id="copySplit" class="runSplit copySplit">
             <div class="runSplit__buttons">
               <button id="copyJsonButton" class="button button--small resultsStack__copy runSplit__main" type="button" disabled>Copy JSON</button>
@@ -459,6 +465,10 @@
         </div>
       </div>
       <div id="analysisNotice" class="analysisModal__notice" hidden></div>
+      <div id="analysisTabs" class="analysisTabs" role="tablist" aria-label="Profiling view">
+        <button id="analysisPipelineTab" class="analysisTab is-active" type="button" role="tab" aria-selected="true">Pipeline</button>
+        <button id="analysisTraceTab" class="analysisTab" type="button" role="tab" aria-selected="false">Tracing</button>
+      </div>
       <div id="analysisContent" class="analysisModal__content"></div>
     </section>
   </div>

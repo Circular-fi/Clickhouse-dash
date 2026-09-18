@@ -90,8 +90,12 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert 'w.Key("lineage"); w.Bool(cfg_.explorer.lineage);' in server
     assert 'w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);' in server
     api_explorer = read("src/api_explorer.cpp")
-    assert '(node.layer == "logical" && cfg_.explorer.lineage)' in api_explorer
-    assert '(node.layer == "physical" && cfg_.explorer.storage_topology)' in api_explorer
+    assert "ExplorerGraphRequestScope" in api_explorer
+    assert "scope_graph(" in api_explorer
+    assert "cfg_.explorer.lineage" in api_explorer
+    assert "cfg_.explorer.storage_topology" in api_explorer
+    assert 'scope.physical && storage_enabled' in api_explorer
+    assert '!scope.physical && lineage_enabled' in api_explorer
     assert "browse = true" in example
     assert "graph {" in example
     assert "lineage" in example and "storage_topology" in example

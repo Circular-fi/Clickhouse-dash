@@ -14,7 +14,7 @@ def test_overview_uses_ram_labels_without_resident_runtime_cards_or_extra_sectio
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
     assert "renderResidentRuntime" not in ui
-    assert '`${fmtBytes(bytes)} RAM`' in ui
+    assert '`${fmtBytes(footprint)} RAM`' in ui
     assert '`${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
     assert 'sectionTitle("Storage breakdown")' not in overview
     assert 'sectionTitle("CREATE statement")' not in overview

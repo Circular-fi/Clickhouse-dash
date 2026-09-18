@@ -306,6 +306,38 @@ void AllowedObjectSet::add_table(AllowedTable table) {
   }
 }
 
+std::vector<std::string> discover_visible_databases(clickhouse::Client& runner) {
+  auto databases = show_databases(runner);
+  databases.erase(
+      std::remove_if(databases.begin(), databases.end(), [](const std::string& database) {
+        return !explorer_schema_visible(database);
+      }),
+      databases.end());
+  return databases;
+}
+
+std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, const std::string& database) {
+  if (!explorer_schema_visible(database)) return {};
+  auto objects = show_tables(runner, database);
+  auto dictionaries = show_dictionaries(runner, database);
+  objects.insert(objects.end(), dictionaries.begin(), dictionaries.end());
+  std::sort(objects.begin(), objects.end());
+  objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
+  return objects;
+}
+
+std::optional<AllowedTable> discover_allowed_table(
+    clickhouse::Client& runner,
+    const std::string& database,
+    const std::string& table) {
+  if (!explorer_schema_visible(database) || database.empty() || table.empty()) return std::nullopt;
+  const auto objects = discover_visible_objects(runner, database);
+  if (!std::binary_search(objects.begin(), objects.end(), table)) return std::nullopt;
+  auto entry = inspect_table(runner, database, table);
+  if (!entry.all_columns && entry.columns.empty()) return std::nullopt;
+  return entry;
+}
+
 AllowedObjectSet discover_allowed_objects(clickhouse::Client& runner) {
   AllowedObjectSet allowed;
   const auto databases = show_databases(runner);

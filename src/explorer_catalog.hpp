@@ -238,6 +238,10 @@ struct ExplorerReplicationQueueItem {
 
 struct ExplorerTableDetail {
   ExplorerTableSummary summary;
+  // Scope totals are loaded lazily with the selected table so Browse can keep
+  // Table / Database / ClickHouse percentages without bloating the list API.
+  std::optional<uint64_t> database_footprint_bytes;
+  std::optional<uint64_t> clickhouse_footprint_bytes;
   std::string create_table_query;
   // Actual default codecs observed on active MergeTree parts. A column with no
   // explicit CODEC() uses one of these part defaults; keeping the set avoids the
@@ -306,6 +310,28 @@ struct ExplorerPreview {
   std::vector<std::vector<std::string>> rows;
   size_t limit = 100;
 };
+
+bool load_explorer_catalog_index(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    const AllowedObjectSet& allowed,
+    ExplorerCatalog& out,
+    std::string* error);
+
+bool load_explorer_database_summaries(
+    clickhouse::Client& runner,
+    const std::vector<std::string>& databases,
+    std::vector<ExplorerDatabaseSummary>& out,
+    std::string* error);
+
+bool load_explorer_table_summary(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    const AllowedObjectSet& allowed,
+    const std::string& database,
+    const std::string& table,
+    ExplorerTableSummary& out,
+    std::string* error);
 
 bool load_explorer_catalog(
     clickhouse::Client& system,

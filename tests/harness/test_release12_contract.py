@@ -29,21 +29,24 @@ def test_graph_focus_freezes_camera_and_retained_node_coordinates_and_has_select
     assert 'ctx.strokeStyle = css("--accent"' in graph
 
 
-def test_analysis_is_trace_first_and_uses_reusable_foldable_viewer() -> None:
+def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -> None:
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
     app = read("src/static/app.js")
-    assert 'data-analysis-tab=' not in html
-    assert 'analysisTabs' not in html
-    assert 'activeTab' not in analysis
+    assert 'id="analysisTabs"' in html
+    assert 'id="analysisPipelineTab"' in html
+    assert 'id="analysisTraceTab"' in html
+    assert 'let activeTab = "pipeline";' in analysis
+    assert 'ns.pipelineViewer.render(root' in analysis
     assert 'ns.traceViewer.render(root' in analysis
-    assert 'ns.traceViewer = { render, durationLabel, buildModel };' in viewer
+    assert 'ns.traceViewer = { render, durationLabel, buildModel, initialCollapsedForSpanLimit };' in viewer
     assert 'shouldCollapseByDefault' in viewer
     assert 'collapsed.has(span.key)' in viewer
     assert 'Attempt ${index + 1}' in viewer
     assert 'analysisFlowIntro' not in viewer
     assert 'app_trace_viewer.js' in app
+    assert 'app_pipeline_viewer.js' in app
 
 
 def test_profiling_auto_opens_analysis_and_debug_exports_full_profiling_file() -> None:
@@ -56,6 +59,6 @@ def test_profiling_auto_opens_analysis_and_debug_exports_full_profiling_file() -
     assert 'runMode,' in run
     assert 'async function profilingFiles(entry, prefix)' in download
     assert '`${prefix}profiling.json`' in download
-    assert 'api.analyzeQuery(entry.hostId || runHostId, entry.queryId)' in download
+    assert 'api.analyzeQuery(entry.hostId || runHostId, entry.queryId, { includeOriginalTrace: true })' in download
     assert 'files.push(...await profilingFiles(entry, prefix));' in download
     assert 'profiling is unavailable for multiquery editor content' in functional

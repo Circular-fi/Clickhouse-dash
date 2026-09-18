@@ -135,21 +135,18 @@ test('normal runs do not expose Analyze', async ({ page }, testInfo) => {
   await captureState(page, testInfo, 'query-normal-no-analysis');
 });
 
-test('profiling analysis renders the reusable Jaeger-style trace', async ({ page }, testInfo) => {
+test('profiling analysis renders Pipeline first and Tracing second', async ({ page }, testInfo) => {
   await openApp(page);
   await runSuccessfulQuery(page, `SELECT city, count() AS rows, avg(temperature_c) AS avg_temperature
     FROM chdash_ui.mild_weather_observations
     GROUP BY city ORDER BY city`, { profiling: true });
   await expect(page.locator('#analysisModalBackdrop')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('#analysisTabs')).toHaveCount(0);
-  await expect(page.locator('[data-analysis-tab]')).toHaveCount(0);
+  await expect(page.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'analysis-pipeline');
+  await page.locator('#analysisTraceTab').click();
   await expect(page.locator('.traceViewer__row').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.traceViewer__bar').first()).toBeVisible();
   await captureState(page, testInfo, 'analysis-trace');
-
-
-  await expect(page.locator('[data-analysis-tab="raw"]')).toHaveCount(0);
-  await expect(page.locator('[data-analysis-tab="deep"]')).toHaveCount(0);
   await expect(page.locator('#deepAnalyzeButton')).toHaveCount(0);
 });
 

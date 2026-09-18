@@ -246,34 +246,33 @@
     scheduleChartsRender();
   }
 
-  function formatShort(value, mul = 1000, units = ['k', 'M', 'B', 'T'], fixed=2, space=false) {
+  function formatShort(value, mul = 1000, units = ["K", "M", "B", "T"], fixed = 2, baseUnit = "") {
     const n = Number(value);
     if (!Number.isFinite(n)) return "-";
-    const sign = n < 0 ? '-' : '';
-    if (n < mul) return `${Math.round(n)} B`;
+    const sign = n < 0 ? "-" : "";
     let v = Math.abs(n);
+    if (v < mul) return `${sign}${v.toFixed(fixed)}${baseUnit}`;
     let u = -1;
     while (v >= mul && u < units.length - 1) {
       v /= mul;
-      u++;
+      u += 1;
     }
-    const d = u > 1 ? 2 : 0;
-    return `${sign}${v.toFixed(fixed)}${space?' ':''}${units[u]}`;
+    return `${sign}${v.toFixed(fixed)}${units[u]}`;
   }
 
   function formatBytesShort(value) {
-    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"],  2, true);
+    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"], 2, "B");
+  }
+
+  function formatRows(value) {
+    return formatShort(value, 1000, ["K", "M", "B", "T"], 2, "");
   }
 
   function formatSecondsFromMs(ms) {
     const n = Number(ms);
     if (!Number.isFinite(n) || n < 0) return "-";
-    if (n < 1000) return `${Math.max(0, Math.round(n))}ms`;
-    const s = n / 1000;
-    if (s < 10) return `${s.toFixed(3)}s`;
-    if (s < 100) return `${s.toFixed(2)}s`;
-    if (s < 1000) return `${s.toFixed(1)}s`;
-    return `${Math.round(s)}s`;
+    if (n < 1000) return `${n.toFixed(2)}ms`;
+    return `${(n / 1000).toFixed(2)}s`;
   }
 
   function formatPercentFromCenti(value) {
@@ -328,6 +327,10 @@
   }
 
   async function refreshClickHouseElapsed(hostId, queryId) {
+    if (!state.runOptExecutionStats) {
+      if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
+      return;
+    }
     if (!dom.clickhouseElapsedText || !hostId || !queryId || !api || typeof api.getQueryExecution !== "function") return;
     if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
     dom.clickhouseElapsedText.removeAttribute("title");
@@ -386,8 +389,8 @@
       else setProgressIndeterminate(false);
     }
 
-    if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, `${formatShort(rowsPerSec)}/s`);
-    if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, formatShort(readRowsTotal));
+    if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, `${formatRows(rowsPerSec)}/s`);
+    if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, formatRows(readRowsTotal));
 
     if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
     if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
@@ -397,8 +400,8 @@
     if (hasWrites) {
       if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
       if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
-      if (Number.isFinite(writtenRowsPerSec)) util.setMetricText(dom.writtenRowsRateText, `${formatShort(writtenRowsPerSec)}/s`);
-      if (Number.isFinite(writtenRowsTotal)) util.setMetricText(dom.writtenRowsTotalText, formatShort(writtenRowsTotal));
+      if (Number.isFinite(writtenRowsPerSec)) util.setMetricText(dom.writtenRowsRateText, `${formatRows(writtenRowsPerSec)}/s`);
+      if (Number.isFinite(writtenRowsTotal)) util.setMetricText(dom.writtenRowsTotalText, formatRows(writtenRowsTotal));
       if (Number.isFinite(writtenBytesPerSec)) util.setMetricText(dom.writtenBytesRateText, `${formatBytesShort(writtenBytesPerSec)}/s`);
       if (Number.isFinite(writtenBytesTotal)) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(writtenBytesTotal));
     }
@@ -511,15 +514,15 @@
   function applyDoneMetrics(done, agg) {
     if (!done || typeof done !== "object") return;
     lockProgressIndeterminate = true;
-    if (done.elapsed_seconds != null) util.setMetricText(dom.elapsedSecondsText, util.formatSeconds(done.elapsed_seconds));
+    if (done.elapsed_seconds != null) util.setMetricText(dom.elapsedSecondsText, formatSecondsFromMs(Number(done.elapsed_seconds) * 1000));
 
     const rr = done.read_rows != null ? Number(done.read_rows) : null;
     const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
     const wr = done.written_rows != null ? Number(done.written_rows) : null;
     const wb = done.written_bytes != null ? Number(done.written_bytes) : null;
 
-    if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, formatShort(rr));
-    else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, formatShort(agg.lastReadRows));
+    if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, formatRows(rr));
+    else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, formatRows(agg.lastReadRows));
 
     if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, formatBytesShort(rb));
     else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
@@ -529,7 +532,7 @@
     if ((finalWrittenRows != null && finalWrittenRows > 0) || (finalWrittenBytes != null && finalWrittenBytes > 0)) {
       if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
       if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
-      if (finalWrittenRows != null) util.setMetricText(dom.writtenRowsTotalText, formatShort(finalWrittenRows));
+      if (finalWrittenRows != null) util.setMetricText(dom.writtenRowsTotalText, formatRows(finalWrittenRows));
       if (finalWrittenBytes != null) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(finalWrittenBytes));
     }
 
@@ -1411,11 +1414,15 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         }
 
         applyDoneMetrics(data, agg);
-        streamSink.finalizeAfterDone();
-
-        if (agg) agg.terminal = true;
-        closeActiveStream();
-        resolve({ ...data, status: st });
+        // Row decoding/render bookkeeping is intentionally cooperative for large
+        // streams. Do not publish the terminal result until the background row
+        // queue has drained, otherwise row counts/copy/export can observe a
+        // partially ingested response.
+        Promise.resolve(streamSink.finalizeAfterDone()).then(() => {
+          if (agg) agg.terminal = true;
+          closeActiveStream();
+          resolve({ ...data, status: st });
+        });
       });
 
       es.onerror = () => {
@@ -1472,7 +1479,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     parts.push(statusLabel(status));
     if (elapsedSeconds != null) parts.push(util.formatSeconds(elapsedSeconds));
     if (outRows != null && outCols != null) parts.push(`${outRows} row${outRows > 1 ? 's' : ''} ${outCols} column${outCols > 1 ? 's' : ''}`);
-    if (readRows != null) parts.push(`${formatShort(readRows)} row${readRows > 1 ? 's' : ''}`);
+    if (readRows != null) parts.push(`${formatRows(readRows)} rows`);
     if (readBytes != null) parts.push(`${formatBytesShort(readBytes)}`);
 
     if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${formatPercentFromCenti(cpuMaxCenti)}`);
@@ -1593,6 +1600,10 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     results.clearResultsStack();
     results.clearLiveResults();
+    // Starting a new run behaves exactly like Clear: stale result rows/panels
+    // disappear while the new query is loading and are shown again only when
+    // the new run produces rows, a terminal result, or an error.
+    results.setResultsVisible(false);
     resetMetrics();
     setQueryIdText(null);
     setQueryStatusText("running");
@@ -1645,7 +1656,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
             snapshot: results && typeof results.getSnapshot === "function" ? results.getSnapshot() : null,
           });
         }
-        if (out && out.queryId) await refreshClickHouseElapsed(hostId, out.queryId);
+        if (out && out.queryId && state.runOptExecutionStats) await refreshClickHouseElapsed(hostId, out.queryId);
         resetLiveMetrics();
         const terminalStatus = String(out?.done?.status || "done").toLowerCase();
         if (downloadKind && statusIsStopping(terminalStatus)) {

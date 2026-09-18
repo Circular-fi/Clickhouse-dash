@@ -11,6 +11,7 @@
   let resultColumns = [];
   let resultTypes = [];
   let resultTypeAsts = [];
+  let resultTupleFlattenPlan = null;
   let pendingRows = [];
   let allResultRows = [];
   let lastErrorMessage = "";
@@ -26,8 +27,83 @@
   // in the main page viewport. The results table itself must not become a
   // separate vertical scroll container.
   const virtualRowThreshold = 500;
-  const virtualOverscanRows = 18;
+  const virtualOverscanMinRows = 96;
+  const virtualOverscanViewports = 6;
   const virtualDefaultRowHeight = 32;
+
+  // Streamed result batches can contain hundreds or thousands of rows. Doing
+  // tuple projection, numeric scans and array growth for the whole SSE batch in
+  // one task blocks editor input. Drain rows in short background slices so
+  // typing/scroll/paint keep getting main-thread time.
+  function createCooperativeRowQueue(processRows) {
+    let queue = [];
+    let scheduled = false;
+    let generation = 0;
+    let idleWaiters = [];
+
+    function resolveIdle() {
+      if (queue.length || scheduled) return;
+      const waiters = idleWaiters.splice(0);
+      for (const resolve of waiters) resolve();
+    }
+
+    function postBackground(fn) {
+      if (globalThis.scheduler && typeof globalThis.scheduler.postTask === "function") {
+        try {
+          globalThis.scheduler.postTask(fn, { priority: "background" });
+          return;
+        } catch {
+          // Fall through to the broadly supported timer queue.
+        }
+      }
+      setTimeout(fn, 0);
+    }
+
+    function schedule() {
+      if (scheduled || !queue.length) return;
+      scheduled = true;
+      const taskGeneration = generation;
+      postBackground(() => {
+        if (taskGeneration !== generation) {
+          scheduled = false;
+          resolveIdle();
+          return;
+        }
+        scheduled = false;
+        const start = performance.now();
+        const batch = [];
+        while (queue.length && batch.length < 128 && performance.now() - start < 4) {
+          const head = queue[0];
+          while (head.index < head.rows.length && batch.length < 128 && performance.now() - start < 4) {
+            if (batch.length && globalThis.navigator?.scheduling?.isInputPending?.()) break;
+            batch.push(head.rows[head.index++]);
+          }
+          if (head.index >= head.rows.length) queue.shift();
+        }
+        if (batch.length) processRows(batch);
+        if (queue.length) schedule();
+        else resolveIdle();
+      });
+    }
+
+    return {
+      enqueue(rows) {
+        if (!Array.isArray(rows) || !rows.length) return;
+        queue.push({ rows, index: 0 });
+        schedule();
+      },
+      whenIdle() {
+        if (!queue.length && !scheduled) return Promise.resolve();
+        return new Promise((resolve) => idleWaiters.push(resolve));
+      },
+      reset() {
+        generation += 1;
+        queue = [];
+        scheduled = false;
+        resolveIdle();
+      },
+    };
+  }
 
   let isVerticalResults = false;
   // Do not commit to a horizontal result layout until the stream proves there
@@ -60,6 +136,7 @@
   let liveGaugesEnabled = false;
   let liveGaugesPainted = false;
   let liveBodyHold = null;
+  const liveRowIngest = createCooperativeRowQueue(appendRowsImmediate);
 
   function getDocumentScrollHeight() {
     const bodyH = document.body ? document.body.scrollHeight : 0;
@@ -162,11 +239,13 @@
   }
 
   function clearLiveResults() {
+    liveRowIngest.reset();
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
     const preservedBodyScrollHeight = getDocumentScrollHeight();
     resultColumns = [];
     resultTypes = [];
     resultTypeAsts = [];
+    resultTupleFlattenPlan = null;
     gaugeNumericCols = [];
     gaugeMaxPos = [];
     gaugeMaxAbs = [];
@@ -376,15 +455,111 @@
           const rest = part.slice(splitAt).trim();
           if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(maybeName) && rest) {
             hasNamedFields = true;
-            return { name: maybeName, type: parseChType(rest), named: true };
+            return { name: maybeName, type: parseChType(rest), rawType: rest, named: true };
           }
         }
-        return { name: `_${idx}`, type: parseChType(part), named: false };
+        return { name: `_${idx}`, type: parseChType(part), rawType: part, named: false };
       });
       return { kind: "Tuple", fields, named: hasNamedFields };
     }
 
     return { kind: "Scalar", name: s };
+  }
+
+  function tupleFieldValue(value, field, index) {
+    const parsed = parseJsonStringIfLikely(value);
+    if (parsed === null || parsed === undefined) return null;
+    if (Array.isArray(parsed)) return parsed[index];
+    if (typeof parsed === "object") {
+      const name = String(field?.name ?? `_${index}`);
+      if (Object.prototype.hasOwnProperty.call(parsed, name)) return parsed[name];
+      const synthetic = `_${index}`;
+      if (Object.prototype.hasOwnProperty.call(parsed, synthetic)) return parsed[synthetic];
+      const values = Object.values(parsed);
+      return values[index];
+    }
+    return null;
+  }
+
+  function typeAstLabel(ast) {
+    if (!ast) return "String";
+    if (ast.kind === "Scalar") return String(ast.name || "String");
+    if (ast.kind === "Array") return `Array(${typeAstLabel(ast.inner)})`;
+    if (ast.kind === "Map") return `Map(${typeAstLabel(ast.key)}, ${typeAstLabel(ast.value)})`;
+    if (ast.kind === "Tuple") {
+      const fields = Array.isArray(ast.fields) ? ast.fields : [];
+      return `Tuple(${fields.map((field) => field.named ? `${field.name} ${field.rawType || typeAstLabel(field.type)}` : (field.rawType || typeAstLabel(field.type))).join(", ")})`;
+    }
+    return "String";
+  }
+
+  function createTupleFlattenPlan(columns, types, enabled = state.runOptFlattenTuple !== false) {
+    const safeColumns = Array.isArray(columns) ? columns.map((column) => String(column ?? "")) : [];
+    const safeTypes = Array.isArray(types) ? types.map((type) => String(type ?? "")) : [];
+    const descriptors = [];
+    let changed = false;
+
+    const appendTupleLeaves = (columnIndex, prefix, ast, getter) => {
+      const fields = Array.isArray(ast?.fields) ? ast.fields : [];
+      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+        const field = fields[fieldIndex];
+        const fieldName = String(field?.name ?? `_${fieldIndex}`);
+        const name = `${prefix}.${fieldName}`;
+        const fieldGetter = (row) => tupleFieldValue(getter(row), field, fieldIndex);
+        if (field?.type?.kind === "Tuple" && Array.isArray(field.type.fields) && field.type.fields.length) {
+          appendTupleLeaves(columnIndex, name, field.type, fieldGetter);
+        } else {
+          descriptors.push({
+            columnIndex,
+            name,
+            type: String(field?.rawType || typeAstLabel(field?.type)),
+            get: fieldGetter,
+          });
+        }
+      }
+    };
+
+    for (let columnIndex = 0; columnIndex < safeColumns.length; columnIndex += 1) {
+      const ast = parseChType(safeTypes[columnIndex] || "");
+      const baseGetter = (row) => Array.isArray(row) ? row[columnIndex] : (columnIndex === 0 ? row : null);
+      if (enabled && ast?.kind === "Tuple" && Array.isArray(ast.fields) && ast.fields.length) {
+        changed = true;
+        appendTupleLeaves(columnIndex, safeColumns[columnIndex], ast, baseGetter);
+      } else {
+        descriptors.push({
+          columnIndex,
+          name: safeColumns[columnIndex],
+          type: safeTypes[columnIndex] || "",
+          get: baseGetter,
+        });
+      }
+    }
+
+    return {
+      changed,
+      descriptors,
+      columns: descriptors.map((descriptor) => descriptor.name),
+      types: descriptors.map((descriptor) => descriptor.type),
+    };
+  }
+
+  function flattenTupleRow(row, plan) {
+    if (!plan?.changed) return row;
+    const out = plan.descriptors.map((descriptor) => descriptor.get(row));
+    if (row && typeof row === "object" && row.__chdashRowIndex) out.__chdashRowIndex = row.__chdashRowIndex;
+    return out;
+  }
+
+  function flattenTupleTableData(columns, types, rows, enabled = state.runOptFlattenTuple !== false) {
+    const plan = createTupleFlattenPlan(columns, types, enabled);
+    const safeRows = Array.isArray(rows) ? rows : [];
+    return {
+      columns: plan.columns,
+      types: plan.types,
+      rows: plan.changed ? safeRows.map((row) => flattenTupleRow(row, plan)) : safeRows,
+      sourceColumnIndexes: plan.descriptors.map((descriptor) => descriptor.columnIndex),
+      changed: plan.changed,
+    };
   }
 
   function coerceDeepTyped(v, typeAst) {
@@ -1220,26 +1395,41 @@
     });
   }
 
-  function getPageScrollTop() {
-    return Math.max(0, window.pageYOffset || document.documentElement?.scrollTop || document.body?.scrollTop || 0);
+  function findVerticalScrollOwner(el) {
+    let current = el?.parentElement || null;
+    while (current && current !== document.body && current !== document.documentElement) {
+      const style = window.getComputedStyle ? window.getComputedStyle(current) : null;
+      const overflowY = String(style?.overflowY || "");
+      if (/(auto|scroll|overlay)/.test(overflowY) && current.scrollHeight > current.clientHeight + 1) return current;
+      current = current.parentElement;
+    }
+    return null;
   }
 
-  function getElementPageTop(el) {
-    if (!el || !el.getBoundingClientRect) return 0;
-    return el.getBoundingClientRect().top + getPageScrollTop();
-  }
-
-  function getPageVirtualRange(rowsLength, rowH, bodyTop) {
-    const viewportH = Math.max(rowH, window.innerHeight || document.documentElement?.clientHeight || rowH * 12);
-    const viewportTop = getPageScrollTop();
-    const viewportBottom = viewportTop + viewportH;
-
-    let start = Math.max(0, Math.floor((viewportTop - bodyTop) / rowH) - virtualOverscanRows);
-    let end = Math.min(rowsLength, Math.ceil((viewportBottom - bodyTop) / rowH) + virtualOverscanRows);
+  function getVirtualRange(rowsLength, rowH, bodyEl) {
+    if (!bodyEl?.getBoundingClientRect) return { start: 0, end: Math.min(rowsLength, 50) };
+    const bodyRect = bodyEl.getBoundingClientRect();
+    const owner = findVerticalScrollOwner(bodyEl);
+    const windowHeight = Math.max(rowH, window.innerHeight || document.documentElement?.clientHeight || rowH * 12);
+    let viewportTop = 0;
+    let viewportBottom = windowHeight;
+    if (owner?.getBoundingClientRect) {
+      const ownerRect = owner.getBoundingClientRect();
+      viewportTop = Math.max(0, ownerRect.top);
+      viewportBottom = Math.min(windowHeight, ownerRect.bottom);
+    }
+    const viewportH = Math.max(rowH, viewportBottom - viewportTop);
+    const visibleRows = Math.max(1, Math.ceil(viewportH / rowH));
+    // Keep several full viewports mounted. A tiny fixed overscan can expose the
+    // spacer background before the next rAF when a trackpad/thumb scroll jumps
+    // multiple screens in one frame.
+    const overscanRows = Math.max(virtualOverscanMinRows, visibleRows * virtualOverscanViewports);
+    let start = Math.max(0, Math.floor((viewportTop - bodyRect.top) / rowH) - overscanRows);
+    let end = Math.min(rowsLength, Math.ceil((viewportBottom - bodyRect.top) / rowH) + overscanRows);
 
     if (end <= start) {
-      const visibleCount = Math.ceil(viewportH / rowH) + virtualOverscanRows * 2;
-      if (viewportBottom < bodyTop) {
+      const visibleCount = visibleRows + overscanRows * 2;
+      if (viewportBottom < bodyRect.top) {
         start = 0;
         end = Math.min(rowsLength, visibleCount);
       } else {
@@ -1251,10 +1441,28 @@
     return { start, end };
   }
 
+  function handleVirtualScroll() {
+    if (!isVirtualResults || isVerticalResults || !dom.resultTableBody) return;
+    const rows = Array.isArray(virtualViewRows) ? virtualViewRows : [];
+    const rowH = Math.max(18, Number(virtualRowHeight) || virtualDefaultRowHeight);
+    const target = getVirtualRange(rows.length, rowH, dom.resultTableBody);
+    // A scrollbar-thumb / rapid trackpad jump can move the viewport completely
+    // outside the currently mounted overscan window before the next animation
+    // frame. Render that disjoint jump synchronously so the user never lands on
+    // a spacer-only blank area; ordinary scrolling remains rAF-coalesced.
+    if (virtualLastStart < 0 || target.start >= virtualLastEnd || target.end <= virtualLastStart) {
+      renderVirtualRows(false);
+      return;
+    }
+    scheduleVirtualRender();
+  }
+
   function ensureVirtualScrollListener() {
     if (virtualScrollAttached) return;
     virtualScrollAttached = true;
-    window.addEventListener("scroll", scheduleVirtualRender, { passive: true });
+    // Query scrolls inside #queryWorkspace and Explorer inside its detail pane.
+    // scroll does not bubble, so listen in capture phase for the actual owner.
+    document.addEventListener("scroll", handleVirtualScroll, { passive: true, capture: true });
     window.addEventListener("resize", scheduleVirtualRender, { passive: true });
   }
 
@@ -1264,8 +1472,7 @@
     const rows = Array.isArray(virtualViewRows) ? virtualViewRows : [];
     const rowH = Math.max(18, Number(virtualRowHeight) || virtualDefaultRowHeight);
     const tbody = dom.resultTableBody;
-    const bodyTop = getElementPageTop(tbody);
-    const { start, end } = getPageVirtualRange(rows.length, rowH, bodyTop);
+    const { start, end } = getVirtualRange(rows.length, rowH, tbody);
 
     if (!force && start === virtualLastStart && end === virtualLastEnd) return;
     virtualLastStart = start;
@@ -1408,9 +1615,11 @@
   }
 
   function renderTableMeta(columns, types) {
+    liveRowIngest.reset();
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
-    resultColumns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
-    resultTypes = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+    resultTupleFlattenPlan = createTupleFlattenPlan(columns, types);
+    resultColumns = resultTupleFlattenPlan.columns;
+    resultTypes = resultTupleFlattenPlan.types;
     resultTypeAsts = resultTypes.map(parseChType);
     resetLiveGaugeState();
 
@@ -1487,12 +1696,17 @@
   }
 
   function appendRows(rowsChunk) {
+    liveRowIngest.enqueue(rowsChunk);
+  }
+
+  function appendRowsImmediate(rowsChunk) {
     if (!Array.isArray(rowsChunk) || rowsChunk.length === 0) return;
 
     let needsFullRender = isLiveSortActive() || isVirtualResults;
-    for (const row of rowsChunk) {
-      if (!Array.isArray(row)) continue;
+    for (const sourceRow of rowsChunk) {
+      if (!Array.isArray(sourceRow)) continue;
       rowIndexCounter++;
+      const row = flattenTupleRow(sourceRow, resultTupleFlattenPlan);
       row.__chdashRowIndex = rowIndexCounter;
       updateLiveGaugeMaximaFromRow(row);
       allResultRows.push(row);
@@ -1642,11 +1856,22 @@
   }
 
   function finalizeAfterDone() {
+    return liveRowIngest.whenIdle().then(() => finalizeAfterDoneImmediate());
+  }
+
+  function finalizeAfterDoneImmediate() {
     if (!livePresentationCommitted) {
       if (allResultRows.length === 1) {
         livePresentationCommitted = true;
         setResultsVisible(true);
-        renderVerticalSingleRow(allResultRows[0]);
+        if (resultColumns.length === 1) {
+          resetTableMode();
+          const td = simplifySingleValueTable();
+          const row = allResultRows[0];
+          if (td) renderSingleValueCell(td, Array.isArray(row) ? row[0] : row, 0, resultTypeAsts);
+        } else {
+          renderVerticalSingleRow(allResultRows[0]);
+        }
       } else {
         // Zero-row results can finally expose their schema; 2+ is a defensive
         // fallback for a terminal batch that bypassed the live threshold.
@@ -2117,7 +2342,7 @@
     const analyzeBtn = document.createElement("button");
     analyzeBtn.type = "button";
     analyzeBtn.className = "button button--small resultsStack__analyze";
-    analyzeBtn.textContent = "Analyze";
+    analyzeBtn.textContent = "Profiling";
     analyzeBtn.hidden = true;
     right.appendChild(analyzeBtn);
 
@@ -2353,8 +2578,7 @@
 
       const rows = Array.isArray(local.virtualViewRows) ? local.virtualViewRows : [];
       const rowH = Math.max(18, Number(local.virtualRowHeight) || virtualDefaultRowHeight);
-      const bodyTop = getElementPageTop(tbody);
-      const { start, end } = getPageVirtualRange(rows.length, rowH, bodyTop);
+      const { start, end } = getVirtualRange(rows.length, rowH, tbody);
 
       if (!force && start === local.virtualLastStart && end === local.virtualLastEnd) return;
       local.virtualLastStart = start;
@@ -2392,10 +2616,24 @@
       });
     }
 
+    function handleLocalVirtualScroll() {
+      if (!local.isVirtual || local.isVertical || !local.wrap) return;
+      const { tbody } = findTablePartsIn(local.wrap);
+      if (!tbody) return;
+      const rows = Array.isArray(local.virtualViewRows) ? local.virtualViewRows : [];
+      const rowH = Math.max(18, Number(local.virtualRowHeight) || virtualDefaultRowHeight);
+      const target = getVirtualRange(rows.length, rowH, tbody);
+      if (local.virtualLastStart < 0 || target.start >= local.virtualLastEnd || target.end <= local.virtualLastStart) {
+        renderLocalVirtualRows(false);
+        return;
+      }
+      scheduleLocalVirtualRender();
+    }
+
     function ensureLocalVirtualScrollListener() {
       if (local.virtualScrollAttached) return;
       local.virtualScrollAttached = true;
-      window.addEventListener("scroll", scheduleLocalVirtualRender, { passive: true });
+      document.addEventListener("scroll", handleLocalVirtualScroll, { passive: true, capture: true });
       window.addEventListener("resize", scheduleLocalVirtualRender, { passive: true });
     }
 
@@ -2600,9 +2838,11 @@
     }
 
     function renderTableMetaLocal(columns, types) {
+      localRowIngest.reset();
       if (local.wrap) local.wrap.hidden = false;
-      local.columns = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
-      local.types = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+      local.tupleFlattenPlan = createTupleFlattenPlan(columns, types);
+      local.columns = local.tupleFlattenPlan.columns;
+      local.types = local.tupleFlattenPlan.types;
       local.typeAsts = local.types.map(parseChType);
       resetLocalGaugeState();
       local.allRows.length = 0;
@@ -2636,9 +2876,14 @@
     }
 
     function appendRowsLocal(rowsChunk) {
+      localRowIngest.enqueue(rowsChunk);
+    }
+
+    function appendRowsLocalImmediate(rowsChunk) {
       if (!Array.isArray(rowsChunk) || rowsChunk.length === 0) return;
-      for (const row of rowsChunk) {
+      for (const sourceRow of rowsChunk) {
         local.rowIndexCounter++;
+        const row = flattenTupleRow(sourceRow, local.tupleFlattenPlan);
         if (row && typeof row === "object") row.__chdashRowIndex = local.rowIndexCounter;
         updateLocalGaugeMaximaFromRow(row);
         local.allRows.push(row);
@@ -2722,6 +2967,8 @@
       }
     }
 
+    const localRowIngest = createCooperativeRowQueue(appendRowsLocalImmediate);
+
     updateCopyEnabledLocal();
 
     activeMultiqueryPanel = blockObj;
@@ -2730,7 +2977,11 @@
     return {
       renderTableMeta: renderTableMetaLocal,
       appendRows: appendRowsLocal,
-      clearLiveResults: () => clearTableIn(local.wrap),
+      clearLiveResults: () => {
+        localRowIngest.reset();
+        clearTableIn(local.wrap);
+      },
+      finalizeAfterDone: () => localRowIngest.whenIdle(),
       getRowCount: () => local.allRows.length,
       getColumnCount: () => local.columns.length,
       buildCopyJsonText: buildCopyJsonTextLocal,
@@ -2753,7 +3004,14 @@
         if (!local.presentationCommitted) {
           if (local.allRows.length === 1) {
             local.presentationCommitted = true;
-            renderVerticalSingleRowLocal(local.allRows[0]);
+            if (local.columns.length === 1) {
+              resetTableModeLocal();
+              const td = simplifySingleValueTableLocal();
+              const row = local.allRows[0];
+              if (td) renderSingleValueCell(td, Array.isArray(row) ? row[0] : row, 0, local.typeAsts);
+            } else {
+              renderVerticalSingleRowLocal(local.allRows[0]);
+            }
           } else {
             // Zero-row statements expose their schema only at the terminal
             // event; 2+ is a defensive fallback if rows arrived in one batch.
@@ -2787,12 +3045,34 @@
     rows = [],
     className = "",
     decorateHeader = null,
+    decorateRow = null,
     renderCell = null,
+    indexSortable = true,
+    rowIndexValue = null,
   } = {}) {
     const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
     const safeRows = Array.isArray(rows) ? rows.slice() : [];
     const typeAsts = safeColumns.map((_, index) => parseChType(safeTypes[index] || ""));
+    const staticNumericCols = typeAsts.map(isScalarNumericType);
+    const staticMaxPos = new Array(staticNumericCols.length).fill(0);
+    const staticMaxAbs = new Array(staticNumericCols.length).fill(0);
+    const staticMaxScale = new Array(staticNumericCols.length).fill(0);
+    if (safeRows.length > 1 && staticNumericCols.some(Boolean)) {
+      for (const row of safeRows) {
+        if (!Array.isArray(row)) continue;
+        for (let index = 0; index < staticNumericCols.length; index++) {
+          if (!staticNumericCols[index]) continue;
+          const scale = extractDecimalScale(row[index]);
+          if (scale > staticMaxScale[index]) staticMaxScale[index] = scale;
+          const n = extractFiniteNumber(row[index]);
+          if (n == null) continue;
+          const abs = Math.abs(n);
+          if (abs > staticMaxAbs[index]) staticMaxAbs[index] = abs;
+          if (n > staticMaxPos[index]) staticMaxPos[index] = n;
+        }
+      }
+    }
 
     const wrap = document.createElement("div");
     wrap.className = `tableWrap ${String(className || "").trim()}`.trim();
@@ -2832,18 +3112,46 @@
     function render() {
       thead.replaceChildren();
       tbody.replaceChildren();
+
+      if (safeRows.length === 1 && safeColumns.length === 1) {
+        table.classList.add("resultTable--singleValue");
+        const head = document.createElement("tr");
+        const th = document.createElement("th");
+        th.textContent = safeColumns[0];
+        if (safeTypes[0]) th.title = safeTypes[0];
+        if (typeof decorateHeader === "function") decorateHeader(th, { column: safeColumns[0], type: safeTypes[0] || "", columnIndex: 0 });
+        head.appendChild(th);
+        thead.appendChild(head);
+
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        const row = safeRows[0];
+        const value = Array.isArray(row) ? row[0] : row;
+        const handled = typeof renderCell === "function" && renderCell(td, {
+          value, row, sourceRowIndex: 0, column: safeColumns[0], type: safeTypes[0] || "", columnIndex: 0,
+        }) === true;
+        if (!handled) renderSingleValueCell(td, value, 0, typeAsts);
+        tr.appendChild(td);
+        if (typeof decorateRow === "function") decorateRow(tr, { row, sourceRowIndex: 0, displayIndex: 1 });
+        tbody.appendChild(tr);
+        return;
+      }
+
+      table.classList.remove("resultTable--singleValue");
       const head = document.createElement("tr");
       const indexHead = document.createElement("th");
       indexHead.textContent = "#";
-      indexHead.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
-      indexHead.dataset.sortKey = "-1";
-      if (sortKey === -1 && sortDir) indexHead.dataset.sort = sortDir;
-      indexHead.addEventListener("click", () => {
-        const next = nextDirection(-1);
-        sortKey = next ? -1 : null;
-        sortDir = next;
-        render();
-      });
+      indexHead.className = `resultTable__rowIndex resultTable__stickyLeft${indexSortable ? " resultTable__thSortable" : ""}`;
+      if (indexSortable) {
+        indexHead.dataset.sortKey = "-1";
+        if (sortKey === -1 && sortDir) indexHead.dataset.sort = sortDir;
+        indexHead.addEventListener("click", () => {
+          const next = nextDirection(-1);
+          sortKey = next ? -1 : null;
+          sortDir = next;
+          render();
+        });
+      }
       head.appendChild(indexHead);
 
       safeColumns.forEach((column, index) => {
@@ -2884,7 +3192,10 @@
         const tr = document.createElement("tr");
         const indexCell = document.createElement("td");
         indexCell.className = "resultTable__rowIndex resultTable__stickyLeft";
-        indexCell.textContent = String(entry.index);
+        const customIndex = typeof rowIndexValue === "function"
+          ? rowIndexValue(entry.row, entry.index - 1, entry.index)
+          : entry.index;
+        indexCell.textContent = customIndex == null ? "" : String(customIndex);
         tr.appendChild(indexCell);
         if (Array.isArray(entry.row)) {
           for (let index = 0; index < safeColumns.length; index++) {
@@ -2899,7 +3210,14 @@
               type: safeTypes[index] || "",
               columnIndex: index,
             }) === true;
-            if (!handled) setCellTextFlat(td, formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
+            if (!handled) {
+              if (staticNumericCols[index] && safeRows.length > 1) {
+                const text = formatNumericCellText(entry.row[index], index, staticMaxScale);
+                setGaugeCell(td, entry.row[index], index, text, staticMaxPos, staticMaxAbs);
+              } else {
+                setCellTextFlat(td, formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
+              }
+            }
             tr.appendChild(td);
           }
         } else {
@@ -2908,6 +3226,11 @@
           setCellTextFlat(td, entry.row);
           tr.appendChild(td);
         }
+        if (typeof decorateRow === "function") decorateRow(tr, {
+          row: entry.row,
+          sourceRowIndex: entry.index - 1,
+          displayIndex: entry.index,
+        });
         tbody.appendChild(tr);
       }
     }
@@ -2940,5 +3263,6 @@
     ensureResultsStack,
     setResultsVisible,
     createStaticResultTable,
+    flattenTupleTableData,
   };
 })();

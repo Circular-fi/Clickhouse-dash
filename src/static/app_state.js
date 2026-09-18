@@ -149,13 +149,26 @@
     loadRunOptions() {
       const obj = safeReadJson(RUN_OPTIONS_STORAGE_KEY, null);
       if (!obj || typeof obj !== "object") {
-        return { autoFormat: true, multiQuery: false };
+        return { autoFormat: true, multiQuery: false, executionStats: false, flattenTuple: true };
       }
-      return { autoFormat: !!obj.autoFormat, multiQuery: !!obj.multiQuery };
+      return {
+        autoFormat: !!obj.autoFormat,
+        multiQuery: !!obj.multiQuery,
+        // Execution lookup is intentionally opt-in. It adds a post-run
+        // /api/query/execution request and is not needed for normal results.
+        executionStats: obj.executionStats === true,
+        // Tuple flattening is a presentation preference and is enabled by default.
+        flattenTuple: obj.flattenTuple !== false,
+      };
     },
 
-    saveRunOptions({ autoFormat, multiQuery }) {
-      safeWriteJson(RUN_OPTIONS_STORAGE_KEY, { autoFormat: !!autoFormat, multiQuery: !!multiQuery });
+    saveRunOptions({ autoFormat, multiQuery, executionStats, flattenTuple }) {
+      safeWriteJson(RUN_OPTIONS_STORAGE_KEY, {
+        autoFormat: !!autoFormat,
+        multiQuery: !!multiQuery,
+        executionStats: !!executionStats,
+        flattenTuple: flattenTuple !== false,
+      });
     },
 
     loadHistory() {
@@ -310,6 +323,8 @@
 
     runOptAutoFormat: runOpts.autoFormat,
     runOptMultiQuery: runOpts.multiQuery,
+    runOptExecutionStats: runOpts.executionStats,
+    runOptFlattenTuple: runOpts.flattenTuple,
 
     isFormatting: false,
     isRunning: false,

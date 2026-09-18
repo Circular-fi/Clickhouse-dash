@@ -148,9 +148,10 @@
     return getJson(`api/explorer/catalog?${query.toString()}`);
   }
 
-  async function getExplorerTable(hostId, database, table) {
+  async function getExplorerTable(hostId, database, table, refresh = false) {
     if (!hostId || !database || !table) throw new Error("Explorer table scope is incomplete.");
     const query = new URLSearchParams({ host_id: String(hostId), database: String(database), table: String(table) });
+    if (refresh) query.set("refresh", "1");
     return getJson(`api/explorer/table?${query.toString()}`);
   }
 
@@ -165,11 +166,22 @@
   }
 
 
-  async function getExplorerGraph(hostId, database = "", refresh = false) {
+  async function getExplorerGraph(hostId, options = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
-    if (database) query.set("database", String(database));
-    if (refresh) query.set("refresh", "1");
+    const database = String(options.database || "");
+    const focusDatabase = String(options.focusDatabase || "");
+    const focusTable = String(options.focusTable || "");
+    if (database) query.set("database", database);
+    if (focusDatabase && focusTable) {
+      query.set("focus_database", focusDatabase);
+      query.set("focus_table", focusTable);
+      query.set("depth", String(Math.max(0, Math.min(8, Number(options.depth) || 0))));
+    }
+    query.set("mode", options.mode === "physical" ? "physical" : "logical");
+    if (options.includeSystem === true) query.set("include_system", "1");
+    query.set("include_non_storing", options.includeNonStoring === false ? "0" : "1");
+    if (options.refresh === true) query.set("refresh", "1");
     return getJson(`api/explorer/graph?${query.toString()}`);
   }
 
@@ -180,12 +192,6 @@
     return getJson(`api/explorer/functions?${query.toString()}`);
   }
 
-  async function getExplorerActivity(hostId, database = "") {
-    if (!hostId) throw new Error("No host selected.");
-    const query = new URLSearchParams({ host_id: String(hostId) });
-    if (database) query.set("database", String(database));
-    return getJson(`api/explorer/activity?${query.toString()}`);
-  }
 
   async function formatSqls(hostId, sqls) {
     if (!hostId) throw new Error("No host selected.");
@@ -224,10 +230,41 @@
     };
   }
 
-  async function analyzeQuery(hostId, queryId) {
+  async function analyzeQuery(hostId, queryId, options = {}) {
     if (!hostId) throw new Error("No host selected.");
     if (!queryId) throw new Error("No query selected for analysis.");
-    return postJson("api/query/analysis", { host_id: String(hostId), query_id: String(queryId) });
+    let response;
+    try {
+      response = await fetch(resolveUrl("api/query/analysis"), {
+        method: "POST",
+        headers: requestHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          host_id: String(hostId),
+          query_id: String(queryId),
+          ...(options.includeOriginalTrace === true ? { include_original_trace: true } : {}),
+        }),
+        cache: "no-store",
+      });
+    } catch (e) {
+      setApiOnline(false);
+      const norm = util.normalizeApiErrorPayload(null, { error_code: "network_error", message: e instanceof Error ? String(e.message || "Network error.") : "Network error." });
+      const err = new Error(util.buildApiErrorText(norm, "Network error."));
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
+    }
+    setApiOnline(true);
+    if (!response.ok) {
+      const errorPayload = await readJsonBody(response);
+      const norm = util.buildApiErrorFromResponse(response.status, errorPayload);
+      const err = new Error(util.buildApiErrorText(norm, `Request failed with status ${response.status}`));
+      err.code = norm.error_code;
+      err.payload = norm;
+      throw err;
+    }
+    const payload = await readJsonBody(response);
+    if (!payload || typeof payload !== "object") throw new Error("Invalid profiling response.");
+    return payload;
   }
 
 
@@ -268,6 +305,6 @@
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
-    getExplorerGraph, getExplorerActivity,
+    getExplorerGraph,
   };
 })();

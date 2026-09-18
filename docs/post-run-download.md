@@ -10,6 +10,7 @@ The browser builds the ZIP locally from the rows already received plus metadata 
 
 ```text
 query.zip
+├── README.md
 ├── query.sql
 ├── results.csv
 ├── execution.csv
@@ -22,7 +23,9 @@ query.zip
 
 `results.csv` is the only result-data representation inside a Debug bundle. `results.json` is deliberately not included; the normal Download JSON action remains separate.
 
-`execution.csv` comes from `/api/query/execution` and ClickHouse `system.query_log`. `profiling.json` contains the complete `/api/query/analysis` payload, including attempts, processor profiling, view/distributed execution metadata, availability/errors, and `trace_spans` when available.
+`execution.csv` comes from `/api/query/execution` and ClickHouse `system.query_log`. `profiling.json` contains attempts, processor profiling, view/distributed execution metadata, availability/errors, plus both trace representations needed for debugging: `trace_compact` is the exact compact 3840-pixel temporal-LOD JSON used by the live UI and `trace_spans_original` contains the original ungrouped ClickHouse spans with their real span IDs and exact timestamps. The original spans are requested only while building a Debug archive; normal profiling UI traffic receives only the compact JSON trace.
+
+`README.md` is generated in English at the archive root. It documents every file in the archive and the `chdash.trace.json.lod.v2` compact trace format, including dictionaries, local parent references, the 3840-pixel temporal LOD, and how exact original spans are preserved for debugging.
 
 The `tables/` directory contains the CREATE definition of every table reported as used by the query, then recursively follows upstream dependencies. A Buffer additionally follows its downstream flush target because reading the Buffer depends on that target. Traversal is cycle-safe and capped at 256 definitions. `tables/manifest.csv` records depth, relation, parent object, and definition path.
 
@@ -34,6 +37,7 @@ With multiquery enabled, the archive is namespaced per statement:
 
 ```text
 queries.zip
+├── README.md
 ├── query-001/
 │   ├── query.sql
 │   ├── results.csv

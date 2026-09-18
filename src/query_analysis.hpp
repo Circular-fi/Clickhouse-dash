@@ -15,6 +15,7 @@ class ClickHouseClientPool;
 struct QueryAnalysisOptions {
   int log_lookup_timeout_ms = 2000;
   bool flush_logs = false;
+  bool include_original_trace_fields = false;
 };
 
 struct QueryLogAnalysisRow {
@@ -23,6 +24,7 @@ struct QueryLogAnalysisRow {
   std::string initial_query_id;
   std::string status;
   std::string event_time;
+  uint64_t event_time_us = 0;
   uint64_t duration_ms = 0;
   uint64_t read_rows = 0;
   uint64_t read_bytes = 0;
@@ -63,6 +65,19 @@ struct ProcessorAnalysisRow {
   uint64_t output_bytes = 0;
 };
 
+
+struct ProcessorTraceSummaryRow {
+  std::string hostname;
+  std::string trace_id;
+  std::string query_id;
+  std::string parent_span_id;
+  std::string operation_name;
+  uint64_t first_start_time_us = 0;
+  uint64_t last_finish_time_us = 0;
+  uint64_t active_time_us = 0;
+  uint64_t event_count = 0;
+};
+
 struct OpenTelemetrySpanAnalysisRow {
   std::string hostname;
   std::string trace_id;
@@ -79,6 +94,7 @@ struct OpenTelemetrySpanAnalysisRow {
 struct QueryViewAnalysisRow {
   std::string hostname;
   std::string event_time;
+  uint64_t event_time_us = 0;
   uint64_t duration_ms = 0;
   std::string initial_query_id;
   std::string view_name;
@@ -101,6 +117,10 @@ struct QueryAnalysisResult {
   bool query_views_available = false;
   bool opentelemetry_span_log_available = false;
   bool trace_truncated = false;
+  bool processors_truncated = false;
+  bool processor_trace_summary_truncated = false;
+  bool processor_trace_summary_available = false;
+  uint64_t processor_trace_bucket_us = 0;
   bool logs_pending = false;
   // Fatal collection failures (system context, mandatory flush, core query_log)
   // are surfaced by the API as an explicit non-2xx error. Optional profiling
@@ -110,11 +130,13 @@ struct QueryAnalysisResult {
   std::string processors_profile_error;
   std::string query_views_error;
   std::string opentelemetry_span_log_error;
+  std::string processor_trace_summary_error;
   std::string distributed_error;
   std::vector<QueryLogAnalysisRow> query_log;
   std::vector<QueryLogAnalysisRow> distributed_children;
   std::vector<ProcessorAnalysisRow> processors;
   std::vector<OpenTelemetrySpanAnalysisRow> trace_spans;
+  std::vector<ProcessorTraceSummaryRow> processor_trace_summary;
   std::vector<QueryViewAnalysisRow> views;
 };
 

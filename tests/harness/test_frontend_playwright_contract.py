@@ -26,7 +26,7 @@ def test_frontend_functional_and_design_are_separate_playwright_suites():
     review = read("tests/frontend/helpers/review.js")
     assert "captureState" not in functional
     assert "query execution renders rows" in functional
-    assert "profiling auto-opens a compact Jaeger-style wall-clock trace" in functional
+    assert "profiling auto-opens Pipeline and lazily mounts Tracing" in functional
     assert "explorer opens fixture" in functional
     assert "captureState" in design
     assert "query-results" in design
@@ -38,6 +38,7 @@ def test_frontend_functional_and_design_are_separate_playwright_suites():
         "theme-menu",
         "results-copy-menu",
         "query-library",
+        "analysis-pipeline",
         "analysis-trace",
         "explorer-table-overview",
         "explorer-table-overview-schema",

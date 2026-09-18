@@ -34,7 +34,7 @@ def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
     assert '"Resident memory"' not in ui
     assert '"Resident rows"' not in ui
     assert 'node("span", "explorerBufferRuntime__label", "Flush target")' not in ui
-    assert '`${fmtBytes(bytes)} RAM`' in ui
+    assert '`${fmtBytes(footprint)} RAM`' in ui
 
 
 def test_storage_metric_unknown_values_render_as_dash_only_inside_tables() -> None:
@@ -42,7 +42,8 @@ def test_storage_metric_unknown_values_render_as_dash_only_inside_tables() -> No
     row = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
     assert 'item.codec && item.codec !== "unknown" ? item.codec : "-"' in row
     assert 'ctx.value == null ? "-" : fmtStorageBytes(ctx.value)' in row
-    assert 'unknownText: "-"' in row
+    assert 'ctx.value == null ? "-" : fmtPercent(ctx.value)' in row
+    assert 'applyGauge(td, ctx.value, 100' in row
     assert 'ns.results?.createStaticResultTable?.({' in row
     # Non-table percentage components still retain an explicit unknown state.
     assert 'function percentBar(value, { title = "", variant = "default", unknownText = "unknown" } = {})' in ui

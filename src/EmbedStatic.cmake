@@ -8,7 +8,7 @@ function(chdash_embed_directory DIR OUTPUT_CPP OUTPUT_HPP NS)
     message(FATAL_ERROR "Embed directory not found: ${DIR}")
   endif()
 
-  file(GLOB_RECURSE _files RELATIVE "${DIR}" "${DIR}/*")
+  file(GLOB_RECURSE _files CONFIGURE_DEPENDS LIST_DIRECTORIES false RELATIVE "${DIR}" "${DIR}/*")
 
   if(NOT _files)
     message(FATAL_ERROR "No files found to embed in: ${DIR}")
@@ -38,6 +38,7 @@ namespace ${NS} {
 
   foreach(f IN LISTS _files)
     set(_abs "${DIR}/${f}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_abs}")
 
     # Make a valid C symbol name from relative path
     string(REPLACE "/" "_" sym "${f}")

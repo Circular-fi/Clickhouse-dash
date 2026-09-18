@@ -132,20 +132,20 @@ test('query errors are surfaced', async ({ page }) => {
   await expect(page.locator('#resultTable')).toBeHidden();
 });
 
-test('profiling auto-opens a compact Jaeger-style wall-clock trace', async ({ page }) => {
+test('profiling auto-opens Pipeline and lazily mounts Tracing', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
   await expect(page.locator('#analysisModalBackdrop')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('#analysisTabs')).toHaveCount(0);
-  await expect(page.locator('[data-analysis-tab]')).toHaveCount(0);
-  await expect(page.locator('.analysisFlowIntro')).toHaveCount(0);
-  await expect(page.locator('.analysisOtelTraceIntro')).toHaveCount(0);
-  await expect(page.locator('.analysisFootnote.analysisOtelTrace__note')).toHaveCount(0);
+  await expect(page.locator('#analysisPipelineTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#analysisTraceTab')).toHaveAttribute('aria-selected', 'false');
+  await expect(page.locator('.pipelineViewer')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.traceViewer')).toHaveCount(0);
+  await page.locator('#analysisTraceTab').click();
+  await expect(page.locator('#analysisTraceTab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.traceViewer')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.traceViewer__row').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.traceViewer__bar').first()).toBeVisible();
-  await expect(page.locator('.analysisOtelTraceRow__marker')).toHaveCount(0);
-  await expect(page.locator('[data-analysis-tab="raw"]')).toHaveCount(0);
   await expect(page.locator('#deepAnalyzeButton')).toHaveCount(0);
 });
 

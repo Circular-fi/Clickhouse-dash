@@ -49,4 +49,19 @@ private:
 // candidate columns and CHECK GRANT SELECT(col...) determines the readable set.
 AllowedObjectSet discover_allowed_objects(clickhouse::Client& runner);
 
+// Lightweight Explorer discovery helpers. These execute in the runner context
+// and intentionally avoid scanning/inspecting every table up front. The
+// sidebar first asks only for databases, then for the objects of one database.
+std::vector<std::string> discover_visible_databases(clickhouse::Client& runner);
+std::vector<std::string> discover_visible_objects(clickhouse::Client& runner, const std::string& database);
+
+// Resolve the exact SELECT/column boundary for one object only. This is used by
+// lazy table detail/data endpoints so opening Explorer never expands ACL checks
+// across unrelated databases. Returns nullopt when the object is not visible or
+// has no readable columns.
+std::optional<AllowedTable> discover_allowed_table(
+    clickhouse::Client& runner,
+    const std::string& database,
+    const std::string& table);
+
 } // namespace chdash

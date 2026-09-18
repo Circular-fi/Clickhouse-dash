@@ -26,12 +26,28 @@
     return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
   }
 
+  function normalizeOperationName(value) {
+    return String(value || "span").replace(/(?:_\d+)+$/g, "") || String(value || "span");
+  }
+
   function normalizeSpan(raw, index) {
-    const start = Number(raw?.start_time_us) || 0;
-    const finish = Number(raw?.finish_time_us) || 0;
     const traceId = String(raw?.trace_id || "");
     const spanId = String(raw?.span_id || "");
-    if (!spanId || start <= 0 || finish < start) return null;
+    const rawSegments = Array.isArray(raw?.segments) && raw.segments.length
+      ? raw.segments
+      : [{ start_time_us: raw?.start_time_us, finish_time_us: raw?.finish_time_us }];
+    const segments = rawSegments
+      .map((segment) => {
+        const start = Number(segment?.start_time_us) || 0;
+        const finish = Number(segment?.finish_time_us) || 0;
+        return { start, finish, duration: Math.max(0, finish - start) };
+      })
+      .filter((segment) => segment.start > 0 && segment.finish >= segment.start);
+    if (!spanId || !segments.length) return null;
+    const start = Math.min(...segments.map((segment) => segment.start));
+    const finish = Math.max(...segments.map((segment) => segment.finish));
+    const duration = segments.reduce((sum, segment) => sum + segment.duration, 0);
+    const rawOperation = String(raw?.operation_name || "span");
     return {
       raw,
       index,
@@ -39,13 +55,15 @@
       traceId,
       spanId,
       parentSpanId: String(raw?.parent_span_id || ""),
-      operation: String(raw?.operation_name || "span"),
+      operation: normalizeOperationName(rawOperation),
+      rawOperation,
       host: String(raw?.hostname || ""),
-      queryId: String(raw?.query_id || ""),
-      threadId: String(raw?.thread_id || raw?.thread_number || ""),
       start,
       finish,
-      duration: Math.max(0, finish - start),
+      duration,
+      segments,
+      compactLeafGroup: raw?.compact_leaf_group === true,
+      mergedCount: 1,
       depth: 0,
       children: [],
       parent: null,
@@ -58,26 +76,81 @@
     return a.start - b.start || a.finish - b.finish || a.operation.localeCompare(b.operation) || a.spanId.localeCompare(b.spanId);
   }
 
+  function mergeIntervals(segments) {
+    const sorted = segments.map((segment) => ({
+      start: Number(segment.start) || 0,
+      finish: Number(segment.finish) || 0,
+    })).filter((segment) => segment.start > 0 && segment.finish >= segment.start)
+      .sort((a, b) => a.start - b.start || a.finish - b.finish);
+    const merged = [];
+    for (const segment of sorted) {
+      const last = merged[merged.length - 1];
+      if (last && segment.start <= last.finish) last.finish = Math.max(last.finish, segment.finish);
+      else merged.push({ ...segment });
+    }
+    return merged.map((segment) => ({
+      ...segment,
+      duration: Math.max(0, segment.finish - segment.start),
+    }));
+  }
+
+  function mergeSiblingInstances(children, parent = null) {
+    const groups = new Map();
+    for (const child of children.slice().sort(stableCompare)) {
+      child.operation = normalizeOperationName(child.operation);
+      const key = `${child.traceId}\0${child.operation}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(child);
+    }
+
+    const result = [];
+    for (const siblings of groups.values()) {
+      const first = siblings[0];
+      let node = first;
+      if (siblings.length > 1) {
+        const segments = mergeIntervals(siblings.flatMap((span) => span.segments));
+        const mergedChildren = siblings.flatMap((span) => span.children);
+        const hosts = new Set(siblings.map((span) => span.host).filter(Boolean));
+        node = {
+          ...first,
+          key: `${first.traceId}\0__merged__\0${parent?.key || "root"}\0${first.operation}`,
+          spanId: `__merged_${first.index}`,
+          parentSpanId: parent?.spanId || "",
+          host: hosts.size === 1 ? hosts.values().next().value : "",
+          start: Math.min(...segments.map((segment) => segment.start)),
+          finish: Math.max(...segments.map((segment) => segment.finish)),
+          duration: segments.reduce((sum, segment) => sum + segment.duration, 0),
+          segments,
+          compactLeafGroup: mergedChildren.length === 0,
+          mergedCount: siblings.reduce((sum, span) => sum + (Number(span.mergedCount) || 1), 0),
+          children: [],
+          parent,
+        };
+        node.children = mergeSiblingInstances(mergedChildren, node);
+      } else {
+        node.parent = parent;
+        node.children = mergeSiblingInstances(node.children, node);
+      }
+      result.push(node);
+    }
+    return result.sort(stableCompare);
+  }
+
   function operationFamily(name) {
-    return String(name || "")
+    return normalizeOperationName(name)
       .replace(/(?:[_ .-](?:thread|worker|port|stream|lane)?\d+)+$/gi, "")
       .replace(/\d+/g, "#")
       .toLowerCase();
   }
 
   function buildModel(rawSpans, nativeAttemptIds = []) {
-    const spans = (Array.isArray(rawSpans) ? rawSpans : [])
+    const sourceSpans = (Array.isArray(rawSpans) ? rawSpans : [])
       .map(normalizeSpan)
       .filter(Boolean);
-    const byKey = new Map(spans.map((span) => [span.key, span]));
-    const byTrace = new Map();
-    for (const span of spans) {
-      if (!byTrace.has(span.traceId)) byTrace.set(span.traceId, []);
-      byTrace.get(span.traceId).push(span);
-    }
+    const byKey = new Map(sourceSpans.map((span) => [span.key, span]));
 
     const roots = [];
-    for (const span of spans) {
+    for (const span of sourceSpans) {
       const parentKey = span.parentSpanId && span.parentSpanId !== "0"
         ? `${span.traceId}\0${span.parentSpanId}`
         : "";
@@ -89,11 +162,12 @@
         roots.push(span);
       }
     }
-    for (const span of spans) span.children.sort(stableCompare);
+    for (const span of sourceSpans) span.children.sort(stableCompare);
     roots.sort(stableCompare);
 
     // Spans occasionally reference a parent outside the retained/truncated set.
-    // Walk every disconnected component once so those spans remain visible.
+    // Keep every disconnected component, then merge sibling instance suffixes
+    // recursively so Foo_0/Foo_1 under the same logical parent become one Foo.
     const orderedRoots = [];
     const seenRoots = new Set();
     for (const root of roots) {
@@ -102,12 +176,20 @@
         seenRoots.add(root.key);
       }
     }
-    for (const span of spans.slice().sort(stableCompare)) {
+    for (const span of sourceSpans.slice().sort(stableCompare)) {
       if (!span.parent && !seenRoots.has(span.key)) {
         orderedRoots.push(span);
         seenRoots.add(span.key);
       }
     }
+
+    const mergedRoots = mergeSiblingInstances(orderedRoots, null);
+    const spans = [];
+    const collect = (span) => {
+      spans.push(span);
+      for (const child of span.children) collect(child);
+    };
+    for (const root of mergedRoots) collect(root);
 
     const seen = new Set();
     const setDepthAndCounts = (span, depth) => {
@@ -119,37 +201,37 @@
       span.descendantCount = descendants;
       return descendants;
     };
-    for (const root of orderedRoots) setDepthAndCounts(root, 0);
+    for (const root of mergedRoots) setDepthAndCounts(root, 0);
+
+    const byTrace = new Map();
+    for (const span of spans) {
+      if (!byTrace.has(span.traceId)) byTrace.set(span.traceId, []);
+      byTrace.get(span.traceId).push(span);
+    }
 
     const attemptIds = Array.from(new Set((Array.isArray(nativeAttemptIds) ? nativeAttemptIds : []).map(String).filter(Boolean)));
-    const attemptIndex = new Map(attemptIds.map((id, index) => [id, index]));
-    const traceAttempt = new Map();
-    for (const [traceId, traceSpans] of byTrace) {
-      const known = traceSpans
-        .filter((span) => attemptIndex.has(span.queryId))
-        .sort(stableCompare)[0];
-      if (known) traceAttempt.set(traceId, attemptIndex.get(known.queryId));
-    }
-    let nextAttempt = attemptIds.length;
-    const unknownQueryAttempts = new Map();
-    for (const span of spans) {
-      if (attemptIndex.has(span.queryId)) span.attempt = attemptIndex.get(span.queryId);
-      else if (traceAttempt.has(span.traceId)) span.attempt = traceAttempt.get(span.traceId);
-      else if (span.queryId) {
-        if (!unknownQueryAttempts.has(span.queryId)) unknownQueryAttempts.set(span.queryId, nextAttempt++);
-        span.attempt = unknownQueryAttempts.get(span.queryId);
-      } else span.attempt = 0;
-    }
+    // Compact trace transport deliberately omits query/thread attributes. Map
+    // attempts by trace order instead: one ClickHouse attempt normally owns one
+    // trace, and this keeps coloring stable without bloating every span row.
+    const orderedTraceIds = Array.from(byTrace.entries())
+      .sort((a, b) => {
+        const aa = Math.min(...a[1].map((span) => span.start));
+        const bb = Math.min(...b[1].map((span) => span.start));
+        return aa - bb || a[0].localeCompare(b[0]);
+      })
+      .map(([traceId]) => traceId);
+    const traceAttempt = new Map(orderedTraceIds.map((traceId, index) => [traceId, index]));
+    for (const span of spans) span.attempt = traceAttempt.get(span.traceId) || 0;
 
     const allAttemptIds = attemptIds.slice();
-    for (const [queryId, index] of unknownQueryAttempts) allAttemptIds[index] = queryId;
+    while (allAttemptIds.length < orderedTraceIds.length) allAttemptIds.push("");
     if (!allAttemptIds.length && spans.length) allAttemptIds.push("");
 
     const start = spans.length ? Math.min(...spans.map((span) => span.start)) : 0;
     const finish = spans.length ? Math.max(...spans.map((span) => span.finish)) : 0;
     return {
       spans,
-      roots: orderedRoots,
+      roots: mergedRoots,
       start,
       finish,
       window: Math.max(1, finish - start),
@@ -184,9 +266,47 @@
       if (collapsed.has(span.key)) return;
       for (const child of span.children) visit(child);
     };
+    // buildModel already promotes every genuinely disconnected component to a
+    // root. Do not revisit descendants that were intentionally hidden by a
+    // collapsed ancestor, otherwise every folded child is incorrectly counted
+    // as a standalone visible row.
     for (const root of model.roots) visit(root);
-    for (const span of model.spans.slice().sort(stableCompare)) visit(span);
     return rows;
+  }
+
+  const INITIAL_VISIBLE_SPAN_LIMIT = 50;
+
+  function initialCollapsedForSpanLimit(model, limit = INITIAL_VISIBLE_SPAN_LIMIT) {
+    const maxVisible = Math.max(1, Number(limit) || INITIAL_VISIBLE_SPAN_LIMIT);
+    const collapsed = new Set(branchKeys(model));
+    const maxDepth = Math.max(0, ...model.spans.map((span) => Number(span.depth) || 0));
+
+    // Commit complete breadth levels only. This is calculated before any DOM
+    // rows are mounted so the first paint already reflects the intended open
+    // depths instead of briefly rendering everything folded.
+    for (let depth = 0; depth <= maxDepth; depth += 1) {
+      const candidates = model.spans
+        .filter((span) => span.children.length && span.depth === depth)
+        .filter((span) => {
+          let parent = span.parent;
+          while (parent) {
+            if (collapsed.has(parent.key)) return false;
+            parent = parent.parent;
+          }
+          return true;
+        })
+        .slice()
+        .sort(stableCompare);
+      if (!candidates.length) continue;
+
+      const beforeDepth = new Set(collapsed);
+      for (const span of candidates) collapsed.delete(span.key);
+      if (visibleRows(model, collapsed).length <= maxVisible) continue;
+      collapsed.clear();
+      for (const key of beforeDepth) collapsed.add(key);
+      break;
+    }
+    return collapsed;
   }
 
   function addTicks(parent, windowUs, withLabels) {
@@ -206,8 +326,9 @@
   function render(container, options = {}) {
     if (!container) return null;
     const model = buildModel(options.spans, options.attemptIds);
-    const collapsed = new Set();
-    for (const span of model.spans) if (shouldCollapseByDefault(span)) collapsed.add(span.key);
+    // Compute the initial fold state before rendering. Complete depths are
+    // opened breadth-first while the visible span count remains <= 50.
+    const collapsed = initialCollapsedForSpanLimit(model);
     const maxRows = Math.max(100, Math.min(10000, Number(options.maxRows) || 3000));
     let columnWidthPx = null;
     const rowByKey = new Map();
@@ -253,6 +374,7 @@
       }
     };
 
+
     const controller = {
       model,
       collapsed,
@@ -261,7 +383,9 @@
         for (const key of branchKeys(model)) collapsed.add(key);
         syncAll();
       },
-      destroy() { container.replaceChildren(); },
+      destroy() {
+        container.replaceChildren();
+      },
     };
 
     container.replaceChildren();
@@ -280,7 +404,9 @@
     if (options.truncated) {
       const notice = document.createElement("div");
       notice.className = "traceViewer__notice";
-      notice.textContent = "Trace truncated at the configured span limit.";
+      notice.textContent = options.processorSummaryOverlay
+        ? `Detailed calls exceed the span limit. Structure is preserved and processor activity is filled from the full time-bucketed OTel summary${Number(options.processorSummaryBucketUs) > 0 ? ` (${durationLabel(options.processorSummaryBucketUs)} buckets)` : ""}.`
+        : "Trace truncated at the configured span limit; shallower depths are preserved first.";
       shell.appendChild(notice);
     }
 
@@ -416,6 +542,9 @@
       const operation = document.createElement("span");
       operation.className = "traceViewer__operation";
       operation.textContent = span.operation;
+      if (span.mergedCount > 1) {
+        operation.title = `${span.mergedCount.toLocaleString()} sibling spans merged after removing trailing _<number> instance suffixes.`;
+      }
       name.append(service, operation);
       if (span.children.length && span.descendantCount) {
         const folded = document.createElement("span");
@@ -428,18 +557,58 @@
 
       const timeline = document.createElement("div");
       timeline.className = "traceViewer__timeline";
-      const bar = document.createElement("span");
-      bar.className = "traceViewer__bar";
-      const left = Math.max(0, Math.min(100, (span.start - model.start) / model.window * 100));
-      const width = Math.max(0.12, Math.min(100 - left, span.duration / model.window * 100));
-      bar.style.left = `${left}%`;
-      bar.style.width = `${width}%`;
-      bar.title = `${span.operation} · ${durationLabel(span.duration)} · +${durationLabel(span.start - model.start)}`;
-      const label = document.createElement("span");
-      label.className = `traceViewer__barLabel${left >= 50 ? " is-before" : " is-after"}`;
-      label.textContent = durationLabel(span.duration);
-      bar.appendChild(label);
-      timeline.appendChild(bar);
+      const renderSegments = Array.isArray(span.segments) && span.segments.length
+        ? span.segments
+        : [{ start: span.start, finish: span.finish, duration: span.duration }];
+      const spanOffset = span.start - model.start;
+      const spanWidth = span.duration / model.window;
+      if (renderSegments.length > 96) {
+        // Dense compact leaf rows stay a single DOM element even when they
+        // contain thousands of disjoint time intervals.
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "traceViewer__segmentSvg");
+        svg.setAttribute("viewBox", "0 0 1000 20");
+        svg.setAttribute("preserveAspectRatio", "none");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("class", "traceViewer__segmentPath");
+        const minWidthPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        minWidthPath.setAttribute("class", "traceViewer__segmentMinWidth");
+        minWidthPath.setAttribute("vector-effect", "non-scaling-stroke");
+        const commands = [];
+        const minWidthCommands = [];
+        for (const segment of renderSegments) {
+          const x1 = Math.max(0, Math.min(1000, (segment.start - model.start) / model.window * 1000));
+          const x2 = Math.max(x1, Math.min(1000, (segment.finish - model.start) / model.window * 1000));
+          commands.push(`M${x1.toFixed(2)} 6H${x2.toFixed(2)}V14H${x1.toFixed(2)}Z`);
+          // The filled interval can become sub-pixel after the 4K LOD timeline is
+          // projected into a narrower viewport. Keep one non-scaling 1px marker
+          // at its start so every event remains visible on the actual screen.
+          minWidthCommands.push(`M${x1.toFixed(2)} 6V14`);
+        }
+        path.setAttribute("d", commands.join(""));
+        minWidthPath.setAttribute("d", minWidthCommands.join(""));
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = `${span.operation} · ${renderSegments.length.toLocaleString()} intervals · ${durationLabel(span.duration)} total · +${durationLabel(spanOffset)} · ${(spanWidth * 100).toFixed(2)}% window`;
+        svg.append(title, path, minWidthPath);
+        timeline.appendChild(svg);
+      } else {
+        for (const segment of renderSegments) {
+          const bar = document.createElement("span");
+          bar.className = "traceViewer__bar";
+          const left = Math.max(0, Math.min(100, (segment.start - model.start) / model.window * 100));
+          const width = Math.max(0.12, Math.min(100 - left, segment.duration / model.window * 100));
+          bar.style.left = `${left}%`;
+          bar.style.width = `${width}%`;
+          bar.title = `${span.operation} · ${durationLabel(segment.duration)} · +${durationLabel(segment.start - model.start)}`;
+          if (renderSegments.length === 1) {
+            const label = document.createElement("span");
+            label.className = `traceViewer__barLabel${left >= 50 ? " is-before" : " is-after"}`;
+            label.textContent = durationLabel(segment.duration);
+            bar.appendChild(label);
+          }
+          timeline.appendChild(bar);
+        }
+      }
       row.append(identity, timeline);
       fragment.appendChild(row);
     }
@@ -460,5 +629,5 @@
     return controller;
   }
 
-  ns.traceViewer = { render, durationLabel, buildModel };
+  ns.traceViewer = { render, durationLabel, buildModel, initialCollapsedForSpanLimit };
 })();

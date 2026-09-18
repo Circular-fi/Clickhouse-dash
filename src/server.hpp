@@ -152,7 +152,6 @@ private:
   void handle_explorer_table(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
-  void handle_explorer_activity(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();
@@ -198,7 +197,13 @@ private:
   StaleCache<std::string, MetaFunctions> meta_functions_cache_;
   StaleCache<std::string, MetaCatalog> meta_catalog_cache_;
   StaleCache<std::string, AllowedObjectSet> explorer_allowed_cache_;
+  // Browse uses a tiny identity-only catalog. Rich summaries are loaded only
+  // when a table is opened or Graph explicitly needs them.
+  StaleCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_;
   StaleCache<std::string, ExplorerCatalog> explorer_catalog_cache_;
+  // Per-table detail is request-driven and expires after 30s. There is no
+  // periodic refresh: stale entries are refreshed only when requested again.
+  StaleCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_;
   StaleCache<std::string, ExplorerGraph> explorer_graph_cache_;
   StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
 

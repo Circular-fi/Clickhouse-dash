@@ -14,7 +14,6 @@
     refreshQueuedForce: false,
     refreshQueuedReflow: false,
     graph: null,
-    activity: null,
     detailMode: "logical",
     database: "",
     layout: new Map(),
@@ -37,13 +36,9 @@
     pendingEnsureVisible: false,
     openTable: null,
     resizeObserver: null,
-    pollTimer: null,
-    pollGeneration: 0,
     animationFrame: 0,
     lastPointerX: 0,
     lastPointerY: 0,
-    nodeActivity: new Map(),
-    edgeActivity: new Map(),
     flowMarkerState: new Map(),
     storageProjectionCache: null,
     lineageRouteCache: null,
@@ -53,7 +48,7 @@
   };
 
   const NODE_HEIGHT = 70;
-  const NODE_WIDTH = 210;
+  const NODE_WIDTH = 240;
   const PHYSICAL_WIDTH = 166;
   const PHYSICAL_HEIGHT = 58;
   const X_GAP = 92;
@@ -62,6 +57,13 @@
   function css(name, fallback) {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return value || fallback;
+  }
+
+  function lightThemeActive() {
+    const explicit = String(document.documentElement.dataset.theme || "");
+    if (explicit === "light") return true;
+    if (explicit === "dark") return false;
+    return !!window.matchMedia?.("(prefers-color-scheme: light)")?.matches;
   }
 
   function reducedMotionPreferred() {
@@ -118,6 +120,55 @@
     return { width: rect.width, height: rect.height, dpr };
   }
 
+  function parseLogicalTableId(id) {
+    const raw = String(id || "");
+    if (!raw.startsWith("table:")) return null;
+    const qualified = raw.slice(6);
+    const dot = qualified.indexOf(".");
+    if (dot <= 0 || dot >= qualified.length - 1) return null;
+    return { database: qualified.slice(0, dot), table: qualified.slice(dot + 1) };
+  }
+
+  function currentFocusScope() {
+    const id = model.pendingFocusId || model.focusedId;
+    if (!id) return null;
+    const node = (model.graph?.nodes || []).find((candidate) => candidate.id === id && candidate.layer === "logical");
+    if (node) return { database: String(node.database || ""), table: String(node.name || "") };
+    return parseLogicalTableId(id);
+  }
+
+  function graphRequestOptions(refresh = false) {
+    const focus = currentFocusScope();
+    const options = {
+      mode: model.detailMode,
+      includeSystem: model.includeSystem,
+      includeNonStoring: model.includeNonStoring,
+      refresh: !!refresh,
+    };
+    if (focus?.database && focus?.table) {
+      options.focusDatabase = focus.database;
+      options.focusTable = focus.table;
+      // Request exactly what is displayed. The backend exposes scope_has_more,
+      // so the + depth control never needs a hidden look-ahead ring.
+      options.depth = model.detailMode === "logical" ? Math.min(8, model.focusDepth) : 0;
+    } else if (model.database) {
+      options.database = model.database;
+    }
+    return options;
+  }
+
+  function graphRequestKey(options) {
+    return [
+      options.mode || "logical",
+      options.database || "",
+      options.focusDatabase || "",
+      options.focusTable || "",
+      Number(options.depth) || 0,
+      options.includeSystem === true ? 1 : 0,
+      options.includeNonStoring === false ? 0 : 1,
+    ].join("\u0000");
+  }
+
   function logicalNeighborhoodIds(depthLimit = model.focusDepth) {
     if (!model.focusedId || !model.graph) return null;
     const projection = logicalProjection();
@@ -154,7 +205,7 @@
   function logicalNodeAllowed(node) {
     if (!node || node.layer !== "logical") return true;
     if (!model.includeSystem && ["system", "information_schema", "INFORMATION_SCHEMA"].includes(String(node.database || ""))) return false;
-    if (!model.includeNonStoring && isNonStoringNode(node)) return false;
+    if (!model.includeNonStoring && isNonStoringNode(node) && node.id !== model.focusedId) return false;
     return true;
   }
 
@@ -169,7 +220,7 @@
     const nodes = Array.isArray(model.graph?.nodes) ? model.graph.nodes.filter((node) => node.layer === "logical") : [];
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     const systemHidden = (node) => !model.includeSystem && ["system", "information_schema", "INFORMATION_SCHEMA"].includes(String(node?.database || ""));
-    const collapseHidden = (node) => !model.includeNonStoring && isNonStoringNode(node);
+    const collapseHidden = (node) => !model.includeNonStoring && isNonStoringNode(node) && node.id !== model.focusedId;
     const visible = new Set(nodes.filter((node) => !systemHidden(node) && !collapseHidden(node)).map((node) => node.id));
     const rawEdges = (model.graph?.edges || [])
       .filter((edge) => nodeById.has(edge.from) && nodeById.has(edge.to))
@@ -325,6 +376,10 @@
     }
     const root = byId.get(id);
     if (!root || root.layer !== "logical") return false;
+    // Logical-only graph responses deliberately omit the physical layer. The
+    // backend derives this flag from the complete cached topology so the UI can
+    // still offer Storage without downloading every disk/volume/shard node.
+    if (typeof root.storage_available === "boolean") return root.storage_available;
 
     // Persistent tables own physical placement directly. Buffer tables are a
     // special storage-mode routing object: they do not own parts themselves,
@@ -1009,6 +1064,18 @@
       // hop and keeps connected card tops aligned by row.
       const bufferIds = logicalIds.filter((id) => byId.get(id)?.kind === "buffer");
       const storedLogicalIds = logicalIds.filter((id) => byId.get(id)?.kind !== "buffer");
+
+      // Logical cards stacked vertically belong to one storage lane. Keep the
+      // cards the same width so their centres line up and vertical Buffer ->
+      // target edges can be drawn as one straight segment.
+      const logicalStackWidth = Math.max(0, ...logicalIds.map((id) => positions.get(id)?.width || 0));
+      if (logicalStackWidth > 0) {
+        for (const id of logicalIds) {
+          const item = positions.get(id);
+          if (item) item.width = logicalStackWidth;
+        }
+      }
+
       let logicalY = cursorY;
       let logicalRight = 70;
 
@@ -1066,6 +1133,11 @@
         }
       }
 
+      const storedAnchorY = storedLogicalIds
+        .map((id) => positions.get(id)?.y)
+        .filter((value) => Number.isFinite(value))
+        .reduce((best, value) => Math.min(best, value), Number.POSITIVE_INFINITY);
+      const storageRowY = Number.isFinite(storedAnchorY) ? storedAnchorY : cursorY;
       const middleIds = component.filter((id) => {
         const node = byId.get(id);
         return node && node.layer === "physical" && node.kind !== "storage_tier" && node.kind !== "ttl_expired";
@@ -1073,7 +1145,7 @@
       let middleRight = logicalRight;
       if (middleIds.length) {
         const middleX = logicalRight + columnGap;
-        let middleY = cursorY;
+        let middleY = storageRowY;
         for (const id of middleIds.sort((a, b) => Number(level.get(a) || 0) - Number(level.get(b) || 0) || stableId(a).localeCompare(stableId(b)))) {
           const item = positions.get(id);
           if (!item) continue;
@@ -1085,8 +1157,8 @@
       }
 
       const tierX = Math.max(logicalRight, middleRight) + columnGap;
-      let tierY = cursorY;
-      let maxTierWidth = 0;
+      let tierY = storageRowY;
+      const maxTierWidth = Math.max(0, ...tierIds.map((id) => positions.get(id)?.width || 0));
       const lastTierByRoot = new Map();
       for (const id of tierIds) {
         const item = positions.get(id);
@@ -1094,7 +1166,7 @@
         if (!item || !node) continue;
         item.x = tierX;
         item.y = tierY;
-        maxTierWidth = Math.max(maxTierWidth, item.width);
+        if (maxTierWidth > 0) item.width = maxTierWidth;
         for (const rootId of node.root_logical_ids || []) lastTierByRoot.set(rootId, id);
         tierY += item.height + storageTierGap;
       }
@@ -1121,6 +1193,111 @@
         }),
       );
       cursorY = componentBottom + componentGap;
+    }
+  }
+
+  function alignPhysicalHorizontalPeers(positions, edges) {
+    if (model.detailMode !== "physical" || positions.size < 2) return;
+    const items = [...positions.values()];
+    const overlapsAt = (item, y) => items.some((other) => {
+      if (other === item) return false;
+      const separatedX = item.x + item.width <= other.x || other.x + other.width <= item.x;
+      if (separatedX) return false;
+      return y < other.y + other.height + 8 && y + item.height + 8 > other.y;
+    });
+    for (let pass = 0; pass < 3; pass += 1) {
+      for (const edge of edges) {
+        if (String(edge?.kind || "") === "buffer") continue;
+        const from = positions.get(edge.from);
+        const to = positions.get(edge.to);
+        if (!from || !to || Math.abs(from.x - to.x) < 24) continue;
+        const storageEntry = from.node?.layer === "logical" && to.node?.layer === "physical"
+          && ["storage_policy", "policy_volume", "volume_tier"].includes(String(edge?.kind || ""));
+        // Logical table -> first storage card is a single horizontal lifecycle
+        // step and should share one top row. Other physical tiers keep their
+        // ordered vertical layout.
+        if (!storageEntry && (from.node?.layer !== "logical" || to.node?.layer !== "logical")) continue;
+        // Horizontal relationships read best when card tops share a row. Only
+        // apply the alignment when it cannot overlap another card in that lane.
+        if (!overlapsAt(to, from.y)) to.y = from.y;
+      }
+    }
+  }
+
+  function groupLogicalPositionsByDatabase(positions) {
+    if (model.detailMode !== "logical" || !positions.size) return;
+    const groups = new Map();
+    for (const item of positions.values()) {
+      if (item.node?.layer !== "logical") continue;
+      const database = String(item.node.database || "default");
+      if (!groups.has(database)) groups.set(database, []);
+      groups.get(database).push(item);
+    }
+    if (groups.size <= 1) return;
+
+    const focus = currentFocusScope();
+    const order = [...groups.entries()].sort(([adb, aitems], [bdb, bitems]) => {
+      if (focus?.database === adb && focus?.database !== bdb) return -1;
+      if (focus?.database === bdb && focus?.database !== adb) return 1;
+      const ax = Math.min(...aitems.map((item) => item.x));
+      const bx = Math.min(...bitems.map((item) => item.x));
+      return ax - bx || adb.localeCompare(bdb);
+    });
+
+    // A high fan-out source can have many direct consumers
+    // consumers in the same database. A single tall DB lane made Fit content
+    // shrink the whole topology until only database LOD blocks were readable.
+    // Keep each DB as one visual group, but wrap dense same-level columns into
+    // short sub-columns. This bounds group height without losing DB locality.
+    const maxRowsPerSubcolumn = 6;
+    const subcolumnGap = 28;
+    const databaseGap = 58;
+    const headerSpace = 38;
+    const innerPad = 14;
+    let cursorY = 64;
+
+    for (const [, items] of order) {
+      const columns = new Map();
+      for (const item of items) {
+        const key = Math.round(item.x * 1000) / 1000;
+        if (!columns.has(key)) columns.set(key, []);
+        columns.get(key).push(item);
+      }
+
+      const packedColumns = [];
+      let cursorX = Math.min(...items.map((item) => item.x));
+      for (const [originalX, column] of [...columns.entries()].sort((a, b) => a[0] - b[0])) {
+        column.sort((a, b) => a.y - b.y || String(a.node?.name || "").localeCompare(String(b.node?.name || "")));
+        cursorX = Math.max(cursorX, originalX);
+        const chunks = [];
+        for (let start = 0; start < column.length; start += maxRowsPerSubcolumn) {
+          chunks.push(column.slice(start, start + maxRowsPerSubcolumn));
+        }
+        let blockRight = cursorX;
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+          const chunk = chunks[chunkIndex];
+          const chunkWidth = Math.max(...chunk.map((item) => item.width));
+          const x = cursorX + chunkIndex * (chunkWidth + subcolumnGap);
+          const height = chunk.reduce((sum, item, index) => sum + item.height + (index ? Y_GAP : 0), 0);
+          packedColumns.push({ items: chunk, x, height });
+          blockRight = Math.max(blockRight, x + chunkWidth);
+        }
+        cursorX = blockRight + X_GAP;
+      }
+
+      const contentHeight = Math.max(NODE_HEIGHT, ...packedColumns.map((column) => column.height));
+      const bandTop = cursorY;
+      for (const column of packedColumns) {
+        let y = bandTop + headerSpace + innerPad + Math.max(0, (contentHeight - column.height) / 2);
+        for (let index = 0; index < column.items.length; index += 1) {
+          const item = column.items[index];
+          item.x = column.x;
+          item.y = y;
+          item.lineageRow = index;
+          y += item.height + Y_GAP;
+        }
+      }
+      cursorY += headerSpace + innerPad * 2 + contentHeight + databaseGap;
     }
   }
 
@@ -1411,7 +1588,9 @@
       });
     }
 
+    groupLogicalPositionsByDatabase(positions);
     alignPhysicalStorageRows(positions, nodes, edges, level);
+    alignPhysicalHorizontalPeers(positions, edges);
 
     const idealPositions = new Map(
       [...positions.entries()].map(([id, item]) => [id, { ...item }])
@@ -1441,6 +1620,7 @@
     model.fitScale = model.scale;
     model.offsetX = width / 2 - (bounds.x + bounds.width / 2) * model.scale;
     model.offsetY = height / 2 - (bounds.y + bounds.height / 2) * model.scale;
+    clampViewportToGraph();
     model.fitOffsetX = model.offsetX;
     model.fitOffsetY = model.offsetY;
     model.isFitted = true;
@@ -1495,6 +1675,7 @@
     if (!item) return false;
     model.offsetX = anchor.screenX - (item.x + item.width / 2) * model.scale;
     model.offsetY = anchor.screenY - (item.y + item.height / 2) * model.scale;
+    clampViewportToGraph();
     return true;
   }
 
@@ -1519,6 +1700,7 @@
     const centerY = item.y + item.height / 2;
     model.offsetX = width / 2 - centerX * model.scale;
     model.offsetY = height / 2 - centerY * model.scale;
+    clampViewportToGraph();
     model.isFitted = false;
     syncFocusControls();
     scheduleDraw();
@@ -1593,13 +1775,10 @@
     return kind === "refreshable_mv" || kind === "refreshable_mv_output";
   }
 
-  function lineageEdgeShouldAnimate(edge, activity) {
-    if (reducedMotionPreferred()) return false;
-    if (isInsertFlowEdge(edge)) return isFocusedDepthOneEdge(edge) || activity?.active === true;
-    // Refreshable MVs are not insert-time flows. Animate only while ClickHouse
-    // reports an actual refresh, never merely because the edge has focus.
-    if (isRefreshFlowEdge(edge)) return activity?.active === true;
-    return false;
+  function lineageEdgeShouldAnimate(edge) {
+    if (reducedMotionPreferred() || !model.focusedId) return false;
+    if (!isFocusedDepthOneEdge(edge)) return false;
+    return isInsertFlowEdge(edge) || isRefreshFlowEdge(edge);
   }
 
   function bezierRoutePoints(a, p1, p2, b, samples = 40) {
@@ -1617,6 +1796,30 @@
   function storageRouteGeometry(from, to, edge) {
     const fromNode = from?.node || {};
     const toNode = to?.node || {};
+
+    // A Buffer sits above the MergeTree/table it flushes into. Use bottom/top
+    // ports for that vertical semantic relation instead of routing out of the
+    // right edge and back into the left edge.
+    if (String(edge?.kind || "") === "buffer" && from.y + from.height <= to.y + 2) {
+      const overlapLeft = Math.max(from.x, to.x);
+      const overlapRight = Math.min(from.x + from.width, to.x + to.width);
+      if (overlapRight >= overlapLeft) {
+        const x = (overlapLeft + overlapRight) / 2;
+        return {
+          points: [
+            { x, y: from.y + from.height },
+            { x, y: to.y },
+          ],
+          vertical: true,
+        };
+      }
+      // The layout normally keeps a vertical storage stack overlapping. Keep a
+      // conservative orthogonal fallback only for malformed/legacy layouts.
+      const a = { x: from.x + from.width / 2, y: from.y + from.height };
+      const b = { x: to.x + to.width / 2, y: to.y };
+      const midY = a.y + Math.max(18, (b.y - a.y) / 2);
+      return { points: [a, { x: a.x, y: midY }, { x: b.x, y: midY }, b], vertical: true };
+    }
 
     // Consecutive policy volumes are intentionally stacked. Their lifecycle
     // transition therefore uses a straight vertical segment through the card
@@ -2431,8 +2634,6 @@
     const p2 = straightStorage ? b : { x: b.x - dx, y: b.y };
     const routePoints = straightStorage ? storageRoute.points : (lineageRoute?.points || null);
     const selected = !focused || (focused.has(edge.from) && focused.has(edge.to));
-    const activity = model.edgeActivity.get(edge.id);
-
     ctx.save();
     drawSelectedLogicalDependencyHalo(ctx, edge, routePoints, a, p1, p2, b);
     ctx.globalAlpha = selected ? 0.78 : 0.14;
@@ -2440,10 +2641,6 @@
     edgeStyle(edge, ctx);
     // Dash patterns encode edge semantics but never move. Motion is reserved
     // for the one normalized round marker on actual insert-time data flow.
-    if (activity?.active && !isLogicalDependencyEdge(edge)) {
-      const rate = Math.max(0, Number(activity.rows_per_second || 0));
-      ctx.lineWidth += Math.min(4, Math.log10(rate + 1) * 0.55);
-    }
     strokeEdgePath(ctx, routePoints, a, p1, p2, b);
 
     // Arrow head follows the final segment for routed polylines and the Bezier
@@ -2464,7 +2661,7 @@
     if (straightStorage) drawStorageFlowMarker(ctx, edge, now, routePoints, selected);
     const lifecyclePoint = straightStorage ? storageRoutePoint(routePoints, 0.5) : null;
     drawLifecycleEdgeLabel(ctx, edge, a, p1, p2, b, selected, lifecyclePoint);
-    if (!straightStorage && selected && lineageEdgeShouldAnimate(edge, activity)) {
+    if (!straightStorage && selected && lineageEdgeShouldAnimate(edge)) {
       drawNormalizedFlowMarker(ctx, edge, now, routePoints || bezierRoutePoints(a, p1, p2, b));
     }
     ctx.restore();
@@ -2827,9 +3024,10 @@
 
     ctx.fillStyle = storageDisabled ? css("--muted", "#8993a4") : css("--text", "#edf2f7");
     ctx.font = `600 ${node.layer === "physical" ? 11 : 12}px Arial, Helvetica, sans-serif`;
-    const maxChars = node.layer === "physical" ? 22 : 27;
-    const name = String(node.label || node.name || "");
-    ctx.fillText(name.length > maxChars ? `${name.slice(0, maxChars - 1)}…` : name, item.x + 10, item.y + (node.layer === "physical" ? 32 : 34));
+    const maxChars = node.layer === "physical" ? 22 : 31;
+    const baseName = String(node.label || node.name || "");
+    const name = node.layer === "logical" && node.database ? `${node.database}.${baseName}` : baseName;
+    ctx.fillText(canvasEllipsis(ctx, name, item.width - 20), item.x + 10, item.y + (node.layer === "physical" ? 32 : 34));
     if (node.layer === "physical" && node.kind === "disk" && node.disk_free_space != null && node.disk_total_space != null) {
       const free = Number(node.disk_free_space);
       const total = Number(node.disk_total_space);
@@ -2873,6 +3071,44 @@
       }
     }
     drawTtlSummary(ctx, item, node);
+    ctx.restore();
+  }
+
+  function drawDatabaseGroups(ctx) {
+    if (model.detailMode !== "logical") return;
+    const groups = databaseBounds();
+    if (groups.size <= 1) return;
+    ctx.save();
+    for (const [database, box] of groups) {
+      const padX = 20;
+      const padBottom = 20;
+      const header = 34;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(
+        box.minX - padX,
+        box.minY - header,
+        box.maxX - box.minX + padX * 2,
+        box.maxY - box.minY + header + padBottom,
+        12,
+      );
+      else ctx.rect(
+        box.minX - padX,
+        box.minY - header,
+        box.maxX - box.minX + padX * 2,
+        box.maxY - box.minY + header + padBottom,
+      );
+      ctx.fillStyle = css("--tableBg", "#10141d");
+      ctx.globalAlpha = 0.36;
+      ctx.fill();
+      ctx.globalAlpha = 0.68;
+      ctx.strokeStyle = css("--borderStrong", "#384152");
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = css("--muted", "#8993a4");
+      ctx.font = "600 11px Arial, Helvetica, sans-serif";
+      ctx.fillText(`${database} · ${box.count}`, box.minX, box.minY - 12);
+    }
     ctx.restore();
   }
 
@@ -2932,6 +3168,55 @@
     const scale = Math.min((width - 12) / bounds.width, (height - 12) / bounds.height);
     const ox = 6 - bounds.x * scale;
     const oy = 6 - bounds.y * scale;
+    // Draw the same routed geometry as the main canvas. The minimap is small,
+    // but direction and bends must match what the user sees in the graph rather
+    // than falling back to misleading centre-to-centre diagonals.
+    ctx.save();
+    ctx.strokeStyle = css("--accentBorder", "#6b8cff");
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.globalAlpha = 0.48;
+    const lineageRoutes = model.detailMode === "logical" ? ensureLineageRouteCache() : null;
+    for (const edge of visibleEdges()) {
+      const from = model.layout.get(edge.from);
+      const to = model.layout.get(edge.to);
+      if (!from || !to) continue;
+      let points = null;
+      if (isStorageRouteEdge(edge)) {
+        points = storageRouteGeometry(from, to, edge).points;
+      } else {
+        const route = lineageRoutes?.get(edge.id);
+        if (Array.isArray(route?.points) && route.points.length >= 2) {
+          points = route.points;
+        } else {
+          const a = route?.a || { x: from.x + from.width, y: from.y + from.height / 2 };
+          const b = route?.b || { x: to.x, y: to.y + to.height / 2 };
+          const dx = Math.max(42, Math.abs(b.x - a.x) * 0.45);
+          points = bezierRoutePoints(a, { x: a.x + dx, y: a.y }, { x: b.x - dx, y: b.y }, b);
+        }
+      }
+      if (!Array.isArray(points) || points.length < 2) continue;
+      const mapped = points.map((point) => ({ x: ox + point.x * scale, y: oy + point.y * scale }));
+      const style = edgeDashPattern(edge);
+      ctx.lineWidth = Math.max(0.7, Math.min(1.4, style.width));
+      ctx.setLineDash(style.dash.map((value) => Math.max(1, value * Math.max(0.25, scale))));
+      ctx.beginPath();
+      ctx.moveTo(mapped[0].x, mapped[0].y);
+      for (let i = 1; i < mapped.length; i += 1) ctx.lineTo(mapped[i].x, mapped[i].y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const tip = mapped[mapped.length - 1];
+      const near = mapped[mapped.length - 2];
+      const angle = Math.atan2(tip.y - near.y, tip.x - near.x);
+      const arrow = 3;
+      ctx.beginPath();
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(tip.x - arrow * Math.cos(angle - 0.55), tip.y - arrow * Math.sin(angle - 0.55));
+      ctx.lineTo(tip.x - arrow * Math.cos(angle + 0.55), tip.y - arrow * Math.sin(angle + 0.55));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
     ctx.fillStyle = css("--muted", "#8993a4");
     for (const item of model.layout.values()) {
       // The preview mirrors the active projection. Storage tiers/TTL terminals
@@ -2947,9 +3232,17 @@
       const worldTop = -model.offsetY / model.scale;
       const worldWidth = main.width / model.scale;
       const worldHeight = main.height / model.scale;
-      ctx.strokeStyle = css("--accent", "#7c9cff");
-      ctx.lineWidth = 1;
-      ctx.strokeRect(ox + worldLeft * scale, oy + worldTop * scale, worldWidth * scale, worldHeight * scale);
+      const viewportX = ox + worldLeft * scale;
+      const viewportY = oy + worldTop * scale;
+      const viewportWidth = worldWidth * scale;
+      const viewportHeight = worldHeight * scale;
+      if (lightThemeActive()) {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.10)";
+        ctx.fillRect(viewportX, viewportY, viewportWidth, viewportHeight);
+      }
+      ctx.strokeStyle = lightThemeActive() ? "rgba(15, 23, 42, 0.92)" : css("--accent", "#7c9cff");
+      ctx.lineWidth = lightThemeActive() ? 1.6 : 1;
+      ctx.strokeRect(viewportX, viewportY, viewportWidth, viewportHeight);
     }
   }
 
@@ -2975,10 +3268,11 @@
     ctx.save();
     ctx.translate(model.offsetX, model.offsetY);
     ctx.scale(model.scale, model.scale);
-    if (model.scale < 0.23 && model.detailMode === "logical") {
+    if (model.scale < 0.23 && model.detailMode === "logical" && !model.focusedId) {
       drawDatabaseLod(ctx);
     } else {
       const focused = focusedSet();
+      drawDatabaseGroups(ctx);
       for (const edge of visibleEdges()) drawEdge(ctx, edge, now, focused);
       const compact = model.scale < 0.62;
       for (const item of model.layout.values()) drawNode(ctx, item, focused, compact);
@@ -2986,12 +3280,12 @@
     ctx.restore();
     drawMinimap();
 
-    const hasActive = [...model.edgeActivity.values()].some((activity) => activity?.active);
-    const hasFocusAnimation = !!model.focusedId && model.detailMode === "logical"
-      && visibleEdges().some((edge) => isFocusedDepthOneEdge(edge) && isInsertFlowEdge(edge));
+    const animationEdges = visibleEdges();
+    const hasActive = model.detailMode === "logical"
+      && animationEdges.some((edge) => lineageEdgeShouldAnimate(edge));
     const hasStorageAnimation = model.detailMode === "physical" && !reducedMotionPreferred()
       && visibleEdges().some((edge) => isStorageRouteEdge(edge));
-    if ((hasActive || hasFocusAnimation || hasStorageAnimation) && model.active) model.animationFrame = requestAnimationFrame(draw);
+    if ((hasActive || hasStorageAnimation) && model.active) model.animationFrame = requestAnimationFrame(draw);
   }
 
   function scheduleDraw() {
@@ -3053,9 +3347,9 @@
       dom.explorerGraphContractButton.disabled = !model.focusedId || model.detailMode !== "logical" || model.focusDepth <= 0;
     }
     if (dom.explorerGraphExpandButton) {
-      const current = model.focusedId ? logicalNeighborhoodIds(model.focusDepth) : null;
-      const next = model.focusedId ? logicalNeighborhoodIds(model.focusDepth + 1) : null;
-      const canGrow = !!current && !!next && next.size > current.size;
+      const scopeMatches = model.graph?.scope_focus_id === model.focusedId
+        && Number(model.graph?.scope_depth) === model.focusDepth;
+      const canGrow = scopeMatches && model.focusDepth < 8 && model.graph?.scope_has_more === true;
       dom.explorerGraphExpandButton.hidden = model.detailMode !== "logical";
       dom.explorerGraphExpandButton.disabled = !model.focusedId || model.detailMode !== "logical" || !canGrow;
     }
@@ -3140,6 +3434,7 @@
     if (center) {
       computeLayout();
       fitToScreen();
+      if (changed && model.active) refresh(false, { reflow: true });
       return;
     }
 
@@ -3150,19 +3445,18 @@
     model.isFitted = false;
     syncFocusControls();
     scheduleDraw();
+    if (changed && model.active) refresh(false);
   }
 
   function focusTable(database, table, { ensureVisible = false } = {}) {
     const db = String(database || "");
     const id = `table:${db}.${String(table || "")}`;
+    // A table focus is a cross-database neighbourhood scope, not a database
+    // filter. Clearing the database scope is what lets upstream/downstream
+    // objects in other databases remain visible while keeping the payload local.
+    model.database = "";
     model.pendingFocusId = id;
     model.pendingEnsureVisible = !!ensureVisible;
-    if (model.database && model.database !== db) {
-      model.database = db;
-      model.focusedId = null;
-      if (model.active) refresh(false);
-      return;
-    }
     if (!model.graph) return;
     const exists = (model.graph.nodes || []).some((node) => node.id === id && node.layer === "logical");
     if (exists && model.detailMode === "physical" && !canUseStorageForId(id)) {
@@ -3175,7 +3469,7 @@
       // after a CREATE). Never leave the previously focused node selected when
       // the sidebar asks for a real table that is missing from this payload.
       // Force one graph refresh; pendingFocusId will be resolved by refresh().
-      if (model.active) refresh(true);
+      if (model.active) refresh(false, { reflow: !!ensureVisible });
       return true;
     }
     model.pendingFocusId = null;
@@ -3221,16 +3515,17 @@
     if (!model.focusedId || model.focusDepth <= 0) return;
     model.focusDepth -= 1;
     recomputePreservingFocus();
+    if (model.active) refresh(false);
     model.onStateChange?.();
   }
 
   function expandNeighborhood() {
-    if (!model.focusedId) return;
-    const current = logicalNeighborhoodIds(model.focusDepth);
-    const next = logicalNeighborhoodIds(model.focusDepth + 1);
-    if (!current || !next || next.size <= current.size) { syncFocusControls(); return; }
-    model.focusDepth += 1;
-    recomputePreservingFocus();
+    if (!model.focusedId || model.focusDepth >= 8 || model.graph?.scope_has_more !== true) { syncFocusControls(); return; }
+    model.focusDepth = Math.min(8, model.focusDepth + 1);
+    // The next ring is intentionally not prefetched. Keep the current camera and
+    // request the newly visible depth only when the user asks for it.
+    if (model.active) refresh(false);
+    else recomputePreservingFocus();
     model.onStateChange?.();
   }
 
@@ -3274,48 +3569,12 @@
     }
     const nodes = visibleNodes().length;
     const edges = visibleEdges().length;
-    const scope = model.database || "all databases";
-    const activityAt = model.activity?.generated_at_ms ? new Date(model.activity.generated_at_ms).toLocaleTimeString() : "—";
+    const focusedScope = currentFocusScope();
+    const scope = focusedScope ? `${focusedScope.database}.${focusedScope.table}` : (model.database || "all databases");
     const focus = model.focusedId && model.detailMode === "logical" ? ` · neighborhood depth ${model.focusDepth}` : "";
-    dom.explorerGraphStatus.textContent = `${nodes} nodes · ${edges} edges · ${scope}${focus} · activity ${activityAt}`;
+    dom.explorerGraphStatus.textContent = `${nodes} nodes · ${edges} edges · ${scope}${focus}`;
   }
 
-  function setActivity(payload) {
-    model.activity = payload || null;
-    model.nodeActivity = new Map((payload?.nodes || []).map((item) => [item.node_id, item]));
-    model.edgeActivity = new Map((payload?.edges || []).map((item) => [item.edge_id, item]));
-    updateStatus();
-    scheduleDraw();
-  }
-
-  async function refreshActivity(generation) {
-    if (!model.active || !model.graph) return;
-    const hostId = String(state.selectedHostId || "");
-    if (!hostId) return;
-    try {
-      const payload = await api.getExplorerActivity(hostId, model.database);
-      if (!model.active || generation !== model.pollGeneration || String(state.selectedHostId || "") !== hostId) return;
-      setActivity(payload);
-    } catch (e) {
-      // Live overlay is best-effort; topology remains useful when system logs
-      // are unavailable or disabled.
-      if (dom.explorerGraphStatus) dom.explorerGraphStatus.textContent = `Topology available · live activity unavailable: ${e.message || e}`;
-    }
-  }
-
-  function startPolling() {
-    stopPolling();
-    const generation = ++model.pollGeneration;
-    refreshActivity(generation);
-    const interval = Math.max(1000, Math.min(30000, Number(model.graph?.live_refresh_ms) || 2000));
-    model.pollTimer = window.setInterval(() => refreshActivity(generation), interval);
-  }
-
-  function stopPolling() {
-    model.pollGeneration += 1;
-    if (model.pollTimer) window.clearInterval(model.pollTimer);
-    model.pollTimer = null;
-  }
 
   async function refresh(force = false, { reflow = false } = {}) {
     if (!model.active) return;
@@ -3334,23 +3593,21 @@
 
     const hostId = String(state.selectedHostId || "");
     if (!hostId) return;
-    const requestDatabase = String(model.database || "");
+    const requestOptions = graphRequestOptions(force);
+    const requestKey = graphRequestKey(requestOptions);
     const hadLayout = model.layout.size > 0;
     model.loading = true;
     updateStatus();
     scheduleDraw();
     try {
-      const payload = await api.getExplorerGraph(hostId, requestDatabase, !!force);
+      const payload = await api.getExplorerGraph(hostId, requestOptions);
       const stale = !model.active
         || serial !== model.refreshSerial
         || String(state.selectedHostId || "") !== hostId
-        || String(model.database || "") !== requestDatabase;
+        || graphRequestKey(graphRequestOptions(false)) !== requestKey;
       if (stale) return;
 
       model.graph = payload;
-      model.activity = null;
-      model.nodeActivity.clear();
-      model.edgeActivity.clear();
       let ensurePendingFocus = false;
       if (model.pendingFocusId && (payload.nodes || []).some((node) => node.id === model.pendingFocusId)) {
         if (model.detailMode === "physical" && !canUseStorageForId(model.pendingFocusId)) {
@@ -3364,6 +3621,13 @@
         model.pendingFocusId = null;
         ensurePendingFocus = model.pendingEnsureVisible;
         model.pendingEnsureVisible = false;
+      } else if (model.pendingFocusId && !force) {
+        // Scoped payloads intentionally omit unrelated tables. If the requested
+        // table is still absent from a payload scoped directly to it, retry once
+        // with cache invalidation to cover a just-created object.
+        model.refreshQueued = true;
+        model.refreshQueuedForce = true;
+        model.refreshQueuedReflow = model.refreshQueuedReflow || reflow || model.pendingEnsureVisible;
       } else if (model.focusedId && !(payload.nodes || []).some((node) => node.id === model.focusedId)) {
         model.focusedId = null;
       }
@@ -3386,13 +3650,12 @@
       } else {
         fitToScreen();
       }
-      startPolling();
     } catch (e) {
       // A stale transport error belongs to the old scope and must not erase a
       // newer graph selection that is waiting in the queue.
       const stale = serial !== model.refreshSerial
         || String(state.selectedHostId || "") !== hostId
-        || String(model.database || "") !== requestDatabase;
+        || graphRequestKey(graphRequestOptions(false)) !== requestKey;
       if (!stale) {
         model.graph = null;
         model.layout.clear();
@@ -3428,7 +3691,11 @@
     closeGraphTypeMenu({ immediate: true });
     if (!changed) return;
     syncFocusControls();
-    if (model.focusedId) recomputePreservingFocus();
+    // The backend now serves only the active layer. Switching Lineage/Storage
+    // therefore changes the transport scope and must fetch that projection
+    // instead of expecting the hidden layer to already be in browser memory.
+    if (model.active) refresh(false, { reflow: true });
+    else if (model.focusedId) recomputePreservingFocus();
     else { computeLayout(); fitToScreen(); }
     if (notify) model.onStateChange?.();
   }
@@ -3436,6 +3703,24 @@
   function minimumZoomScale() {
     const fitScale = Number(model.fitScale);
     return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 0.06;
+  }
+
+  function clampViewportToGraph() {
+    const bounds = model.worldBounds;
+    const canvas = dom.explorerGraphCanvas;
+    if (!bounds || !canvas || !model.layout.size || model.scale <= 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    if (!width || !height) return;
+    const marginX = Math.min(72, Math.max(24, width * 0.18));
+    const marginY = Math.min(72, Math.max(24, height * 0.18));
+    const minX = marginX - (bounds.x + bounds.width) * model.scale;
+    const maxX = width - marginX - bounds.x * model.scale;
+    const minY = marginY - (bounds.y + bounds.height) * model.scale;
+    const maxY = height - marginY - bounds.y * model.scale;
+    model.offsetX = Math.max(Math.min(minX, maxX), Math.min(Math.max(minX, maxX), model.offsetX));
+    model.offsetY = Math.max(Math.min(minY, maxY), Math.min(Math.max(minY, maxY), model.offsetY));
   }
 
   function zoomBy(factor) {
@@ -3448,6 +3733,7 @@
     model.scale = Math.max(minimumZoomScale(), Math.min(3.2, model.scale * factor));
     model.offsetX = px - before.x * model.scale;
     model.offsetY = py - before.y * model.scale;
+    clampViewportToGraph();
     model.isFitted = Math.abs(model.scale - model.fitScale) < 1e-9;
     syncFocusControls();
     scheduleDraw();
@@ -3469,16 +3755,20 @@
     const database = String(node?.database || "");
     return {
       includeSystem: !!node && ["system", "information_schema", "INFORMATION_SCHEMA"].includes(database),
+      // A focused View/MV/Buffer is itself part of the non-storing projection,
+      // so the option must remain enabled until focus moves to a storing node.
       includeNonStoring: !!node && isNonStoringNode(node),
     };
   }
 
   function setVisibilityOptions(options = {}) {
+    const previousIncludeSystem = model.includeSystem;
     const previousIncludeNonStoring = model.includeNonStoring;
     const required = visibilityRequirements();
     const nextIncludeSystem = required.includeSystem || options.includeSystem === true;
     const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;
-    const projectionChanged = previousIncludeNonStoring !== nextIncludeNonStoring || model.includeSystem !== nextIncludeSystem;
+    const systemScopeChanged = previousIncludeSystem !== nextIncludeSystem;
+    const projectionChanged = previousIncludeNonStoring !== nextIncludeNonStoring || systemScopeChanged;
     const anchor = projectionChanged ? captureViewportAnchor({ includeSystem: nextIncludeSystem, includeNonStoring: nextIncludeNonStoring }) : null;
     model.includeSystem = nextIncludeSystem;
     model.includeNonStoring = nextIncludeNonStoring;
@@ -3486,7 +3776,12 @@
       const node = (model.graph?.nodes || []).find((candidate) => candidate.id === model.focusedId);
       if (node && !logicalNodeAllowed(node)) model.focusedId = null;
     }
-    if (projectionChanged) recomputePreservingFocusAnchorOnly(anchor);
+    if ((systemScopeChanged || projectionChanged) && model.active) {
+      // Both system visibility and non-storing visibility change the server-side
+      // scoped neighborhood. In particular, hidden View/MV/Buffer nodes have
+      // zero semantic depth cost and therefore require a fresh scope.
+      refresh(false, { reflow: true });
+    } else if (projectionChanged) recomputePreservingFocusAnchorOnly(anchor);
     else {
       computeLayout({ preserveExisting: true });
       syncFocusControls();
@@ -3504,7 +3799,6 @@
 
   function deactivate() {
     model.active = false;
-    stopPolling();
     if (model.animationFrame) cancelAnimationFrame(model.animationFrame);
     model.animationFrame = 0;
   }
@@ -3520,7 +3814,6 @@
     model.refreshQueuedForce = false;
     model.refreshQueuedReflow = false;
     model.graph = null;
-    model.activity = null;
     model.layout.clear();
     model.focusedId = null;
     model.pendingEnsureVisible = false;
@@ -3572,6 +3865,7 @@
         if (Math.abs(dx) + Math.abs(dy) > 2) model.dragMoved = true;
         model.offsetX += dx;
         model.offsetY += dy;
+        clampViewportToGraph();
         model.isFitted = false;
         syncFocusControls();
         model.dragX = event.clientX;

@@ -9,25 +9,33 @@
     el.textContent = value;
   }
 
-  // Set a metric value with a stable unit area (prevents jitter when unit switches, e.g. M <-> B).
-  // Renders: <span class="metricCompact__number">123.4</span><span class="metricCompact__unit">MiB/s</span>
+  // Keep the compact magnitude (K/M/B/T or Ki/Mi/Gi/Ti) at the exact same
+  // typographic size as the numeric value. Only the real unit/rate suffix is
+  // split out, e.g. 148.95M/s => [148.95M][/s] and 1.11GiB/s => [1.11Gi][B/s].
   function setMetricText(el, rawValue) {
     if (!el) return;
 
     const text = String(rawValue ?? "").trim();
-    const match = text.match(/^(-?\d+(?:[.,]\d+)?)(.*)$/);
+    const match = text.match(/^(-?\d+(?:[.,]\d+)?)(Ki|Mi|Gi|Ti|K|M|B|T)?(.*)$/);
 
-    if (!match || !(match[2] || "").trim()) {
-      const value = match ? match[1] : text;
-      if (el.textContent !== value || el.classList.contains("metricCompact__value--split")) {
+    if (!match) {
+      if (el.textContent !== text || el.classList.contains("metricCompact__value--split")) {
         el.classList.remove("metricCompact__value--split");
-        el.replaceChildren(document.createTextNode(value));
+        el.replaceChildren(document.createTextNode(text));
       }
       return;
     }
 
-    const number = match[1];
-    const unit = match[2].trim();
+    const magnitude = `${match[1]}${match[2] || ""}`;
+    const unit = String(match[3] || "").trim();
+    if (!unit) {
+      if (el.textContent !== magnitude || el.classList.contains("metricCompact__value--split")) {
+        el.classList.remove("metricCompact__value--split");
+        el.replaceChildren(document.createTextNode(magnitude));
+      }
+      return;
+    }
+
     let numberEl = el.firstElementChild;
     let unitEl = numberEl ? numberEl.nextElementSibling : null;
     if (!numberEl || !unitEl || !numberEl.classList.contains("metricCompact__number") ||
@@ -40,11 +48,8 @@
     }
 
     el.classList.add("metricCompact__value--split");
-    const unitClass = unit.length <= 1
-      ? "metricCompact__unit_1"
-      : (unit.length <= 3 ? "metricCompact__unit_3" : "metricCompact__unit_4");
-    unitEl.className = `metricCompact__unit ${unitClass}`;
-    if (numberEl.textContent !== number) numberEl.textContent = number;
+    unitEl.className = "metricCompact__unit";
+    if (numberEl.textContent !== magnitude) numberEl.textContent = magnitude;
     if (unitEl.textContent !== unit) unitEl.textContent = unit;
   }
 

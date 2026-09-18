@@ -150,13 +150,14 @@
       throw new Error(`Profiling export failed for statement ${Number(entry?.index || 0) + 1}: no query_id was produced.`);
     }
     try {
-      const analysis = await api.analyzeQuery(entry.hostId || runHostId, entry.queryId);
+      const analysis = await api.analyzeQuery(entry.hostId || runHostId, entry.queryId, { includeOriginalTrace: true });
       if (!analysis || typeof analysis !== "object") {
         throw new Error("Invalid profiling response.");
       }
-      // The complete analysis payload already contains attempts, processor
-      // profiling, view/distributed execution metadata and trace_spans. Keep one
-      // canonical profiling file instead of exporting a second trace-only JSON.
+      // Debug JSON deliberately keeps both representations: trace_compact is
+      // the exact 4K temporal-LOD JSON used by the live UI, while
+      // trace_spans_original preserves the ungrouped ClickHouse spans for
+      // offline diagnostics and exact timing inspection.
       return [{ name: `${prefix}profiling.json`, text: JSON.stringify(analysis, null, 2) }];
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e || "Profiling request failed.");
@@ -422,11 +423,71 @@
     }, null, 2);
   }
 
+  function debugArchiveReadme(many) {
+    const lines = [
+      "# ChDash Debug Archive",
+      "",
+      "This archive is a self-contained diagnostic snapshot produced by **Run → Download Debug**.",
+      many
+        ? "Each `query-NNN/` directory contains the files for one statement. Paths below are relative to that directory."
+        : "The files below are stored at the archive root for this single-query export.",
+      "",
+      "## Files",
+      "",
+      "### `query.sql`",
+      "The exact SQL statement executed by ChDash.",
+      "",
+      "### `results.csv`",
+      "The rows received by the browser preview, encoded as CSV. This can be a partial result when preview limits or cancellation stopped the execution early.",
+      "",
+      "### `execution.csv`",
+      "One-row execution summary read from ClickHouse `system.query_log`. Columns include duration, read/write/result rows and bytes, memory usage, tables, projections, status, and exception metadata.",
+      "",
+      "### `profiling.json`",
+      "Profiling metadata collected for a query executed in profiling mode. It contains query attempts, processor profiling, view/distributed metadata, availability/error information, and two trace representations:",
+      "",
+      "- `trace_compact`: the exact compact JSON trace representation used by the live UI. It uses dictionaries for hosts, trace IDs, and operation names plus local integer parent references instead of ClickHouse span IDs. Trailing `_N` instance suffixes are removed from operation names. Leaf spans are grouped when they have the same trace, parent, and normalized operation name; the viewer also recursively merges normalized sibling branches while preserving their activity intervals and descendants.",
+      "- `processors_compact` (`chdash.processors.json.v1`): the live Pipeline representation. `strings` is a shared dictionary. `rows` follow `row_schema`; identities and parent IDs reference exact decimal strings. Summary windows are grouped in `summary_series` by host, trace, query, parent and operation. Their flat `windows` follow `summary_window_schema`: start offset, finish offset, active time and event count. Add `summary_origin_us` to the offsets to recover exact microsecond timestamps. These windows have no additional temporal LOD. Values beyond JavaScript's safe integer range use decimal strings.",
+      "- `processor_trace_summary`: expanded original activity summaries, included only in Debug exports. `processor_trace_bucket_us` gives the adaptive bucket width; gaps within a bucket are unknown. Collection is independent of the detailed span cap; `processor_trace_summary_truncated` reports its own 65,536-row cap.",
+      "- `processors`: expanded original processor counters and graph links, included only in Debug exports. `id`, `parent_ids`, `plan_step` and `plan_group` use decimal strings to preserve UInt64 precision. `processors_truncated` reports the 10,000-row cap.",
+      "- `trace_spans_original`: the original ungrouped spans collected from ClickHouse before leaf grouping or temporal LOD. Each object contains `hostname`, `trace_id`, `span_id`, `parent_span_id`, `operation_name`, `start_time_us`, `finish_time_us`, `duration_us`, `query_id`, `thread_id`, and `thread_number`.",
+      "",
+      "The normal live API does not send `trace_spans_original`, `processors` or `processor_trace_summary`; it sends their compact representations. Expanded originals are requested only while building a Debug archive.",
+      "",
+      "### `error.txt`",
+      "Present only when the query finished with a browser-visible error. It contains the error text associated with the statement.",
+      "",
+      "### `tables/manifest.csv`",
+      "Manifest of table definitions recursively associated with the query. It records dependency depth, relation direction, database/table names, parent object, and the path to the exported DDL.",
+      "",
+      "### `tables/<database>/<table>.sql`",
+      "`CREATE` definition returned by Explorer for each table/view included by the recursive dependency export.",
+      "",
+      "## Compact live trace JSON (`chdash.trace.json.lod.v2`)",
+      "",
+      "`POST /api/query/analysis` returns ordinary `application/json`. The heavy trace portion is stored in `trace_compact` rather than repeated span objects.",
+      "",
+      "`trace_compact` contains:",
+      "",
+      "- `timeline_px`: fixed at 3840, matching a 4K horizontal timeline resolution.",
+      "- `origin_us`: the minimum original span start timestamp, transmitted once.",
+      "- `duration_us`: the full trace time range used to map timestamps to the 3840 temporal buckets.",
+      "- `hosts`, `traces`, `operations`: string dictionaries.",
+      "- `node_schema`: positional schema for each entry in `nodes`.",
+      "- `segment_schema`: positional schema for timeline segments.",
+      "- `nodes`: compact positional rows. `parent_ref` is `0` when unresolved/root, otherwise `parent_node_index + 1`. `flags & 1` identifies an aggregated leaf group.",
+      "",
+      "Each `segments_px` value is a flat list `[start_px, finish_px, start_px, finish_px, ...]`. Original microsecond intervals are projected to a 3840-pixel timeline. Leaf intervals that become indistinguishable at that resolution are merged. No structural/tree LOD is applied: parent/child nodes remain represented. Exact original timings and real span IDs remain available in `trace_spans_original` in this Debug archive.",
+    ];
+    return lines.join("\n");
+  }
+
   async function buildArchiveFiles() {
     const entries = sortedQueries();
     if (!entries.length) throw new Error("No received results are available to download.");
     const files = [];
     const many = multiQuery || entries.length > 1;
+    files.push({ name: "README.md", text: debugArchiveReadme(many) });
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       const prefix = many ? `query-${String(i + 1).padStart(3, "0")}/` : "";

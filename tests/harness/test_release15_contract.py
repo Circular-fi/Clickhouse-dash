@@ -28,7 +28,8 @@ def test_overview_embeds_lineage_and_uses_compact_rows_without_duplicate_engine_
     assert '["Partition key"' not in overview
     assert '["TTL"' not in overview
     assert 'renderTableFootprint(container, detail);' in overview
-    assert 'renderStorageComposition(container, detail);' in overview
+    footprint = ui[ui.index('function renderTableFootprint'):ui.index('function structureCompressedBytes')]
+    assert 'buildStorageComposition(detail, { embedded: true })' in footprint
     assert 'if (deps.length) renderDependencies(container, detail);' in overview
     assert 'sectionTitle("Lineage")' not in overview
     assert 'explorerKvGrid' not in ui

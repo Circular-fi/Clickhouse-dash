@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, state, api, util, ui } = ns;
+  const { dom, state, api, util, ui, storage } = ns;
   const graph = ns.explorerGraph;
 
   const model = {
@@ -26,6 +26,10 @@
     selectedFunctionKey: null,
     expandedFunctionCategories: new Set(),
     expandedDatabases: new Set(),
+    databaseTablesLoaded: new Set(),
+    databaseTablesLoading: new Set(),
+    databaseLoadPromises: new Map(),
+    databaseLoadErrors: new Map(),
     routeIntent: null,
     includeSystem: false,
     includeNonStoring: true,
@@ -312,7 +316,15 @@
       }
       if (table) graph?.focusTable?.(table.database, table.name);
       graph?.activate(false);
-    } else graph?.deactivate();
+    } else {
+      graph?.deactivate();
+      // Graph focus intentionally does not fetch Browse metadata. Load the
+      // selected table only when Browse becomes visible and actually needs it.
+      const table = selectedTable();
+      if (table && !model.detailLoading && !model.detail) {
+        void selectTable(table.database, table.name, false, { historyMode: "replace" });
+      }
+    }
   }
 
   function setWorkspace(name, { historyMode = "push" } = {}) {
@@ -361,6 +373,13 @@
     return key === "view" || key === "parameterizedview" || key === "materializedview" || key === "buffer";
   }
 
+  function sidebarObjectVisible(table) {
+    if (!table) return false;
+    if (!model.includeSystem && isSystemDatabaseName(table.database)) return false;
+    if (!model.includeNonStoring && nonStoringSummary(table)) return false;
+    return true;
+  }
+
   function isSystemDatabaseName(database) {
     return ["system", "information_schema", "INFORMATION_SCHEMA"].includes(String(database || ""));
   }
@@ -370,7 +389,10 @@
     const graphRequirements = model.mode === "graph" ? (graph?.visibilityRequirements?.() || {}) : {};
     return {
       includeSystem: !!graphRequirements.includeSystem || !!table && isSystemDatabaseName(table.database),
-      includeNonStoring: !!graphRequirements.includeNonStoring || !!table && nonStoringSummary(table),
+      // A non-storing object cannot remain selected while being excluded from
+      // the current Explorer scope. Keep the option checked/locked until the
+      // user moves to a storing object.
+      includeNonStoring: !!table && nonStoringSummary(table),
     };
   }
 
@@ -466,9 +488,11 @@
 
   function summaryFootprintBytes(summary) {
     if (!summary) return null;
-    const raw = isResidentMemorySummary(summary)
-      ? summary.resident_bytes
-      : (summary.logical_bytes ?? summary.compressed_bytes);
+    const raw = summary?.bytes != null
+      ? summary.bytes
+      : (isResidentMemorySummary(summary)
+        ? summary.resident_bytes
+        : (summary.logical_bytes ?? summary.compressed_bytes));
     if (raw == null) return null;
     const value = Number(raw);
     return Number.isFinite(value) && value >= 0 ? value : null;
@@ -891,25 +915,96 @@
     }
   }
 
-  function databaseSummary(name) {
-    return (model.catalog?.database_summaries || []).find((item) => String(item.name || "") === String(name || "")) || null;
+  function mergeDatabaseCatalog(database, payload) {
+    if (!model.catalog) model.catalog = { databases: [], tables: [] };
+    const name = String(database || "");
+    const databases = new Set([...(model.catalog.databases || []), ...(payload?.databases || []), name].filter(Boolean));
+    const retained = (model.catalog.tables || []).filter((table) => String(table.database || "") !== name);
+    model.catalog = {
+      ...model.catalog,
+      databases: [...databases].sort((a, b) => a.localeCompare(b)),
+      tables: retained.concat(Array.isArray(payload?.tables) ? payload.tables : []),
+    };
+  }
+
+  async function loadDatabaseTables(database, force = false) {
+    const name = String(database || "");
+    if (!name || !model.active) return;
+    if (!force && model.databaseTablesLoaded.has(name)) return;
+    const existing = model.databaseLoadPromises.get(name);
+    if (existing) return existing;
+    const hostId = String(state.selectedHostId || "");
+    if (!hostId) return;
+
+    const promise = (async () => {
+      model.databaseTablesLoading.add(name);
+      model.databaseLoadErrors.delete(name);
+      renderTableList();
+      try {
+        const payload = await api.getExplorerCatalog(hostId, name, !!force);
+        if (!model.active || String(state.selectedHostId || "") !== hostId) return;
+        mergeDatabaseCatalog(name, payload);
+        model.databaseTablesLoaded.add(name);
+        renderTableList();
+        if (model.selectedDatabase === name && model.mode !== "graph") renderDatabaseDetail(name);
+      } catch (error) {
+        if (!model.active || String(state.selectedHostId || "") !== hostId) return;
+        model.databaseLoadErrors.set(name, error);
+        renderTableList();
+        if (model.selectedDatabase === name && model.mode !== "graph") renderDatabaseDetail(name);
+      } finally {
+        model.databaseTablesLoading.delete(name);
+        model.databaseLoadPromises.delete(name);
+        renderTableList();
+      }
+    })();
+    model.databaseLoadPromises.set(name, promise);
+    return promise;
+  }
+
+  function catalogHasDatabase(name) {
+    const target = String(name || "");
+    return (model.catalog?.databases || []).some((item) => String(item || "") === target)
+      || (model.catalog?.tables || []).some((item) => String(item.database || "") === target);
   }
 
   function renderDatabaseDetail(database) {
-    const summary = databaseSummary(database);
-    if (!summary) {
+    const name = String(database || "");
+    const tables = (model.catalog?.tables || [])
+      .filter((item) => item.database === name && sidebarObjectVisible(item))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!name || !catalogHasDatabase(name)) {
       if (dom.explorerEmptyState) {
         dom.explorerEmptyState.hidden = false;
-        dom.explorerEmptyState.replaceChildren(node("strong", "", "Database unavailable"), node("span", "", database || "Unknown database"));
+        dom.explorerEmptyState.replaceChildren(node("strong", "", "Database unavailable"), node("span", "", name || "Unknown database"));
       }
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
       return;
     }
 
+    if (!model.databaseTablesLoaded.has(name)) {
+      if (dom.explorerEmptyState) {
+        dom.explorerEmptyState.hidden = false;
+        const error = model.databaseLoadErrors.get(name);
+        dom.explorerEmptyState.replaceChildren(
+          node("strong", "", error ? "Unable to load database" : "Loading tables…"),
+          node("span", "", error?.message || name),
+        );
+      }
+      if (dom.explorerDetail) dom.explorerDetail.hidden = true;
+      if (!model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);
+      return;
+    }
+
     if (dom.explorerEmptyState) dom.explorerEmptyState.hidden = true;
     if (dom.explorerDetail) dom.explorerDetail.hidden = false;
-    if (dom.explorerDetailName) dom.explorerDetailName.textContent = summary.name || database;
-    if (dom.explorerDetailMeta) dom.explorerDetailMeta.textContent = `${fmtInt(summary.tables)} tables · ${fmtInt(summary.rows)} rows · ${fmtBytes(summary.bytes)} total`;
+    if (dom.explorerDetailName) dom.explorerDetailName.textContent = name;
+    if (dom.explorerDetailMeta) {
+      const databaseSummary = (model.catalog?.database_summaries || []).find((item) => String(item?.name || "") === name) || null;
+      const meta = [`${fmtInt(tables.length)} tables`];
+      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) meta.push(fmtStorageBytes(databaseSummary.bytes));
+      dom.explorerDetailMeta.textContent = meta.join(" · ");
+    }
     if (dom.explorerHealthBadge) { dom.explorerHealthBadge.hidden = true; dom.explorerHealthBadge.textContent = ""; }
     if (dom.explorerWarnings) { dom.explorerWarnings.hidden = true; dom.explorerWarnings.replaceChildren(); }
     if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
@@ -917,42 +1012,24 @@
     if (!dom.explorerDetailContent) return;
     clear(dom.explorerDetailContent);
 
-    dom.explorerDetailContent.appendChild(simpleRows([
-      ["Tables", fmtInt(summary.tables)],
-      ["Rows", fmtInt(summary.rows)],
-      ["Table data", fmtBytes(summary.bytes)],
-    ]));
-
-    dom.explorerDetailContent.appendChild(sectionTitle("Disks used by this database"));
-    const disks = (summary.disks || []).map((disk) => [
-      disk.host_name || "—", disk.name || "—", fmtBytes(disk.bytes),
-      disk.free_space == null ? "—" : fmtBytes(disk.free_space),
-      disk.total_space == null ? "—" : fmtBytes(disk.total_space),
-    ]);
-    if (disks.length) dom.explorerDetailContent.appendChild(dataTable(["Host", "Disk", "Database data", "Free", "Capacity"], disks, "explorerDataTableWrap--wide"));
-    else dom.explorerDetailContent.appendChild(node("div", "explorerEmptySection", "No local disk-backed storage for this database."));
-
-    dom.explorerDetailContent.appendChild(sectionTitle("Tables"));
     const list = node("div", "explorerDatabaseDetailTables");
-    for (const table of (model.catalog?.tables || []).filter((item) => item.database === summary.name).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const table of tables) {
       const button = node("button", "explorerDatabaseDetailTable");
       button.type = "button";
       const labels = node("span", "explorerDatabaseDetailTable__labels");
+      const footprint = summaryFootprintBytes(table);
+      const stats = [summaryRowsLabel(table, { compact: true }), footprint == null ? null : util.formatBytes(footprint)].filter(Boolean).join(" · ");
       labels.append(node("strong", "", table.name), node("span", "", humanEngine(table.engine)));
-      const stats = node("span", "explorerDatabaseDetailTable__stats", [
-        summaryRowsLabel(table),
-        summaryFootprintBytes(table) == null ? null : fmtBytes(summaryFootprintBytes(table)),
-      ].filter(Boolean).join(" · ") || "—");
-      button.append(labels, stats);
+      button.append(labels, node("span", "explorerDatabaseDetailTable__stats", stats || "—"));
       button.addEventListener("click", () => void selectTable(table.database, table.name));
       list.appendChild(button);
     }
     dom.explorerDetailContent.appendChild(list);
   }
 
-  function selectDatabase(database, { historyMode = "push" } = {}) {
+  function selectDatabase(database, { historyMode = "push", expand = true } = {}) {
     const name = String(database || "");
-    if (!name || !databaseSummary(name)) {
+    if (!name || !catalogHasDatabase(name)) {
       setError(new Error(`Explorer database is not visible: ${name || "unknown"}`));
       return;
     }
@@ -962,12 +1039,14 @@
     model.selectedKey = null;
     model.detail = null;
     model.preview = null;
-    model.expandedDatabases.add(name);
+    if (expand) model.expandedDatabases.add(name);
+    else model.expandedDatabases.delete(name);
     setError(null);
     syncVisibilityOptionLocks({ propagate: true });
     renderTableList();
     if (model.mode === "graph") graph?.focusDatabase?.(name);
     else renderDatabaseDetail(name);
+    if (!model.databaseTablesLoaded.has(name)) void loadDatabaseTables(name);
     syncExplorerUrl(historyMode);
   }
 
@@ -978,35 +1057,28 @@
 
   function renderTableList() {
     if (!dom.explorerTableList) return;
-    const tables = visibleTables();
     clear(dom.explorerTableList);
+    const catalog = model.catalog;
+    const databases = [...new Set([
+      ...(catalog?.databases || []),
+      ...(catalog?.tables || []).map((table) => String(table.database || "")),
+    ].filter(Boolean))]
+      .filter((database) => model.includeSystem || !["system", "information_schema", "INFORMATION_SCHEMA"].includes(database))
+      .sort((a, b) => a.localeCompare(b));
 
-    if (!tables.length) {
-      dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading…" : "No accessible tables or views"));
+    if (!databases.length) {
+      dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading…" : "No accessible databases"));
       return;
     }
 
-    const queryActive = !!String(dom.explorerSearchInput?.value || "").trim();
-    const groups = new Map();
-    for (const table of tables) {
-      if (!groups.has(table.database)) groups.set(table.database, []);
-      groups.get(table.database).push(table);
-    }
-
-    if (!model.expandedDatabases.size && groups.size) {
-      const databases = [...groups.keys()].sort((a, b) => a.localeCompare(b));
-      const userDatabases = databases.filter((name) => !["system", "information_schema", "INFORMATION_SCHEMA"].includes(name));
-      // Keep user databases immediately browsable; system is intentionally
-      // collapsed because it is usually much larger and would dominate the
-      // object tree. The pane itself owns scrolling, not the document.
-      for (const database of userDatabases) model.expandedDatabases.add(database);
-      if (!model.expandedDatabases.size && databases[0]) model.expandedDatabases.add(databases[0]);
-    }
-
-    for (const [database, items] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
+    for (const database of databases) {
+      const allItems = (catalog?.tables || []).filter((table) => table.database === database && sidebarObjectVisible(table));
+      const items = allItems.filter((table) => !query || `${table.database}.${table.name} ${table.engine || ""}`.toLowerCase().includes(query));
+      const loaded = model.databaseTablesLoaded.has(database);
+      const loading = model.databaseTablesLoading.has(database);
+      const expanded = model.expandedDatabases.has(database);
       const section = node("section", "explorerTreeGroup");
-      const expanded = queryActive || model.expandedDatabases.has(database);
-      const databaseInfo = databaseSummary(database);
       const header = node("div", `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}`);
       const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "⌄" : "›");
       toggle.type = "button";
@@ -1014,15 +1086,35 @@
       toggle.setAttribute("aria-expanded", String(expanded));
       toggle.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (model.expandedDatabases.has(database)) model.expandedDatabases.delete(database);
-        else model.expandedDatabases.add(database);
+        if (expanded) {
+          const selectedTableInDatabase = typeof model.selectedKey === "string" && model.selectedKey.startsWith(`${database}\0`);
+          const selectedDatabase = model.selectedDatabase === database;
+          if (selectedTableInDatabase || selectedDatabase) {
+            // Collapsing the branch that currently owns the detail view should
+            // never leave a hidden table selected. Switch to the database view
+            // while keeping the branch collapsed.
+            selectDatabase(database, { expand: false });
+            return;
+          }
+          model.expandedDatabases.delete(database);
+        } else {
+          model.expandedDatabases.add(database);
+          if (!loaded) void loadDatabaseTables(database);
+        }
         renderTableList();
       });
       const headerMain = node("button", "explorerTreeDatabase");
       headerMain.type = "button";
+      const databaseSummary = (catalog?.database_summaries || []).find((item) => String(item?.name || "") === database) || null;
+      const databaseMeta = [];
+      if (loading) databaseMeta.push("Loading…");
+      else if (loaded) databaseMeta.push(`${fmtInt(allItems.length)} tables`);
+      else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) databaseMeta.push(`${fmtInt(databaseSummary.tables)} tables`);
+      else databaseMeta.push("Tables");
+      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) databaseMeta.push(fmtStorageBytes(databaseSummary.bytes));
       headerMain.append(
         node("span", "explorerTreeDatabase__name", database),
-        node("span", "explorerTreeDatabase__count", `${databaseInfo ? fmtInt(databaseInfo.tables) : fmtInt(items.length)} tables · ${databaseInfo ? fmtBytes(databaseInfo.bytes) : "—"}`),
+        node("span", "explorerTreeDatabase__count", databaseMeta.join(" · ")),
       );
       headerMain.addEventListener("click", () => selectDatabase(database));
       header.append(toggle, headerMain);
@@ -1030,43 +1122,42 @@
 
       if (expanded) {
         const children = node("div", "explorerTreeChildren");
-        for (const table of items.sort((a, b) => a.name.localeCompare(b.name))) {
-          const key = `${table.database}\0${table.name}`;
-          const button = node("button", "explorerTreeObject");
-          button.type = "button";
-          button.classList.toggle("is-selected", key === model.selectedKey);
-          button.dataset.database = table.database;
-          button.dataset.table = table.name;
-
-          const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${objectKind(table).toLowerCase().replace(/[^a-z]+/g, "-")}`, objectKind(table) === "Table" ? "▦" : objectKind(table) === "View" ? "◇" : objectKind(table) === "Materialized View" ? "◆" : "◈");
-          const labels = node("span", "explorerTreeObject__labels");
-          const metaBits = [humanEngine(table.engine)];
-          if (!isViewLikeSummary(table)) {
-            const rowsLabel = summaryRowsLabel(table, { compact: true });
-            if (rowsLabel) metaBits.push(rowsLabel);
-            const bytes = summaryFootprintBytes(table);
-            if (bytes != null) metaBits.push(isResidentMemorySummary(table) ? `${fmtBytes(bytes)} RAM` : fmtBytes(bytes));
+        if (loading && !loaded) {
+          children.appendChild(node("div", "explorerListEmpty", "Loading tables…"));
+        } else if (model.databaseLoadErrors.has(database) && !loaded) {
+          children.appendChild(node("div", "explorerListEmpty", "Unable to load tables"));
+        } else if (loaded && !items.length) {
+          children.appendChild(node("div", "explorerListEmpty", query ? "No matching tables" : "No accessible tables or views"));
+        } else {
+          for (const table of items.sort((a, b) => a.name.localeCompare(b.name))) {
+            const key = `${table.database}\0${table.name}`;
+            const button = node("button", "explorerTreeObject");
+            button.type = "button";
+            button.classList.toggle("is-selected", key === model.selectedKey);
+            button.dataset.database = table.database;
+            button.dataset.table = table.name;
+            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${objectKind(table).toLowerCase().replace(/[^a-z]+/g, "-")}`, objectKind(table) === "Table" ? "▦" : objectKind(table) === "View" ? "◇" : objectKind(table) === "Materialized View" ? "◆" : "◈");
+            const labels = node("span", "explorerTreeObject__labels");
+            const footprint = summaryFootprintBytes(table);
+            const stats = [
+              summaryRowsLabel(table, { compact: true }),
+              footprint == null ? null : util.formatBytes(footprint),
+            ].filter(Boolean).join(" · ");
+            labels.append(
+              node("span", "explorerTreeObject__name", table.name),
+              node("span", "explorerTreeObject__meta", [humanEngine(table.engine), stats].filter(Boolean).join(" · ")),
+            );
+            button.append(icon, labels);
+            const storageBlocked = model.mode === "graph" && graph?.isStorageMode?.() && !storageCatalogEligible(table);
+            button.disabled = !!storageBlocked;
+            button.classList.toggle("is-storage-blocked", !!storageBlocked);
+            if (storageBlocked) button.title = "This object does not store data and has no storage topology.";
+            button.addEventListener("click", () => { if (!button.disabled) void selectTable(table.database, table.name); });
+            children.appendChild(button);
           }
-          labels.append(node("span", "explorerTreeObject__name", table.name), node("span", "explorerTreeObject__meta", metaBits.filter(Boolean).join(" · ")));
-          const healthState = String(table.health || "healthy");
-          const hostHealthClass = healthState === "healthy" ? "hostDot--good" : healthState === "warning" ? "hostDot--warning" : "hostDot--bad";
-          const health = node("span", `hostDot explorerTreeHealthDot ${hostHealthClass}`, "");
-          health.title = healthLabel(table);
-          health.setAttribute("aria-hidden", "true");
-          button.append(icon, labels, health);
-          // Sidebar storage eligibility comes from the catalog object type, not
-          // the currently loaded graph scope. Using graph reachability here made
-          // tables from the previously selected database flash grey while the
-          // next database graph was loading.
-          const storageBlocked = model.mode === "graph" && graph?.isStorageMode?.()
-            && !storageCatalogEligible(table);
-          button.disabled = !!storageBlocked;
-          button.classList.toggle("is-storage-blocked", !!storageBlocked);
-          if (storageBlocked) button.title = "This object does not store data and has no storage topology.";
-          button.addEventListener("click", () => { if (!button.disabled) selectTable(table.database, table.name); });
-          children.appendChild(button);
         }
         section.appendChild(children);
+        if (!loaded && !loading) queueMicrotask(() => void loadDatabaseTables(database));
       }
       dom.explorerTableList.appendChild(section);
     }
@@ -1085,50 +1176,50 @@
     if (dom.explorerRefreshButton) dom.explorerRefreshButton.disabled = true;
     renderTableList();
     try {
-      let payload = await api.getExplorerCatalog(hostId, "", !!force);
+      const payload = await api.getExplorerCatalog(hostId, "", !!force);
       if (String(state.selectedHostId || "") !== hostId || !model.active) return;
 
-      // A direct Explorer URL can target an object created after the current
-      // catalog/ACL snapshot (performance fixtures are a concrete example).
-      // Missing from a cached catalog is therefore not proof that the runner
-      // cannot see the object. Retry exactly once with refresh=1 before
-      // reporting the route as invisible; that refresh invalidates both the
-      // runner ACL boundary and the technical metadata catalog on the backend.
-      let route = model.routeIntent;
-      const routeNeedsFreshCatalog = !force
-        && route?.workspace === "explorer"
-        && route.section === "tables"
-        && route.database
-        && route.table
-        && !catalogContainsTable(payload, route.database, route.table);
-      if (routeNeedsFreshCatalog) {
-        payload = await api.getExplorerCatalog(hostId, "", true);
-        if (String(state.selectedHostId || "") !== hostId || !model.active) return;
-        route = model.routeIntent;
+      const previousTables = force ? [] : (model.catalog?.tables || []);
+      model.catalog = { ...payload, tables: previousTables };
+      if (force) {
+        model.databaseTablesLoaded.clear();
+        model.databaseLoadErrors.clear();
       }
-
-      model.catalog = payload;
       renderTableList();
       if (model.mode === "graph") graph?.onScopeChanged();
-      // Route intent is a one-shot bootstrap instruction. Keeping it around
-      // allows a later catalog refresh to resurrect an old selection.
-      if (route?.workspace === "explorer" && route.section === "tables") model.routeIntent = null;
-      if (route?.workspace === "explorer" && route.section === "tables" && route.database && route.table) {
-        const exists = catalogContainsTable(payload, route.database, route.table);
-        if (!exists) throw new Error(`Explorer route object is not visible: ${route.database}.${route.table}`);
-        model.tab = route.tab || "Overview";
-        model.expandedDatabases.add(route.database);
-        await selectTable(route.database, route.table, false, { historyMode: "none" });
-      } else if (route?.workspace === "explorer" && route.section === "tables" && route.database) {
-        selectDatabase(route.database, { historyMode: "none" });
+
+      const route = model.routeIntent;
+      if (route?.workspace === "explorer" && route.section === "tables") {
+        model.routeIntent = null;
+        if (route.database) {
+          model.expandedDatabases.add(route.database);
+          await loadDatabaseTables(route.database, !!force);
+        }
+        if (route.database && route.table) {
+          if (!catalogContainsTable(model.catalog, route.database, route.table) && !force) {
+            await loadDatabaseTables(route.database, true);
+          }
+          if (!catalogContainsTable(model.catalog, route.database, route.table)) {
+            throw new Error(`Explorer route object is not visible: ${route.database}.${route.table}`);
+          }
+          model.tab = route.tab || "Overview";
+          await selectTable(route.database, route.table, false, { historyMode: "none" });
+        } else if (route.database) {
+          selectDatabase(route.database, { historyMode: "none" });
+        }
       }
-      if (force && model.selectedKey) {
-        const table = selectedTable();
-        if (table) await selectTable(table.database, table.name, true);
+
+      if (force) {
+        const expanded = [...model.expandedDatabases];
+        for (const database of expanded) await loadDatabaseTables(database, true);
+        if (model.selectedKey) {
+          const [database, table] = model.selectedKey.split("\0");
+          if (database && table) await selectTable(database, table, true);
+        }
       }
     } catch (e) {
       setError(e);
-      model.catalog = null;
+      if (!model.catalog) model.catalog = null;
       renderTableList();
     } finally {
       model.loadingCatalog = false;
@@ -1314,45 +1405,54 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  function catalogFootprintTotal(database = null) {
-    const summaries = model.catalog?.database_summaries || [];
-    if (database != null) {
-      const summary = summaries.find((item) => String(item?.name || "") === String(database));
-      const value = optionalNumber(summary?.bytes);
-      return value != null && value >= 0 ? value : null;
-    }
-    if (!summaries.length) return null;
-    let total = 0;
-    let known = false;
-    for (const summary of summaries) {
-      const value = optionalNumber(summary?.bytes);
-      if (value == null || value < 0) continue;
-      total += value;
-      known = true;
-    }
-    return known ? total : null;
-  }
-
   function renderTableFootprint(container, detail) {
     const s = detail.summary || {};
     const tableBytes = summaryFootprintBytes(s);
-    const dbBytes = catalogFootprintTotal(s.database);
-    const allBytes = catalogFootprintTotal();
-    const list = node("div", "explorerShareList explorerShareList--inline");
-    for (const [scope, total] of [["Database", dbBytes], ["ClickHouse", allBytes]]) {
-      const pct = tableBytes == null ? null : percentValue(tableBytes, total);
-      const row = node("div", "explorerShareRow");
-      const head = node("div", "explorerShareRow__head");
-      const value = tableBytes == null || total == null || total <= 0
-        ? "unknown"
-        : `${fmtBytes(tableBytes)} / ${fmtBytes(total)}`;
-      head.append(node("span", "explorerShareRow__label", `Table / ${scope}`), node("code", "explorerShareRow__value", value));
-      row.append(head, percentBar(pct, {
-        title: pct == null ? "Storage percentage is unavailable" : `${fmtBytes(tableBytes)} of ${fmtBytes(total)}`,
-        variant: scope === "Database" ? "database" : "clickhouse",
-      }));
-      list.appendChild(row);
+    const dbBytes = optionalNumber(detail?.footprint_scope?.database_bytes);
+    const allBytes = optionalNumber(detail?.footprint_scope?.clickhouse_bytes);
+    const list = node("div", "explorerShareList explorerShareList--footprint");
+
+    const scopeMeter = (label, part, total, variant) => {
+      const pct = part == null ? null : percentValue(part, total);
+      const row = node("div", `explorerScopeMeter explorerScopeMeter--${variant}`);
+      const head = node("div", "explorerScopeMeter__head");
+      head.append(
+        node("span", "explorerScopeMeter__label", label),
+        node("code", "explorerScopeMeter__percent", pct == null ? "unknown" : fmtPercent(pct)),
+        node("code", "explorerScopeMeter__bytes", part == null || total == null
+          ? "unknown"
+          : `${fmtStorageBytes(part)} / ${fmtStorageBytes(total)}`),
+      );
+      const track = node("div", "explorerScopeMeter__track");
+      if (pct == null) {
+        track.classList.add("is-unknown");
+      } else {
+        const fill = node("div", "explorerScopeMeter__fill");
+        fill.style.width = `${Math.max(0, Math.min(100, Number(pct) || 0))}%`;
+        track.appendChild(fill);
+      }
+      row.append(head, track);
+      return row;
+    };
+
+    const scopeCard = node("div", "explorerScopeMeters");
+    scopeCard.append(
+      scopeMeter("Table / Database", tableBytes, dbBytes, "database"),
+      scopeMeter("Table / ClickHouse", tableBytes, allBytes, "clickhouse"),
+    );
+    list.appendChild(scopeCard);
+
+    if (isMergeTreeSummary(s)) {
+      const composition = node("div", "explorerStorageCompositionCard");
+      const head = node("div", "explorerStorageCompositionCard__head");
+      head.append(
+        node("span", "explorerStorageCompositionCard__label", "Table storage"),
+        node("code", "explorerStorageCompositionCard__bytes", tableBytes == null ? "unknown" : fmtStorageBytes(tableBytes)),
+      );
+      composition.append(head, buildStorageComposition(detail, { embedded: true }));
+      list.appendChild(composition);
     }
+
     container.appendChild(list);
   }
 
@@ -1439,17 +1539,15 @@
     };
   }
 
-  function renderStorageComposition(container, detail) {
+  function buildStorageComposition(detail, { embedded = false } = {}) {
     const composition = storageComposition(detail);
-    const wrap = node("div", "explorerStorageComposition explorerStorageComposition--stacked");
+    const wrap = node("div", `explorerStorageComposition explorerStorageComposition--stacked${embedded ? " is-embedded" : ""}`);
     const bar = node("div", `explorerStorageStackedBar${composition.known ? "" : " is-unknown"}`);
 
     if (composition.known) {
       let consumed = 0;
       const visible = composition.items.filter((item) => item.percent > 0);
       visible.forEach((item, index) => {
-        // The final visible segment closes the bar exactly at 100%, avoiding a
-        // sub-pixel hole from floating-point/rounding drift.
         const width = index === visible.length - 1
           ? Math.max(0, 100 - consumed)
           : Math.max(0, Math.min(item.percent, 100 - consumed));
@@ -1473,13 +1571,20 @@
       entry.append(
         node("i", `explorerStorageCompositionLegend__swatch explorerStorageCompositionLegend__swatch--${item.variant}`),
         node("span", "explorerStorageCompositionLegend__label", item.label),
-        node("code", "explorerStorageCompositionLegend__percent", item.percent == null ? "unknown" : fmtPercent(item.percent)),
+        node("code", "explorerStorageCompositionLegend__percent",
+          item.percent == null || item.bytes == null
+            ? "unknown"
+            : `${fmtPercent(item.percent)} · ${fmtStorageBytes(item.bytes)}`),
       );
-      if (item.bytes != null) entry.title = `${item.label}: ${fmtStorageBytes(item.bytes)}`;
+      if (item.bytes != null) entry.title = `${item.label}: ${fmtPercent(item.percent)} · ${fmtStorageBytes(item.bytes)}`;
       legend.appendChild(entry);
     }
     if (legendItems.length) wrap.appendChild(legend);
-    container.appendChild(wrap);
+    return wrap;
+  }
+
+  function renderStorageComposition(container, detail) {
+    container.appendChild(buildStorageComposition(detail));
   }
 
   function renderOverview(container, detail) {
@@ -1489,7 +1594,6 @@
     const empty = isEmptyRowSummary(s);
     if (!empty && !resident && !viewLike) {
       renderTableFootprint(container, detail);
-      if (isMergeTreeSummary(s)) renderStorageComposition(container, detail);
     }
 
     const deps = visibleDependencies(detail);
@@ -1499,7 +1603,6 @@
       return;
     }
 
-    renderColumns(container, detail);
     if (detail.ddl) renderDdl(container, detail);
   }
 
@@ -1514,11 +1617,21 @@
       return;
     }
 
+    const compressedMax = Math.max(0, ...rows.map((item) => optionalNumber(item.compressed) || 0));
+    const uncompressedMax = Math.max(0, ...rows.map((item) => optionalNumber(item.uncompressed) || 0));
+    const applyGauge = (td, value, max, text) => {
+      td.classList.add("resultTable__gaugeCell", "resultTable__numeric", "explorerStorageGaugeCell");
+      const n = optionalNumber(value);
+      const fill = n == null || max <= 0 ? 0 : Math.max(0, Math.min(100, (Math.abs(n) / max) * 100));
+      td.style.setProperty("--gaugeFill", `${fill}%`);
+      td.textContent = text;
+    };
+
     // Reuse the exact Query results table component. Explorer contributes only
     // display adapters for byte values and the percentage bar; sorting,
     // headers, row indexes, typography and table geometry remain shared.
     const tableRows = rows.map((item) => {
-      const displayName = options.subcolumn || item.is_subcolumn ? `<${item.name}>` : String(item.name || "—");
+      const displayName = String(item.name || "—");
       const row = [
         displayName,
         item.codec && item.codec !== "unknown" ? item.codec : "-",
@@ -1529,29 +1642,68 @@
       row.__explorerStorageItem = item;
       return row;
     });
-    const table = ns.results?.createStaticResultTable?.({
+    const tupleExpanded = options.tupleExpanded instanceof Set ? options.tupleExpanded : null;
+    let table = null;
+    table = ns.results?.createStaticResultTable?.({
       columns: [firstLabel, group === "columns" ? "Codec" : "Type", "Compressed", "Uncompressed", "% table"],
       types: ["String", "String", "Float64", "Float64", "Float64"],
       rows: tableRows,
       className: `explorerResultTable explorerStorageResultTable explorerStorageResultTable--${group}`,
+      indexSortable: false,
+      rowIndexValue: (row) => row?.__explorerStorageItem?.position ?? "",
+      decorateRow: (tr, ctx) => {
+        const item = ctx.row?.__explorerStorageItem || null;
+        if (item?.tuple_parent) {
+          tr.dataset.tupleParent = item.tuple_parent;
+          tr.classList.add("explorerStorageTupleChild");
+          tr.hidden = !(tupleExpanded?.has(item.tuple_parent));
+          const indexCell = tr.querySelector(".resultTable__rowIndex");
+          if (indexCell) {
+            indexCell.textContent = "";
+            indexCell.setAttribute("aria-hidden", "true");
+          }
+        }
+      },
       renderCell: (td, ctx) => {
         const item = ctx.row?.__explorerStorageItem || null;
         if (ctx.columnIndex === 0) {
-          td.textContent = String(ctx.value ?? "—");
+          td.textContent = "";
+          if (item?.tuple_root && tupleExpanded) {
+            const toggle = node("button", "explorerTreeDatabaseToggle explorerStorageTupleToggle", tupleExpanded.has(item.tuple_root) ? "⌄" : "›");
+            toggle.type = "button";
+            toggle.setAttribute("aria-expanded", String(tupleExpanded.has(item.tuple_root)));
+            toggle.setAttribute("aria-label", `${tupleExpanded.has(item.tuple_root) ? "Collapse" : "Expand"} ${item.tuple_root}`);
+            toggle.addEventListener("click", (event) => {
+              event.stopPropagation();
+              const opening = !tupleExpanded.has(item.tuple_root);
+              if (opening) tupleExpanded.add(item.tuple_root);
+              else tupleExpanded.delete(item.tuple_root);
+              toggle.textContent = opening ? "⌄" : "›";
+              toggle.setAttribute("aria-expanded", String(opening));
+              toggle.setAttribute("aria-label", `${opening ? "Collapse" : "Expand"} ${item.tuple_root}`);
+              for (const row of table?.querySelectorAll?.("tbody tr[data-tuple-parent]") || []) {
+                if (row.dataset.tupleParent === item.tuple_root) row.hidden = !opening;
+              }
+            });
+            td.append(toggle, node("span", "explorerStorageTupleName", String(ctx.value ?? "—")));
+          } else {
+            const label = node("span", item?.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", String(ctx.value ?? "—"));
+            td.appendChild(label);
+          }
           if (item?.title) td.title = item.title;
           return true;
         }
-        if (ctx.columnIndex === 2 || ctx.columnIndex === 3) {
-          td.textContent = ctx.value == null ? "-" : fmtStorageBytes(ctx.value);
+        if (ctx.columnIndex === 2) {
+          applyGauge(td, ctx.value, compressedMax, ctx.value == null ? "-" : fmtStorageBytes(ctx.value));
+          return true;
+        }
+        if (ctx.columnIndex === 3) {
+          applyGauge(td, ctx.value, uncompressedMax, ctx.value == null ? "-" : fmtStorageBytes(ctx.value));
           return true;
         }
         if (ctx.columnIndex === 4) {
           td.classList.add("explorerStoragePercentCell");
-          td.replaceChildren(percentBar(ctx.value, {
-            title: ctx.value == null ? "Compressed share is unavailable" : "Compressed bytes as a share of the table on-disk footprint",
-            variant: options.structure ? (String(item?.kind || "").startsWith("projection:") ? "projection" : "index") : "column",
-            unknownText: "-",
-          }));
+          applyGauge(td, ctx.value, 100, ctx.value == null ? "-" : fmtPercent(ctx.value));
           return true;
         }
         return false;
@@ -1574,21 +1726,35 @@
           ? `${observedDefaults.join(" / ")} (part defaults)`
           : "DEFAULT";
     const visibleColumns = (detail.columns || []).filter((column) => !isImplementationSubcolumn(column));
-    const columnRows = visibleColumns.map((c, position) => {
+    const tupleRoots = visibleColumns
+      .filter((column) => !column?.is_subcolumn && /^Tuple\s*\(/i.test(String(column?.type || "")))
+      .map((column) => String(column.name || ""))
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+    const tupleExpanded = new Set();
+    let topLevelColumnPosition = 0;
+    const columnRows = visibleColumns.map((c) => {
       const compressed = optionalNumber(c.compressed_bytes);
       const uncompressed = optionalNumber(c.uncompressed_bytes);
+      const name = String(c.name || "—");
+      const tupleParent = c.is_subcolumn
+        ? (tupleRoots.find((root) => name.startsWith(`${root}.`)) || null)
+        : null;
+      const displayPosition = c.is_subcolumn ? null : ++topLevelColumnPosition;
       return {
-        position,
-        name: String(c.name || "—"),
+        position: displayPosition,
+        name,
         title: c.type || "",
         codec: c.codec || defaultCodec,
         compressed,
         uncompressed,
         percent: compressed == null ? null : percentValue(compressed, tableFootprint),
         is_subcolumn: !!c.is_subcolumn,
+        tuple_root: tupleRoots.includes(name) ? name : null,
+        tuple_parent: tupleParent,
       };
     });
-    renderStorageMetricTable(container, "Columns", "columns", columnRows, "Column");
+    renderStorageMetricTable(container, "Columns", "columns", columnRows, "Column", { tupleExpanded });
 
     const structures = (detail.indexes_and_projections || []).map((item, position) => {
       const compressed = optionalNumber(item.compressed_bytes);
@@ -1616,9 +1782,6 @@
       container.appendChild(node("div", "explorerFootnote", "Wide per-column storage counters are unavailable on this server; unknown is shown instead of fabricating 0%."));
     } else if (sectionUnavailable("wide_subcolumn_sizes")) {
       container.appendChild(node("div", "explorerFootnote", "Tuple subcolumn names are available, but this server does not expose per-subcolumn Wide byte counters."));
-    }
-    if (compactParts > 0) {
-      container.appendChild(node("div", "explorerFootnote", "Compact parts share one physical data stream, so ClickHouse cannot report exact per-column Compact bytes. Column rows therefore show independently stored Wide bytes only."));
     }
   }
 
@@ -1684,7 +1847,6 @@
         ].filter(Boolean).join(" · "),
       })), { valueFormatter: fmtBytes, variant: "storage" }));
     }
-    container.appendChild(node("div", "explorerFootnote", "Storage values are local-replica values. Capacity and paths are only exposed for disks used by this visible table."));
   }
 
   function renderIngestionCharts(container, detail) {
@@ -1720,19 +1882,35 @@
       container.appendChild(node("div", "explorerEmptySection", sectionUnavailable("merges") ? "Merge metadata unavailable." : "No active merges."));
       return;
     }
-    const wrap = node("div", "explorerMergeProgressList");
-    for (const merge of merges) {
-      const pct = Math.max(0, Math.min(100, Number(merge.progress || 0) * 100));
-      const row = node("div", "explorerMergeProgress");
-      const head = node("div", "explorerMergeProgress__head");
-      head.append(
-        node("code", "explorerMergeProgress__part", merge.result_part_name || merge.partition || "merge"),
-        node("span", "explorerMergeProgress__meta", `${fmtInt(merge.num_parts)} parts · ${fmtBytes(merge.bytes_read)} read · ${fmtBytes(merge.memory_usage)} memory · ${util.formatSeconds(merge.elapsed_seconds)}`),
-      );
-      row.append(head, percentBar(pct, { title: `Merge progress ${fmtPercent(pct)}`, variant: "merge" }));
-      wrap.appendChild(row);
-    }
-    container.appendChild(wrap);
+    const rows = merges.map((merge) => [
+      merge.result_part_name || merge.partition || "merge",
+      merge.partition || "—",
+      Number(merge.elapsed_seconds || 0),
+      Math.max(0, Math.min(100, Number(merge.progress || 0) * 100)),
+      Number(merge.num_parts || 0),
+      Number(merge.rows_read || 0),
+      Number(merge.bytes_read || 0),
+      Number(merge.memory_usage || 0),
+    ]);
+    const table = ns.results?.createStaticResultTable?.({
+      columns: ["Result part", "Partition", "Elapsed", "Progress", "Parts", "Rows read", "Bytes read", "Memory"],
+      types: ["String", "String", "Float64", "Float64", "UInt64", "UInt64", "UInt64", "UInt64"],
+      rows,
+      className: "explorerResultTable explorerStorageResultTable explorerStorageResultTable--merges",
+      renderCell: (td, ctx) => {
+        if (ctx.columnIndex === 2) { td.textContent = util.formatSeconds(Number(ctx.value || 0)); return true; }
+        if (ctx.columnIndex === 3) {
+          td.classList.add("resultTable__gaugeCell", "resultTable__numeric", "explorerStorageGaugeCell");
+          td.style.setProperty("--gaugeFill", `${Math.max(0, Math.min(100, Number(ctx.value || 0)))}%`);
+          td.textContent = `${Number(ctx.value || 0).toFixed(2)}%`;
+          return true;
+        }
+        if (ctx.columnIndex === 6 || ctx.columnIndex === 7) { td.textContent = fmtStorageBytes(ctx.value); return true; }
+        return false;
+      },
+    });
+    if (!table) throw new Error("Shared result table component is unavailable.");
+    container.appendChild(table);
   }
 
   function renderTopology(container, detail) {
@@ -1844,17 +2022,42 @@
 
   function renderParts(container, detail) {
     const rows = (detail.parts || []).map((p) => [
-      p.name, p.partition, p.disk, fmtInt(p.rows), fmtBytes(p.bytes), fmtInt(p.marks), fmtInt(p.files), fmtInt(p.level),
-      util.formatSeconds(Number(p.age_seconds || 0)), p.active ? "active" : "inactive",
+      p.name, p.partition, p.disk, Number(p.rows || 0), Number(p.bytes || 0), Number(p.marks || 0), Number(p.files || 0), Number(p.level || 0),
+      Number(p.age_seconds || 0), p.active ? "active" : "inactive",
     ]);
     if (!rows.length && sectionUnavailable("parts")) return container.appendChild(unavailableMessage("Parts metadata"));
-    container.appendChild(dataTable(["Part", "Partition", "Disk", "Rows", "Bytes", "Marks", "Files", "Level", "Age", "State"], rows, "explorerDataTableWrap--wide"));
+    if (!rows.length) return container.appendChild(node("div", "explorerEmptySection", "No parts."));
+    const table = ns.results?.createStaticResultTable?.({
+      columns: ["Part", "Partition", "Disk", "Rows", "Bytes", "Marks", "Files", "Level", "Age", "State"],
+      types: ["String", "String", "String", "UInt64", "UInt64", "UInt64", "UInt64", "UInt64", "Float64", "String"],
+      rows,
+      className: "explorerResultTable explorerStorageResultTable explorerStorageResultTable--parts",
+      renderCell: (td, ctx) => {
+        if (ctx.columnIndex === 4) { td.textContent = fmtStorageBytes(ctx.value); return true; }
+        if (ctx.columnIndex === 8) { td.textContent = util.formatSeconds(Number(ctx.value || 0)); return true; }
+        return false;
+      },
+    });
+    if (!table) throw new Error("Shared result table component is unavailable.");
+    container.appendChild(table);
   }
 
   function renderPartitions(container, detail) {
-    const rows = (detail.partitions || []).map((p) => [p.partition, fmtInt(p.rows), fmtBytes(p.bytes), fmtInt(p.parts)]);
+    const rows = (detail.partitions || []).map((p) => [p.partition, Number(p.rows || 0), Number(p.bytes || 0), Number(p.parts || 0)]);
     if (!rows.length && sectionUnavailable("partitions")) return container.appendChild(unavailableMessage("Partition metadata"));
-    container.appendChild(dataTable(["Partition", "Rows", "Bytes", "Parts"], rows));
+    if (!rows.length) return container.appendChild(node("div", "explorerEmptySection", "No partitions."));
+    const table = ns.results?.createStaticResultTable?.({
+      columns: ["Partition", "Rows", "Bytes", "Parts"],
+      types: ["String", "UInt64", "UInt64", "UInt64"],
+      rows,
+      className: "explorerResultTable explorerStorageResultTable explorerStorageResultTable--partitions",
+      renderCell: (td, ctx) => {
+        if (ctx.columnIndex === 2) { td.textContent = fmtStorageBytes(ctx.value); return true; }
+        return false;
+      },
+    });
+    if (!table) throw new Error("Shared result table component is unavailable.");
+    container.appendChild(table);
   }
 
   function renderIndexes(container, detail) {
@@ -1935,6 +2138,10 @@
 
   function renderStorageCombined(container, detail) {
     renderStorage(container, detail);
+
+    if (isMergeTreeSummary(detail.summary)) {
+      renderColumns(container, detail);
+    }
 
     container.appendChild(sectionTitle("Ingestion activity"));
     renderIngestionCharts(container, detail);
@@ -2061,11 +2268,119 @@
     info.tabIndex = 0;
     info.setAttribute("aria-label", text);
     info.addEventListener("click", (event) => event.stopPropagation());
-    info.append(
-      node("span", "explorerFinalizeInfo__icon", "i"),
-      node("div", "explorerFinalizeInfo__tooltip", text),
-    );
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 416.979 416.979");
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("explorerFinalizeInfo__icon");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M356.004 61.156C274.634-20.314 142.627-20.395 61.156 60.974c-81.47 81.371-81.552 213.379-.181 294.85 81.369 81.47 213.378 81.551 294.849.181 81.469-81.369 81.551-213.379.18-294.849zM237.6 340.786c0 3.217-2.607 5.822-5.822 5.822h-46.576c-3.215 0-5.822-2.605-5.822-5.822V167.885c0-3.217 2.607-5.822 5.822-5.822h46.576c3.215 0 5.822 2.604 5.822 5.822v172.901zM208.49 137.901c-18.618 0-33.766-15.146-33.766-33.765 0-18.617 15.147-33.766 33.766-33.766 18.619 0 33.766 15.148 33.766 33.766 0 18.619-15.149 33.765-33.766 33.765z");
+    icon.appendChild(path);
+    info.append(icon, node("div", "explorerFinalizeInfo__tooltip", text));
     th.appendChild(info);
+  }
+
+  function persistFlattenTuple(enabled) {
+    state.runOptFlattenTuple = enabled !== false;
+    storage?.saveRunOptions?.({
+      autoFormat: state.runOptAutoFormat,
+      multiQuery: state.runOptMultiQuery,
+      executionStats: state.runOptExecutionStats,
+      flattenTuple: state.runOptFlattenTuple,
+    });
+    ui?.applyRunOptionsUi?.();
+    window.dispatchEvent(new CustomEvent("chdash:flatten-tuple-change", { detail: { enabled: state.runOptFlattenTuple } }));
+  }
+
+  function createDataSettingsControl() {
+    const root = node("div", "themeSelect explorerDataSettings");
+    const button = node("button", "themeSelect__button editorAutocompleteControl__button explorerDataSettings__button");
+    button.type = "button";
+    button.setAttribute("aria-haspopup", "menu");
+    button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-label", "Data display settings");
+    button.title = "Data display settings";
+    button.appendChild(node("span", "editorAutocompleteControl__gear"));
+
+    const menu = node("div", "themeSelect__menu explorerDataSettings__menu");
+    menu.setAttribute("role", "menu");
+    menu.tabIndex = -1;
+    menu.hidden = true;
+    const option = node("button", "runMenu__opt");
+    option.type = "button";
+    option.setAttribute("role", "menuitemcheckbox");
+    const check = node("span", "runMenu__optCheck");
+    check.setAttribute("aria-hidden", "true");
+    option.append(check, node("span", "runMenu__optText", "Flatten tuple"));
+    const sync = () => option.setAttribute("aria-checked", String(state.runOptFlattenTuple !== false));
+    sync();
+    menu.appendChild(option);
+    root.append(button, menu);
+
+    let open = false;
+    const positionMenu = () => {
+      if (!open) return;
+      const rect = button.getBoundingClientRect();
+      menu.style.position = "fixed";
+      menu.style.left = "auto";
+      menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+      menu.style.top = `${Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 4)}px`;
+    };
+    const onOutsideClick = (event) => {
+      const target = event.target;
+      if (target instanceof Node && (root.contains(target) || menu.contains(target))) return;
+      close();
+    };
+    const onEscape = (event) => {
+      if (event.key === "Escape") close();
+    };
+    const close = () => {
+      if (!open) return;
+      open = false;
+      root.classList.remove("themeSelect--open");
+      menu.classList.remove("is-open");
+      button.setAttribute("aria-expanded", "false");
+      document.removeEventListener("click", onOutsideClick);
+      document.removeEventListener("keydown", onEscape);
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+      menu.hidden = true;
+      menu.style.removeProperty("position");
+      menu.style.removeProperty("left");
+      menu.style.removeProperty("right");
+      menu.style.removeProperty("top");
+      if (menu.parentNode !== root) root.appendChild(menu);
+    };
+    const openMenu = () => {
+      if (open) return;
+      open = true;
+      document.body.appendChild(menu);
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      positionMenu();
+      requestAnimationFrame(() => {
+        if (!open) return;
+        root.classList.add("themeSelect--open");
+        menu.classList.add("is-open");
+      });
+      document.addEventListener("click", onOutsideClick);
+      document.addEventListener("keydown", onEscape);
+      window.addEventListener("resize", positionMenu, { passive: true });
+      window.addEventListener("scroll", positionMenu, { passive: true, capture: true });
+    };
+
+    option.addEventListener("click", (event) => {
+      event.stopPropagation();
+      persistFlattenTuple(!(state.runOptFlattenTuple !== false));
+      sync();
+      close();
+      renderTabContent();
+    });
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (open) close();
+      else openMenu();
+    });
+    return root;
   }
 
   function renderData(container, detail) {
@@ -2082,7 +2397,9 @@
         open.disabled = false;
       }
     });
-    toolbar.append(open);
+    const actions = node("div", "explorerDataToolbar__actions");
+    actions.append(open, createDataSettingsControl());
+    toolbar.append(actions);
     container.appendChild(toolbar);
 
     if (model.previewLoading) return container.appendChild(node("div", "explorerEmptySection", "Loading preview…"));
@@ -2093,16 +2410,27 @@
     }
     if (model.preview.error) return container.appendChild(node("div", "explorerUnavailable", model.preview.error.message || "Preview failed."));
     const previewColumns = Array.isArray(model.preview.columns) ? model.preview.columns : [];
-    const columns = previewColumns.map((c) => c.name);
-    const types = previewColumns.map((c) => c.type);
-    const rows = Array.isArray(model.preview.rows) ? model.preview.rows : [];
+    const sourceColumns = previewColumns.map((c) => c.name);
+    const sourceRows = Array.isArray(model.preview.rows) ? model.preview.rows : [];
+    // AggregateFunction preview values are finalized/stringified server-side so
+    // clickhouse-cpp never has to decode aggregate states. If every returned
+    // finalized value is numeric, expose a numeric presentation type to the
+    // shared result table so Explorer gets the same background gauges as Query.
+    const sourceTypes = previewColumns.map((c, columnIndex) => {
+      if (!aggregatePreviewColumn(c)) return c.type;
+      const values = sourceRows.map((row) => Array.isArray(row) ? row[columnIndex] : null).filter((value) => value != null && String(value).trim() !== "");
+      return values.length && values.every((value) => Number.isFinite(Number(value))) ? "Float64" : c.type;
+    });
+    const projected = ns.results?.flattenTupleTableData?.(sourceColumns, sourceTypes, sourceRows, state.runOptFlattenTuple !== false)
+      || { columns: sourceColumns, types: sourceTypes, rows: sourceRows, sourceColumnIndexes: sourceColumns.map((_, index) => index) };
     const table = ns.results?.createStaticResultTable?.({
-      columns,
-      types,
-      rows,
+      columns: projected.columns,
+      types: projected.types,
+      rows: projected.rows,
       className: "explorerResultTable explorerResultTable--preview",
       decorateHeader: (th, ctx) => {
-        if (aggregatePreviewColumn(previewColumns[ctx.columnIndex])) appendFinalizePreviewInfo(th);
+        const sourceIndex = projected.sourceColumnIndexes?.[ctx.columnIndex] ?? ctx.columnIndex;
+        if (aggregatePreviewColumn(previewColumns[sourceIndex])) appendFinalizePreviewInfo(th);
       },
     });
     if (!table) throw new Error("Shared result table component is unavailable.");
@@ -2158,10 +2486,19 @@
 
   async function selectTable(database, table, force = false, { historyMode = "push", graphOrigin = false } = {}) {
     if (model.mode === "graph" && graph?.isStorageMode?.() && graph?.canUseStorageForTable?.(database, table) === false) return;
+    // The top-level catalog intentionally contains only database names. Load
+    // exactly the branch the user is navigating to before resolving selection.
+    if (model.catalog && !model.databaseTablesLoaded.has(database)) await loadDatabaseTables(database, false);
+    if (model.catalog && !catalogContainsTable(model.catalog, database, table)) {
+      await loadDatabaseTables(database, true);
+      if (!catalogContainsTable(model.catalog, database, table)) {
+        setError(new Error(`Explorer table is not visible: ${database}.${table}`));
+        return;
+      }
+    }
     const serial = ++model.detailSerial;
     const key = `${database}\0${table}`;
     if (model.mode === "graph") graph?.focusTable?.(database, table, { ensureVisible: !graphOrigin });
-    if (!force && model.selectedKey === key && model.detail) return;
     model.selectedKey = key;
     model.selectedDatabase = null;
     model.expandedDatabases.add(database);
@@ -2169,6 +2506,17 @@
     // required to render it. Lock the corresponding option until selection
     // moves away from a system/non-storing object.
     syncVisibilityOptionLocks({ propagate: true });
+    if (model.mode === "graph") {
+      // Nothing from /api/explorer/table is rendered in Graph mode. Keep only
+      // the lightweight catalog selection + graph focus and avoid the detail
+      // request entirely until the user switches to Browse.
+      model.detail = null;
+      model.preview = null;
+      model.detailLoading = false;
+      renderTableList();
+      syncExplorerUrl(historyMode);
+      return;
+    }
     model.detail = null;
     model.preview = null;
     model.detailLoading = true;
@@ -2182,7 +2530,7 @@
 
     const hostId = String(state.selectedHostId || "");
     try {
-      const detail = await api.getExplorerTable(hostId, database, table);
+      const detail = await api.getExplorerTable(hostId, database, table, !!force);
       if (!detail || typeof detail !== "object" || !detail.summary || detail.summary.database !== database || detail.summary.name !== table) {
         throw new Error(`Invalid Explorer detail response for ${database}.${table}.`);
       }
@@ -2262,12 +2610,16 @@
     }
     model.tab = route.tab || "Overview";
     if (route.database && route.table && model.catalog) {
-      const exists = catalogContainsTable(model.catalog, route.database, route.table);
-      if (!exists) {
-        // The browser may already hold an Explorer catalog from before this
-        // object was created. Preserve the route intent and force one fresh
-        // ACL/catalog snapshot instead of immediately surfacing a false 404.
-        if (!model.loadingCatalog) await refreshCatalog(true);
+      // A route only needs the addressed database branch. Never refresh/enumerate
+      // every database just because the selected table is not in the lightweight
+      // top-level catalog yet.
+      await loadDatabaseTables(route.database, false);
+      if (!catalogContainsTable(model.catalog, route.database, route.table)) {
+        await loadDatabaseTables(route.database, true);
+      }
+      if (!catalogContainsTable(model.catalog, route.database, route.table)) {
+        setError(new Error(`Explorer table route is not visible: ${route.database}.${route.table}`));
+        model.routeIntent = null;
         return;
       }
       const key = `${route.database}\0${route.table}`;
@@ -2292,6 +2644,11 @@
 
   function resetForHost() {
     model.catalog = null;
+    model.databaseTablesLoaded.clear();
+    model.databaseTablesLoading.clear();
+    model.databaseLoadPromises.clear();
+    model.databaseLoadErrors.clear();
+    model.expandedDatabases.clear();
     model.selectedKey = null;
     model.selectedDatabase = null;
     model.detailSerial += 1;

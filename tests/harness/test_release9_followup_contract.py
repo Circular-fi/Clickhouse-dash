@@ -50,13 +50,14 @@ def test_results_wait_for_shape_before_committing_horizontal_layout_globally_and
     assert "renderVerticalSingleRowLocal(local.allRows[0])" in results
 
 
-def test_analysis_uses_reusable_jaeger_trace_without_overview() -> None:
+def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
     html = read("src/static/index.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
     css = read("src/static/style.css")
-    assert 'data-analysis-tab=' not in html
-    assert 'analysisTabs' not in html
+    assert 'id="analysisTabs"' in html
+    assert 'id="analysisPipelineTab"' in html
+    assert 'id="analysisTraceTab"' in html
     assert 'ns.traceViewer.render(root' in analysis
     assert 'traceViewer__row' in viewer
     assert 'span.start - model.start' in viewer

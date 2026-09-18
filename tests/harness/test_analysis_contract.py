@@ -81,8 +81,8 @@ def test_optional_distributed_lookup_failure_is_preserved_in_payload() -> None:
     ui = read("src/static/app_analysis.js")
     assert "result.distributed_error = e.what();" in collector
     assert 'writer.Key("distributed_error")' in api
-    # Analysis is intentionally Trace-only now; optional non-trace sections are
-    # no longer rendered as tabs, but backend diagnostics remain exportable.
+    # Views/distributed diagnostics remain backend/export data. The UI exposes
+    # only the processor Pipeline and raw Tracing tabs.
     assert "analysisDistributedTab" not in ui
 
 
@@ -99,8 +99,10 @@ def test_analysis_ui_supports_single_multi_and_pipeline_degradation() -> None:
     assert 'analysis.setContext({ hostId, queryId: out.queryId, runMode })' in run
     assert 'setAnalyzeAction' in results
     assert 'Execution stopped by result preview limit.' in analysis
-    assert 'data-analysis-tab=' not in html
-    assert 'analysisTabs' not in html
+    assert 'id="analysisTabs"' in html
+    assert 'id="analysisPipelineTab"' in html
+    assert 'id="analysisTraceTab"' in html
+    assert 'ns.pipelineViewer.render(root' in analysis
     assert 'ns.traceViewer.render(root' in analysis
     trace_viewer = read("src/static/app_trace_viewer.js")
     assert 'traceViewer__row' in trace_viewer
@@ -180,14 +182,17 @@ def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
     assert '.traceViewer__bar' in css
     assert 'ns.traceViewer.render(root' in analysis
 
-def test_analysis_is_trace_only_and_modal_uses_nearly_full_viewport() -> None:
+def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_viewport() -> None:
     html = read("src/static/index.html")
     ui = read("src/static/app_analysis.js")
     css = read("src/static/style.css")
 
-    assert 'analysisTabs' not in html
+    assert 'id="analysisTabs"' in html
+    assert 'id="analysisPipelineTab"' in html and 'id="analysisTraceTab"' in html
     assert 'analysisViewsTab' not in html and 'analysisDistributedTab' not in html
-    assert 'activeTab' not in ui
+    assert 'let activeTab = "pipeline";' in ui
+    assert 'if (activeTab === "tracing") renderTrace();' in ui
+    assert 'else renderPipeline();' in ui
     assert 'ns.traceViewer.render(root' in ui
     backdrop = css[css.index(".analysisModalBackdrop"):css.index(".analysisModalBackdrop[hidden]")]
     assert 'padding: 6px' in backdrop
@@ -200,7 +205,8 @@ def test_trace_uses_real_otel_wall_clock_without_processor_counter_reconstructio
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
     assert 'ns.traceViewer.render(root' in analysis
-    assert 'payload?.trace_spans' in analysis
+    assert 'decodeTraceSpans(payload)' in analysis
+    assert 'trace_compact' in analysis
     assert 'elapsed - waitTotal' not in analysis
     assert 'processorPhases' not in analysis
     assert 'traceGroups' not in analysis

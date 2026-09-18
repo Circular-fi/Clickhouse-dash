@@ -751,6 +751,7 @@ html.is-ready #queryTextArea::placeholder {
   border-radius: 12px;
   cursor: pointer;
   font: inherit;
+  font-size: .8rem;
 }
 
 .runMenu__opt:hover {
@@ -1097,19 +1098,12 @@ button.button:not(:disabled):hover {
 
 .metricCompact__value--split .metricCompact__unit {
   display: inline-block;
-  text-align: right;
-}
-
-.metricCompact__unit_1 {
-  width: 1ch;
-}
-
-.metricCompact__unit_3 {
-  width: 3ch;
-}
-
-.metricCompact__unit_4 {
-  width: 4ch;
+  width: auto;
+  min-width: 0;
+  margin-left: 0.08ch;
+  text-align: left;
+  font-size: 1em;
+  line-height: inherit;
 }
 
 
@@ -6009,10 +6003,6 @@ body {
 
 /* Analysis trace UI is rendered by the reusable traceViewer component below. */
 
-/* Review 10: smaller run-option labels. */
-#runOptAutoFormat,
-#runOptMultiQuery { font-size: .8rem; }
-
 .analysisPipelineSection { margin-top: 9px; }
 
 /* Review 10: borderless close affordance. */
@@ -6294,6 +6284,26 @@ body {
   min-width: 2px;
   border-radius: 2px;
   background: var(--trace-attempt-color);
+}
+
+.traceViewer__segmentSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.traceViewer__segmentPath {
+  fill: var(--trace-attempt-color);
+}
+
+.traceViewer__segmentMinWidth {
+  fill: none;
+  stroke: var(--trace-attempt-color);
+  stroke-width: 1px;
+  stroke-linecap: butt;
+  pointer-events: none;
 }
 
 .traceViewer__barLabel {
@@ -6811,7 +6821,7 @@ body {
 /* Explorer Browse v16: compact footprint/composition rows and sortable storage metrics. */
 .explorerShareList--inline {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 0;
 }
 .explorerShareList--inline .explorerShareRow {
@@ -7059,6 +7069,29 @@ body {
   border-radius: 8px;
   background: var(--panelBg);
 }
+.explorerStorageComposition--stacked.is-embedded {
+  padding: 0;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageStackedBar {
+  height: 10px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend {
+  gap: 3px 9px;
+  margin-top: 5px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
+  grid-template-columns: 7px auto auto;
+  gap: 4px;
+  font-size: 10px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__swatch {
+  width: 6px;
+  height: 6px;
+}
 .explorerStorageStackedBar {
   display: flex;
   width: 100%;
@@ -7208,13 +7241,11 @@ body {
   outline: none;
 }
 .explorerFinalizeInfo__icon {
-  display: inline-grid;
-  place-items: center;
+  display: block;
   width: 13px;
   height: 13px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  font: 700 9px/1 Arial, Helvetica, sans-serif;
+  fill: currentColor;
+  flex: 0 0 13px;
 }
 .explorerFinalizeInfo__tooltip {
   position: absolute;
@@ -7388,4 +7419,870 @@ body {
   top: calc(100% + 5px);
   right: -2px;
   left: auto;
+}
+
+
+/* Release 28: shared Data display settings and compact Explorer controls. */
+.explorerDataToolbar__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.explorerDataSettings {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.explorerDataSettings__button {
+  position: static;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+}
+.explorerDataSettings__menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 168px;
+  width: max-content;
+  padding: 5px;
+}
+
+/* The sort marker remains immediately after the column label. The aggregate
+   hint is independently pinned to the extreme top-right corner. */
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
+  right: auto;
+  margin-left: 0.4rem;
+}
+.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
+  padding-right: 2.35rem;
+}
+
+/* A single available graph mode is a label, not an interactive selector. */
+.explorerGraphTypeSelect .themeSelect__button--singleOption,
+.explorerGraphTypeSelect .themeSelect__button--singleOption:hover,
+.explorerGraphTypeSelect .themeSelect__button--singleOption:focus,
+.explorerGraphTypeSelect .themeSelect__button--singleOption:focus-visible {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  color: var(--text);
+}
+
+/* Sidebar gear and refresh are chrome-less icon controls, matching the Query
+   editor gear: hover changes icon emphasis only, never button background. */
+.explorerTableSettings__button,
+.explorerRefreshButton {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.explorerTableSettings__button:hover,
+.explorerTableSettings.themeSelect--open .explorerTableSettings__button,
+.explorerRefreshButton:hover:not(:disabled),
+.explorerRefreshButton:focus-visible {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text);
+}
+.explorerTableSettings__button .editorAutocompleteControl__gear,
+.explorerRefreshButton .refreshGlyph {
+  opacity: 0.78;
+  transition: opacity 120ms ease;
+}
+.explorerTableSettings__button:hover .editorAutocompleteControl__gear,
+.explorerTableSettings.themeSelect--open .editorAutocompleteControl__gear,
+.explorerRefreshButton:hover:not(:disabled) .refreshGlyph,
+.explorerRefreshButton:focus-visible .refreshGlyph {
+  opacity: 1;
+}
+
+
+/* Release 30: keep a permanent right-side scrollbar lane in Query and Explorer. */
+#queryWorkspace,
+.explorerDetailPane,
+.explorerTableList,
+.explorerDataTableWrap--preview {
+  scrollbar-gutter: stable !important;
+}
+
+/* Storage byte/share columns use the same in-cell background gauge as Query numerics. */
+.explorerStorageGaugeCell {
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
+  background-repeat: no-repeat;
+  background-origin: content-box;
+  background-clip: content-box;
+  background-size: var(--gaugeFill, 0%) 100%;
+}
+
+/* Release 31: profiling, Explorer Data controls and storage hierarchy polish. */
+.traceViewer__table {
+  scrollbar-gutter: auto !important;
+}
+.traceViewer__scroll {
+  scrollbar-gutter: stable !important;
+}
+
+/* Modal close + theme icons use the same chrome-less hover grammar as the
+   Explorer refresh/settings controls: emphasis changes on the glyph only. */
+#analysisCloseButton,
+#analysisCloseButton:hover,
+#analysisCloseButton:focus-visible,
+.themeSelect__option--icon,
+.themeSelect__option--icon:hover,
+.themeSelect__option--icon:focus-visible {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+#analysisCloseButton,
+.themeSelect__option--icon {
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  opacity: .8;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+#analysisCloseButton:hover,
+#analysisCloseButton:focus-visible,
+.themeSelect__option--icon:hover,
+.themeSelect__option--icon:focus-visible,
+.themeSelect__option--icon[aria-selected="true"] {
+  color: var(--text);
+  opacity: 1;
+}
+
+.explorerDataToolbar {
+  position: relative;
+  z-index: 90;
+  overflow: visible;
+}
+.explorerDataSettings {
+  z-index: 100;
+}
+.explorerDataSettings__menu {
+  z-index: 500 !important;
+}
+
+/* The aggregate preview hint is intentionally visible but remains subordinate
+   to the sort affordance. */
+.explorerFinalizeInfo {
+  width: 13px;
+  height: 13px;
+  top: 7px;
+  right: 8px;
+}
+.explorerFinalizeInfo__icon {
+  width: 11px;
+  height: 11px;
+  flex-basis: 11px;
+}
+
+/* All three footprint/share bars occupy identical geometry. */
+.explorerShareList--inline .explorerPercentBar,
+.explorerShareList--inline .explorerStorageStackedBar {
+  height: 16px;
+  min-height: 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  box-sizing: border-box;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageStackedBar {
+  height: 16px;
+}
+.explorerShareRow__value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Tuple physical subcolumns are a local Storage-only disclosure hierarchy. */
+.explorerStorageTupleToggle {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 18px;
+  padding: 0;
+  margin-right: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 650 .78rem/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.explorerStorageTupleToggle:hover,
+.explorerStorageTupleToggle:focus-visible {
+  color: var(--text);
+  background: transparent;
+  outline: none;
+}
+.explorerStorageTupleName--child {
+  padding-left: 20px;
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+}
+.explorerStorageTupleChild[hidden] {
+  display: none !important;
+}
+
+.themeSelect--icons .themeSelect__button--icon,
+.themeSelect--icons .themeSelect__button--icon:hover,
+.themeSelect--icons .themeSelect__button--icon:focus-visible,
+.themeSelect--icons.themeSelect--open .themeSelect__button--icon {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.themeSelect--icons .themeSelect__button--icon {
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+}
+.themeSelect--icons .themeSelect__button--icon:hover,
+.themeSelect--icons .themeSelect__button--icon:focus-visible,
+.themeSelect--icons.themeSelect--open .themeSelect__button--icon {
+  color: var(--text);
+}
+
+/* Release 32: preserve connected selectors, portal Data settings and stabilize Storage tuples. */
+#explorerFunctionDetail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#explorerFunctionDetail[hidden] { display: none !important; }
+#explorerFunctionDetail > .explorerDetailHeader { width: 100%; }
+#explorerFunctionDetail .explorerFunctionDescription {
+  width: min(100%, 980px);
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Theme and Browse/Graph icon selectors keep their original outlined connected
+   control and opening animation. Hover only strengthens the icon/control state. */
+.themeSelect--icons .themeSelect__button--icon {
+  border: 1px solid var(--buttonBorder) !important;
+  background: var(--buttonBg) !important;
+  box-shadow: none !important;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 120ms ease, opacity 120ms ease !important;
+}
+.themeSelect--icons .themeSelect__button--icon:hover,
+.themeSelect--icons .themeSelect__button--icon:focus-visible {
+  border-color: var(--accentBorder) !important;
+  background: var(--buttonBg) !important;
+  color: var(--text);
+}
+.themeSelect--icons .themeSelect__button--icon:focus-visible {
+  box-shadow: var(--ring) !important;
+  outline: none !important;
+}
+.themeSelect--icons.themeSelect--open .themeSelect__button--icon,
+.themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
+  border-color: var(--buttonBorder) !important;
+  border-bottom-color: transparent !important;
+  background: var(--buttonBg) !important;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.themeSelect__option--icon {
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease !important;
+}
+.themeSelect__option--icon:hover {
+  background: var(--rowHover) !important;
+  border-color: transparent !important;
+  color: var(--text);
+}
+.themeSelect__option--icon:focus-visible {
+  background: var(--rowHover) !important;
+  box-shadow: var(--ring) !important;
+  outline: none !important;
+}
+.themeSelect__option--icon[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border)) !important;
+}
+
+/* Explorer Data menu is portalled to body while open, avoiding every sticky /
+   overflow stacking context in the Data panel. */
+body > .explorerDataSettings__menu {
+  z-index: 2500 !important;
+  min-width: 168px;
+  width: max-content;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px) scale(.985);
+  transform-origin: top right;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms;
+}
+body > .explorerDataSettings__menu.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s;
+}
+
+/* Keep the AggregateFunction info affordance comfortably away from the table borders. */
+.explorerFinalizeInfo {
+  top: 8px;
+  right: 8px;
+}
+
+/* Expanding Tuple physical subcolumns must not make the shared table reflow. */
+.explorerStorageResultTable .resultTable {
+  width: 100%;
+  min-width: 720px;
+  table-layout: fixed;
+}
+.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(1),
+.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(1) { width: 42px; }
+.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(2),
+.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(2) { width: 31%; }
+.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(3),
+.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(3) { width: 18%; }
+.explorerStorageResultTable .resultTable > thead > tr > th,
+.explorerStorageResultTable .resultTable > tbody > tr > td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Release 33: profiling fit, Explorer footprint scope graph and local UI polish. */
+
+/* CREATE/DDL previews reuse editor visuals but must never inherit the persisted
+   Query editor height. Long CREATE statements should size from their own content
+   / scroll box instead of the session's query-editor resize preference. */
+html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
+.editorWrap.explorerDdlWrap {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+/* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
+   does not expose the generic ThemeSelect caret. */
+.explorerDataSettings__button::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Database + ClickHouse footprint are one nested scope graph: ClickHouse is the
+   full track, the database is the outer fill and the table is the inner fill. */
+.explorerShareList--footprint {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+.explorerShareRow--scopeGraph {
+  min-width: 0;
+}
+.explorerShareRow__head--scopeGraph {
+  align-items: flex-start;
+  gap: 10px;
+}
+.explorerFootprintScopeLegend {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.explorerFootprintScopeLegend__item {
+  white-space: nowrap;
+}
+.explorerFootprintScopeBar {
+  position: relative;
+  height: 16px;
+  min-height: 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+}
+.explorerFootprintScopeBar__database,
+.explorerFootprintScopeBar__table {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+}
+.explorerFootprintScopeBar__database {
+  background: color-mix(in srgb, var(--accentBorder) 28%, transparent);
+}
+.explorerFootprintScopeBar__table {
+  background: color-mix(in srgb, var(--accent) 68%, transparent);
+}
+
+@media (max-width: 980px) {
+  .explorerShareList--footprint { grid-template-columns: 1fr; }
+  .explorerShareList--footprint .explorerShareRow + .explorerShareRow {
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  }
+}
+
+
+/* Release 34: restrained, readable storage-share meters. */
+.explorerShareList--footprint {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr);
+  gap: 0;
+  margin-top: 0;
+}
+.explorerScopeMeters,
+.explorerStorageCompositionCard {
+  min-width: 0;
+  padding: 11px 12px 12px;
+}
+.explorerStorageCompositionCard {
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+.explorerScopeMeter + .explorerScopeMeter {
+  margin-top: 11px;
+}
+.explorerScopeMeter__head {
+  display: grid;
+  grid-template-columns: minmax(135px, auto) 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 5px;
+}
+.explorerScopeMeter__label,
+.explorerStorageCompositionCard__label {
+  color: var(--muted);
+  font-weight: 650;
+}
+.explorerScopeMeter__percent {
+  color: var(--text);
+  text-align: right;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.explorerScopeMeter__bytes,
+.explorerStorageCompositionCard__bytes {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.explorerScopeMeter__track {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 42%, transparent);
+}
+.explorerScopeMeter__fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.explorerScopeMeter--database .explorerScopeMeter__fill {
+  background: color-mix(in srgb, var(--accent) 80%, #22c55e);
+}
+.explorerScopeMeter--clickhouse .explorerScopeMeter__fill {
+  background: color-mix(in srgb, var(--accent) 80%, #14b8a6);
+}
+.explorerScopeMeter__track.is-unknown::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--border) 58%, transparent) 6px 8px);
+}
+.explorerStorageCompositionCard__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageStackedBar {
+  height: 7px;
+  min-height: 7px;
+  border: 0;
+  border-radius: 4px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend {
+  margin-top: 8px;
+  gap: 5px 12px;
+}
+.explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
+  grid-template-columns: 7px auto auto;
+  font-size: 10.5px;
+}
+@media (max-width: 980px) {
+  .explorerShareList--footprint { grid-template-columns: 1fr; }
+  .explorerStorageCompositionCard {
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  }
+}
+
+/* Storage row numbers are explicit metadata, never a sortable/truncated data column. */
+.explorerStorageResultTable .resultTable > thead > tr > th.resultTable__rowIndex {
+  padding-right: .45rem;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Release 41: Profiling is split into a processor-centric Pipeline view and
+   the existing raw Tracing view. Pipeline is the default and owns its own
+   single scroll surface; Tracing remains lazily mounted on demand. */
+.analysisTabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: end;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.analysisTab {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  min-height: 30px;
+  padding: 0 10px;
+  font: 700 12px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.analysisTab:hover,
+.analysisTab:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  outline: none;
+}
+.analysisTab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.analysisModal__content.pipelineViewerHost {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.pipelineViewerHost {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+.pipelineViewer {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+}
+.pipelineViewer__summary {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 92%, var(--text) 2%);
+}
+.pipelineViewer__summaryText {
+  font: 750 10px/1.15 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text);
+}
+.pipelineViewer__summaryNote {
+  font: 550 9px/1.15 Arial, Helvetica, sans-serif;
+  color: var(--muted);
+  text-align: right;
+}
+.pipelineViewer__notice {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font: 500 10px/1.3 Arial, Helvetica, sans-serif;
+  overflow-wrap: anywhere;
+  max-height: 90px;
+  overflow: auto;
+}
+.pipelineViewer__table {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+.pipelineViewer__head,
+.pipelineViewer__row {
+  display: grid;
+  grid-template-columns: minmax(210px, .75fr) minmax(320px, 1.55fr) minmax(135px, .42fr) minmax(300px, 1fr);
+  min-width: 965px;
+}
+.pipelineViewer__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 30px;
+  min-height: 30px;
+  align-items: center;
+  border-bottom: 1px solid var(--borderStrong);
+  background: var(--panelBg);
+  color: var(--muted);
+  font: 800 10px/1 Arial, Helvetica, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .045em;
+}
+.pipelineViewer__head > div {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+}
+.pipelineViewer__head > div:last-child { border-right: 0; }
+.pipelineViewer__metricsHead {
+  display: grid !important;
+  grid-template-columns: .8fr .8fr 1.2fr 1.2fr;
+  padding: 0 !important;
+}
+.pipelineViewer__metricsHead > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  font-size: 9px;
+  line-height: 1.15;
+}
+.pipelineViewer__metricsHead > span:last-child { border-right: 0; }
+.pipelineViewer__timelineHead {
+  position: relative;
+  padding-bottom: 10px !important;
+}
+.pipelineViewer__tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 8px;
+  background: var(--border);
+  pointer-events: none;
+}
+.pipelineViewer__tick b {
+  position: absolute;
+  bottom: 0;
+  left: 4px;
+  white-space: nowrap;
+  color: var(--muted);
+  font: 550 9px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.pipelineViewer__tick:last-child b {
+  left: auto;
+  right: 4px;
+}
+.pipelineViewer__scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overflow-anchor: none;
+}
+.pipelineViewer__row {
+  min-height: 40px;
+  height: 40px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+.pipelineViewer__row:hover {
+  background: color-mix(in srgb, var(--panelBg) 95%, var(--text) 5%);
+}
+.pipelineViewer__spacer { height: 0; flex: 0 0 auto; pointer-events: none; }
+.pipelineViewer__scroll:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
+.pipelineViewer__row > div {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+.pipelineViewer__row > div:last-child { border-right: 0; }
+.pipelineViewer__stage {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 7px;
+}
+.pipelineViewer__ordinal {
+  flex: 0 0 18px;
+  width: 18px;
+  padding-top: 1px;
+  color: var(--muted);
+  font: 550 8px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pipelineViewer__stageText {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pipelineViewer__stageTitle {
+  overflow: hidden;
+  color: var(--text);
+  font: 750 11px/1.15 Arial, Helvetica, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipelineViewer__stageSub,
+.pipelineViewer__stageDescription {
+  overflow: hidden;
+  color: var(--muted);
+  font: 550 9px/1.15 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipelineViewer__stageDescription {
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 500;
+}
+.pipelineViewer__timeline {
+  position: relative;
+  min-height: 40px;
+  overflow: hidden;
+  background-image: linear-gradient(to right, var(--border) 1px, transparent 1px);
+  background-size: 25% 100%;
+}
+.pipelineViewer__heatmap {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  width: 100%;
+  height: 20px;
+  color: var(--accentBorder);
+}
+.pipelineViewer__flowValue {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pipelineViewer__untimed,
+.pipelineViewer__timeRange {
+  position: absolute;
+  left: 7px;
+  bottom: 5px;
+  color: var(--muted);
+  font: 550 8px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.pipelineViewer__untimed {
+  top: 15px;
+  bottom: auto;
+  font-family: Arial, Helvetica, sans-serif;
+  font-style: italic;
+}
+.pipelineViewer__row--untimed .pipelineViewer__timeline {
+  background-image: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--border) 65%, transparent) 7px 8px);
+}
+.pipelineViewer__metrics {
+  display: grid;
+  grid-template-columns: .8fr .8fr 1.2fr 1.2fr;
+  align-items: stretch;
+}
+.pipelineViewer__metric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  padding: 4px 6px;
+  border-right: 1px solid var(--border);
+}
+.pipelineViewer__metric:last-child { border-right: 0; }
+.pipelineViewer__metricLabel {
+  overflow: hidden;
+  color: var(--muted);
+  font: 700 9px/1 Arial, Helvetica, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipelineViewer__metricValue {
+  overflow: hidden;
+  color: var(--text);
+  font: 650 9px/1.1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipelineViewer__legend,
+.pipelineViewer__controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  font: 500 11px/1.3 Arial, Helvetica, sans-serif;
+  color: var(--muted);
+}
+.pipelineViewer__legend { justify-content: space-between; }
+.pipelineViewer__densityLegend { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pipelineViewer__densityRamp {
+  width: 64px;
+  height: 9px;
+  border: 1px solid var(--border);
+  background: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 15%, var(--panelBg)), var(--accentBorder));
+}
+.pipelineViewer__control,
+.pipelineViewer__sort {
+  padding: 3px 7px;
+  min-height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panelBg);
+  color: var(--text);
+  font: 600 11px/1.2 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.pipelineViewer__control:hover:not(:disabled) { border-color: var(--accentBorder); }
+.pipelineViewer__control:focus-visible,
+.pipelineViewer__sort:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
+.pipelineViewer__control:disabled { opacity: .4; cursor: default; }
+.pipelineViewer__focus { border: 0; padding: 0 4px; min-height: 24px; font-size: 16px; }
+.pipelineViewer__range { margin-left: 4px; font: 550 10px/1.3 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.pipelineViewer__sort { margin-left: auto; }
+.pipelineViewer__work { padding: 6px 9px; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.pipelineViewer__workValues { display: flex; justify-content: space-between; gap: 6px; font: 600 10px/1.2 ui-monospace, monospace; }
+.pipelineViewer__workValues > span { color: var(--muted); font-size: 9px; }
+.pipelineViewer__workTrack { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.pipelineViewer__workBar { display: block; height: 100%; background: var(--accentBorder); }
+.pipelineViewer__row--selected { box-shadow: inset 3px 0 var(--accentBorder); }
+.pipelineViewer__envelope { position: absolute; top: 7px; height: 11px; min-width: 2px; border: 1px dashed var(--muted); border-top: 0; background: transparent; }
+.pipelineViewer__timeRange { overflow: hidden; max-width: calc(100% - 12px); white-space: nowrap; text-overflow: ellipsis; }
+.pipelineViewer__hint { flex: 0 0 auto; min-height: 30px; padding: 6px 8px; border-top: 1px solid var(--border); color: var(--muted); font: 500 10px/1.3 Arial, Helvetica, sans-serif; }
+@media (max-width: 1200px) {
+  .pipelineViewer__summary { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .pipelineViewer__summaryNote { text-align: left; }
 }

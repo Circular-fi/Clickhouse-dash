@@ -81,6 +81,25 @@ def retry_json(method: str, path: str, *, attempts: int = 8, **kwargs):
     pytest.fail(f"{method} {path} failed: {last.status_code} {last.text}")
 
 
+
+def decode_analysis_envelope(response: requests.Response) -> dict:
+    # Analysis is ordinary JSON; the trace itself is compact positional JSON.
+    return response.json()
+
+
+def retry_analysis(path: str, *, attempts: int = 8, **kwargs):
+    last = None
+    for _ in range(attempts):
+        response = SESSION.post(f"{BASE_URL}{path}", timeout=20, **kwargs)
+        last = response
+        if response.status_code == 200:
+            return decode_analysis_envelope(response)
+        if response.status_code not in {409, 503}:
+            break
+        time.sleep(0.25)
+    assert last is not None
+    pytest.fail(f"POST {path} failed: {last.status_code} {last.text}")
+
 def test_core_routes_are_live_and_json_contracts_are_valid():
     for route in ["/", "/query", "/explorer"]:
         root = get(route)
@@ -123,13 +142,17 @@ def test_query_run_alias_stream_analysis_execution_and_deep_analysis():
     assert any(e["event"] == "result_rows" for e in events)
     qid = handshake["query_id"]
 
-    analysis = retry_json("POST", "/api/query/analysis", json={"host_id": "local", "query_id": qid})
+    analysis = retry_analysis("/api/query/analysis", json={"host_id": "local", "query_id": qid})
     assert analysis["query_id"] == qid
     assert analysis["terminal_status"] == "finished"
     assert isinstance(analysis.get("session_elapsed_ms"), int)
     assert analysis.get("availability", {}).get("processors_profile_log") is True, analysis
     assert analysis.get("processor_profiling_recorded") is True, analysis
     assert analysis.get("processors"), analysis
+    compact = analysis.get("trace_compact", {})
+    assert compact.get("format") == "chdash.trace.json.lod.v2", analysis
+    assert compact.get("timeline_px") == 3840, analysis
+    assert isinstance(compact.get("nodes"), list), analysis
 
     execution = retry_json("GET", "/api/query/execution", params={"host_id": "local", "query_id": qid})
     assert execution["query_id"] == qid
