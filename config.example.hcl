@@ -64,6 +64,31 @@ explorer {
   function_markdown_links = false
 }
 
+traces {
+  enabled                  = false
+  database                 = "otel"
+  table                    = "otel_traces"
+  trace_index_table        = "otel_traces_trace_id_ts"
+  # ServiceName access control. "*" allows every service. Patterns use "*"
+  # as a glob wildcard, e.g. "test_*" allows every service starting test_.
+  service_allowlist        = ["*"]
+  default_lookback_minutes = 60
+  max_lookback_minutes     = 10080
+  search_limit             = 100
+  max_spans_per_trace      = 10000
+
+  features {
+    service_filter      = true
+    operation_filter    = true
+    status_filter       = true
+    duration_filter     = true
+    resource_attributes = true
+    span_attributes     = true
+    events              = true
+    links               = true
+  }
+}
+
 analysis {
   registry_ttl_ms      = 3600000
   registry_max_entries = 10000

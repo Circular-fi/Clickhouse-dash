@@ -525,15 +525,20 @@ inline bool sql_likely_requires_compat_describe(std::string_view sql) {
     const bool is_call = next < code.size() && code[next] == '(';
 
     if (ident == "aggregatefunction" || ident == "json" || ident == "dynamic" ||
-        ident == "uint256" || ident == "int256" || ident == "decimal256") {
+        ident == "uint256" || ident == "int256" || ident == "decimal256" ||
+        ident == "finalizeaggregation") {
       return true;
     }
 
     if (ident == "object" && is_call) return true;
 
     // Aggregate combinators ending in State return AggregateFunction(...), for
-    // example argMaxState, uniqState and quantilesMergeState.
-    if (is_call && sql_identifier_ends_with(ident, "state")) return true;
+    // example argMaxState, uniqState and quantilesMergeState. Merge/finalizer
+    // functions can expose the AggregateFunction argument's scalar type (for
+    // example sumMerge(AggregateFunction(sum, Int256)) -> Int256), which is not
+    // visible lexically in the SELECT itself. Pre-describe those calls too.
+    if (is_call && (sql_identifier_ends_with(ident, "state") ||
+                    sql_identifier_ends_with(ident, "merge"))) return true;
 
     // Explicit conversion helpers expose 256-bit values even when their type
     // name does not otherwise occur in the query text.

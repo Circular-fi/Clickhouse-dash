@@ -38,7 +38,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
   try {
     client->Select(
       "SELECT name FROM system.tables WHERE database = 'system' AND name IN "
-      "('query_log', 'query_thread_log', 'trace_log', 'processors_profile_log', 'opentelemetry_span_log', 'jemalloc_profile_text')",
+      "('query_log', 'query_views_log', 'processors_profile_log', 'opentelemetry_span_log')",
       [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
         auto col = b[0]->As<clickhouse::ColumnString>();
@@ -46,11 +46,9 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
         for (size_t i = 0; i < b.GetRowCount(); ++i) {
           const std::string_view sv = col->At(i);
           if (sv == "query_log") out.query_log = true;
-          else if (sv == "query_thread_log") out.query_thread_log = true;
-          else if (sv == "trace_log") out.trace_log = true;
+          else if (sv == "query_views_log") out.query_views_log = true;
           else if (sv == "processors_profile_log") out.processors_profile_log = true;
           else if (sv == "opentelemetry_span_log") out.opentelemetry_span_log = true;
-          else if (sv == "jemalloc_profile_text") out.jemalloc_profile_text = true;
         }
       }
     );
@@ -58,8 +56,6 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
     return out;
   }
 
-  out.logs_table_available = out.query_log;
-  out.flamegraph_tables_available = out.trace_log || out.processors_profile_log || out.jemalloc_profile_text || out.query_thread_log;
   return out;
 }
 

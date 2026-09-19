@@ -201,6 +201,8 @@
       traceError: payload?.availability?.opentelemetry_span_log_error || "",
       summaryError: payload?.availability?.processor_trace_summary_error || "",
       error: payload?.availability?.processors_profile_error || "",
+      profilingStatus: payload?.processor_profiling_status || "",
+      profilingRequested: payload?.processor_profiling_requested === true,
     };
     if (!pipelineModel) pipelineModel = ns.pipelineViewer.buildModel(options);
     ns.pipelineViewer.render(root, { ...options, model: pipelineModel });
@@ -237,25 +239,49 @@
     });
   }
 
+  function profilingViews() {
+    if (!payload) return { pipeline: true, tracing: true };
+    const availability = payload?.availability || {};
+    const pipeline = availability.processors_profile_log === true;
+    const tracing = availability.opentelemetry_span_log === true;
+    return { pipeline, tracing };
+  }
+
+  function normalizeActiveTab() {
+    const views = profilingViews();
+    if (activeTab === "pipeline" && !views.pipeline && views.tracing) activeTab = "tracing";
+    else if (activeTab === "tracing" && !views.tracing && views.pipeline) activeTab = "pipeline";
+    return views;
+  }
+
   function syncTabs() {
+    const views = normalizeActiveTab();
+    const showSelector = views.pipeline && views.tracing;
+    if (dom.analysisTabs) dom.analysisTabs.hidden = !showSelector;
     const pipelineActive = activeTab === "pipeline";
     if (dom.analysisPipelineTab) {
+      dom.analysisPipelineTab.hidden = !views.pipeline;
       dom.analysisPipelineTab.classList.toggle("is-active", pipelineActive);
       dom.analysisPipelineTab.setAttribute("aria-selected", pipelineActive ? "true" : "false");
       dom.analysisPipelineTab.tabIndex = pipelineActive ? 0 : -1;
     }
     if (dom.analysisTraceTab) {
+      dom.analysisTraceTab.hidden = !views.tracing;
       dom.analysisTraceTab.classList.toggle("is-active", !pipelineActive);
       dom.analysisTraceTab.setAttribute("aria-selected", pipelineActive ? "false" : "true");
       dom.analysisTraceTab.tabIndex = pipelineActive ? -1 : 0;
     }
+    return views;
   }
 
   function renderActiveTab() {
-    syncTabs();
+    const views = syncTabs();
     if (!payload) return;
     try {
-      if (activeTab === "tracing") renderTrace();
+      if (!views.pipeline && !views.tracing) {
+        clear(dom.analysisContent);
+        dom.analysisContent?.appendChild(emptyState("No profiling views are available for this host/query."));
+      } else if (activeTab === "tracing") renderTrace();
       else renderPipeline();
     } catch (err) {
       releaseData();
@@ -266,7 +292,11 @@
   }
 
   function setActiveTab(tab) {
-    const next = tab === "tracing" ? "tracing" : "pipeline";
+    const views = profilingViews();
+    const requested = tab === "tracing" ? "tracing" : "pipeline";
+    const next = requested === "tracing"
+      ? (views.tracing ? "tracing" : views.pipeline ? "pipeline" : requested)
+      : (views.pipeline ? "pipeline" : views.tracing ? "tracing" : requested);
     if (activeTab === next) {
       syncTabs();
       return;
@@ -315,6 +345,8 @@
     dom.analysisTabs?.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
+      const views = profilingViews();
+      if (!(views.pipeline && views.tracing)) return;
       setActiveTab(activeTab === "pipeline" ? "tracing" : "pipeline");
       (activeTab === "pipeline" ? dom.analysisPipelineTab : dom.analysisTraceTab)?.focus();
     });

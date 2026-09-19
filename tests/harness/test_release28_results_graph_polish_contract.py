@@ -34,7 +34,10 @@ def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data()
     assert 'id="runOptFlattenTuple"' in index_html
     assert ">Flatten tuple<" in query_html
     assert "function createTupleFlattenPlan" in results
-    assert "name = `${prefix}.${fieldName}`" in results
+    assert 'if (ast.kind === "Array") return containsTuple(ast.inner);' in results
+    assert 'type: `Array(${leaf.type})`' in results
+    assert 'return parsed.map((item) => leaf.extract(item));' in results
+    assert 'name: `${safeColumns[columnIndex]}.${leaf.path.join(".")}`' in results
     assert "flattenTupleRow(sourceRow, resultTupleFlattenPlan)" in results
     assert "function createDataSettingsControl()" in explorer
     assert 'node("span", "runMenu__optText", "Flatten tuple")' in explorer

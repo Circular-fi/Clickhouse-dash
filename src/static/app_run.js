@@ -603,6 +603,14 @@
     return String(ta.value || "") === String(state.lastFormatEditorValue || "");
   }
 
+  function selectedHostSupportsFullProfiling() {
+    const hostId = String(state.selectedHostId || "");
+    const hosts = Array.isArray(state.hostsSnapshot?.hosts) ? state.hostsSnapshot.hosts : [];
+    const host = hosts.find((item) => item && String(item.id || "") === hostId);
+    const tables = host?.system_tables || {};
+    return tables.processors_profile_log === true && tables.opentelemetry_span_log === true;
+  }
+
   function updateActionButtons() {
     const busy = state.isRunning || state.isFormatting;
     const offline = state.apiOnline === false;
@@ -624,8 +632,12 @@
     const editorStatements = sql.splitSqlStatements(String(dom.queryTextArea?.value || "").trim());
     const editorIsMulti = editorStatements.length > 1;
     if (dom.runWithProfilingButton) {
-      dom.runWithProfilingButton.hidden = editorIsMulti;
-      dom.runWithProfilingButton.disabled = busy || offline || editorStatements.length !== 1;
+      const profilingAvailable = selectedHostSupportsFullProfiling();
+      const profilingHidden = editorIsMulti || !profilingAvailable;
+      dom.runWithProfilingButton.hidden = profilingHidden;
+      dom.runWithProfilingButton.disabled = busy || offline || editorStatements.length !== 1 || !profilingAvailable;
+      const divider = dom.runWithProfilingButton.nextElementSibling;
+      if (divider?.classList?.contains("runMenu__divider")) divider.hidden = profilingHidden;
     }
     const exportBusy = ns.massExport && typeof ns.massExport.isPreparing === "function" && ns.massExport.isPreparing();
     if (dom.downloadCsvButton) {

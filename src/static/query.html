@@ -10,6 +10,7 @@
         var pathname = String(window.location.pathname || "/");
         var marker = pathname.indexOf("/explorer");
         if (marker < 0) marker = pathname.indexOf("/query");
+        if (marker < 0) marker = pathname.indexOf("/traces");
         // Known browser routes delimit the application prefix. When the app is
         // opened at a reverse-proxy root such as /clickhouse/, there is no route
         // marker yet: in that case the current directory itself is the prefix.
@@ -113,6 +114,7 @@
         <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
           <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="true">Query</button>
           <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="false">Explorer</button>
+          <button id="navTracesButton" class="themeSelect__option" type="button" role="option" data-value="traces" aria-selected="false" hidden>Traces</button>
         </div>
       </div>
 

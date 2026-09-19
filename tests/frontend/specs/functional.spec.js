@@ -369,7 +369,12 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   }
 
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
-  await expect(page.locator('#explorerDetailContent .explorerResultTable--preview')).toBeVisible({ timeout: 12_000 });
+  const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
+  await expect(previewTable).toBeVisible({ timeout: 12_000 });
+  const previewHeaders = await previewTable.locator('thead th').allTextContents();
+  for (const column of ['tuple_value.code', 'tuple_value.name', 'nested_array.k', 'nested_array.v']) {
+    expect(previewHeaders).toContain(column);
+  }
   await page.getByRole('button', { name: 'Open in Query', exact: true }).click();
   await expect(page).toHaveURL(/\/query$/);
   await expect(page.locator('#queryTextArea')).toHaveValue(/FROM `chdash_ui`\.`wide_types`/);

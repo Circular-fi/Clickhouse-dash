@@ -79,6 +79,7 @@ if (CHDASH_BUILD_APP)
     explorer_catalog.cpp
     explorer_graph.cpp
     api_explorer.cpp
+    api_traces.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp

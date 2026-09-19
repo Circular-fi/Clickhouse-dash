@@ -62,6 +62,16 @@ def test_columns_indexes_projections_live_in_storage_not_overview() -> None:
     assert "Compact parts share one physical data stream" not in ui
 
 
+
+def test_tuple_storage_accounts_for_hidden_array_offsets_and_array_tuple_roots() -> None:
+    ui = read("src/static/app_explorer.js")
+    block = ui[ui.index("function renderColumns"):ui.index("function renderMergeProgress")]
+    assert '/Tuple\\s*\\(/i.test(String(column?.type || ""))' in block
+    assert "const implementationByRoot = new Map();" in block
+    assert 'name: `${tupleRoot}.[offsets]`' in block
+    assert "Physical Array offset stream" in block
+    assert "tuple_parent: tupleRoot" in block
+
 def test_buffer_detail_subtracts_target_rows_lazily() -> None:
     catalog = read("src/explorer_catalog.cpp")
     detail = catalog[catalog.index("bool load_explorer_table_summary"):catalog.index("bool load_explorer_catalog(", catalog.index("bool load_explorer_table_summary"))]

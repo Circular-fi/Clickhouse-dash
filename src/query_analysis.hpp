@@ -42,6 +42,7 @@ struct QueryLogAnalysisRow {
   int32_t exception_code = 0;
   std::string exception;
   std::string query;
+  std::string log_processors_profiles;
   bool is_initial_query = false;
 };
 

@@ -24,6 +24,7 @@ types are startup errors.
 - `client_pool`: native ClickHouse connection pool lifecycle.
 - `format_cache`: bounded SQL formatter cache.
 - `health`: host health polling.
+- `traces`: optional OpenTelemetry trace explorer backed by an OTel Collector ClickHouse traces table.
 - `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
 
 ## Authorization model
@@ -56,6 +57,29 @@ explorer {
   function_markdown_links = false
 }
 
+traces {
+  enabled                  = false
+  database                 = "otel"
+  table                    = "otel_traces"
+  trace_index_table        = "otel_traces_trace_id_ts"
+  service_allowlist        = ["*"]
+  default_lookback_minutes = 60
+  max_lookback_minutes     = 10080
+  search_limit             = 100
+  max_spans_per_trace      = 10000
+
+  features {
+    service_filter      = true
+    operation_filter    = true
+    status_filter       = true
+    duration_filter     = true
+    resource_attributes = true
+    span_attributes     = true
+    events              = true
+    links               = true
+  }
+}
+
 analysis {
   registry_ttl_ms      = 3600000
   registry_max_entries = 10000
@@ -76,6 +100,14 @@ export {
 Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Query/Explorer page selector entirely.
 
 `explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
+
+The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus the optional `otel_traces_trace_id_ts` lookup table). Trace queries always follow the host selected in the normal host picker and always use that host's `system_uri`; there is no per-trace host or credential override. `default_lookback_minutes` and `max_lookback_minutes` bound search/filter queries only. Direct `/traces/<trace-id>` lookups are not lookback-limited: they first resolve the trace time range through `trace_index_table` and, if that auxiliary table is unavailable, fall back to an exact all-history TraceId lookup before reading the bounded trace window.
+
+`traces.service_allowlist` is a backend-enforced `ServiceName` whitelist. The default `service_allowlist = ["*"]` allows all services. Entries without `*` are exact names; `test_*` allows every service whose name starts with `test_`; `*_worker` allows suffix matches; and multiple `*` wildcards are accepted. An explicitly empty list denies every service. The whitelist is applied to trace search, cards, and direct TraceId loads, so `/traces/<trace-id>` cannot be used to read spans from a non-allowed service. When a trace crosses allowed and denied services, only allowed spans are returned; hidden parents may therefore make an allowed child appear as a visible root.
+
+The nested feature switches remove both the UI control and the corresponding payload/query surface. In particular, `resource_attributes`, `span_attributes`, `events`, and `links` can be disabled when the trace page should expose timing only.
+
+For local/demo data, `examples/generate_otel_traces.py` creates synthetic multi-service traces compatible with the standard OTel ClickHouse trace columns. Its defaults generate roughly 60–90 spans per trace, with Kafka/RPC/ClickHouse-style branches, events, links, and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows for installations where the standard materialized view is not populating the auxiliary table.
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
 

@@ -45,13 +45,9 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     if (h.system_tables.checked_at_ms > 0) w.Int64(h.system_tables.checked_at_ms);
     else w.Null();
     w.Key("query_log"); w.Bool(h.system_tables.query_log);
-    w.Key("query_thread_log"); w.Bool(h.system_tables.query_thread_log);
-    w.Key("trace_log"); w.Bool(h.system_tables.trace_log);
+    w.Key("query_views_log"); w.Bool(h.system_tables.query_views_log);
     w.Key("processors_profile_log"); w.Bool(h.system_tables.processors_profile_log);
     w.Key("opentelemetry_span_log"); w.Bool(h.system_tables.opentelemetry_span_log);
-    w.Key("jemalloc_profile_text"); w.Bool(h.system_tables.jemalloc_profile_text);
-    w.Key("logs_table_available"); w.Bool(h.system_tables.logs_table_available);
-    w.Key("flamegraph_tables_available"); w.Bool(h.system_tables.flamegraph_tables_available);
     w.EndObject();
     w.EndObject();
   }

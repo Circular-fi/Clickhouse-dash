@@ -46,6 +46,7 @@ struct ExplorerTableSummary {
   std::string partition_key;
   std::string sampling_key;
   std::string storage_policy;
+  std::string metadata_modification_time;
 
   std::optional<uint64_t> rows;
   std::optional<uint64_t> logical_bytes;
@@ -237,6 +238,7 @@ struct ExplorerReplicationQueueItem {
 };
 
 struct ExplorerTableDetail {
+  uint64_t generated_at_ms = 0;
   ExplorerTableSummary summary;
   // Scope totals are loaded lazily with the selected table so Browse can keep
   // Table / Database / ClickHouse percentages without bloating the list API.

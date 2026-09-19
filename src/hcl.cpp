@@ -12,6 +12,9 @@ enum class TokKind {
   Number,
   LBrace,
   RBrace,
+  LBracket,
+  RBracket,
+  Comma,
   Equal,
   End,
 };
@@ -79,6 +82,18 @@ struct Lexer {
     if (c == '=') {
       ++i;
       return Tok{TokKind::Equal, "="};
+    }
+    if (c == '[') {
+      ++i;
+      return Tok{TokKind::LBracket, "["};
+    }
+    if (c == ']') {
+      ++i;
+      return Tok{TokKind::RBracket, "]"};
+    }
+    if (c == ',') {
+      ++i;
+      return Tok{TokKind::Comma, ","};
     }
 
     // String literal (double quoted)
@@ -172,6 +187,21 @@ struct Parser {
   }
 
   HclValue parse_value() {
+    if (accept(TokKind::LBracket)) {
+      std::vector<std::string> values;
+      if (!accept(TokKind::RBracket)) {
+        while (true) {
+          if (cur.kind != TokKind::String) lex.fail("string lists may contain only quoted strings");
+          values.push_back(cur.text);
+          cur = lex.next();
+          if (accept(TokKind::RBracket)) break;
+          consume(TokKind::Comma, "',' or ']'");
+          if (accept(TokKind::RBracket)) break;
+        }
+      }
+      HclValue v{std::move(values)};
+      return v;
+    }
     if (cur.kind == TokKind::String) {
       HclValue v{cur.text};
       cur = lex.next();
@@ -253,6 +283,13 @@ std::optional<bool> hcl_get_bool(const HclObject& o, const std::string& key) {
   if (it == o.attrs.end()) return std::nullopt;
   if (!it->second.is_bool()) return std::nullopt;
   return it->second.as_bool();
+}
+
+std::optional<std::vector<std::string>> hcl_get_string_list(const HclObject& o, const std::string& key) {
+  auto it = o.attrs.find(key);
+  if (it == o.attrs.end()) return std::nullopt;
+  if (!it->second.is_string_list()) return std::nullopt;
+  return it->second.as_string_list();
 }
 
 } // namespace chdash

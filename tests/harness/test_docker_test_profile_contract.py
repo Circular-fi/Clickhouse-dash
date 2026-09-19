@@ -15,11 +15,16 @@ def service_block(compose: str, service: str) -> str:
     return block[: match.start()] if match else block
 
 
-def test_default_stack_is_only_clickhouse_and_fresh_source_build():
+def test_default_stack_has_clickhouse_otel_seed_and_fresh_source_build():
     compose = read("tests/docker-compose.yml")
     assert "  clickhouse:\n" in compose
+    assert "  otel_fixture:\n" in compose
     assert "  chdash_source:\n" in compose
     assert 'profiles: ["test"]' not in service_block(compose, "clickhouse")
+    fixture = service_block(compose, "otel_fixture")
+    assert "profiles:" not in fixture
+    assert 'restart: unless-stopped' in fixture
+    assert "dockerfile: ./tests/otel-fixture/Dockerfile" in fixture
     source = service_block(compose, "chdash_source")
     assert "profiles:" not in source
     assert "pull_policy: build" in source
@@ -28,10 +33,10 @@ def test_default_stack_is_only_clickhouse_and_fresh_source_build():
     assert "http://127.0.0.1:8080/api/version" in source
 
 
-def test_test_profile_adds_exactly_one_one_shot_test_service():
+def test_test_profile_adds_exactly_one_profile_scoped_test_service():
     compose = read("tests/docker-compose.yml")
-    services = compose.split("services:\n", 1)[1]
-    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "chdash_source", "tests"}
+    services = compose.split("services:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "otel_fixture", "chdash_source", "tests"}
     tests = service_block(compose, "tests")
     assert 'profiles: ["test"]' in tests
     assert "dockerfile: Dockerfile.tests" in tests

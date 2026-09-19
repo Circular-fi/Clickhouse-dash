@@ -152,11 +152,24 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
+  const auto serve_traces_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/traces.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("traces.html not found", "text/plain");
+    }
+  };
+
   http_.Get("/", serve_query_shell);
   http_.Get("/query", serve_query_shell);
   if (cfg_.explorer.enabled()) {
     http_.Get("/explorer", serve_explorer_shell);
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
+  }
+  if (cfg_.traces.enabled) {
+    http_.Get("/traces", serve_traces_shell);
+    http_.Get(R"(/traces/.*)", serve_traces_shell);
   }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
@@ -186,6 +199,14 @@ Server::Server(AppConfig cfg, bool start_background)
 
   http_.Post("/api/export/run", [&](const auto& req, auto& res) { handle_export_run(req, res); });
   http_.Get("/api/export/stream", [&](const auto& req, auto& res) { handle_export_stream(req, res); });
+
+  if (cfg_.traces.enabled) {
+    http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
+    http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
+    http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
+    http_.Get("/api/traces/tags", [&](const auto& req, auto& res) { handle_traces_tags(req, res); });
+    http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
+  }
 
   if (cfg_.explorer.enabled()) {
     http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
@@ -350,6 +371,10 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("lineage"); w.Bool(cfg_.explorer.lineage);
   w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);
   w.EndObject();
+  w.EndObject();
+  w.Key("traces");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.traces.enabled);
   w.EndObject();
   w.EndObject();
   w.EndObject();

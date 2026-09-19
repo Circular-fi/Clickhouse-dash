@@ -42,6 +42,30 @@ struct ExplorerSettings {
   bool function_markdown_links = false;
 };
 
+struct TraceFeatureSettings {
+  bool service_filter = true;
+  bool operation_filter = true;
+  bool status_filter = true;
+  bool duration_filter = true;
+  bool resource_attributes = true;
+  bool span_attributes = true;
+  bool events = true;
+  bool links = true;
+};
+
+struct TraceSettings {
+  bool enabled = false;
+  std::string database = "otel";
+  std::string table = "otel_traces";
+  std::string trace_index_table = "otel_traces_trace_id_ts";
+  std::vector<std::string> service_allowlist{"*"};
+  int default_lookback_minutes = 60;
+  int max_lookback_minutes = 7 * 24 * 60;
+  size_t search_limit = 100;
+  size_t max_spans_per_trace = 10000;
+  TraceFeatureSettings features;
+};
+
 struct AnalysisSettings {
   int registry_ttl_ms = 60 * 60 * 1000;
   size_t registry_max_entries = 10000;
@@ -109,6 +133,7 @@ struct AppConfig {
   // Explorer, analysis, and export feature settings.
   ExplorerSettings explorer;
   AnalysisSettings analysis;
+  TraceSettings traces;
   ExportSettings export_settings;
 
   // /api/version
@@ -153,6 +178,12 @@ private:
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
+
+  void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_search(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_tags(const httplib::Request& req, httplib::Response& res);
+  void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();
   void reap_sessions_once();

@@ -81,6 +81,17 @@ void normalize_config(AppConfig& cfg) {
   cfg.analysis.registry_max_entries = std::max<size_t>(1, std::min<size_t>(1'000'000, cfg.analysis.registry_max_entries));
   cfg.analysis.registry_sql_max_bytes = std::min<size_t>(512 * 1024 * 1024, cfg.analysis.registry_sql_max_bytes);
   cfg.analysis.log_lookup_timeout_ms = std::max(0, std::min(60 * 1000, cfg.analysis.log_lookup_timeout_ms));
+  cfg.traces.default_lookback_minutes = std::max(1, std::min(30 * 24 * 60, cfg.traces.default_lookback_minutes));
+  cfg.traces.max_lookback_minutes = std::max(cfg.traces.default_lookback_minutes, std::min(365 * 24 * 60, cfg.traces.max_lookback_minutes));
+  cfg.traces.search_limit = std::max<size_t>(1, std::min<size_t>(1000, cfg.traces.search_limit));
+  cfg.traces.max_spans_per_trace = std::max<size_t>(100, std::min<size_t>(100000, cfg.traces.max_spans_per_trace));
+  for (const auto& pattern : cfg.traces.service_allowlist) {
+    if (pattern.empty()) throw std::runtime_error("traces.service_allowlist cannot contain an empty pattern");
+    if (pattern.size() > 256) throw std::runtime_error("traces.service_allowlist patterns must be at most 256 bytes");
+  }
+  if (cfg.traces.enabled) {
+    if (cfg.traces.database.empty() || cfg.traces.table.empty()) throw std::runtime_error("traces.database and traces.table cannot be empty");
+  }
   cfg.export_settings.max_concurrent = std::max<size_t>(1, std::min<size_t>(64, cfg.export_settings.max_concurrent));
   cfg.export_settings.output_buffer_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(16 * 1024 * 1024, cfg.export_settings.output_buffer_bytes));
   cfg.export_settings.token_ttl_ms = std::max(5000, std::min(10 * 60 * 1000, cfg.export_settings.token_ttl_ms));
@@ -144,6 +155,18 @@ std::optional<std::string> string_attr(const HclObject& object, const std::strin
     throw std::runtime_error(std::string(context) + "." + name + " must be a string");
   }
   return it->second.as_string();
+}
+
+std::optional<std::vector<std::string>> string_list_attr(
+    const HclObject& object,
+    const std::string& name,
+    std::string_view context) {
+  const auto it = object.attrs.find(name);
+  if (it == object.attrs.end()) return std::nullopt;
+  if (!it->second.is_string_list()) {
+    throw std::runtime_error(std::string(context) + "." + name + " must be a list of strings");
+  }
+  return it->second.as_string_list();
 }
 
 std::optional<int64_t> int_attr(const HclObject& object, const std::string& name, std::string_view context) {
@@ -258,7 +281,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "format_cache", "health",
-      "explorer", "analysis", "export", "clickhouse"});
+      "traces", "explorer", "analysis", "export", "clickhouse"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -332,6 +355,34 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*explorer, "live_refresh_ms", "explorer")) cfg.explorer.live_refresh_ms = int_value(*v, "explorer.live_refresh_ms");
     if (auto v = int_attr(*explorer, "function_cache_ttl_ms", "explorer")) cfg.explorer.function_cache_ttl_ms = int_value(*v, "explorer.function_cache_ttl_ms");
     if (auto v = bool_attr(*explorer, "function_markdown_links", "explorer")) cfg.explorer.function_markdown_links = *v;
+  }
+
+  if (const auto* traces = optional_block(root, "traces", source)) {
+    validate_object(*traces, "traces", {
+        "enabled", "database", "table", "trace_index_table",
+        "service_allowlist", "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace"}, {"features"});
+    if (auto v = bool_attr(*traces, "enabled", "traces")) cfg.traces.enabled = *v;
+    if (auto v = string_attr(*traces, "database", "traces")) cfg.traces.database = *v;
+    if (auto v = string_attr(*traces, "table", "traces")) cfg.traces.table = *v;
+    if (auto v = string_attr(*traces, "trace_index_table", "traces")) cfg.traces.trace_index_table = *v;
+    if (auto v = string_list_attr(*traces, "service_allowlist", "traces")) cfg.traces.service_allowlist = std::move(*v);
+    if (auto v = int_attr(*traces, "default_lookback_minutes", "traces")) cfg.traces.default_lookback_minutes = int_value(*v, "traces.default_lookback_minutes");
+    if (auto v = int_attr(*traces, "max_lookback_minutes", "traces")) cfg.traces.max_lookback_minutes = int_value(*v, "traces.max_lookback_minutes");
+    if (auto v = int_attr(*traces, "search_limit", "traces")) cfg.traces.search_limit = size_value(*v, "traces.search_limit");
+    if (auto v = int_attr(*traces, "max_spans_per_trace", "traces")) cfg.traces.max_spans_per_trace = size_value(*v, "traces.max_spans_per_trace");
+    if (const auto* features = optional_block(*traces, "features", "traces")) {
+      validate_object(*features, "traces.features", {
+          "service_filter", "operation_filter", "status_filter", "duration_filter",
+          "resource_attributes", "span_attributes", "events", "links"}, {});
+      if (auto v = bool_attr(*features, "service_filter", "traces.features")) cfg.traces.features.service_filter = *v;
+      if (auto v = bool_attr(*features, "operation_filter", "traces.features")) cfg.traces.features.operation_filter = *v;
+      if (auto v = bool_attr(*features, "status_filter", "traces.features")) cfg.traces.features.status_filter = *v;
+      if (auto v = bool_attr(*features, "duration_filter", "traces.features")) cfg.traces.features.duration_filter = *v;
+      if (auto v = bool_attr(*features, "resource_attributes", "traces.features")) cfg.traces.features.resource_attributes = *v;
+      if (auto v = bool_attr(*features, "span_attributes", "traces.features")) cfg.traces.features.span_attributes = *v;
+      if (auto v = bool_attr(*features, "events", "traces.features")) cfg.traces.features.events = *v;
+      if (auto v = bool_attr(*features, "links", "traces.features")) cfg.traces.features.links = *v;
+    }
   }
 
   if (const auto* analysis = optional_block(root, "analysis", source)) {

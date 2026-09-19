@@ -16,23 +16,25 @@ namespace chdash {
 // Minimal HCL subset parser.
 // Supported grammar (sufficient for the complete application config):
 //   - Blocks:  ident "{" ... "}"
-//   - Assignments: ident "=" (string|number|bool)
+//   - Assignments: ident "=" (string|number|bool|string-list)
 //   - Repeated blocks with same name (stored as vector)
 //   - Comments: # ... EOL, // ... EOL
 //
 // This is NOT a full HCL parser.
 
 struct HclValue {
-  using V = std::variant<std::string, int64_t, bool>;
+  using V = std::variant<std::string, int64_t, bool, std::vector<std::string>>;
   V v;
 
   bool is_string() const { return std::holds_alternative<std::string>(v); }
   bool is_int() const { return std::holds_alternative<int64_t>(v); }
   bool is_bool() const { return std::holds_alternative<bool>(v); }
+  bool is_string_list() const { return std::holds_alternative<std::vector<std::string>>(v); }
 
   const std::string& as_string() const { return std::get<std::string>(v); }
   int64_t as_int() const { return std::get<int64_t>(v); }
   bool as_bool() const { return std::get<bool>(v); }
+  const std::vector<std::string>& as_string_list() const { return std::get<std::vector<std::string>>(v); }
 };
 
 struct HclObject {
@@ -50,5 +52,6 @@ HclObject parse_hcl(std::string_view src);
 std::optional<std::string> hcl_get_string(const HclObject& o, const std::string& key);
 std::optional<int64_t> hcl_get_int(const HclObject& o, const std::string& key);
 std::optional<bool> hcl_get_bool(const HclObject& o, const std::string& key);
+std::optional<std::vector<std::string>> hcl_get_string_list(const HclObject& o, const std::string& key);
 
 } // namespace chdash

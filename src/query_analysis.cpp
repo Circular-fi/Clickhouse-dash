@@ -221,7 +221,7 @@ std::vector<QueryLogAnalysisRow> load_query_log_rows(
       "toUInt64(ProfileEvents['SystemTimeMicroseconds']), "
       "arrayStringConcat(databases, char(31)), arrayStringConcat(tables, char(31)), "
       "arrayStringConcat(projections, char(31)), toInt32(exception_code), toString(exception), toString(query), "
-      "toUInt8(is_initial_query) "
+      "toString(Settings['log_processors_profiles']), toUInt8(is_initial_query) "
       "FROM system.query_log PREWHERE " + standard_log_prewhere(record) + " "
       "WHERE type != 'QueryStart' AND " + predicate + " "
       "ORDER BY event_time_microseconds DESC LIMIT 512";
@@ -253,7 +253,8 @@ std::vector<QueryLogAnalysisRow> load_query_log_rows(
       value.exception_code = block_i32(block, 20, row);
       value.exception = block_string(block, 21, row);
       value.query = block_string(block, 22, row);
-      value.is_initial_query = block_u64(block, 23, row) != 0;
+      value.log_processors_profiles = block_string(block, 23, row);
+      value.is_initial_query = block_u64(block, 24, row) != 0;
       rows.push_back(std::move(value));
     }
   });

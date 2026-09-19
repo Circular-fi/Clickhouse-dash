@@ -53,7 +53,8 @@ def test_profiling_auto_opens_analysis_and_debug_exports_full_profiling_file() -
     run = read("src/static/app_run.js")
     download = read("src/static/app_download.js")
     functional = read("tests/frontend/specs/functional.spec.js")
-    assert 'dom.runWithProfilingButton.hidden = editorIsMulti;' in run
+    assert 'const profilingHidden = editorIsMulti || !profilingAvailable;' in run
+    assert 'dom.runWithProfilingButton.hidden = profilingHidden;' in run
     assert 'runMode === "profiling" && statements.length !== 1' in run
     assert 'await analysis.open({ hostId, queryId: out.queryId, runMode: "profiling" });' in run
     assert 'runMode,' in run

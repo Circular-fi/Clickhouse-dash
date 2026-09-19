@@ -23,7 +23,6 @@ x-clickhouse-healthcheck: &clickhouse-healthcheck
   start_period: 5s
 
 services:
-  # Default local stack: current ClickHouse + a fresh build of the working-tree ChDash.
   clickhouse:
     image: "${CLICKHOUSE_IMAGE:-clickhouse:26.7.5.10@sha256:d0e74e9970998f92c0490c23345259a539550eff24f551dbe385d3cd29481f74}"
     container_name: chdash-tests-clickhouse
@@ -34,6 +33,7 @@ services:
       - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
     ulimits: *clickhouse-ulimits
     volumes:
+      - clickhouse_data:/var/lib/clickhouse
       - type: bind
         source: ./clickhouse-init
         target: /docker-entrypoint-initdb.d
@@ -43,6 +43,40 @@ services:
         target: /etc/clickhouse-server/config.d/fixture-storage.xml
         read_only: true
     healthcheck: *clickhouse-healthcheck
+
+  # One-shot OTEL seed. It recreates the two fixture tables and inserts a
+  # fresh synthetic dataset before ChDash starts.
+  otel_fixture:
+    image: chdash-tests-otel-fixture:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/otel-fixture/Dockerfile
+    container_name: chdash-tests-otel-fixture
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+    environment:
+      CLICKHOUSE_HTTP_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-test}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-test}"
+      OTEL_FIXTURE_TRACES: "${OTEL_FIXTURE_TRACES:-10000}"
+      OTEL_FIXTURE_MIN_SPANS: "${OTEL_FIXTURE_MIN_SPANS:-60}"
+      OTEL_FIXTURE_MAX_SPANS: "${OTEL_FIXTURE_MAX_SPANS:-90}"
+      OTEL_FIXTURE_SEED: "${OTEL_FIXTURE_SEED:-20260918}"
+      OTEL_FIXTURE_ERROR_RATE: "${OTEL_FIXTURE_ERROR_RATE:-0.0002}"
+      OTEL_FIXTURE_BATCH_TRACES: "${OTEL_FIXTURE_BATCH_TRACES:-100}"
+      OTEL_FIXTURE_SPREAD_MINUTES: "${OTEL_FIXTURE_SPREAD_MINUTES:-55}"
+      OTEL_FIXTURE_FORCE: "${OTEL_FIXTURE_FORCE:-0}"
+      OTEL_FIXTURE_KEEPALIVE: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/fixture-ready"]
+      interval: 2s
+      timeout: 1s
+      retries: 180
+      start_period: 1s
 
   chdash_source:
     image: chdash-tests-source:local
@@ -61,6 +95,10 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+        restart: false
+      otel_fixture:
+        condition: service_healthy
+        restart: false
     environment:
       CHDASH_CONFIG_FILE: /config/CH_HOSTS.hcl
     volumes:
@@ -120,3 +158,6 @@ services:
         read_only: true
     ipc: host
     shm_size: "1gb"
+
+volumes:
+  clickhouse_data:

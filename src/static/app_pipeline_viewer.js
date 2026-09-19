@@ -597,9 +597,21 @@
       return node;
     };
     if (!options.processors?.length) {
-      const empty = element("div", "", options.error
-        ? `Processor profiling is unavailable: ${options.error}`
-        : "No processor profiling rows were recorded for this query.");
+      let message = "No processor profiling rows were recorded for this query.";
+      if (options.error) {
+        message = `Processor profiling is unavailable: ${options.error}`;
+      } else if (options.profilingStatus === "disabled_for_query") {
+        message = "Processor profiling was disabled for this query (log_processors_profiles=0).";
+      } else if (options.profilingStatus === "query_log_pending") {
+        message = "Processor profiling metadata is still pending in system.query_log.";
+      } else if (options.profilingStatus === "table_unavailable") {
+        message = "system.processors_profile_log is unavailable on this ClickHouse server.";
+      } else if (options.profilingStatus === "enabled_no_rows") {
+        message = "Processor profiling was enabled for this query, but system.processors_profile_log contains no rows for it.";
+      } else if (options.profilingStatus === "unknown_no_rows") {
+        message = "No processor rows were found, and ClickHouse did not expose the effective log_processors_profiles setting for this query.";
+      }
+      const empty = element("div", "", message);
       empty.className = "analysisEmpty";
       container.appendChild(empty);
       return null;

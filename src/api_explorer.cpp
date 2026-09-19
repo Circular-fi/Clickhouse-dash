@@ -22,12 +22,13 @@
 namespace chdash {
 namespace {
 
+constexpr uint64_t kExplorerTableDetailCacheTtlMs = 30 * 1000;
+
 uint64_t now_ms() {
   using namespace std::chrono;
   return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 }
 
-constexpr uint64_t kExplorerTableDetailCacheTtlMs = 30 * 1000;
 
 std::string explorer_security_key(const std::string& host_id) {
   return host_id;
@@ -297,6 +298,7 @@ void write_summary(rapidjson::Writer<rapidjson::StringBuffer>& w, const Explorer
   w.Key("partition_key"); w.String(table.partition_key.c_str());
   w.Key("sampling_key"); w.String(table.sampling_key.c_str());
   w.Key("storage_policy"); w.String(table.storage_policy.c_str());
+  w.Key("metadata_modification_time"); w.String(table.metadata_modification_time.c_str());
   w.Key("last_part_time"); w.String(table.last_part_time.c_str());
   w.Key("disks");
   w.StartArray();
@@ -468,6 +470,7 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.Key("database"); w.String(table.database.c_str());
     w.Key("name"); w.String(table.name.c_str());
     w.Key("engine"); w.String(table.engine.c_str());
+    w.Key("metadata_modification_time"); w.String(table.metadata_modification_time.c_str());
     w.Key("rows"); write_optional_u64(w, table.rows);
     w.Key("bytes");
     if (table.resident_bytes) w.Uint64(*table.resident_bytes);
@@ -501,8 +504,9 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
   if (force_refresh) explorer_table_detail_cache_.erase(detail_key);
 
+  const uint64_t detail_ttl = kExplorerTableDetailCacheTtlMs;
   auto detail_result = explorer_table_detail_cache_.get_or_refresh(
-      detail_key, ts, kExplorerTableDetailCacheTtlMs, 250,
+      detail_key, ts, detail_ttl, 250,
       [&](ExplorerTableDetail& value, std::string& code, std::string& message) {
         const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
         std::string error;
@@ -547,6 +551,7 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
           message = error.empty() ? "Unable to load Explorer table metadata." : error;
           return false;
         }
+        value.generated_at_ms = now_ms();
         return true;
       });
 
@@ -566,7 +571,8 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   w.Key("host_id"); w.String(host_id.c_str());
   w.Key("metric_scope"); w.String("local-replica");
   w.Key("stale"); w.Bool(detail_result.stale);
-  w.Key("cache_ttl_ms"); w.Uint64(kExplorerTableDetailCacheTtlMs);
+  w.Key("cache_ttl_ms"); w.Uint64(detail_ttl);
+  w.Key("generated_at_ms"); w.Uint64(detail.generated_at_ms);
   w.Key("summary"); write_summary(w, detail.summary);
   w.Key("footprint_scope"); w.StartObject();
   w.Key("database_bytes"); write_optional_u64(w, detail.database_footprint_bytes);

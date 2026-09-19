@@ -454,7 +454,7 @@ bool load_base_summaries(
     std::string* error) {
   std::unordered_map<std::string, size_t> by_key;
   auto consume_tables = [&](const clickhouse::Block& block, bool has_storage_policy) {
-    constexpr size_t kExpectedColumns = 13;
+    constexpr size_t kExpectedColumns = 14;
     if (block.GetRowCount() > 0 && block.GetColumnCount() < kExpectedColumns) {
       throw std::runtime_error(
           "system.tables metadata block has " + std::to_string(block.GetColumnCount()) +
@@ -486,6 +486,7 @@ bool load_base_summaries(
       const auto total_bytes = parse_u64(block_string_at(block, 10, row));
       const auto total_uncompressed_bytes = parse_u64(block_string_at(block, 11, row));
       summary.data_paths = split_unit_separator(block_string_at(block, 12, row));
+      summary.metadata_modification_time = block_string_at(block, 13, row);
       // system.tables.total_bytes is a resident-memory estimate for in-memory
       // engines. Keep Buffer/Memory/Dictionary bytes in resident_bytes so Browse
       // never presents RAM as database/ClickHouse on-disk footprint. Dictionary
@@ -510,7 +511,7 @@ bool load_base_summaries(
 
   const std::string table_select =
     "SELECT toString(database), toString(name), toString(engine), toString(engine_full), toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), toString(storage_policy), "
-    "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)) "
+    "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time) "
     "FROM system.tables "
     "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') ";
 
@@ -991,7 +992,7 @@ bool load_explorer_catalog_index(
   }
   const std::string select_sql =
       "SELECT toString(database), toString(name), toString(engine), "
-      "toString(total_rows), toString(total_bytes) FROM system.tables" + table_filter;
+      "toString(total_rows), toString(total_bytes), toString(metadata_modification_time) FROM system.tables" + table_filter;
 
   auto consume = [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1006,6 +1007,7 @@ bool load_explorer_catalog_index(
       item.engine = block_string_at(block, 2, row);
       item.rows = parse_u64(block_string_at(block, 3, row));
       const auto total_bytes = parse_u64(block_string_at(block, 4, row));
+      item.metadata_modification_time = block_string_at(block, 5, row);
       if (item.engine == "Buffer" || item.engine == "Memory" || item.engine == "Dictionary") {
         item.resident_bytes = total_bytes;
       } else {
@@ -1140,7 +1142,7 @@ bool load_explorer_table_summary(
       "SELECT toString(database), toString(name), toString(engine), toString(engine_full), "
       "toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), "
       "toString(storage_policy), toString(total_rows), toString(total_bytes), "
-      "toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)) "
+      "toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time) "
       "FROM system.tables WHERE database = " + db + " AND name = " + tbl + " LIMIT 1";
 
   auto consume_base = [&](const clickhouse::Block& block) {
@@ -1158,6 +1160,7 @@ bool load_explorer_table_summary(
     const auto total_bytes = parse_u64(block_string_at(block, 10, 0));
     const auto total_uncompressed_bytes = parse_u64(block_string_at(block, 11, 0));
     out.data_paths = split_unit_separator(block_string_at(block, 12, 0));
+    out.metadata_modification_time = block_string_at(block, 13, 0);
     if (out.engine == "Buffer" || out.engine == "Memory" || out.engine == "Dictionary") {
       out.resident_bytes = total_bytes;
     } else {
@@ -1513,9 +1516,56 @@ bool load_explorer_table_detail(
       return false;
     }
   }
+
+  // Since ClickHouse 24.2, parameterized View objects intentionally have no
+  // rows in system.columns. Try DESCRIBE as a compatibility fallback for any
+  // object whose catalog columns are absent; ordinary tables/views are then
+  // recovered without weakening the ACL boundary. Parameterized views can also
+  // reject bare DESCRIBE because their local parameters were not supplied. In
+  // that case Explorer still has useful object metadata (DDL, lineage, engine),
+  // so a View with no resolvable static schema must remain browsable instead of
+  // turning an upstream ClickHouse metadata limitation into a 503.
   if (out.columns.empty()) {
+    const std::string fallback_describe_sql =
+      "DESCRIBE TABLE " + quote_ident(database) + "." + quote_ident(table) +
+      " SETTINGS describe_include_subcolumns = 0";
+    auto load_describe_columns = [&](clickhouse::Client& client, std::string* load_error) {
+      return try_select(client, fallback_describe_sql,
+        [&](const clickhouse::Block& block) {
+          for (size_t row = 0; row < block.GetRowCount(); ++row) {
+            if (block.GetColumnCount() < 2) continue;
+            const std::string name = block_string_at(block, 0, row);
+            if (name.empty() || !allowed.allows_column(database, table, name)) continue;
+            ExplorerColumnInfo column;
+            column.name = name;
+            column.type = block_string_at(block, 1, row);
+            if (block.GetColumnCount() > 2) column.default_kind = block_string_at(block, 2, row);
+            if (block.GetColumnCount() > 3) column.default_expression = block_string_at(block, 3, row);
+            if (block.GetColumnCount() > 5) column.codec_expression = block_string_at(block, 5, row);
+            if (block.GetColumnCount() > 6) column.ttl_expression = block_string_at(block, 6, row);
+            out.columns.push_back(std::move(column));
+          }
+        }, load_error);
+    };
+
+    std::string describe_fallback_error;
+    bool fallback_loaded = load_describe_columns(system, &describe_fallback_error);
+    if (!fallback_loaded || out.columns.empty()) {
+      out.columns.clear();
+      std::string runner_describe_error;
+      fallback_loaded = load_describe_columns(runner, &runner_describe_error);
+    }
+  }
+
+  const bool schema_unresolved_view =
+      out.columns.empty() &&
+      (summary.engine == "View" || summary.engine == "MaterializedView");
+  if (out.columns.empty() && !schema_unresolved_view) {
     if (error) *error = "Column metadata query returned no readable columns for " + database + "." + table;
     return false;
+  }
+  if (schema_unresolved_view) {
+    out.unavailable_sections.push_back("columns");
   }
 
   // system.columns.compression_codec is intentionally empty when a column has
@@ -1539,94 +1589,97 @@ bool load_explorer_table_detail(
       }, &codec_error);
   }
 
-  // DESCRIBE TABLE is deliberately metadata-only and version-stable for column
-  // TTLs. Include subcolumns so the Browse storage breakdown can expose named
-  // Tuple fields (for example `<sensor_packet.station.code>`) instead of hiding
-  // all tuple storage behind the parent column. The runner ACL is still applied
-  // at the top-level column boundary: a subcolumn is visible only when its
-  // longest matching top-level parent is readable.
-  std::unordered_map<std::string, ExplorerColumnInfo*> columns_by_name;
-  columns_by_name.reserve(out.columns.size());
-  for (auto& column : out.columns) columns_by_name.emplace(column.name, &column);
-  std::vector<ExplorerColumnInfo> described_subcolumns;
-  section_error.clear();
-  const std::string describe_sql =
-    "DESCRIBE TABLE " + quote_ident(database) + "." + quote_ident(table) +
-    " SETTINGS describe_include_subcolumns = 1";
-  auto load_describe = [&](clickhouse::Client& client, std::string* load_error) {
-    return try_select(client, describe_sql,
-      [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          if (block.GetColumnCount() < 7) continue;
-          const std::string name = block_string_at(block, 0, row);
-          const bool is_subcolumn = block.GetColumnCount() >= 8 && block_bool_at(block, 7, row);
-          if (!is_subcolumn) {
-            const auto it = columns_by_name.find(name);
-            if (it == columns_by_name.end()) continue;
-            auto& column = *it->second;
-            const std::string described_codec = block_string_at(block, 5, row);
-            const std::string described_ttl = block_string_at(block, 6, row);
-            if (column.codec_expression.empty() && !described_codec.empty()) column.codec_expression = described_codec;
-            column.ttl_expression = described_ttl;
-            continue;
-          }
-
-          ExplorerColumnInfo* parent = nullptr;
-          size_t parent_length = 0;
-          for (auto& candidate : out.columns) {
-            const std::string prefix = candidate.name + ".";
-            if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
-            if (candidate.name.size() > parent_length) {
-              parent = &candidate;
-              parent_length = candidate.name.size();
+  if (!out.columns.empty()) {
+    // DESCRIBE TABLE is deliberately metadata-only and version-stable for column
+    // TTLs. Include subcolumns so the Browse storage breakdown can expose named
+    // Tuple fields (for example `<sensor_packet.station.code>`) instead of hiding
+    // all tuple storage behind the parent column. The runner ACL is still applied
+    // at the top-level column boundary: a subcolumn is visible only when its
+    // longest matching top-level parent is readable.
+    std::unordered_map<std::string, ExplorerColumnInfo*> columns_by_name;
+    columns_by_name.reserve(out.columns.size());
+    for (auto& column : out.columns) columns_by_name.emplace(column.name, &column);
+    std::vector<ExplorerColumnInfo> described_subcolumns;
+    section_error.clear();
+    const std::string describe_sql =
+      "DESCRIBE TABLE " + quote_ident(database) + "." + quote_ident(table) +
+      " SETTINGS describe_include_subcolumns = 1";
+    auto load_describe = [&](clickhouse::Client& client, std::string* load_error) {
+      return try_select(client, describe_sql,
+        [&](const clickhouse::Block& block) {
+          for (size_t row = 0; row < block.GetRowCount(); ++row) {
+            if (block.GetColumnCount() < 7) continue;
+            const std::string name = block_string_at(block, 0, row);
+            const bool is_subcolumn = block.GetColumnCount() >= 8 && block_bool_at(block, 7, row);
+            if (!is_subcolumn) {
+              const auto it = columns_by_name.find(name);
+              if (it == columns_by_name.end()) continue;
+              auto& column = *it->second;
+              const std::string described_codec = block_string_at(block, 5, row);
+              const std::string described_ttl = block_string_at(block, 6, row);
+              if (column.codec_expression.empty() && !described_codec.empty()) column.codec_expression = described_codec;
+              column.ttl_expression = described_ttl;
+              continue;
             }
+
+            ExplorerColumnInfo* parent = nullptr;
+            size_t parent_length = 0;
+            for (auto& candidate : out.columns) {
+              const std::string prefix = candidate.name + ".";
+              if (name.size() <= prefix.size() || name.compare(0, prefix.size(), prefix) != 0) continue;
+              if (candidate.name.size() > parent_length) {
+                parent = &candidate;
+                parent_length = candidate.name.size();
+              }
+            }
+            if (!parent || parent->type.find("Tuple(") == std::string::npos) continue;
+
+            ExplorerColumnInfo subcolumn;
+            subcolumn.name = name;
+            subcolumn.type = block_string_at(block, 1, row);
+            // Intermediate Tuple subcolumns are structural containers and do not
+            // own a physical stream in MergeTree parts. Showing them would produce
+            // a misleading size row with no bytes; keep the leaf tuple fields that
+            // system.parts_columns can actually account for.
+            if (subcolumn.type.rfind("Tuple(", 0) == 0 || subcolumn.type.rfind("NamedTuple(", 0) == 0) continue;
+            subcolumn.default_kind = block_string_at(block, 2, row);
+            subcolumn.default_expression = block_string_at(block, 3, row);
+            subcolumn.codec_expression = block_string_at(block, 5, row);
+            if (subcolumn.codec_expression.empty()) subcolumn.codec_expression = parent->codec_expression;
+            subcolumn.ttl_expression = block_string_at(block, 6, row);
+            subcolumn.is_subcolumn = true;
+            subcolumn.parent_name = parent->name;
+            described_subcolumns.push_back(std::move(subcolumn));
           }
-          if (!parent || parent->type.find("Tuple(") == std::string::npos) continue;
+        }, load_error);
+    };
 
-          ExplorerColumnInfo subcolumn;
-          subcolumn.name = name;
-          subcolumn.type = block_string_at(block, 1, row);
-          // Intermediate Tuple subcolumns are structural containers and do not
-          // own a physical stream in MergeTree parts. Showing them would produce
-          // a misleading size row with no bytes; keep the leaf tuple fields that
-          // system.parts_columns can actually account for.
-          if (subcolumn.type.rfind("Tuple(", 0) == 0 || subcolumn.type.rfind("NamedTuple(", 0) == 0) continue;
-          subcolumn.default_kind = block_string_at(block, 2, row);
-          subcolumn.default_expression = block_string_at(block, 3, row);
-          subcolumn.codec_expression = block_string_at(block, 5, row);
-          if (subcolumn.codec_expression.empty()) subcolumn.codec_expression = parent->codec_expression;
-          subcolumn.ttl_expression = block_string_at(block, 6, row);
-          subcolumn.is_subcolumn = true;
-          subcolumn.parent_name = parent->name;
-          described_subcolumns.push_back(std::move(subcolumn));
-        }
-      }, load_error);
-  };
-
-  bool describe_loaded = load_describe(system, &section_error);
-  if (!describe_loaded) {
-    described_subcolumns.clear();
-    for (auto& column : out.columns) column.ttl_expression.clear();
-    std::string runner_error;
-    describe_loaded = load_describe(runner, &runner_error);
+    bool describe_loaded = load_describe(system, &section_error);
     if (!describe_loaded) {
-      if (error) *error = "Column DESCRIBE metadata query failed: " + runner_error;
-      return false;
-    }
-  }
-
-
-  if (!described_subcolumns.empty()) {
-    std::vector<ExplorerColumnInfo> ordered;
-    ordered.reserve(out.columns.size() + described_subcolumns.size());
-    for (auto& column : out.columns) {
-      const std::string parent_name = column.name;
-      ordered.push_back(std::move(column));
-      for (auto& subcolumn : described_subcolumns) {
-        if (subcolumn.parent_name == parent_name) ordered.push_back(std::move(subcolumn));
+      described_subcolumns.clear();
+      for (auto& column : out.columns) column.ttl_expression.clear();
+      std::string runner_error;
+      describe_loaded = load_describe(runner, &runner_error);
+      if (!describe_loaded) {
+        if (error) *error = "Column DESCRIBE metadata query failed: " + runner_error;
+        return false;
       }
     }
-    out.columns = std::move(ordered);
+
+
+    if (!described_subcolumns.empty()) {
+      std::vector<ExplorerColumnInfo> ordered;
+      ordered.reserve(out.columns.size() + described_subcolumns.size());
+      for (auto& column : out.columns) {
+        const std::string parent_name = column.name;
+        ordered.push_back(std::move(column));
+        for (auto& subcolumn : described_subcolumns) {
+          if (subcolumn.parent_name == parent_name) ordered.push_back(std::move(subcolumn));
+        }
+      }
+      out.columns = std::move(ordered);
+    }
+
   }
 
   // Compact parts physically interleave all columns in one data file. ClickHouse

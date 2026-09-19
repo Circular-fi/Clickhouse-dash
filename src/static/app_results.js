@@ -499,32 +499,76 @@
     const descriptors = [];
     let changed = false;
 
-    const appendTupleLeaves = (columnIndex, prefix, ast, getter) => {
-      const fields = Array.isArray(ast?.fields) ? ast.fields : [];
-      for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
-        const field = fields[fieldIndex];
-        const fieldName = String(field?.name ?? `_${fieldIndex}`);
-        const name = `${prefix}.${fieldName}`;
-        const fieldGetter = (row) => tupleFieldValue(getter(row), field, fieldIndex);
-        if (field?.type?.kind === "Tuple" && Array.isArray(field.type.fields) && field.type.fields.length) {
-          appendTupleLeaves(columnIndex, name, field.type, fieldGetter);
-        } else {
-          descriptors.push({
-            columnIndex,
-            name,
-            type: String(field?.rawType || typeAstLabel(field?.type)),
-            get: fieldGetter,
-          });
+    const containsTuple = (ast) => {
+      if (!ast) return false;
+      if (ast.kind === "Tuple") return Array.isArray(ast.fields) && ast.fields.length > 0;
+      if (ast.kind === "Array") return containsTuple(ast.inner);
+      return false;
+    };
+
+    // Return leaf projections for every Tuple nested directly or below one or
+    // more Array wrappers. Array wrappers are preserved: Array(Tuple(a UInt64,
+    // b String)) becomes two display columns named .a/.b with types
+    // Array(UInt64)/Array(String), without exploding rows.
+    const collectTupleLeaves = (ast) => {
+      if (!ast) return [];
+
+      if (ast.kind === "Tuple") {
+        const fields = Array.isArray(ast.fields) ? ast.fields : [];
+        const leaves = [];
+        for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+          const field = fields[fieldIndex];
+          const fieldName = String(field?.name ?? `_${fieldIndex}`);
+          const nested = containsTuple(field?.type) ? collectTupleLeaves(field.type) : [];
+          if (nested.length) {
+            for (const leaf of nested) {
+              leaves.push({
+                path: [fieldName, ...leaf.path],
+                type: leaf.type,
+                extract: (value) => leaf.extract(tupleFieldValue(value, field, fieldIndex)),
+              });
+            }
+          } else {
+            leaves.push({
+              path: [fieldName],
+              type: String(field?.rawType || typeAstLabel(field?.type)),
+              extract: (value) => tupleFieldValue(value, field, fieldIndex),
+            });
+          }
         }
+        return leaves;
       }
+
+      if (ast.kind === "Array" && containsTuple(ast.inner)) {
+        return collectTupleLeaves(ast.inner).map((leaf) => ({
+          path: leaf.path,
+          type: `Array(${leaf.type})`,
+          extract: (value) => {
+            const parsed = parseJsonStringIfLikely(value);
+            if (parsed === null || parsed === undefined) return null;
+            if (!Array.isArray(parsed)) return [];
+            return parsed.map((item) => leaf.extract(item));
+          },
+        }));
+      }
+
+      return [];
     };
 
     for (let columnIndex = 0; columnIndex < safeColumns.length; columnIndex += 1) {
       const ast = parseChType(safeTypes[columnIndex] || "");
       const baseGetter = (row) => Array.isArray(row) ? row[columnIndex] : (columnIndex === 0 ? row : null);
-      if (enabled && ast?.kind === "Tuple" && Array.isArray(ast.fields) && ast.fields.length) {
+      const leaves = enabled && containsTuple(ast) ? collectTupleLeaves(ast) : [];
+      if (leaves.length) {
         changed = true;
-        appendTupleLeaves(columnIndex, safeColumns[columnIndex], ast, baseGetter);
+        for (const leaf of leaves) {
+          descriptors.push({
+            columnIndex,
+            name: `${safeColumns[columnIndex]}.${leaf.path.join(".")}`,
+            type: leaf.type,
+            get: (row) => leaf.extract(baseGetter(row)),
+          });
+        }
       } else {
         descriptors.push({
           columnIndex,

@@ -705,6 +705,22 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.Key("session_elapsed_ms"); writer.Int64(record->session_elapsed_ms);
   writer.Key("logs_pending"); writer.Bool(analysis.logs_pending);
   writer.Key("processor_profiling_recorded"); writer.Bool(!analysis.processors.empty());
+  bool processor_setting_seen = false;
+  bool processor_setting_enabled = false;
+  for (const auto& row : analysis.query_log) {
+    if (row.log_processors_profiles.empty()) continue;
+    processor_setting_seen = true;
+    if (row.log_processors_profiles == "1" || row.log_processors_profiles == "true") processor_setting_enabled = true;
+  }
+  std::string processor_profiling_status;
+  if (!analysis.processors.empty()) processor_profiling_status = "recorded";
+  else if (!analysis.processors_profile_available) processor_profiling_status = "table_unavailable";
+  else if (analysis.logs_pending) processor_profiling_status = "query_log_pending";
+  else if (processor_setting_seen && !processor_setting_enabled) processor_profiling_status = "disabled_for_query";
+  else if (processor_setting_enabled) processor_profiling_status = "enabled_no_rows";
+  else processor_profiling_status = "unknown_no_rows";
+  writer.Key("processor_profiling_requested"); writer.Bool(processor_setting_enabled);
+  writer.Key("processor_profiling_status"); writer.String(processor_profiling_status.c_str());
   // Applicability is derived from the filtered execution itself. The frontend
   // must never infer cluster/view usage from database names or configuration.
   writer.Key("views_applicable"); writer.Bool(!analysis.views.empty());

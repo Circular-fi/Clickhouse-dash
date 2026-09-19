@@ -788,6 +788,7 @@ static ResultTransportMode classify_result_transport(std::string_view type) {
 static bool should_retry_with_describe_after_direct_path_error(std::string_view msg) {
   return icontains(msg, "unimplemented") ||
          icontains(msg, "unsupported column type") ||
+         icontains(msg, "unsupported type") ||
          icontains(msg, "unsupported custom serialization") ||
          icontains(msg, "unsupported json serialization version") ||
          icontains(msg, "output_format_native_write_json_as_string") ||

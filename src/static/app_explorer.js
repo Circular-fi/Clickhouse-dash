@@ -30,6 +30,8 @@
     databaseTablesLoading: new Set(),
     databaseLoadPromises: new Map(),
     databaseLoadErrors: new Map(),
+    detailCache: new Map(),
+    detailPromises: new Map(),
     routeIntent: null,
     includeSystem: false,
     includeNonStoring: true,
@@ -234,6 +236,75 @@
     if (!model.catalog || !model.selectedKey) return null;
     return (model.catalog.tables || []).find((t) => `${t.database}\0${t.name}` === model.selectedKey) || null;
   }
+
+  function detailCacheKey(hostId, database, table) {
+    return `${String(hostId || "")}\0${String(database || "")}\0${String(table || "")}`;
+  }
+
+  function currentCatalogTable(database, table) {
+    return (model.catalog?.tables || []).find((item) => String(item.database || "") === String(database || "") && String(item.name || "") === String(table || "")) || null;
+  }
+
+  function metadataRevision(table) {
+    return String(table?.metadata_modification_time || "");
+  }
+
+  function detailMatchesCatalog(detail, database, table) {
+    const current = currentCatalogTable(database, table);
+    const navRevision = metadataRevision(current);
+    const detailRevision = metadataRevision(detail?.summary);
+    // Older ClickHouse versions / restricted accounts may not expose a revision.
+    // In that case fall back to the bounded detail TTL instead of invalidating
+    // every time the lightweight navigation catalog refreshes.
+    return !navRevision || !detailRevision || navRevision === detailRevision;
+  }
+
+  function applyFreshSidebarSummary(detail, database, table) {
+    const current = currentCatalogTable(database, table);
+    if (!detail?.summary || !current) return detail;
+    detail.summary.engine = current.engine || detail.summary.engine;
+    detail.summary.metadata_modification_time = current.metadata_modification_time || detail.summary.metadata_modification_time || "";
+    if (current.rows != null) detail.summary.rows = current.rows;
+    if (current.bytes != null) {
+      if (detail.summary.resident_bytes != null) detail.summary.resident_bytes = current.bytes;
+      else {
+        detail.summary.logical_bytes = current.bytes;
+        detail.summary.compressed_bytes = current.bytes;
+        if (detail.summary.physical_bytes != null) detail.summary.physical_bytes = current.bytes;
+      }
+    }
+    return detail;
+  }
+
+  async function fetchTableDetail(hostId, database, table, force = false) {
+    const key = detailCacheKey(hostId, database, table);
+    if (force) model.detailCache.delete(key);
+    const cached = model.detailCache.get(key);
+    const ttl = Math.max(0, Number(cached?.detail?.cache_ttl_ms ?? 30000));
+    const freshByAge = !!cached && (Date.now() - Number(cached.cachedAtMs || 0) < ttl);
+    if (!force && cached?.detail && freshByAge && detailMatchesCatalog(cached.detail, database, table)) {
+      return applyFreshSidebarSummary(cached.detail, database, table);
+    }
+    const existing = model.detailPromises.get(key);
+    if (existing) return existing;
+
+    const promise = (async () => {
+      let detail = await api.getExplorerTable(hostId, database, table, !!force);
+      // A 30s rich-detail cache keeps clicks responsive, while the 5s navigation
+      // catalog carries ClickHouse's metadata_modification_time. If the schema
+      // changed since the cached detail was produced, bypass the server cache
+      // exactly once; row/byte-only changes are overlaid from the sidebar.
+      if (!force && !detailMatchesCatalog(detail, database, table)) {
+        detail = await api.getExplorerTable(hostId, database, table, true);
+      }
+      applyFreshSidebarSummary(detail, database, table);
+      model.detailCache.set(key, { detail, cachedAtMs: Date.now() });
+      return detail;
+    })().finally(() => model.detailPromises.delete(key));
+    model.detailPromises.set(key, promise);
+    return promise;
+  }
+
 
   function setSection(section) {
     const next = section === "functions" ? "functions" : "tables";
@@ -1589,6 +1660,7 @@
 
   function renderOverview(container, detail) {
     const s = detail.summary || {};
+    if (detail?._loading) container.appendChild(node("div", "explorerFootnote", "Loading detailed metadata…"));
     const viewLike = isViewLikeSummary(s);
     const resident = isResidentMemorySummary(s);
     const empty = isEmptyRowSummary(s);
@@ -1725,23 +1797,39 @@
         : observedDefaults.length > 1
           ? `${observedDefaults.join(" / ")} (part defaults)`
           : "DEFAULT";
-    const visibleColumns = (detail.columns || []).filter((column) => !isImplementationSubcolumn(column));
-    const tupleRoots = visibleColumns
-      .filter((column) => !column?.is_subcolumn && /^Tuple\s*\(/i.test(String(column?.type || "")))
+    const allColumns = Array.isArray(detail.columns) ? detail.columns : [];
+    const visibleColumns = allColumns.filter((column) => !isImplementationSubcolumn(column));
+    // A storage Tuple hierarchy is not limited to a top-level Tuple(...).
+    // Array(Tuple(...)) and deeper Array wrappers expose the same named physical
+    // subcolumns and should use the same disclosure control.
+    const tupleRoots = allColumns
+      .filter((column) => !column?.is_subcolumn && /Tuple\s*\(/i.test(String(column?.type || "")))
       .map((column) => String(column.name || ""))
       .filter(Boolean)
       .sort((a, b) => b.length - a.length);
+    const implementationByRoot = new Map();
+    for (const c of allColumns) {
+      if (!isImplementationSubcolumn(c)) continue;
+      const name = String(c.name || "");
+      const root = tupleRoots.find((candidate) => name.startsWith(`${candidate}.`));
+      if (!root) continue;
+      if (!implementationByRoot.has(root)) implementationByRoot.set(root, []);
+      implementationByRoot.get(root).push(c);
+    }
+
     const tupleExpanded = new Set();
     let topLevelColumnPosition = 0;
-    const columnRows = visibleColumns.map((c) => {
+    const columnRows = [];
+    for (const c of visibleColumns) {
       const compressed = optionalNumber(c.compressed_bytes);
       const uncompressed = optionalNumber(c.uncompressed_bytes);
       const name = String(c.name || "—");
       const tupleParent = c.is_subcolumn
         ? (tupleRoots.find((root) => name.startsWith(`${root}.`)) || null)
         : null;
+      const tupleRoot = tupleRoots.includes(name) ? name : null;
       const displayPosition = c.is_subcolumn ? null : ++topLevelColumnPosition;
-      return {
+      columnRows.push({
         position: displayPosition,
         name,
         title: c.type || "",
@@ -1750,10 +1838,37 @@
         uncompressed,
         percent: compressed == null ? null : percentValue(compressed, tableFootprint),
         is_subcolumn: !!c.is_subcolumn,
-        tuple_root: tupleRoots.includes(name) ? name : null,
+        tuple_root: tupleRoot,
         tuple_parent: tupleParent,
-      };
-    });
+      });
+
+      // size0/sizeN are real on-disk Array offset streams. They were previously
+      // hidden, which made the expanded children appear not to add up to their
+      // parent (especially in uncompressed bytes, where UInt64 offsets are
+      // large but compress extremely well). Keep the implementation names out
+      // of the UI, but account for their bytes as one explicit physical child.
+      if (tupleRoot) {
+        const implementation = implementationByRoot.get(tupleRoot) || [];
+        if (implementation.length) {
+          const compressedValues = implementation.map((item) => optionalNumber(item.compressed_bytes)).filter((value) => value != null);
+          const uncompressedValues = implementation.map((item) => optionalNumber(item.uncompressed_bytes)).filter((value) => value != null);
+          const implementationCompressed = compressedValues.length ? compressedValues.reduce((sum, value) => sum + value, 0) : null;
+          const implementationUncompressed = uncompressedValues.length ? uncompressedValues.reduce((sum, value) => sum + value, 0) : null;
+          columnRows.push({
+            position: null,
+            name: `${tupleRoot}.[offsets]`,
+            title: `Physical Array offset stream${implementation.length === 1 ? "" : "s"}: ${implementation.map((item) => item.name).join(", ")}`,
+            codec: c.codec || defaultCodec,
+            compressed: implementationCompressed,
+            uncompressed: implementationUncompressed,
+            percent: implementationCompressed == null ? null : percentValue(implementationCompressed, tableFootprint),
+            is_subcolumn: true,
+            tuple_root: null,
+            tuple_parent: tupleRoot,
+          });
+        }
+      }
+    }
     renderStorageMetricTable(container, "Columns", "columns", columnRows, "Column", { tupleExpanded });
 
     const structures = (detail.indexes_and_projections || []).map((item, position) => {
@@ -2472,6 +2587,10 @@
     clear(container);
     const detail = model.detail;
     if (!detail) return;
+    if (detail._loading && model.tab !== "Overview") {
+      container.appendChild(node("div", "explorerEmptySection", "Loading detailed metadata…"));
+      return;
+    }
 
     switch (model.tab) {
       case "Overview": renderOverview(container, detail); break;
@@ -2517,30 +2636,50 @@
       syncExplorerUrl(historyMode);
       return;
     }
-    model.detail = null;
     model.preview = null;
     model.detailLoading = true;
     renderTableList();
     setError(null);
-    if (dom.explorerEmptyState) {
-      dom.explorerEmptyState.hidden = false;
-      dom.explorerEmptyState.replaceChildren(node("strong", "", "Loading table…"), node("span", "", `${database}.${table}`));
+
+    // The sidebar already owns a fresh table summary. Paint it immediately
+    // instead of replacing the whole detail pane with a 1-2s loading screen
+    // while the richer physical metadata is collected.
+    const sidebarSummary = selectedTable();
+    model.detail = sidebarSummary ? {
+      summary: { ...sidebarSummary },
+      metric_scope: "local-replica",
+      footprint_scope: {},
+      dependencies: [],
+      columns: [],
+      storage: [],
+      parts: [],
+      partitions: [],
+      indexes_and_projections: [],
+      mutations: [],
+      merges: [],
+      unavailable_sections: [],
+      _loading: true,
+    } : null;
+    if (model.detail) {
+      renderDetailHeader();
+      renderTabs();
+      renderTabContent();
+      syncExplorerUrl(historyMode);
+    } else {
+      if (dom.explorerEmptyState) {
+        dom.explorerEmptyState.hidden = false;
+        dom.explorerEmptyState.replaceChildren(node("strong", "", "Loading table…"), node("span", "", `${database}.${table}`));
+      }
+      if (dom.explorerDetail) dom.explorerDetail.hidden = true;
     }
-    if (dom.explorerDetail) dom.explorerDetail.hidden = true;
 
     const hostId = String(state.selectedHostId || "");
+    // Browse detail delegates to fetchTableDetail(), whose network path calls
+    // api.getExplorerTable only after the graph-mode early return above.
     try {
-      const detail = await api.getExplorerTable(hostId, database, table, !!force);
+      const detail = await fetchTableDetail(hostId, database, table, !!force);
       if (!detail || typeof detail !== "object" || !detail.summary || detail.summary.database !== database || detail.summary.name !== table) {
         throw new Error(`Invalid Explorer detail response for ${database}.${table}.`);
-      }
-      if (detail.ddl) {
-        try {
-          const formatted = await api.formatSqls(hostId, [String(detail.ddl)]);
-          if (Array.isArray(formatted) && formatted[0]) detail.formatted_ddl = formatted[0];
-        } catch (formatError) {
-          detail.ddl_format_error = formatError instanceof Error ? formatError.message : String(formatError || "format failed");
-        }
       }
       if (serial !== model.detailSerial || String(state.selectedHostId || "") !== hostId || model.selectedKey !== key) return;
       model.detail = detail;
@@ -2549,6 +2688,19 @@
       renderTabs();
       renderTabContent();
       syncExplorerUrl(historyMode);
+
+      // SQL formatting is cosmetic and must never delay the first usable table
+      // view. Format after the raw DDL/detail has already been rendered.
+      if (detail.ddl) {
+        void api.formatSqls(hostId, [String(detail.ddl)]).then((formatted) => {
+          if (!Array.isArray(formatted) || !formatted[0]) return;
+          if (serial !== model.detailSerial || String(state.selectedHostId || "") !== hostId || model.selectedKey !== key || model.detail !== detail) return;
+          detail.formatted_ddl = formatted[0];
+          if (model.tab === "Overview") renderTabContent();
+        }).catch((formatError) => {
+          detail.ddl_format_error = formatError instanceof Error ? formatError.message : String(formatError || "format failed");
+        });
+      }
     } catch (e) {
       if (serial !== model.detailSerial || model.selectedKey !== key) return;
       setError(e);
@@ -2648,6 +2800,8 @@
     model.databaseTablesLoading.clear();
     model.databaseLoadPromises.clear();
     model.databaseLoadErrors.clear();
+    model.detailCache.clear();
+    model.detailPromises.clear();
     model.expandedDatabases.clear();
     model.selectedKey = null;
     model.selectedDatabase = null;
@@ -2684,6 +2838,7 @@
     graph?.init({ openTable: openTableFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
+    dom.navTracesButton?.addEventListener("click", () => window.location.assign(appRoute("/traces")));
     window.addEventListener("popstate", () => { void applyRouteFromLocation(); });
     dom.explorerSectionSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu));
     dom.explorerModeSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu));

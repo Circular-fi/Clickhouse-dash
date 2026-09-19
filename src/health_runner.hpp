@@ -32,13 +32,9 @@ struct HostSystemTables {
   bool checked = false;
   int64_t checked_at_ms = 0;
   bool query_log = false;
-  bool query_thread_log = false;
-  bool trace_log = false;
+  bool query_views_log = false;
   bool processors_profile_log = false;
   bool opentelemetry_span_log = false;
-  bool jemalloc_profile_text = false;
-  bool logs_table_available = false;
-  bool flamegraph_tables_available = false;
 };
 
 struct HostHealth {

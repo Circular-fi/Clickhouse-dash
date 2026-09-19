@@ -42,6 +42,8 @@
           storage_topology: storageTopology,
         },
       };
+      const traces = data && data.features && data.features.traces ? data.features.traces : {};
+      state.features.traces = { enabled: traces.enabled === true };
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
@@ -92,6 +94,8 @@
     if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") {
       state.editorSizeCtrl.apply(state.selectedHostId);
     }
+    const run = ns.run;
+    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
     try {
       window.dispatchEvent(new CustomEvent("chdash:host-changed", { detail: { hostId: state.selectedHostId } }));
     } catch (_) {}
@@ -278,6 +282,8 @@
       state.hostsSnapshot = snap;
       renderHostPicker(snap);
       setApiOnline(true);
+      const run = ns.run;
+      if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
     };
 
     const closeStream = () => {
@@ -410,18 +416,25 @@
   function applyProductFeatures() {
     const f = state.features?.explorer || {};
     const explorerEnabled = f.enabled !== false;
-    if (dom.pageSelect) dom.pageSelect.hidden = !explorerEnabled;
+    const tracesEnabled = state.features?.traces?.enabled === true;
+    if (dom.pageSelect) dom.pageSelect.hidden = !explorerEnabled && !tracesEnabled;
+    if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
+    if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       const next = api.resolveUrl("query");
       window.history.replaceState({ workspace: "query" }, "", next);
       if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { historyMode: "none" });
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: f }));
+    if (!tracesEnabled && /\/traces(?:\/|$)/.test(window.location.pathname)) {
+      window.location.replace(api.resolveUrl("query"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {} } }));
   }
 
   function setPageSelectorValue(value) {
-    const page = value === "explorer" ? "explorer" : "query";
-    if (dom.pageSelectButton) dom.pageSelectButton.textContent = page === "explorer" ? "Explorer" : "Query";
+    const page = value === "explorer" ? "explorer" : value === "traces" ? "traces" : "query";
+    if (dom.pageSelectButton) dom.pageSelectButton.textContent = page === "explorer" ? "Explorer" : page === "traces" ? "Traces" : "Query";
     if (dom.pageSelectMenu) {
       for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) {
         b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));

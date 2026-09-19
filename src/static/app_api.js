@@ -185,6 +185,41 @@
     return getJson(`api/explorer/graph?${query.toString()}`);
   }
 
+  async function getTracesMeta(hostId) {
+    const query = new URLSearchParams();
+    if (hostId) query.set("host_id", String(hostId));
+    return getJson(`api/traces/meta?${query.toString()}`);
+  }
+
+  function traceQuery(hostId, filters = {}) {
+    const query = new URLSearchParams();
+    if (hostId) query.set("host_id", String(hostId));
+    for (const key of ["start_ms", "end_ms", "service", "service_match", "operation", "operation_match", "status", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets"]) {
+      const value = filters?.[key];
+      if (value != null && String(value) !== "") query.set(key, String(value));
+    }
+    return query;
+  }
+
+  async function prefillTraces(hostId, filters = {}) {
+    return getJson(`api/traces/prefill?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTraceTags(hostId, filters = {}) {
+    return getJson(`api/traces/tags?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function searchTraces(hostId, filters = {}) {
+    return getJson(`api/traces/search?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTrace(hostId, traceId) {
+    if (!traceId) throw new Error("No trace selected.");
+    const query = new URLSearchParams({ trace_id: String(traceId) });
+    if (hostId) query.set("host_id", String(hostId));
+    return getJson(`api/traces/trace?${query.toString()}`);
+  }
+
   async function getExplorerFunctions(hostId, refresh = false) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
@@ -305,6 +340,6 @@
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
-    getExplorerGraph,
+    getExplorerGraph, getTracesMeta, prefillTraces, getTraceTags, searchTraces, getTrace,
   };
 })();

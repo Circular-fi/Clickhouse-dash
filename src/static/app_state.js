@@ -318,6 +318,7 @@
     apiOnline: true,
     features: {
       explorer: { enabled: true, browse: true, graph: { enabled: true, lineage: true, storage_topology: true } },
+      traces: { enabled: false },
     },
     suppressResultsVisibility: false,
 

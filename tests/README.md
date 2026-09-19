@@ -7,15 +7,18 @@ The test workflow is fully containerized. The host needs only Docker + Docker Co
 From `tests/`:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-This starts exactly:
+This starts:
 
 - ClickHouse `26.7.5.10`;
+- a one-shot `otel_fixture` container that recreates and populates `otel.otel_traces` and `otel.otel_traces_trace_id_ts`;
 - a fresh Release build of the current ChDash working tree at `http://localhost:18080`.
 
-`chdash_source` uses `pull_policy: build`, so the local source image is rebuilt by a normal `docker compose up -d`.
+The OTEL seed is automatic: no host-side Python or manual `clickhouse-client` import is required. The fixture generates 10,000 domain-neutral distributed-system traces by default, each with 60–90 spans. It generates and inserts them incrementally in batches (100 traces by default), so startup memory stays bounded and progress is visible in `docker logs chdash-tests-otel-fixture`. The fixture remains healthy after the initial seed and reuses an existing populated OTEL dataset on later `docker compose up -d --build` runs, so rebuilding ChDash does not reseed the traces. Set `OTEL_FIXTURE_FORCE=1` when you explicitly want a fresh fixture. ClickHouse data is stored in the named `clickhouse_data` volume, so an eventual container recreation does not discard the seeded data.
+
+The fixture size can be overridden through `OTEL_FIXTURE_TRACES`, `OTEL_FIXTURE_MIN_SPANS`, `OTEL_FIXTURE_MAX_SPANS`, `OTEL_FIXTURE_SEED`, `OTEL_FIXTURE_ERROR_RATE`, `OTEL_FIXTURE_BATCH_TRACES`, and `OTEL_FIXTURE_SPREAD_MINUTES`; defaults are listed in `.env.example`.
 
 ## Full test profile
 
