@@ -40,7 +40,9 @@ def test_direct_trace_url_lookup_is_not_bounded_by_search_lookback():
     api = read("src/api_traces.cpp")
     detail = api[api.index("void Server::handle_trace_detail"): ]
     assert "full_trace_id_lookup" in detail
-    assert 'WHERE TraceId = " + quote_string(trace_id)' in detail
+    assert 'WITH " + trace_literal + " AS trace' in detail
+    assert "PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end" in detail
+    assert 'WHERE TraceId = " + trace_literal' in detail
     assert "max_lookback_minutes" not in detail
     ui = read("src/static/app_traces.js")
     assert r"pathname.match(/\/traces\/([^/]+)\/?$/)" in ui

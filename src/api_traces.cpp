@@ -854,36 +854,8 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
-  int64_t start_ns = 0;
-  int64_t end_ns = 0;
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
-  bool used_index = false;
-  if (!cfg_.traces.trace_index_table.empty()) {
-    try {
-      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
-      client->Select(
-          "SELECT toString(toUnixTimestamp64Nano(min(Start))), toString(toUnixTimestamp64Nano(max(End))) "
-          "FROM " + index_table + " WHERE TraceId = " + quote_string(trace_id),
-          [&](const clickhouse::Block& block) {
-            if (!block.GetRowCount()) return;
-            const std::string lo = ch_block_text_at(block, 0, 0);
-            const std::string hi = ch_block_text_at(block, 1, 0);
-            if (!lo.empty() && !hi.empty()) {
-              start_ns = std::stoll(lo);
-              end_ns = std::stoll(hi);
-            }
-          });
-      used_index = start_ns > 0 && end_ns >= start_ns;
-    } catch (...) {
-      // The auxiliary trace-id time table is an optimization, not a hard
-      // dependency. Fall back to an exact all-history TraceId lookup below.
-      used_index = false;
-      start_ns = 0;
-      end_ns = 0;
-    }
-  }
-
   const auto& f = cfg_.traces.features;
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const std::string span_attrs = f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'";
   const std::string resource_attrs = f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'";
   const std::string events_ts = f.events ? "toJSONString(Events.Timestamp)" : "'[]'";
@@ -892,57 +864,15 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   const std::string links_trace = f.links ? "toJSONString(Links.TraceId)" : "'[]'";
   const std::string links_span = f.links ? "toJSONString(Links.SpanId)" : "'[]'";
   const std::string links_attrs = f.links ? "toJSONString(Links.Attributes)" : "'[]'";
-
-  bool used_full_trace_lookup = false;
-  if (!used_index) {
-    // Direct TraceId URLs are intentionally not constrained by the search
-    // lookback. If the exporter auxiliary table is unavailable, perform one
-    // exact all-history lookup over TraceId to recover the timestamp window,
-    // then use that window as the primary-key PREWHERE for the detail read.
-    // The standard OTEL auxiliary trace-id table remains the preferred path.
-    try {
-      client->Select(
-          "SELECT toString(toUnixTimestamp64Nano(min(Timestamp))), "
-          "toString(toUnixTimestamp64Nano(max(Timestamp))) "
-          "FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
-          " WHERE TraceId = " + quote_string(trace_id) + " AND " + visibility,
-          [&](const clickhouse::Block& block) {
-            if (!block.GetRowCount()) return;
-            const std::string lo = ch_block_text_at(block, 0, 0);
-            const std::string hi = ch_block_text_at(block, 1, 0);
-            if (!lo.empty() && !hi.empty()) {
-              start_ns = std::stoll(lo);
-              end_ns = std::stoll(hi);
-            }
-          });
-      used_full_trace_lookup = start_ns > 0 && end_ns >= start_ns;
-    } catch (...) {
-      used_full_trace_lookup = false;
-      start_ns = 0;
-      end_ns = 0;
-    }
-  }
-
-  if (!used_index && !used_full_trace_lookup) {
-    return json_error(res, 404, "trace_not_found", "TraceId was not found on the selected host.");
-  }
-
-  // Add one second of right-side tolerance for exporters whose auxiliary End
-  // timestamp is equal to the latest span start rather than its finish.
-  const int64_t safe_end = end_ns > std::numeric_limits<int64_t>::max() - 1000000000LL
-      ? end_ns : end_ns + 1000000000LL;
-  const std::string time_prewhere =
-      "Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(start_ns) +
-      ") AND Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(safe_end) + ")";
-
+  const std::string main_table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string trace_literal = quote_string(trace_id);
   const size_t limit = cfg_.traces.max_spans_per_trace + 1;
-  const std::string sql =
+
+  const std::string select_columns =
       "SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
       "toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), "
       "toString(StatusCode), toString(StatusMessage), " + span_attrs + ", " + resource_attrs + ", " +
-      events_ts + ", " + events_name + ", " + events_attrs + ", " + links_trace + ", " + links_span + ", " + links_attrs + " "
-      "FROM " + qualified(cfg_.traces.database, cfg_.traces.table) + " PREWHERE " + time_prewhere +
-      " WHERE TraceId = " + quote_string(trace_id) + " AND " + visibility + " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
+      events_ts + ", " + events_name + ", " + events_attrs + ", " + links_trace + ", " + links_span + ", " + links_attrs + " ";
 
   struct Span {
     std::string timestamp, trace_id, span_id, parent_span_id, name, kind, service, status, status_message;
@@ -952,7 +882,8 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
     uint64_t duration_ns = 0;
   };
   std::vector<Span> spans;
-  try {
+
+  auto load_spans = [&](const std::string& sql) {
     client->Select(sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Span out;
@@ -978,8 +909,79 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
         spans.push_back(std::move(out));
       }
     });
-  } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_load_failed", e.what());
+  };
+
+  bool used_index = false;
+  if (!cfg_.traces.trace_index_table.empty()) {
+    try {
+      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+      const std::string indexed_sql =
+          "WITH " + trace_literal + " AS trace, "
+          "(SELECT min(Start) - toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_start, "
+          "(SELECT max(End) + toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_end " +
+          select_columns +
+          "FROM " + main_table + " PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end "
+          "WHERE TraceId = trace AND " + visibility +
+          " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
+      load_spans(indexed_sql);
+      used_index = !spans.empty();
+    } catch (...) {
+      // The auxiliary trace-id time table is an optimization, not a hard
+      // dependency. Fall back to an exact all-history TraceId lookup below.
+      spans.clear();
+      used_index = false;
+    }
+  }
+
+  bool used_full_trace_lookup = false;
+  if (!used_index) {
+    // Direct TraceId URLs are intentionally not constrained by the search
+    // lookback. If the exporter auxiliary table is unavailable or does not
+    // contain this trace, recover its timestamp window from the main table,
+    // then use that window as the primary-key PREWHERE for the detail read.
+    int64_t start_ns = 0;
+    int64_t end_ns = 0;
+    try {
+      client->Select(
+          "SELECT toString(toUnixTimestamp64Nano(min(Timestamp))), "
+          "toString(toUnixTimestamp64Nano(max(Timestamp))) "
+          "FROM " + main_table +
+          " WHERE TraceId = " + trace_literal + " AND " + visibility,
+          [&](const clickhouse::Block& block) {
+            if (!block.GetRowCount()) return;
+            const std::string lo = ch_block_text_at(block, 0, 0);
+            const std::string hi = ch_block_text_at(block, 1, 0);
+            if (!lo.empty() && !hi.empty()) {
+              start_ns = std::stoll(lo);
+              end_ns = std::stoll(hi);
+            }
+          });
+      used_full_trace_lookup = start_ns > 0 && end_ns >= start_ns;
+    } catch (...) {
+      used_full_trace_lookup = false;
+    }
+
+    if (!used_full_trace_lookup) {
+      return json_error(res, 404, "trace_not_found", "TraceId was not found on the selected host.");
+    }
+
+    constexpr int64_t kOneSecondNs = 1000000000LL;
+    const int64_t safe_start = start_ns < std::numeric_limits<int64_t>::min() + kOneSecondNs
+        ? start_ns : start_ns - kOneSecondNs;
+    const int64_t safe_end = end_ns > std::numeric_limits<int64_t>::max() - kOneSecondNs
+        ? end_ns : end_ns + kOneSecondNs;
+    const std::string fallback_sql =
+        select_columns + "FROM " + main_table +
+        " PREWHERE Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(safe_start) +
+        ") AND Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(safe_end) + ")"
+        " WHERE TraceId = " + trace_literal + " AND " + visibility +
+        " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
+    spans.clear();
+    try {
+      load_spans(fallback_sql);
+    } catch (const std::exception& e) {
+      return json_error(res, 503, "trace_load_failed", e.what());
+    }
   }
 
   bool truncated = spans.size() > cfg_.traces.max_spans_per_trace;
