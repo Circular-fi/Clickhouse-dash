@@ -107,6 +107,8 @@ The Trace Explorer is disabled by default. Its table defaults match the OpenTele
 
 The nested feature switches remove both the UI control and the corresponding payload/query surface. In particular, `resource_attributes`, `span_attributes`, `events`, and `links` can be disabled when the trace page should expose timing only.
 
+For large trace datasets, `docs/traces.md` documents the recommended ClickHouse 26.1+ projection indexes (`prj_traceid` and `prj_start`). They are storage/query optimizations and are not ChDash configuration fields; ChDash continues to query the standard `otel_traces` and `otel_traces_trace_id_ts` table names.
+
 For local/demo data, `examples/generate_otel_traces.py` creates synthetic multi-service traces compatible with the standard OTel ClickHouse trace columns. Its defaults generate roughly 60–90 spans per trace, with Kafka/RPC/ClickHouse-style branches, events, links, and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows for installations where the standard materialized view is not populating the auxiliary table.
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.

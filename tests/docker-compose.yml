@@ -44,9 +44,8 @@ services:
         read_only: true
     healthcheck: *clickhouse-healthcheck
 
-  # One-shot OTEL seed. It recreates the two fixture tables and inserts a
-  # fresh synthetic dataset before ChDash starts.
   otel_fixture:
+    profiles: ["otel", "test"]
     image: chdash-tests-otel-fixture:local
     pull_policy: build
     build:
@@ -69,13 +68,20 @@ services:
       OTEL_FIXTURE_ERROR_RATE: "${OTEL_FIXTURE_ERROR_RATE:-0.0002}"
       OTEL_FIXTURE_BATCH_TRACES: "${OTEL_FIXTURE_BATCH_TRACES:-100}"
       OTEL_FIXTURE_SPREAD_MINUTES: "${OTEL_FIXTURE_SPREAD_MINUTES:-55}"
+      OTEL_FIXTURE_GENERATOR: "${OTEL_FIXTURE_GENERATOR:-auto}"
+      OTEL_FIXTURE_SQL_THRESHOLD: "${OTEL_FIXTURE_SQL_THRESHOLD:-50000}"
+      OTEL_FIXTURE_SQL_CHUNK_TRACES: "${OTEL_FIXTURE_SQL_CHUNK_TRACES:-2000000}"
+      OTEL_FIXTURE_SQL_TARGET_SPANS_PER_CHUNK: "${OTEL_FIXTURE_SQL_TARGET_SPANS_PER_CHUNK:-1000000}"
+      OTEL_FIXTURE_SQL_PROCESSES: "${OTEL_FIXTURE_SQL_PROCESSES:-4}"
+      OTEL_FIXTURE_SQL_MAX_THREADS: "${OTEL_FIXTURE_SQL_MAX_THREADS:-0}"
+      OTEL_FIXTURE_INSERT_TIMEOUT_SECONDS: "${OTEL_FIXTURE_INSERT_TIMEOUT_SECONDS:-1800}"
       OTEL_FIXTURE_FORCE: "${OTEL_FIXTURE_FORCE:-0}"
       OTEL_FIXTURE_KEEPALIVE: "1"
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/fixture-ready"]
       interval: 2s
       timeout: 1s
-      retries: 180
+      retries: 3600
       start_period: 1s
 
   chdash_source:
@@ -94,9 +100,6 @@ services:
     stop_grace_period: 2s
     depends_on:
       clickhouse:
-        condition: service_healthy
-        restart: false
-      otel_fixture:
         condition: service_healthy
         restart: false
     environment:
@@ -132,6 +135,8 @@ services:
       clickhouse:
         condition: service_healthy
       chdash_source:
+        condition: service_healthy
+      otel_fixture:
         condition: service_healthy
     environment:
       API_BASE_URL: http://chdash_source:8080

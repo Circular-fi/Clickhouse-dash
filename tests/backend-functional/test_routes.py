@@ -127,6 +127,23 @@ def test_core_routes_are_live_and_json_contracts_are_valid():
     assert meta.json().get("host_id") == "local"
 
 
+def test_otel_projection_indexes_are_present():
+    run_sql(
+        """
+SELECT throwIf(
+    count() != 2,
+    concat('expected 2 OTEL projection indexes, found ', toString(count()))
+)
+FROM system.projections
+WHERE database = 'otel'
+  AND (
+      (table = 'otel_traces' AND name = 'prj_traceid')
+      OR (table = 'otel_traces_trace_id_ts' AND name = 'prj_start')
+  )
+"""
+    )
+
+
 def test_hosts_stream_emits_hosts_event():
     with SESSION.get(f"{BASE_URL}/api/hosts/stream", stream=True, timeout=(10, 10)) as response:
         assert response.status_code == 200
