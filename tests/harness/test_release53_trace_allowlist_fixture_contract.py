@@ -31,7 +31,7 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
     assert "match(ServiceName" in api
     assert '" WHERE " + visibility' in api
     assert '"WHERE TraceId = trace AND " + visibility' in api
-    assert '" WHERE TraceId = " + trace_literal + " AND " + visibility' in api
+    assert '"WHERE TraceId = trace AND " + visibility' in api
     assert "visible_span_ids" in api
 
 

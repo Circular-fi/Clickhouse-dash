@@ -245,31 +245,38 @@ std::string trace_time_predicate(int64_t start_ms, int64_t end_ms) {
   return "Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND Timestamp <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")";
 }
 
-std::string text_match_predicate(std::string_view column, std::string_view value, std::string_view mode) {
-  if (value.empty()) return {};
-  if (mode == "exact") return std::string(column) + " = " + quote_string(value);
-  return std::string(column) + " ILIKE " + quote_string("%" + std::string(value) + "%");
+std::vector<std::string> repeated_param_values(const httplib::Request& req, std::string_view name) {
+  std::vector<std::string> values;
+  const auto range = req.params.equal_range(std::string(name));
+  for (auto it = range.first; it != range.second; ++it) {
+    if (!it->second.empty()) values.push_back(it->second);
+  }
+  std::sort(values.begin(), values.end());
+  values.erase(std::unique(values.begin(), values.end()), values.end());
+  return values;
+}
+
+std::string exact_values_predicate(std::string_view column, const std::vector<std::string>& values) {
+  if (values.empty()) return {};
+  if (values.size() == 1) return std::string(column) + " = " + quote_string(values.front());
+  std::string out = std::string(column) + " IN (";
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i) out += ", ";
+    out += quote_string(values[i]);
+  }
+  out += ")";
+  return out;
 }
 
 std::string trace_span_filters(const TraceSettings& cfg, const httplib::Request& req, std::string* validation_error = nullptr) {
   (void)cfg;
-  const std::string service = req.has_param("service") ? req.get_param_value("service") : std::string{};
-  const std::string operation = req.has_param("operation") ? req.get_param_value("operation") : std::string{};
-  const std::string service_mode = req.has_param("service_match") ? req.get_param_value("service_match") : "ilike";
-  const std::string operation_mode = req.has_param("operation_match") ? req.get_param_value("operation_match") : "ilike";
+  const auto services = repeated_param_values(req, "service");
+  const auto operations = repeated_param_values(req, "operation");
   const std::string status = req.has_param("status") ? req.get_param_value("status") : std::string{};
   const std::string tag_scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
   const std::string tag_key = req.has_param("tag_key") ? req.get_param_value("tag_key") : std::string{};
   const std::string tag_value = req.has_param("tag_value") ? req.get_param_value("tag_value") : std::string{};
 
-  if (service_mode != "exact" && service_mode != "ilike") {
-    if (validation_error) *validation_error = "service_match must be exact or ilike.";
-    return {};
-  }
-  if (operation_mode != "exact" && operation_mode != "ilike") {
-    if (validation_error) *validation_error = "operation_match must be exact or ilike.";
-    return {};
-  }
   if (!status.empty() && status != "Error" && status != "Ok" && status != "Unset") {
     if (validation_error) *validation_error = "status must be Error, Ok, Unset, or empty.";
     return {};
@@ -284,8 +291,8 @@ std::string trace_span_filters(const TraceSettings& cfg, const httplib::Request&
   }
 
   std::vector<std::string> filters;
-  if (!service.empty()) filters.push_back(text_match_predicate("ServiceName", service, service_mode));
-  if (!operation.empty()) filters.push_back(text_match_predicate("SpanName", operation, operation_mode));
+  if (!services.empty()) filters.push_back(exact_values_predicate("ServiceName", services));
+  if (!operations.empty()) filters.push_back(exact_values_predicate("SpanName", operations));
   if (!status.empty()) filters.push_back("StatusCode = " + quote_string(status));
   if (!tag_key.empty()) {
     if (tag_scope == "any") {
@@ -498,9 +505,9 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
 void Server::handle_traces_tags(const httplib::Request& req, httplib::Response& res) {
   if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
 
-  const std::string service = req.has_param("service") ? req.get_param_value("service") : std::string{};
-  const std::string operation = req.has_param("operation") ? req.get_param_value("operation") : std::string{};
-  if (service.empty() || operation.empty()) {
+  const auto services = repeated_param_values(req, "service");
+  const auto operations = repeated_param_values(req, "operation");
+  if (services.empty() || operations.empty()) {
     return json_error(res, 400, "trace_tags_need_service_operation", "Select both service and operation before loading tags.");
   }
 
@@ -523,13 +530,8 @@ void Server::handle_traces_tags(const httplib::Request& req, httplib::Response& 
     return json_error(res, 400, "trace_tag_search_unsupported", "Tag discovery currently requires Map(String, String) OpenTelemetry attributes.");
   }
 
-  const std::string service_mode = req.has_param("service_match") ? req.get_param_value("service_match") : "ilike";
-  const std::string operation_mode = req.has_param("operation_match") ? req.get_param_value("operation_match") : "ilike";
-  if ((service_mode != "exact" && service_mode != "ilike") || (operation_mode != "exact" && operation_mode != "ilike")) {
-    return json_error(res, 400, "invalid_trace_filter", "service_match and operation_match must be exact or ilike.");
-  }
-  const std::string filters = " AND " + text_match_predicate("ServiceName", service, service_mode) +
-      " AND " + text_match_predicate("SpanName", operation, operation_mode);
+  const std::string filters = " AND " + exact_values_predicate("ServiceName", services) +
+      " AND " + exact_values_predicate("SpanName", operations);
 
   const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
@@ -1107,77 +1109,23 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
     });
   };
 
-  bool used_index = false;
-  if (!cfg_.traces.trace_index_table.empty()) {
-    try {
-      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
-      const std::string indexed_sql =
-          "WITH " + trace_literal + " AS trace, "
-          "(SELECT min(Start) - toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_start, "
-          "(SELECT max(End) + toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_end " +
-          select_columns +
-          "FROM " + main_table + " PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end "
-          "WHERE TraceId = trace AND " + visibility +
-          " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
-      load_spans(indexed_sql);
-      used_index = !spans.empty();
-    } catch (...) {
-      // The auxiliary trace-id time table is an optimization, not a hard
-      // dependency. Fall back to an exact all-history TraceId lookup below.
-      spans.clear();
-      used_index = false;
-    }
+  if (cfg_.traces.trace_index_table.empty()) {
+    return json_error(res, 503, "trace_index_unavailable", "Trace detail requires traces.trace_index_table.");
   }
 
-  bool used_full_trace_lookup = false;
-  if (!used_index) {
-    // Direct TraceId URLs are intentionally not constrained by the search
-    // lookback. If the exporter auxiliary table is unavailable or does not
-    // contain this trace, recover its timestamp window from the main table,
-    // then use that window as the primary-key PREWHERE for the detail read.
-    int64_t start_ns = 0;
-    int64_t end_ns = 0;
-    try {
-      client->Select(
-          "SELECT toString(toUnixTimestamp64Nano(min(Timestamp))), "
-          "toString(toUnixTimestamp64Nano(max(Timestamp))) "
-          "FROM " + main_table +
-          " WHERE TraceId = " + trace_literal + " AND " + visibility,
-          [&](const clickhouse::Block& block) {
-            if (!block.GetRowCount()) return;
-            const std::string lo = ch_block_text_at(block, 0, 0);
-            const std::string hi = ch_block_text_at(block, 1, 0);
-            if (!lo.empty() && !hi.empty()) {
-              start_ns = std::stoll(lo);
-              end_ns = std::stoll(hi);
-            }
-          });
-      used_full_trace_lookup = start_ns > 0 && end_ns >= start_ns;
-    } catch (...) {
-      used_full_trace_lookup = false;
-    }
-
-    if (!used_full_trace_lookup) {
-      return json_error(res, 404, "trace_not_found", "TraceId was not found on the selected host.");
-    }
-
-    constexpr int64_t kOneSecondNs = 1000000000LL;
-    const int64_t safe_start = start_ns < std::numeric_limits<int64_t>::min() + kOneSecondNs
-        ? start_ns : start_ns - kOneSecondNs;
-    const int64_t safe_end = end_ns > std::numeric_limits<int64_t>::max() - kOneSecondNs
-        ? end_ns : end_ns + kOneSecondNs;
-    const std::string fallback_sql =
-        select_columns + "FROM " + main_table +
-        " PREWHERE Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(safe_start) +
-        ") AND Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(safe_end) + ")"
-        " WHERE TraceId = " + trace_literal + " AND " + visibility +
+  try {
+    const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+    const std::string indexed_sql =
+        "WITH " + trace_literal + " AS trace, "
+        "(SELECT min(Start) - toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_start, "
+        "(SELECT max(End) + toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_end " +
+        select_columns +
+        "FROM " + main_table + " PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end "
+        "WHERE TraceId = trace AND " + visibility +
         " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
-    spans.clear();
-    try {
-      load_spans(fallback_sql);
-    } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_load_failed", e.what());
-    }
+    load_spans(indexed_sql);
+  } catch (const std::exception& e) {
+    return json_error(res, 503, "trace_index_lookup_failed", e.what());
   }
 
   bool truncated = spans.size() > cfg_.traces.max_spans_per_trace;
@@ -1200,7 +1148,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   w.StartObject();
   w.Key("source_host_id"); w.String(source_host_id.c_str());
   w.Key("trace_id"); w.String(trace_id.c_str());
-  w.Key("range_source"); w.String(used_index ? "trace_index" : "full_trace_id_lookup");
+  w.Key("range_source"); w.String("trace_index");
   w.Key("truncated"); w.Bool(truncated);
   w.Key("spans"); w.StartArray();
   for (const auto& span : spans) {

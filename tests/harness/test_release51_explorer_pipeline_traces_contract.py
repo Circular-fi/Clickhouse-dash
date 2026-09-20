@@ -105,7 +105,8 @@ def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
     assert "SELECT max(End) + toIntervalSecond(1)" in detail
     assert "PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end" in detail
     assert "WHERE TraceId = trace AND" in detail
-    assert 'w.String(used_index ? "trace_index" : "full_trace_id_lookup")' in api
+    assert 'w.Key("range_source"); w.String("trace_index");' in detail
+    assert "full_trace_id_lookup" not in detail
     assert "max_lookback_minutes" not in detail
     assert "traceWaterfall" in trace_ui
     assert "traceInspector" in trace_ui

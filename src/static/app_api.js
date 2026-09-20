@@ -194,9 +194,13 @@
   function traceQuery(hostId, filters = {}) {
     const query = new URLSearchParams();
     if (hostId) query.set("host_id", String(hostId));
-    for (const key of ["start_ms", "end_ms", "service", "service_match", "operation", "operation_match", "status", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets"]) {
+    for (const key of ["start_ms", "end_ms", "service", "operation", "status", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets"]) {
       const value = filters?.[key];
-      if (value != null && String(value) !== "") query.set(key, String(value));
+      if (Array.isArray(value)) {
+        for (const item of value) if (item != null && String(item) !== "") query.append(key, String(item));
+      } else if (value != null && String(value) !== "") {
+        query.set(key, String(value));
+      }
     }
     return query;
   }

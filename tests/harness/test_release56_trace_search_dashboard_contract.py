@@ -6,7 +6,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 
-def test_trace_search_supports_ranges_prefill_ilike_tags_and_compact_rows():
+def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows():
     cpp = read('src/api_traces.cpp')
     server = read('src/server.cpp')
     api = read('src/static/app_api.js')
@@ -16,8 +16,10 @@ def test_trace_search_supports_ranges_prefill_ilike_tags_and_compact_rows():
     assert 'http_.Get("/api/traces/tags"' in server
     assert 'start_ms' in cpp and 'end_ms' in cpp
     assert 'max_lookback_minutes' in cpp
-    assert ' ILIKE ' in cpp
-    assert 'service_match' in cpp and 'operation_match' in cpp
+    assert ' ILIKE ' not in cpp
+    assert 'service_match' not in cpp and 'operation_match' not in cpp
+    assert 'exact_values_predicate' in cpp
+    assert ' IN (' in cpp
     assert 'mapKeys(' in cpp and 'SpanAttributes' in cpp
     assert 'mapContains(' in cpp
     assert 'tag_value' in cpp
@@ -28,7 +30,7 @@ def test_trace_search_supports_ranges_prefill_ilike_tags_and_compact_rows():
     assert 'w.Key("duration_quantiles")' in cpp
     assert 'quantileTDigest(0.99)' in cpp
     assert 'prefillTraces' in api and 'getTraceTags' in api
-    assert 'matchMode' in ui and '"exact" : "ilike"' in ui
+    assert 'fuzzyExactValues' in ui and 'resolvedServiceValues' in ui and 'resolvedOperationValues' in ui
 
 
 def test_trace_results_show_full_id_and_per_service_span_error_counts():

@@ -35,3 +35,24 @@ def test_trace_analytics_deduplicates_by_existence_and_runs_one_quantile_rollup(
     assert "read_analytics(analytics_sql)" in search
     assert "count_by_bucket" in search
     assert "std::gcd(bucket_seconds, quantile_bucket_seconds)" in search
+
+
+def test_trace_detail_has_no_all_history_traceid_fallback():
+    cpp = read("src/api_traces.cpp")
+    detail = cpp[cpp.index("void Server::handle_trace_detail"):]
+    assert "full_trace_id_lookup" not in detail
+    assert "used_full_trace_lookup" not in detail
+    assert "fromUnixTimestamp64Nano(min(Timestamp))" not in detail
+    assert 'w.Key("range_source"); w.String("trace_index");' in detail
+    assert "trace_index_lookup_failed" in detail
+
+
+def test_trace_filters_never_use_like_or_ilike():
+    cpp = read("src/api_traces.cpp")
+    trace_code = cpp[cpp.index("std::vector<std::string> repeated_param_values"):]
+    assert " ILIKE " not in trace_code
+    assert " LIKE " not in trace_code
+    assert "service_match" not in trace_code
+    assert "operation_match" not in trace_code
+    assert 'exact_values_predicate("ServiceName", services)' in trace_code
+    assert 'exact_values_predicate("SpanName", operations)' in trace_code

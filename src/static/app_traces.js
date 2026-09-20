@@ -450,21 +450,36 @@
 
   function updateOperationOptions() {
     if (!dom.tracesOperationOptions) return;
-    const service = String(dom.tracesService?.value || "").trim();
+    const services = resolvedServiceValues();
     const values = new Set();
     for (const pair of model.prefillPairs) {
-      if (!service || pair[0] === service) values.add(pair[1]);
+      if (!services.length || services.includes(String(pair?.[0] || ""))) values.add(pair[1]);
     }
     dom.tracesOperationOptions.innerHTML = [...values].sort().map((value) => `<option value="${esc(value)}"></option>`).join("");
     updateTagButton();
   }
 
-  function matchMode(kind, value) {
-    const text = String(value || "").trim();
-    if (!text || !model.prefillPairs.length) return "ilike";
-    if (kind === "service") return model.prefillPairs.some((pair) => pair[0] === text) ? "exact" : "ilike";
-    const service = String(dom.tracesService?.value || "").trim();
-    return model.prefillPairs.some((pair) => pair[1] === text && (!service || pair[0] === service)) ? "exact" : "ilike";
+  function fuzzyExactValues(values, input) {
+    const text = String(input || "").trim();
+    if (!text) return [];
+    const unique = [...new Set((values || []).map((value) => String(value || "")).filter(Boolean))];
+    const exact = unique.filter((value) => value === text);
+    if (exact.length) return exact;
+    const needle = text.toLocaleLowerCase();
+    const exactFolded = unique.filter((value) => value.toLocaleLowerCase() === needle);
+    if (exactFolded.length) return exactFolded;
+    return unique.filter((value) => value.toLocaleLowerCase().includes(needle));
+  }
+
+  function resolvedServiceValues() {
+    return fuzzyExactValues(model.prefillPairs.map((pair) => pair?.[0]), dom.tracesService?.value);
+  }
+
+  function resolvedOperationValues(services = resolvedServiceValues()) {
+    const scoped = services.length
+      ? model.prefillPairs.filter((pair) => services.includes(String(pair?.[0] || "")))
+      : model.prefillPairs;
+    return fuzzyExactValues(scoped.map((pair) => pair?.[1]), dom.tracesOperation?.value);
   }
 
   function syncFilterFeatures() {
@@ -1154,14 +1169,12 @@
 
   function searchFilters({ includeTag = true } = {}) {
     const range = selectedRange();
-    const service = String(dom.tracesService?.value || "").trim();
-    const operation = String(dom.tracesOperation?.value || "").trim();
+    const services = resolvedServiceValues();
+    const operations = resolvedOperationValues(services);
     const filters = {
       ...range,
-      service,
-      service_match: matchMode("service", service),
-      operation,
-      operation_match: matchMode("operation", operation),
+      service: services,
+      operation: operations,
       status: String(dom.tracesStatus?.value || ""),
       limit: String(dom.tracesLimit?.value || Math.min(50, Number(model.meta?.search_limit || 50))),
     };
@@ -1195,7 +1208,7 @@
       const services = [...new Set(model.prefillPairs.map((pair) => String(pair?.[0] || "")).filter(Boolean))].sort();
       if (dom.tracesServiceOptions) dom.tracesServiceOptions.innerHTML = services.map((value) => `<option value="${esc(value)}"></option>`).join("");
       updateOperationOptions();
-      if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Manual ILIKE search is still available.");
+      if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Use a narrower service / operation filter if the desired value is outside the discovered combinations.");
     } catch (error) {
       if (seq === model.prefillSeq) showError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1203,8 +1216,15 @@
     }
   }
 
+
+  async function ensurePrefillForTextFilters() {
+    const needsDiscovery = String(dom.tracesService?.value || "").trim() || String(dom.tracesOperation?.value || "").trim();
+    if (needsDiscovery && !model.prefillPairs.length) await prefill();
+  }
+
   async function loadTagKeys() {
     if (!String(dom.tracesService?.value || "").trim() || !String(dom.tracesOperation?.value || "").trim()) return;
+    await ensurePrefillForTextFilters();
     const seq = ++model.tagSeq;
     setButtonLoading(dom.tracesTagsButton, true);
     showError("");
@@ -1236,6 +1256,7 @@
   }
 
   async function loadTagValues() {
+    await ensurePrefillForTextFilters();
     const tag = currentTag();
     const valueList = document.getElementById("tracesTagValueOptions");
     if (!tag.key) { if (valueList) valueList.innerHTML = ""; return; }
@@ -1279,6 +1300,7 @@
 
   async function search() {
     if (!model.meta) await loadMeta().catch(() => null);
+    await ensurePrefillForTextFilters();
     const seq = ++model.searchSeq;
     if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
     setView(false);
