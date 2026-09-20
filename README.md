@@ -82,6 +82,30 @@ cmake --build build --target chdash
 
 The default build embeds frontend assets into the binary.
 
+## Trace Explorer ClickHouse indexes
+
+For large OpenTelemetry trace tables on ClickHouse 26.1+, keep the standard OTel table definitions and add the two lightweight projection indexes used by Trace Explorer:
+
+```sql
+ALTER TABLE otel.otel_traces
+    ADD PROJECTION IF NOT EXISTS prj_traceid INDEX TraceId TYPE basic;
+
+ALTER TABLE otel.otel_traces_trace_id_ts
+    ADD PROJECTION IF NOT EXISTS prj_start INDEX Start TYPE basic;
+```
+
+If those tables already contain historical data, materialize the projections once:
+
+```sql
+ALTER TABLE otel.otel_traces
+    MATERIALIZE PROJECTION prj_traceid;
+
+ALTER TABLE otel.otel_traces_trace_id_ts
+    MATERIALIZE PROJECTION prj_start;
+```
+
+The materialization is asynchronous by default; use `SETTINGS mutations_sync=1` when you need the command to wait. For very large historical tables, materialize partition-by-partition. See [`docs/traces.md`](docs/traces.md) for the Trace Explorer schema, access-control, search-path, and projection details.
+
 ## Massive downloads
 
 The Run menu can stream complete CSV or JSON exports directly from ClickHouse

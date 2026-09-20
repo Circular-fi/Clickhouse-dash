@@ -59,6 +59,38 @@ The Trace Explorer is trace-index-first whenever no trace-duration filter is act
 
 Service/operation prefill and tag discovery are also existence queries: they use `LIMIT 1 BY` rather than counting every matching span. The API keeps the legacy count fields for compatibility, but discovery does not rank values by frequency.
 
+## Recommended ClickHouse projection indexes
+
+Keep the official OpenTelemetry table definitions and sorting keys unchanged. For the large-trace workloads benchmarked by ChDash, add only these two ClickHouse 26.1+ lightweight projection indexes:
+
+```sql
+ALTER TABLE otel.otel_traces
+    ADD PROJECTION IF NOT EXISTS prj_traceid INDEX TraceId TYPE basic;
+
+ALTER TABLE otel.otel_traces_trace_id_ts
+    ADD PROJECTION IF NOT EXISTS prj_start INDEX Start TYPE basic;
+```
+
+New parts populate these projections automatically. If the tables already contain historical data, materialize the existing parts once:
+
+```sql
+ALTER TABLE otel.otel_traces
+    MATERIALIZE PROJECTION prj_traceid;
+
+ALTER TABLE otel.otel_traces_trace_id_ts
+    MATERIALIZE PROJECTION prj_start;
+```
+
+`MATERIALIZE PROJECTION` is a mutation and is asynchronous by default. Add `SETTINGS mutations_sync=1` to either statement when an operator explicitly wants the command to wait for completion. On very large production tables, materializing partition-by-partition is safer than rewriting all historical parts in one mutation.
+
+`prj_traceid` accelerates exact and `IN (...)` TraceId pruning after search has selected candidate traces. `prj_start` gives the trace-id time index a time-oriented access path for the main search page while preserving its base `(TraceId, Start)` ordering for direct trace lookup.
+
+Do not add `prj_timestamp` by default. On a production-shaped local benchmark with about 2.01 billion spans it consumed roughly 18.7 GiB while a one-hour timestamp scan improved only from about 15 ms to 14 ms.
+
+The Trace Explorer is trace-index-first whenever no trace-duration filter is active. Unfiltered searches read the newest trace IDs directly from `otel_traces_trace_id_ts`. Service, operation, status, tag, and allowlist filters page recent trace IDs in batches of 1,000, test existence with `LIMIT 1 BY TraceId`, stop once enough result traces match, and then aggregate only those selected traces through `prj_traceid`. The global charts use the same existence semantics and `trace_index_table` bounds instead of grouping the full span table repeatedly. Duration filters keep the exact span-aggregation fallback because they are trace-level predicates. Duration quantiles on the index path use `Start`/`End`, so deployments should populate `End` as the trace end if exact trace-duration quantiles are required.
+
+Service/operation prefill and tag discovery are also existence queries: they use `LIMIT 1 BY` rather than counting every matching span. The API keeps the legacy count fields for compatibility, but discovery does not rank values by frequency.
+
 ## Direct TraceId URLs
 
 A trace can be opened directly at:
