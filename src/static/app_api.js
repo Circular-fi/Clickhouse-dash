@@ -209,12 +209,12 @@
     return getJson(`api/traces/prefill?${traceQuery(hostId, filters).toString()}`);
   }
 
-  async function getTraceTags(hostId, filters = {}) {
-    return getJson(`api/traces/tags?${traceQuery(hostId, filters).toString()}`);
-  }
-
   async function searchTraces(hostId, filters = {}) {
     return getJson(`api/traces/search?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTraceAnalytics(hostId, filters = {}) {
+    return getJson(`api/traces/analytics?${traceQuery(hostId, filters).toString()}`);
   }
 
   async function getTrace(hostId, traceId) {
@@ -344,6 +344,6 @@
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
-    getExplorerGraph, getTracesMeta, prefillTraces, getTraceTags, searchTraces, getTrace,
+    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTrace,
   };
 })();

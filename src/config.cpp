@@ -359,9 +359,10 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
   if (const auto* traces = optional_block(root, "traces", source)) {
     validate_object(*traces, "traces", {
-        "enabled", "database", "table", "trace_index_table",
+        "enabled", "analytics", "database", "table", "trace_index_table",
         "service_allowlist", "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace"}, {"features"});
     if (auto v = bool_attr(*traces, "enabled", "traces")) cfg.traces.enabled = *v;
+    if (auto v = bool_attr(*traces, "analytics", "traces")) cfg.traces.analytics = *v;
     if (auto v = string_attr(*traces, "database", "traces")) cfg.traces.database = *v;
     if (auto v = string_attr(*traces, "table", "traces")) cfg.traces.table = *v;
     if (auto v = string_attr(*traces, "trace_index_table", "traces")) cfg.traces.trace_index_table = *v;

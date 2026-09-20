@@ -7,6 +7,7 @@ ChDash can read OpenTelemetry traces stored by the OpenTelemetry Collector contr
 ```hcl
 traces {
   enabled                  = true
+  analytics                = false
   database                 = "otel"
   table                    = "otel_traces"
   trace_index_table        = "otel_traces_trace_id_ts"
@@ -55,41 +56,13 @@ Do not add `prj_timestamp` by default. On a production-shaped local benchmark wi
 
 New parts populate projection indexes automatically. For historical parts, materialize only the projections you actually add, preferably partition-by-partition on large production datasets rather than rewriting all history at once.
 
-The Trace Explorer is trace-index-first whenever no trace-duration filter is active. Unfiltered searches read the newest trace IDs directly from `otel_traces_trace_id_ts`. Service, operation, status, tag, and allowlist filters page recent trace IDs in batches of 1,000, test existence with `LIMIT 1 BY TraceId`, stop once enough result traces match, and then aggregate only those selected traces through `prj_traceid`. The global charts use the same existence semantics and `trace_index_table` bounds instead of grouping the full span table repeatedly. Duration filters keep the exact span-aggregation fallback because they are trace-level predicates. Duration quantiles on the index path use `Start`/`End`, so deployments should populate `End` as the trace end if exact trace-duration quantiles are required.
+The Trace Explorer is trace-index-first whenever no trace-duration filter is active. Unfiltered searches read the newest trace IDs directly from `otel_traces_trace_id_ts`. Service, operation, status, tag, and allowlist filters page recent trace IDs in batches of 1,000, test existence with `LIMIT 1 BY TraceId`, stop once enough result traces match, and then aggregate only those selected traces through `prj_traceid`. Duration filters keep the exact span-aggregation fallback because they are trace-level predicates.
 
-Service/operation prefill and tag discovery are also existence queries: they use `LIMIT 1 BY` rather than counting every matching span. The API keeps the legacy count fields for compatibility, but discovery does not rank values by frequency.
+Search results and global analytics are intentionally separate. `/api/traces/search` returns only the bounded result list and never runs the matching-trace or duration-percentile aggregation. `/api/traces/analytics` computes the two graphs independently and starts only after the browser has rendered the search results. Trace analytics are disabled by default. Set `traces.analytics = true` to show the graphs and enable the analytics query. Duration quantiles on the index path use `Start`/`End`, so deployments should populate `End` as the trace end if exact trace-duration quantiles are required.
 
-## Recommended ClickHouse projection indexes
+Service/operation prefill is an existence query: it uses `LIMIT 1 BY` rather than counting every matching span. Tag discovery is disabled; tag filters are entered directly as exact key/value pairs.
 
-Keep the official OpenTelemetry table definitions and sorting keys unchanged. For the large-trace workloads benchmarked by ChDash, add only these two ClickHouse 26.1+ lightweight projection indexes:
-
-```sql
-ALTER TABLE otel.otel_traces
-    ADD PROJECTION IF NOT EXISTS prj_traceid INDEX TraceId TYPE basic;
-
-ALTER TABLE otel.otel_traces_trace_id_ts
-    ADD PROJECTION IF NOT EXISTS prj_start INDEX Start TYPE basic;
-```
-
-New parts populate these projections automatically. If the tables already contain historical data, materialize the existing parts once:
-
-```sql
-ALTER TABLE otel.otel_traces
-    MATERIALIZE PROJECTION prj_traceid;
-
-ALTER TABLE otel.otel_traces_trace_id_ts
-    MATERIALIZE PROJECTION prj_start;
-```
-
-`MATERIALIZE PROJECTION` is a mutation and is asynchronous by default. Add `SETTINGS mutations_sync=1` to either statement when an operator explicitly wants the command to wait for completion. On very large production tables, materializing partition-by-partition is safer than rewriting all historical parts in one mutation.
-
-`prj_traceid` accelerates exact and `IN (...)` TraceId pruning after search has selected candidate traces. `prj_start` gives the trace-id time index a time-oriented access path for the main search page while preserving its base `(TraceId, Start)` ordering for direct trace lookup.
-
-Do not add `prj_timestamp` by default. On a production-shaped local benchmark with about 2.01 billion spans it consumed roughly 18.7 GiB while a one-hour timestamp scan improved only from about 15 ms to 14 ms.
-
-The Trace Explorer is trace-index-first whenever no trace-duration filter is active. Unfiltered searches read the newest trace IDs directly from `otel_traces_trace_id_ts`. Service, operation, status, tag, and allowlist filters page recent trace IDs in batches of 1,000, test existence with `LIMIT 1 BY TraceId`, stop once enough result traces match, and then aggregate only those selected traces through `prj_traceid`. The global charts use the same existence semantics and `trace_index_table` bounds instead of grouping the full span table repeatedly. Duration filters keep the exact span-aggregation fallback because they are trace-level predicates. Duration quantiles on the index path use `Start`/`End`, so deployments should populate `End` as the trace end if exact trace-duration quantiles are required.
-
-Service/operation prefill and tag discovery are also existence queries: they use `LIMIT 1 BY` rather than counting every matching span. The API keeps the legacy count fields for compatibility, but discovery does not rank values by frequency.
+The service/operation prefill is automatic: changing the selected time range refreshes the discovered combinations. There is no manual Prefill button. Tag filters use exact key/value equality only; there is no tag discovery button and no LIKE/ILIKE matching.
 
 ## Direct TraceId URLs
 
@@ -99,7 +72,7 @@ A trace can be opened directly at:
 /traces/<trace-id>
 ```
 
-Direct TraceId lookup is not limited by `max_lookback_minutes`. ChDash first uses `trace_index_table` to resolve the timestamp window. If that auxiliary table is unavailable, it performs an exact all-history lookup for the TraceId, restricted by `service_allowlist`, and then reads the trace through the recovered time window.
+Direct TraceId lookup is not limited by `max_lookback_minutes`. ChDash requires `trace_index_table` to resolve the timestamp window and then reads `otel_traces` only inside that bounded window. There is no all-history TraceId fallback. If the auxiliary table is unavailable or its lookup fails, the API returns an error instead of scanning `otel_traces`.
 
 ## Synthetic demo traces
 

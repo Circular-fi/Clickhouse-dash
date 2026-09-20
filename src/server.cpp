@@ -203,8 +203,8 @@ Server::Server(AppConfig cfg, bool start_background)
   if (cfg_.traces.enabled) {
     http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
     http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
+    http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
     http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
-    http_.Get("/api/traces/tags", [&](const auto& req, auto& res) { handle_traces_tags(req, res); });
     http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
   }
 

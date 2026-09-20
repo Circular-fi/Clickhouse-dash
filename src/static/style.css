@@ -9068,7 +9068,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   top: 0;
   z-index: 8;
   display: grid;
-  grid-template-columns: minmax(160px, 1.1fr) auto minmax(150px, 1fr) minmax(160px, 1.15fr) minmax(250px, 1.5fr) 118px 76px auto;
+  grid-template-columns: minmax(160px, 1.1fr) 92px minmax(150px, 1fr) minmax(160px, 1.15fr) minmax(250px, 1.5fr) 76px auto;
   gap: 7px;
   align-items: end;
   min-height: 66px;
@@ -9230,7 +9230,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceServiceStat.is-error > span { color: #e45756; }
 
 @media (max-width: 1400px) {
-  .traceSearchBar { grid-template-columns: minmax(155px, 1.1fr) auto minmax(135px, 1fr) minmax(145px, 1fr) minmax(210px, 1.35fr) 110px 72px auto; }
+  .traceSearchBar { grid-template-columns: minmax(155px, 1.1fr) 88px minmax(135px, 1fr) minmax(145px, 1fr) minmax(210px, 1.35fr) 72px auto; }
 }
 @media (max-width: 1100px) {
   .traceSearchBar { position: static; grid-template-columns: repeat(4, minmax(130px, 1fr)); }
@@ -10112,7 +10112,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font-size: 10.5px;
 }
 
-/* Trace search v2: strict ranges, editable prefill combos, compact result stats. */
+/* Trace search v2: strict ranges, selection-only prefill pickers, compact result stats. */
 .traceRangeCompact--preset {
   display: block;
 }
@@ -10122,102 +10122,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 .traceRangeCompact--preset > .tracePicker .tracePicker__button {
   border-radius: 6px;
-}
-.traceCombo {
-  position: relative;
-  min-width: 0;
-  width: 100%;
-}
-.traceCombo__input {
-  width: 100%;
-  height: 31px !important;
-  padding: 0 30px 0 8px !important;
-  border: 1px solid var(--buttonBorder) !important;
-  border-radius: 6px !important;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--inputBg) 92%, white 8%), var(--inputBg)) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 16%, transparent);
-  color: var(--text);
-  font: 600 11px/1 Arial, Helvetica, sans-serif !important;
-}
-.traceCombo__input:focus,
-.traceCombo.is-open .traceCombo__input {
-  border-color: var(--accentBorder) !important;
-  box-shadow: var(--ring) !important;
-  outline: none;
-}
-.traceCombo__toggle {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 28px;
-  height: 29px;
-  padding: 0;
-  border: 0;
-  border-left: 1px solid color-mix(in srgb, var(--buttonBorder) 70%, transparent);
-  border-radius: 0 5px 5px 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.traceCombo__toggle::before {
-  content: "";
-  position: absolute;
-  left: 9px;
-  top: 10px;
-  width: 7px;
-  height: 7px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 120ms ease;
-}
-.traceCombo.is-open .traceCombo__toggle::before {
-  top: 12px;
-  transform: rotate(225deg);
-}
-.traceCombo__toggle:hover { color: var(--text); background: var(--buttonHover); }
-.traceCombo__menu {
-  position: absolute;
-  z-index: 40;
-  left: 0;
-  right: 0;
-  top: calc(100% + 3px);
-  max-height: 280px;
-  overflow: auto;
-  padding: 5px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 8px;
-  background: var(--panelBg);
-  box-shadow: 0 12px 32px color-mix(in srgb, #000 22%, transparent);
-  scrollbar-gutter: stable;
-}
-.traceCombo__menu[hidden] { display: none !important; }
-.traceCombo__option {
-  width: 100%;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  font: 500 10.5px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceCombo__option:hover,
-.traceCombo__option:focus-visible {
-  background: var(--rowHover);
-  outline: none;
-}
-.traceCombo__empty {
-  padding: 8px;
-  color: var(--muted);
-  font-size: 10px;
 }
 .traceTagSearch__inputs > .tracePicker .tracePicker__button {
   height: 31px;
@@ -10969,14 +10873,12 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   width: 16px;
   height: 16px;
 }
-.tracePicker__button,
-.traceCombo__input {
+.tracePicker__button {
   background: var(--buttonBg) !important;
   box-shadow: none !important;
   color: var(--text) !important;
 }
-.tracePicker__menu,
-.traceCombo__menu {
+.tracePicker__menu {
   background: var(--panel) !important;
   border-color: var(--borderStrong) !important;
 }
@@ -10984,12 +10886,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .tracePicker.themeSelect--closing .tracePicker__button {
   background: var(--panel) !important;
 }
-.traceCombo__input::placeholder {
-  color: var(--muted);
-  opacity: .9;
-}
-.tracePicker__option,
-.traceCombo__option {
+.tracePicker__option {
   color: var(--text);
 }
 
@@ -11224,3 +11121,549 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceTagSearch__inputs > input::placeholder { color: var(--muted); opacity: .92; }
 .traceTagSearch__inputs > input:first-of-type { border-radius: 6px 0 0 6px; }
 .traceTagSearch__inputs > input:nth-of-type(2) { margin-left: -1px; border-radius: 0 6px 6px 0; }
+
+
+/* Trace search v4: inert discovery pickers on empty ranges + compact status before service. */
+.tracePicker.is-empty .tracePicker__button::after {
+  display: none !important;
+}
+.tracePicker.is-empty .tracePicker__button {
+  padding-right: 8px !important;
+  cursor: default !important;
+}
+.traceSearchField--status {
+  width: 92px;
+  grid-template-columns: minmax(0, 72px) 14px;
+  gap: 3px;
+}
+.traceSearchField--status > .tracePicker {
+  width: 72px;
+}
+.traceSearchField--status > .tracePicker .tracePicker__button {
+  height: 27px;
+  min-height: 27px;
+  padding-left: 6px !important;
+  padding-right: 21px !important;
+  font-size: 9.5px;
+}
+.traceSearchField--status .traceInfoButton--inline {
+  width: 14px;
+  height: 14px;
+}
+@media (max-width: 1100px) {
+  .traceSearchField--status { width: 100%; }
+  .traceSearchField--status > .tracePicker { width: 100%; }
+}
+
+/* Trace search v5: balanced compact layout, fixed Status/Results selector widths,
+   and analytics hidden until meta explicitly enables them. */
+.traceAnalyticsGrid[hidden] {
+  display: none !important;
+}
+
+.traceSearchBar {
+  grid-template-columns:
+    minmax(220px, 1.15fr)
+    120px
+    minmax(180px, 1fr)
+    minmax(180px, 1fr)
+    minmax(260px, 1.2fr)
+    100px
+    minmax(120px, .72fr);
+}
+
+.traceSearchField--status {
+  width: 120px;
+  grid-template-columns: 100px 16px;
+  gap: 4px;
+}
+.traceSearchField--status > .tracePicker {
+  width: 100px;
+}
+.traceSearchField--status > .tracePicker .tracePicker__button {
+  width: 100px !important;
+}
+
+.traceSearchField--limit,
+.traceSearchField--limit > .tracePicker,
+.traceSearchField--limit > .tracePicker .tracePicker__button {
+  width: 100px !important;
+}
+
+@media (max-width: 1100px) {
+  .traceSearchBar {
+    position: static;
+    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
+    grid-template-areas:
+      "range status service operation"
+      "tags tags limit search"
+      "source source source source";
+    gap: 7px;
+    align-items: center;
+  }
+  .traceSearchBar__range { grid-area: range; }
+  .traceSearchField--status { grid-area: status; width: 120px; }
+  .traceSearchField--service { grid-area: service; }
+  .traceSearchField--operation { grid-area: operation; }
+  .traceTagSearch { grid-area: tags; }
+  .traceSearchField--limit { grid-area: limit; width: 100px; justify-self: end; }
+  .traceSearchSubmit { grid-area: search; width: 100%; min-width: 0; }
+  .traceSearchBar__source { grid-area: source; }
+}
+
+@media (max-width: 760px) {
+  .traceSearchBar {
+    grid-template-columns: minmax(0, 1fr) 100px;
+    grid-template-areas:
+      "range range"
+      "status limit"
+      "service service"
+      "operation operation"
+      "tags tags"
+      "search search"
+      "source source";
+  }
+  .traceSearchField--status { width: 120px; }
+  .traceSearchField--limit { width: 100px; justify-self: end; }
+}
+
+
+/* Trace search v6: one picker geometry/interaction model + exact tag pair. */
+.traceSearchBar {
+  grid-template-columns:
+    minmax(220px, 1.15fr)
+    140px
+    minmax(180px, 1fr)
+    minmax(180px, 1fr)
+    minmax(260px, 1.2fr)
+    120px
+    160px;
+}
+
+/* Every search selector uses the exact same tracePicker surface. Context only controls width. */
+.traceSearchBar .tracePicker {
+  height: 31px !important;
+  min-height: 31px !important;
+}
+.traceSearchBar .tracePicker__button {
+  width: 100% !important;
+  height: 31px !important;
+  min-height: 31px !important;
+  padding: 0 28px 0 10px !important;
+  border: 1px solid var(--buttonBorder) !important;
+  border-radius: 6px !important;
+  background: var(--buttonBg) !important;
+  color: var(--text) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  font: 600 11px/1 Arial, Helvetica, sans-serif !important;
+}
+.traceSearchBar .tracePicker__button:hover:not(:disabled) {
+  border-color: var(--accentBorder) !important;
+  background: var(--buttonHoverBg) !important;
+  color: var(--text) !important;
+}
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button {
+  border-color: var(--accentBorder) !important;
+  box-shadow: var(--ring) !important;
+}
+.traceSearchBar .tracePicker__menu {
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  background: var(--panelBg) !important;
+}
+.traceSearchBar .tracePicker__option {
+  min-height: 28px !important;
+  padding: 0 9px !important;
+  font: 600 10.5px/1 Arial, Helvetica, sans-serif !important;
+}
+.traceSearchBar .tracePicker__option:hover:not(:disabled) {
+  background: var(--rowHover) !important;
+}
+
+.traceSearchField--status {
+  width: 140px !important;
+  grid-template-columns: 120px 16px !important;
+  gap: 4px !important;
+}
+.traceSearchField--status > .tracePicker {
+  width: 120px !important;
+}
+.traceSearchField--limit,
+.traceSearchField--limit > .tracePicker {
+  width: 120px !important;
+}
+
+.traceTagSearch__inputs {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 4px !important;
+}
+.traceTagSearch__inputs > input {
+  width: 100% !important;
+  height: 31px !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  border-radius: 6px !important;
+}
+.traceTagSearch__inputs > input:first-of-type,
+.traceTagSearch__inputs > input:nth-of-type(2) {
+  margin-left: 0 !important;
+  border-radius: 6px !important;
+}
+
+.traceSearchSubmit {
+  width: 160px !important;
+  min-width: 160px !important;
+  max-width: 160px !important;
+  justify-self: start !important;
+}
+
+@media (max-width: 1100px) {
+  .traceSearchBar {
+    grid-template-columns: minmax(220px, 1.2fr) 140px minmax(180px, 1fr) minmax(180px, 1fr);
+    grid-template-areas:
+      "range status service operation"
+      "tags tags limit search"
+      "source source source source";
+  }
+  .traceSearchField--status { width: 140px !important; }
+  .traceSearchField--limit { width: 120px !important; justify-self: end; }
+  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; justify-self: start !important; }
+}
+
+@media (max-width: 760px) {
+  .traceSearchBar {
+    grid-template-columns: minmax(0, 1fr) 120px;
+    grid-template-areas:
+      "range range"
+      "status limit"
+      "service service"
+      "operation operation"
+      "tags tags"
+      "search search"
+      "source source";
+  }
+  .traceSearchField--status { width: 140px !important; }
+  .traceSearchField--limit { width: 120px !important; justify-self: end; }
+  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; }
+}
+
+/* Trace search v7: connected tag pair and page-selector style picker motion. */
+.traceSearchField--status {
+  width: 120px !important;
+  grid-template-columns: 120px !important;
+  gap: 0 !important;
+}
+.traceSearchField--status > .tracePicker {
+  width: 120px !important;
+}
+
+.traceTagSearch__inputs {
+  gap: 0 !important;
+}
+.traceTagSearch__inputs > input:first-of-type {
+  border-radius: 6px 0 0 6px !important;
+}
+.traceTagSearch__inputs > input:nth-of-type(2) {
+  margin-left: -1px !important;
+  border-radius: 0 6px 6px 0 !important;
+}
+.traceTagSearch__inputs > input:focus {
+  outline: none !important;
+  border-color: var(--buttonBorder) !important;
+  box-shadow: none !important;
+  position: relative;
+  z-index: 1;
+}
+
+/* Keep keyboard focus neutral: no blue ring/glow on Trace page buttons. */
+.traceSearchBar button:focus,
+.traceSearchBar button:focus-visible,
+.traceSearchBar .tracePicker__button:focus,
+.traceSearchBar .tracePicker__button:focus-visible {
+  outline: none !important;
+  border-color: var(--buttonBorder) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+}
+
+/* Match pageSelectButton's connected expansion instead of a highlighted popup. */
+.traceSearchBar .tracePicker__button,
+.traceResultsSort .tracePicker__button {
+  transition: background 140ms ease, border-color 140ms ease, border-radius 140ms ease !important;
+}
+.traceSearchBar .tracePicker__menu,
+.traceResultsSort .tracePicker__menu {
+  transform-origin: top !important;
+  opacity: 0;
+  transform: translateY(-6px) scaleY(.98);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms !important;
+}
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__menu,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__menu {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+  background: var(--panel) !important;
+  box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, .55) !important;
+}
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
+.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
+  border-color: var(--buttonBorder) !important;
+  border-bottom-color: transparent !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
+}
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
+.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
+  border-color: var(--buttonBorder) !important;
+  background: var(--buttonBg) !important;
+}
+
+@media (max-width: 1100px) {
+  .traceSearchField--status { width: 120px !important; }
+}
+@media (max-width: 760px) {
+  .traceSearchField--status { width: 120px !important; }
+}
+
+/* Status no longer has an info affordance, so its grid column is exactly 120px. */
+.traceSearchBar {
+  grid-template-columns:
+    minmax(220px, 1.15fr)
+    120px
+    minmax(180px, 1fr)
+    minmax(180px, 1fr)
+    minmax(260px, 1.2fr)
+    120px
+    160px;
+}
+@media (max-width: 1100px) {
+  .traceSearchBar {
+    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
+  }
+}
+
+/* Trace search v8: use the same connected themeSelect interaction as the page selector. */
+.traceSearchBar .tracePicker,
+.traceResultsSort .tracePicker {
+  box-sizing: border-box !important;
+}
+
+/* Status and page-size pickers are exactly 120px, including their dropdowns. */
+.traceSearchField--status,
+.traceSearchField--status > .tracePicker,
+.traceSearchField--limit,
+.traceSearchField--limit > .tracePicker {
+  width: 120px !important;
+  min-width: 120px !important;
+  max-width: 120px !important;
+}
+
+.traceSearchBar .tracePicker__button,
+.traceResultsSort .tracePicker__button {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  border-color: var(--buttonBorder) !important;
+  border-radius: 0.75rem !important;
+  background: var(--buttonBg) !important;
+  box-shadow: none !important;
+  transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease !important;
+}
+
+/* Same hover as pageSelectButton: only the standard button border changes. */
+.traceSearchBar .tracePicker__button:hover:not(:disabled),
+.traceResultsSort .tracePicker__button:hover:not(:disabled) {
+  border-color: var(--buttonBorderHover) !important;
+  background: var(--buttonBg) !important;
+  box-shadow: none !important;
+}
+
+/* Trace keeps focus neutral, but otherwise follows the page selector surface. */
+.traceSearchBar .tracePicker__button:focus,
+.traceSearchBar .tracePicker__button:focus-visible,
+.traceResultsSort .tracePicker__button:focus,
+.traceResultsSort .tracePicker__button:focus-visible {
+  outline: none !important;
+  border-color: var(--buttonBorder) !important;
+  box-shadow: none !important;
+}
+
+.traceSearchBar .tracePicker__menu,
+.traceResultsSort .tracePicker__menu {
+  box-sizing: border-box !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 100% !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  margin-top: -1px !important;
+  padding: 0.05rem 0.35rem 0.35rem 0.35rem !important;
+  border: 1px solid var(--borderStrong) !important;
+  border-top: 0 !important;
+  border-radius: var(--radiusSm) !important;
+  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
+  box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55) !important;
+  transform-origin: top !important;
+  opacity: 0;
+  transform: translateY(-6px) scaleY(0.98);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s linear 140ms !important;
+}
+
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__menu,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__menu {
+  opacity: 1;
+  transform: translateY(0) scaleY(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+  background: var(--panel) !important;
+}
+
+/* Keep the button and menu as one continuous shape until the close animation ends. */
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
+.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
+  border-color: var(--buttonBorder) !important;
+  border-bottom-color: transparent !important;
+  border-bottom-left-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
+  box-shadow: none !important;
+}
+
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
+.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
+  border-color: var(--buttonBorder) !important;
+  border-bottom-color: transparent !important;
+  background: var(--buttonBg) !important;
+}
+
+/* The selected option is represented by the button while the menu is open/closing. */
+.traceSearchBar .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
+.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"],
+.traceResultsSort .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
+.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"] {
+  display: none !important;
+}
+
+/* Custom time inputs must remain usable whenever Custom range is selected. */
+.traceCustomRange:not([hidden]) {
+  display: grid !important;
+}
+
+/* Grafana-like absolute custom time-range editor: pick From/To, then Apply collapses it. */
+.traceCustomRange {
+  width: min(470px, 88vw) !important;
+  min-width: 380px !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 10px !important;
+}
+.traceCustomRange__field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+.traceCustomRange__field > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.traceCustomRange__field > input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font-size: 11px;
+  box-shadow: none;
+}
+.traceCustomRange__field > input:focus {
+  outline: none;
+  border-color: var(--buttonBorderHover);
+  box-shadow: none;
+}
+.traceCustomRange__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 2px;
+}
+.traceCustomRange__cancel,
+.traceCustomRange__apply {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+@media (max-width: 560px) {
+  .traceCustomRange {
+    min-width: 0 !important;
+    grid-template-columns: 1fr !important;
+  }
+  .traceCustomRange__actions { grid-column: 1; }
+}
+
+/* Keep Custom range reachable while it is the active range so it can be edited again. */
+.tracePicker--range.themeSelect--open .tracePicker__option[data-value="custom"][aria-selected="true"],
+.tracePicker--range.themeSelect--closing .tracePicker__option[data-value="custom"][aria-selected="true"] {
+  display: flex !important;
+}
+
+/* Trace polish: neutral theme hover, borderless trace sections, and stable range menus. */
+body[data-page="traces"] .appHeader {
+  border-bottom: 0 !important;
+}
+body[data-page="traces"] .traceSearchResults__toolbar {
+  border-bottom: 0 !important;
+}
+body[data-page="traces"] .tracesResults--wide {
+  border-top: 0 !important;
+}
+
+/* The time-range menu should not gain a scrollbar merely because Custom is active. */
+body[data-page="traces"] .tracePicker--range .tracePicker__menu {
+  max-height: none !important;
+  overflow: visible !important;
+  scrollbar-gutter: auto !important;
+}
+
+/* Theme picker uses the same restrained hover/focus treatment as other selectors. */
+.themeSelect--icons .themeSelect__button--icon:hover,
+.themeSelect--icons .themeSelect__button--icon:focus-visible {
+  border-color: var(--buttonBorderHover) !important;
+  background: var(--buttonBg) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.themeSelect--icons .themeSelect__option--icon:focus-visible {
+  box-shadow: none !important;
+  outline: none !important;
+}

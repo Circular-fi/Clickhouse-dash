@@ -13,8 +13,10 @@
     meta: null,
     traces: [],
     analytics: null,
+    analyticsLoading: false,
+    analyticsError: "",
     prefillPairs: [],
-    tagKeys: [],
+    prefillPromise: null,
     activeTrace: null,
     activeSpanId: null,
     openSpanIds: new Set(),
@@ -23,9 +25,10 @@
     disabledServices: new Set(),
     collapsed: new Set(),
     searchSeq: 0,
+    analyticsSeq: 0,
     prefillSeq: 0,
-    tagSeq: 0,
     detailSeq: 0,
+    customRangeOpen: false,
   };
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
@@ -211,13 +214,62 @@
 
   const tracePickers = new Set();
 
-  function closeTracePickers(except = null) {
+  function closeTracePicker(root, { immediate = false } = {}) {
+    if (!root) return;
+    const button = root.querySelector(".tracePicker__button");
+    const menu = root.querySelector(".tracePicker__menu");
+    if (root._tracePickerCloseTimer) {
+      clearTimeout(root._tracePickerCloseTimer);
+      root._tracePickerCloseTimer = null;
+    }
+    button?.setAttribute("aria-expanded", "false");
+    if (immediate) {
+      root.classList.remove("themeSelect--open", "themeSelect--closing");
+      if (menu) menu.hidden = true;
+      return;
+    }
+    if (menu?.hidden) {
+      root.classList.remove("themeSelect--open", "themeSelect--closing");
+      return;
+    }
+    // Enter the closing state before dropping --open so the button stays
+    // visually connected to the menu for the whole collapse animation.
+    root.classList.add("themeSelect--closing");
+    requestAnimationFrame(() => root.classList.remove("themeSelect--open"));
+    root._tracePickerCloseTimer = setTimeout(() => {
+      if (!root.classList.contains("themeSelect--open")) {
+        if (menu) menu.hidden = true;
+        root.classList.remove("themeSelect--closing");
+      }
+      root._tracePickerCloseTimer = null;
+    }, 160);
+  }
+
+  function closeTracePickers(except = null, { immediate = false } = {}) {
     for (const root of tracePickers) {
       if (root === except) continue;
-      root.classList.remove("themeSelect--open", "themeSelect--closing");
-      root.querySelector(".tracePicker__button")?.setAttribute("aria-expanded", "false");
-      root.querySelector(".tracePicker__menu")?.blur?.();
+      closeTracePicker(root, { immediate });
     }
+  }
+
+  function openTracePicker(root) {
+    if (!root) return;
+    const button = root.querySelector(".tracePicker__button");
+    const menu = root.querySelector(".tracePicker__menu");
+    if (!button || !menu || button.disabled) return;
+    closeTracePickers(root);
+    if (root._tracePickerCloseTimer) {
+      clearTimeout(root._tracePickerCloseTimer);
+      root._tracePickerCloseTimer = null;
+    }
+    root.classList.remove("themeSelect--closing");
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => {
+      if (button.getAttribute("aria-expanded") !== "true") return;
+      root.classList.add("themeSelect--open");
+      menu.focus({ preventScroll: true });
+    });
   }
 
   function enhanceTraceSelect(select) {
@@ -225,6 +277,7 @@
     select.dataset.tracePickerReady = "1";
     const root = document.createElement("div");
     root.className = "themeSelect tracePicker";
+    if (select === dom.tracesRangeUnit) root.classList.add("tracePicker--range");
     select.parentNode.insertBefore(root, select);
     root.appendChild(select);
     select.classList.add("tracePicker__native");
@@ -238,6 +291,7 @@
     menu.className = "themeSelect__menu tracePicker__menu";
     menu.setAttribute("role", "listbox");
     menu.tabIndex = -1;
+    menu.hidden = true;
     root.append(button, menu);
     tracePickers.add(root);
 
@@ -245,9 +299,15 @@
       const selected = select.options[select.selectedIndex] || select.options[0] || null;
       const fieldLabel = String(select.dataset.fieldLabel || "").trim();
       const selectedText = selected?.textContent || "Select";
+      const disableWhenEmpty = select.dataset.disableWhenEmpty === "1";
+      const hasValues = Array.from(select.options).some((option) => !option.hidden && String(option.value || "").length > 0);
+      const unavailable = !!select.disabled || (disableWhenEmpty && !hasValues);
       button.textContent = fieldLabel ? `${fieldLabel} · ${selectedText}` : selectedText;
-      button.disabled = !!select.disabled;
-      root.classList.toggle("is-disabled", !!select.disabled);
+      button.disabled = unavailable;
+      button.setAttribute("aria-disabled", unavailable ? "true" : "false");
+      root.classList.toggle("is-disabled", unavailable);
+      root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);
+      if (unavailable) closeTracePicker(root, { immediate: true });
       menu.innerHTML = "";
       Array.from(select.options).forEach((option) => {
         if (option.hidden) return;
@@ -264,7 +324,7 @@
           select.value = option.value;
           select.dispatchEvent(new Event("change", { bubbles: true }));
           refresh();
-          closeTracePickers();
+          closeTracePicker(root);
         });
         menu.appendChild(item);
       });
@@ -273,18 +333,18 @@
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (select.disabled) return;
-      const opening = !root.classList.contains("themeSelect--open");
-      closeTracePickers(root);
-      root.classList.toggle("themeSelect--open", opening);
-      button.setAttribute("aria-expanded", opening ? "true" : "false");
-      if (opening) menu.focus({ preventScroll: true });
+      if (button.disabled) return;
+      if (root.classList.contains("themeSelect--open") || button.getAttribute("aria-expanded") === "true") {
+        closeTracePicker(root);
+      } else {
+        openTracePicker(root);
+      }
     });
     menu.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        closeTracePickers();
-        button.focus();
+        closeTracePicker(root);
+        button.focus({ preventScroll: true });
       }
     });
     select.addEventListener("change", refresh);
@@ -293,90 +353,10 @@
     refresh();
   }
 
-  const traceCombos = new Set();
-
-  function closeTraceCombos(except = null) {
-    for (const root of traceCombos) {
-      if (root === except) continue;
-      root.classList.remove("is-open");
-      root.querySelector(".traceCombo__toggle")?.setAttribute("aria-expanded", "false");
-      const menu = root.querySelector(".traceCombo__menu");
-      if (menu) menu.hidden = true;
-    }
-  }
-
-  function enhanceTraceCombo(input) {
-    if (!input || input.dataset.traceComboReady === "1") return;
-    const listId = input.getAttribute("list");
-    const datalist = listId ? document.getElementById(listId) : null;
-    if (!datalist) return;
-    input.dataset.traceComboReady = "1";
-    input.removeAttribute("list");
-    const root = document.createElement("div");
-    root.className = "traceCombo";
-    input.parentNode.insertBefore(root, input);
-    root.appendChild(input);
-    input.classList.add("traceCombo__input");
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "traceCombo__toggle";
-    toggle.setAttribute("aria-label", "Show available values");
-    toggle.setAttribute("aria-haspopup", "listbox");
-    toggle.setAttribute("aria-expanded", "false");
-    const menu = document.createElement("div");
-    menu.className = "traceCombo__menu";
-    menu.setAttribute("role", "listbox");
-    menu.hidden = true;
-    root.append(toggle, menu);
-    traceCombos.add(root);
-
-    const options = () => Array.from(datalist.options).map((option) => String(option.value || "")).filter(Boolean);
-    const render = () => {
-      const query = String(input.value || "").trim().toLowerCase();
-      const values = options().filter((value) => !query || value.toLowerCase().includes(query)).slice(0, 300);
-      menu.innerHTML = values.length ? values.map((value) => `<button type="button" class="traceCombo__option" role="option" data-value="${esc(value)}">${esc(value)}</button>`).join("") : '<div class="traceCombo__empty">No prefetched values</div>';
-      for (const item of menu.querySelectorAll("[data-value]")) {
-        item.addEventListener("click", () => {
-          input.value = item.getAttribute("data-value") || "";
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-          closeTraceCombos();
-          input.focus({ preventScroll: true });
-        });
-      }
-    };
-    const open = () => {
-      closeTraceCombos(root);
-      render();
-      root.classList.add("is-open");
-      menu.hidden = false;
-      toggle.setAttribute("aria-expanded", "true");
-    };
-    const close = () => {
-      root.classList.remove("is-open");
-      menu.hidden = true;
-      toggle.setAttribute("aria-expanded", "false");
-    };
-    toggle.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (root.classList.contains("is-open")) close(); else open();
-    });
-    input.addEventListener("input", () => { if (root.classList.contains("is-open")) render(); });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown" && !root.classList.contains("is-open")) { event.preventDefault(); open(); }
-      if (event.key === "Escape") close();
-    });
-    new MutationObserver(() => { if (root.classList.contains("is-open")) render(); }).observe(datalist, { childList: true, subtree: true });
-  }
-
   function initTracePickers() {
     document.querySelectorAll(".traceSearchBar select, .traceResultsSort select").forEach(enhanceTraceSelect);
-    enhanceTraceCombo(dom.tracesService);
-    enhanceTraceCombo(dom.tracesOperation);
     document.addEventListener("click", (event) => {
       if (![...tracePickers].some((root) => root.contains(event.target))) closeTracePickers();
-      if (![...traceCombos].some((root) => root.contains(event.target))) closeTraceCombos();
     });
   }
 
@@ -387,10 +367,26 @@
     return d.toISOString().slice(0, 19);
   }
 
+  function syncCustomRangeBounds() {
+    const startInput = dom.tracesRangeStart;
+    const endInput = dom.tracesRangeEnd;
+    if (!startInput || !endInput) return;
+    const now = Date.now();
+    const maxMs = maxRangeMinutes() * 60000;
+    const startMs = Date.parse(String(startInput.value || ""));
+    const endMs = Date.parse(String(endInput.value || ""));
+    const stepMs = Math.max(1000, Number(startInput.step || endInput.step || 1) * 1000);
+
+    startInput.max = toLocalDateTime(Number.isFinite(endMs) ? Math.min(now, endMs - stepMs) : now);
+    endInput.min = Number.isFinite(startMs) ? toLocalDateTime(startMs + stepMs) : "";
+    endInput.max = toLocalDateTime(Number.isFinite(startMs) ? Math.min(now, startMs + maxMs) : now);
+    startInput.min = Number.isFinite(endMs) ? toLocalDateTime(Math.max(0, endMs - maxMs)) : "";
+  }
+
   function syncRangeControls() {
     const value = String(dom.tracesRangeUnit?.value || "60");
     const custom = value === "custom";
-    if (!custom && dom.tracesCustomRange) dom.tracesCustomRange.hidden = true;
+    if (dom.tracesCustomRange) dom.tracesCustomRange.hidden = !(custom && model.customRangeOpen);
     const max = maxRangeMinutes();
     if (dom.tracesRangeUnit) {
       let selectedVisible = false;
@@ -409,12 +405,11 @@
       dom.tracesRangeUnit.dispatchEvent(new Event("tracepicker-refresh"));
     }
     const now = Date.now();
-    if (dom.tracesRangeStart) { dom.tracesRangeStart.removeAttribute("min"); dom.tracesRangeStart.max = toLocalDateTime(now); }
-    if (dom.tracesRangeEnd) { dom.tracesRangeEnd.removeAttribute("min"); dom.tracesRangeEnd.max = toLocalDateTime(now); }
     if (custom && dom.tracesRangeStart && dom.tracesRangeEnd && (!dom.tracesRangeStart.value || !dom.tracesRangeEnd.value)) {
       dom.tracesRangeStart.value = toLocalDateTime(now - Math.min(max, 60) * 60000);
       dom.tracesRangeEnd.value = toLocalDateTime(now);
     }
+    syncCustomRangeBounds();
   }
 
   function selectedRange() {
@@ -434,52 +429,60 @@
     return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: value === "custom" ? "0" : "1" };
   }
 
-  function clearTagSelection() {
-    model.tagKeys = [];
-    const keyList = document.getElementById("tracesTagKeyOptions");
-    const valueList = document.getElementById("tracesTagValueOptions");
-    if (keyList) keyList.innerHTML = "";
-    if (valueList) valueList.innerHTML = "";
+  function replaceSelectOptions(select, values, allLabel) {
+    if (!select) return;
+    const previous = String(select.value || "");
+    const unique = [...new Set((values || []).map((value) => String(value || "")).filter(Boolean))].sort();
+    select.innerHTML = `<option value="">${esc(allLabel || "ALL")}</option>` + unique.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+    select.value = unique.includes(previous) ? previous : "";
+    select.dispatchEvent(new Event("tracepicker-refresh"));
   }
 
-  function updateTagButton() {
-    if (!dom.tracesTagsButton) return;
-    const allowed = model.meta?.tag_search_supported !== false && String(dom.tracesService?.value || "").trim() && String(dom.tracesOperation?.value || "").trim();
-    dom.tracesTagsButton.disabled = !allowed;
+  function updateServiceOptions() {
+    const operation = String(dom.tracesOperation?.value || "").trim();
+    const services = model.prefillPairs
+      .filter((pair) => !operation || String(pair?.[1] || "") === operation)
+      .map((pair) => pair?.[0]);
+    replaceSelectOptions(dom.tracesService, services, "ALL");
   }
 
   function updateOperationOptions() {
-    if (!dom.tracesOperationOptions) return;
-    const services = resolvedServiceValues();
-    const values = new Set();
-    for (const pair of model.prefillPairs) {
-      if (!services.length || services.includes(String(pair?.[0] || ""))) values.add(pair[1]);
-    }
-    dom.tracesOperationOptions.innerHTML = [...values].sort().map((value) => `<option value="${esc(value)}"></option>`).join("");
-    updateTagButton();
+    const service = String(dom.tracesService?.value || "").trim();
+    const operations = model.prefillPairs
+      .filter((pair) => !service || String(pair?.[0] || "") === service)
+      .map((pair) => pair?.[1]);
+    replaceSelectOptions(dom.tracesOperation, operations, "ALL");
   }
 
-  function fuzzyExactValues(values, input) {
-    const text = String(input || "").trim();
-    if (!text) return [];
-    const unique = [...new Set((values || []).map((value) => String(value || "")).filter(Boolean))];
-    const exact = unique.filter((value) => value === text);
-    if (exact.length) return exact;
-    const needle = text.toLocaleLowerCase();
-    const exactFolded = unique.filter((value) => value.toLocaleLowerCase() === needle);
-    if (exactFolded.length) return exactFolded;
-    return unique.filter((value) => value.toLocaleLowerCase().includes(needle));
+  function serviceOperationPairExists(service, operation) {
+    if (!service || !operation) return true;
+    return model.prefillPairs.some((pair) => String(pair?.[0] || "") === service && String(pair?.[1] || "") === operation);
+  }
+
+  function syncServiceOperationPair(preferred = "service") {
+    let service = String(dom.tracesService?.value || "").trim();
+    let operation = String(dom.tracesOperation?.value || "").trim();
+    if (service && operation && !serviceOperationPairExists(service, operation)) {
+      if (preferred === "operation") {
+        dom.tracesService.value = "";
+        service = "";
+      } else {
+        dom.tracesOperation.value = "";
+        operation = "";
+      }
+    }
+    updateServiceOptions();
+    updateOperationOptions();
   }
 
   function resolvedServiceValues() {
-    return fuzzyExactValues(model.prefillPairs.map((pair) => pair?.[0]), dom.tracesService?.value);
+    const value = String(dom.tracesService?.value || "").trim();
+    return value ? [value] : [];
   }
 
-  function resolvedOperationValues(services = resolvedServiceValues()) {
-    const scoped = services.length
-      ? model.prefillPairs.filter((pair) => services.includes(String(pair?.[0] || "")))
-      : model.prefillPairs;
-    return fuzzyExactValues(scoped.map((pair) => pair?.[1]), dom.tracesOperation?.value);
+  function resolvedOperationValues() {
+    const value = String(dom.tracesOperation?.value || "").trim();
+    return value ? [value] : [];
   }
 
   function syncFilterFeatures() {
@@ -493,21 +496,24 @@
     syncRangeControls();
     if (dom.tracesLimit && model.meta) {
       const max = Math.max(1, Number(model.meta.search_limit || 100));
-      for (const option of dom.tracesLimit.options) option.disabled = Number(option.value) > max;
-      const enabled = Array.from(dom.tracesLimit.options).filter((o) => !o.disabled);
-      if (!enabled.some((o) => o.value === dom.tracesLimit.value) && enabled.length) dom.tracesLimit.value = enabled[enabled.length - 1].value;
+      for (const option of dom.tracesLimit.options) {
+        const unavailable = Number(option.value) > max;
+        option.disabled = unavailable;
+        option.hidden = unavailable;
+      }
+      const enabled = Array.from(dom.tracesLimit.options).filter((option) => !option.disabled && !option.hidden);
+      if (!enabled.some((option) => option.value === dom.tracesLimit.value) && enabled.length) {
+        dom.tracesLimit.value = enabled[enabled.length - 1].value;
+      }
+      dom.tracesLimit.dispatchEvent(new Event("tracepicker-refresh"));
     }
-    if (model.meta?.tag_search_supported === false) clearTagSelection();
-    updateTagButton();
+    const tagEnabled = model.meta?.tag_search_supported !== false;
+    if (dom.tracesTagKey) dom.tracesTagKey.disabled = !tagEnabled;
+    if (dom.tracesTagValue) dom.tracesTagValue.disabled = !tagEnabled;
+    renderAnalytics();
   }
 
-  function renderSource() {
-    if (!dom.tracesSourceMeta) return;
-    if (!model.meta) { dom.tracesSourceMeta.textContent = "Loading source…"; return; }
-    const index = model.meta.trace_index_available ? "trace-id index" : "exact TraceId fallback";
-    dom.tracesSourceMeta.textContent = `${model.meta.source_host_id} · ${model.meta.database}.${model.meta.table} · ${index}`;
-    dom.tracesSourceMeta.title = "Uses the selected host system connection.";
-  }
+  function renderSource() {}
 
   function sortedResults() {
     const rows = [...(model.traces || [])];
@@ -532,11 +538,13 @@
       error_count: Number(row?.[6] || 0),
       service_stats: (Array.isArray(row?.[7]) ? row[7] : []).map((stat) => ({ service: services[Number(stat?.[0] || 0)] || "unknown", spans: Number(stat?.[1] || 0), errors: Number(stat?.[2] || 0) })),
     }));
+  }
+
+  function unpackAnalytics(payload) {
     model.analytics = {
       range: Array.isArray(payload?.range) ? payload.range.map(Number) : [0, 1],
       bucket_ms: Number(payload?.bucket_ms || 60000),
       quantile_bucket_ms: Number(payload?.quantile_bucket_ms || payload?.bucket_ms || 60000),
-      services,
       trace_count_chart: Array.isArray(payload?.trace_count_chart) ? payload.trace_count_chart : [],
       duration_quantiles: Array.isArray(payload?.duration_quantiles) ? payload.duration_quantiles : [],
     };
@@ -666,7 +674,24 @@
     if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `percentiles · bucket ${formatDuration(qBucketMs * 1e6)}`;
   }
 
-  function renderAnalytics() { renderServiceChart(); renderDurationChart(); }
+  function renderAnalytics() {
+    const enabled = model.meta?.analytics_enabled === true;
+    if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
+    if (!enabled) return;
+    if (model.analyticsLoading && !model.analytics) {
+      if (dom.traceServiceChart) dom.traceServiceChart.innerHTML = '<div class="tracesEmpty">Loading trace activity…</div>';
+      if (dom.traceDurationChart) dom.traceDurationChart.innerHTML = '<div class="tracesEmpty">Loading duration distribution…</div>';
+      return;
+    }
+    if (model.analyticsError && !model.analytics) {
+      const message = esc(model.analyticsError);
+      if (dom.traceServiceChart) dom.traceServiceChart.innerHTML = `<div class="tracesEmpty">${message}</div>`;
+      if (dom.traceDurationChart) dom.traceDurationChart.innerHTML = `<div class="tracesEmpty">${message}</div>`;
+      return;
+    }
+    renderServiceChart();
+    renderDurationChart();
+  }
 
   function copyText(text, button) {
     navigator.clipboard?.writeText?.(text).then(() => {
@@ -1161,16 +1186,16 @@
   function currentTag() {
     const key = String(dom.tracesTagKey?.value || "").trim();
     const value = String(dom.tracesTagValue?.value || "");
-    if (!key) return { scope: "", key: "", value };
-    const scoped = key.match(/^(span|resource):(.*)$/i);
-    if (scoped) return { scope: scoped[1].toLowerCase(), key: String(scoped[2] || "").trim(), value };
-    return { scope: "any", key, value };
+    return { scope: key ? "any" : "", key, value };
   }
 
   function searchFilters({ includeTag = true } = {}) {
     const range = selectedRange();
     const services = resolvedServiceValues();
-    const operations = resolvedOperationValues(services);
+    const operations = resolvedOperationValues();
+    if (services.length && operations.length && !serviceOperationPairExists(services[0], operations[0])) {
+      throw new Error("Selected service / operation combination does not exist in this time range.");
+    }
     const filters = {
       ...range,
       service: services,
@@ -1180,105 +1205,56 @@
     };
     if (includeTag) {
       const tag = currentTag();
-      if (tag.scope && tag.key && tag.value !== "") Object.assign(filters, { tag_scope: tag.scope, tag_key: tag.key, tag_value: tag.value });
+      const hasKey = !!tag.key;
+      const hasValue = tag.value !== "";
+      if (hasKey !== hasValue) throw new Error("Tag and value must both be provided.");
+      if (hasKey && hasValue) Object.assign(filters, { tag_scope: "any", tag_key: tag.key, tag_value: tag.value });
     }
     return filters;
   }
 
-  function invalidateDiscovery({ pairs = true, tags = true } = {}) {
+  function invalidateDiscovery({ pairs = true } = {}) {
     if (pairs) {
       model.prefillPairs = [];
-      if (dom.tracesServiceOptions) dom.tracesServiceOptions.innerHTML = "";
-      if (dom.tracesOperationOptions) dom.tracesOperationOptions.innerHTML = "";
+      replaceSelectOptions(dom.tracesService, [], "ALL");
+      replaceSelectOptions(dom.tracesOperation, [], "ALL");
     }
-    if (tags) clearTagSelection();
-    updateTagButton();
   }
 
-  async function prefill() {
+  async function prefill({ force = false } = {}) {
     if (!model.meta) await loadMeta().catch(() => null);
+    if (!force && model.prefillPromise) return model.prefillPromise;
     const seq = ++model.prefillSeq;
-    setButtonLoading(dom.tracesPrefillButton, true);
-    showError("");
-    try {
-      const range = selectedRange();
-      const payload = await api.prefillTraces(currentHost(), range);
-      if (seq !== model.prefillSeq) return;
-      model.prefillPairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
-      const services = [...new Set(model.prefillPairs.map((pair) => String(pair?.[0] || "")).filter(Boolean))].sort();
-      if (dom.tracesServiceOptions) dom.tracesServiceOptions.innerHTML = services.map((value) => `<option value="${esc(value)}"></option>`).join("");
-      updateOperationOptions();
-      if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Use a narrower service / operation filter if the desired value is outside the discovered combinations.");
-    } catch (error) {
-      if (seq === model.prefillSeq) showError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (seq === model.prefillSeq) setButtonLoading(dom.tracesPrefillButton, false);
-    }
-  }
-
-
-  async function ensurePrefillForTextFilters() {
-    const needsDiscovery = String(dom.tracesService?.value || "").trim() || String(dom.tracesOperation?.value || "").trim();
-    if (needsDiscovery && !model.prefillPairs.length) await prefill();
-  }
-
-  async function loadTagKeys() {
-    if (!String(dom.tracesService?.value || "").trim() || !String(dom.tracesOperation?.value || "").trim()) return;
-    await ensurePrefillForTextFilters();
-    const seq = ++model.tagSeq;
-    setButtonLoading(dom.tracesTagsButton, true);
-    showError("");
-    try {
-      const filters = searchFilters({ includeTag: false });
-      delete filters.status;
-      delete filters.limit;
-      const payload = await api.getTraceTags(currentHost(), filters);
-      if (seq !== model.tagSeq) return;
-      model.tagKeys = Array.isArray(payload?.keys) ? payload.keys : [];
-      const keyList = document.getElementById("tracesTagKeyOptions");
-      if (keyList) {
-        const seen = new Set();
-        keyList.innerHTML = model.tagKeys.map((row) => {
-          const scope = String(row?.[0] || "span"), key = String(row?.[1] || "");
-          if (!key) return "";
-          const plainKey = key;
-          const value = seen.has(plainKey) ? `${scope}:${key}` : plainKey;
-          seen.add(plainKey);
-          return `<option value="${esc(value)}"></option>`;
-        }).join("");
+    const run = (async () => {
+      showError("");
+      try {
+        const range = selectedRange();
+        const payload = await api.prefillTraces(currentHost(), range);
+        if (seq !== model.prefillSeq) return;
+        model.prefillPairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
+        updateServiceOptions();
+        updateOperationOptions();
+        if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Use a narrower service / operation filter if the desired value is outside the discovered combinations.");
+      } catch (error) {
+        if (seq === model.prefillSeq) showError(error instanceof Error ? error.message : String(error));
       }
-      await loadTagValues();
-    } catch (error) {
-      if (seq === model.tagSeq) showError(error instanceof Error ? error.message : String(error));
+    })();
+    model.prefillPromise = run;
+    try {
+      await run;
     } finally {
-      if (seq === model.tagSeq) { setButtonLoading(dom.tracesTagsButton, false); updateTagButton(); }
+      if (model.prefillPromise === run) model.prefillPromise = null;
     }
   }
 
-  async function loadTagValues() {
-    await ensurePrefillForTextFilters();
-    const tag = currentTag();
-    const valueList = document.getElementById("tracesTagValueOptions");
-    if (!tag.key) { if (valueList) valueList.innerHTML = ""; return; }
-    const seq = ++model.tagSeq;
-    setButtonLoading(dom.tracesTagsButton, true);
-    try {
-      const filters = searchFilters({ includeTag: false });
-      delete filters.status;
-      delete filters.limit;
-      filters.tag_scope = tag.scope || "any";
-      filters.tag_key = tag.key;
-      const payload = await api.getTraceTags(currentHost(), filters);
-      if (seq !== model.tagSeq) return;
-      if (valueList) {
-        const values = Array.isArray(payload?.values) ? payload.values : [];
-        valueList.innerHTML = values.map((row) => `<option value="${esc(row?.[0] || "")}"></option>`).join("");
-      }
-    } catch (error) {
-      if (seq === model.tagSeq) showError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (seq === model.tagSeq) { setButtonLoading(dom.tracesTagsButton, false); updateTagButton(); }
-    }
+  async function prefillForSelectedRange() {
+    invalidateDiscovery();
+    try { selectedRange(); } catch (_) { return; }
+    await prefill({ force: true });
+  }
+
+  async function ensurePrefillForFilters() {
+    if (!model.prefillPairs.length) await prefill();
   }
 
   function formatCustomRangeLabel() {
@@ -1289,28 +1265,89 @@
     return `${fmt(start)} → ${fmt(end)}`;
   }
 
-  function commitCustomRange() {
+  function refreshCustomRangeLabel() {
     if (String(dom.tracesRangeUnit?.value || "") !== "custom") return;
     const option = Array.from(dom.tracesRangeUnit?.options || []).find((item) => item.value === "custom");
     if (option) option.textContent = formatCustomRangeLabel();
     dom.tracesRangeUnit?.dispatchEvent(new Event("tracepicker-refresh"));
-    try { selectedRange(); } catch (_) { return; }
-    if (dom.tracesCustomRange) dom.tracesCustomRange.hidden = true;
+  }
+
+  function openCustomRangeEditor() {
+    if (String(dom.tracesRangeUnit?.value || "") !== "custom") return;
+    model.customRangeOpen = true;
+    syncRangeControls();
+    requestAnimationFrame(() => dom.tracesRangeStart?.focus?.({ preventScroll: true }));
+  }
+
+  function closeCustomRangeEditor() {
+    model.customRangeOpen = false;
+    syncRangeControls();
+  }
+
+  async function applyCustomRange() {
+    try {
+      selectedRange();
+      refreshCustomRangeLabel();
+      closeCustomRangeEditor();
+      await prefillForSelectedRange();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function loadAnalytics(filters) {
+    if (model.meta?.analytics_enabled !== true) {
+      model.analytics = null;
+      model.analyticsLoading = false;
+      model.analyticsError = "";
+      renderAnalytics();
+      return;
+    }
+    const seq = ++model.analyticsSeq;
+    model.analytics = null;
+    model.analyticsLoading = true;
+    model.analyticsError = "";
+    renderAnalytics();
+    try {
+      const analyticsFilters = { ...filters };
+      delete analyticsFilters.limit;
+      const payload = await api.getTraceAnalytics(currentHost(), analyticsFilters);
+      if (seq !== model.analyticsSeq) return;
+      unpackAnalytics(payload);
+    } catch (error) {
+      if (seq !== model.analyticsSeq) return;
+      model.analytics = null;
+      model.analyticsError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (seq === model.analyticsSeq) {
+        model.analyticsLoading = false;
+        renderAnalytics();
+      }
+    }
   }
 
   async function search() {
     if (!model.meta) await loadMeta().catch(() => null);
-    await ensurePrefillForTextFilters();
+    await ensurePrefillForFilters();
     const seq = ++model.searchSeq;
+    ++model.analyticsSeq;
+    const filters = searchFilters();
     if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
     setView(false);
     setButtonLoading(dom.tracesSearchButton, true);
     showError("");
+    model.analytics = null;
+    model.analyticsLoading = false;
+    model.analyticsError = "";
+    renderAnalytics();
     try {
-      const payload = await api.searchTraces(currentHost(), searchFilters());
+      const payload = await api.searchTraces(currentHost(), filters);
       if (seq !== model.searchSeq) return;
       unpackSearch(payload);
       renderResults();
+      // Search results are intentionally delivered first. Heavy graph analytics
+      // starts only after the trace list has rendered, on its own API route.
+      void loadAnalytics(filters);
     } catch (error) {
       if (seq !== model.searchSeq) return;
       model.traces = [];
@@ -1374,8 +1411,12 @@
     model.meta = null;
     model.traces = [];
     model.analytics = null;
+    model.analyticsLoading = false;
+    model.analyticsError = "";
     model.prefillPairs = [];
-    model.tagKeys = [];
+    model.prefillPromise = null;
+    ++model.prefillSeq;
+    ++model.analyticsSeq;
     model.activeTrace = null;
     model.activeSpanId = null;
     model.openSpanIds.clear();
@@ -1388,7 +1429,10 @@
       await loadMeta();
       const id = traceIdFromPath();
       if (id) await loadTrace(id, { push: false });
-      else await search();
+      else {
+        await prefill();
+        await search();
+      }
     } catch (_) {}
   }
 
@@ -1400,16 +1444,22 @@
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
     dom.tracesSort?.addEventListener("change", renderResults);
-    dom.tracesPrefillButton?.addEventListener("click", prefill);
-    dom.tracesTagsButton?.addEventListener("click", loadTagKeys);
-    dom.tracesTagKey?.addEventListener("change", () => {
-      if (String(dom.tracesService?.value || "").trim() && String(dom.tracesOperation?.value || "").trim()) loadTagValues();
+    dom.tracesRangeUnit?.addEventListener("change", () => {
+      const custom = String(dom.tracesRangeUnit?.value || "") === "custom";
+      model.customRangeOpen = custom;
+      syncRangeControls();
+      refreshCustomRangeLabel();
+      if (custom) openCustomRangeEditor();
+      else void prefillForSelectedRange();
     });
-    dom.tracesRangeUnit?.addEventListener("change", () => { syncRangeControls(); invalidateDiscovery(); });
-    dom.tracesRangeStart?.addEventListener("change", () => invalidateDiscovery());
-    dom.tracesRangeEnd?.addEventListener("change", () => invalidateDiscovery());
-    dom.tracesService?.addEventListener("input", () => { clearTagSelection(); updateOperationOptions(); });
-    dom.tracesOperation?.addEventListener("input", () => { clearTagSelection(); updateTagButton(); });
+    const refreshCustomInputs = () => { syncCustomRangeBounds(); refreshCustomRangeLabel(); };
+    dom.tracesRangeStart?.addEventListener("input", refreshCustomInputs);
+    dom.tracesRangeStart?.addEventListener("change", refreshCustomInputs);
+    dom.tracesRangeEnd?.addEventListener("input", refreshCustomInputs);
+    dom.tracesRangeEnd?.addEventListener("change", refreshCustomInputs);
+    dom.tracesCustomRangeApply?.addEventListener("click", () => { void applyCustomRange(); });
+    dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
+    dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));
     dom.traceSpanSearch?.addEventListener("input", renderWaterfall);
     dom.traceSpanSearch?.addEventListener("keydown", (event) => {

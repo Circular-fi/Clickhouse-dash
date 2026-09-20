@@ -101,50 +101,51 @@
               </select>
             </div>
             <div id="tracesCustomRange" class="traceCustomRange" hidden>
-              <input id="tracesRangeStart" type="datetime-local" step="1" aria-label="Range start" />
-              <span>→</span>
-              <input id="tracesRangeEnd" type="datetime-local" step="1" aria-label="Range end" />
-            </div>
-          </div>
-
-          <button id="tracesPrefillButton" class="button traceActionButton" type="button" title="Load exact service / operation combinations for this time range">
-            <span class="traceButtonSpinner" aria-hidden="true"></span><span>Prefill</span>
-          </button>
-
-          <label class="traceSearchField traceSearchField--service">
-            <input id="tracesService" list="tracesServiceOptions" type="text" placeholder="Service" aria-label="Service" autocomplete="off" />
-            <datalist id="tracesServiceOptions"></datalist>
-          </label>
-
-          <label class="traceSearchField traceSearchField--operation">
-            <input id="tracesOperation" list="tracesOperationOptions" type="text" placeholder="Operation" aria-label="Operation" autocomplete="off" />
-            <datalist id="tracesOperationOptions"></datalist>
-          </label>
-
-          <div class="traceTagSearch">
-            <div class="traceTagSearch__inputs">
-              <input id="tracesTagKey" list="tracesTagKeyOptions" type="text" placeholder="Tag" aria-label="Tag key" autocomplete="off" />
-              <datalist id="tracesTagKeyOptions"></datalist>
-              <input id="tracesTagValue" list="tracesTagValueOptions" type="text" placeholder="Value" aria-label="Tag value" autocomplete="off" />
-              <datalist id="tracesTagValueOptions"></datalist>
-              <button id="tracesTagsButton" class="traceMiniButton" type="button" disabled title="Load tags after selecting service and operation"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Load tags</span></button>
+              <label class="traceCustomRange__field">
+                <span>From</span>
+                <input id="tracesRangeStart" type="datetime-local" step="1" aria-label="Range start" />
+              </label>
+              <label class="traceCustomRange__field">
+                <span>To</span>
+                <input id="tracesRangeEnd" type="datetime-local" step="1" aria-label="Range end" />
+              </label>
+              <div class="traceCustomRange__actions">
+                <button id="tracesCustomRangeApply" class="button button--primary traceCustomRange__apply" type="button">Apply time range</button>
+              </div>
             </div>
           </div>
 
           <div class="traceSearchField traceSearchField--status">
             <select id="tracesStatus" data-field-label="Status" aria-label="Status"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
-            <button class="traceInfoButton traceInfoButton--inline" type="button" aria-label="OpenTelemetry status information" title="OpenTelemetry span status values are UNSET, OK, and ERROR. UNSET is the default; OK means explicitly successful.">i</button>
+          </div>
+
+          <label class="traceSearchField traceSearchField--service">
+            <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service">
+              <option value="" selected>ALL</option>
+            </select>
+          </label>
+
+          <label class="traceSearchField traceSearchField--operation">
+            <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation">
+              <option value="" selected>ALL</option>
+            </select>
+          </label>
+
+          <div class="traceTagSearch">
+            <div class="traceTagSearch__inputs">
+              <input id="tracesTagKey" type="text" placeholder="Tag" aria-label="Tag" autocomplete="off" spellcheck="false" />
+              <input id="tracesTagValue" type="text" placeholder="Value" aria-label="Value" autocomplete="off" spellcheck="false" />
+            </div>
           </div>
 
           <label class="traceSearchField traceSearchField--limit">
-            <select id="tracesLimit" data-field-label="Results" aria-label="Results"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option><option value="500">500</option></select>
+            <select id="tracesLimit" data-field-label="Results" aria-label="Results"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250" hidden disabled>250</option><option value="500" hidden disabled>500</option></select>
           </label>
 
           <button id="tracesSearchButton" class="button button--primary traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
-          <span id="tracesSourceMeta" class="tracesSourceMeta traceSearchBar__source">Loading source…</span>
         </form>
 
-        <section class="traceAnalyticsGrid" aria-label="Trace analytics">
+        <section id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden>
           <article class="traceAnalyticsCard">
             <header><strong>Matching traces</strong><span id="traceServiceChartMeta">traces over time</span></header>
             <div id="traceServiceChart" class="traceChart"><div class="tracesEmpty">Search to load matching trace activity.</div></div>

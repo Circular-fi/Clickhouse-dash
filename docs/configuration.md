@@ -59,6 +59,7 @@ explorer {
 
 traces {
   enabled                  = false
+  analytics                = false
   database                 = "otel"
   table                    = "otel_traces"
   trace_index_table        = "otel_traces_trace_id_ts"
@@ -101,7 +102,9 @@ Explorer availability is derived from the enabled surfaces; there is no separate
 
 `explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
 
-The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus the optional `otel_traces_trace_id_ts` lookup table). Trace queries always follow the host selected in the normal host picker and always use that host's `system_uri`; there is no per-trace host or credential override. `default_lookback_minutes` and `max_lookback_minutes` bound search/filter queries only. Direct `/traces/<trace-id>` lookups are not lookback-limited: they first resolve the trace time range through `trace_index_table` and, if that auxiliary table is unavailable, fall back to an exact all-history TraceId lookup before reading the bounded trace window.
+The Trace Explorer is disabled by default. Its table defaults match the OpenTelemetry Collector ClickHouse exporter (`otel_traces` plus `otel_traces_trace_id_ts`). Trace queries always follow the host selected in the normal host picker and always use that host's `system_uri`; there is no per-trace host or credential override. `default_lookback_minutes` and `max_lookback_minutes` bound search/filter queries only. Direct `/traces/<trace-id>` lookups are not lookback-limited and require `trace_index_table`; ChDash resolves the trace time range there and never scans all history in `otel_traces` to recover a missing TraceId.
+
+`traces.analytics` defaults to `false`. Set it to `true` to enable the expensive matching-trace and duration-percentile graphs. Search results use `/api/traces/search`; graph data uses the independent `/api/traces/analytics` route, so loading the graph never blocks the trace-result response.
 
 `traces.service_allowlist` is a backend-enforced `ServiceName` whitelist. The default `service_allowlist = ["*"]` allows all services. Entries without `*` are exact names; `test_*` allows every service whose name starts with `test_`; `*_worker` allows suffix matches; and multiple `*` wildcards are accepted. An explicitly empty list denies every service. The whitelist is applied to trace search, cards, and direct TraceId loads, so `/traces/<trace-id>` cannot be used to read spans from a non-allowed service. When a trace crosses allowed and denied services, only allowed spans are returned; hidden parents may therefore make an allowed child appear as a visible root.
 

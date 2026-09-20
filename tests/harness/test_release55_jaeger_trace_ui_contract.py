@@ -14,10 +14,8 @@ def test_trace_search_layout_tracks_jaeger_structure():
 
     for token in (
         'id="tracesRangeUnit"',
-        'id="tracesPrefillButton"',
         'id="tracesService"',
         'id="tracesOperation"',
-        'id="tracesTagsButton"',
         'id="tracesTagKey"',
         'id="tracesTagValue"',
         'id="tracesStatus"',
@@ -32,6 +30,7 @@ def test_trace_search_layout_tracks_jaeger_structure():
         assert token in html
 
     assert 'Trace search dashboard' in css
+    assert 'id="tracesPrefillButton"' not in html
     assert 'renderServiceChart' in js
     assert 'renderDurationChart' in js
     assert 'buildTree' in js

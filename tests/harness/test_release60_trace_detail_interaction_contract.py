@@ -36,6 +36,8 @@ def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     assert '.traceAttributeTable__row' in css
     assert '--trace-depth-x' in css
 
-def test_combo_selection_closes_menu():
+def test_selection_picker_closes_menu():
     js = read("src/static/app_traces.js")
-    assert 'if (menu) menu.hidden = true;' in js
+    assert 'select.dispatchEvent(new Event("change", { bubbles: true }))' in js
+    assert 'closeTracePickers();' in js
+    assert 'enhanceTraceCombo' not in js

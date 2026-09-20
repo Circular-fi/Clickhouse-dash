@@ -106,6 +106,8 @@ ALTER TABLE otel.otel_traces_trace_id_ts
 
 The materialization is asynchronous by default; use `SETTINGS mutations_sync=1` when you need the command to wait. For very large historical tables, materialize partition-by-partition. See [`docs/traces.md`](docs/traces.md) for the Trace Explorer schema, access-control, search-path, and projection details.
 
+Trace search results and graph analytics use separate routes. Trace analytics are disabled by default. Set `traces.analytics = true` to enable the matching-trace and duration-percentile graph queries without affecting trace search. Service/operation prefill refreshes automatically whenever the selected time range changes. Tag filtering is direct and exact: enter an exact tag key and exact value; the dashboard does not run tag discovery or LIKE/ILIKE matching.
+
 ## Massive downloads
 
 The Run menu can stream complete CSV or JSON exports directly from ClickHouse

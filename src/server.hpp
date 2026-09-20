@@ -55,6 +55,7 @@ struct TraceFeatureSettings {
 
 struct TraceSettings {
   bool enabled = false;
+  bool analytics = false;
   std::string database = "otel";
   std::string table = "otel_traces";
   std::string trace_index_table = "otel_traces_trace_id_ts";
@@ -181,8 +182,8 @@ private:
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_analytics(const httplib::Request& req, httplib::Response& res);
   void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
-  void handle_traces_tags(const httplib::Request& req, httplib::Response& res);
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();

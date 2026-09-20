@@ -35,8 +35,10 @@ def test_search_controls_embed_field_names_and_use_theme_colors():
     css = read("src/static/style.css")
     assert '<span class="traceFieldLabel">' not in html
     assert 'data-field-label="Time range"' in html
-    assert 'placeholder="Service"' in html
-    assert 'placeholder="Operation"' in html
+    assert 'data-field-label="Service"' in html
+    assert 'data-field-label="Operation"' in html
+    assert '<input id="tracesService"' not in html
+    assert '<input id="tracesOperation"' not in html
     assert 'id="tracesTagKey"' in html and 'placeholder="Tag"' in html
     assert 'data-field-label="Status"' in html
     assert 'data-field-label="Results"' in html

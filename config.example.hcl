@@ -66,6 +66,7 @@ explorer {
 
 traces {
   enabled                  = false
+  analytics                = false
   database                 = "otel"
   table                    = "otel_traces"
   trace_index_table        = "otel_traces_trace_id_ts"

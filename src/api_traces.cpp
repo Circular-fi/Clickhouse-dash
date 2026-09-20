@@ -407,6 +407,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
   w.Key("enabled"); w.Bool(true);
+  w.Key("analytics_enabled"); w.Bool(cfg_.traces.analytics);
   w.Key("source_host_id"); w.String(source_host_id.c_str());
   w.Key("database"); w.String(cfg_.traces.database.c_str());
   w.Key("table"); w.String(cfg_.traces.table.c_str());
@@ -502,124 +503,6 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   res.set_content(sb.GetString(), "application/json");
 }
 
-void Server::handle_traces_tags(const httplib::Request& req, httplib::Response& res) {
-  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
-
-  const auto services = repeated_param_values(req, "service");
-  const auto operations = repeated_param_values(req, "operation");
-  if (services.empty() || operations.empty()) {
-    return json_error(res, 400, "trace_tags_need_service_operation", "Select both service and operation before loading tags.");
-  }
-
-  int64_t start_ms = 0, end_ms = 0;
-  std::string range_error;
-  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
-    return json_error(res, 400, "invalid_trace_range", range_error);
-  }
-
-  std::string source_host_id;
-  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
-  std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  bool span_map = false, resource_map = false;
-  trace_attribute_maps(*client, cfg_.traces, &span_map, &resource_map);
-  if (!span_map && !resource_map) {
-    return json_error(res, 400, "trace_tag_search_unsupported", "Tag discovery currently requires Map(String, String) OpenTelemetry attributes.");
-  }
-
-  const std::string filters = " AND " + exact_values_predicate("ServiceName", services) +
-      " AND " + exact_values_predicate("SpanName", operations);
-
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
-  const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
-  const std::string tag_key = req.has_param("tag_key") ? req.get_param_value("tag_key") : std::string{};
-  const std::string tag_scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
-
-  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
-
-  try {
-    if (tag_key.empty()) {
-      struct KeyRow { std::string scope, key; uint64_t count = 0; };
-      std::vector<KeyRow> rows;
-      auto load_keys = [&](const char* scope, const char* column) {
-        const std::string sql =
-            "SELECT toString(tag_key) FROM " + table +
-            " ARRAY JOIN mapKeys(" + std::string(column) + ") AS tag_key PREWHERE " + time_predicate +
-            " WHERE " + visibility + filters + " LIMIT 1 BY tag_key LIMIT 500";
-        client->Select(sql, [&](const clickhouse::Block& block) {
-          for (size_t row = 0; row < block.GetRowCount(); ++row) {
-            rows.push_back(KeyRow{scope, ch_block_text_at(block, 0, row), 1});
-          }
-        });
-      };
-      if (span_map && cfg_.traces.features.span_attributes) load_keys("span", "SpanAttributes");
-      if (resource_map && cfg_.traces.features.resource_attributes) load_keys("resource", "ResourceAttributes");
-      std::sort(rows.begin(), rows.end(), [](const KeyRow& a, const KeyRow& b) {
-        if (a.scope != b.scope) return a.scope < b.scope;
-        return a.key < b.key;
-      });
-      w.Key("keys"); w.StartArray();
-      for (const auto& row : rows) {
-        w.StartArray(); w.String(row.scope.c_str()); w.String(row.key.c_str()); w.Uint64(row.count); w.EndArray();
-      }
-      w.EndArray();
-    } else {
-      if (tag_scope != "span" && tag_scope != "resource" && tag_scope != "any") {
-        return json_error(res, 400, "invalid_tag_scope", "tag_scope must be span, resource, or any when tag_key is provided.");
-      }
-      if ((tag_scope == "span" && !span_map) || (tag_scope == "resource" && !resource_map) ||
-          (tag_scope == "any" && !span_map && !resource_map)) {
-        return json_error(res, 400, "trace_tag_search_unsupported", "Selected attribute scope is not stored as Map(String, String).");
-      }
-      struct ValueRow { std::string value; uint64_t count = 0; };
-      std::vector<ValueRow> rows;
-      auto load_values = [&](const char* column) {
-        const std::string sql =
-            "SELECT toString(" + std::string(column) + "[" + quote_string(tag_key) + "]) AS tag_value FROM " + table +
-            " PREWHERE " + time_predicate + " WHERE " + visibility + filters +
-            " AND mapContains(" + std::string(column) + ", " + quote_string(tag_key) + ") LIMIT 1 BY tag_value LIMIT 1000";
-        client->Select(sql, [&](const clickhouse::Block& block) {
-          for (size_t row = 0; row < block.GetRowCount(); ++row) {
-            rows.push_back(ValueRow{ch_block_text_at(block, 0, row), 1});
-          }
-        });
-      };
-      if ((tag_scope == "span" || tag_scope == "any") && span_map) load_values("SpanAttributes");
-      if ((tag_scope == "resource" || tag_scope == "any") && resource_map) load_values("ResourceAttributes");
-      std::map<std::string, uint64_t> merged;
-      for (const auto& row : rows) merged[row.value] = 1;
-      rows.clear();
-      rows.reserve(merged.size());
-      for (const auto& item : merged) rows.push_back(ValueRow{item.first, item.second});
-      std::sort(rows.begin(), rows.end(), [](const ValueRow& a, const ValueRow& b) {
-        return a.value < b.value;
-      });
-      if (rows.size() > 1000) rows.resize(1000);
-      w.Key("scope"); w.String(tag_scope.c_str());
-      w.Key("key"); w.String(tag_key.c_str());
-      w.Key("values"); w.StartArray();
-      for (const auto& row : rows) {
-        w.StartArray(); w.String(row.value.c_str()); w.Uint64(row.count); w.EndArray();
-      }
-      w.EndArray();
-    }
-  } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_tags_failed", e.what());
-  }
-
-  w.EndObject();
-  res.status = 200;
-  res.set_header("Cache-Control", "private, no-store");
-  res.set_content(sb.GetString(), "application/json");
-}
-
 void Server::handle_traces_search(const httplib::Request& req, httplib::Response& res) {
   const auto request_started = std::chrono::steady_clock::now();
   if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
@@ -670,8 +553,6 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
   const bool needs_span_match = has_candidate_filters || visibility != "1";
 
-  // Candidate selection is an existence test, not an aggregation. LIMIT 1 BY avoids
-  // building aggregate states for every matching trace before the result set is bounded.
   const std::string candidate_cte = has_candidate_filters
       ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
         " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId)"
@@ -699,12 +580,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     uint64_t duration_ns = 0, spans = 0, errors = 0;
     std::vector<ServiceStat> service_stats;
   };
-  struct TraceCountPoint { int64_t bucket_ms = 0; uint64_t count = 0; };
-  struct QuantilePoint { int64_t bucket_ms = 0; uint64_t p50 = 0, p90 = 0, p95 = 0, p99 = 0; };
-
   std::vector<Row> rows;
-  std::vector<TraceCountPoint> trace_counts;
-  std::vector<QuantilePoint> quantiles;
 
   auto read_summary = [&](const std::string& sql) {
     client->Select(sql, [&](const clickhouse::Block& block) {
@@ -743,19 +619,6 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       "toString(" + duration_expr + "), toString(count()), toString(countIf(StatusCode = 'Error')), "
       "arrayStringConcat(groupArray(concat(toString(ServiceName), char(30), toString(StatusCode))), char(31)) ";
 
-  const int bucket_seconds = choose_trace_bucket_seconds(end_ms - start_ms);
-  int quantile_bucket_seconds = choose_trace_quantile_bucket_seconds(end_ms - start_ms);
-  // Let one quantile-bucket query feed both charts. A quantile bucket must divide the
-  // count bucket exactly so its count can be rolled up losslessly in C++.
-  if (bucket_seconds % quantile_bucket_seconds != 0) {
-    quantile_bucket_seconds = std::max(60, std::gcd(bucket_seconds, quantile_bucket_seconds));
-  }
-  const int64_t bucket_ms = static_cast<int64_t>(bucket_seconds) * 1000;
-  const int64_t quantile_bucket_ms = static_cast<int64_t>(quantile_bucket_seconds) * 1000;
-  const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
-  const int64_t analytics_start_ms = align_buckets ? (start_ms / bucket_ms) * bucket_ms : start_ms;
-  const int64_t analytics_end_ms = align_buckets ? ((end_ms + bucket_ms - 1) / bucket_ms) * bucket_ms : end_ms;
-
   auto trace_id_list_sql = [&](const std::vector<std::string>& ids) {
     std::string out = "(";
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -766,36 +629,10 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     return out;
   };
 
-  auto read_analytics = [&](const std::string& sql) {
-    std::map<int64_t, uint64_t> count_by_bucket;
-    client->Select(sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
-        const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
-        const int64_t count_bucket_ms = (q_bucket_ms / bucket_ms) * bucket_ms;
-        count_by_bucket[count_bucket_ms] += count;
-        quantiles.push_back(QuantilePoint{
-            q_bucket_ms,
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row))),
-            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)))});
-      }
-    });
-    for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
-  };
-
   uint64_t candidate_query_ms = 0;
   uint64_t summary_query_ms = 0;
-  uint64_t analytics_query_ms = 0;
   bool used_trace_index_fast_path = false;
   std::string search_path = "span_aggregation";
-  std::string quantile_source = "span_bounds";
-
-  // Trace-index-first search is valid whenever trace duration itself is not a filter.
-  // The index drives recency. For filtered searches we test small batches of recent
-  // trace IDs against span predicates, stop as soon as enough traces match, and only
-  // then aggregate the selected trace spans.
   const bool index_fast_path_eligible = !has_duration_filters && !cfg_.traces.trace_index_table.empty();
 
   if (index_fast_path_eligible) {
@@ -814,9 +651,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
             " PREWHERE " + index_time_predicate +
             " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(limit);
         client->Select(candidate_sql, [&](const clickhouse::Block& block) {
-          for (size_t row = 0; row < block.GetRowCount(); ++row) {
-            selected_ids.push_back(ch_block_text_at(block, 0, row));
-          }
+          for (size_t row = 0; row < block.GetRowCount(); ++row) selected_ids.push_back(ch_block_text_at(block, 0, row));
         });
         search_path = "trace_index";
       } else {
@@ -833,9 +668,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
               " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(kCandidateBatch) +
               " OFFSET " + std::to_string(offset);
           client->Select(candidate_sql, [&](const clickhouse::Block& block) {
-            for (size_t row = 0; row < block.GetRowCount(); ++row) {
-              batch_ids.push_back(ch_block_text_at(block, 0, row));
-            }
+            for (size_t row = 0; row < block.GetRowCount(); ++row) batch_ids.push_back(ch_block_text_at(block, 0, row));
           });
 
           if (batch_ids.empty()) {
@@ -851,9 +684,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
               " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_list +
               " LIMIT 1 BY TraceId";
           client->Select(match_sql, [&](const clickhouse::Block& block) {
-            for (size_t row = 0; row < block.GetRowCount(); ++row) {
-              matching_ids.insert(ch_block_text_at(block, 0, row));
-            }
+            for (size_t row = 0; row < block.GetRowCount(); ++row) matching_ids.insert(ch_block_text_at(block, 0, row));
           });
 
           for (const auto& id : batch_ids) {
@@ -869,9 +700,6 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
           offset += kCandidateBatch;
         }
 
-        // Rare filters should remain exact. If 64k recent trace candidates were not
-        // enough and the time range still has more data, fall back to the legacy exact
-        // span aggregation instead of returning an incomplete result set.
         if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && offset >= kCandidateScanCap) {
           throw std::runtime_error("filtered trace-index candidate scan cap reached");
         }
@@ -893,41 +721,11 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
             std::chrono::steady_clock::now() - summary_started).count());
       }
 
-      const auto analytics_started = std::chrono::steady_clock::now();
-      const std::string trace_bounds_cte = needs_span_match
-          ? "WITH matching_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
-            " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId), "
-            "trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
-            " PREWHERE " + index_time_predicate +
-            " WHERE TraceId IN (SELECT TraceId FROM matching_ids) LIMIT 1 BY TraceId) "
-          : "WITH trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
-            " PREWHERE " + index_time_predicate + " LIMIT 1 BY TraceId) ";
-
-      const std::string index_duration_expr =
-          "greatest(toInt64(0), toInt64(toUnixTimestamp64Nano(toDateTime64(trace_end, 9))) - "
-          "toInt64(toUnixTimestamp64Nano(toDateTime64(trace_start, 9))))";
-      const std::string analytics_sql = trace_bounds_cte +
-          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(toDateTime64(trace_start, 9), "
-          "toIntervalSecond(" + std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, "
-          "toString(count()), "
-          "toString(toUInt64(quantileTDigest(0.50)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.90)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.95)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.99)(" + index_duration_expr + "))) "
-          "FROM trace_bounds GROUP BY bucket_ms ORDER BY bucket_ms";
-      read_analytics(analytics_sql);
-      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - analytics_started).count());
-
       used_trace_index_fast_path = true;
-      quantile_source = "trace_index_bounds";
     } catch (...) {
       rows.clear();
-      trace_counts.clear();
-      quantiles.clear();
       candidate_query_ms = 0;
       summary_query_ms = 0;
-      analytics_query_ms = 0;
       search_path = "span_aggregation";
     }
   }
@@ -944,26 +742,6 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
           std::chrono::steady_clock::now() - summary_started).count());
     } catch (const std::exception& e) {
       return json_error(res, 503, "trace_search_failed", e.what());
-    }
-
-    try {
-      const auto analytics_started = std::chrono::steady_clock::now();
-      const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility + candidate_where +
-          " GROUP BY TraceId" + having;
-      const std::string with_candidate = has_candidate_filters ? "WITH " + candidate_cte + ", " : "WITH ";
-      const std::string trace_durations_cte = with_candidate +
-          "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + duration_expr + " AS duration_ns" + trace_scope + ") ";
-      const std::string analytics_sql = trace_durations_cte +
-          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(trace_start, toIntervalSecond(" +
-          std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, toString(count()), "
-          "toString(toUInt64(quantileTDigest(0.50)(duration_ns))), toString(toUInt64(quantileTDigest(0.90)(duration_ns))), "
-          "toString(toUInt64(quantileTDigest(0.95)(duration_ns))), toString(toUInt64(quantileTDigest(0.99)(duration_ns))) "
-          "FROM trace_durations GROUP BY bucket_ms ORDER BY bucket_ms";
-      read_analytics(analytics_sql);
-      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - analytics_started).count());
-    } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_analytics_failed", e.what());
     }
   }
 
@@ -988,19 +766,14 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("v"); w.Int(2);
+  w.Key("v"); w.Int(3);
   w.Key("source_host_id"); w.String(source_host_id.c_str());
   w.Key("search_path"); w.String(search_path.c_str());
-  w.Key("duration_quantiles_source"); w.String(quantile_source.c_str());
   w.Key("timing_ms"); w.StartObject();
   w.Key("candidates"); w.Uint64(candidate_query_ms);
   w.Key("summary"); w.Uint64(summary_query_ms);
-  w.Key("analytics"); w.Uint64(analytics_query_ms);
   w.Key("total"); w.Uint64(total_ms);
   w.EndObject();
-  w.Key("range"); w.StartArray(); w.Int64(analytics_start_ms); w.Int64(analytics_end_ms); w.EndArray();
-  w.Key("bucket_ms"); w.Int64(bucket_ms);
-  w.Key("quantile_bucket_ms"); w.Int64(quantile_bucket_ms);
   w.Key("services"); write_string_array(w, service_dict);
   w.Key("columns"); w.StartArray();
   for (const char* col : {"trace_id", "start_ms", "root_operation", "root_service", "duration_ns", "span_count", "error_count", "service_stats"}) w.String(col);
@@ -1018,13 +791,209 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     w.EndArray();
   }
   w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
 
+void Server::handle_traces_analytics(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+  if (!cfg_.traces.analytics) return json_error(res, 404, "trace_analytics_disabled", "Trace analytics are disabled by configuration.");
+
+  std::string disabled_message;
+  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
+
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+
+  int64_t start_ms = 0, end_ms = 0;
+  std::string range_error;
+  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+    return json_error(res, 400, "invalid_trace_range", range_error);
+  }
+
+  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
+    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+  }
+
+  std::string validation_error;
+  const std::string span_filters = trace_span_filters(cfg_.traces, req, &validation_error);
+  if (!validation_error.empty()) return json_error(res, 400, "invalid_trace_filter", validation_error);
+
+  std::string error;
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  if (req.has_param("tag_key") && !req.get_param_value("tag_key").empty()) {
+    bool span_map = false, resource_map = false;
+    trace_attribute_maps(*client, cfg_.traces, &span_map, &resource_map);
+    const std::string scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
+    if ((scope == "span" && !span_map) || (scope == "resource" && !resource_map) ||
+        (scope == "any" && !span_map && !resource_map)) {
+      return json_error(res, 400, "trace_tag_search_unsupported", "Selected attribute scope is not stored as Map(String, String).");
+    }
+  }
+
+  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const bool has_candidate_filters = !span_filters.empty();
+  const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
+  const bool needs_span_match = has_candidate_filters || visibility != "1";
+
+  const std::string candidate_cte = has_candidate_filters
+      ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
+        " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId)"
+      : std::string{};
+  const std::string candidate_where = has_candidate_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
+
+  const std::string duration_expr =
+      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
+      "toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
+  std::string having;
+  if (min_duration_ms > 0.0) {
+    const uint64_t ns = static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0));
+    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " >= " + std::to_string(ns);
+  }
+  if (max_duration_ms > 0.0) {
+    const uint64_t ns = static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0));
+    having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
+  }
+
+  struct TraceCountPoint { int64_t bucket_ms = 0; uint64_t count = 0; };
+  struct QuantilePoint { int64_t bucket_ms = 0; uint64_t p50 = 0, p90 = 0, p95 = 0, p99 = 0; };
+  std::vector<TraceCountPoint> trace_counts;
+  std::vector<QuantilePoint> quantiles;
+
+  const int bucket_seconds = choose_trace_bucket_seconds(end_ms - start_ms);
+  int quantile_bucket_seconds = choose_trace_quantile_bucket_seconds(end_ms - start_ms);
+  if (bucket_seconds % quantile_bucket_seconds != 0) {
+    quantile_bucket_seconds = std::max(60, std::gcd(bucket_seconds, quantile_bucket_seconds));
+  }
+  const int64_t bucket_ms = static_cast<int64_t>(bucket_seconds) * 1000;
+  const int64_t quantile_bucket_ms = static_cast<int64_t>(quantile_bucket_seconds) * 1000;
+  const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
+  const int64_t analytics_start_ms = align_buckets ? (start_ms / bucket_ms) * bucket_ms : start_ms;
+  const int64_t analytics_end_ms = align_buckets ? ((end_ms + bucket_ms - 1) / bucket_ms) * bucket_ms : end_ms;
+
+  auto read_analytics = [&](const std::string& sql) {
+    std::map<int64_t, uint64_t> count_by_bucket;
+    client->Select(sql, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
+        const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
+        const int64_t count_bucket_ms = (q_bucket_ms / bucket_ms) * bucket_ms;
+        count_by_bucket[count_bucket_ms] += count;
+        quantiles.push_back(QuantilePoint{
+            q_bucket_ms,
+            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row))),
+            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row))),
+            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row))),
+            static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)))});
+      }
+    });
+    for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
+  };
+
+  uint64_t analytics_query_ms = 0;
+  bool used_trace_index_fast_path = false;
+  std::string analytics_path = "span_aggregation";
+  std::string quantile_source = "span_bounds";
+  const bool index_fast_path_eligible = !has_duration_filters && !cfg_.traces.trace_index_table.empty();
+
+  if (index_fast_path_eligible) {
+    try {
+      const auto analytics_started = std::chrono::steady_clock::now();
+      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+      const std::string index_time_predicate =
+          "Start >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND "
+          "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")";
+      const std::string trace_bounds_cte = needs_span_match
+          ? "WITH matching_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
+            " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId), "
+            "trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
+            " PREWHERE " + index_time_predicate +
+            " WHERE TraceId IN (SELECT TraceId FROM matching_ids) LIMIT 1 BY TraceId) "
+          : "WITH trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
+            " PREWHERE " + index_time_predicate + " LIMIT 1 BY TraceId) ";
+
+      const std::string index_duration_expr =
+          "greatest(toInt64(0), toInt64(toUnixTimestamp64Nano(toDateTime64(trace_end, 9))) - "
+          "toInt64(toUnixTimestamp64Nano(toDateTime64(trace_start, 9))))";
+      const std::string analytics_sql = trace_bounds_cte +
+          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(toDateTime64(trace_start, 9), "
+          "toIntervalSecond(" + std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, "
+          "toString(count()), "
+          "toString(toUInt64(quantileTDigest(0.50)(" + index_duration_expr + "))), "
+          "toString(toUInt64(quantileTDigest(0.90)(" + index_duration_expr + "))), "
+          "toString(toUInt64(quantileTDigest(0.95)(" + index_duration_expr + "))), "
+          "toString(toUInt64(quantileTDigest(0.99)(" + index_duration_expr + "))) "
+          "FROM trace_bounds GROUP BY bucket_ms ORDER BY bucket_ms";
+      read_analytics(analytics_sql);
+      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - analytics_started).count());
+      used_trace_index_fast_path = true;
+      analytics_path = "trace_index";
+      quantile_source = "trace_index_bounds";
+    } catch (...) {
+      trace_counts.clear();
+      quantiles.clear();
+      analytics_query_ms = 0;
+      analytics_path = "span_aggregation";
+    }
+  }
+
+  if (!used_trace_index_fast_path) {
+    try {
+      const auto analytics_started = std::chrono::steady_clock::now();
+      const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility + candidate_where +
+          " GROUP BY TraceId" + having;
+      const std::string with_candidate = has_candidate_filters ? "WITH " + candidate_cte + ", " : "WITH ";
+      const std::string trace_durations_cte = with_candidate +
+          "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + duration_expr + " AS duration_ns" + trace_scope + ") ";
+      const std::string analytics_sql = trace_durations_cte +
+          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(trace_start, toIntervalSecond(" +
+          std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, toString(count()), "
+          "toString(toUInt64(quantileTDigest(0.50)(duration_ns))), toString(toUInt64(quantileTDigest(0.90)(duration_ns))), "
+          "toString(toUInt64(quantileTDigest(0.95)(duration_ns))), toString(toUInt64(quantileTDigest(0.99)(duration_ns))) "
+          "FROM trace_durations GROUP BY bucket_ms ORDER BY bucket_ms";
+      read_analytics(analytics_sql);
+      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - analytics_started).count());
+    } catch (const std::exception& e) {
+      return json_error(res, 503, "trace_analytics_failed", e.what());
+    }
+  }
+
+  const uint64_t total_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - request_started).count());
+
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("analytics_path"); w.String(analytics_path.c_str());
+  w.Key("duration_quantiles_source"); w.String(quantile_source.c_str());
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("analytics"); w.Uint64(analytics_query_ms);
+  w.Key("total"); w.Uint64(total_ms);
+  w.EndObject();
+  w.Key("range"); w.StartArray(); w.Int64(analytics_start_ms); w.Int64(analytics_end_ms); w.EndArray();
+  w.Key("bucket_ms"); w.Int64(bucket_ms);
+  w.Key("quantile_bucket_ms"); w.Int64(quantile_bucket_ms);
   w.Key("trace_count_chart"); w.StartArray();
   for (const auto& point : trace_counts) {
     w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.count); w.EndArray();
   }
   w.EndArray();
-
   w.Key("duration_quantiles"); w.StartArray();
   for (const auto& point : quantiles) {
     w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.p50); w.Uint64(point.p90); w.Uint64(point.p95); w.Uint64(point.p99); w.EndArray();

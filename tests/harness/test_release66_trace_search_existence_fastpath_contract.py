@@ -6,19 +6,21 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 
-def test_trace_discovery_uses_existence_instead_of_counting_every_span():
+def test_trace_prefill_uses_existence_and_tag_discovery_is_removed():
     cpp = read("src/api_traces.cpp")
-    prefill = cpp[cpp.index("void Server::handle_traces_prefill"):cpp.index("void Server::handle_traces_tags")]
+    server = read("src/server.cpp")
+    api = read("src/static/app_api.js")
+    prefill = cpp[cpp.index("void Server::handle_traces_prefill"):cpp.index("void Server::handle_traces_search")]
     assert "LIMIT 1 BY ServiceName, SpanName LIMIT" in prefill
     assert "GROUP BY ServiceName, SpanName" not in prefill
-    tags = cpp[cpp.index("void Server::handle_traces_tags"):cpp.index("void Server::handle_traces_search")]
-    assert "LIMIT 1 BY tag_key LIMIT 500" in tags
-    assert "LIMIT 1 BY tag_value LIMIT 1000" in tags
+    assert "handle_traces_tags" not in cpp
+    assert '/api/traces/tags' not in server
+    assert "getTraceTags" not in api
 
 
 def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     cpp = read("src/api_traces.cpp")
-    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_trace_detail")]
+    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
     assert "kCandidateBatch = 1000" in search
     assert "ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT" in search
     assert "OFFSET " in search
@@ -27,14 +29,17 @@ def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     assert '" WHERE " + visibility + " AND TraceId IN " + trace_id_list' in search
 
 
-def test_trace_analytics_deduplicates_by_existence_and_runs_one_quantile_rollup():
+def test_trace_analytics_is_separate_and_deduplicates_by_existence():
     cpp = read("src/api_traces.cpp")
-    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_trace_detail")]
-    assert "matching_ids AS (SELECT TraceId" in search
-    assert "LIMIT 1 BY TraceId), " in search
-    assert "read_analytics(analytics_sql)" in search
-    assert "count_by_bucket" in search
-    assert "std::gcd(bucket_seconds, quantile_bucket_seconds)" in search
+    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
+    analytics = cpp[cpp.index("void Server::handle_traces_analytics"):cpp.index("void Server::handle_trace_detail")]
+    assert "read_analytics(analytics_sql)" not in search
+    assert 'w.Key("trace_count_chart")' not in search
+    assert "matching_ids AS (SELECT TraceId" in analytics
+    assert "LIMIT 1 BY TraceId), " in analytics
+    assert "read_analytics(analytics_sql)" in analytics
+    assert "count_by_bucket" in analytics
+    assert "std::gcd(bucket_seconds, quantile_bucket_seconds)" in analytics
 
 
 def test_trace_detail_has_no_all_history_traceid_fallback():
