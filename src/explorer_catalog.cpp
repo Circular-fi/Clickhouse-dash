@@ -651,17 +651,20 @@ bool load_non_part_row_counts(
   return true;
 }
 
+// Also collects secondary-index bytes (the same GROUP BY over system.parts),
+// so load_structure_bytes does not scan every active part a second time.
 bool load_parts_summary(
     clickhouse::Client& system,
     const AllowedObjectSet& allowed,
     std::unordered_map<std::string, ExplorerTableSummary*>& map,
+    std::unordered_set<std::string>* index_seen,
     std::string* error) {
   return try_select(system,
     "SELECT toString(database), toString(`table`), toString(sum(rows)), toString(sum(bytes_on_disk)), "
     "toString(sum(data_compressed_bytes)), toString(sum(data_uncompressed_bytes)), "
     "toString(count()), toString(uniqExact(partition_id)), "
     "arrayStringConcat(arraySort(groupUniqArray(disk_name)), ','), "
-    "toString(max(modification_time)) "
+    "toString(max(modification_time)), toString(sum(secondary_indices_compressed_bytes)) "
     "FROM system.parts WHERE active GROUP BY database, `table`",
     [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -684,6 +687,8 @@ bool load_parts_summary(
           if (!disk.empty()) target.disks.push_back(std::move(disk));
         }
         target.last_part_time = block_string_at(block, 9, row);
+        target.secondary_indices_bytes = parse_u64(block_string_at(block, 10, row));
+        if (index_seen) index_seen->insert(it->first);
 
         // A local non-replicated table's local footprint is its physical
         // footprint. Replicated/Distributed physical totals require a
@@ -699,10 +704,12 @@ void load_structure_bytes(
     clickhouse::Client& system,
     const AllowedObjectSet& allowed,
     std::unordered_map<std::string, ExplorerTableSummary*>& map,
+    const std::unordered_set<std::string>* index_seen_from_parts,
     std::string* error) {
   std::string section_error;
   std::unordered_set<std::string> index_seen;
-  const bool indexes_loaded = try_select(system,
+  if (index_seen_from_parts) index_seen = *index_seen_from_parts;
+  const bool indexes_loaded = index_seen_from_parts != nullptr || try_select(system,
     "SELECT toString(database), toString(`table`), toString(sum(secondary_indices_compressed_bytes)) "
     "FROM system.parts WHERE active GROUP BY database, `table`",
     [&](const clickhouse::Block& block) {
@@ -1588,12 +1595,14 @@ bool load_explorer_catalog(
   // best-effort: metadata remains usable with an unknown row count.
   load_non_part_row_counts(system, runner, allowed, map, &section_error);
   section_error.clear();
-  if (!load_parts_summary(system, allowed, map, &section_error)) {
+  std::unordered_set<std::string> parts_index_seen;
+  const bool parts_loaded = load_parts_summary(system, allowed, map, &parts_index_seen, &section_error);
+  if (!parts_loaded) {
     if (error) *error = "Parts summary query failed: " + section_error;
     return false;
   }
   section_error.clear();
-  load_structure_bytes(system, allowed, map, &section_error);
+  load_structure_bytes(system, allowed, map, parts_loaded ? &parts_index_seen : nullptr, &section_error);
   section_error.clear();
   if (!load_query_ingress(system, allowed, map, &section_error)) {
     if (error) *error = "Query ingress query failed: " + section_error;
