@@ -3712,21 +3712,17 @@
     content.setAttribute("role", "region");
     content.setAttribute("aria-label", label ? `Row ${label} details` : "Row details");
     content.tabIndex = -1;
+    if (label) content.dataset.row = String(label);
 
-    const header = document.createElement("div");
-    header.className = "rowDetails__header";
-    const title = document.createElement("span");
-    title.className = "rowDetails__title";
-    title.textContent = label ? `Row ${label}` : "Row";
-    const meta = document.createElement("span");
-    meta.className = "rowDetails__meta";
-    meta.textContent = `${ctx.columns.length} ${ctx.columns.length === 1 ? "column" : "columns"}`;
+    // Exactly the one-row (LIMIT 1) vertical presentation; the only additions
+    // are two small overlay actions that do not take a layout row.
     const actions = document.createElement("div");
     actions.className = "rowDetails__actions";
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "button button--small rowDetails__copy";
     copyBtn.textContent = "Copy JSON";
+    copyBtn.title = label ? `Copy row ${label} as JSON` : "Copy row as JSON";
     copyBtn.addEventListener("click", () => {
       void copyTextWithFlash(copyBtn, JSON.stringify(buildRowDetailsObject(ctx, row), null, 2));
     });
@@ -3738,7 +3734,6 @@
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", onClose);
     actions.append(copyBtn, closeBtn);
-    header.append(title, meta, actions);
 
     // Same presentation as a one-row result: one line per column, the value
     // rendered by the shared single-value renderer (pretty JSON/arrays/maps,
@@ -3753,25 +3748,21 @@
       const name = document.createElement("div");
       name.className = "rowDetails__name";
       const colName = String(ctx.columns[i] ?? "");
-      const nameEl = document.createElement("span");
-      nameEl.className = "rowDetails__colName";
-      nameEl.textContent = colName;
-      name.appendChild(nameEl);
-      const type = String(ctx.types[i] ?? "");
-      if (type) {
-        const typeEl = document.createElement("span");
-        typeEl.className = "rowDetails__type";
-        typeEl.textContent = type;
-        name.appendChild(typeEl);
-      }
-      name.title = type ? `${colName}\n${type}` : colName;
+      // Column name only, like the one-row view (no type line).
+      name.textContent = colName;
+      name.title = colName;
       const value = document.createElement("div");
       value.className = "rowDetails__value";
-      renderSingleValueCell(value, row[i], i, ctx.typeAsts);
+      // The cell box (border, full line height, vertical centering) wraps a
+      // plain block that receives the shared one-row renderer's output.
+      const valueContent = document.createElement("div");
+      valueContent.className = "rowDetails__valueContent";
+      renderSingleValueCell(valueContent, row[i], i, ctx.typeAsts);
+      value.appendChild(valueContent);
       line.append(name, value);
       list.appendChild(line);
     }
-    content.append(header, list);
+    content.append(list, actions);
     return content;
   }
 

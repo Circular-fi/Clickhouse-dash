@@ -73,6 +73,16 @@ export async function enableExecutionStats(page) {
   await expect(page.locator('#runSettingsMenu')).toBeHidden();
 }
 
+export async function setFlattenTuple(page, enabled) {
+  await page.locator('#runSettingsButton').click();
+  await expect(page.locator('#runSettingsMenu')).toBeVisible();
+  const option = page.locator('#runOptFlattenTuple');
+  if ((await option.getAttribute('aria-checked')) !== String(enabled)) await option.click();
+  await expect(option).toHaveAttribute('aria-checked', String(enabled));
+  await page.locator('#runSettingsButton').click();
+  await expect(page.locator('#runSettingsMenu')).toBeHidden();
+}
+
 export async function openAnalysis(page) {
   await expect(page.locator('#analyzeQueryButton')).toBeVisible({ timeout: 10_000 });
   await page.locator('#analyzeQueryButton').click();

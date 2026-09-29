@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { enableExecutionStats, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { enableExecutionStats, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -609,14 +609,19 @@ test('right-click Details expands a result row inline, under the row, and dismis
   const row4Before = await rows.nth(3).evaluate((tr) => tr.getBoundingClientRect().top);
   const view = await openRowDetailsFromRow(page, row3);
   await expectDetailRightAfter(row3);
-  await expect(view.locator('.rowDetails__title')).toHaveText('Row 3');
-  const names = await view.locator('.rowDetails__colName').allTextContents();
+  await expect(view).toHaveAttribute('data-row', '3');
+  // Same presentation as a one-row (LIMIT 1) result: column names only, no type line.
+  const names = await view.locator('.rowDetails__name').allTextContents();
   expect(names).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
-  const types = await view.locator('.rowDetails__type').allTextContents();
-  expect(types[0]).toBe('UInt64');
-  expect(types[2]).toBe('Array(UInt64)');
-  expect(types[3]).toMatch(/^Map\(String, UInt64\)$/);
-  expect(types[6]).toBe('Nullable(UInt64)');
+  await expect(view.locator('.rowDetails__type')).toHaveCount(0);
+  // The detail's accent bar sits at exactly the same x as the expanded row's bar.
+  const bars = await page.evaluate(() => {
+    const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.resultTable__rowIndex');
+    const detail = document.querySelector('.rowDetails');
+    const inner = (el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).borderLeftWidth);
+    return { row: inner(index), detail: inner(detail) };
+  });
+  expect(Math.abs(bars.row - bars.detail)).toBeLessThan(0.5);
   const values = view.locator('.rowDetails__value');
   await expect(values).toHaveCount(8);
   await expect(values.nth(0)).toHaveText('2');
@@ -704,7 +709,7 @@ test('right-click Details expands a result row inline, under the row, and dismis
   await rows.nth(4).locator('td').nth(1).click({ button: 'right' });
   await expect(page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.rowDetails .rowDetails__title')).toHaveText('Row 5');
+  await expect(page.locator('.rowDetails')).toHaveAttribute('data-row', '5');
   await page.keyboard.press('Escape');
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
@@ -778,7 +783,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   const rowFor = (n) => body.locator('tr').filter({ has: page.locator(`td.resultTable__rowIndex:text-is("${n}")`) });
   const closed = await extent();
   const view = await openRowDetailsFromRow(page, rowFor(index));
-  await expect(view.locator('.rowDetails__title')).toHaveText(`Row ${index}`);
+  await expect(view).toHaveAttribute('data-row', String(index));
   await expect(view.locator('.rowDetails__value').nth(1)).toHaveText(`row-${index - 1}`);
   await expectDetailRightAfter(rowFor(index));
   const open = await extent();
@@ -849,7 +854,7 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await expect(rows).toHaveCount(4);
   const view = await openRowDetailsFromRow(page, rows.nth(2));
   await expectDetailRightAfter(rows.nth(2));
-  expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(['x', 'y', 'z']);
+  expect(await view.locator('.rowDetails__name').allTextContents()).toEqual(['x', 'y', 'z']);
   await expect(view.locator('.rowDetails__value').nth(1)).toHaveText('second-2');
   await expect(view.locator('.rowDetails__value').nth(2)).toHaveText(/^\[\s+2\s+\]$/);
   const pushed = await rows.nth(3).evaluate((tr) => tr.getBoundingClientRect().top - tr.previousElementSibling.getBoundingClientRect().bottom);
@@ -898,7 +903,7 @@ test('inline row details open from the Explorer data preview', async ({ page }) 
   const headers = (await previewTable.locator('thead th').allTextContents()).slice(1);
   const view = await openRowDetailsFromRow(page, rows.nth(1));
   await expectDetailRightAfter(rows.nth(1));
-  expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(headers);
+  expect(await view.locator('.rowDetails__name').allTextContents()).toEqual(headers);
   expect(headers).toContain('tuple_value.code');
   const fit = await page.evaluate(() => {
     const content = document.querySelector('.explorerResultTable--preview .rowDetails');
@@ -951,3 +956,35 @@ test('inline row details remove every document/window listener they add', async 
   await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
   expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBe(before);
 });
+
+
+for (const flatten of [true, false]) {
+  test(`row Details renders exactly like the one-row (LIMIT 1) view (flatten=${flatten})`, async ({ page }) => {
+    await openApp(page);
+    await setFlattenTuple(page, flatten);
+    const query = (n) => `SELECT number AS id, concat('alpha-', toString(number)) AS alpha,
+  if(number % 2 = 0, NULL, number) AS maybe, range(number, number + 3) AS arr, map('k', toString(number)) AS m,
+  CAST((number, concat('code-', toString(number))), 'Tuple(code UInt64, label String)') AS tup, number % 2 = 0 AS flag
+FROM numbers(${n})`;
+    const snapshot = (page, nameSel, valueSel) => page.evaluate(([n, v]) => {
+      const names = [...document.querySelectorAll(n)].map((el) => el.textContent.trim());
+      const values = [...document.querySelectorAll(v)].map((el) => ({
+        text: el.innerText.trim(),
+        tokens: [...el.querySelectorAll('span')].map((s) => `${s.className}=${getComputedStyle(s).color}`).join('|'),
+        weight: getComputedStyle(el).fontWeight,
+        size: getComputedStyle(el).fontSize,
+      }));
+      return { names, values };
+    }, [nameSel, valueSel]);
+    // Row 2 (number = 1) of a 3-row result vs the same row alone.
+    await runSuccessfulQuery(page, `${query(3)} LIMIT 1 OFFSET 1`);
+    const vertical = await snapshot(page, '#resultTableBody tr th', '#resultTableBody tr td');
+    await runSuccessfulQuery(page, query(3));
+    const row2 = page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').nth(1);
+    await openRowDetailsFromRow(page, row2);
+    const details = await snapshot(page, '.rowDetails__name', '.rowDetails__valueContent');
+    expect(details.names).toEqual(vertical.names);
+    expect(details.names.includes('tup.code')).toBe(flatten);
+    expect(details.values).toEqual(vertical.values);
+  });
+}
