@@ -78,7 +78,9 @@ def test_massive_export_metadata_is_required_before_download_and_during_archive(
     # The one-time stream revalidates before attachment headers/body commit.
     stream = api[api.index("void Server::handle_export_stream"):]
     assert stream.index("preflight_export_metadata(") < stream.index('res.set_header(\n      "Content-Disposition"')
-    assert 'system->Execute("SYSTEM FLUSH LOGS query_log")' in api
+    # The privilege is validated without a server-wide flush.
+    assert 'check_grant_expression(*system, "SYSTEM FLUSH LOGS ON *.*", &decoded)' in api
+    assert 'system->Execute("SYSTEM FLUSH LOGS query_log")' not in api
 
     # A post-query metadata lookup failure can never be serialized as a
     # successful execution row and must leave an explicit archive error.

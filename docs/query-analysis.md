@@ -66,11 +66,21 @@ has already produced and never re-executes the business query:
 - `system.query_views_log`, when recorded
 
 System logs are asynchronous, so `analysis.log_lookup_timeout_ms` controls a
-short retry window. `analysis.flush_logs=false` is the default. When explicitly
-enabled, `SYSTEM FLUSH LOGS` is a required precondition for the analysis lookup:
-if the system account cannot flush the logs, the endpoint returns an explicit
-`analysis_collection_failed` error instead of rendering a partial-looking
-analysis. A failure to connect to the system context or to query the core
+short retry window. ChDash avoids `SYSTEM FLUSH LOGS` (a server-wide operation
+that writes new system-log parts) as much as possible:
+
+- `analysis.flush_logs=false` is the default and nothing is ever flushed. When
+  rows are not published yet, the response sets `logs_pending` (query_log) or
+  `profiling_logs_pending` (processor rows / OpenTelemetry spans of a profiling
+  run) and the browser re-polls Analyze with a bounded backoff (~20 s) until
+  ClickHouse's own flush interval publishes them.
+- With `analysis.flush_logs=true`, logs are still read first; a flush is only
+  issued when the needed rows are missing, at most once per lookup and per log
+  group, and concurrent lookups share it (a flush that started after a caller
+  needed the rows covers that caller). If that flush fails, the endpoint
+  returns an explicit `analysis_collection_failed` error instead of rendering a
+  partial-looking analysis. Exports validate the privilege with
+  `CHECK GRANT SYSTEM FLUSH LOGS` instead of flushing up front. A failure to connect to the system context or to query the core
 `system.query_log` is handled the same way.
 
 The technical account is not an authorization source. Before names from system

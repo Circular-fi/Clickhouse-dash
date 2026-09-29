@@ -305,6 +305,45 @@
     renderActiveTab();
   }
 
+  function analysisLogsPending(data) {
+    return !!(data && (data.logs_pending || data.profiling_logs_pending));
+  }
+
+  function applyAnalysisPayload(response) {
+    releaseData();
+    payload = response;
+    renderSummary(payload);
+    if (payload.partial_execution) notice("Execution stopped by result preview limit. Metrics describe a partial execution.", "warning");
+    else if (analysisLogsPending(payload)) notice("ClickHouse system logs are still being populated; refreshing automatically…", "warning");
+    else notice("");
+    renderActiveTab();
+  }
+
+  // The backend no longer forces SYSTEM FLUSH LOGS (server-wide) to make fresh
+  // logs visible. ClickHouse publishes them on its own flush interval (7.5 s by
+  // default), so re-poll with a bounded backoff while rows are still missing.
+  const PENDING_REFRESH_DELAYS_MS = [800, 1500, 2500, 3500, 5000, 7000];
+  function schedulePendingRefresh(generation, attempt) {
+    if (!analysisLogsPending(payload) || attempt >= PENDING_REFRESH_DELAYS_MS.length) {
+      if (analysisLogsPending(payload) && generation === loadGeneration) {
+        notice("ClickHouse system logs are still being populated; available data is shown.", "warning");
+      }
+      return;
+    }
+    const target = current;
+    setTimeout(async () => {
+      if (generation !== loadGeneration || current !== target) return;
+      try {
+        const response = await api.analyzeQuery(target.hostId, target.queryId);
+        if (generation !== loadGeneration || current !== target) return;
+        applyAnalysisPayload(response);
+      } catch {
+        // Keep the data already shown; the next attempt (if any) may succeed.
+      }
+      schedulePendingRefresh(generation, attempt + 1);
+    }, PENDING_REFRESH_DELAYS_MS[attempt]);
+  }
+
   async function open(ctx = current) {
     if (ctx && ctx.hostId && ctx.queryId && String(ctx.runMode || "normal") === "profiling") {
       current = { hostId: String(ctx.hostId), queryId: String(ctx.queryId), runMode: "profiling" };
@@ -321,12 +360,8 @@
       releaseData();
       const response = await api.analyzeQuery(current.hostId, current.queryId);
       if (generation !== loadGeneration) return;
-      payload = response;
-      renderSummary(payload);
-      if (payload.partial_execution) notice("Execution stopped by result preview limit. Metrics describe a partial execution.", "warning");
-      else if (payload.logs_pending) notice("ClickHouse system logs are still being populated; available data is shown.", "warning");
-      else notice("");
-      renderActiveTab();
+      applyAnalysisPayload(response);
+      schedulePendingRefresh(generation, 0);
     } catch (err) {
       if (generation !== loadGeneration) return;
       releaseData();

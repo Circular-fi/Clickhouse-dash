@@ -123,6 +123,8 @@ struct QueryAnalysisResult {
   bool processor_trace_summary_available = false;
   uint64_t processor_trace_bucket_us = 0;
   bool logs_pending = false;
+  // Profiling-only logs (processors, OpenTelemetry spans) not published yet.
+  bool profiling_logs_pending = false;
   // Fatal collection failures (system context, mandatory flush, core query_log)
   // are surfaced by the API as an explicit non-2xx error. Optional profiling
   // tables keep their dedicated availability/error fields below.

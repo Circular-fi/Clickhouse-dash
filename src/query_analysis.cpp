@@ -1,4 +1,5 @@
 #include "query_analysis.hpp"
+#include "system_log_flush.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
 
@@ -521,17 +522,33 @@ QueryAnalysisResult collect_query_analysis(
     return result;
   }
 
-  if (options.flush_logs) {
-    try {
-      client->Execute("SYSTEM FLUSH LOGS query_log, processors_profile_log, query_views_log");
-    } catch (const std::exception& e) {
-      result.fatal_error = std::string("SYSTEM FLUSH LOGS failed: ") + e.what();
-      result.query_log_error = result.fatal_error;
-      result.processors_profile_error = result.fatal_error;
-      result.query_views_error = result.fatal_error;
-      return result;
+  // System logs are read *without* flushing first: when Analyze is opened a
+  // few seconds after the run, ClickHouse's periodic flush has usually
+  // published the rows already. SYSTEM FLUSH LOGS (server-wide, creates new
+  // parts) is only a last resort when analysis.flush_logs = true and the rows
+  // are still missing, and SystemLogFlushGate shares one flush between
+  // concurrent callers. With flush_logs = false nothing is ever flushed; the
+  // browser re-polls while logs_pending / profiling_logs_pending is set.
+  const auto requested_at = std::chrono::steady_clock::now();
+  // Rows exist server-side once the query ended; any flush that started
+  // after that (by another lookup, too) makes them visible.
+  const auto needed_after = record.updated_at.time_since_epoch().count() != 0
+      ? std::min(record.updated_at, requested_at) : requested_at;
+  bool core_logs_flushed = false;
+  auto flush_core_logs = [&]() -> bool {
+    if (!options.flush_logs || core_logs_flushed) return true;
+    core_logs_flushed = true;
+    std::string flush_error;
+    if (SystemLogFlushGate::instance().ensure_flushed_after(
+            *client, system_uri, "query_log, processors_profile_log, query_views_log", needed_after, &flush_error)) {
+      return true;
     }
-  }
+    result.fatal_error = std::string("SYSTEM FLUSH LOGS failed: ") + flush_error;
+    result.query_log_error = result.fatal_error;
+    result.processors_profile_error = result.fatal_error;
+    result.query_views_error = result.fatal_error;
+    return false;
+  };
 
   const auto deadline = std::chrono::steady_clock::now() +
       std::chrono::milliseconds(std::max(0, options.log_lookup_timeout_ms));
@@ -547,7 +564,11 @@ QueryAnalysisResult collect_query_analysis(
     }
 
     if (!result.query_log.empty() || std::chrono::steady_clock::now() >= deadline) break;
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if (options.flush_logs && !core_logs_flushed) {
+      if (!flush_core_logs()) return result;
+      continue;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   } while (std::chrono::steady_clock::now() < deadline);
 
   result.logs_pending = result.query_log_available && result.query_log.empty();
@@ -564,32 +585,44 @@ QueryAnalysisResult collect_query_analysis(
     }
   }
 
-  try {
-    result.processors = load_processors(*client, record, ids, &result.processors_truncated);
-    result.processors_profile_available = true;
-  } catch (const std::exception& e) {
-    result.processors_profile_error = e.what();
+  auto load_processor_rows = [&]() {
+    try {
+      result.processors = load_processors(*client, record, ids, &result.processors_truncated);
+      result.processors_profile_available = true;
+    } catch (const std::exception& e) {
+      result.processors_profile_error = e.what();
+    }
+  };
+  load_processor_rows();
+  // processors_profile_log is flushed independently of query_log, so a
+  // profiling run can already have its query_log row but no processor rows.
+  if (record.run_mode == QueryRunMode::Profiling && result.processors.empty() &&
+      result.processors_profile_available && !result.query_log.empty() &&
+      options.flush_logs && !core_logs_flushed) {
+    if (!flush_core_logs()) return result;
+    load_processor_rows();
   }
 
   if (record.run_mode == QueryRunMode::Profiling) {
     // The OpenTelemetry span log is asynchronous and can lag query_log. Give
     // it its own bounded lookup window instead of reusing the query_log
-    // deadline, otherwise a slow query_log flush can consume the entire trace
-    // budget. Re-flush at a low cadence while the trace is still growing.
+    // deadline, otherwise a slow query_log lookup can consume the entire trace
+    // budget. It used to be flushed every 200 ms unconditionally (even with
+    // flush_logs = false); now it is flushed at most once, only when enabled
+    // and no span is visible yet.
     const auto otel_deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(std::max(0, options.log_lookup_timeout_ms));
-    auto next_otel_flush = std::chrono::steady_clock::now();
+    bool otel_flushed = false;
     size_t previous_count = static_cast<size_t>(-1);
     int stable_observations = 0;
     do {
-      const auto now = std::chrono::steady_clock::now();
-      if (now >= next_otel_flush) {
-        try {
-          client->Execute("SYSTEM FLUSH LOGS opentelemetry_span_log");
-        } catch (const std::exception& e) {
-          result.opentelemetry_span_log_error = e.what();
+      if (otel_flushed == false && options.flush_logs && previous_count == 0) {
+        otel_flushed = true;
+        std::string flush_error;
+        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+                *client, system_uri, "opentelemetry_span_log", needed_after, &flush_error)) {
+          result.opentelemetry_span_log_error = flush_error;
         }
-        next_otel_flush = now + std::chrono::milliseconds(200);
       }
 
       try {
@@ -609,9 +642,13 @@ QueryAnalysisResult collect_query_analysis(
         result.opentelemetry_span_log_error = e.what();
         break;
       }
+      // Without a query_log row the query's time bounds are unknown and the
+      // span log is published no sooner; return and let the browser re-poll
+      // instead of spending a second full lookup window here.
+      if (result.logs_pending) break;
       if ((!result.trace_spans.empty() && stable_observations >= 1) ||
           std::chrono::steady_clock::now() >= otel_deadline) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     } while (std::chrono::steady_clock::now() < otel_deadline);
 
     // Pipeline collection is independent of detailed trace retrieval. A failed
@@ -635,6 +672,15 @@ QueryAnalysisResult collect_query_analysis(
   } catch (const std::exception& e) {
     result.query_views_error = e.what();
   }
+
+  // Profiling runs always record processor rows and OpenTelemetry spans, but
+  // those logs are published asynchronously (without a flush, up to the
+  // server's flush interval later). Tell the browser to re-poll instead of
+  // forcing a server-wide flush.
+  result.profiling_logs_pending = record.run_mode == QueryRunMode::Profiling &&
+      !result.query_log.empty() &&
+      ((result.processors_profile_available && result.processors.empty()) ||
+       (result.opentelemetry_span_log_available && result.trace_spans.empty()));
 
   return result;
 }

@@ -264,6 +264,21 @@ AllowedTable inspect_table(
 
 } // namespace
 
+bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded) {
+  bool seen = false;
+  bool granted = false;
+  client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
+    if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
+    bool parsed = false;
+    const bool value = block_bool_at(block, 0, 0, &parsed);
+    if (!parsed) return;
+    seen = true;
+    granted = value;
+  });
+  if (decoded) *decoded = seen;
+  return seen && granted;
+}
+
 std::string AllowedObjectSet::table_key(const std::string& database, const std::string& table) {
   std::string key;
   key.reserve(database.size() + table.size() + 1);

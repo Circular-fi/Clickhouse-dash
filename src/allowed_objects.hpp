@@ -64,4 +64,8 @@ std::optional<AllowedTable> discover_allowed_table(
     const std::string& database,
     const std::string& table);
 
+// Run `CHECK GRANT <expression>` on `client`. `decoded` reports whether the
+// result could be read (some protocol/result variants cannot be decoded).
+bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded = nullptr);
+
 } // namespace chdash

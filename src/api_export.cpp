@@ -4,6 +4,7 @@
 #include "allowed_objects.hpp"
 #include "ch_uri.hpp"
 #include "export_serializer.hpp"
+#include "system_log_flush.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
 #include "query_execution.hpp"
@@ -283,7 +284,32 @@ bool preflight_export_metadata(
     // The streamed archive treats execution.csv as required metadata. Validate
     // the exact privilege before the HTTP download begins so a missing grant
     // cannot produce a superficially successful ZIP with collector_error.
-    system->Execute("SYSTEM FLUSH LOGS query_log");
+    // CHECK GRANT validates it without performing a server-wide flush; the
+    // collector flushes later only if a query_log row is actually missing.
+    bool granted = false;
+    bool decoded = false;
+    try {
+      granted = check_grant_expression(*system, "SYSTEM FLUSH LOGS ON *.*", &decoded);
+    } catch (const std::exception&) {
+      // Some ClickHouse/clickhouse-cpp combinations cannot decode CHECK GRANT
+      // result variants. The connection is replaced and the exact privilege is
+      // then proven by one (shared) flush, as before.
+      if (pool) pool->invalidate(system);
+      system = pool ? pool->acquire(system_uri, std::chrono::seconds(5), std::chrono::seconds(15),
+                                    std::chrono::seconds(15), &connect_error)
+                    : make_client_from_uri(system_uri, std::chrono::seconds(5), std::chrono::seconds(15),
+                                           std::chrono::seconds(15), &connect_error);
+      if (!system) throw std::runtime_error(connect_error.empty() ? "Cannot connect to ClickHouse system context." : connect_error);
+    }
+    if (!decoded) {
+      std::string flush_error;
+      if (!SystemLogFlushGate::instance().ensure_flushed_after(
+              *system, system_uri, "query_log", std::chrono::steady_clock::now(), &flush_error)) {
+        throw std::runtime_error(flush_error);
+      }
+      return true;
+    }
+    if (!granted) throw std::runtime_error("system account lacks SYSTEM FLUSH LOGS (analysis.flush_logs = true)");
     return true;
   } catch (const std::exception& e) {
     if (pool) pool->invalidate(system);

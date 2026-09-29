@@ -1,4 +1,5 @@
 #include "query_execution.hpp"
+#include "system_log_flush.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
 
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -168,10 +170,16 @@ QueryExecutionStats collect_query_execution(
   }
 
   try {
-    if (flush_logs) client->Execute("SYSTEM FLUSH LOGS query_log");
-
-    const auto deadline = std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(std::max(0, lookup_timeout_ms));
+    // Read first; flush only as a last resort (flush_logs = true and the row
+    // is still missing). SystemLogFlushGate shares one flush between the
+    // statements of a multiquery run / concurrent export collectors.
+    const auto requested_at = std::chrono::steady_clock::now();
+    // Rows exist server-side once the query ended; any flush that started
+    // after that (by another lookup, too) makes them visible.
+    const auto needed_after = record.updated_at.time_since_epoch().count() != 0
+        ? std::min(record.updated_at, requested_at) : requested_at;
+    bool flushed = false;
+    const auto deadline = requested_at + std::chrono::milliseconds(std::max(0, lookup_timeout_ms));
     do {
       if (load_once(*client, record, result)) {
         result.available = true;
@@ -179,6 +187,15 @@ QueryExecutionStats collect_query_execution(
         return result;
       }
       if (std::chrono::steady_clock::now() >= deadline) break;
+      if (flush_logs && !flushed) {
+        flushed = true;
+        std::string flush_error;
+        if (!SystemLogFlushGate::instance().ensure_flushed_after(
+                *client, system_uri, "query_log", needed_after, &flush_error)) {
+          throw std::runtime_error("SYSTEM FLUSH LOGS failed: " + flush_error);
+        }
+        continue;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     } while (true);
 

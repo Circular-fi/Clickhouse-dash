@@ -704,6 +704,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
   writer.Key("session_elapsed_ms"); writer.Int64(record->session_elapsed_ms);
   writer.Key("logs_pending"); writer.Bool(analysis.logs_pending);
+  writer.Key("profiling_logs_pending"); writer.Bool(analysis.profiling_logs_pending);
   writer.Key("processor_profiling_recorded"); writer.Bool(!analysis.processors.empty());
   bool processor_setting_seen = false;
   bool processor_setting_enabled = false;

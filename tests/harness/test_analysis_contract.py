@@ -51,14 +51,21 @@ def test_analysis_uses_host_registry_and_runner_acl_without_user_auth() -> None:
 def test_analysis_log_lookup_is_bounded_and_flush_is_opt_in() -> None:
     source = read("src/query_analysis.cpp")
     assert 'options.log_lookup_timeout_ms' in source
-    assert 'std::this_thread::sleep_for(std::chrono::milliseconds(50))' in source
-    assert 'if (options.flush_logs)' in source
-    assert 'SYSTEM FLUSH LOGS query_log, processors_profile_log, query_views_log' in source
+    assert 'std::this_thread::sleep_for(std::chrono::milliseconds(100))' in source
+    # Logs are read first; a flush is only a last resort when enabled.
+    assert 'if (!options.flush_logs || core_logs_flushed) return true;' in source
+    assert '"query_log, processors_profile_log, query_views_log"' in source
+    assert 'SystemLogFlushGate::instance().ensure_flushed_after(' in source
     assert 'system.processors_profile_log' in source
     assert 'system.query_views_log' in source
     assert 'system.query_log' in source
     assert 'system.opentelemetry_span_log' in source
-    assert 'SYSTEM FLUSH LOGS opentelemetry_span_log' in source
+    assert '"opentelemetry_span_log"' in source
+    # The span log is flushed at most once, never on a fixed cadence.
+    assert 'next_otel_flush' not in source
+    gate = read("src/system_log_flush.hpp")
+    assert 'client.Execute("SYSTEM FLUSH LOGS " + logs);' in gate
+    assert 'Execute("SYSTEM FLUSH' not in source
 
 
 
@@ -66,11 +73,11 @@ def test_analysis_collection_failures_are_explicit_not_partial_success() -> None
     collector = read("src/query_analysis.cpp")
     api = read("src/api_analysis.cpp")
 
-    flush = collector[collector.index("if (options.flush_logs)"):collector.index("const auto deadline")]
-    assert "catch (const std::exception& e)" in flush
-    assert 'result.fatal_error = std::string("SYSTEM FLUSH LOGS failed: ") + e.what();' in flush
-    assert "return result;" in flush
+    flush = collector[collector.index("auto flush_core_logs = [&]() -> bool {"):collector.index("const auto deadline")]
+    assert 'result.fatal_error = std::string("SYSTEM FLUSH LOGS failed: ") + flush_error;' in flush
+    assert "return false;" in flush
     assert "catch (...)" not in flush
+    assert "if (!flush_core_logs()) return result;" in collector
     assert 'result.fatal_error = std::string("query_log lookup failed: ") + e.what();' in collector
     assert 'if (!analysis.fatal_error.empty())' in api
     assert 'json_error(res, 503, "analysis_collection_failed", analysis.fatal_error)' in api
