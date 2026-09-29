@@ -405,3 +405,8 @@ Explorer uses three visual edge families:
 Lineage routing avoids drawing an edge through an unrelated node card: when the normal Bezier would intersect another card, the renderer selects a clear orthogonal detour.
 
 In **Storage** mode, ordinary non-storing objects remain excluded from the canvas, with one deliberate exception: a `Buffer` is shown as a write-routing stage together with the persistent table it flushes into. Selecting a Buffer therefore expands automatically to `Buffer → destination table → storage tiers`.
+
+## Replication metadata and Keeper load
+
+`system.replicas` serves `queue_size`, `absolute_delay`, `is_readonly` and `is_session_expired` from memory, but `total_replicas` / `active_replicas` cost one Keeper request per replicated table. The graph catalog (rebuilt every few seconds while the graph is open) therefore reads only the in-memory columns on every build; the replica counts behind the `nR` badge and the "inactive replica" warning are cached per server for 60 s and re-read only for new tables or expired entries, restricted to the shown databases. Local-replica problems (read-only, expired Keeper session, queue, delay) appear immediately; a remote replica going down appears within 60 s. Table detail always reads fresh counts for the opened table.
+

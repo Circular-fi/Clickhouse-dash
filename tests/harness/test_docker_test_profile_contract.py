@@ -37,7 +37,7 @@ def test_default_stack_skips_otel_fixture_and_builds_fresh_source():
 def test_test_profile_enables_fixture_and_single_test_runner():
     compose = read("tests/docker-compose.yml")
     services = compose.split("services:\n", 1)[1].split("\nvolumes:\n", 1)[0]
-    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "otel_fixture", "chdash_source", "tests"}
+    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "clickhouse_replica", "otel_fixture", "chdash_source", "tests"}
     fixture = service_block(compose, "otel_fixture")
     assert 'profiles: ["otel", "test"]' in fixture
     tests = service_block(compose, "tests")

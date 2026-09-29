@@ -84,7 +84,7 @@ def _execute_script(session: requests.Session, base_url: str, user: str, passwor
             base_url,
             params={"user": user, "password": password},
             data=statement.encode("utf-8"),
-            timeout=60,
+            timeout=180,
         )
         if response.status_code != 200:
             preview = statement.replace("\n", " ")[:180]
@@ -112,3 +112,5 @@ def reset_clickhouse_integration_fixture() -> None:
     with requests.Session() as session:
         _execute_script(session, base_url.rstrip("/"), user, password, init_root / "01-chdash-users.sql")
         _execute_script(session, base_url.rstrip("/"), user, password, init_root / "02-frontend-fixtures.sql")
+        # ReplicatedMergeTree fixtures on chdash_cluster (clickhouse + clickhouse_replica).
+        _execute_script(session, base_url.rstrip("/"), user, password, init_root / "04-replicated-fixtures.sql")

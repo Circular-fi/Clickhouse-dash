@@ -42,6 +42,43 @@ services:
         source: ./clickhouse-config/fixture-storage.xml
         target: /etc/clickhouse-server/config.d/fixture-storage.xml
         read_only: true
+      - type: bind
+        source: ./clickhouse-config/keeper.xml
+        target: /etc/clickhouse-server/config.d/keeper.xml
+        read_only: true
+      - type: bind
+        source: ./clickhouse-config/replication.xml
+        target: /etc/clickhouse-server/config.d/replication.xml
+        read_only: true
+      - type: bind
+        source: ./clickhouse-config/node-r1.xml
+        target: /etc/clickhouse-server/config.d/node.xml
+        read_only: true
+    healthcheck: *clickhouse-healthcheck
+
+  # Second replica of chdash_cluster. The primary embeds ClickHouse Keeper, so
+  # ReplicatedMergeTree fixtures (chdash_repl) have two live replicas and the
+  # Explorer's replication metadata (replica counts, queues) is testable.
+  clickhouse_replica:
+    image: "${CLICKHOUSE_IMAGE:-clickhouse:26.7.5.10@sha256:d0e74e9970998f92c0490c23345259a539550eff24f551dbe385d3cd29481f74}"
+    container_name: chdash-tests-clickhouse-replica
+    restart: unless-stopped
+    environment: *clickhouse-env
+    ulimits: *clickhouse-ulimits
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+    volumes:
+      - clickhouse_replica_data:/var/lib/clickhouse
+      - type: bind
+        source: ./clickhouse-config/replication.xml
+        target: /etc/clickhouse-server/config.d/replication.xml
+        read_only: true
+      - type: bind
+        source: ./clickhouse-config/node-r2.xml
+        target: /etc/clickhouse-server/config.d/node.xml
+        read_only: true
     healthcheck: *clickhouse-healthcheck
 
   otel_fixture:
@@ -134,6 +171,8 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+      clickhouse_replica:
+        condition: service_healthy
       chdash_source:
         condition: service_healthy
       otel_fixture:
@@ -166,3 +205,4 @@ services:
 
 volumes:
   clickhouse_data:
+  clickhouse_replica_data:

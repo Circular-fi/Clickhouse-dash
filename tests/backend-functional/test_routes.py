@@ -962,3 +962,26 @@ def test_trace_prefill_is_cached_per_minute_aligned_range():
     assert shifted.status_code == 200, shifted.text
     assert shifted.json().get("pairs") == payload["pairs"]
     assert all(len(pair) == 3 and pair[0] and pair[1] for pair in payload["pairs"]), payload
+
+
+def test_replicated_fixture_exposes_replica_counts_badges_and_distributed_topology():
+    # chdash_repl lives on chdash_cluster (clickhouse + clickhouse_replica).
+    detail = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_repl", "table": "replicated_events", "refresh": "1"})
+    assert detail.status_code == 200, detail.text
+    replication = detail.json()["summary"]["replication"]
+    assert replication["available"] is True, replication
+    assert replication["total_replicas"] == 2 and replication["active_replicas"] == 2, replication
+    assert replication["replica_name"] == "r1", replication
+    assert int(detail.json()["summary"]["rows"] or 0) == 5000
+
+    graph = get("/api/explorer/graph", params={"host_id": "local", "database": "chdash_repl", "refresh": "1"})
+    assert graph.status_code == 200, graph.text
+    nodes = {n.get("name"): n for n in graph.json()["nodes"] if n.get("database") == "chdash_repl"}
+    assert nodes["replicated_events"].get("topology_badge") == "2R", nodes["replicated_events"]
+    assert nodes["replicated_daily"].get("topology_badge") == "2R", nodes["replicated_daily"]
+    assert nodes["replicated_events_all"].get("kind") == "distributed", nodes["replicated_events_all"]
+    assert nodes["replicated_events"].get("health") == "healthy", nodes["replicated_events"]
+    # A second build within the replica-count TTL reuses the cached counts.
+    again = get("/api/explorer/graph", params={"host_id": "local", "database": "chdash_repl", "refresh": "1"})
+    assert {n.get("name"): n.get("topology_badge") for n in again.json()["nodes"] if n.get("database") == "chdash_repl"} == \
+        {name: node.get("topology_badge") for name, node in nodes.items()}

@@ -1,0 +1,9 @@
+<!-- Replica r2 identity. interserver_http_host must be the compose service
+     name: replicas fetch parts from each other over interserver HTTP. -->
+<clickhouse>
+    <interserver_http_host>clickhouse_replica</interserver_http_host>
+    <macros>
+        <shard>01</shard>
+        <replica>r2</replica>
+    </macros>
+</clickhouse>

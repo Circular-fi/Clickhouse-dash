@@ -135,7 +135,11 @@ def reset_clickhouse_fixtures(env: dict[str, str]) -> None:
     user = env.get("CLICKHOUSE_USER", "test")
     password = env.get("CLICKHOUSE_PASSWORD", "test")
     fixture_root = Path("/repo/tests/clickhouse-init")
-    scripts = [fixture_root / "01-chdash-users.sql", fixture_root / "02-frontend-fixtures.sql"]
+    scripts = [
+        fixture_root / "01-chdash-users.sql",
+        fixture_root / "02-frontend-fixtures.sql",
+        fixture_root / "04-replicated-fixtures.sql",
+    ]
     print("\n=== fixture-reset ===", flush=True)
     for script in scripts:
         if not script.is_file():
@@ -146,7 +150,8 @@ def reset_clickhouse_fixtures(env: dict[str, str]) -> None:
                 base + "/",
                 data=sql.encode("utf-8"),
                 auth=(user, password),
-                timeout=30,
+                # ON CLUSTER DDL waits for both replicas.
+                timeout=180,
                 headers={"Content-Type": "text/plain; charset=utf-8"},
             )
             if response.status_code >= 400:

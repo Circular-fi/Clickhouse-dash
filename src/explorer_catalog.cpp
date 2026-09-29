@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <mutex>
 #include <map>
 #include <set>
 #include <sstream>
@@ -852,13 +853,106 @@ bool load_part_ingress(
     }, error);
 }
 
+// system.replicas answers queue_size / absolute_delay / is_readonly /
+// is_session_expired from memory, but total_replicas / active_replicas cost a
+// Keeper (ZooKeeper) request per replicated table. The graph catalog is
+// rebuilt every few seconds while the graph is open, so the replica counts
+// (the "nR" badge and the degraded check) are cached per server for
+// kReplicaCountTtl and re-read only for new tables or once the entry expired,
+// restricted to the databases being shown. Local-replica health (read-only,
+// expired session, queue, delay) stays live on every build.
+class ReplicaCountCache {
+public:
+  static ReplicaCountCache& instance() {
+    static ReplicaCountCache cache;
+    return cache;
+  }
+
+  struct Counts {
+    uint64_t total = 0;
+    uint64_t active = 0;
+  };
+
+  std::unordered_map<std::string, Counts> get(
+      clickhouse::Client& client,
+      const std::vector<std::pair<std::string, std::string>>& tables,
+      std::string* error) {
+    std::string scope;
+    if (const auto& endpoint = client.GetCurrentEndpoint()) scope = endpoint->host + ":" + std::to_string(endpoint->port);
+    const auto now = std::chrono::steady_clock::now();
+    std::unordered_map<std::string, Counts> out;
+    std::set<std::string> stale_databases;
+    std::set<std::string> stale_tables;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      auto& entries = scopes_[scope];
+      for (const auto& [database, table] : tables) {
+        const std::string key = table_key(database, table);
+        const auto it = entries.find(key);
+        if (it != entries.end() && now - it->second.fetched_at < kReplicaCountTtl) {
+          out[key] = it->second.counts;
+        } else {
+          stale_databases.insert(database);
+          stale_tables.insert(table);
+        }
+      }
+    }
+    if (stale_databases.empty()) return out;
+
+    auto in_list = [](const std::set<std::string>& values) {
+      std::string sql = "(";
+      bool first = true;
+      for (const auto& value : values) {
+        if (!first) sql += ", ";
+        first = false;
+        sql += quote_string(value);
+      }
+      return sql + ")";
+    };
+    // database/table predicates are applied before the per-table status
+    // (and its Keeper requests) is collected.
+    std::vector<std::pair<std::string, Counts>> fetched;
+    const bool ok = try_select(client,
+      "SELECT toString(database), toString(`table`), toString(total_replicas), toString(active_replicas) "
+      "FROM system.replicas WHERE database IN " + in_list(stale_databases) + " AND `table` IN " + in_list(stale_tables),
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          fetched.emplace_back(table_key(block_string_at(block, 0, row), block_string_at(block, 1, row)),
+                               Counts{parse_u64(block_string_at(block, 2, row)).value_or(0),
+                                      parse_u64(block_string_at(block, 3, row)).value_or(0)});
+        }
+      }, error);
+    if (!ok) return out;
+    std::lock_guard<std::mutex> lk(mu_);
+    auto& entries = scopes_[scope];
+    for (auto& [key, counts] : fetched) {
+      entries[key] = Entry{counts, now};
+      out[key] = counts;
+    }
+    if (entries.size() > 100000) entries.clear();
+    return out;
+  }
+
+private:
+  static constexpr auto kReplicaCountTtl = std::chrono::seconds(60);
+
+  struct Entry {
+    Counts counts;
+    std::chrono::steady_clock::time_point fetched_at;
+  };
+
+  std::mutex mu_;
+  std::unordered_map<std::string, std::unordered_map<std::string, Entry>> scopes_;
+};
+
 bool load_replication(
     clickhouse::Client& system,
     const AllowedObjectSet& allowed,
     std::unordered_map<std::string, ExplorerTableSummary*>& map,
     std::string* error) {
-  return try_select(system,
-    "SELECT toString(database), toString(`table`), toString(total_replicas), toString(active_replicas), "
+  std::vector<std::pair<std::string, std::string>> replicated;
+  const bool ok = try_select(system,
+    "SELECT toString(database), toString(`table`), "
     "toString(queue_size), toString(absolute_delay), toString(is_readonly), "
     "toString(is_session_expired), toString(replica_name), toString(zookeeper_path) "
     "FROM system.replicas",
@@ -871,16 +965,31 @@ bool load_replication(
         if (it == map.end()) continue;
         auto& replica = it->second->replication;
         replica.available = true;
-        replica.total_replicas = parse_u64(block_string_at(block, 2, row)).value_or(0);
-        replica.active_replicas = parse_u64(block_string_at(block, 3, row)).value_or(0);
-        replica.queue_size = parse_u64(block_string_at(block, 4, row)).value_or(0);
-        replica.absolute_delay_seconds = parse_u64(block_string_at(block, 5, row)).value_or(0);
-        replica.readonly = truthy(block_string_at(block, 6, row));
-        replica.session_expired = truthy(block_string_at(block, 7, row));
-        replica.replica_name = block_string_at(block, 8, row);
-        replica.zookeeper_path = block_string_at(block, 9, row);
+        replica.queue_size = parse_u64(block_string_at(block, 2, row)).value_or(0);
+        replica.absolute_delay_seconds = parse_u64(block_string_at(block, 3, row)).value_or(0);
+        replica.readonly = truthy(block_string_at(block, 4, row));
+        replica.session_expired = truthy(block_string_at(block, 5, row));
+        replica.replica_name = block_string_at(block, 6, row);
+        replica.zookeeper_path = block_string_at(block, 7, row);
+        replicated.emplace_back(database, table);
       }
     }, error);
+  if (!ok || replicated.empty()) return ok;
+
+  std::string counts_error;
+  const auto counts = ReplicaCountCache::instance().get(system, replicated, &counts_error);
+  for (const auto& [database, table] : replicated) {
+    const auto key = table_key(database, table);
+    const auto it = counts.find(key);
+    if (it == counts.end()) continue;
+    auto& replica = map.at(key)->replication;
+    replica.total_replicas = it->second.total;
+    replica.active_replicas = it->second.active;
+  }
+  // Counts are an enrichment: a failed lookup leaves them unknown (0) rather
+  // than failing the whole catalog.
+  if (!counts_error.empty() && error && error->empty()) *error = "Replica count lookup failed: " + counts_error;
+  return true;
 }
 
 bool load_database_summaries(

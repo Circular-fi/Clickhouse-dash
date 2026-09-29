@@ -15,6 +15,7 @@ This starts only the normal development stack:
 - ClickHouse `26.7.5.10`;
 - ClickHouse init SQL that creates the OTEL tables and trace projection indexes;
 - a fresh Release build of the current ChDash working tree at `http://localhost:18080`.
+- a second ClickHouse replica (`clickhouse_replica`) joined to the primary through the ClickHouse Keeper embedded in `clickhouse` (cluster `chdash_cluster`, config in `tests/clickhouse-config/`). The fixture `tests/clickhouse-init/04-replicated-fixtures.sql` (re-applied by every test run) creates `chdash_repl` with ReplicatedMergeTree / ReplicatedSummingMergeTree tables, a materialized view and a Distributed table, so replica counts, queues and the graph's `nR` badges are exercised locally.
 
 The heavy `otel_fixture` service is intentionally behind the Compose `otel` profile, so a normal rebuild does **not** start or wait for it. Start it explicitly with `docker compose --profile otel up -d --build otel_fixture`. The `test` profile also enables it automatically because the full test suite expects seeded trace data.
 
