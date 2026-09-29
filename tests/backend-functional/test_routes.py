@@ -947,3 +947,18 @@ def test_trace_tag_search_and_detail_match_spans():
                       f"(mapContains(ResourceAttributes, {_sql_list([key])[1:-1]}) AND ResourceAttributes[{_sql_list([key])[1:-1]}] = {_sql_list([value])[1:-1]}))")
         expected = _expected_trace_ids(payload["search_path"], start_ms, end_ms, 20, tag_filter)
         assert set(ids) == set(expected)
+
+
+def test_trace_prefill_is_cached_per_minute_aligned_range():
+    start_ms, end_ms = _otel_window_ms()
+    params = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}
+    first = get("/api/traces/prefill", params=params)
+    assert first.status_code == 200, first.text
+    payload = first.json()
+    assert payload.get("pairs"), payload
+    assert payload.get("range") == [start_ms, end_ms], payload
+    # A range shifted within the same minute is served from the shared scan.
+    shifted = get("/api/traces/prefill", params={**params, "start_ms": start_ms - 1, "end_ms": end_ms - 1})
+    assert shifted.status_code == 200, shifted.text
+    assert shifted.json().get("pairs") == payload["pairs"]
+    assert all(len(pair) == 3 and pair[0] and pair[1] for pair in payload["pairs"]), payload

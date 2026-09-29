@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -241,6 +242,17 @@ private:
   StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
   // Server-wide storage distribution for the Explorer System section.
   StaleCache<std::string, ExplorerStorageMap> explorer_storage_cache_;
+  // Trace service/operation prefill. The browser re-requests it on every
+  // time-range change and page load; each miss scans every span of the window
+  // (seconds on wide windows), so identical minute-aligned ranges share one
+  // result for a short TTL.
+  struct TracePrefill {
+    std::vector<std::pair<std::string, std::string>> pairs;
+    bool truncated = false;
+    int64_t start_ms = 0;
+    int64_t end_ms = 0;
+  };
+  StaleCache<std::string, TracePrefill> trace_prefill_cache_;
 
   AppConfig cfg_;
   httplib::Server http_;

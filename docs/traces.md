@@ -106,3 +106,8 @@ The generated services include `test_ingest`, `test_worker`, and `test_enrichmen
 ```hcl
 service_allowlist = ["test_*"]
 ```
+
+### Service/operation prefill cache
+
+`/api/traces/prefill` scans every span of the window (existence only, `LIMIT 1 BY ServiceName, SpanName`). The browser requests it on every time-range change and page load, so the server answers from a 60 s cache keyed by the minute-aligned superset of the requested range: requests made within the same minute share one scan, and the picker lists may include pairs seen up to one minute outside the exact range.
+

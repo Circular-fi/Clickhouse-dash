@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "time_util.hpp"
 
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
@@ -754,41 +755,61 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
     return json_error(res, 400, "invalid_trace_range", range_error);
   }
 
-  std::string error;
-  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
-  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
-
-  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
-  const std::string visibility = service_allowlist_predicate(cfg_.traces);
-  const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
+  // Minute-aligned superset of the requested range: the list only feeds the
+  // service/operation pickers, and alignment lets "last N minutes" requests
+  // made within the same minute (reloads, range toggles) share one scan.
+  constexpr int64_t kPrefillAlignMs = 60 * 1000;
+  constexpr uint64_t kPrefillTtlMs = 60 * 1000;
+  const int64_t aligned_start_ms = (start_ms / kPrefillAlignMs) * kPrefillAlignMs;
+  const int64_t aligned_end_ms = ((end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
+  const std::string cache_key = source_host_id + '\0' + std::to_string(aligned_start_ms) + '\0' +
+      std::to_string(aligned_end_ms);
   const size_t hard_limit = 20000;
 
-  struct Pair { std::string service, operation; uint64_t count = 1; };
-  std::vector<Pair> pairs;
-  try {
-    // Discovery only needs existence. Counting every span per service/operation pair
-    // turns a cheap dictionary prefill into a large aggregation on busy trace tables.
-    const std::string sql =
-        "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
-        " PREWHERE " + time_predicate + " WHERE " + visibility +
-        " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1);
-    client->Select(sql, [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        Pair item;
-        item.service = ch_block_text_at(block, 0, row);
-        item.operation = ch_block_text_at(block, 1, row);
-        pairs.push_back(std::move(item));
-      }
-    });
-  } catch (const std::exception& e) {
-    return json_error(res, 503, "trace_prefill_failed", e.what());
+  auto cached = trace_prefill_cache_.get_or_refresh(
+      cache_key, static_cast<uint64_t>(now_ms()), kPrefillTtlMs, 5000,
+      [&](TracePrefill& value, std::string& code, std::string& message) {
+        std::string error;
+        auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+        if (!client) {
+          code = "trace_source_unavailable";
+          message = error.empty() ? "Cannot connect to trace ClickHouse source." : error;
+          return false;
+        }
+        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+        const std::string visibility = service_allowlist_predicate(cfg_.traces);
+        const std::string time_predicate = trace_time_predicate(aligned_start_ms, aligned_end_ms);
+        try {
+          // Discovery only needs existence. Counting every span per service/operation pair
+          // turns a cheap dictionary prefill into a large aggregation on busy trace tables.
+          const std::string sql =
+              "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
+              " PREWHERE " + time_predicate + " WHERE " + visibility +
+              " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1);
+          client->Select(sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              value.pairs.emplace_back(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
+            }
+          });
+        } catch (const std::exception& e) {
+          if (client_pool_) client_pool_->invalidate(client);
+          code = "trace_prefill_failed";
+          message = e.what();
+          return false;
+        }
+        std::sort(value.pairs.begin(), value.pairs.end());
+        value.truncated = value.pairs.size() > hard_limit;
+        if (value.truncated) value.pairs.resize(hard_limit);
+        value.start_ms = aligned_start_ms;
+        value.end_ms = aligned_end_ms;
+        return true;
+      });
+  if (!cached.has_value || !cached.value) {
+    return json_error(res, 503, cached.error_code.empty() ? "trace_prefill_failed" : cached.error_code,
+                      cached.error_message.empty() ? "Trace prefill failed." : cached.error_message);
   }
-  std::sort(pairs.begin(), pairs.end(), [](const Pair& a, const Pair& b) {
-    if (a.service != b.service) return a.service < b.service;
-    return a.operation < b.operation;
-  });
-  const bool truncated = pairs.size() > hard_limit;
-  if (truncated) pairs.resize(hard_limit);
+  const bool truncated = cached.value->truncated;
+  const auto& pairs = cached.value->pairs;
 
   rapidjson::StringBuffer sb(nullptr, 64 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -796,8 +817,9 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
   w.Key("truncated"); w.Bool(truncated);
   w.Key("pairs"); w.StartArray();
-  for (const auto& item : pairs) {
-    w.StartArray(); w.String(item.service.c_str()); w.String(item.operation.c_str()); w.Uint64(item.count); w.EndArray();
+  for (const auto& [service, operation] : pairs) {
+    // The count column is kept for payload compatibility (existence only).
+    w.StartArray(); w.String(service.c_str()); w.String(operation.c_str()); w.Uint64(1); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
