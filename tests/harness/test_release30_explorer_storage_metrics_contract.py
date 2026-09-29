@@ -19,7 +19,10 @@ def test_non_storing_toggle_filters_sidebar_objects() -> None:
     ui = read("src/static/app_explorer.js")
     assert "function sidebarObjectVisible(table)" in ui
     assert "!model.includeNonStoring && nonStoringSummary(table)" in ui
-    assert "table.database === database && sidebarObjectVisible(table)" in ui
+    # Tables are grouped per database once per catalog payload; the visibility
+    # filter still applies to every rendered database group.
+    assert "grouped.set(table.database, [])" in ui
+    assert "(groupedTables.get(database) || []).filter((table) => sidebarObjectVisible(table))" in ui
     assert "item.database === name && sidebarObjectVisible(item)" in ui
 
 
