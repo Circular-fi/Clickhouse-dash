@@ -563,18 +563,34 @@
       tooltip.hidden = true;
       container.appendChild(tooltip);
     }
+    // pointermove fires at display rate: rebuild and measure the tooltip only
+    // when the hovered bucket changes, then just reposition it.
+    let current = null;
+    let tipWidth = 0;
+    let tipHeight = 0;
     const hide = (target = null) => {
       tooltip.hidden = true;
+      current = null;
       onHover?.(target, false);
     };
     const move = (event, target) => {
-      const html = htmlFor(target);
-      if (!html) return hide(target);
-      onHover?.(target, true);
-      tooltip.innerHTML = html;
-      tooltip.hidden = false;
+      if (current !== target) {
+        const html = htmlFor(target);
+        if (!html) return hide(target);
+        onHover?.(target, true);
+        tooltip.innerHTML = html;
+        tooltip.hidden = false;
+        // Measure at the origin so the natural size does not depend on where
+        // the previous bucket left the tooltip.
+        tooltip.style.left = "0px";
+        tooltip.style.top = "0px";
+        const size = tooltip.getBoundingClientRect();
+        tipWidth = size.width;
+        tipHeight = size.height;
+        current = target;
+      }
       const rect = container.getBoundingClientRect();
-      const tip = tooltip.getBoundingClientRect();
+      const tip = { width: tipWidth, height: tipHeight };
       let x = event.clientX - rect.left + 12;
       let y = event.clientY - rect.top + 12;
       if (x + tip.width > rect.width - 4) x = event.clientX - rect.left - tip.width - 12;
@@ -791,6 +807,70 @@
     return { start, end, duration: Math.max(1, end - start) };
   }
 
+  // Everything derived from the loaded trace alone (tree, bounds, per-service
+  // stats, start-ordered spans, parsed event markers, search text) is computed
+  // once per trace. The waterfall re-renders on every toggle, service filter,
+  // range change and search keystroke; rebuilding the tree and re-parsing each
+  // span's events JSON on every render dominated those interactions.
+  let traceCache = null;
+
+  function activeTraceCache() {
+    const trace = model.activeTrace;
+    if (traceCache && traceCache.trace === trace) return traceCache;
+    const spans = trace?.spans || [];
+    const tree = buildTree(spans);
+    const nodeById = new Map();
+    const duplicateIds = new Set();
+    const parentOf = new Map();
+    for (const node of tree.nodes) {
+      const id = String(node.span.span_id || "");
+      if (nodeById.has(id)) duplicateIds.add(id);
+      else nodeById.set(id, node);
+      for (const child of node.children) parentOf.set(child, node);
+    }
+    traceCache = {
+      trace,
+      spans,
+      tree,
+      nodeById,
+      duplicateIds,
+      parentOf,
+      extent: spanExtent(spans),
+      bounds: traceBounds(spans),
+      byStart: null,
+      serviceStats: null,
+      overviewBars: new Map(),
+      events: new Map(),
+      searchText: new Map(),
+    };
+    return traceCache;
+  }
+
+  function spanSearchText(cache, span) {
+    let text = cache.searchText.get(span);
+    if (text == null) {
+      text = `${span.service_name || ""} ${span.span_name || ""} ${span.span_id || ""}`.toLowerCase();
+      cache.searchText.set(span, text);
+    }
+    return text;
+  }
+
+  // Event markers only need each event's time and label; parse the JSON arrays once.
+  function spanEventMarkers(cache, span) {
+    let markers = cache.events.get(span);
+    if (!markers) {
+      const eventTimes = parseStructuredValue(span.events_timestamp);
+      const eventNames = parseStructuredValue(span.events_name);
+      const events = Array.isArray(eventTimes) ? eventTimes : [];
+      markers = events.map((value, index) => ({
+        ns: timestampToNs(value),
+        name: Array.isArray(eventNames) && eventNames[index] != null ? String(eventNames[index]) : `Event ${index + 1}`,
+      }));
+      cache.events.set(span, markers);
+    }
+    return markers;
+  }
+
   function renderTraceOverview(spans, bounds) {
     if (!dom.traceOverview) return;
     if (!spans.length) { dom.traceOverview.innerHTML = ""; return; }
@@ -798,13 +878,33 @@
     const lo = Math.max(0, Math.min(1, Number(range[0] || 0)));
     const hi = Math.max(lo + 0.005, Math.min(1, Number(range[1] == null ? 1 : range[1])));
     const ticks = durationTicks(bounds.duration, 5).map((tick) => `<span style="left:${tick.ratio * 100}%">${esc(tick.label)}</span>`).join("");
-    const ordered = spans.filter((span) => serviceEnabled(span.service_name)).slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0));
+    const cache = activeTraceCache();
+    const cached = cache.spans === spans && cache.bounds === bounds;
+    // A stable sort once per trace, then filter: same order as filtering first.
+    const byStart = cached
+      ? (cache.byStart ||= spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0)))
+      : spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0));
+    const ordered = byStart.filter((span) => serviceEnabled(span.service_name));
+    // Only the lane depends on the enabled-service set; the rest of each bar is
+    // fixed for the trace, so build it once.
+    const barParts = (span) => {
+      let parts = cached ? cache.overviewBars.get(span) : null;
+      if (!parts) {
+        const left = Math.max(0, Math.min(100, ((Number(span.start_ns || 0) - bounds.start) / bounds.duration) * 100));
+        const width = Math.max(.08, Math.min(100 - left, (Number(span.duration_ns || 0) / bounds.duration) * 100));
+        const isError = String(span.status_code || "").toLowerCase() === "error";
+        parts = [
+          `<i class="${isError ? "is-error" : ""}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${formatDuration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:`,
+          `px;--trace-service-color:${serviceColor(span.service_name)}"></i>`,
+        ];
+        if (cached) cache.overviewBars.set(span, parts);
+      }
+      return parts;
+    };
     const bars = ordered.map((span, index) => {
-      const left = Math.max(0, Math.min(100, ((Number(span.start_ns || 0) - bounds.start) / bounds.duration) * 100));
-      const width = Math.max(.08, Math.min(100 - left, (Number(span.duration_ns || 0) / bounds.duration) * 100));
       const lane = index % 9;
-      const isError = String(span.status_code || "").toLowerCase() === "error";
-      return `<i class="${isError ? "is-error" : ""}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${formatDuration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${6 + lane * 4}px;--trace-service-color:${serviceColor(span.service_name)}"></i>`;
+      const parts = barParts(span);
+      return `${parts[0]}${6 + lane * 4}${parts[1]}`;
     }).join("");
     dom.traceOverview.innerHTML = `<div class="traceOverview__ticks">${ticks}</div><div class="traceOverview__graph" data-trace-overview-graph>${bars}<div class="traceOverview__selection" data-trace-overview-selection style="left:${(lo * 100).toFixed(3)}%;width:${((hi-lo)*100).toFixed(3)}%"><button type="button" class="traceOverview__handle traceOverview__handle--start" data-overview-handle="start" aria-label="Resize trace range start"></button><button type="button" class="traceOverview__handle traceOverview__handle--end" data-overview-handle="end" aria-label="Resize trace range end"></button></div></div>`;
 
@@ -818,10 +918,11 @@
       selection.style.width = `${((b-a)*100).toFixed(3)}%`;
       return [a, b];
     };
+    // A range change only moves the selection box; the bars are unchanged, so
+    // update the box in place instead of rebuilding one element per span.
     graph.addEventListener("dblclick", (event) => {
       event.preventDefault();
-      model.traceViewRange = [0, 1];
-      renderTraceOverview(spans, bounds);
+      model.traceViewRange = updateSelection([0, 1]);
       renderWaterfall();
     });
     graph.addEventListener("pointerdown", (event) => {
@@ -852,7 +953,6 @@
           next = updateSelection([Math.max(0, pos-half), Math.min(1, pos+half)]);
         }
         model.traceViewRange = next;
-        renderTraceOverview(spans, bounds);
         renderWaterfall();
       };
       graph.addEventListener("pointermove", move);
@@ -864,13 +964,18 @@
 
   function renderTraceServiceFilters(spans) {
     if (!dom.traceServiceFilters) return;
-    const stats = new Map();
-    for (const span of spans || []) {
-      const service = String(span.service_name || "unknown");
-      const row = stats.get(service) || { spans: 0, errors: 0 };
-      row.spans += 1;
-      if (String(span.status_code || "").toLowerCase() === "error") row.errors += 1;
-      stats.set(service, row);
+    const cache = activeTraceCache();
+    let stats = cache.spans === spans ? cache.serviceStats : null;
+    if (!stats) {
+      stats = new Map();
+      for (const span of spans || []) {
+        const service = String(span.service_name || "unknown");
+        const row = stats.get(service) || { spans: 0, errors: 0 };
+        row.spans += 1;
+        if (String(span.status_code || "").toLowerCase() === "error") row.errors += 1;
+        stats.set(service, row);
+      }
+      if (cache.spans === spans) cache.serviceStats = stats;
     }
     const services = [...stats.keys()].sort((a, b) => a.localeCompare(b));
     const allSelected = services.every((service) => !model.disabledServices.has(service));
@@ -883,7 +988,7 @@
     dom.traceServiceFilters.querySelector("[data-trace-toggle-all]")?.addEventListener("click", () => {
       model.disabledServices = allSelected ? new Set(services) : new Set();
       renderTraceServiceFilters(spans);
-      renderTraceOverview(spans, traceBounds(spans));
+      renderTraceOverview(spans, activeTraceCache().bounds);
       renderWaterfall();
     });
     for (const button of dom.traceServiceFilters.querySelectorAll("[data-trace-service-filter]")) {
@@ -892,7 +997,7 @@
         if (model.disabledServices.has(service)) model.disabledServices.delete(service);
         else model.disabledServices.add(service);
         renderTraceServiceFilters(spans);
-        renderTraceOverview(spans, traceBounds(spans));
+        renderTraceOverview(spans, activeTraceCache().bounds);
         renderWaterfall();
       });
     }
@@ -908,7 +1013,7 @@
       if (dom.traceOverview) dom.traceOverview.innerHTML = "";
       return;
     }
-    const bounds = traceBounds(spans);
+    const bounds = activeTraceCache().bounds;
     const root = spans.find((s) => !s.parent_span_id) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
     if (dom.traceDetailTitle) {
       dom.traceDetailTitle.innerHTML = `<strong><span>${esc(root?.service_name || "trace")}:</span> ${esc(root?.span_name || "trace")}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(shortId(trace.trace_id, 10))}</code><button type="button" class="traceCopyButton traceCopyButton--header" data-copy-active-trace="${esc(trace.trace_id)}" aria-label="Copy Trace ID" title="Copy full Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
@@ -928,137 +1033,238 @@
     renderTraceOverview(spans, bounds);
   }
 
-  function renderWaterfall() {
-    if (!dom.traceWaterfall) return;
-    const spans = model.activeTrace?.spans || [];
-    if (!spans.length) { dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">No spans.</div>'; return; }
-    const tree = buildTree(spans);
-    const allRows = visibleNodes(tree);
-    const { start: fullStart, end: fullEnd } = spanExtent(spans);
+  function spanRowClass(active, searchMatch, error) {
+    return `traceSpanRow${active ? " is-active" : ""}${searchMatch ? " is-search-match" : ""}${error ? " is-error" : ""}`;
+  }
+
+  function spanRowGuides(depth) {
+    return Array.from({ length: depth }, (_, index) => `<i style="left:${18 + index * 12}px"></i>`).join("");
+  }
+
+  function spanInspectorRowHtml(node, cache) {
+    const span = node.span;
+    const depth = Math.min(node.depth, 20);
+    const serviceLineX = 27 + depth * 12;
+    return `<div class="traceSpanInspectorRow" style="--trace-service-color:${serviceColor(span.service_name)};--trace-depth-x:${serviceLineX}px"><div class="traceSpanInspectorRow__spacer"><span class="traceSpanRow__guides" aria-hidden="true">${spanRowGuides(depth)}</span></div><div class="traceSpanInspectorRow__panel">${renderSpanInspectorCard(span, cache.spans, cache.bounds)}</div></div>`;
+  }
+
+  // View window and search shared by the full render and in-place row updates.
+  function waterfallContext(cache) {
+    const { start: fullStart, end: fullEnd } = cache.extent;
     const fullTotal = Math.max(1, fullEnd - fullStart);
     const viewRange = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
     const viewLo = Math.max(0, Math.min(1, Number(viewRange[0] || 0)));
     const viewHi = Math.max(viewLo + .005, Math.min(1, Number(viewRange[1] == null ? 1 : viewRange[1])));
     const start = fullStart + fullTotal * viewLo;
     const end = fullStart + fullTotal * viewHi;
-    const total = Math.max(1, end - start);
-    const rows = allRows.filter((node) => {
-      const spanStart = Number(node.span.start_ns || 0);
-      const spanEnd = spanStart + Number(node.span.duration_ns || 0);
-      return serviceEnabled(node.span.service_name) && spanEnd > start && spanStart < end;
-    });
-    const search = String(dom.traceSpanSearch?.value || "").trim().toLowerCase();
-    const matching = search ? rows.filter((node) => `${node.span.service_name || ""} ${node.span.span_name || ""} ${node.span.span_id || ""}`.toLowerCase().includes(search)) : [];
+    return { cache, start, end, total: Math.max(1, end - start), search: String(dom.traceSpanSearch?.value || "").trim().toLowerCase() };
+  }
+
+  function waterfallRowShown(node, ctx) {
+    const { start, end } = ctx;
+    const spanStart = Number(node.span.start_ns || 0);
+    const spanEnd = spanStart + Number(node.span.duration_ns || 0);
+    return serviceEnabled(node.span.service_name) && spanEnd > start && spanStart < end;
+  }
+
+  function renderWaterfall() {
+    if (!dom.traceWaterfall) return;
+    const cache = activeTraceCache();
+    const spans = cache.spans;
+    if (!spans.length) { dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">No spans.</div>'; return; }
+    const ctx = waterfallContext(cache);
+    const { total, search } = ctx;
+    const rows = visibleNodes(cache.tree).filter((node) => waterfallRowShown(node, ctx));
+    const matching = search ? rows.filter((node) => spanSearchText(cache, node.span).includes(search)) : [];
     if (dom.traceSpanSearchCount) dom.traceSpanSearchCount.textContent = search ? `${matching.length} match${matching.length === 1 ? "" : "es"}` : "";
     dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
     const tickLabels = durationTicks(total, 5).map((tick) => `<span style="left:${tick.ratio * 100}%"><i></i><b>${esc(tick.label)}</b></span>`).join("");
     const head = `<div class="traceWaterfallHead"><div class="traceWaterfallHead__operation"><span>Service &amp; Operation</span><span class="traceWaterfallHead__controls"><button type="button" data-trace-collapse-all title="Collapse all">‹‹</button><button type="button" data-trace-expand-all title="Expand all">››</button></span></div><div class="traceWaterfallHead__timeline">${tickLabels}</div><div class="traceWaterfallResizer" data-trace-waterfall-resizer role="separator" aria-orientation="vertical" aria-label="Resize Service & Operation column" tabindex="0"></div></div>`;
-    const body = rows.map((node) => {
-      const span = node.span;
-      const id = String(span.span_id || "");
-      const spanStart = Number(span.start_ns || 0);
-      const spanEnd = spanStart + Number(span.duration_ns || 0);
-      const clippedStart = Math.max(start, spanStart);
-      const clippedEnd = Math.min(end, spanEnd);
-      const inView = clippedEnd > clippedStart;
-      const left = inView ? Math.max(0, Math.min(100, ((clippedStart - start) / total) * 100)) : 0;
-      const width = inView ? Math.max(0.24, Math.min(100 - left, ((clippedEnd - clippedStart) / total) * 100)) : 0;
-      const error = String(span.status_code || "").toLowerCase() === "error";
-      const active = model.openSpanIds.has(id);
-      const searchMatch = !!search && `${span.service_name || ""} ${span.span_name || ""} ${span.span_id || ""}`.toLowerCase().includes(search);
-      const color = serviceColor(span.service_name);
-      const toggle = node.children.length ? `<button type="button" class="traceSpanRow__toggle" data-toggle-span="${esc(id)}" aria-label="${model.collapsed.has(id) ? "Expand" : "Collapse"} children">${model.collapsed.has(id) ? "›" : "⌄"}</button>` : '<span class="traceSpanRow__toggle traceSpanRow__toggle--blank"></span>';
-      const labelLeft = left + (width / 2) >= 62;
-      const depth = Math.min(node.depth, 20);
-      const guides = Array.from({ length: depth }, (_, index) => `<i style="left:${18 + index * 12}px"></i>`).join("");
-      const serviceLineX = 27 + depth * 12;
-      const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
-      const durationText = formatDuration(span.duration_ns);
-      const barLabel = labelLeft
-        ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
-        : `<span class="traceSpanBar__label"><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
-      const eventTimes = parseStructuredValue(span.events_timestamp);
-      const eventNames = parseStructuredValue(span.events_name);
-      const events = Array.isArray(eventTimes) ? eventTimes : [];
-      const eventMarkers = events.map((value, index) => {
-        const eventNs = timestampToNs(value);
-        if (!Number.isFinite(eventNs) || eventNs < clippedStart || eventNs > clippedEnd) return "";
-        const eventLeft = Math.max(0, Math.min(100, ((eventNs - start) / total) * 100));
-        const eventName = Array.isArray(eventNames) && eventNames[index] != null ? String(eventNames[index]) : `Event ${index + 1}`;
-        return `<i class="traceSpanEventMarker" style="left:${eventLeft.toFixed(4)}%" title="${esc(eventName)}"></i>`;
-      }).join("");
-      const bar = inView ? `<i class="traceSpanBar${error ? " traceSpanBar--error" : ""}${labelLeft ? " traceSpanBar--labelLeft" : ""}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--trace-service-color:${color}">${barLabel}</i>` : "";
-      const rowHtml = `<div class="traceSpanRow${active ? " is-active" : ""}${searchMatch ? " is-search-match" : ""}${error ? " is-error" : ""}" data-span-id="${esc(id)}" role="button" tabindex="0">
+    const body = rows.map((node) => waterfallRowHtml(node, ctx)).join("");
+    dom.traceWaterfall.innerHTML = `${head}<div class="traceWaterfallBody">${body}</div>`;
+  }
+
+  function waterfallRowHtml(node, ctx) {
+    const { cache, start, end, total, search } = ctx;
+    const span = node.span;
+    const id = String(span.span_id || "");
+    const spanStart = Number(span.start_ns || 0);
+    const spanEnd = spanStart + Number(span.duration_ns || 0);
+    const clippedStart = Math.max(start, spanStart);
+    const clippedEnd = Math.min(end, spanEnd);
+    const inView = clippedEnd > clippedStart;
+    const left = inView ? Math.max(0, Math.min(100, ((clippedStart - start) / total) * 100)) : 0;
+    const width = inView ? Math.max(0.24, Math.min(100 - left, ((clippedEnd - clippedStart) / total) * 100)) : 0;
+    const error = String(span.status_code || "").toLowerCase() === "error";
+    const active = model.openSpanIds.has(id);
+    const searchMatch = !!search && spanSearchText(cache, span).includes(search);
+    const color = serviceColor(span.service_name);
+    const toggle = node.children.length ? `<button type="button" class="traceSpanRow__toggle" data-toggle-span="${esc(id)}" aria-label="${model.collapsed.has(id) ? "Expand" : "Collapse"} children">${model.collapsed.has(id) ? "›" : "⌄"}</button>` : '<span class="traceSpanRow__toggle traceSpanRow__toggle--blank"></span>';
+    const labelLeft = left + (width / 2) >= 62;
+    const depth = Math.min(node.depth, 20);
+    const guides = spanRowGuides(depth);
+    const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
+    const durationText = formatDuration(span.duration_ns);
+    const barLabel = labelLeft
+      ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
+      : `<span class="traceSpanBar__label"><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
+    const eventMarkers = spanEventMarkers(cache, span).map((event) => {
+      const eventNs = event.ns;
+      if (!Number.isFinite(eventNs) || eventNs < clippedStart || eventNs > clippedEnd) return "";
+      const eventLeft = Math.max(0, Math.min(100, ((eventNs - start) / total) * 100));
+      return `<i class="traceSpanEventMarker" style="left:${eventLeft.toFixed(4)}%" title="${esc(event.name)}"></i>`;
+    }).join("");
+    const bar = inView ? `<i class="traceSpanBar${error ? " traceSpanBar--error" : ""}${labelLeft ? " traceSpanBar--labelLeft" : ""}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--trace-service-color:${color}">${barLabel}</i>` : "";
+    const rowHtml = `<div class="${spanRowClass(active, searchMatch, error)}" data-span-id="${esc(id)}" role="button" tabindex="0">
         <div class="traceSpanRow__label" style="--trace-service-color:${color}"><span class="traceSpanRow__guides" aria-hidden="true">${guides}</span><div class="traceSpanRow__labelContent" style="padding-left:${8 + depth * 12}px">${toggle}<span class="traceSpanRow__serviceDot"></span><span class="traceSpanRow__service">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${error ? '<span class="traceSpanRow__errorBadge" title="Span status: Error">!</span>' : ""}</div></div>
         <div class="traceSpanRow__timeline">${bar}${eventMarkers}</div>
       </div>`;
-      const inspectorHtml = active ? `<div class="traceSpanInspectorRow" style="--trace-service-color:${color};--trace-depth-x:${serviceLineX}px"><div class="traceSpanInspectorRow__spacer"><span class="traceSpanRow__guides" aria-hidden="true">${guides}</span></div><div class="traceSpanInspectorRow__panel">${renderSpanInspectorCard(span, spans)}</div></div>` : "";
-      return rowHtml + inspectorHtml;
-    }).join("");
-    dom.traceWaterfall.innerHTML = `${head}<div class="traceWaterfallBody">${body}</div>`;
+    return active ? rowHtml + spanInspectorRowHtml(node, cache) : rowHtml;
+  }
 
-    dom.traceWaterfall.querySelector("[data-trace-collapse-all]")?.addEventListener("click", () => {
-      model.collapsed = new Set(tree.nodes.filter((node) => node.children.length).map((node) => String(node.span.span_id || "")));
-      renderWaterfall();
-    });
-    dom.traceWaterfall.querySelector("[data-trace-expand-all]")?.addEventListener("click", () => { model.collapsed.clear(); renderWaterfall(); });
-
-    const resizer = dom.traceWaterfall.querySelector("[data-trace-waterfall-resizer]");
-    const setWidthFromClient = (clientX) => {
-      const rect = dom.traceWaterfall.getBoundingClientRect();
-      if (!rect.width) return;
-      model.waterfallLabelPct = Math.max(18, Math.min(60, ((clientX - rect.left) / rect.width) * 100));
-      dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
+  // Folding or unfolding one branch only removes or inserts that branch's
+  // descendant rows (contiguous after it in tree order); the rest of the
+  // waterfall is unchanged, so patch the DOM instead of re-rendering it.
+  function toggleSpanCollapse(toggle) {
+    const id = String(toggle.getAttribute("data-toggle-span") || "");
+    const collapsing = !model.collapsed.has(id);
+    if (collapsing) model.collapsed.add(id); else model.collapsed.delete(id);
+    const cache = activeTraceCache();
+    const node = cache.nodeById.get(id);
+    const row = toggle.closest("[data-span-id]");
+    const ctx = waterfallContext(cache);
+    // A span search also maintains a match count over the visible rows.
+    if (!node || cache.duplicateIds.size || ctx.search || !row?.isConnected) { renderWaterfall(); return; }
+    toggle.setAttribute("aria-label", `${collapsing ? "Expand" : "Collapse"} children`);
+    toggle.textContent = collapsing ? "›" : "⌄";
+    const own = row.nextElementSibling?.classList.contains("traceSpanInspectorRow") ? row.nextElementSibling : row;
+    if (collapsing) {
+      const isDescendant = (candidate) => {
+        for (let parent = cache.parentOf.get(candidate); parent; parent = cache.parentOf.get(parent)) {
+          if (parent === node) return true;
+        }
+        return false;
+      };
+      let el = own.nextElementSibling;
+      while (el) {
+        if (!el.classList.contains("traceSpanInspectorRow")) {
+          const other = cache.nodeById.get(String(el.getAttribute("data-span-id") || ""));
+          if (!other || !isDescendant(other)) break;
+        }
+        const next = el.nextElementSibling;
+        el.remove();
+        el = next;
+      }
+      return;
+    }
+    const html = [];
+    const visit = (parent) => {
+      for (const child of parent.children) {
+        if (waterfallRowShown(child, ctx)) html.push(waterfallRowHtml(child, ctx));
+        if (!model.collapsed.has(String(child.span.span_id || ""))) visit(child);
+      }
     };
-    resizer?.addEventListener("pointerdown", (event) => {
+    visit(node);
+    if (html.length) own.insertAdjacentHTML("afterend", html.join(""));
+  }
+
+  // Opening or closing one span's inspector only changes that row: patch it in
+  // place instead of re-rendering (and re-parsing) every row of the trace.
+  function toggleSpanInspector(row) {
+    const id = String(row.getAttribute("data-span-id") || "");
+    model.activeSpanId = id;
+    const opening = !model.openSpanIds.has(id);
+    if (opening) model.openSpanIds.add(id); else model.openSpanIds.delete(id);
+    const cache = activeTraceCache();
+    const node = cache.nodeById.get(id);
+    if (!node || cache.duplicateIds.has(id) || !row.isConnected) { renderWaterfall(); return; }
+    const span = node.span;
+    const search = String(dom.traceSpanSearch?.value || "").trim().toLowerCase();
+    const error = String(span.status_code || "").toLowerCase() === "error";
+    row.className = spanRowClass(opening, !!search && spanSearchText(cache, span).includes(search), error);
+    const next = row.nextElementSibling;
+    if (next?.classList.contains("traceSpanInspectorRow")) next.remove();
+    if (opening) row.insertAdjacentHTML("afterend", spanInspectorRowHtml(node, cache));
+  }
+
+  function setWaterfallLabelWidth(pct) {
+    model.waterfallLabelPct = Math.max(18, Math.min(60, pct));
+    dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
+  }
+
+  // The waterfall body is rebuilt on every render, so its controls are handled
+  // by delegation on the persistent container instead of re-binding listeners
+  // to every row, toggle and link after each render.
+  function initWaterfallEvents() {
+    const root = dom.traceWaterfall;
+    if (!root) return;
+    root.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (target.closest("[data-trace-collapse-all]")) {
+        model.collapsed = new Set(activeTraceCache().tree.nodes.filter((node) => node.children.length).map((node) => String(node.span.span_id || "")));
+        renderWaterfall();
+        return;
+      }
+      if (target.closest("[data-trace-expand-all]")) { model.collapsed.clear(); renderWaterfall(); return; }
+      const toggle = target.closest("[data-toggle-span]");
+      if (toggle) {
+        event.stopPropagation();
+        toggleSpanCollapse(toggle);
+        return;
+      }
+      const link = target.closest("[data-linked-trace]");
+      if (link) {
+        event.preventDefault();
+        event.stopPropagation();
+        const traceId = String(link.getAttribute("data-linked-trace") || "");
+        if (traceId) loadTrace(traceId, { push: true });
+        return;
+      }
+      const row = target.closest("[data-span-id]");
+      if (row && root.contains(row)) toggleSpanInspector(row);
+    });
+    root.addEventListener("keydown", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      if (target.closest("[data-trace-waterfall-resizer]")) {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        setWaterfallLabelWidth(model.waterfallLabelPct + (event.key === "ArrowRight" ? 2 : -2));
+        return;
+      }
+      const row = target.closest("[data-span-id]");
+      if (row && root.contains(row) && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        toggleSpanInspector(row);
+      }
+    });
+    const setWidthFromClient = (clientX) => {
+      const rect = root.getBoundingClientRect();
+      if (!rect.width) return;
+      setWaterfallLabelWidth(((clientX - rect.left) / rect.width) * 100);
+    };
+    root.addEventListener("pointerdown", (event) => {
+      const resizer = event.target instanceof Element ? event.target.closest("[data-trace-waterfall-resizer]") : null;
+      if (!resizer) return;
       event.preventDefault();
       resizer.setPointerCapture?.(event.pointerId);
       resizer.classList.add("is-dragging");
       setWidthFromClient(event.clientX);
     });
-    resizer?.addEventListener("pointermove", (event) => {
-      if (!resizer.hasPointerCapture?.(event.pointerId)) return;
+    root.addEventListener("pointermove", (event) => {
+      const resizer = event.target instanceof Element ? event.target.closest("[data-trace-waterfall-resizer]") : null;
+      if (!resizer?.hasPointerCapture?.(event.pointerId)) return;
       setWidthFromClient(event.clientX);
     });
     const stopResize = (event) => {
-      if (resizer?.hasPointerCapture?.(event.pointerId)) resizer.releasePointerCapture?.(event.pointerId);
-      resizer?.classList.remove("is-dragging");
+      const resizer = event.target instanceof Element ? event.target.closest("[data-trace-waterfall-resizer]") : null;
+      if (!resizer) return;
+      if (resizer.hasPointerCapture?.(event.pointerId)) resizer.releasePointerCapture?.(event.pointerId);
+      resizer.classList.remove("is-dragging");
     };
-    resizer?.addEventListener("pointerup", stopResize);
-    resizer?.addEventListener("pointercancel", stopResize);
-    resizer?.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      event.preventDefault();
-      model.waterfallLabelPct = Math.max(18, Math.min(60, model.waterfallLabelPct + (event.key === "ArrowRight" ? 2 : -2)));
-      dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
-    });
-
-    for (const toggle of dom.traceWaterfall.querySelectorAll("[data-toggle-span]")) {
-      toggle.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const id = String(toggle.getAttribute("data-toggle-span") || "");
-        if (model.collapsed.has(id)) model.collapsed.delete(id); else model.collapsed.add(id);
-        renderWaterfall();
-      });
-    }
-    for (const row of dom.traceWaterfall.querySelectorAll("[data-span-id]")) {
-      const select = () => {
-        const id = String(row.getAttribute("data-span-id") || "");
-        model.activeSpanId = id;
-        if (model.openSpanIds.has(id)) model.openSpanIds.delete(id); else model.openSpanIds.add(id);
-        renderWaterfall();
-      };
-      row.addEventListener("click", select);
-      row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); } });
-    }
-    for (const link of dom.traceWaterfall.querySelectorAll("[data-linked-trace]")) {
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const traceId = String(link.getAttribute("data-linked-trace") || "");
-        if (traceId) loadTrace(traceId, { push: true });
-      });
-    }
+    root.addEventListener("pointerup", stopResize);
+    root.addEventListener("pointercancel", stopResize);
   }
 
   function parseStructuredValue(raw) {
@@ -1144,9 +1350,9 @@
     return `<details class="traceJaegerGroup"><summary>Links <span>${count}</span></summary><div class="traceJaegerLinks">${rows}</div></details>`;
   }
 
-  function renderSpanInspectorCard(span, spans) {
+  function renderSpanInspectorCard(span, spans, knownBounds = null) {
     const status = span.status_code || "Unset";
-    const bounds = traceBounds(spans || []);
+    const bounds = knownBounds || traceBounds(spans || []);
     const startOffset = Math.max(0, Number(span.start_ns || 0) - bounds.start);
     const statusClass = esc(String(status).toLowerCase());
     const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}">${esc(status)}</span>`;
@@ -1450,6 +1656,7 @@
   function init() {
     ui?.setPageSelectorValue?.("traces");
     initTracePickers();
+    initWaterfallEvents();
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());

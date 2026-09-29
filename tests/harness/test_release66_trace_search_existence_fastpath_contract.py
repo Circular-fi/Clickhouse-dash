@@ -21,12 +21,52 @@ def test_trace_prefill_uses_existence_and_tag_discovery_is_removed():
 def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     cpp = read("src/api_traces.cpp")
     search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
+    cursor = cpp[cpp.index("class TraceIndexCursor"):cpp.index("struct SpanRankQuery")]
     assert "kCandidateBatch = 1000" in search
-    assert "ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT" in search
-    assert "OFFSET " in search
+    assert "kCandidateScanCap = 64000" in search
+    assert "TraceIndexCursor cursor(*client, index_table, start_ms, end_ms);" in search
+    # Keyset pagination: no OFFSET re-sorting of the whole window per page.
+    assert "ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT" in cursor
+    assert "OFFSET " not in search and "OFFSET " not in cursor
+    assert "hi_ns_ = (fresh == 0 && last >= hi_ns_) ? last - 1 : last;" in cursor
+    assert "seen_.insert(id).second" in cursor
+    # Each page's span match reads only the page's index time bounds.
+    assert "AS batch_bounds" in search
+    assert "tupleElement(batch_bounds, 1)" in search and "tupleElement(batch_bounds, 2)" in search
     assert '" LIMIT 1 BY TraceId"' in search
     assert 'search_path = "trace_index_filtered"' in search
     assert '" WHERE " + visibility + " AND TraceId IN " + trace_id_list' in search
+    # Per-service stats are aggregated server-side: O(services), not O(spans).
+    assert "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])" in search
+    assert "groupArray(concat(toString(ServiceName)" not in search
+
+
+def test_span_based_trace_search_ranks_newest_slice_first_then_summarizes():
+    cpp = read("src/api_traces.cpp")
+    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
+    rank = cpp[cpp.index("std::vector<RankedTrace> rank_traces_by_start"):cpp.index("} // namespace\n\nvoid Server::handle_traces_meta")]
+    assert "rank_traces_by_start(*client, rank)" in search
+    assert 'search_path = "span_duration_two_phase"' in search
+    # Exactness: traces with visible window spans before the slice are probed and dropped.
+    assert '" AND Timestamp < " + ns_time(t)' in rank
+    assert "straddlers.count(row.trace_id) == 0" in rank
+    assert "GROUP BY TraceId\" + having + \" ORDER BY min(Timestamp) DESC LIMIT" in rank
+    # Broad service / operation filters become one HAVING countIf pass.
+    assert 'having = " HAVING countIf(1" + q.span_filters + ") > 0"' in rank
+    assert "filters_are_broad(*client, table, index_table" in search
+    # The last resort is exactly the whole-window query.
+    assert "if (whole) return rows;" in rank
+
+
+def test_trace_attribute_map_schema_is_cached_per_source():
+    cpp = read("src/api_traces.cpp")
+    search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
+    analytics = cpp[cpp.index("void Server::handle_traces_analytics"):cpp.index("void Server::handle_trace_detail")]
+    meta = cpp[cpp.index("void Server::handle_traces_meta"):cpp.index("void Server::handle_traces_prefill")]
+    assert "cached_trace_attribute_maps(*client, *host, cfg_.traces" in search
+    assert "cached_trace_attribute_maps(*client, *host, cfg_.traces" in analytics
+    assert "store_trace_attribute_maps(*host, cfg_.traces" in meta
+    assert "kAttributeMapCacheTtl" in cpp
 
 
 def test_trace_analytics_is_separate_and_deduplicates_by_existence():

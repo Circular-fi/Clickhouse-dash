@@ -794,3 +794,156 @@ def test_trace_analytics_duration_quantiles_come_from_spans():
     assert payload.get("duration_quantiles_source") == "span_bounds", payload
     assert payload.get("trace_count_chart"), payload
     assert payload.get("duration_quantiles"), payload
+
+
+def _ch_rows(sql: str) -> list[list[str]]:
+    base = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
+    auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+    response = requests.post(base + "/", data=(sql + " FORMAT TSV").encode(), auth=auth, timeout=120)
+    assert response.status_code == 200, response.text
+    return [line.split("\t") for line in response.text.splitlines() if line]
+
+
+def _span_window(start_ms: int, end_ms: int) -> str:
+    return f"Timestamp >= fromUnixTimestamp64Milli({start_ms}) AND Timestamp <= fromUnixTimestamp64Milli({end_ms})"
+
+
+def _index_window(start_ms: int, end_ms: int) -> str:
+    return f"Start >= fromUnixTimestamp64Milli({start_ms}) AND Start <= fromUnixTimestamp64Milli({end_ms})"
+
+
+def _sql_list(values) -> str:
+    return "(" + ",".join("'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'" for v in values) + ")"
+
+
+def _expected_trace_ids(path: str, start_ms: int, end_ms: int, limit: int, span_filter: str = "", having: str = "") -> list[str]:
+    # Ground truth computed directly in ClickHouse, whole window, no slicing.
+    spans = _span_window(start_ms, end_ms)
+    candidates = f" AND TraceId IN (SELECT TraceId FROM otel.otel_traces WHERE {spans} AND {span_filter})" if span_filter else ""
+    if path in ("trace_index", "trace_index_filtered"):
+        # Newest traces by their newest index row, restricted to matching traces.
+        sql = (f"SELECT TraceId FROM otel.otel_traces_trace_id_ts WHERE {_index_window(start_ms, end_ms)}{candidates}"
+               f" GROUP BY TraceId ORDER BY max(Start) DESC LIMIT {limit}")
+    else:
+        sql = (f"SELECT TraceId FROM otel.otel_traces WHERE {spans}{candidates}"
+               f" GROUP BY TraceId{having} ORDER BY min(Timestamp) DESC LIMIT {limit}")
+    return [row[0] for row in _ch_rows(sql)]
+
+
+def _assert_trace_summaries_match_spans(payload: dict, start_ms: int, end_ms: int) -> None:
+    rows = payload.get("rows") or []
+    if not rows:
+        return
+    services = payload["services"]
+    ids = [row[0] for row in rows]
+    truth = {}
+    for trace_id, service, spans, errors in _ch_rows(
+            f"SELECT TraceId, ServiceName, count(), countIf(StatusCode = 'Error') FROM otel.otel_traces "
+            f"WHERE {_span_window(start_ms, end_ms)} AND TraceId IN {_sql_list(ids)} GROUP BY TraceId, ServiceName"):
+        truth.setdefault(trace_id, {})[service] = (int(spans), int(errors))
+    bounds = {r[0]: (int(r[1]), int(r[2])) for r in _ch_rows(
+        f"SELECT TraceId, toUnixTimestamp64Milli(min(Timestamp)), "
+        f"toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))) "
+        f"FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} AND TraceId IN {_sql_list(ids)} GROUP BY TraceId")}
+    for row in rows:
+        trace_id, first_ms, _, _, duration_ns, span_count, error_count, stats = row
+        per_service = truth[trace_id]
+        assert span_count == sum(v[0] for v in per_service.values()), row
+        assert error_count == sum(v[1] for v in per_service.values()), row
+        assert {services[s]: (n, e) for s, n, e in stats} == {k: v for k, v in per_service.items() if k}, row
+        assert [n for _, n, _ in stats] == sorted((n for _, n, _ in stats), reverse=True), row
+        assert (first_ms, duration_ns) == bounds[trace_id], row
+    starts = [row[1] for row in rows]
+    assert starts == sorted(starts, reverse=True), starts
+
+
+def test_trace_index_search_pages_match_whole_window_ground_truth():
+    # The index is walked in bounded Start slices (keyset) and each page's span
+    # match reads only the page's time bounds; results must equal the plain
+    # whole-window definition: newest matching traces by their newest index row.
+    start_ms, end_ms = _otel_window_ms()
+    limit = 50
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": limit}
+    pairs = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}).json().get("pairs") or []
+    assert pairs, "OTEL fixture has no service/operation pairs"
+    service, operation = pairs[0][0], pairs[0][1]
+    cases = [
+        ({}, ""),
+        ({"service": service}, f"ServiceName = '{service}'"),
+        ({"service": service, "operation": operation}, f"ServiceName = '{service}' AND SpanName = '{operation}'"),
+        ({"status": "Error"}, "StatusCode = 'Error'"),
+    ]
+    for params, span_filter in cases:
+        response = get("/api/traces/search", params={**base, **params}, timeout=120)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        path = payload.get("search_path")
+        assert path in ("trace_index", "trace_index_filtered", "span_aggregation"), payload
+        assert path == ("trace_index" if not params else path), payload
+        ids = [row[0] for row in payload["rows"]]
+        expected = _expected_trace_ids(path, start_ms, end_ms, limit, span_filter)
+        assert set(ids) == set(expected), (params, path)
+        _assert_trace_summaries_match_spans(payload, start_ms, end_ms)
+
+
+def test_trace_duration_search_slices_match_whole_window_ground_truth():
+    # Span-based ranking scans the newest time slice first and drops traces that
+    # started before the slice; it must equal one whole-window aggregation.
+    # A 3 h window is wide enough for the sliced plan to be used.
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 3 * 3_600_000
+    limit = 40
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": limit}
+    recent_payload = get("/api/traces/search", params=base, timeout=120).json()
+    recent = recent_payload["rows"]
+    assert recent, "OTEL fixture is empty"
+    durations = sorted(int(row[4]) for row in recent)
+    threshold_ns = durations[len(durations) // 2]
+    duration_expr = ("(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - "
+                     "toInt64(min(toUnixTimestamp64Nano(Timestamp))))")
+    service_name = recent_payload["services"][recent[0][3]]
+    cases = [
+        ({"min_duration_ms": threshold_ns / 1_000_000}, "", f" HAVING {duration_expr} >= {threshold_ns}"),
+        ({"max_duration_ms": threshold_ns / 1_000_000}, "", f" HAVING {duration_expr} <= {threshold_ns}"),
+        ({"min_duration_ms": threshold_ns / 1_000_000, "service": service_name},
+         f"ServiceName = '{service_name}'", f" HAVING {duration_expr} >= {threshold_ns}"),
+    ]
+    for params, span_filter, having in cases:
+        response = get("/api/traces/search", params={**base, **params}, timeout=120)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload.get("search_path") == "span_duration_two_phase", payload
+        ids = [row[0] for row in payload["rows"]]
+        expected = _expected_trace_ids("span", start_ms, end_ms, limit, span_filter, having)
+        assert ids == expected, params
+        _assert_trace_summaries_match_spans(payload, start_ms, end_ms)
+
+
+def test_trace_tag_search_and_detail_match_spans():
+    start_ms, end_ms = _otel_window_ms()
+    window = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": 20}
+    rows = get("/api/traces/search", params=window).json()["rows"]
+    assert rows, "OTEL fixture is empty"
+    trace_id = rows[0][0]
+    detail = get("/api/traces/trace", params={"host_id": "local", "trace_id": trace_id})
+    assert detail.status_code == 200, detail.text
+    spans = detail.json()["spans"]
+    (count,), = _ch_rows(f"SELECT count() FROM otel.otel_traces WHERE TraceId = {_sql_list([trace_id])[1:-1]}")
+    assert len(spans) == int(count)
+    attributes = {}
+    for span in spans:
+        attributes.update(json.loads(span.get("span_attributes") or "{}"))
+    if not attributes:
+        pytest.skip("fixture spans carry no attributes")
+    key, value = sorted(attributes.items())[0]
+    # Twice: the second request is answered from the cached attribute schema.
+    for _ in range(2):
+        response = get("/api/traces/search", params={**window, "tag_scope": "any", "tag_key": key, "tag_value": value}, timeout=120)
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        ids = [row[0] for row in payload["rows"]]
+        assert ids, payload
+        tag_filter = (f"((mapContains(SpanAttributes, {_sql_list([key])[1:-1]}) AND SpanAttributes[{_sql_list([key])[1:-1]}] = {_sql_list([value])[1:-1]}) OR "
+                      f"(mapContains(ResourceAttributes, {_sql_list([key])[1:-1]}) AND ResourceAttributes[{_sql_list([key])[1:-1]}] = {_sql_list([value])[1:-1]}))")
+        expected = _expected_trace_ids(payload["search_path"], start_ms, end_ms, 20, tag_filter)
+        assert set(ids) == set(expected)
