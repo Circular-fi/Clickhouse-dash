@@ -2887,6 +2887,7 @@
       types: projected.types,
       rows: projected.rows,
       className: "explorerResultTable explorerResultTable--preview",
+      rowDetails: true,
       decorateHeader: (th, ctx) => {
         const sourceIndex = projected.sourceColumnIndexes?.[ctx.columnIndex] ?? ctx.columnIndex;
         if (aggregatePreviewColumn(previewColumns[sourceIndex])) appendFinalizePreviewInfo(th);

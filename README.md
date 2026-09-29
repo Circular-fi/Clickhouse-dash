@@ -11,6 +11,7 @@ A lightweight real-time ClickHouse query dashboard.
 ## Features
 
 - Execute ClickHouse SQL with streamed result batches.
+- Right-click a result row (Query results, multiquery panels, Explorer data preview) and pick **Details** to see that row vertically: every column with its type and full, pretty-printed value. Clicking elsewhere, Escape or scrolling far away closes it; Shift+right-click keeps the browser's own context menu.
 - Explicit **Run with profiling** mode enables processor/query-view logging only for that execution; normal Run keeps the existing lightweight path.
 - On-demand **Analyze** reads persisted ClickHouse execution logs by panel-scoped `query_id` without replaying the query.
 - Original compact telemetry: elapsed time, read progress, read rates, CPU usage, and current/peak query memory.

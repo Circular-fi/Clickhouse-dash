@@ -240,6 +240,8 @@
   }
 
   function clearLiveResults() {
+    closeRowDetailsMenu();
+    closeRowDetails();
     liveRowIngest.reset();
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
     const preservedBodyScrollHeight = getDocumentScrollHeight();
@@ -318,6 +320,8 @@
   const resultsStackDisposers = [];
 
   function clearResultsStack() {
+    closeRowDetailsMenu();
+    closeRowDetails();
     while (resultsStackDisposers.length) {
       const dispose = resultsStackDisposers.pop();
       try { dispose(); } catch { /* teardown must not block clearing */ }
@@ -1415,6 +1419,7 @@
     tr.appendChild(tdIndex);
 
     if (Array.isArray(row)) {
+      bindRowDetails(tr, row, row.__chdashRowIndex);
       for (let columnIndex = 0; columnIndex < resultColumns.length; columnIndex++) {
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex] && allResultRows.length > 1) {
@@ -1559,6 +1564,7 @@
 
     tbody.innerHTML = "";
     tbody.appendChild(frag);
+    refreshRowDetailsAfterRender(tbody);
 
     const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
     if (firstRow) {
@@ -1649,6 +1655,7 @@
       }
       tbody.appendChild(frag);
       if (end < rows.length) requestAnimationFrame(() => renderBatch(end));
+      else refreshRowDetailsAfterRender(tbody);
     };
 
     renderBatch(0);
@@ -2511,6 +2518,14 @@
       virtualScrollAttached: false,
     };
 
+    if (wrapClone) {
+      registerRowDetailsSource(findTablePartsIn(wrapClone).table, () => ({
+        columns: local.columns,
+        types: local.types,
+        typeAsts: local.typeAsts,
+      }));
+    }
+
     function updateCopyEnabledLocal() {
       const hasError = String(local.errorText || "").trim().length > 0;
       const hasRows = Array.isArray(local.allRows) && local.allRows.length > 0;
@@ -2636,6 +2651,7 @@
       tr.appendChild(tdIndex);
 
       if (Array.isArray(row)) {
+        bindRowDetails(tr, row, row.__chdashRowIndex);
         for (let i = 0; i < local.columns.length; i++) {
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i] && local.allRows.length > 1) {
@@ -2699,6 +2715,7 @@
 
       tbody.innerHTML = "";
       tbody.appendChild(frag);
+      refreshRowDetailsAfterRender(tbody);
 
       const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
       if (firstRow) {
@@ -2784,6 +2801,7 @@
         }
         tbody.appendChild(frag);
         if (end < rows.length) requestAnimationFrame(() => renderBatch(end));
+        else refreshRowDetailsAfterRender(tbody);
       };
 
       renderBatch(0);
@@ -3156,6 +3174,7 @@
     renderCell = null,
     indexSortable = true,
     rowIndexValue = null,
+    rowDetails = false,
   } = {}) {
     const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
@@ -3189,6 +3208,9 @@
     const tbody = document.createElement("tbody");
     table.append(thead, tbody);
     wrap.appendChild(table);
+    if (rowDetails) {
+      registerRowDetailsSource(table, () => ({ columns: safeColumns, types: safeTypes, typeAsts }));
+    }
 
     let sortKey = null;
     let sortDir = "";
@@ -3305,6 +3327,7 @@
         indexCell.textContent = customIndex == null ? "" : String(customIndex);
         tr.appendChild(indexCell);
         if (Array.isArray(entry.row)) {
+          if (rowDetails) bindRowDetails(tr, entry.row, customIndex);
           for (let index = 0; index < safeColumns.length; index++) {
             const td = document.createElement("td");
             const ast = typeAsts[index] || null;
@@ -3340,10 +3363,364 @@
         });
         tbody.appendChild(tr);
       }
+      refreshRowDetailsAfterRender(tbody);
     }
 
     render();
     return wrap;
+  }
+
+  // --- Row details: right-click a result row > "Details" ------------------
+  // Result rows are bound to their data through a WeakMap instead of being
+  // referenced by DOM node: virtualized tables unmount/remount <tr> elements
+  // on scroll, so the open details view re-finds its anchor among the rows
+  // currently mounted for the same row object (and closes once that row is
+  // gone, i.e. scrolled far away). Shift+right-click keeps the native menu.
+  const rowDetailsBindings = new WeakMap(); // <tr> -> { row, label }
+  const rowDetailsSources = new WeakMap(); // <table> -> () => { columns, types, typeAsts }
+  let rowDetailsMenu = null;
+  let rowDetailsView = null;
+
+  function registerRowDetailsSource(table, getContext) {
+    if (table && typeof getContext === "function") rowDetailsSources.set(table, getContext);
+  }
+
+  function bindRowDetails(tr, row, label) {
+    if (tr && Array.isArray(row)) rowDetailsBindings.set(tr, { row, label });
+  }
+
+  function listenUntilClosed(disposers, target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    disposers.push(() => target.removeEventListener(type, handler, options));
+  }
+
+  function runDisposers(disposers) {
+    while (disposers.length) {
+      const dispose = disposers.pop();
+      try { dispose(); } catch { /* teardown must not block closing */ }
+    }
+  }
+
+  function rowDetailsVisibleRect(table) {
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const owner = findVerticalScrollOwner(table);
+    if (!owner) return { top: 0, left: 0, right: vw, bottom: vh, height: vh };
+    const r = owner.getBoundingClientRect();
+    const top = Math.max(0, r.top);
+    const bottom = Math.min(vh, r.bottom);
+    return { top, left: Math.max(0, r.left), right: Math.min(vw, r.right), bottom, height: Math.max(0, bottom - top) };
+  }
+
+  function selectedTextWithin(el) {
+    const sel = window.getSelection ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return "";
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.commonAncestorContainer) && !range.intersectsNode(el)) return "";
+    return String(sel.toString() || "");
+  }
+
+  function closeRowDetailsMenu({ restoreFocus = false } = {}) {
+    const menu = rowDetailsMenu;
+    if (!menu) return;
+    rowDetailsMenu = null;
+    runDisposers(menu.disposers);
+    menu.el.remove();
+    if (restoreFocus && menu.returnFocus && menu.returnFocus.isConnected) {
+      try { menu.returnFocus.focus({ preventScroll: true }); } catch { null; }
+    }
+  }
+
+  function openRowDetailsMenu(clientX, clientY, tr, binding, table) {
+    closeRowDetailsMenu();
+    const el = document.createElement("div");
+    el.className = "runMenu rowDetailsMenu";
+    el.setAttribute("role", "menu");
+    el.setAttribute("aria-label", "Row actions");
+    el.tabIndex = -1;
+
+    const items = [];
+    const addItem = (text, onPick) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "runMenu__opt";
+      btn.setAttribute("role", "menuitem");
+      const label = document.createElement("span");
+      label.className = "runMenu__optText";
+      label.textContent = text;
+      btn.appendChild(label);
+      btn.addEventListener("click", () => {
+        closeRowDetailsMenu();
+        onPick();
+      });
+      el.appendChild(btn);
+      items.push(btn);
+    };
+
+    const returnFocus = document.activeElement;
+    addItem("Details", () => openRowDetails(tr, binding, table, clientX, returnFocus));
+    const selection = selectedTextWithin(table);
+    if (selection) addItem("Copy selection", () => { void util.copyTextToClipboard(selection).catch(() => undefined); });
+
+    const hint = document.createElement("div");
+    hint.className = "rowDetailsMenu__hint";
+    hint.setAttribute("role", "none");
+    hint.textContent = "Shift+right-click: browser menu";
+    el.appendChild(hint);
+
+    document.body.appendChild(el);
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const left = Math.max(4, Math.min(clientX, vw - w - 4));
+    const top = clientY + h + 4 <= vh ? clientY : Math.max(4, clientY - h);
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+    el.classList.add("is-open");
+
+    const disposers = [];
+    rowDetailsMenu = { el, disposers, returnFocus };
+    const close = () => closeRowDetailsMenu();
+    listenUntilClosed(disposers, document, "pointerdown", (ev) => {
+      if (!(ev.target instanceof Node) || !el.contains(ev.target)) close();
+    }, true);
+    listenUntilClosed(disposers, document, "keydown", (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeRowDetailsMenu({ restoreFocus: true });
+        return;
+      }
+      if (ev.key === "Tab") {
+        close();
+        return;
+      }
+      const moves = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
+      if (!(ev.key in moves)) return;
+      ev.preventDefault();
+      const current = items.indexOf(document.activeElement);
+      const move = moves[ev.key];
+      let next = 0;
+      if (move === "first") next = 0;
+      else if (move === "last") next = items.length - 1;
+      else next = current < 0 ? 0 : (current + move + items.length) % items.length;
+      items[next]?.focus({ preventScroll: true });
+    }, true);
+    listenUntilClosed(disposers, document, "scroll", close, { capture: true, passive: true });
+    listenUntilClosed(disposers, window, "resize", close, { passive: true });
+    listenUntilClosed(disposers, window, "blur", close);
+    try { items[0].focus({ preventScroll: true }); } catch { null; }
+  }
+
+  function closeRowDetails({ restoreFocus = false } = {}) {
+    const view = rowDetailsView;
+    if (!view) return;
+    rowDetailsView = null;
+    runDisposers(view.disposers);
+    if (view.anchor) view.anchor.classList.remove("is-detailsAnchor");
+    view.el.remove();
+    if (restoreFocus && view.returnFocus && view.returnFocus.isConnected) {
+      try { view.returnFocus.focus({ preventScroll: true }); } catch { null; }
+    }
+  }
+
+  function resolveRowDetailsAnchor(view) {
+    const current = view.anchor;
+    if (current && current.isConnected && rowDetailsBindings.get(current)?.row === view.row) return current;
+    if (!view.table.isConnected) return null;
+    for (const body of view.table.tBodies) {
+      for (const tr of body.rows) {
+        if (rowDetailsBindings.get(tr)?.row === view.row) return tr;
+      }
+    }
+    return null;
+  }
+
+  function positionRowDetails() {
+    const view = rowDetailsView;
+    if (!view) return;
+    const anchor = resolveRowDetailsAnchor(view);
+    if (!anchor) {
+      closeRowDetails();
+      return;
+    }
+    if (anchor !== view.anchor) {
+      if (view.anchor) view.anchor.classList.remove("is-detailsAnchor");
+      anchor.classList.add("is-detailsAnchor");
+      view.anchor = anchor;
+    }
+    const rr = anchor.getBoundingClientRect();
+    const visible = rowDetailsVisibleRect(view.table);
+    // Hidden workspace/tab, or the row scrolled more than a viewport away.
+    if ((!rr.width && !rr.height) || rr.bottom < visible.top - visible.height || rr.top > visible.bottom + visible.height) {
+      closeRowDetails();
+      return;
+    }
+    const el = view.el;
+    if (!view.placement) {
+      const spaceBelow = visible.bottom - rr.bottom - 12;
+      const spaceAbove = rr.top - visible.top - 12;
+      const natural = el.offsetHeight;
+      view.placement = natural <= spaceBelow || spaceBelow >= spaceAbove ? "below" : "above";
+      const room = view.placement === "below" ? spaceBelow : spaceAbove;
+      if (natural > room) el.style.maxHeight = `${Math.round(Math.max(160, room))}px`;
+    }
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const top = view.placement === "below" ? rr.bottom + 4 : rr.top - h - 4;
+    const minLeft = visible.left + 8;
+    const maxLeft = Math.max(minLeft, visible.right - w - 8);
+    const left = Math.max(minLeft, Math.min(view.clientX - 32, maxLeft));
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+    // Fixed overlay: clip whatever leaves the results scroller so it never
+    // paints over the app header while its row scrolls away.
+    const clipTop = Math.max(0, visible.top - top);
+    const clipBottom = Math.max(0, top + h - visible.bottom);
+    el.style.clipPath = clipTop || clipBottom ? `inset(${Math.round(clipTop)}px 0 ${Math.round(clipBottom)}px 0)` : "";
+  }
+
+  // Virtualized renderers replace every mounted <tr>; re-anchor right after.
+  function refreshRowDetailsAfterRender(tbody) {
+    if (rowDetailsView && tbody && rowDetailsView.table.contains(tbody)) positionRowDetails();
+  }
+
+  function buildRowDetailsObject(ctx, row) {
+    const obj = {};
+    for (let i = 0; i < ctx.columns.length; i++) {
+      obj[String(ctx.columns[i] ?? "")] = coerceDeepTyped(row[i], ctx.typeAsts[i] || null);
+    }
+    return obj;
+  }
+
+  function openRowDetails(tr, binding, table, clientX, returnFocus = null) {
+    const getContext = rowDetailsSources.get(table);
+    if (!getContext || !binding) return;
+    const raw = getContext() || {};
+    const ctx = {
+      columns: Array.isArray(raw.columns) ? raw.columns : [],
+      types: Array.isArray(raw.types) ? raw.types : [],
+      typeAsts: Array.isArray(raw.typeAsts) ? raw.typeAsts : [],
+    };
+    closeRowDetails();
+    const row = binding.row;
+    const label = binding.label == null || binding.label === "" ? "" : String(binding.label);
+
+    const el = document.createElement("div");
+    el.className = "rowDetails";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", label ? `Row ${label} details` : "Row details");
+    el.tabIndex = -1;
+
+    const header = document.createElement("div");
+    header.className = "rowDetails__header";
+    const title = document.createElement("span");
+    title.className = "rowDetails__title";
+    title.textContent = label ? `Row ${label}` : "Row";
+    const meta = document.createElement("span");
+    meta.className = "rowDetails__meta";
+    meta.textContent = `${ctx.columns.length} ${ctx.columns.length === 1 ? "column" : "columns"}`;
+    const actions = document.createElement("div");
+    actions.className = "rowDetails__actions";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "button button--small rowDetails__copy";
+    copyBtn.textContent = "Copy JSON";
+    copyBtn.addEventListener("click", () => {
+      void copyTextWithFlash(copyBtn, JSON.stringify(buildRowDetailsObject(ctx, row), null, 2));
+    });
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "button button--small rowDetails__close";
+    closeBtn.setAttribute("aria-label", "Close row details");
+    closeBtn.title = "Close (Esc)";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => closeRowDetails({ restoreFocus: true }));
+    actions.append(copyBtn, closeBtn);
+    header.append(title, meta, actions);
+
+    const body = document.createElement("div");
+    body.className = "rowDetails__body";
+    const detailsTable = document.createElement("table");
+    detailsTable.className = "resultTable resultTable--vertical rowDetails__table";
+    const tbody = document.createElement("tbody");
+    for (let i = 0; i < ctx.columns.length; i++) {
+      const line = document.createElement("tr");
+      const th = document.createElement("th");
+      th.className = "rowDetails__name";
+      th.scope = "row";
+      const colName = String(ctx.columns[i] ?? "");
+      const nameEl = document.createElement("span");
+      nameEl.className = "rowDetails__colName";
+      nameEl.textContent = colName;
+      th.appendChild(nameEl);
+      const type = String(ctx.types[i] ?? "");
+      if (type) {
+        const typeEl = document.createElement("span");
+        typeEl.className = "rowDetails__type";
+        typeEl.textContent = type;
+        th.appendChild(typeEl);
+      }
+      th.title = type ? `${colName}\n${type}` : colName;
+      const td = document.createElement("td");
+      td.className = "rowDetails__value";
+      renderSingleValueCell(td, row[i], i, ctx.typeAsts);
+      line.append(th, td);
+      tbody.appendChild(line);
+    }
+    detailsTable.appendChild(tbody);
+    body.appendChild(detailsTable);
+    el.append(header, body);
+    document.body.appendChild(el);
+
+    const disposers = [];
+    rowDetailsView = {
+      el, row, table, anchor: null, clientX: Number(clientX) || 0, placement: "", disposers,
+      returnFocus: returnFocus || document.activeElement,
+    };
+    tr.classList.add("is-detailsAnchor");
+    rowDetailsView.anchor = tr;
+    positionRowDetails();
+    if (!rowDetailsView) return;
+
+    listenUntilClosed(disposers, document, "pointerdown", (ev) => {
+      if (!(ev.target instanceof Node) || !el.contains(ev.target)) closeRowDetails();
+    }, true);
+    listenUntilClosed(disposers, document, "keydown", (ev) => {
+      if (ev.key !== "Escape" || rowDetailsMenu) return;
+      ev.preventDefault();
+      closeRowDetails({ restoreFocus: el.contains(document.activeElement) });
+    });
+    listenUntilClosed(disposers, document, "scroll", (ev) => {
+      if (ev.target instanceof Node && el.contains(ev.target)) return;
+      positionRowDetails();
+    }, { capture: true, passive: true });
+    listenUntilClosed(disposers, window, "resize", positionRowDetails, { passive: true });
+    listenUntilClosed(disposers, window, "popstate", () => closeRowDetails());
+    try { el.focus({ preventScroll: true }); } catch { null; }
+  }
+
+  function onResultRowContextMenu(ev) {
+    if (ev.shiftKey || ev.defaultPrevented) return;
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (!target || target.closest(".rowDetails, .rowDetailsMenu")) return;
+    const tr = target.closest("tr");
+    const binding = tr ? rowDetailsBindings.get(tr) : null;
+    if (!binding) return;
+    const table = tr.closest("table");
+    if (!table || !rowDetailsSources.has(table)) return;
+    ev.preventDefault();
+    openRowDetailsMenu(ev.clientX, ev.clientY, tr, binding, table);
+  }
+
+  document.addEventListener("contextmenu", onResultRowContextMenu);
+  if (dom.resultTableBody) {
+    registerRowDetailsSource(dom.resultTableBody.closest("table"), () => ({
+      columns: resultColumns,
+      types: resultTypes,
+      typeAsts: resultTypeAsts,
+    }));
   }
 
   ns.results = {
@@ -3370,6 +3747,7 @@
     ensureResultsStack,
     setResultsVisible,
     createStaticResultTable,
+    closeRowDetails,
     flattenTupleTableData,
   };
 })();
