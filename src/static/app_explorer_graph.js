@@ -41,6 +41,8 @@
     lastPointerY: 0,
     flowMarkerState: new Map(),
     storageProjectionCache: null,
+    logicalProjectionCache: null,
+    visibleSetCache: null,
     lineageRouteCache: null,
     includeSystem: false,
     includeNonStoring: true,
@@ -54,16 +56,39 @@
   const X_GAP = 92;
   const Y_GAP = 34;
 
+  // Canvas colours are resolved from CSS variables. getComputedStyle() on the
+  // root element per edge/node made every frame pay hundreds of style lookups,
+  // so resolved values are cached until the theme can have changed: any root
+  // attribute change (data-theme, class) or an OS colour-scheme switch.
+  const themeCache = { colors: new Map(), light: null };
+  function invalidateThemeCache() {
+    themeCache.colors.clear();
+    themeCache.light = null;
+  }
+  const colorSchemeQuery = window.matchMedia?.("(prefers-color-scheme: light)") || null;
+  colorSchemeQuery?.addEventListener?.("change", invalidateThemeCache);
+  if (typeof MutationObserver === "function" && document.documentElement) {
+    new MutationObserver(invalidateThemeCache).observe(document.documentElement, { attributes: true });
+  }
+
   function css(name, fallback) {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    let value = themeCache.colors.get(name);
+    if (value === undefined) {
+      value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      themeCache.colors.set(name, value);
+    }
     return value || fallback;
   }
 
   function lightThemeActive() {
+    if (themeCache.light !== null) return themeCache.light;
     const explicit = String(document.documentElement.dataset.theme || "");
-    if (explicit === "light") return true;
-    if (explicit === "dark") return false;
-    return !!window.matchMedia?.("(prefers-color-scheme: light)")?.matches;
+    let light;
+    if (explicit === "light") light = true;
+    else if (explicit === "dark") light = false;
+    else light = !!colorSchemeQuery?.matches;
+    themeCache.light = light;
+    return light;
   }
 
   function reducedMotionPreferred() {
@@ -216,7 +241,31 @@
     return "view";
   }
 
+  function logicalProjectionCacheValid(cache) {
+    return !!cache
+      && cache.graph === model.graph
+      && cache.focusedId === model.focusedId
+      && cache.includeSystem === model.includeSystem
+      && cache.includeNonStoring === model.includeNonStoring;
+  }
+
+  function rememberLogicalProjection(projection) {
+    model.logicalProjectionCache = {
+      graph: model.graph,
+      focusedId: model.focusedId,
+      includeSystem: model.includeSystem,
+      includeNonStoring: model.includeNonStoring,
+      projection,
+    };
+    return projection;
+  }
+
   function logicalProjection() {
+    // The projection depends only on the payload object and the visibility
+    // inputs below, yet draw/minimap/status asked for it ~11 times per frame
+    // (each call sorting every edge with localeCompare). Payloads are replaced,
+    // never mutated, so object identity is a sound cache key.
+    if (logicalProjectionCacheValid(model.logicalProjectionCache)) return model.logicalProjectionCache.projection;
     const nodes = Array.isArray(model.graph?.nodes) ? model.graph.nodes.filter((node) => node.layer === "logical") : [];
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
     const systemHidden = (node) => !model.includeSystem && ["system", "information_schema", "INFORMATION_SCHEMA"].includes(String(node?.database || ""));
@@ -228,7 +277,7 @@
       .sort((a, b) => `${a.from}\u0000${a.to}\u0000${a.kind}\u0000${a.id}`.localeCompare(`${b.from}\u0000${b.to}\u0000${b.kind}\u0000${b.id}`));
 
     if (model.includeNonStoring) {
-      return { nodes: nodes.filter((node) => visible.has(node.id)), edges: rawEdges.filter((edge) => visible.has(edge.from) && visible.has(edge.to)) };
+      return rememberLogicalProjection({ nodes: nodes.filter((node) => visible.has(node.id)), edges: rawEdges.filter((edge) => visible.has(edge.from) && visible.has(edge.to)) });
     }
 
     const outgoing = new Map();
@@ -361,7 +410,7 @@
     }
 
     projected.sort((a, b) => `${a.from}\u0000${a.to}\u0000${a.kind}\u0000${a.id}`.localeCompare(`${b.from}\u0000${b.to}\u0000${b.kind}\u0000${b.id}`));
-    return { nodes: nodes.filter((node) => visible.has(node.id)), edges: projected };
+    return rememberLogicalProjection({ nodes: nodes.filter((node) => visible.has(node.id)), edges: projected });
   }
 
   function canUseStorageForId(id) {
@@ -784,11 +833,43 @@
     return projection;
   }
 
+  // visibleNodes()/visibleEdges() run several times per animated frame (edges,
+  // minimap, animation check, status). Memoise them on the projection object
+  // plus the neighbourhood inputs; callers treat the returned arrays as
+  // read-only.
+  function visibleSet() {
+    let projection;
+    if (model.detailMode === "physical") projection = storageProjection();
+    else projection = logicalProjection();
+    const cache = model.visibleSetCache;
+    if (cache
+        && cache.projection === projection
+        && cache.detailMode === model.detailMode
+        && cache.focusedId === model.focusedId
+        && cache.focusDepth === model.focusDepth) {
+      return cache;
+    }
+    let nodes = projection.nodes;
+    let edges = projection.edges;
+    if (model.detailMode !== "physical") {
+      const logicalIds = logicalNeighborhoodIds();
+      if (logicalIds) nodes = projection.nodes.filter((node) => logicalIds.has(node.id));
+      const ids = new Set(nodes.map((node) => node.id));
+      edges = projection.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+    }
+    model.visibleSetCache = {
+      projection,
+      detailMode: model.detailMode,
+      focusedId: model.focusedId,
+      focusDepth: model.focusDepth,
+      nodes,
+      edges,
+    };
+    return model.visibleSetCache;
+  }
+
   function visibleNodes() {
-    if (model.detailMode === "physical") return storageProjection().nodes;
-    const projection = logicalProjection();
-    const logicalIds = logicalNeighborhoodIds();
-    if (logicalIds) return projection.nodes.filter((node) => logicalIds.has(node.id));
+    const projection = visibleSet();
     return projection.nodes;
   }
 
@@ -797,9 +878,7 @@
   }
 
   function visibleEdges() {
-    if (model.detailMode === "physical") return storageProjection().edges;
-    const ids = visibleNodeIds();
-    return logicalProjection().edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+    return visibleSet().edges;
   }
 
   function ttlRules(node) {
@@ -1446,16 +1525,54 @@
       }
       return score;
     };
+    // crossingScore() above is the reference metric, but re-evaluating it twice
+    // per adjacent swap is O(swaps x E^2) and froze the tab for a minute on a
+    // 2k-node catalog. Swapping neighbours u,v of one layer only flips the
+    // crossing state of edge pairs (u-edge, v-edge) that share the same
+    // adjacent layer, so after - before is exactly
+    //   #(p_u < p_v) - #(p_u > p_v)
+    // over those pairs (p = far endpoint position). Same decisions, same order.
+    const swapLevelById = new Map();
+    for (const [l, group] of columns.entries()) for (const node of group) swapLevelById.set(node.id, l);
+    const swapPosById = new Map();
+    for (const group of columns.values()) group.forEach((node, index) => swapPosById.set(node.id, index));
+    const swapNeighbors = new Map();
+    for (const edge of edges) {
+      const fromLevel = swapLevelById.get(edge.from);
+      const toLevel = swapLevelById.get(edge.to);
+      if (!Number.isFinite(fromLevel) || !Number.isFinite(toLevel) || Math.abs(fromLevel - toLevel) !== 1) continue;
+      if (!swapNeighbors.has(edge.from)) swapNeighbors.set(edge.from, []);
+      if (!swapNeighbors.has(edge.to)) swapNeighbors.set(edge.to, []);
+      swapNeighbors.get(edge.from).push({ id: edge.to, level: toLevel });
+      swapNeighbors.get(edge.to).push({ id: edge.from, level: fromLevel });
+    }
+    const swapDelta = (leftId, rightId) => {
+      const left = swapNeighbors.get(leftId);
+      const right = swapNeighbors.get(rightId);
+      if (!left || !right) return 0;
+      let delta = 0;
+      for (const a of left) {
+        const pa = swapPosById.get(a.id);
+        for (const b of right) {
+          if (a.level !== b.level) continue;
+          const pb = swapPosById.get(b.id);
+          if (pa < pb) delta += 1;
+          else if (pa > pb) delta -= 1;
+        }
+      }
+      return delta;
+    };
     for (let pass = 0; pass < 4; pass += 1) {
       let improved = false;
       for (const l of levels) {
         const group = columns.get(l) || [];
         for (let i = 0; i + 1 < group.length; i += 1) {
-          const before = crossingScore();
-          [group[i], group[i + 1]] = [group[i + 1], group[i]];
-          const after = crossingScore();
-          if (after < before) improved = true;
-          else [group[i], group[i + 1]] = [group[i + 1], group[i]];
+          if (swapDelta(group[i].id, group[i + 1].id) < 0) {
+            improved = true;
+            [group[i], group[i + 1]] = [group[i + 1], group[i]];
+            swapPosById.set(group[i].id, i);
+            swapPosById.set(group[i + 1].id, i + 1);
+          }
         }
       }
       if (!improved) break;
@@ -1511,20 +1628,23 @@
         const slots = Math.max(rowCount, n);
         const ideals = group.map((node) => weightedIdeal(node.id));
         const inf = 1e18;
-        const dp = Array.from({ length: n }, () => Array(slots).fill(inf));
-        const prev = Array.from({ length: n }, () => Array(slots).fill(-1));
+        // Typed rows: a 2k-node column allocates n x slots cells per sweep.
+        const dp = Array.from({ length: n }, () => new Float64Array(slots).fill(inf));
+        const prev = Array.from({ length: n }, () => new Int32Array(slots).fill(-1));
         for (let row = 0; row < slots; row += 1) {
           if (slots - row < n) break;
           dp[0][row] = (row - ideals[0]) ** 2;
         }
         for (let i = 1; i < n; i += 1) {
+          // Running prefix minimum of dp[i - 1][i - 1 .. row - 1]. Scanning pr
+          // upward with a strict < keeps the lowest predecessor on ties, exactly
+          // as the former O(slots^2) inner loop did.
+          let bestCost = inf;
+          let bestPrev = -1;
           for (let row = i; row < slots; row += 1) {
+            const pr = row - 1;
+            if (dp[i - 1][pr] < bestCost) { bestCost = dp[i - 1][pr]; bestPrev = pr; }
             if (slots - row < n - i) continue;
-            let bestCost = inf;
-            let bestPrev = -1;
-            for (let pr = i - 1; pr < row; pr += 1) {
-              if (dp[i - 1][pr] < bestCost) { bestCost = dp[i - 1][pr]; bestPrev = pr; }
-            }
             if (bestPrev < 0) continue;
             dp[i][row] = bestCost + (row - ideals[i]) ** 2;
             prev[i][row] = bestPrev;
@@ -2166,6 +2286,8 @@
   function routeConflictPenalty(a, b, usedSegments, currentEdge = null) {
     let penalty = 0;
     for (const segment of usedSegments) {
+      // Disjoint segments cannot cross or overlap (see routeBox()).
+      if (segmentsApart(a, b, segment.a, segment.b)) continue;
       const conflict = orthogonalSegmentConflict(a, b, segment.a, segment.b);
       if (conflict.overlap > 0.5 && !sharedPortOverlapAllowed(a, b, currentEdge, segment)) {
         // Outside the tiny source/target fan, two routes must never share a
@@ -2300,8 +2422,19 @@
         adjacency.get(bKey).push({ key: aKey, length, dir });
       }
     };
-    for (const y of gridY) connectLine([...points.entries()].filter(([, point]) => point.y === y).map(([key]) => key), true);
-    for (const x of gridX) connectLine([...points.entries()].filter(([, point]) => point.x === x).map(([key]) => key), false);
+    // Bucket the grid once per axis. Filtering every point for every lane was
+    // O(lanes x points) and dominated routing on tall columns. connectLine()
+    // sorts each lane by coordinate, so bucket order cannot change the result.
+    const keysByY = new Map();
+    const keysByX = new Map();
+    for (const [key, point] of points) {
+      if (!keysByY.has(point.y)) keysByY.set(point.y, []);
+      keysByY.get(point.y).push(key);
+      if (!keysByX.has(point.x)) keysByX.set(point.x, []);
+      keysByX.get(point.x).push(key);
+    }
+    for (const y of gridY) connectLine((keysByY.get(y) || []).slice(), true);
+    for (const x of gridX) connectLine((keysByX.get(x) || []).slice(), false);
 
     const startKey = pointKey(sourceFan.x, sourceFan.y);
     const endKey = pointKey(targetFan.x, targetFan.y);
@@ -2436,12 +2569,45 @@
     return route;
   }
 
+  // Bounding boxes of routed polylines, keyed by the (immutable) points array.
+  // orthogonalSegmentConflict() can only report a crossing or an overlap when
+  // two segments touch within its 0.001 tolerance, so pairs of routes whose
+  // boxes are further apart contribute exactly 0 and can be skipped. Without
+  // this the O(E^2) route scoring took minutes on a 550-edge lineage graph.
+  const routeBoxCache = new WeakMap();
+  function routeBox(points) {
+    let box = routeBoxCache.get(points);
+    if (box) return box;
+    box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const point of points) {
+      if (point.x < box.minX) box.minX = point.x;
+      if (point.x > box.maxX) box.maxX = point.x;
+      if (point.y < box.minY) box.minY = point.y;
+      if (point.y > box.maxY) box.maxY = point.y;
+    }
+    routeBoxCache.set(points, box);
+    return box;
+  }
+
+  function routeBoxesApart(a, b) {
+    const margin = 0.01;
+    return a.maxX + margin < b.minX || b.maxX + margin < a.minX || a.maxY + margin < b.minY || b.maxY + margin < a.minY;
+  }
+
+  function segmentsApart(a, b, c, d) {
+    const margin = 0.01;
+    return Math.max(a.x, b.x) + margin < Math.min(c.x, d.x) || Math.max(c.x, d.x) + margin < Math.min(a.x, b.x)
+      || Math.max(a.y, b.y) + margin < Math.min(c.y, d.y) || Math.max(c.y, d.y) + margin < Math.min(a.y, b.y);
+  }
+
   function routePairConflictScore(routeA, edgeA, routeB, edgeB) {
     let score = 0;
+    if (routeBoxesApart(routeBox(routeA), routeBox(routeB))) return score;
     const segmentsA = routeSegmentMeta(routeA, edgeA);
     const segmentsB = routeSegmentMeta(routeB, edgeB);
     for (const a of segmentsA) {
       for (const b of segmentsB) {
+        if (segmentsApart(a.a, a.b, b.a, b.b)) continue;
         const conflict = orthogonalSegmentConflict(a.a, a.b, b.a, b.b);
         const sharedFan = sharedPortOverlapAllowed(a.a, a.b, edgeA, b)
           || sharedPortOverlapAllowed(b.a, b.b, edgeB, a);
@@ -3294,6 +3460,9 @@
   }
 
   function redrawThemeNow() {
+    // Called synchronously by the theme switch, before MutationObserver
+    // callbacks run: drop resolved colours so this redraw uses the new theme.
+    invalidateThemeCache();
     if (!model.active || !dom.explorerGraphCanvas) return;
     // Theme changes update CSS variables synchronously, while the canvas keeps
     // its previous pixels until it is painted again. Redraw immediately in the

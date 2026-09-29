@@ -1432,6 +1432,36 @@
     return health === "error" ? "Error" : health === "warning" ? "Warning" : "Healthy";
   }
 
+  // Catalog payloads are replaced, never mutated in place, so their arrays are
+  // stable cache keys. renderTableList() runs on every search keystroke and
+  // previously re-filtered all tables and re-searched all summaries once per
+  // database (O(databases x tables)).
+  const catalogTablesByDatabase = new WeakMap();
+  const catalogSummaryByDatabase = new WeakMap();
+  function tablesByDatabase(tables) {
+    let grouped = catalogTablesByDatabase.get(tables);
+    if (grouped) return grouped;
+    grouped = new Map();
+    for (const table of tables) {
+      if (!grouped.has(table.database)) grouped.set(table.database, []);
+      grouped.get(table.database).push(table);
+    }
+    catalogTablesByDatabase.set(tables, grouped);
+    return grouped;
+  }
+  function summaryByDatabase(summaries) {
+    let byName = catalogSummaryByDatabase.get(summaries);
+    if (byName) return byName;
+    byName = new Map();
+    for (const item of summaries) {
+      // Keep the first match, as the former .find() did.
+      const name = String(item?.name || "");
+      if (!byName.has(name)) byName.set(name, item);
+    }
+    catalogSummaryByDatabase.set(summaries, byName);
+    return byName;
+  }
+
   function renderTableList() {
     if (!dom.explorerTableList) return;
     clear(dom.explorerTableList);
@@ -1449,8 +1479,10 @@
     }
 
     const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
+    const groupedTables = tablesByDatabase(catalog?.tables || []);
+    const summaries = summaryByDatabase(catalog?.database_summaries || []);
     for (const database of databases) {
-      const allItems = (catalog?.tables || []).filter((table) => table.database === database && sidebarObjectVisible(table));
+      const allItems = (groupedTables.get(database) || []).filter((table) => sidebarObjectVisible(table));
       const items = allItems.filter((table) => !query || `${table.database}.${table.name} ${table.engine || ""}`.toLowerCase().includes(query));
       const loaded = model.databaseTablesLoaded.has(database);
       const loading = model.databaseTablesLoading.has(database);
@@ -1482,7 +1514,7 @@
       });
       const headerMain = node("button", "explorerTreeDatabase");
       headerMain.type = "button";
-      const databaseSummary = (catalog?.database_summaries || []).find((item) => String(item?.name || "") === database) || null;
+      const databaseSummary = summaries.get(database) || null;
       const databaseMeta = [];
       if (loading) databaseMeta.push("Loading…");
       else if (loaded) databaseMeta.push(`${fmtInt(allItems.length)} tables`);
@@ -3205,9 +3237,14 @@
       renderTableList();
     });
     dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));
+    // The list filter is cheap and stays per keystroke. Graph focus re-runs the
+    // layout, the fit and a scoped graph fetch, so it only follows the query
+    // once typing pauses instead of once per intermediate prefix.
+    let graphSearchTimer = 0;
     dom.explorerSearchInput?.addEventListener("input", () => {
       renderTableList();
-      graph?.searchFocus();
+      clearTimeout(graphSearchTimer);
+      graphSearchTimer = setTimeout(() => graph?.searchFocus(), 200);
     });
     dom.explorerFunctionSearchInput?.addEventListener("input", renderFunctionList);
     dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
