@@ -473,6 +473,128 @@ def test_explorer_catalog_survives_runner_created_object_after_startup():
         assert refreshed.status_code == 200, refreshed.text
 
 
+def _explorer_storage(refresh: bool = False) -> dict:
+    params = {"host_id": "local"}
+    if refresh:
+        params["refresh"] = "1"
+    response = get("/api/explorer/storage", params=params)
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers.get("Cache-Control", ""), response.headers
+    return response.json()
+
+
+def test_explorer_storage_route_serves_runner_scoped_on_disk_distribution():
+    # The session fixture reset (and concurrent reviewers) recreate chdash_ui;
+    # wait until the recreated MergeTree parts are visible again.
+    payload: dict = {}
+    by_name: dict = {}
+    for _ in range(20):
+        payload = _explorer_storage(refresh=True)
+        by_name = {item.get("name"): item for item in payload.get("databases", [])}
+        tables = {row.get("name"): row for row in (by_name.get("chdash_ui") or {}).get("tables", [])}
+        if int((tables.get("weather_observations") or {}).get("bytes") or 0) > 0:
+            break
+        time.sleep(0.5)
+
+    assert payload.get("version") == 1, payload
+    assert payload.get("metric_scope") == "local-replica", payload
+    assert payload.get("byte_metric") == "bytes_on_disk", payload
+    assert int(payload.get("table_limit_per_database") or 0) >= 100, payload
+    assert {"chdash_ui", "otel", "system"} <= set(by_name), by_name.keys()
+    assert not {"information_schema", "INFORMATION_SCHEMA"} & set(by_name), by_name.keys()
+    assert by_name["system"].get("system") is True
+    assert by_name["chdash_ui"].get("system") is False
+    assert [item.get("name") for item in payload["databases"]] == sorted(by_name), payload["databases"]
+
+    total = 0
+    for database in payload["databases"]:
+        tables = database.get("tables", [])
+        sizes = [int(row.get("bytes") or 0) for row in tables]
+        # Only storing tables are listed, largest first, and the database total
+        # reconciles exactly with listed + bounded-out tables.
+        assert all(size > 0 for size in sizes), database
+        assert sizes == sorted(sizes, reverse=True), database
+        assert int(database.get("bytes") or 0) == sum(sizes) + int(database.get("omitted_bytes") or 0), database
+        assert int(database.get("storing_tables") or 0) == len(tables) + int(database.get("omitted_tables") or 0), database
+        assert int(database.get("objects") or 0) >= int(database.get("storing_tables") or 0), database
+        assert len(tables) <= int(payload["table_limit_per_database"]), database
+        total += int(database.get("bytes") or 0)
+    assert int(payload.get("total_bytes") or 0) == total, payload
+
+    ui = {row.get("name"): row for row in by_name["chdash_ui"].get("tables", [])}
+    weather = ui.get("weather_observations")
+    assert weather is not None, ui.keys()
+    assert weather.get("engine") == "MergeTree", weather
+    assert int(weather.get("bytes") or 0) > 1_000_000, weather
+    assert int(weather.get("rows") or 0) > 0, weather
+    assert int(weather.get("parts") or 0) >= 1, weather
+    # Resident-memory engines report RAM, never on-disk treemap area.
+    for resident in ["memory_weather", "weather_buffer", "station_dictionary"]:
+        assert resident not in ui, (resident, ui.keys())
+    assert int(by_name["chdash_ui"].get("resident_bytes") or 0) > 0, by_name["chdash_ui"]
+    # Views own no bytes and are therefore absent from the distribution.
+    assert "valid_weather_observations" not in ui, ui.keys()
+
+    # Metadata-only accounting of the ~2 billion row OTEL fixture.
+    otel = {row.get("name"): row for row in by_name["otel"].get("tables", [])}
+    assert int((otel.get("otel_traces") or {}).get("bytes") or 0) > 0, otel
+
+    # Security boundary: every serialized name is an object the runner sees in
+    # the lazy sidebar catalog of the same database.
+    for database in ["chdash_ui", "otel"]:
+        catalog = get("/api/explorer/catalog", params={"host_id": "local", "database": database})
+        assert catalog.status_code == 200, catalog.text
+        visible = {row.get("name") for row in catalog.json().get("tables", []) if row.get("database") == database}
+        listed = {row.get("name") for row in by_name[database].get("tables", [])}
+        assert listed <= visible, (database, listed - visible)
+
+    cached = _explorer_storage()
+    assert int(cached.get("generated_at_ms") or 0) >= int(payload.get("generated_at_ms") or 0), cached
+
+
+def test_explorer_storage_route_validates_host_and_serves_the_system_section_shell():
+    missing = get("/api/explorer/storage")
+    assert missing.status_code == 400, missing.text
+    assert missing.json().get("error_code") == "missing_host_id", missing.text
+    unknown = get("/api/explorer/storage", params={"host_id": "does-not-exist"})
+    assert unknown.status_code == 404, unknown.text
+    for path in ["/explorer/_system", "/explorer/_system?level=tables", "/explorer/system"]:
+        response = get(path)
+        assert response.status_code == 200, (path, response.text[:300])
+        assert 'id="explorerSystemPane"' in response.text, path
+
+
+def test_explorer_storage_route_accounts_new_disk_and_memory_objects():
+    database = "chdash_storage_map"
+    try:
+        run_sql(f"CREATE DATABASE IF NOT EXISTS {database}")
+        run_sql(f"DROP TABLE IF EXISTS {database}.disk_rows")
+        run_sql(f"DROP TABLE IF EXISTS {database}.ram_rows")
+        run_sql(f"CREATE TABLE {database}.disk_rows (id UInt64, payload String) ENGINE = MergeTree ORDER BY id")
+        run_sql(f"CREATE TABLE {database}.ram_rows (id UInt64) ENGINE = Memory")
+        run_sql(f"INSERT INTO {database}.disk_rows SELECT number, repeat('x', 64) FROM numbers(5000)")
+        run_sql(f"INSERT INTO {database}.ram_rows SELECT number FROM numbers(1000)")
+
+        payload = _explorer_storage(refresh=True)
+        entry = next((item for item in payload.get("databases", []) if item.get("name") == database), None)
+        assert entry is not None, payload.get("databases")
+        assert int(entry.get("objects") or 0) == 2, entry
+        tables = {row.get("name"): row for row in entry.get("tables", [])}
+        assert set(tables) == {"disk_rows"}, entry
+        assert int(tables["disk_rows"].get("rows") or 0) == 5000, tables
+        assert int(tables["disk_rows"].get("bytes") or 0) > 0, tables
+        assert int(entry.get("bytes") or 0) == int(tables["disk_rows"]["bytes"]), entry
+        assert int(entry.get("resident_bytes") or 0) > 0, entry
+    finally:
+        run_sql(f"DROP TABLE IF EXISTS {database}.disk_rows")
+        run_sql(f"DROP TABLE IF EXISTS {database}.ram_rows")
+        run_sql(f"DROP DATABASE IF EXISTS {database}")
+        refreshed = get("/api/explorer/storage", params={"host_id": "local", "refresh": "1"})
+        assert refreshed.status_code == 200, refreshed.text
+        refreshed = get("/api/explorer/catalog", params={"host_id": "local", "refresh": "1"})
+        assert refreshed.status_code == 200, refreshed.text
+
+
 def test_aggregate_function_state_preview_is_bounded_and_serializable():
     preview = post("/api/explorer/table/data", json={"host_id": "local", "database": "chdash_ui", "table": "weather_daily_summary", "limit": 5})
     assert preview.status_code == 200, preview.text

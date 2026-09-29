@@ -57,6 +57,79 @@ through `system.clusters`, while remote disk accounting remains explicitly out o
 scope until a safe cluster-wide metadata query is configured. Clicking a table in
 a database card opens that table's normal Explorer route.
 
+## Storage treemaps
+
+The database detail (click a database in the Browse sidebar) starts with a
+**Storage distribution** treemap of its tables, followed by the object list.
+The **System** Explorer section (next to Tables and Functions, route
+`/explorer/_system`) shows the same kind of treemap for the whole server, by
+database, and optionally by table inside each database (`Databases` /
+`Databases + tables`, `?level=tables`). The left rail ranks the databases in
+scope by size. The existing *Include system database* option is shared with the
+Tables sidebar and controls whether `system` is part of the scope and of the
+totals. `/explorer/system` keeps addressing the ClickHouse `system` database, so
+the section uses the reserved `_system` segment.
+
+Byte accounting is the same local on-disk accounting as the database header and
+sidebar summaries (`metric_scope = local-replica`): `bytes_on_disk` of active
+parts for MergeTree families and `system.tables.total_bytes` for Log-family and
+other disk engines. Memory, Buffer and Dictionary objects report resident RAM
+(`isResidentMemorySummary`); drawing RAM as disk area would make the treemap
+disagree with the database total, so resident bytes are excluded from the areas
+and reported separately (treemap footnote, System rail). Views and other objects
+without bytes are not drawn.
+
+Grouping and layout follow the S3-Browser folder treemap:
+
+- the threshold is `ceil(1%)` of the displayed root and is applied with that
+  absolute value at every level; smaller siblings are merged into one
+  **Others** node (name, exact size and member count are always kept);
+- a level with a single real child is contracted into that child and a sole
+  Others child is dropped (the parent already carries the totals);
+- squarified layout, Others as a proportional bottom strip that is only grown to
+  the height its label needs, database headers/insets for nested levels, at most
+  1000 rectangles and 5 levels, label fitting (compact/tiny/hidden modes), hover
+  highlight and a tooltip with size, rows/engine and share of the root.
+
+Grouping runs in the browser: the displayed root depends on view options (system
+databases on/off, depth), and the database treemap reuses the per-database
+catalog that the sidebar already loaded, so one implementation
+(`app_explorer_treemap.js`) serves both. Tables are coloured by engine family
+(legend under the map); databases use a pale per-database tint. Clicking a table
+opens its Browse route; clicking a database (System) opens the database detail.
+
+`GET /api/explorer/storage?host_id=<id>[&refresh=1]` backs the System section.
+Object names come exclusively from runner-context discovery
+(`discover_visible_databases` / `discover_visible_objects`, the same boundary as
+the lazy sidebar). The system context then contributes counters only for those
+names, through one aggregated `system.parts` query (`active`, `GROUP BY
+database, table`, `database IN (<visible databases>)`) and one `system.tables`
+query for engine identity and non-MergeTree totals. Both are metadata reads: the
+multi-billion-row OTEL fixture costs the same as a small table, and no `SYSTEM
+FLUSH` is issued. The response is cached with the Explorer StaleCache TTL
+(`explorer.cache_ttl_ms`); `refresh=1` (and a global catalog refresh) invalidates
+it.
+
+```json
+{
+  "version": 1, "metric_scope": "local-replica", "byte_metric": "bytes_on_disk",
+  "table_limit_per_database": 128,
+  "total_bytes": 0, "total_rows": 0, "resident_bytes": 0, "storing_tables": 0,
+  "databases": [{
+    "name": "chdash_ui", "system": false, "bytes": 0, "rows": 0, "resident_bytes": 0,
+    "objects": 16, "storing_tables": 6,
+    "omitted_tables": 0, "omitted_bytes": 0, "omitted_rows": 0,
+    "tables": [{ "name": "weather_observations", "engine": "MergeTree", "bytes": 0, "rows": 0, "parts": 4 }]
+  }]
+}
+```
+
+`tables` lists only storing tables, largest first, bounded to 128 per database.
+The bound is lossless for every treemap the UI can draw: at most 100 siblings can
+each hold 1% of their parent, and everything smaller is grouped into Others. The
+remainder is still reported exactly through `omitted_*`, so `bytes` always equals
+listed + omitted bytes.
+
 ## Table detail
 
 `GET /api/explorer/table?...` can return, when the corresponding system table is

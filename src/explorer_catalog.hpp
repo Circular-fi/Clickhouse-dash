@@ -92,6 +92,43 @@ struct ExplorerDatabaseSummary {
   std::vector<ExplorerDatabaseDisk> disks;
 };
 
+// Server-wide storage distribution used by the Explorer "System" section.
+// Byte values are local on-disk bytes (`bytes_on_disk` of active parts for
+// MergeTree families, `system.tables.total_bytes` for other disk engines).
+// Memory/Buffer/Dictionary allocations are RAM, not disk, and are therefore
+// accumulated separately in resident_bytes instead of being mixed into the
+// treemap areas.
+struct ExplorerStorageTable {
+  std::string name;
+  std::string engine;
+  uint64_t bytes = 0;
+  std::optional<uint64_t> rows;
+  uint64_t parts = 0;
+};
+
+struct ExplorerStorageDatabase {
+  std::string name;
+  uint64_t bytes = 0;
+  uint64_t rows = 0;
+  uint64_t resident_bytes = 0;
+  // Runner-visible objects, and the subset that owns on-disk bytes.
+  uint64_t objects = 0;
+  uint64_t storing_tables = 0;
+  // Largest storing tables first. The list is bounded; the remainder is kept
+  // as exact aggregate counters so parent totals always reconcile.
+  std::vector<ExplorerStorageTable> tables;
+  uint64_t omitted_tables = 0;
+  uint64_t omitted_bytes = 0;
+  uint64_t omitted_rows = 0;
+};
+
+struct ExplorerStorageMap {
+  uint64_t generated_at_ms = 0;
+  std::string metric_scope = "local-replica";
+  size_t table_limit_per_database = 0;
+  std::vector<ExplorerStorageDatabase> databases;
+};
+
 struct ExplorerCatalog {
   uint64_t generated_at_ms = 0;
   std::string metric_scope = "local-replica";
@@ -324,6 +361,16 @@ bool load_explorer_database_summaries(
     clickhouse::Client& runner,
     const std::vector<std::string>& databases,
     std::vector<ExplorerDatabaseSummary>& out,
+    std::string* error);
+
+// Builds the storage distribution of every runner-visible object. Object names
+// come exclusively from runner-context SHOW DATABASES/TABLES/DICTIONARIES; the
+// system context only contributes byte/row counters for names already in that
+// boundary (one aggregated system.parts query + one system.tables query).
+bool load_explorer_storage_map(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    ExplorerStorageMap& out,
     std::string* error);
 
 bool load_explorer_table_summary(

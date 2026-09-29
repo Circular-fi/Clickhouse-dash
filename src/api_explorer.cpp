@@ -364,6 +364,7 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
       explorer_catalog_cache_.erase(catalog_key);
       explorer_graph_cache_.erase(graph_key);
       explorer_functions_cache_.erase(functions_key);
+      explorer_storage_cache_.erase(security_key + std::string("\0storage", 8));
     }
   }
 
@@ -475,6 +476,125 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.Key("bytes");
     if (table.resident_bytes) w.Uint64(*table.resident_bytes);
     else write_optional_u64(w, table.logical_bytes);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+void Server::handle_explorer_storage(const httplib::Request& req, httplib::Response& res) {
+  const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
+  if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+  if (!is_host_healthy(health_.get(), host_id)) {
+    return json_error(res, 503, "host_unavailable", "Selected host is down.");
+  }
+
+  const uint64_t ts = now_ms();
+  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
+  const std::string storage_key = explorer_security_key(host_id) + std::string("\0storage", 8);
+  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") {
+    explorer_storage_cache_.erase(storage_key);
+  }
+
+  auto result = explorer_storage_cache_.get_or_refresh(
+      storage_key, ts, ttl, 250,
+      [&](ExplorerStorageMap& value, std::string& code, std::string& message) {
+        std::string error;
+        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        if (!runner) {
+          code = "runner_unavailable";
+          message = error.empty() ? "Cannot connect to the runner context." : error;
+          return false;
+        }
+        const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+        auto system = acquire_explorer_client(client_pool_, system_uri, &error);
+        if (!system) {
+          code = "system_context_unavailable";
+          message = error.empty() ? "Cannot connect to the system context." : error;
+          return false;
+        }
+        try {
+          if (!load_explorer_storage_map(*system, *runner, value, &error)) {
+            code = "explorer_storage_failed";
+            message = error.empty() ? "Unable to load the Explorer storage distribution." : error;
+            return false;
+          }
+          return true;
+        } catch (const std::exception& e) {
+          code = "explorer_storage_failed";
+          message = e.what();
+          if (client_pool_) {
+            client_pool_->invalidate(runner);
+            client_pool_->invalidate(system);
+          }
+          return false;
+        }
+      });
+
+  if (!result.has_value || !result.value) {
+    return json_error(
+        res, 503,
+        result.error_code.empty() ? "explorer_unavailable" : result.error_code,
+        result.error_message.empty() ? "Explorer storage distribution is unavailable." : result.error_message);
+  }
+
+  const ExplorerStorageMap& map = *result.value;
+  uint64_t total_bytes = 0;
+  uint64_t total_rows = 0;
+  uint64_t total_resident = 0;
+  uint64_t total_storing = 0;
+  for (const auto& database : map.databases) {
+    total_bytes += database.bytes;
+    total_rows += database.rows;
+    total_resident += database.resident_bytes;
+    total_storing += database.storing_tables;
+  }
+
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("version"); w.Uint(1);
+  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("generated_at_ms"); w.Uint64(map.generated_at_ms);
+  w.Key("stale"); w.Bool(result.stale);
+  w.Key("metric_scope"); w.String(map.metric_scope.c_str());
+  w.Key("byte_metric"); w.String("bytes_on_disk");
+  w.Key("table_limit_per_database"); w.Uint64(map.table_limit_per_database);
+  w.Key("total_bytes"); w.Uint64(total_bytes);
+  w.Key("total_rows"); w.Uint64(total_rows);
+  w.Key("resident_bytes"); w.Uint64(total_resident);
+  w.Key("storing_tables"); w.Uint64(total_storing);
+  w.Key("databases");
+  w.StartArray();
+  for (const auto& database : map.databases) {
+    w.StartObject();
+    w.Key("name"); w.String(database.name.c_str());
+    w.Key("system"); w.Bool(is_system_database(database.name));
+    w.Key("bytes"); w.Uint64(database.bytes);
+    w.Key("rows"); w.Uint64(database.rows);
+    w.Key("resident_bytes"); w.Uint64(database.resident_bytes);
+    w.Key("objects"); w.Uint64(database.objects);
+    w.Key("storing_tables"); w.Uint64(database.storing_tables);
+    w.Key("omitted_tables"); w.Uint64(database.omitted_tables);
+    w.Key("omitted_bytes"); w.Uint64(database.omitted_bytes);
+    w.Key("omitted_rows"); w.Uint64(database.omitted_rows);
+    w.Key("tables");
+    w.StartArray();
+    for (const auto& table : database.tables) {
+      w.StartObject();
+      w.Key("name"); w.String(table.name.c_str());
+      w.Key("engine"); w.String(table.engine.c_str());
+      w.Key("bytes"); w.Uint64(table.bytes);
+      w.Key("rows"); write_optional_u64(w, table.rows);
+      w.Key("parts"); w.Uint64(table.parts);
+      w.EndObject();
+    }
+    w.EndArray();
     w.EndObject();
   }
   w.EndArray();

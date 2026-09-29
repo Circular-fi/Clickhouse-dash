@@ -224,6 +224,15 @@
     return getJson(`api/traces/trace?${query.toString()}`);
   }
 
+  // Server-wide storage distribution (runner-visible databases -> tables) for
+  // the Explorer System section treemap.
+  async function getExplorerStorage(hostId, refresh = false) {
+    if (!hostId) throw new Error("Explorer storage scope is incomplete.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/storage?${query.toString()}`);
+  }
+
   async function getExplorerFunctions(hostId, refresh = false) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
@@ -343,7 +352,7 @@
 
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
-    getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
+    getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTrace,
   };
 })();

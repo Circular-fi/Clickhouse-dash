@@ -254,6 +254,30 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
+test('explorer captures database and System storage treemaps', async ({ page }, testInfo) => {
+  await openApp(page);
+  await openExplorerDatabase(page);
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
+  const weather = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="weather_observations"]');
+  await expect(weather).toBeVisible({ timeout: 15_000 });
+  await weather.hover();
+  await expect(page.locator('#explorerDatabaseTreemap [data-treemap-tooltip]')).toBeVisible();
+  await captureState(page, testInfo, 'explorer-database-treemap');
+
+  await page.locator('#explorerSectionSelectButton').click();
+  await page.locator('#explorerSystemSectionButton').click();
+  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"]').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-system-storage-databases');
+
+  await page.locator('#explorerSystemTablesButton').click();
+  await page.locator('#explorerSystemIncludeSystem').check();
+  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"]').first()).toBeVisible();
+  const table = page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"]').first();
+  await table.hover();
+  await expect(page.locator('#explorerSystemTreemap [data-treemap-tooltip]')).toBeVisible();
+  await captureState(page, testInfo, 'explorer-system-storage-tables');
+});
+
 
 test('captures query library and history navigation', async ({ page }, testInfo) => {
   await openApp(page);
