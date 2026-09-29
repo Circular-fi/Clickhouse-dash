@@ -1,0 +1,1 @@
+CREATE TABLE anon.metrics_snapshot ENGINE=MergeTree ORDER BY entity_key AS SELECT entity_key, sum(metric_value) AS total_metric FROM anon.metrics_store GROUP BY entity_key

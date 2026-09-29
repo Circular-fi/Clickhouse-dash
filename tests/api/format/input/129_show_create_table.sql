@@ -1,0 +1,1 @@
+show create table anon.metrics_store

@@ -446,3 +446,9 @@ Each fixture must exist in both folders with the same file name. For example:
 The test fails during collection when an `input/` fixture has no matching `output/` fixture, or when an `output/` fixture has no matching `input/` fixture.
 
 All `.sql` files are normalized without a trailing newline.
+
+Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`):
+`EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server,
+so formatting can never change what a query means. Fixtures whose input is intentionally not
+the same query (collapsed `--` comments that swallow the rest of the line) are listed with a
+reason in `AST_EQUIVALENCE_EXEMPT`.

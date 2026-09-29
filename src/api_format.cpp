@@ -137,16 +137,12 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
     while (pos < code.size() && sql_is_ident_continue(code[pos])) ++pos;
     leading_keywords.emplace_back(code.substr(begin, pos - begin));
   }
-  bool create_view_statement = !leading_keywords.empty() && leading_keywords[0] == "create";
-  if (create_view_statement) {
-    size_t keyword = 1;
-    if (keyword < leading_keywords.size() && leading_keywords[keyword] == "or") {
-      ++keyword;
-      if (keyword < leading_keywords.size() && leading_keywords[keyword] == "replace") ++keyword;
-    }
-    if (keyword < leading_keywords.size() && leading_keywords[keyword] == "materialized") ++keyword;
-    create_view_statement = keyword < leading_keywords.size() && leading_keywords[keyword] == "view";
-  }
+  // CREATE/REPLACE/ATTACH statements with a query body ([MATERIALIZED] VIEW,
+  // TABLE ... AS SELECT, REFRESH ... AS SELECT) introduce that body with a
+  // top-level `AS SELECT` / `AS WITH`; that keyword is not an alias.
+  const bool create_query_statement = !leading_keywords.empty() &&
+      (leading_keywords[0] == "create" || leading_keywords[0] == "replace" ||
+       leading_keywords[0] == "attach");
 
   struct Range { size_t begin; size_t end; };
   std::vector<Range> ranges;
@@ -187,11 +183,11 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
     const std::string candidate(code.substr(begin, end - begin));
     if (reserved_aliases.find(candidate) == reserved_aliases.end()) continue;
 
-    // In CREATE [MATERIALIZED] VIEW, the top-level `AS SELECT` / `AS WITH`
-    // introduces the view query; SELECT/WITH is not an alias. The formatter
-    // compatibility pass still has to quote reserved aliases *inside* that
-    // SELECT, e.g. `SELECT 1 AS FROM`.
-    if (create_view_statement && !view_query_boundary_consumed &&
+    // In CREATE [MATERIALIZED] VIEW / CREATE TABLE ... AS SELECT, the first
+    // `AS SELECT` / `AS WITH` introduces the stored query; SELECT/WITH is not
+    // an alias. The formatter compatibility pass still has to quote reserved
+    // aliases *inside* that SELECT, e.g. `SELECT 1 AS FROM`.
+    if (create_query_statement && !view_query_boundary_consumed &&
         (candidate == "select" || candidate == "with")) {
       view_query_boundary_consumed = true;
       continue;

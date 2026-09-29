@@ -1,0 +1,1 @@
+EXCHANGE TABLES anon.metrics_new AND anon.metrics_store

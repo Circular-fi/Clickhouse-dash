@@ -1,0 +1,1 @@
+CREATE FUNCTION IF NOT EXISTS linear_equation AS (x, k, b) -> ((k * x) + b)

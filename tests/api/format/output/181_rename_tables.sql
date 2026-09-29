@@ -1,0 +1,1 @@
+RENAME TABLE anon.metrics_a TO anon.metrics_b, anon.metrics_c TO anon.metrics_d

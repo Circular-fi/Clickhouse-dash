@@ -223,6 +223,13 @@ string normalize_code_spacing(string_view s) {
                                out_word_before("OVER") || out_word_before("AND") ||
                                out_word_before("OR") || out_word_before("BY") ||
                                out_word_before("USING") || out_word_before("JOIN") ||
+                               out_word_before("AS") || out_word_before("NOT") ||
+                               out_word_before("THEN") || out_word_before("ELSE") ||
+                               out_word_before("WHEN") || out_word_before("ON") ||
+                               out_word_before("INTERPOLATE") ||
+                               prev_non_space() == ',' || prev_non_space() == '+' ||
+                               prev_non_space() == '-' || prev_non_space() == '*' ||
+                               prev_non_space() == '/' || prev_non_space() == '%' ||
                                prev_non_space() == '=' ||
                                prev_non_space() == '>' || prev_non_space() == '<';
       if (needs_space) append_space();
@@ -480,9 +487,19 @@ string join_lines(const vector<string>& lines) {
 
 
 
+// Display width used for alignment: UTF-8 code points, not bytes, so a
+// non-ASCII literal or identifier does not shift the aligned `AS` column.
+size_t utf8_width(string_view s) {
+  size_t width = 0;
+  for (const char ch : s) {
+    if ((static_cast<unsigned char>(ch) & 0xC0) != 0x80) ++width;
+  }
+  return width;
+}
+
 size_t last_line_length(string_view s) {
   const size_t pos = s.rfind('\n');
-  return (pos == string_view::npos) ? s.size() : (s.size() - pos - 1);
+  return utf8_width(pos == string_view::npos ? s : s.substr(pos + 1));
 }
 
 string prefix_first_line(string s, string_view prefix) {
@@ -929,8 +946,9 @@ string align_alias_line(string_view line, size_t target_as) {
   if (as_pos < 0) return string(line);
   string lhs = rtrim_spaces(line.substr(0, static_cast<size_t>(as_pos)));
   string rhs = trim_ascii_spaces(line.substr(static_cast<size_t>(as_pos) + 4));
-  if (lhs.size() >= target_as) return lhs + " AS " + rhs;
-  return lhs + string(target_as - lhs.size(), ' ') + "AS " + rhs;
+  const size_t lhs_width = utf8_width(lhs);
+  if (lhs_width >= target_as) return lhs + " AS " + rhs;
+  return lhs + string(target_as - lhs_width, ' ') + "AS " + rhs;
 }
 
 bool line_is_alignable_alias(string_view line) {
@@ -953,8 +971,9 @@ void align_alias_groups(vector<string>& lines) {
     size_t min_as = static_cast<size_t>(-1);
     while (j < lines.size() && line_is_alignable_alias(lines[j]) && leading_space_count(lines[j]) == indent) {
       const int as_pos = find_alias_marker_for_alignment(lines[j]);
-      max_as = std::max(max_as, static_cast<size_t>(as_pos));
-      min_as = std::min(min_as, static_cast<size_t>(as_pos));
+      const size_t as_col = utf8_width(string_view(lines[j]).substr(0, static_cast<size_t>(as_pos)));
+      max_as = std::max(max_as, as_col);
+      min_as = std::min(min_as, as_col);
       ++j;
     }
     bool previous_multiline_alias = false;
@@ -980,7 +999,7 @@ void align_alias_groups(vector<string>& lines) {
       vector<string> rendered;
       for (size_t k = i; k < j; ++k) {
         string line = align_alias_line(lines[k], target);
-        if (line.size() > 80) ok = false;
+        if (utf8_width(line) > 80) ok = false;
         rendered.push_back(std::move(line));
       }
       if (ok) {
@@ -1663,24 +1682,33 @@ string Formatter::join_bool_parts(const vector<string>& parts, string_view kw) c
 
 string Formatter::format_select_like(string_view s) {
   string text = trim_ascii_spaces(s);
-  if (auto parts = split_top_level_keyword(text, "UNION ALL"); !parts.empty()) {
-    vector<string> rendered;
-    for (const auto& part : parts) rendered.push_back(format_select_like(part));
-    return join_with_keyword(rendered, "UNION ALL");
+  for (const char* set_operator : {"UNION ALL", "UNION DISTINCT"}) {
+    if (auto parts = split_top_level_keyword(text, set_operator); !parts.empty()) {
+      vector<string> rendered;
+      for (const auto& part : parts) rendered.push_back(format_select_like(part));
+      return join_with_keyword(rendered, set_operator);
+    }
   }
 
   string out;
   if (starts_with_ci(text, "WITH")) {
     const int pos = find_top_level_keyword(text, "SELECT", 4);
     if (pos > 0) {
-      const string with_body = trim_ascii_spaces(text.substr(4, static_cast<size_t>(pos) - 4));
-      out += "WITH\n" + indent_block(format_with_item_block(split_top_level(with_body, ',')), 4) + "\n";
+      string with_body = trim_ascii_spaces(text.substr(4, static_cast<size_t>(pos) - 4));
+      string with_head = "WITH";
+      if (starts_with_ci(with_body, "RECURSIVE") &&
+          (with_body.size() == 9 || !is_ident_char(with_body[9]))) {
+        with_head = "WITH RECURSIVE";
+        with_body = trim_ascii_spaces(with_body.substr(9));
+      }
+      out += with_head + "\n" + indent_block(format_with_item_block(split_top_level(with_body, ',')), 4) + "\n";
       text = trim_ascii_spaces(text.substr(static_cast<size_t>(pos)));
     }
   }
 
   static const vector<string_view> clauses = {
       "GLOBAL ARRAY JOIN",
+      "LEFT ARRAY JOIN",
       "ARRAY JOIN",
       "GROUP BY",
       "ORDER BY",
@@ -1695,11 +1723,25 @@ string Formatter::format_select_like(string_view s) {
       "LIMIT",
       "OFFSET",
       "SETTINGS",
+      "INTERPOLATE",
+      "INTO OUTFILE",
       "FORMAT",
   };
   // Find every top-level occurrence. Repeated ARRAY JOIN clauses are legal and
   // must remain distinct instead of being absorbed into the first clause body.
   vector<std::pair<int, string>> poses = find_select_clauses(text, 6, clauses);
+  // Keywords that are clause heads elsewhere are ordinary tokens inside some
+  // clauses: `ORDER BY x WITH FILL FROM a TO b`, `SAMPLE 1/10 OFFSET 1/2`.
+  for (size_t i = 1; i < poses.size();) {
+    const string& previous = poses[i - 1].second;
+    const string& current = poses[i].second;
+    if ((iequals_ascii(current, "FROM") && iequals_ascii(previous, "ORDER BY")) ||
+        (iequals_ascii(current, "OFFSET") && iequals_ascii(previous, "SAMPLE"))) {
+      poses.erase(poses.begin() + static_cast<long>(i));
+      continue;
+    }
+    ++i;
+  }
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
   const string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
@@ -1734,6 +1776,7 @@ string normalize_boolean_lines(string_view s) {
     const size_t nl = s.find('\n', start);
     const size_t end = (nl == string::npos) ? s.size() : nl;
     string line = trim_ascii_spaces(s.substr(start, end - start));
+    const size_t indent = leading_space_count(s.substr(start, end - start));
     auto [code, comment] = split_inline_comment(line);
     string prefix;
     string rest = code;
@@ -1743,7 +1786,7 @@ string normalize_boolean_lines(string_view s) {
       rest = trim_ascii_spaces(rest.substr(cut));
     }
     if (const string inner = unwrap_outer_parens(rest); !inner.empty() && find_top_level_keyword(inner, "AND") < 0 && find_top_level_keyword(inner, "OR") < 0) rest = trim_ascii_spaces(inner);
-    line = trim_ascii_spaces(prefix + rest);
+    line = string(indent, ' ') + trim_ascii_spaces(prefix + rest);
     if (!comment.empty()) line += " " + comment;
     lines.push_back(line);
     if (nl == string::npos) break;
@@ -1754,7 +1797,7 @@ string normalize_boolean_lines(string_view s) {
 
 string Formatter::format_clause(string_view kw, string_view body) {
   if (iequals_ascii(kw, "FROM")) return format_from_clause(body);
-  if (iequals_ascii(kw, "ARRAY JOIN") || iequals_ascii(kw, "GLOBAL ARRAY JOIN")) {
+  if (iequals_ascii(kw, "ARRAY JOIN") || iequals_ascii(kw, "GLOBAL ARRAY JOIN") || iequals_ascii(kw, "LEFT ARRAY JOIN")) {
     const auto items = split_top_level(body, ',');
     if (items.size() == 1 && trim_ascii_spaces(body).find('\n') == string::npos) {
       auto [expr, alias] = split_top_level_as(items.front());
@@ -1779,6 +1822,10 @@ string Formatter::format_clause(string_view kw, string_view body) {
     }
     return string(kw) + "\n" + indent_block(rendered, 4);
   }
+  if (iequals_ascii(kw, "LIMIT") || iequals_ascii(kw, "OFFSET") || iequals_ascii(kw, "SAMPLE")) {
+    // formatQuery prints `LIMIT n\n WITH TIES`; keep these clauses on one line.
+    return string(kw) + " " + collapse_whitespace(cleanup_surface(body));
+  }
   if (iequals_ascii(kw, "GROUP BY") || iequals_ascii(kw, "ORDER BY") || iequals_ascii(kw, "WINDOW")) {
     string base = trim_ascii_spaces(body);
     string suffix;
@@ -1791,6 +1838,21 @@ string Formatter::format_clause(string_view kw, string_view body) {
           base = rtrim_spaces(base.substr(0, base.size() - suf.size()));
           break;
         }
+      }
+    }
+    if (iequals_ascii(kw, "GROUP BY") && starts_with_ci(base, "GROUPING SETS")) {
+      const size_t open = base.find('(');
+      const size_t close = open == string::npos ? string::npos : find_matching_paren(base, open);
+      if (close != string::npos && trim_ascii_spaces(base.substr(close + 1)).empty()) {
+        const auto sets = split_top_level(base.substr(open + 1, close - open - 1), ',');
+        string block;
+        for (size_t i = 0; i < sets.size(); ++i) {
+          block += "        " + collapse_whitespace(cleanup_surface(trim_ascii_spaces(sets[i])));
+          block += i + 1 < sets.size() ? ",\n" : "\n";
+        }
+        string out = string(kw) + "\n    GROUPING SETS (\n" + block + "    )";
+        if (!suffix.empty()) out += " " + suffix;
+        return out;
       }
     }
     const auto items = split_top_level(base, ',');
@@ -1829,8 +1891,27 @@ vector<std::pair<string, string>> Formatter::split_joins(string_view s) const {
           const char prev = (i == 0) ? '\0' : s[i - 1];
           const char next = (i + kw.size() < s.size()) ? s[i + kw.size()] : '\0';
           if ((prev == '\0' || std::isspace(static_cast<unsigned char>(prev))) && (next == '\0' || std::isspace(static_cast<unsigned char>(next)))) {
-            parts.push_back({trim_ascii_spaces(s.substr(start, i - start)), last_kw});
-            last_kw = string(kw);
+            // formatQuery prints locality/strictness/kind modifiers before the
+            // matched keyword (`GLOBAL ANY LEFT JOIN`, `SEMI LEFT JOIN`,
+            // `ASOF LEFT JOIN`, `FULL OUTER JOIN`, `PASTE JOIN`). They belong
+            // to the join keyword, not to the preceding table expression.
+            size_t kw_begin = i;
+            for (;;) {
+              size_t end = kw_begin;
+              while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+              size_t begin = end;
+              while (begin > start && is_ident_char(s[begin - 1])) --begin;
+              if (begin == end || (begin > start && !std::isspace(static_cast<unsigned char>(s[begin - 1])))) break;
+              static const char* modifiers[] = {"GLOBAL", "LOCAL", "ANY", "ALL", "ASOF", "SEMI", "ANTI",
+                                                "OUTER", "LEFT", "RIGHT", "FULL", "INNER", "PASTE"};
+              const string_view word = s.substr(begin, end - begin);
+              bool modifier = false;
+              for (const char* m : modifiers) modifier = modifier || iequals_ascii(word, m);
+              if (!modifier || previous_word_is_as(s, begin)) break;
+              kw_begin = begin;
+            }
+            parts.push_back({trim_ascii_spaces(s.substr(start, kw_begin - start)), last_kw});
+            last_kw = collapse_whitespace(s.substr(kw_begin, i + kw.size() - kw_begin));
             start = i + kw.size();
             i += kw.size() - 1;
             found = true;
@@ -1852,7 +1933,10 @@ matched:
 string Formatter::format_from_clause(string_view body) {
   const string s = trim_ascii_spaces(body);
   if (auto joins = split_joins(s); !joins.empty()) {
-    string out = "FROM " + format_table_source(joins.front().first);
+    // Same layout as a join-free FROM: a multiline (subquery) source opens on
+    // its own line, `FROM\n(`.
+    const string first_source = format_table_source(joins.front().first);
+    string out = first_source.find('\n') == string::npos ? "FROM " + first_source : "FROM\n" + first_source;
     for (size_t i = 1; i < joins.size(); ++i) {
       const string& join_kw = joins[i].second;
       const string segment = joins[i].first;
@@ -2121,7 +2205,14 @@ string Formatter::format_over_clause(string_view expr) {
 
   const int part_pos = find_top_level_keyword(inner, "PARTITION BY");
   const int order_pos = find_top_level_keyword(inner, "ORDER BY");
-  const int rows_pos = find_top_level_keyword(inner, "ROWS BETWEEN");
+  // Window frame: ROWS or RANGE (formatQuery always prints the BETWEEN form).
+  string frame_kw = "ROWS BETWEEN";
+  int rows_pos = find_top_level_keyword(inner, frame_kw);
+  if (const int range_pos = find_top_level_keyword(inner, "RANGE BETWEEN");
+      range_pos >= 0 && (rows_pos < 0 || range_pos < rows_pos)) {
+    rows_pos = range_pos;
+    frame_kw = "RANGE BETWEEN";
+  }
   if (part_pos < 0 && order_pos < 0 && rows_pos < 0) return {};
 
   vector<string> lines;
@@ -2146,8 +2237,8 @@ string Formatter::format_over_clause(string_view expr) {
   }
 
   if (rows_pos >= 0) {
-    const string body = trim_ascii_spaces(inner.substr(static_cast<size_t>(rows_pos) + 12));
-    lines.push_back("ROWS BETWEEN " + cleanup_surface(body));
+    const string body = trim_ascii_spaces(inner.substr(static_cast<size_t>(rows_pos) + frame_kw.size()));
+    lines.push_back(frame_kw + " " + cleanup_surface(body));
   }
 
   if (!multiline) return {};
@@ -2574,6 +2665,8 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
         nested_start = nested_nl + 1;
       }
       for (string& line : nested_lines) {
+        // Keep the relative indentation of deeper groups: `(a OR (b AND c))`.
+        const size_t nested_indent = leading_space_count(line);
         auto [code, inline_comment] = split_inline_comment(trim_ascii_spaces(line));
         string prefix;
         string rest = code;
@@ -2583,7 +2676,7 @@ string Formatter::format_bool_term(string_view expr, bool in_and_chain) {
           rest = trim_ascii_spaces(rest.substr(cut));
         }
         rest = strip_atomic_parentheses(rest);
-        line = trim_ascii_spaces(prefix + trim_ascii_spaces(rest));
+        line = string(nested_indent, ' ') + trim_ascii_spaces(prefix + trim_ascii_spaces(rest));
         if (!inline_comment.empty()) line += " " + inline_comment;
       }
       string grouped = "(\n" + indent_block(normalize_boolean_lines(join_lines(nested_lines)), 4) + "\n)";
@@ -2763,6 +2856,23 @@ string format_create_view_head_clauses(string_view raw_head) {
 
 string Formatter::format_create_table(string_view s) {
   const string text = trim_ascii_spaces(s);
+  // CREATE TABLE ... [ENGINE ...] AS SELECT: the stored query is a statement of
+  // its own. Without this split, the first `(` of the query (e.g. `sum(`) is
+  // mistaken for the column list.
+  for (int as_pos = find_top_level_keyword(text, "AS"); as_pos >= 0;
+       as_pos = find_top_level_keyword(text, "AS", static_cast<size_t>(as_pos) + 2)) {
+    const string query = trim_ascii_spaces(text.substr(static_cast<size_t>(as_pos) + 2));
+    const string inner = unwrap_outer_parens(query);
+    const string& candidate = inner.empty() ? query : inner;
+    if (!(starts_with_ci(candidate, "SELECT") || starts_with_ci(candidate, "WITH")) ||
+        (candidate.size() > 6 && is_ident_char(candidate[starts_with_ci(candidate, "WITH") ? 4 : 6]))) {
+      continue;
+    }
+    const string ddl = trim_ascii_spaces(text.substr(0, static_cast<size_t>(as_pos)));
+    string body = format_statement(candidate);
+    if (starts_with_ci(body, "SELECT ") && body.find('\n') != string::npos) body = expand_nested_select_head(std::move(body));
+    return format_create_table(ddl) + "\nAS\n" + body;
+  }
   const size_t par = text.find('(');
   if (par == string::npos) return cleanup_surface(text);
   const size_t close = find_matching_paren(text, par);
@@ -2834,7 +2944,15 @@ string Formatter::format_alter_table(string_view s) {
   if (close == string::npos) return cleanup_surface(text);
   const string head = trim_ascii_spaces(text.substr(0, par));
   string inner = trim_ascii_spaces(text.substr(par + 1, close - par - 1));
-  if (starts_with_ci(inner, "MODIFY TTL")) return head + "\n(\n    " + cleanup_surface(inner) + "\n)";
+  // formatQuery prints every command as `(command)`, comma-separated, followed
+  // by an optional statement-level SETTINGS. The block layouts below describe a
+  // single command; a multi-command ALTER keeps the formatQuery layout, and the
+  // SETTINGS tail must always survive (dropping it changes the statement).
+  string tail = trim_ascii_spaces(text.substr(close + 1));
+  if (!tail.empty() && tail.front() == ',') return cleanup_surface(text);
+  if (!tail.empty() && !starts_with_ci(tail, "SETTINGS")) return cleanup_surface(text);
+  if (!tail.empty()) tail = "\n" + format_clause("SETTINGS", trim_ascii_spaces(tail.substr(8)));
+  if (starts_with_ci(inner, "MODIFY TTL")) return head + "\n(\n    " + cleanup_surface(inner) + "\n)" + tail;
   if (starts_with_ci(inner, "ADD COLUMN")) {
     const int after_pos = find_top_level_keyword(inner, "AFTER");
     const string before_after = after_pos > 0 ? trim_ascii_spaces(inner.substr(0, static_cast<size_t>(after_pos))) : inner;
@@ -2847,7 +2965,7 @@ string Formatter::format_alter_table(string_view s) {
     }
     string out = head + "\n(\n    " + prefix + "\n        " + coldef;
     if (!after.empty()) out += "\n    AFTER " + after;
-    out += "\n)";
+    out += "\n)" + tail;
     return out;
   }
   if (starts_with_ci(inner, "UPDATE")) {
@@ -2855,10 +2973,18 @@ string Formatter::format_alter_table(string_view s) {
     if (where_pos > 0) {
       const string assigns = trim_ascii_spaces(inner.substr(6, static_cast<size_t>(where_pos) - 6));
       const string cond = trim_ascii_spaces(inner.substr(static_cast<size_t>(where_pos) + 5));
-      return head + "\n(\n    UPDATE\n" + indent_block(format_simple_item_block(split_top_level(assigns, ',')), 8) + "\n    WHERE\n" + indent_block(indent_block(format_bool_expr(cond), 4), 4) + "\n)";
+      return head + "\n(\n    UPDATE\n" + indent_block(format_simple_item_block(split_top_level(assigns, ',')), 8) + "\n    WHERE\n" + indent_block(indent_block(format_bool_expr(cond), 4), 4) + "\n)" + tail;
     }
   }
-  return cleanup_surface(text);
+  if (starts_with_ci(inner, "DELETE WHERE")) {
+    const string cond = trim_ascii_spaces(inner.substr(12));
+    const string rendered = format_bool_expr(cond);
+    if (rendered.find('\n') == string::npos) return head + "\n(\n    DELETE WHERE " + rendered + "\n)" + tail;
+    return head + "\n(\n    DELETE\n    WHERE\n" + indent_block(rendered, 8) + "\n)" + tail;
+  }
+  // Any other single command uses the same block layout. formatQuery already
+  // indents continuation lines by 4 relative to the command start.
+  return head + "\n(\n    " + cleanup_surface(inner) + "\n)" + tail;
 }
 
 string Formatter::format_insert_select_like(string_view s) {

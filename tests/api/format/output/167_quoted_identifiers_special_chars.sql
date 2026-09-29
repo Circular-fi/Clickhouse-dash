@@ -1,0 +1,7 @@
+SELECT
+    `weird col`,
+    "another-col",
+    `col``with``ticks`,
+    `Ünïcode_col`
+FROM `my db`.`my table`
+WHERE `weird col` != ''

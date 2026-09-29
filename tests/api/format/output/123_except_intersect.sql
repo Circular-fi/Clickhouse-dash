@@ -1,0 +1,12 @@
+(
+    SELECT entity_key
+    FROM anon.all_keys
+)
+EXCEPT
+(
+    SELECT entity_key
+    FROM anon.blocked_keys
+)
+INTERSECT
+SELECT entity_key
+FROM anon.active_keys

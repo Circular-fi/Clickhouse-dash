@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS anon.metrics_tmp SYNC

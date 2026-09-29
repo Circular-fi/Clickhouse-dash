@@ -1,0 +1,6 @@
+CREATE VIEW anon.group_metrics AS
+SELECT
+    entity_key,
+    metric_value
+FROM anon.metrics_store
+WHERE entity_group = {group_name:String}

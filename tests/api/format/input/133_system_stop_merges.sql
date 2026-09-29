@@ -1,0 +1,1 @@
+SYSTEM STOP MERGES anon.metrics_store

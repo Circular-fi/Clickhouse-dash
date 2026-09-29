@@ -1,0 +1,14 @@
+SELECT
+    number,
+    toString(number) AS `number_label`
+FROM numbers(10)
+WHERE number IN (
+        SELECT number
+        FROM system.numbers
+        LIMIT 5
+    )
+UNION ALL
+SELECT
+    id,
+    name
+FROM remote('replica-{1|2}', anon, metrics_store)

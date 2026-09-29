@@ -1,0 +1,8 @@
+SELECT
+    sumIf(metric_value, is_active)             AS `active_total`,
+    uniqExactIf(entity_key, metric_value > 0)  AS `positive_keys`,
+    argMax(metric_value, event_timestamp)      AS `latest_metric`,
+    groupArray(10)(entity_key)                 AS `sample_keys`,
+    sumMap(attribute_keys, attribute_values)   AS `attribute_totals`,
+    uniqMerge(entity_state)                    AS `merged_uniques`
+FROM anon.metrics_store

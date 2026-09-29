@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.metrics_store WHERE (entity_group,entity_key) IN (('g1','k1'),('g2','k2')) AND entity_key NOT IN ('x','y') AND entity_key GLOBAL NOT IN (SELECT entity_key FROM anon.blocked_keys)

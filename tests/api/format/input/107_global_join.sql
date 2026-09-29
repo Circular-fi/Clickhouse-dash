@@ -1,0 +1,1 @@
+SELECT l.entity_key, r.region_key FROM anon.distributed_metrics AS l GLOBAL INNER JOIN anon.distributed_regions AS r ON l.entity_key=r.entity_key

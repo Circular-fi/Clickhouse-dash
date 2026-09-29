@@ -1,0 +1,1 @@
+SELECT l.entity_key FROM anon.left_table AS l LEFT ANTI JOIN anon.right_table AS r ON l.entity_key=r.entity_key WHERE l.metric_value>0
