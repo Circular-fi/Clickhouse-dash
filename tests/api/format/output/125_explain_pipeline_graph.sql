@@ -1,0 +1,3 @@
+EXPLAIN PIPELINE graph = 1
+SELECT sum(number) AS total
+FROM numbers(1000)

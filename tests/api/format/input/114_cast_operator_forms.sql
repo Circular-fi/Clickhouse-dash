@@ -1,0 +1,1 @@
+SELECT CAST(metric_value AS Decimal(18,4)) AS decimal_value, metric_value::Float32 AS float_value, CAST('1','UInt8') AS parsed_flag, NULL::Nullable(String) AS empty_label, accurateCastOrNull(raw_value,'UInt8') AS safe_value FROM anon.metrics_store

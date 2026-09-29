@@ -1,0 +1,13 @@
+SELECT
+    t1.a,
+    t2.b
+FROM
+(
+    SELECT number AS `a`
+    FROM numbers(3)
+) AS t1
+PASTE JOIN
+(
+    SELECT number * 10 AS `b`
+    FROM numbers(3)
+) AS t2

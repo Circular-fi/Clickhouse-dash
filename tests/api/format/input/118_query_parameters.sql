@@ -1,0 +1,1 @@
+SELECT entity_key, metric_value FROM {source_table:Identifier} WHERE event_date BETWEEN {start_date:Date} AND {end_date:Date} AND entity_group IN {groups:Array(String)} LIMIT {row_limit:UInt32}

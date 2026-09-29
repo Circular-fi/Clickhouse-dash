@@ -514,6 +514,118 @@ def test_format_sql_roundtrip(output_sql_path: Path) -> None:
     )
 
 
+# Fixtures whose *input* is not the same query as the formatted output, so
+# `EXPLAIN AST` equivalence cannot hold by construction. Each one is a query
+# with `--` line comments collapsed onto a single line: every `--` comment then
+# swallows the remainder of that line (the input is either a truncated query or
+# a syntax error), and the formatter's repair_line_comments pass deliberately
+# re-splits the comment text from the SQL that followed it. Keep this list
+# explicit: a new fixture must not silently opt out of the semantic check.
+AST_EQUIVALENCE_EXEMPT = {
+    "059_comments_header_and_select": "collapsed -- comments truncate the input query",
+    "060_comments_with_nested_ctes": "collapsed -- comments truncate the input query",
+    "061_comments_join_and_where": "collapsed -- comments truncate the input query",
+    "062_comments_insert_select": "collapsed -- comments truncate the input query",
+    "063_comments_deep_subquery": "collapsed -- comments leave the input unparseable",
+    "068_if_is_not_null_least_inline_comment copy": "collapsed -- comment leaves the input unparseable",
+    "069_if_reindent": "collapsed -- comment leaves the input unparseable",
+}
+AST_FAIL_DIR = ARTIFACTS_DIR / "format_ast_failures"
+QUERY_PARAMETER_RE = re.compile(r"\{\s*(\w+)\s*:\s*([^{}]+?)\s*\}")
+
+
+def placeholder_query_parameter(name: str, type_name: str) -> str | None:
+    """A syntactically valid value for a `{name:Type}` query parameter."""
+    base = re.sub(r"^(Nullable|LowCardinality)\((.*)\)$", r"\2", type_name.strip())
+    if base == "Identifier":
+        return name
+    if base.startswith("Array("):
+        return "[]"
+    if base.startswith(("UInt", "Int", "Float", "Decimal")):
+        return "1"
+    if base.startswith("DateTime"):
+        return "2026-01-01 00:00:00"
+    if base.startswith("Date"):
+        return "2026-01-01"
+    if base in {"String", "UUID"} or base.startswith("FixedString("):
+        return "00000000-0000-0000-0000-000000000000" if base == "UUID" else "x"
+    return None
+
+
+def fetch_clickhouse_explain_ast(sql_text: str) -> tuple[bool, str]:
+    """Return (ok, text) for `EXPLAIN AST <sql_text>` on the reference server.
+
+    EXPLAIN AST only parses: tables, databases and dictionaries referenced by a
+    fixture do not have to exist. Over HTTP, every `{name:Type}` query
+    parameter must have a value before the statement is parsed, so each one
+    gets a type-appropriate placeholder (identical for input and output).
+    """
+    params = {"database": "default"}
+    for name, type_name in QUERY_PARAMETER_RE.findall(sql_text):
+        value = placeholder_query_parameter(name, type_name)
+        if value is None:
+            pytest.skip(f"no placeholder value for query parameter type {type_name}")
+        params[f"param_{name}"] = value
+    response = SESSION.post(
+        f"{CLICKHOUSE_URL}/",
+        params=params,
+        data=("EXPLAIN AST " + sql_text).encode("utf-8"),
+        auth=(CLICKHOUSE_USER, CLICKHOUSE_PASSWORD),
+        timeout=CLICKHOUSE_TIMEOUT_SECONDS,
+    )
+    return response.status_code == 200, normalize_sql_file_content(response.text)
+
+
+@pytest.mark.parametrize(
+    "output_sql_path", require_output_sql_files(), ids=lambda path: path.stem
+)
+def test_format_fixture_preserves_ast(output_sql_path: Path) -> None:
+    """Formatting must never change semantics: the parsed AST of every fixture
+    input equals the parsed AST of its canonical formatted output."""
+    if output_sql_path.stem in AST_EQUIVALENCE_EXEMPT:
+        pytest.skip(AST_EQUIVALENCE_EXEMPT[output_sql_path.stem])
+
+    input_sql = load_input_sql_text(output_sql_path)
+    expected_sql = load_sql_text(output_sql_path)
+    input_ok, input_ast = fetch_clickhouse_explain_ast(input_sql)
+    output_ok, output_ast = fetch_clickhouse_explain_ast(expected_sql)
+    if input_ok and output_ok and input_ast == output_ast:
+        return
+
+    AST_FAIL_DIR.mkdir(parents=True, exist_ok=True)
+    input_artifact = AST_FAIL_DIR / f"{output_sql_path.stem}.input.ast.txt"
+    output_artifact = AST_FAIL_DIR / f"{output_sql_path.stem}.output.ast.txt"
+    write_text(input_artifact, input_ast)
+    write_text(output_artifact, output_ast)
+    if not input_ok:
+        reason = "EXPLAIN AST failed on the fixture input (fix the input or add an exemption)"
+    elif not output_ok:
+        reason = "EXPLAIN AST failed on the formatted output: formatting broke the query"
+    else:
+        reason = "formatted output parses to a different AST: formatting changed semantics"
+    diff = "\n".join(
+        difflib.unified_diff(
+            input_ast.split("\n"),
+            output_ast.split("\n"),
+            fromfile=f"{output_sql_path.name}:input",
+            tofile=f"{output_sql_path.name}:output",
+            lineterm="",
+            n=2,
+        )
+    )
+    pytest.fail(
+        "\n".join(
+            [
+                f"{reason}: {output_sql_path.name}",
+                f"input AST:  {input_artifact}",
+                f"output AST: {output_artifact}",
+                "",
+                diff[:8_000],
+            ]
+        )
+    )
+
+
 def post_format_payload(payload: dict) -> requests.Response:
     response = SESSION.post(
         f"{BASE_URL}/api/format",

@@ -1,0 +1,9 @@
+SELECT
+    entity_key,
+    tag_value,
+    tag_index
+FROM anon.metrics_store
+ARRAY JOIN
+    tag_values AS tag_value,
+    arrayEnumerate(tag_values) AS tag_index
+WHERE tag_index <= 5

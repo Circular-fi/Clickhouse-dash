@@ -1,0 +1,1 @@
+CREATE SETTINGS PROFILE analyst_profile SETTINGS max_threads=8 MIN 1 MAX 16, readonly=1 TO analyst

@@ -1,0 +1,8 @@
+SELECT
+    trades.symbol,
+    trades.trade_time,
+    quotes.bid_price
+FROM anon.trades AS trades
+ASOF LEFT JOIN anon.quotes AS quotes
+    ON trades.symbol = quotes.symbol
+    AND trades.trade_time >= quotes.quote_time

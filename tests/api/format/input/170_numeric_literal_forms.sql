@@ -1,0 +1,1 @@
+SELECT 0xFF AS hex_value, 0b1010 AS binary_value, 1e10 AS exponent_value, 1.5e-3 AS small_value, -0.0 AS negative_zero, inf AS infinity_value, nan AS nan_value, 1_000_000 AS separated_value, .5 AS leading_dot

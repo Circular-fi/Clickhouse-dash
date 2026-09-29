@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.metrics_store WHERE (entity_group='group_a' AND metric_value>10) OR (entity_group='group_b' AND (metric_value<5 OR metric_ratio>0.5)) OR NOT is_active

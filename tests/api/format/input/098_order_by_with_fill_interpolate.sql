@@ -1,0 +1,1 @@
+SELECT toStartOfDay(event_timestamp) AS event_day, sum(metric_value) AS daily_metric, any(entity_group) AS last_group FROM anon.metrics_store GROUP BY event_day ORDER BY event_day ASC WITH FILL FROM toDate('2026-01-01') TO toDate('2026-02-01') STEP 1 INTERPOLATE (last_group AS last_group)

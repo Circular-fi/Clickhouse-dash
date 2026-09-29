@@ -1,0 +1,1 @@
+GRANT SELECT(entity_key, metric_value) ON anon.metrics_store TO analyst WITH GRANT OPTION

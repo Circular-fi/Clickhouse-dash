@@ -1,0 +1,1 @@
+SHOW TABLES FROM anon LIKE 'metrics%' LIMIT 10

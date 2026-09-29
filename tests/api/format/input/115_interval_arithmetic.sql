@@ -1,0 +1,1 @@
+SELECT now()-INTERVAL 1 DAY AS yesterday, event_timestamp+INTERVAL '2 hours' AS shifted_timestamp, toStartOfInterval(event_timestamp, INTERVAL 15 MINUTE) AS quarter_hour, date_diff('day', start_date, end_date) AS day_span FROM anon.metrics_store WHERE event_timestamp>=now()-INTERVAL 7 DAY

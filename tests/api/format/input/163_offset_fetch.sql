@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.metrics_store ORDER BY entity_key OFFSET 10 ROWS FETCH FIRST 5 ROWS ONLY

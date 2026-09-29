@@ -1,0 +1,6 @@
+SELECT
+    entity_key,
+    metric_value
+FROM anon.metrics_store
+INTO OUTFILE 'metrics.csv.gz' TRUNCATE COMPRESSION 'gzip'
+FORMAT CSVWithNames

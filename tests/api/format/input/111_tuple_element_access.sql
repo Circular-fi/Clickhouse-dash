@@ -1,0 +1,1 @@
+SELECT payload.1 AS first_item, payload.2 AS second_item, tupleElement(payload,'name') AS payload_name, named_tuple.name AS name_field, (1,'a',[2,3]) AS literal_tuple FROM anon.tuple_values

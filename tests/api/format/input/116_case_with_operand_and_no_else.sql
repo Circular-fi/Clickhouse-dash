@@ -1,0 +1,1 @@
+SELECT CASE entity_group WHEN 'group_a' THEN 1 WHEN 'group_b' THEN 2 ELSE 0 END AS group_code, CASE WHEN metric_value>100 THEN 'high' END AS metric_tier FROM anon.metrics_store

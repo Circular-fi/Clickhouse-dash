@@ -1,0 +1,6 @@
+SELECT
+    entity_key,
+    tag_value
+FROM anon.metrics_store
+LEFT ARRAY JOIN tag_values AS `tag_value`
+WHERE entity_group = 'group_live'

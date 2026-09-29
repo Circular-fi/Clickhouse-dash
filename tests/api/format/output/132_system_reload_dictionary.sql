@@ -1,0 +1,1 @@
+SYSTEM RELOAD DICTIONARY anon.region_dict

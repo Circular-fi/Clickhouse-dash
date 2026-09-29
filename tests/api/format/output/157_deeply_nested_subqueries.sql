@@ -1,0 +1,21 @@
+SELECT entity_key
+FROM
+(
+    SELECT entity_key
+    FROM
+    (
+        SELECT entity_key
+        FROM
+        (
+            SELECT
+                entity_key,
+                metric_value
+            FROM anon.metrics_store
+            WHERE metric_value > 0
+        )
+        WHERE metric_value < 100
+    )
+    GROUP BY entity_key
+    HAVING count() > 1
+)
+ORDER BY entity_key ASC

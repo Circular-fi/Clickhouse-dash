@@ -1,0 +1,1 @@
+SELECT entity_key, metric_value FROM anon.metrics_store ORDER BY metric_value DESC LIMIT 10 FORMAT JSONEachRow

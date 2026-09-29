@@ -1,0 +1,1 @@
+truncate table if exists anon.metrics_tmp

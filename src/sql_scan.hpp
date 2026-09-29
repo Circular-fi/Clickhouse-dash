@@ -271,26 +271,97 @@ inline std::vector<std::string> extract_sql_single_quoted_literals(std::string_v
   return out;
 }
 
+// Decode a single-quoted SQL literal (including its quotes) to the value the
+// ClickHouse parser produces. Two spellings are interchangeable only when they
+// decode to the same bytes, e.g. 'it''s' and 'it\'s'. Unknown escapes keep
+// their backslash, matching ClickHouse's parseComplexEscapeSequence.
+inline std::string decode_sql_single_quoted_literal(std::string_view literal) {
+  std::string out;
+  if (literal.size() < 2) return std::string(literal);
+  const std::string_view body = literal.substr(1, literal.size() - 2);
+  out.reserve(body.size());
+  auto hex_value = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+  };
+  for (size_t i = 0; i < body.size(); ++i) {
+    const char ch = body[i];
+    if (ch == '\'' && i + 1 < body.size() && body[i + 1] == '\'') {
+      out.push_back('\'');
+      ++i;
+      continue;
+    }
+    if (ch != '\\' || i + 1 >= body.size()) {
+      out.push_back(ch);
+      continue;
+    }
+    const char esc = body[++i];
+    switch (esc) {
+      case 'b': out.push_back('\b'); break;
+      case 'f': out.push_back('\f'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case 't': out.push_back('\t'); break;
+      case '0': out.push_back('\0'); break;
+      case 'a': out.push_back('\a'); break;
+      case 'v': out.push_back('\v'); break;
+      case '\\': case '\'': case '"': case '`': case '/': out.push_back(esc); break;
+      case 'x':
+        if (i + 2 < body.size() && hex_value(body[i + 1]) >= 0 && hex_value(body[i + 2]) >= 0) {
+          out.push_back(static_cast<char>(hex_value(body[i + 1]) * 16 + hex_value(body[i + 2])));
+          i += 2;
+          break;
+        }
+        [[fallthrough]];
+      default:
+        out.push_back('\\');
+        out.push_back(esc);
+        break;
+    }
+  }
+  return out;
+}
+
+// formatQuery re-escapes string literals; restore the user's exact spelling.
+// Literals are matched by *decoded value*, in order, never by position alone:
+// formatQuery also adds literals (CAST(x AS T) -> CAST(x, 'T'), x::T) and
+// removes others (INTERVAL '2 hours' -> toIntervalHour(2)), so a positional
+// swap would silently change query semantics. A formatted literal without an
+// equal-valued source literal ahead of the cursor keeps its formatted spelling.
 inline std::string restore_sql_single_quoted_literals(
     std::string formatted,
     std::string_view original
 ) {
-  const auto source_literals = extract_sql_single_quoted_literals(original);
-  if (source_literals.empty()) return formatted;
+  const auto source_ranges = sql_single_quoted_literal_ranges(original);
+  if (source_ranges.empty()) return formatted;
 
   const auto formatted_ranges = sql_single_quoted_literal_ranges(formatted);
   if (formatted_ranges.empty()) return formatted;
 
+  std::vector<std::string> source_values;
+  source_values.reserve(source_ranges.size());
+  for (const auto& [begin, end] : source_ranges) {
+    source_values.push_back(decode_sql_single_quoted_literal(original.substr(begin, end - begin)));
+  }
+
   std::string out;
   out.reserve(std::max(formatted.size(), original.size()));
   size_t cursor = 0;
-  for (size_t i = 0; i < formatted_ranges.size(); ++i) {
-    const auto [begin, end] = formatted_ranges[i];
+  size_t source_cursor = 0;
+  for (const auto& [begin, end] : formatted_ranges) {
     out.append(formatted, cursor, begin - cursor);
-    if (i < source_literals.size()) {
-      out += source_literals[i];
+    const std::string_view current = std::string_view(formatted).substr(begin, end - begin);
+    const std::string value = decode_sql_single_quoted_literal(current);
+    size_t match = source_cursor;
+    while (match < source_values.size() && source_values[match] != value) ++match;
+    if (match < source_values.size()) {
+      const auto [source_begin, source_end] = source_ranges[match];
+      out.append(original.substr(source_begin, source_end - source_begin));
+      source_cursor = match + 1;
     } else {
-      out.append(formatted, begin, end - begin);
+      out.append(current);
     }
     cursor = end;
   }

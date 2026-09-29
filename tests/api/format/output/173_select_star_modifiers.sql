@@ -1,0 +1,4 @@
+SELECT
+    * EXCEPT(raw_payload, debug_info) REPLACE(metric_value * 2 AS metric_value),
+    COLUMNS('^metric_') APPLY sum
+FROM anon.metrics_store
