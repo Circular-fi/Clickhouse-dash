@@ -302,3 +302,37 @@ test('captures the light theme as a separate design state', async ({ page }, tes
   await runSuccessfulQuery(page, 'SELECT number AS id, concat(\'light-row-\', toString(number)) AS label FROM numbers(8)');
   await captureState(page, testInfo, 'query-results-light');
 });
+
+const rowDetailsDesignQuery = `SELECT
+  number AS id,
+  concat('alpha-', toString(number)) AS alpha,
+  toNullable(if(number % 3 = 2, NULL, number)) AS nullable_value,
+  arrayMap(x -> x + number, range(6)) AS array_value,
+  map('station_id', 'visual-test', 'row', toString(number)) AS map_value,
+  CAST((number, concat('code-', toString(number))), 'Tuple(code UInt64, label String)') AS tuple_value,
+  concat('long-', repeat('lorem ipsum dolor sit amet ', 12), 'end') AS long_text
+FROM numbers(18) ORDER BY id`;
+
+async function openRowDetailsForDesign(page, testInfo, suffix) {
+  await runSuccessfulQuery(page, rowDetailsDesignQuery);
+  const row = page.locator('#resultTableBody tr').nth(2);
+  await row.locator('td').nth(2).click({ button: 'right' });
+  await expect(page.locator('.rowDetailsMenu')).toBeVisible();
+  await captureState(page, testInfo, `row-details-menu${suffix}`);
+  await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' }).click();
+  await expect(page.locator('.rowDetails')).toBeVisible();
+  await captureState(page, testInfo, `row-details${suffix}`);
+}
+
+test('captures the result row details overlay', async ({ page }, testInfo) => {
+  await openApp(page);
+  await openRowDetailsForDesign(page, testInfo, '');
+});
+
+test('captures the result row details overlay in the light theme', async ({ page }, testInfo) => {
+  await openApp(page);
+  await page.locator('#themeSelectButton').click();
+  await page.locator('.themeSelect__option[data-value="light"]').click();
+  await expect(page.locator('#themeSelectButton')).toHaveAttribute('aria-label', 'Theme: light');
+  await openRowDetailsForDesign(page, testInfo, '-light');
+});

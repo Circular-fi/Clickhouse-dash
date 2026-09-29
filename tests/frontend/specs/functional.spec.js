@@ -531,3 +531,242 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   await expect(page.locator('#queryTextArea')).toHaveValue(/FROM `chdash_ui`\.`wide_types`/);
   await expect(page.locator('#queryTextArea')).not.toHaveValue(/`tuple_value\.code`/);
 });
+
+const rowDetailsQuery = `SELECT
+  number AS id,
+  concat('name-', toString(number)) AS name,
+  range(number + 1) AS arr,
+  map('k', number, 'z', number * 2) AS m,
+  CAST((number, concat('t', toString(number))), 'Tuple(code UInt64, label String)') AS tup,
+  if(number = 2, NULL, toNullable(number)) AS maybe,
+  concat('long-', repeat('abcdefghij', 40), '-end') AS long_text
+FROM numbers(6)
+ORDER BY id`;
+
+async function openRowDetailsFromRow(page, row) {
+  await row.locator('td').nth(2).click({ button: 'right' });
+  const menu = page.locator('.rowDetailsMenu');
+  await expect(menu).toBeVisible();
+  const details = menu.getByRole('menuitem', { name: 'Details' });
+  await expect(details).toBeFocused();
+  await details.click();
+  await expect(menu).toHaveCount(0);
+  const view = page.locator('.rowDetails');
+  await expect(view).toBeVisible();
+  return view;
+}
+
+test('right-click Details shows a result row vertically and dismisses on outside click or Escape', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, rowDetailsQuery);
+  const rows = page.locator('#resultTableBody tr:not(.resultTable__spacerRow)');
+  await expect(rows).toHaveCount(6);
+  const row3 = rows.nth(2);
+
+  // Shift+right-click keeps the browser menu (no custom menu).
+  await row3.locator('td').nth(2).click({ button: 'right', modifiers: ['Shift'] });
+  await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
+
+  // Escape closes the custom menu without opening details.
+  await row3.locator('td').nth(2).click({ button: 'right' });
+  await expect(page.locator('.rowDetailsMenu')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+
+  const view = await openRowDetailsFromRow(page, row3);
+  await expect(view.locator('.rowDetails__title')).toHaveText('Row 3');
+  await expect(row3).toHaveClass(/is-detailsAnchor/);
+  const names = await view.locator('.rowDetails__colName').allTextContents();
+  expect(names).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
+  const types = await view.locator('.rowDetails__type').allTextContents();
+  expect(types[2]).toBe('Array(UInt64)');
+  expect(types[3]).toMatch(/^Map\(String, UInt64\)$/);
+  expect(types[6]).toBe('Nullable(UInt64)');
+  const values = view.locator('.rowDetails__value');
+  await expect(values.nth(0)).toHaveText('2');
+  await expect(values.nth(1)).toHaveText('name-2');
+  // Arrays and maps are pretty-printed on several lines and highlighted.
+  await expect(values.nth(2)).toHaveText(/^\[\s+0,\s+1,\s+2\s+\]$/);
+  expect(await values.nth(2).evaluate((el) => el.textContent.split('\n').length)).toBeGreaterThan(3);
+  await expect(values.nth(3)).toContainText('"z": 4');
+  await expect(values.nth(3).locator('.tok-num').first()).toBeVisible();
+  await expect(values.nth(4)).toHaveText('2');
+  await expect(values.nth(5)).toHaveText('t2');
+  await expect(values.nth(6).locator('.tok-null')).toHaveText('null');
+  await expect(values.nth(7)).toContainText(`long-${'abcdefghij'.repeat(40)}-end`);
+
+  // Long values wrap inside the overlay; nothing overflows the viewport.
+  const geometry = await page.evaluate(() => {
+    const el = document.querySelector('.rowDetails');
+    const r = el.getBoundingClientRect();
+    const body = el.querySelector('.rowDetails__body');
+    return {
+      left: r.left, right: r.right, vw: window.innerWidth,
+      bodyOverflowX: body.scrollWidth - body.clientWidth,
+      docOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.vw);
+  expect(geometry.bodyOverflowX).toBeLessThanOrEqual(1);
+  expect(geometry.docOverflowX).toBeLessThanOrEqual(1);
+
+  // Clicking / selecting inside keeps it open.
+  await values.nth(1).click();
+  await values.nth(7).dblclick();
+  await expect(view).toBeVisible();
+  const selected = await page.evaluate(() => String(window.getSelection()));
+  expect(selected.length).toBeGreaterThan(0);
+
+  // Any click elsewhere dismisses it.
+  await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(row3).not.toHaveClass(/is-detailsAnchor/);
+
+  // Escape dismisses it; the keyboard path (Enter on the focused item) works.
+  await rows.nth(4).locator('td').nth(1).click({ button: 'right' });
+  await expect(page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.rowDetails .rowDetails__title')).toHaveText('Row 5');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+
+  // Starting a new query dismisses it too.
+  await openRowDetailsFromRow(page, rows.nth(1));
+  // The overlay may cover the Run button: use the editor shortcut instead.
+  await page.locator('#queryTextArea').focus();
+  await expect(page.locator('.rowDetails')).toHaveCount(1);
+  await page.keyboard.press('Control+Enter');
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await waitForTerminal(page);
+});
+
+test('row details follow virtualized rows and close when scrolled far away', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, `SELECT number AS id, concat('row-', toString(number)) AS label, [number, number + 1] AS pair,
+    if(number % 7 = 0, NULL, toNullable(number * 3)) AS maybe FROM numbers(20000)`);
+  const body = page.locator('#resultTableBody');
+  await expect(body.locator('tr.resultTable__spacerRow').first()).toBeAttached();
+  // Wait until the streamed rows are all accounted for by rows + spacers.
+  await expect.poll(async () => page.evaluate(() => {
+    const tbody = document.getElementById('resultTableBody');
+    let spacer = 0;
+    for (const tr of tbody.querySelectorAll('tr.resultTable__spacerRow')) spacer += tr.getBoundingClientRect().height;
+    const rows = tbody.querySelectorAll('tr:not(.resultTable__spacerRow)');
+    const rowH = rows.length ? rows[0].getBoundingClientRect().height : 0;
+    return rowH > 0 ? (spacer / rowH + rows.length) / 20000 : 0;
+  }), { timeout: 10_000 }).toBeGreaterThan(0.95);
+
+  const scrollBy = (dy) => page.evaluate((delta) => {
+    const ws = document.getElementById('queryWorkspace');
+    const owner = ws && ws.scrollHeight > ws.clientHeight + 1 ? ws : document.scrollingElement;
+    owner.scrollTop += delta;
+  }, dy);
+  const visibleRowIndex = () => page.evaluate(() => {
+    const el = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
+    const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow)');
+    return tr ? Number(tr.querySelector('.resultTable__rowIndex').textContent) : 0;
+  });
+
+  await scrollBy(12000 * 32);
+  await expect.poll(visibleRowIndex, { timeout: 10_000 }).toBeGreaterThan(2000);
+  const index = await visibleRowIndex();
+  const rowFor = (n) => body.locator('tr').filter({ has: page.locator(`td.resultTable__rowIndex:text-is("${n}")`) });
+  const view = await openRowDetailsFromRow(page, rowFor(index));
+  await expect(view.locator('.rowDetails__title')).toHaveText(`Row ${index}`);
+  await expect(view.locator('.rowDetails__value').nth(1)).toHaveText(`row-${index - 1}`);
+
+  // Small scrolls (which remount the virtual window) keep a single overlay
+  // anchored to the same row data.
+  await page.evaluate(() => { document.querySelector('#resultTableBody tr.is-detailsAnchor').__rowDetailsProbe = true; });
+  for (let i = 0; i < 4; i++) {
+    await scrollBy(i % 2 ? -150 : 220);
+    await page.waitForTimeout(60);
+    await expect(page.locator('.rowDetails')).toHaveCount(1);
+    await expect(body.locator('tr.is-detailsAnchor')).toHaveCount(1);
+    await expect(body.locator('tr.is-detailsAnchor td.resultTable__rowIndex')).toHaveText(String(index));
+  }
+  // The anchor <tr> was re-created by the virtual renderer, not kept alive.
+  expect(await page.evaluate(() => !document.querySelector('#resultTableBody tr.is-detailsAnchor').__rowDetailsProbe)).toBe(true);
+  const aligned = await page.evaluate(() => {
+    const anchor = document.querySelector('#resultTableBody tr.is-detailsAnchor').getBoundingClientRect();
+    const box = document.querySelector('.rowDetails').getBoundingClientRect();
+    return Math.min(Math.abs(box.top - anchor.bottom), Math.abs(anchor.top - box.bottom));
+  });
+  expect(aligned).toBeLessThanOrEqual(8);
+
+  // Scrolling the results far away dismisses it.
+  await scrollBy(4000 * 32);
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(body.locator('tr.is-detailsAnchor')).toHaveCount(0);
+});
+
+test('row details work in multiquery result panels', async ({ page }) => {
+  await openApp(page);
+  await page.locator('#runSettingsButton').click();
+  await page.locator('#runOptMultiQuery').click();
+  await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('#runSettingsButton').click();
+  await runQuery(page, `SELECT number AS a, 'first' AS b FROM numbers(3); SELECT number AS x, concat('second-', toString(number)) AS y, [number] AS z FROM numbers(4);`);
+  await waitForTerminal(page);
+  const second = page.locator('.resultsStack__block').nth(1);
+  if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
+  await expect(second.locator('tbody tr')).toHaveCount(4);
+  const view = await openRowDetailsFromRow(page, second.locator('tbody tr').nth(2));
+  expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(['x', 'y', 'z']);
+  await expect(view.locator('.rowDetails__value').nth(1)).toHaveText('second-2');
+  await page.mouse.click(4, 4);
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+});
+
+test('row details open from the Explorer data preview', async ({ page }) => {
+  await openApp(page);
+  await openExplorerDatabase(page);
+  await page.getByText('wide_types', { exact: true }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
+  const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
+  await expect(previewTable).toBeVisible({ timeout: 12_000 });
+  const headers = (await previewTable.locator('thead th').allTextContents()).slice(1);
+  const view = await openRowDetailsFromRow(page, previewTable.locator('tbody tr').first());
+  expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(headers);
+  expect(headers).toContain('tuple_value.code');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.rowDetails')).toHaveCount(0);
+});
+
+test('row details remove every document/window listener they add', async ({ page }) => {
+  await page.addInitScript(() => {
+    const ids = new WeakMap();
+    let nextId = 1;
+    const live = new Set();
+    const key = (target, type, fn, options) => {
+      if (!ids.has(fn)) ids.set(fn, nextId++);
+      const capture = typeof options === 'boolean' ? options : !!(options && options.capture);
+      return `${target === window ? 'w' : 'd'}|${type}|${capture}|${ids.get(fn)}`;
+    };
+    for (const target of [window, document]) {
+      const add = target.addEventListener.bind(target);
+      const remove = target.removeEventListener.bind(target);
+      target.addEventListener = (type, fn, options) => { if (fn) live.add(key(target, type, fn, options)); return add(type, fn, options); };
+      target.removeEventListener = (type, fn, options) => { if (fn) live.delete(key(target, type, fn, options)); return remove(type, fn, options); };
+    }
+    window.__chdashLiveListenerCount = () => live.size;
+  });
+  await openApp(page);
+  await runSuccessfulQuery(page, rowDetailsQuery);
+  const row = page.locator('#resultTableBody tr').nth(2);
+  const before = await page.evaluate(() => window.__chdashLiveListenerCount());
+  for (let i = 0; i < 4; i++) {
+    await openRowDetailsFromRow(page, row);
+    expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBeGreaterThan(before);
+    if (i % 2) await page.keyboard.press('Escape');
+    else await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('.rowDetails')).toHaveCount(0);
+  }
+  await row.locator('td').nth(1).click({ button: 'right' });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBe(before);
+});
