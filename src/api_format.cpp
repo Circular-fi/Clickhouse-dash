@@ -302,12 +302,19 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     }
     ++cache_misses;
 
+    // Heredoc literals ($$...$$) are swapped for same-width placeholders so
+    // neither formatQuery (which re-quotes them) nor the local scanners (which
+    // do not know heredocs) see their bodies; the exact spelling is put back
+    // at the end, like other literal spellings.
+    const SqlHeredocMask heredocs = mask_sql_heredocs(sql);
+    const std::string& source_sql = heredocs.sql;
+
     std::string pretty;
-    const auto masked = mask_sql_surface(sql);
-    if (masked.has_comments || has_top_level_values_insert(sql)) {
+    const auto masked = mask_sql_surface(source_sql);
+    if (masked.has_comments || has_top_level_values_insert(source_sql)) {
       // ClickHouse formatQuery removes or restructures these surfaces. The local
       // post-processor preserves comments and VALUES payloads byte-for-byte.
-      pretty = postprocess_format_query(sql, line_width);
+      pretty = postprocess_format_query(source_sql, line_width);
     } else {
       auto client = get_format_client();
       if (!client) {
@@ -320,7 +327,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
         return false;
       }
 
-      const std::string parseable_sql = quote_reserved_aliases_for_format_query(sql);
+      const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql);
       FormatQueryResult format_result = format_query_with_client(
           *client,
           parseable_sql,
@@ -343,7 +350,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       // formatQuery may normalize literal escaping. Restore the user's exact
       // literal spelling, including doubled SQL quotes, before line wrapping.
       pretty = postprocess_format_query(
-          restore_sql_single_quoted_literals(*format_result.formatted_sql, sql),
+          restore_sql_single_quoted_literals(*format_result.formatted_sql, source_sql),
           line_width);
     }
 
@@ -351,8 +358,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     // identifiers to backticks. Keep formatting deterministic while restoring
     // the exact spelling of identifiers that the user explicitly quoted, as
     // well as the original spelling of string literals.
-    pretty = restore_sql_quoted_identifiers(std::move(pretty), sql);
-    pretty = restore_sql_single_quoted_literals(std::move(pretty), sql);
+    pretty = restore_sql_quoted_identifiers(std::move(pretty), source_sql);
+    pretty = restore_sql_single_quoted_literals(std::move(pretty), source_sql);
+    pretty = restore_sql_heredocs(std::move(pretty), heredocs);
 
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);

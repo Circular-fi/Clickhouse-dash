@@ -2,7 +2,7 @@ SELECT
     column_1,
     if(
         column_2 = 1 AND column_3 > 10000,
-        toUInt64((column_4 / column_3) * 1000) / 10,
+        toUInt64(column_4 / column_3 * 1000) / 10,
         NULL
     ) AS `column_9`
 FROM database_1.table_1

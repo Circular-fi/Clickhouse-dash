@@ -1,0 +1,16 @@
+CREATE TABLE anon.metrics_ttl
+(
+    `event_date`   Date,
+    `entity_key`   String,
+    `entity_group` LowCardinality(String),
+    `metric_value` Float64
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMM(event_date)
+ORDER BY (entity_group, entity_key, event_date)
+TTL
+    event_date + toIntervalDay(90)
+    WHERE
+        entity_group = 'group_tmp'
+        AND metric_value = 0
+        AND entity_key LIKE 'tmp_%'

@@ -1,0 +1,32 @@
+SELECT
+    entity_key,
+    (
+        score_accuracy * weight_accuracy
+        + score_latency * weight_latency
+        + score_coverage * weight_coverage
+    ) / (
+        weight_accuracy
+        + weight_latency
+        + weight_coverage
+    ) AS `weighted_score`,
+    metric_alpha * 0.25
+        + metric_beta * 0.25
+        + metric_gamma * 0.2
+        + metric_delta * 0.15
+        + metric_epsilon * 0.15 AS `composite_score`,
+    (
+        metric_alpha * weight_alpha
+        + metric_beta * weight_beta
+        + metric_gamma * weight_gamma
+        + metric_delta * weight_delta
+    ) / (
+        weight_alpha
+        + weight_beta
+        + weight_gamma
+        + weight_delta
+    ) AS `weighted_mean`,
+    total_revenue_amount
+        - total_refund_amount
+        - total_chargeback_amount
+        - total_fee_amount AS `net_revenue`
+FROM anon.metrics_store

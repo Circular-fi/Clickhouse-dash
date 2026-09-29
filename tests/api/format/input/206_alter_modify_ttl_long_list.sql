@@ -1,0 +1,1 @@
+ALTER TABLE anon.metrics_store MODIFY TTL event_date + INTERVAL 30 DAY TO VOLUME 'cold', event_date + INTERVAL 180 DAY TO DISK 'archive', event_date + INTERVAL 1 YEAR DELETE WHERE entity_group = 'group_tmp'

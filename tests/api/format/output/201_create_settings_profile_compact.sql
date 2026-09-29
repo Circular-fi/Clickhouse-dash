@@ -1,0 +1,1 @@
+CREATE SETTINGS PROFILE `reporting` SETTINGS max_threads = 4 TO analyst

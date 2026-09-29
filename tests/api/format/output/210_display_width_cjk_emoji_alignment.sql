@@ -1,0 +1,11 @@
+SELECT
+    entity_key,
+    '東京タワー'  AS `city_label`,
+    '🚀🚀'        AS `rocket_label`,
+    'café naïve'  AS `combining_label`,
+    '👨‍👩‍👧 family'   AS `zwj_label`,
+    '❤️ love'     AS `vs16_label`,
+    'ｆｕｌｌ'    AS `fullwidth_label`,
+    "列名"        AS `名前`,
+    'cafe'        AS `ascii_label`
+FROM anon.metrics_store

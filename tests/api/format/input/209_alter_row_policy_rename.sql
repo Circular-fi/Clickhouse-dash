@@ -1,0 +1,1 @@
+ALTER ROW POLICY IF EXISTS tenant_isolation ON anon.metrics_store RENAME TO tenant_isolation_v2 AS PERMISSIVE FOR SELECT USING tenant_id = currentUser() OR has(currentRoles(), 'global_reader') TO ALL EXCEPT guest_role

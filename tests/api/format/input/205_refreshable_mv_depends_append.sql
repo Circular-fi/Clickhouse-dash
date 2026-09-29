@@ -1,0 +1,1 @@
+CREATE MATERIALIZED VIEW anon.entity_snapshot_mv REFRESH AFTER 30 MINUTE DEPENDS ON anon.daily_entity_rollup_mv APPEND TO anon.entity_snapshots AS SELECT now() AS snapshot_time, entity_key, count() AS row_count FROM anon.metrics_store GROUP BY entity_key
