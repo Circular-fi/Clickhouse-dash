@@ -80,10 +80,14 @@ std::shared_ptr<clickhouse::Client> acquire_trace_client(
   const std::string& uri = host.system_uri;
   const auto connect_timeout = std::chrono::seconds(5);
   const auto send_timeout = std::chrono::seconds(15);
-  const auto receive_timeout = std::chrono::seconds(30);
+  // Wide-window span aggregations (analytics, duration search) can spend tens
+  // of seconds merging without sending a packet. The arguments are
+  // (connect, receive, send): they used to be swapped, which made the receive
+  // timeout 15 s and aborted such queries with "can't receive string data".
+  const auto receive_timeout = std::chrono::seconds(60);
   return pool
-      ? pool->acquire(uri, connect_timeout, send_timeout, receive_timeout, error)
-      : make_client_from_uri(uri, connect_timeout, send_timeout, receive_timeout, error);
+      ? pool->acquire(uri, connect_timeout, receive_timeout, send_timeout, error)
+      : make_client_from_uri(uri, connect_timeout, receive_timeout, send_timeout, error);
 }
 
 int int_param(const httplib::Request& req, const char* name, int fallback, int lo, int hi) {
