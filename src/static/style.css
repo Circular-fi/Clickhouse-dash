@@ -12200,37 +12200,48 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   user-select: none;
 }
 
+/* Inline expanded row: a detail <tr> right under the clicked row. Its content
+   sticks to the left edge of the (horizontally scrollable) table wrap and is
+   as wide as the visible area (width set from JS), so wide tables never need
+   horizontal scrolling to read it. */
+.resultTable tbody tr.resultTable__detailRow > td.resultTable__detailCell {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  vertical-align: top;
+  background: transparent;
+}
+
 .rowDetails {
-  position: fixed;
-  top: 0;
+  position: sticky;
   left: 0;
-  z-index: 115;
+  z-index: 1;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  width: min(46rem, calc(100vw - 2rem));
-  max-height: min(32rem, 64vh);
-  border: 1px solid var(--buttonBorder);
-  border-radius: var(--radiusSm);
-  background: var(--panel);
-  box-shadow: var(--shadow2);
+  max-width: 100%;
+  min-width: 16rem;
+  border-left: 3px solid var(--accentBorder);
+  background: color-mix(in srgb, var(--accentBorder) 5%, var(--panel));
   color: var(--text);
-  overflow: hidden;
+  font-size: 0.9rem;
   outline: none;
+  cursor: auto;
 }
 
 .rowDetails:focus-visible {
-  box-shadow: var(--shadow2), var(--ring);
+  box-shadow: inset 0 0 0 1px var(--accentBorder);
 }
 
 .rowDetails__header {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  flex: 0 0 auto;
-  padding: 0.45rem 0.5rem 0.45rem 0.85rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  background: var(--theadBg);
+  background: color-mix(in srgb, var(--theadBg) 60%, transparent);
 }
 
 .rowDetails__title {
@@ -12259,35 +12270,24 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   line-height: 1;
 }
 
-.rowDetails__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
+/* Mirrors .resultTable--vertical (the one-row result view). */
+.rowDetails__line {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  border-bottom: 1px solid var(--rowDivider);
 }
 
-.resultTable.resultTable--vertical.rowDetails__table {
-  font-size: 0.82rem;
-}
-
-.resultTable.resultTable--vertical.rowDetails__table tbody th {
-  width: 12rem;
-  max-width: 12rem;
-  padding: 0.45rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  white-space: normal;
-}
-
-.resultTable.resultTable--vertical.rowDetails__table tbody td {
-  padding: 0.45rem 0.75rem;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-  user-select: text;
-}
-
-.resultTable.resultTable--vertical.rowDetails__table tbody tr:last-child > * {
+.rowDetails__line:last-child {
   border-bottom: 0;
+}
+
+.rowDetails__name {
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  border-right: 1px solid var(--rowDivider);
+  background: color-mix(in srgb, var(--theadBg) 45%, transparent);
+  color: color-mix(in srgb, var(--text) 92%, transparent);
+  font-weight: 950;
 }
 
 .rowDetails__colName,
@@ -12306,7 +12306,20 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   font-weight: 500;
 }
 
-.resultTable tbody tr.is-detailsAnchor > td,
-.resultTable:not(.resultTable--vertical) tbody tr.is-detailsAnchor > td.resultTable__stickyLeft {
-  background-color: color-mix(in srgb, var(--accentBorder) 14%, var(--panel));
+.rowDetails__value {
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+  user-select: text;
+}
+
+.resultTable tbody tr.is-rowExpanded > td,
+.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft {
+  background-color: color-mix(in srgb, var(--accentBorder) 16%, var(--panel));
+}
+
+.resultTable tbody tr.is-rowExpanded > td.resultTable__rowIndex {
+  box-shadow: inset 3px 0 0 var(--accentBorder);
 }

@@ -241,7 +241,7 @@
 
   function clearLiveResults() {
     closeRowDetailsMenu();
-    closeRowDetails();
+    closeRowDetails({ silent: true });
     liveRowIngest.reset();
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
     const preservedBodyScrollHeight = getDocumentScrollHeight();
@@ -321,7 +321,7 @@
 
   function clearResultsStack() {
     closeRowDetailsMenu();
-    closeRowDetails();
+    closeRowDetails({ silent: true });
     while (resultsStackDisposers.length) {
       const dispose = resultsStackDisposers.pop();
       try { dispose(); } catch { /* teardown must not block clearing */ }
@@ -1496,8 +1496,11 @@
     // spacer background before the next rAF when a trackpad/thumb scroll jumps
     // multiple screens in one frame.
     const overscanRows = Math.max(virtualOverscanMinRows, visibleRows * virtualOverscanViewports);
-    let start = Math.max(0, Math.floor((viewportTop - bodyRect.top) / rowH) - overscanRows);
-    let end = Math.min(rowsLength, Math.ceil((viewportBottom - bodyRect.top) / rowH) + overscanRows);
+    // An expanded row (inline details) pushes every later row down by its
+    // measured height: map viewport offsets to row indexes around it.
+    const detail = rowDetailsVirtualSlot(bodyEl);
+    let start = Math.max(0, Math.floor(virtualRowAt(viewportTop - bodyRect.top, rowH, detail)) - overscanRows);
+    let end = Math.min(rowsLength, Math.ceil(virtualRowAt(viewportBottom - bodyRect.top, rowH, detail)) + overscanRows);
 
     if (end <= start) {
       const visibleCount = visibleRows + overscanRows * 2;
@@ -1551,8 +1554,9 @@
     virtualLastEnd = end;
 
     const frag = document.createDocumentFragment();
+    const extra = rowDetailsSpacerExtra(rowDetailsVirtualSlot(tbody), start, end);
 
-    if (start > 0) frag.appendChild(createVirtualSpacerRow(start * rowH));
+    if (start > 0) frag.appendChild(createVirtualSpacerRow(start * rowH + extra.top));
 
     for (let i = start; i < end; i++) {
       const tr = document.createElement("tr");
@@ -1560,16 +1564,15 @@
       frag.appendChild(tr);
     }
 
-    if (end < rows.length) frag.appendChild(createVirtualSpacerRow((rows.length - end) * rowH));
+    if (end < rows.length) frag.appendChild(createVirtualSpacerRow((rows.length - end) * rowH + extra.bottom));
 
-    tbody.innerHTML = "";
-    tbody.appendChild(frag);
+    replaceVirtualBodyRows(tbody, frag);
     refreshRowDetailsAfterRender(tbody);
 
-    const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
+    const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)");
     if (firstRow) {
       const h = firstRow.getBoundingClientRect().height;
-      if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 2) {
+      if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 0.05) {
         virtualRowHeight = h;
         virtualLastStart = -1;
         virtualLastEnd = -1;
@@ -1594,7 +1597,8 @@
       if (hasBottomSpacer) last.remove();
       return true;
     }
-    const tailHeight = (rows.length - end) * rowH;
+    const extra = rowDetailsSpacerExtra(rowDetailsVirtualSlot(tbody), start, end);
+    const tailHeight = (rows.length - end) * rowH + extra.bottom;
     if (hasBottomSpacer && last.firstElementChild) {
       last.firstElementChild.style.height = `${Math.max(0, Math.round(tailHeight))}px`;
     } else {
@@ -2523,7 +2527,11 @@
         columns: local.columns,
         types: local.types,
         typeAsts: local.typeAsts,
-      }));
+      }), {
+        rowCount: () => (local.isVertical ? 1 : local.allRows.length),
+        viewRows: () => (local.isVirtual && !local.isVertical ? local.virtualViewRows : null),
+        relayout: () => { if (local.isVirtual && !local.isVertical) renderLocalVirtualRows(true); },
+      });
     }
 
     function updateCopyEnabledLocal() {
@@ -2705,22 +2713,22 @@
       local.virtualLastEnd = end;
 
       const frag = document.createDocumentFragment();
-      if (start > 0) frag.appendChild(createLocalVirtualSpacerRow(start * rowH));
+      const extra = rowDetailsSpacerExtra(rowDetailsVirtualSlot(tbody), start, end);
+      if (start > 0) frag.appendChild(createLocalVirtualSpacerRow(start * rowH + extra.top));
       for (let i = start; i < end; i++) {
         const tr = document.createElement("tr");
         appendLocalRowCells(tr, rows[i]);
         frag.appendChild(tr);
       }
-      if (end < rows.length) frag.appendChild(createLocalVirtualSpacerRow((rows.length - end) * rowH));
+      if (end < rows.length) frag.appendChild(createLocalVirtualSpacerRow((rows.length - end) * rowH + extra.bottom));
 
-      tbody.innerHTML = "";
-      tbody.appendChild(frag);
+      replaceVirtualBodyRows(tbody, frag);
       refreshRowDetailsAfterRender(tbody);
 
-      const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow)");
+      const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)");
       if (firstRow) {
         const h = firstRow.getBoundingClientRect().height;
-        if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 2) {
+        if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 0.05) {
           local.virtualRowHeight = h;
           local.virtualLastStart = -1;
           local.virtualLastEnd = -1;
@@ -3209,7 +3217,9 @@
     table.append(thead, tbody);
     wrap.appendChild(table);
     if (rowDetails) {
-      registerRowDetailsSource(table, () => ({ columns: safeColumns, types: safeTypes, typeAsts }));
+      registerRowDetailsSource(table, () => ({ columns: safeColumns, types: safeTypes, typeAsts }), {
+        rowCount: () => safeRows.length,
+      });
     }
 
     let sortKey = null;
@@ -3371,18 +3381,24 @@
   }
 
   // --- Row details: right-click a result row > "Details" ------------------
-  // Result rows are bound to their data through a WeakMap instead of being
+  // The row expands in place: a detail <tr> (one <td colspan>) is inserted
+  // right after its data row and shows the row vertically, like a one-row
+  // result. Rows are bound to their data through a WeakMap instead of being
   // referenced by DOM node: virtualized tables unmount/remount <tr> elements
-  // on scroll, so the open details view re-finds its anchor among the rows
-  // currently mounted for the same row object (and closes once that row is
-  // gone, i.e. scrolled far away). Shift+right-click keeps the native menu.
+  // on scroll, so the detail row follows the row *data* and is re-inserted
+  // after whichever <tr> currently renders it. Virtualized renderers add the
+  // detail's measured height to their range math and spacers (see
+  // rowDetailsVirtualSlot). Shift+right-click keeps the native menu.
   const rowDetailsBindings = new WeakMap(); // <tr> -> { row, label }
-  const rowDetailsSources = new WeakMap(); // <table> -> () => { columns, types, typeAsts }
+  const rowDetailsSources = new WeakMap(); // <table> -> { getContext, rowCount, viewRows, relayout }
   let rowDetailsMenu = null;
   let rowDetailsView = null;
 
-  function registerRowDetailsSource(table, getContext) {
-    if (table && typeof getContext === "function") rowDetailsSources.set(table, getContext);
+  // `rowCount()` gates the menu (single-row results are already vertical);
+  // `viewRows()` returns the virtualized view rows (null when not virtual);
+  // `relayout()` re-runs the virtual range after the detail height changed.
+  function registerRowDetailsSource(table, getContext, { rowCount = null, viewRows = null, relayout = null } = {}) {
+    if (table && typeof getContext === "function") rowDetailsSources.set(table, { getContext, rowCount, viewRows, relayout });
   }
 
   function bindRowDetails(tr, row, label) {
@@ -3401,23 +3417,173 @@
     }
   }
 
-  function rowDetailsVisibleRect(table) {
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-    const owner = findVerticalScrollOwner(table);
-    if (!owner) return { top: 0, left: 0, right: vw, bottom: vh, height: vh };
-    const r = owner.getBoundingClientRect();
-    const top = Math.max(0, r.top);
-    const bottom = Math.min(vh, r.bottom);
-    return { top, left: Math.max(0, r.left), right: Math.min(vw, r.right), bottom, height: Math.max(0, bottom - top) };
-  }
-
   function selectedTextWithin(el) {
     const sel = window.getSelection ? window.getSelection() : null;
     if (!sel || sel.isCollapsed || !sel.rangeCount) return "";
     const range = sel.getRangeAt(0);
     if (!el.contains(range.commonAncestorContainer) && !range.intersectsNode(el)) return "";
     return String(sel.toString() || "");
+  }
+
+  // The expanded row of a virtualized tbody: `{ index, height }` in view-row
+  // coordinates, or null. Rows after `index` sit `height` px lower.
+  function rowDetailsVirtualSlot(tbody) {
+    const view = rowDetailsView;
+    if (!view || !tbody || !view.table.contains(tbody)) return null;
+    const rows = typeof view.source.viewRows === "function" ? view.source.viewRows() : null;
+    if (!Array.isArray(rows) || !rows.length) return null;
+    if (rows[view.index] !== view.row) view.index = rows.indexOf(view.row);
+    return view.index >= 0 ? view : null;
+  }
+
+  // Extra spacer height for a virtual window [start, end): the detail height
+  // lives in the top spacer while its row is above the window, in the bottom
+  // spacer while below, and in the real detail <tr> while mounted.
+  function rowDetailsSpacerExtra(slot, start, end) {
+    if (!slot) return { top: 0, bottom: 0 };
+    slot.side = slot.index < start ? -1 : slot.index >= end ? 1 : 0;
+    const height = Math.max(0, Number(slot.height) || 0);
+    return { top: slot.side < 0 ? height : 0, bottom: slot.side > 0 ? height : 0 };
+  }
+
+  // Maps a y offset (px from the tbody top) to a fractional view-row index.
+  function virtualRowAt(y, rowH, slot) {
+    if (!slot) return y / rowH;
+    const detailTop = (slot.index + 1) * rowH;
+    if (y <= detailTop) return y / rowH;
+    const height = Math.max(0, Number(slot.height) || 0);
+    if (y <= detailTop + height) return slot.index + 1;
+    return (y - height) / rowH;
+  }
+
+  // Swaps a virtual window's rows while the mounted detail <tr> stays in the
+  // DOM (no re-layout of its content, text selection inside it survives).
+  function replaceVirtualBodyRows(tbody, frag) {
+    const view = rowDetailsView;
+    const keep = view && view.el.parentNode === tbody ? view.el : null;
+    let anchor = null;
+    if (keep) {
+      for (const tr of frag.children) {
+        if (rowDetailsBindings.get(tr)?.row === view.row) { anchor = tr; break; }
+      }
+    }
+    if (!anchor) {
+      tbody.replaceChildren(frag);
+      return;
+    }
+    const range = document.createRange();
+    range.setStartBefore(tbody.firstChild);
+    range.setEndBefore(keep);
+    range.deleteContents();
+    range.setStartAfter(keep);
+    range.setEndAfter(tbody.lastChild);
+    range.deleteContents();
+    const before = document.createDocumentFragment();
+    while (frag.firstChild) {
+      const node = frag.firstChild;
+      before.appendChild(node);
+      if (node === anchor) break;
+    }
+    tbody.insertBefore(before, keep);
+    tbody.appendChild(frag);
+  }
+
+  function findRowDetailsAnchor(table, row) {
+    if (!table) return null;
+    for (const body of table.tBodies) {
+      for (const tr of body.rows) {
+        if (rowDetailsBindings.get(tr)?.row === row) return tr;
+      }
+    }
+    return null;
+  }
+
+  function setRowDetailsAnchor(view, anchor) {
+    if (view.anchor === anchor) return;
+    if (view.anchor) {
+      view.anchor.classList.remove("is-rowExpanded");
+      view.anchor.removeAttribute("aria-expanded");
+    }
+    view.anchor = anchor;
+    if (anchor) {
+      anchor.classList.add("is-rowExpanded");
+      anchor.setAttribute("aria-expanded", "true");
+    }
+  }
+
+  // Keeps the sticky detail content as wide as the visible table area.
+  function syncRowDetailsWidth(view) {
+    const wrap = view.table.parentElement;
+    const width = wrap ? wrap.clientWidth : 0;
+    if (width > 0) view.content.style.width = `${width}px`;
+  }
+
+  // Returns true when the measured height changed (virtual math must follow).
+  function measureRowDetails(view) {
+    if (!view.el.isConnected) return false;
+    const height = view.el.getBoundingClientRect().height;
+    if (!(height > 0) || Math.abs(height - view.height) < 0.5) return false;
+    view.height = height;
+    return true;
+  }
+
+  function relayoutRowDetails(view) {
+    if (typeof view.source.relayout === "function") view.source.relayout();
+  }
+
+  // Every renderer calls this after (re)building a tbody: re-insert the detail
+  // right after the <tr> now rendering its row, or close it when that row is
+  // gone. A virtualized row that is merely unmounted keeps the detail open.
+  function refreshRowDetailsAfterRender(tbody) {
+    const view = rowDetailsView;
+    if (!view || !tbody || !view.table.contains(tbody)) return;
+    let anchor = view.anchor;
+    if (!anchor || anchor.parentNode !== tbody || rowDetailsBindings.get(anchor)?.row !== view.row) {
+      anchor = null;
+      for (const tr of tbody.rows) {
+        if (rowDetailsBindings.get(tr)?.row === view.row) { anchor = tr; break; }
+      }
+    }
+    if (!anchor) {
+      setRowDetailsAnchor(view, null);
+      if (rowDetailsVirtualSlot(tbody)) {
+        if (view.el.parentNode) view.el.remove();
+        return;
+      }
+      closeRowDetails({ silent: true });
+      return;
+    }
+    setRowDetailsAnchor(view, anchor);
+    if (anchor.nextSibling !== view.el) anchor.after(view.el);
+    if (measureRowDetails(view) && rowDetailsVirtualSlot(tbody)) relayoutRowDetails(view);
+  }
+
+  // Portion of the detail above the scroll viewport: removing it would pull
+  // the rows the user is looking at upward, so closing scrolls back by it.
+  function rowDetailsHeightAboveViewport(view) {
+    if (!view.el.isConnected) {
+      return view.side < 0 && rowDetailsVirtualSlot(view.table.tBodies[0] || null) ? view.height : 0;
+    }
+    const owner = findVerticalScrollOwner(view.table);
+    const viewportTop = owner ? Math.max(0, owner.getBoundingClientRect().top) : 0;
+    const rect = view.el.getBoundingClientRect();
+    return Math.max(0, Math.min(rect.height, viewportTop - rect.top));
+  }
+
+  // Dragging a scrollbar (page, workspace or wide table) to read the detail
+  // must not dismiss it.
+  function isScrollbarPointer(ev, target) {
+    if (!(target instanceof Element)) return false;
+    if (target === document.documentElement) {
+      return ev.clientX >= target.clientWidth || ev.clientY >= target.clientHeight;
+    }
+    const scrolls = target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth;
+    return scrolls && (ev.offsetX >= target.clientWidth || ev.offsetY >= target.clientHeight);
+  }
+
+  function scrollRowDetailsOwnerBy(table, dy) {
+    const owner = findVerticalScrollOwner(table) || document.scrollingElement || document.documentElement;
+    if (owner) owner.scrollTop += dy;
   }
 
   function closeRowDetailsMenu({ restoreFocus = false } = {}) {
@@ -3431,7 +3597,7 @@
     }
   }
 
-  function openRowDetailsMenu(clientX, clientY, tr, binding, table) {
+  function openRowDetailsMenu(clientX, clientY, binding, table) {
     closeRowDetailsMenu();
     const el = document.createElement("div");
     el.className = "runMenu rowDetailsMenu";
@@ -3458,7 +3624,7 @@
     };
 
     const returnFocus = document.activeElement;
-    addItem("Details", () => openRowDetails(tr, binding, table, clientX, returnFocus));
+    addItem("Details", () => openRowDetails(binding, table, returnFocus));
     const selection = selectedTextWithin(table);
     if (selection) addItem("Copy selection", () => { void util.copyTextToClipboard(selection).catch(() => undefined); });
 
@@ -3513,77 +3679,23 @@
     try { items[0].focus({ preventScroll: true }); } catch { null; }
   }
 
-  function closeRowDetails({ restoreFocus = false } = {}) {
+  // `silent`: the table is being cleared/rebuilt, skip scroll compensation and
+  // the virtual relayout.
+  function closeRowDetails({ restoreFocus = false, silent = false } = {}) {
     const view = rowDetailsView;
     if (!view) return;
+    const shift = silent ? 0 : rowDetailsHeightAboveViewport(view);
     rowDetailsView = null;
     runDisposers(view.disposers);
-    if (view.anchor) view.anchor.classList.remove("is-detailsAnchor");
+    setRowDetailsAnchor(view, null);
     view.el.remove();
+    if (!silent) {
+      if (shift > 0) scrollRowDetailsOwnerBy(view.table, -shift);
+      relayoutRowDetails(view);
+    }
     if (restoreFocus && view.returnFocus && view.returnFocus.isConnected) {
       try { view.returnFocus.focus({ preventScroll: true }); } catch { null; }
     }
-  }
-
-  function resolveRowDetailsAnchor(view) {
-    const current = view.anchor;
-    if (current && current.isConnected && rowDetailsBindings.get(current)?.row === view.row) return current;
-    if (!view.table.isConnected) return null;
-    for (const body of view.table.tBodies) {
-      for (const tr of body.rows) {
-        if (rowDetailsBindings.get(tr)?.row === view.row) return tr;
-      }
-    }
-    return null;
-  }
-
-  function positionRowDetails() {
-    const view = rowDetailsView;
-    if (!view) return;
-    const anchor = resolveRowDetailsAnchor(view);
-    if (!anchor) {
-      closeRowDetails();
-      return;
-    }
-    if (anchor !== view.anchor) {
-      if (view.anchor) view.anchor.classList.remove("is-detailsAnchor");
-      anchor.classList.add("is-detailsAnchor");
-      view.anchor = anchor;
-    }
-    const rr = anchor.getBoundingClientRect();
-    const visible = rowDetailsVisibleRect(view.table);
-    // Hidden workspace/tab, or the row scrolled more than a viewport away.
-    if ((!rr.width && !rr.height) || rr.bottom < visible.top - visible.height || rr.top > visible.bottom + visible.height) {
-      closeRowDetails();
-      return;
-    }
-    const el = view.el;
-    if (!view.placement) {
-      const spaceBelow = visible.bottom - rr.bottom - 12;
-      const spaceAbove = rr.top - visible.top - 12;
-      const natural = el.offsetHeight;
-      view.placement = natural <= spaceBelow || spaceBelow >= spaceAbove ? "below" : "above";
-      const room = view.placement === "below" ? spaceBelow : spaceAbove;
-      if (natural > room) el.style.maxHeight = `${Math.round(Math.max(160, room))}px`;
-    }
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const top = view.placement === "below" ? rr.bottom + 4 : rr.top - h - 4;
-    const minLeft = visible.left + 8;
-    const maxLeft = Math.max(minLeft, visible.right - w - 8);
-    const left = Math.max(minLeft, Math.min(view.clientX - 32, maxLeft));
-    el.style.left = `${Math.round(left)}px`;
-    el.style.top = `${Math.round(top)}px`;
-    // Fixed overlay: clip whatever leaves the results scroller so it never
-    // paints over the app header while its row scrolls away.
-    const clipTop = Math.max(0, visible.top - top);
-    const clipBottom = Math.max(0, top + h - visible.bottom);
-    el.style.clipPath = clipTop || clipBottom ? `inset(${Math.round(clipTop)}px 0 ${Math.round(clipBottom)}px 0)` : "";
-  }
-
-  // Virtualized renderers replace every mounted <tr>; re-anchor right after.
-  function refreshRowDetailsAfterRender(tbody) {
-    if (rowDetailsView && tbody && rowDetailsView.table.contains(tbody)) positionRowDetails();
   }
 
   function buildRowDetailsObject(ctx, row) {
@@ -3594,24 +3706,12 @@
     return obj;
   }
 
-  function openRowDetails(tr, binding, table, clientX, returnFocus = null) {
-    const getContext = rowDetailsSources.get(table);
-    if (!getContext || !binding) return;
-    const raw = getContext() || {};
-    const ctx = {
-      columns: Array.isArray(raw.columns) ? raw.columns : [],
-      types: Array.isArray(raw.types) ? raw.types : [],
-      typeAsts: Array.isArray(raw.typeAsts) ? raw.typeAsts : [],
-    };
-    closeRowDetails();
-    const row = binding.row;
-    const label = binding.label == null || binding.label === "" ? "" : String(binding.label);
-
-    const el = document.createElement("div");
-    el.className = "rowDetails";
-    el.setAttribute("role", "dialog");
-    el.setAttribute("aria-label", label ? `Row ${label} details` : "Row details");
-    el.tabIndex = -1;
+  function buildRowDetailsContent(ctx, row, label, onClose) {
+    const content = document.createElement("div");
+    content.className = "rowDetails";
+    content.setAttribute("role", "region");
+    content.setAttribute("aria-label", label ? `Row ${label} details` : "Row details");
+    content.tabIndex = -1;
 
     const header = document.createElement("div");
     header.className = "rowDetails__header";
@@ -3636,82 +3736,128 @@
     closeBtn.setAttribute("aria-label", "Close row details");
     closeBtn.title = "Close (Esc)";
     closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", () => closeRowDetails({ restoreFocus: true }));
+    closeBtn.addEventListener("click", onClose);
     actions.append(copyBtn, closeBtn);
     header.append(title, meta, actions);
 
-    const body = document.createElement("div");
-    body.className = "rowDetails__body";
-    const detailsTable = document.createElement("table");
-    detailsTable.className = "resultTable resultTable--vertical rowDetails__table";
-    const tbody = document.createElement("tbody");
+    // Same presentation as a one-row result: one line per column, the value
+    // rendered by the shared single-value renderer (pretty JSON/arrays/maps,
+    // NULL token); tuple-flattened columns arrive already flattened.
+    const list = document.createElement("div");
+    list.className = "rowDetails__list";
+    list.setAttribute("role", "list");
     for (let i = 0; i < ctx.columns.length; i++) {
-      const line = document.createElement("tr");
-      const th = document.createElement("th");
-      th.className = "rowDetails__name";
-      th.scope = "row";
+      const line = document.createElement("div");
+      line.className = "rowDetails__line";
+      line.setAttribute("role", "listitem");
+      const name = document.createElement("div");
+      name.className = "rowDetails__name";
       const colName = String(ctx.columns[i] ?? "");
       const nameEl = document.createElement("span");
       nameEl.className = "rowDetails__colName";
       nameEl.textContent = colName;
-      th.appendChild(nameEl);
+      name.appendChild(nameEl);
       const type = String(ctx.types[i] ?? "");
       if (type) {
         const typeEl = document.createElement("span");
         typeEl.className = "rowDetails__type";
         typeEl.textContent = type;
-        th.appendChild(typeEl);
+        name.appendChild(typeEl);
       }
-      th.title = type ? `${colName}\n${type}` : colName;
-      const td = document.createElement("td");
-      td.className = "rowDetails__value";
-      renderSingleValueCell(td, row[i], i, ctx.typeAsts);
-      line.append(th, td);
-      tbody.appendChild(line);
+      name.title = type ? `${colName}\n${type}` : colName;
+      const value = document.createElement("div");
+      value.className = "rowDetails__value";
+      renderSingleValueCell(value, row[i], i, ctx.typeAsts);
+      line.append(name, value);
+      list.appendChild(line);
     }
-    detailsTable.appendChild(tbody);
-    body.appendChild(detailsTable);
-    el.append(header, body);
-    document.body.appendChild(el);
+    content.append(header, list);
+    return content;
+  }
+
+  function openRowDetails(binding, table, returnFocus = null) {
+    const source = rowDetailsSources.get(table);
+    if (!source || !binding) return;
+    const raw = source.getContext() || {};
+    const ctx = {
+      columns: Array.isArray(raw.columns) ? raw.columns : [],
+      types: Array.isArray(raw.types) ? raw.types : [],
+      typeAsts: Array.isArray(raw.typeAsts) ? raw.typeAsts : [],
+    };
+    closeRowDetails();
+    const row = binding.row;
+    // Closing a previous detail may have re-rendered a virtual window.
+    const anchor = findRowDetailsAnchor(table, row);
+    if (!anchor) return;
+    const label = binding.label == null || binding.label === "" ? "" : String(binding.label);
+
+    const el = document.createElement("tr");
+    el.className = "resultTable__detailRow";
+    const cell = document.createElement("td");
+    cell.className = "resultTable__detailCell";
+    cell.colSpan = Math.max(1, anchor.cells.length);
+    const content = buildRowDetailsContent(ctx, row, label, () => closeRowDetails({ restoreFocus: true }));
+    cell.appendChild(content);
+    el.appendChild(cell);
 
     const disposers = [];
-    rowDetailsView = {
-      el, row, table, anchor: null, clientX: Number(clientX) || 0, placement: "", disposers,
+    const view = {
+      el, content, row, table, source, anchor: null, index: -1, height: 0, side: 0, disposers,
       returnFocus: returnFocus || document.activeElement,
     };
-    tr.classList.add("is-detailsAnchor");
-    rowDetailsView.anchor = tr;
-    positionRowDetails();
-    if (!rowDetailsView) return;
+    rowDetailsView = view;
+    setRowDetailsAnchor(view, anchor);
+    anchor.after(el);
+    syncRowDetailsWidth(view);
+    measureRowDetails(view);
+    relayoutRowDetails(view);
+    if (rowDetailsView !== view) return;
 
     listenUntilClosed(disposers, document, "pointerdown", (ev) => {
-      if (!(ev.target instanceof Node) || !el.contains(ev.target)) closeRowDetails();
+      const target = ev.target instanceof Node ? ev.target : null;
+      if (target && el.contains(target)) return;
+      if (isScrollbarPointer(ev, target)) return;
+      // Sorting from the same table's header re-renders it around the detail.
+      if (target && table.tHead && table.tHead.contains(target)) return;
+      // A right-click opens the row menu: collapsing now would move the row
+      // under the pointer before `contextmenu` fires. "Details" replaces it.
+      if (ev.button === 2 && !ev.shiftKey && target instanceof Element && rowDetailsBindings.has(target.closest("tr"))) return;
+      closeRowDetails();
     }, true);
     listenUntilClosed(disposers, document, "keydown", (ev) => {
       if (ev.key !== "Escape" || rowDetailsMenu) return;
       ev.preventDefault();
       closeRowDetails({ restoreFocus: el.contains(document.activeElement) });
     });
-    listenUntilClosed(disposers, document, "scroll", (ev) => {
-      if (ev.target instanceof Node && el.contains(ev.target)) return;
-      positionRowDetails();
-    }, { capture: true, passive: true });
-    listenUntilClosed(disposers, window, "resize", positionRowDetails, { passive: true });
     listenUntilClosed(disposers, window, "popstate", () => closeRowDetails());
-    try { el.focus({ preventScroll: true }); } catch { null; }
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => {
+        if (rowDetailsView !== view) return;
+        syncRowDetailsWidth(view);
+        if (measureRowDetails(view)) relayoutRowDetails(view);
+      });
+      observer.observe(content);
+      if (table.parentElement) observer.observe(table.parentElement);
+      disposers.push(() => observer.disconnect());
+    }
+    try { content.focus({ preventScroll: true }); } catch { null; }
   }
 
   function onResultRowContextMenu(ev) {
     if (ev.shiftKey || ev.defaultPrevented) return;
     const target = ev.target instanceof Element ? ev.target : null;
-    if (!target || target.closest(".rowDetails, .rowDetailsMenu")) return;
+    if (!target || target.closest(".resultTable__detailRow, .rowDetailsMenu")) return;
     const tr = target.closest("tr");
     const binding = tr ? rowDetailsBindings.get(tr) : null;
     if (!binding) return;
     const table = tr.closest("table");
-    if (!table || !rowDetailsSources.has(table)) return;
+    const source = table ? rowDetailsSources.get(table) : null;
+    if (!source) return;
+    // A single-row result is already shown vertically: keep the native menu.
+    const count = typeof source.rowCount === "function" ? Number(source.rowCount()) || 0 : 0;
+    if (count < 2) return;
     ev.preventDefault();
-    openRowDetailsMenu(ev.clientX, ev.clientY, tr, binding, table);
+    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table);
   }
 
   document.addEventListener("contextmenu", onResultRowContextMenu);
@@ -3720,7 +3866,11 @@
       columns: resultColumns,
       types: resultTypes,
       typeAsts: resultTypeAsts,
-    }));
+    }), {
+      rowCount: () => (isVerticalResults ? 1 : allResultRows.length),
+      viewRows: () => (isVirtualResults && !isVerticalResults ? virtualViewRows : null),
+      relayout: () => { if (isVirtualResults && !isVerticalResults) renderVirtualRows(true); },
+    });
   }
 
   ns.results = {
@@ -3747,7 +3897,6 @@
     ensureResultsStack,
     setResultsVisible,
     createStaticResultTable,
-    closeRowDetails,
     flattenTupleTableData,
   };
 })();

@@ -532,6 +532,7 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   await expect(page.locator('#queryTextArea')).not.toHaveValue(/`tuple_value\.code`/);
 });
 
+
 const rowDetailsQuery = `SELECT
   number AS id,
   concat('name-', toString(number)) AS name,
@@ -543,7 +544,12 @@ const rowDetailsQuery = `SELECT
 FROM numbers(6)
 ORDER BY id`;
 
+const dataRowsSelector = 'tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)';
+
 async function openRowDetailsFromRow(page, row) {
+  // The menu closes on scroll: let a scroll-into-view settle before the click.
+  await row.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await row.locator('td').nth(2).click({ button: 'right' });
   const menu = page.locator('.rowDetailsMenu');
   await expect(menu).toBeVisible();
@@ -551,15 +557,41 @@ async function openRowDetailsFromRow(page, row) {
   await expect(details).toBeFocused();
   await details.click();
   await expect(menu).toHaveCount(0);
-  const view = page.locator('.rowDetails');
+  const view = page.locator('tr.resultTable__detailRow .rowDetails');
   await expect(view).toBeVisible();
+  await expect(row).toHaveClass(/is-rowExpanded/);
   return view;
 }
 
-test('right-click Details shows a result row vertically and dismisses on outside click or Escape', async ({ page }) => {
+// The detail <tr> must be the very next sibling of its data row.
+async function expectDetailRightAfter(row) {
+  expect(await row.evaluate((tr) => {
+    const next = tr.nextElementSibling;
+    return !!next && next.classList.contains('resultTable__detailRow')
+      && tr.parentElement.querySelectorAll('tr.resultTable__detailRow').length === 1
+      && next.cells.length === 1 && next.cells[0].colSpan === tr.cells.length;
+  })).toBe(true);
+}
+
+test('row details menu is not offered for a single-row (already vertical) result', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, "SELECT 1 AS a, 'x' AS b, [1, 2] AS c");
+  await expect(page.locator('#resultTableBody').locator('xpath=..')).toHaveClass(/resultTable--vertical/);
+  const cell = page.locator('#resultTableBody td').first();
+  await cell.click({ button: 'right' });
+  await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
+  const prevented = await cell.evaluate((td) => {
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    td.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  expect(prevented).toBe(false);
+});
+
+test('right-click Details expands a result row inline, under the row, and dismisses on outside click or Escape', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, rowDetailsQuery);
-  const rows = page.locator('#resultTableBody tr:not(.resultTable__spacerRow)');
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
   await expect(rows).toHaveCount(6);
   const row3 = rows.nth(2);
 
@@ -572,18 +604,21 @@ test('right-click Details shows a result row vertically and dismisses on outside
   await expect(page.locator('.rowDetailsMenu')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
+  const row4Before = await rows.nth(3).evaluate((tr) => tr.getBoundingClientRect().top);
   const view = await openRowDetailsFromRow(page, row3);
+  await expectDetailRightAfter(row3);
   await expect(view.locator('.rowDetails__title')).toHaveText('Row 3');
-  await expect(row3).toHaveClass(/is-detailsAnchor/);
   const names = await view.locator('.rowDetails__colName').allTextContents();
   expect(names).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
   const types = await view.locator('.rowDetails__type').allTextContents();
+  expect(types[0]).toBe('UInt64');
   expect(types[2]).toBe('Array(UInt64)');
   expect(types[3]).toMatch(/^Map\(String, UInt64\)$/);
   expect(types[6]).toBe('Nullable(UInt64)');
   const values = view.locator('.rowDetails__value');
+  await expect(values).toHaveCount(8);
   await expect(values.nth(0)).toHaveText('2');
   await expect(values.nth(1)).toHaveText('name-2');
   // Arrays and maps are pretty-printed on several lines and highlighted.
@@ -596,21 +631,45 @@ test('right-click Details shows a result row vertically and dismisses on outside
   await expect(values.nth(6).locator('.tok-null')).toHaveText('null');
   await expect(values.nth(7)).toContainText(`long-${'abcdefghij'.repeat(40)}-end`);
 
-  // Long values wrap inside the overlay; nothing overflows the viewport.
+  // Row 4 is pushed below the detail; the detail is exactly the visible
+  // table width, sticks to its left edge and never widens the page.
   const geometry = await page.evaluate(() => {
-    const el = document.querySelector('.rowDetails');
-    const r = el.getBoundingClientRect();
-    const body = el.querySelector('.rowDetails__body');
+    const detail = document.querySelector('#resultTableBody tr.resultTable__detailRow');
+    const content = detail.querySelector('.rowDetails');
+    const wrap = detail.closest('.tableWrap');
+    const rows = [...document.querySelectorAll('#resultTableBody tr:not(.resultTable__detailRow)')];
+    const d = detail.getBoundingClientRect();
+    const c = content.getBoundingClientRect();
+    const w = wrap.getBoundingClientRect();
     return {
-      left: r.left, right: r.right, vw: window.innerWidth,
-      bodyOverflowX: body.scrollWidth - body.clientWidth,
+      detailTop: d.top, detailBottom: d.bottom, detailHeight: d.height,
+      row3Bottom: rows[2].getBoundingClientRect().bottom,
+      row4Top: rows[3].getBoundingClientRect().top,
+      contentLeft: c.left, contentWidth: c.width, wrapLeft: w.left + wrap.clientLeft, wrapWidth: wrap.clientWidth,
+      wrapScrollable: wrap.scrollWidth - wrap.clientWidth,
+      contentOverflowX: content.scrollWidth - content.clientWidth,
       docOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
-  expect(geometry.left).toBeGreaterThanOrEqual(0);
-  expect(geometry.right).toBeLessThanOrEqual(geometry.vw);
-  expect(geometry.bodyOverflowX).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.detailTop - geometry.row3Bottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.row4Top - geometry.detailBottom)).toBeLessThanOrEqual(1);
+  expect(geometry.row4Top - row4Before).toBeGreaterThan(geometry.detailHeight - 2);
+  expect(Math.abs(geometry.contentLeft - geometry.wrapLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.contentWidth - geometry.wrapWidth)).toBeLessThanOrEqual(1);
+  expect(geometry.contentOverflowX).toBeLessThanOrEqual(1);
   expect(geometry.docOverflowX).toBeLessThanOrEqual(1);
+  if (geometry.wrapScrollable > 40) {
+    // Scrolling a wide table horizontally keeps the detail in view.
+    const stuck = await page.evaluate(() => {
+      const wrap = document.querySelector('#resultTableBody').closest('.tableWrap');
+      wrap.scrollLeft = 200;
+      const c = document.querySelector('#resultTableBody .rowDetails').getBoundingClientRect();
+      const left = wrap.getBoundingClientRect().left + wrap.clientLeft;
+      wrap.scrollLeft = 0;
+      return Math.abs(c.left - left);
+    });
+    expect(stuck).toBeLessThanOrEqual(1);
+  }
 
   // Clicking / selecting inside keeps it open.
   await values.nth(1).click();
@@ -618,45 +677,76 @@ test('right-click Details shows a result row vertically and dismisses on outside
   await expect(view).toBeVisible();
   const selected = await page.evaluate(() => String(window.getSelection()));
   expect(selected.length).toBeGreaterThan(0);
+  await view.locator('.rowDetails__copy').click();
+  await expect(view).toBeVisible();
 
-  // Any click elsewhere dismisses it.
+  // A click on another row dismisses it.
+  await rows.nth(4).locator('td').nth(1).click();
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
+  await expect(row3).not.toHaveClass(/is-rowExpanded/);
+
+  // Only one expanded row at a time.
+  await openRowDetailsFromRow(page, rows.nth(1));
+  await openRowDetailsFromRow(page, rows.nth(3));
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await expect(rows.nth(1)).not.toHaveClass(/is-rowExpanded/);
+  await expectDetailRightAfter(rows.nth(3));
+
+  // A click elsewhere on the page dismisses it.
   await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
-  await expect(row3).not.toHaveClass(/is-detailsAnchor/);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
-  // Escape dismisses it; the keyboard path (Enter on the focused item) works.
+  // The close button and Escape dismiss it; the keyboard path (Enter on the
+  // focused item) works.
+  await openRowDetailsFromRow(page, rows.nth(0));
+  await page.locator('.rowDetails__close').click();
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   await rows.nth(4).locator('td').nth(1).click({ button: 'right' });
   await expect(page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('.rowDetails .rowDetails__title')).toHaveText('Row 5');
   await page.keyboard.press('Escape');
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
+
+  // Sorting keeps the detail attached to the same data row.
+  await openRowDetailsFromRow(page, rows.nth(2));
+  await page.locator('#resultTableHead th[data-sort-key="0"]').click();
+  await page.locator('#resultTableHead th[data-sort-key="0"]').click();
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  const expanded = page.locator('#resultTableBody tr.is-rowExpanded');
+  await expect(expanded.locator('td.resultTable__rowIndex')).toHaveText('3');
+  await expectDetailRightAfter(expanded);
 
   // Starting a new query dismisses it too.
-  await openRowDetailsFromRow(page, rows.nth(1));
-  // The overlay may cover the Run button: use the editor shortcut instead.
   await page.locator('#queryTextArea').focus();
-  await expect(page.locator('.rowDetails')).toHaveCount(1);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
   await page.keyboard.press('Control+Enter');
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   await waitForTerminal(page);
 });
 
-test('row details follow virtualized rows and close when scrolled far away', async ({ page }) => {
+test('inline row details stay attached to their virtualized row and are counted in the scroll extent', async ({ page }) => {
+  const total = 20000;
   await openApp(page);
   await runSuccessfulQuery(page, `SELECT number AS id, concat('row-', toString(number)) AS label, [number, number + 1] AS pair,
-    if(number % 7 = 0, NULL, toNullable(number * 3)) AS maybe FROM numbers(20000)`);
+    map('n', number) AS m, if(number % 7 = 0, NULL, toNullable(number * 3)) AS maybe FROM numbers(${total})`);
   const body = page.locator('#resultTableBody');
   await expect(body.locator('tr.resultTable__spacerRow').first()).toBeAttached();
-  // Wait until the streamed rows are all accounted for by rows + spacers.
-  await expect.poll(async () => page.evaluate(() => {
+  const extent = () => page.evaluate(() => {
     const tbody = document.getElementById('resultTableBody');
-    let spacer = 0;
-    for (const tr of tbody.querySelectorAll('tr.resultTable__spacerRow')) spacer += tr.getBoundingClientRect().height;
-    const rows = tbody.querySelectorAll('tr:not(.resultTable__spacerRow)');
-    const rowH = rows.length ? rows[0].getBoundingClientRect().height : 0;
-    return rowH > 0 ? (spacer / rowH + rows.length) / 20000 : 0;
-  }), { timeout: 10_000 }).toBeGreaterThan(0.95);
+    const data = tbody.querySelector('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
+    const detail = tbody.querySelector('tr.resultTable__detailRow');
+    return {
+      body: tbody.getBoundingClientRect().height,
+      rowH: data ? data.getBoundingClientRect().height : 0,
+      detail: detail ? detail.getBoundingClientRect().height : 0,
+    };
+  });
+  // Wait until the streamed rows are all accounted for by rows + spacers.
+  await expect.poll(async () => {
+    const e = await extent();
+    return e.rowH > 0 ? Math.round(e.body / e.rowH) : 0;
+  }, { timeout: 15_000 }).toBe(total);
 
   const scrollBy = (dy) => page.evaluate((delta) => {
     const ws = document.getElementById('queryWorkspace');
@@ -665,62 +755,137 @@ test('row details follow virtualized rows and close when scrolled far away', asy
   }, dy);
   const visibleRowIndex = () => page.evaluate(() => {
     const el = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
-    const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow)');
+    const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
     return tr ? Number(tr.querySelector('.resultTable__rowIndex').textContent) : 0;
   });
+  // Every mounted data row sits at (index - 1) * rowH, plus the detail height
+  // for rows after the expanded one: no jump anywhere in the window.
+  const layoutError = (expandedIndex, detailH, rowH) => page.evaluate(({ expandedIndex, detailH, rowH }) => {
+    const tbody = document.getElementById('resultTableBody');
+    const top = tbody.getBoundingClientRect().top;
+    let worst = 0;
+    for (const tr of tbody.querySelectorAll('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)')) {
+      const index = Number(tr.querySelector('.resultTable__rowIndex').textContent);
+      const expected = (index - 1) * rowH + (index > expandedIndex ? detailH : 0);
+      worst = Math.max(worst, Math.abs(tr.getBoundingClientRect().top - top - expected));
+    }
+    return worst;
+  }, { expandedIndex, detailH, rowH });
 
-  await scrollBy(12000 * 32);
+  await scrollBy(10000 * 32);
   await expect.poll(visibleRowIndex, { timeout: 10_000 }).toBeGreaterThan(2000);
   const index = await visibleRowIndex();
   const rowFor = (n) => body.locator('tr').filter({ has: page.locator(`td.resultTable__rowIndex:text-is("${n}")`) });
+  const closed = await extent();
   const view = await openRowDetailsFromRow(page, rowFor(index));
   await expect(view.locator('.rowDetails__title')).toHaveText(`Row ${index}`);
   await expect(view.locator('.rowDetails__value').nth(1)).toHaveText(`row-${index - 1}`);
+  await expectDetailRightAfter(rowFor(index));
+  const open = await extent();
+  expect(open.detail).toBeGreaterThan(100);
+  expect(Math.abs(open.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
+  expect(await layoutError(index, open.detail, closed.rowH)).toBeLessThanOrEqual(2);
 
-  // Small scrolls (which remount the virtual window) keep a single overlay
-  // anchored to the same row data.
-  await page.evaluate(() => { document.querySelector('#resultTableBody tr.is-detailsAnchor').__rowDetailsProbe = true; });
-  for (let i = 0; i < 4; i++) {
-    await scrollBy(i % 2 ? -150 : 220);
-    await page.waitForTimeout(60);
-    await expect(page.locator('.rowDetails')).toHaveCount(1);
-    await expect(body.locator('tr.is-detailsAnchor')).toHaveCount(1);
-    await expect(body.locator('tr.is-detailsAnchor td.resultTable__rowIndex')).toHaveText(String(index));
-  }
-  // The anchor <tr> was re-created by the virtual renderer, not kept alive.
-  expect(await page.evaluate(() => !document.querySelector('#resultTableBody tr.is-detailsAnchor').__rowDetailsProbe)).toBe(true);
-  const aligned = await page.evaluate(() => {
-    const anchor = document.querySelector('#resultTableBody tr.is-detailsAnchor').getBoundingClientRect();
-    const box = document.querySelector('.rowDetails').getBoundingClientRect();
-    return Math.min(Math.abs(box.top - anchor.bottom), Math.abs(anchor.top - box.bottom));
+  // Scroll far away (both directions, detail unmounted into a spacer) and back.
+  const probe = await page.evaluate(() => {
+    const el = document.querySelector('#resultTableBody tr.resultTable__detailRow');
+    el.__rowDetailsProbe = true;
+    return true;
   });
-  expect(aligned).toBeLessThanOrEqual(8);
+  expect(probe).toBe(true);
+  for (const dy of [3000 * 32, -6000 * 32]) {
+    await scrollBy(dy);
+    await expect.poll(async () => Math.abs((await visibleRowIndex()) - index), { timeout: 10_000 }).toBeGreaterThan(1500);
+    await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(0);
+    const away = await extent();
+    expect(Math.abs(away.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
+    expect(await layoutError(index, open.detail, closed.rowH)).toBeLessThanOrEqual(2);
+  }
+  await scrollBy(3000 * 32);
+  await expect.poll(async () => body.locator('tr.resultTable__detailRow').count(), { timeout: 10_000 }).toBe(1);
+  await expectDetailRightAfter(rowFor(index));
+  await expect(body.locator('tr.is-rowExpanded td.resultTable__rowIndex')).toHaveText(String(index));
+  // The same detail content is re-inserted (not rebuilt) after the new <tr>.
+  expect(await page.evaluate(() => document.querySelector('#resultTableBody tr.resultTable__detailRow').__rowDetailsProbe === true)).toBe(true);
 
-  // Scrolling the results far away dismisses it.
-  await scrollBy(4000 * 32);
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
-  await expect(body.locator('tr.is-detailsAnchor')).toHaveCount(0);
+  // Small scrolls across the expanded row: exactly one detail, always right
+  // after its data row, rows never jump.
+  for (let i = 0; i < 6; i++) {
+    await scrollBy(i % 2 ? -180 : 260);
+    await page.waitForTimeout(40);
+    await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(1);
+    await expectDetailRightAfter(rowFor(index));
+    expect(await layoutError(index, open.detail, closed.rowH)).toBeLessThanOrEqual(2);
+  }
+  const back = await extent();
+  expect(Math.abs(back.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
+
+  // Closing while the detail is above the viewport does not move the rows
+  // the user is looking at.
+  await scrollBy(Math.round(open.detail) + 40 * 32);
+  await page.waitForTimeout(60);
+  const before = await visibleRowIndex();
+  expect(before).toBeGreaterThan(index);
+  await page.keyboard.press('Escape');
+  await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(0);
+  await page.waitForTimeout(60);
+  expect(Math.abs((await visibleRowIndex()) - before)).toBeLessThanOrEqual(1);
+  const after = await extent();
+  expect(Math.abs(after.body - total * closed.rowH)).toBeLessThanOrEqual(2);
+  expect(await layoutError(total + 1, 0, closed.rowH)).toBeLessThanOrEqual(2);
 });
 
-test('row details work in multiquery result panels', async ({ page }) => {
+test('inline row details work in multiquery result panels', async ({ page }) => {
   await openApp(page);
   await page.locator('#runSettingsButton').click();
   await page.locator('#runOptMultiQuery').click();
   await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
   await page.locator('#runSettingsButton').click();
-  await runQuery(page, `SELECT number AS a, 'first' AS b FROM numbers(3); SELECT number AS x, concat('second-', toString(number)) AS y, [number] AS z FROM numbers(4);`);
+  await runQuery(page, `SELECT number AS a, 'first' AS b FROM numbers(3); SELECT number AS x, concat('second-', toString(number)) AS y, [number] AS z FROM numbers(4); SELECT 1 AS only; SELECT number AS v, concat('v-', toString(number)) AS s FROM numbers(2000);`);
   await waitForTerminal(page);
   const second = page.locator('.resultsStack__block').nth(1);
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
-  await expect(second.locator('tbody tr')).toHaveCount(4);
-  const view = await openRowDetailsFromRow(page, second.locator('tbody tr').nth(2));
+  const rows = second.locator(`tbody ${dataRowsSelector}`);
+  await expect(rows).toHaveCount(4);
+  const view = await openRowDetailsFromRow(page, rows.nth(2));
+  await expectDetailRightAfter(rows.nth(2));
   expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(['x', 'y', 'z']);
   await expect(view.locator('.rowDetails__value').nth(1)).toHaveText('second-2');
+  await expect(view.locator('.rowDetails__value').nth(2)).toHaveText(/^\[\s+2\s+\]$/);
+  const pushed = await rows.nth(3).evaluate((tr) => tr.getBoundingClientRect().top - tr.previousElementSibling.getBoundingClientRect().bottom);
+  expect(Math.abs(pushed)).toBeLessThanOrEqual(1);
   await page.mouse.click(4, 4);
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
+
+  // The single-row panel is vertical: no custom menu there.
+  const third = page.locator('.resultsStack__block').nth(2);
+  if (await third.locator('.resultsStack__body').isHidden()) await third.locator('.resultsStack__toggle').click();
+  await third.locator('tbody td').first().click({ button: 'right' });
+  await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
+
+  // A virtualized panel counts the detail height in its scroll extent.
+  const fourth = page.locator('.resultsStack__block').nth(3);
+  if (await fourth.locator('.resultsStack__body').isHidden()) await fourth.locator('.resultsStack__toggle').click();
+  await expect(fourth.locator('tbody tr.resultTable__spacerRow').first()).toBeAttached();
+  const bigRows = fourth.locator(`tbody ${dataRowsSelector}`);
+  const measure = () => fourth.locator('tbody').evaluate((tbody) => ({
+    body: tbody.getBoundingClientRect().height,
+    rowH: tbody.querySelector('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)').getBoundingClientRect().height,
+    detail: tbody.querySelector('tr.resultTable__detailRow')?.getBoundingClientRect().height || 0,
+  }));
+  const plain = await measure();
+  expect(Math.abs(plain.body - 2000 * plain.rowH)).toBeLessThanOrEqual(2);
+  await openRowDetailsFromRow(page, bigRows.nth(4));
+  await expectDetailRightAfter(bigRows.nth(4));
+  const expanded = await measure();
+  expect(expanded.detail).toBeGreaterThan(60);
+  expect(Math.abs(expanded.body - (2000 * plain.rowH + expanded.detail))).toBeLessThanOrEqual(2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
+  expect(Math.abs((await measure()).body - 2000 * plain.rowH)).toBeLessThanOrEqual(2);
 });
 
-test('row details open from the Explorer data preview', async ({ page }) => {
+test('inline row details open from the Explorer data preview', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.getByText('wide_types', { exact: true }).first().click();
@@ -728,15 +893,28 @@ test('row details open from the Explorer data preview', async ({ page }) => {
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
   const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
   await expect(previewTable).toBeVisible({ timeout: 12_000 });
+  const rows = previewTable.locator(`tbody ${dataRowsSelector}`);
+  expect(await rows.count()).toBeGreaterThan(2);
   const headers = (await previewTable.locator('thead th').allTextContents()).slice(1);
-  const view = await openRowDetailsFromRow(page, previewTable.locator('tbody tr').first());
+  const view = await openRowDetailsFromRow(page, rows.nth(1));
+  await expectDetailRightAfter(rows.nth(1));
   expect(await view.locator('.rowDetails__colName').allTextContents()).toEqual(headers);
   expect(headers).toContain('tuple_value.code');
+  const fit = await page.evaluate(() => {
+    const content = document.querySelector('.explorerResultTable--preview .rowDetails');
+    const wrap = content.closest('.tableWrap');
+    return {
+      width: Math.abs(content.getBoundingClientRect().width - wrap.clientWidth),
+      docOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(fit.width).toBeLessThanOrEqual(1);
+  expect(fit.docOverflowX).toBeLessThanOrEqual(1);
   await page.keyboard.press('Escape');
-  await expect(page.locator('.rowDetails')).toHaveCount(0);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 });
 
-test('row details remove every document/window listener they add', async ({ page }) => {
+test('inline row details remove every document/window listener they add', async ({ page }) => {
   await page.addInitScript(() => {
     const ids = new WeakMap();
     let nextId = 1;
@@ -756,16 +934,19 @@ test('row details remove every document/window listener they add', async ({ page
   });
   await openApp(page);
   await runSuccessfulQuery(page, rowDetailsQuery);
-  const row = page.locator('#resultTableBody tr').nth(2);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  // Playwright's own injected hit-target listeners install on first use.
+  await rows.nth(1).scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.__chdashLiveListenerCount());
   for (let i = 0; i < 4; i++) {
-    await openRowDetailsFromRow(page, row);
+    await openRowDetailsFromRow(page, rows.nth(i % 2 ? 1 : 3));
     expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBeGreaterThan(before);
-    if (i % 2) await page.keyboard.press('Escape');
+    if (i === 0) await page.keyboard.press('Escape');
+    else if (i === 1) await page.locator('.rowDetails__close').click();
     else await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
-    await expect(page.locator('.rowDetails')).toHaveCount(0);
+    await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   }
-  await row.locator('td').nth(1).click({ button: 'right' });
+  await rows.nth(1).locator('td').nth(1).click({ button: 'right' });
   await page.keyboard.press('Escape');
   await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
   expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBe(before);

@@ -315,21 +315,26 @@ FROM numbers(18) ORDER BY id`;
 
 async function openRowDetailsForDesign(page, testInfo, suffix) {
   await runSuccessfulQuery(page, rowDetailsDesignQuery);
-  const row = page.locator('#resultTableBody tr').nth(2);
+  const rows = page.locator('#resultTableBody tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
+  const row = rows.nth(2);
   await row.locator('td').nth(2).click({ button: 'right' });
   await expect(page.locator('.rowDetailsMenu')).toBeVisible();
   await captureState(page, testInfo, `row-details-menu${suffix}`);
   await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' }).click();
-  await expect(page.locator('.rowDetails')).toBeVisible();
+  const detail = page.locator('#resultTableBody tr.resultTable__detailRow');
+  await expect(detail).toBeVisible();
+  // Keep the header, the expanded row and the rows pushed below it in view.
+  await detail.evaluate((tr) => tr.closest('table').scrollIntoView({ block: 'start' }));
+  await page.mouse.move(2, 2);
   await captureState(page, testInfo, `row-details${suffix}`);
 }
 
-test('captures the result row details overlay', async ({ page }, testInfo) => {
+test('captures the inline result row details', async ({ page }, testInfo) => {
   await openApp(page);
   await openRowDetailsForDesign(page, testInfo, '');
 });
 
-test('captures the result row details overlay in the light theme', async ({ page }, testInfo) => {
+test('captures the inline result row details in the light theme', async ({ page }, testInfo) => {
   await openApp(page);
   await page.locator('#themeSelectButton').click();
   await page.locator('.themeSelect__option[data-value="light"]').click();
