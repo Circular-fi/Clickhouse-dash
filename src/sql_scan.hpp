@@ -370,6 +370,218 @@ inline std::string restore_sql_single_quoted_literals(
 }
 
 
+// Monospace display columns of one code point, as editors and terminals render
+// it: East Asian Wide/Fullwidth characters and emoji take two columns, while
+// combining marks, zero-width joiners/spaces, variation selectors and emoji
+// skin-tone modifiers take none. Alignment that counts bytes or code points
+// shifts the `AS` column as soon as a literal or identifier contains CJK or
+// emoji. The tables cover the common blocks rather than all of Unicode's
+// EastAsianWidth.txt; unlisted code points count as one column.
+inline size_t sql_codepoint_display_width(char32_t cp) {
+  struct Range { char32_t first; char32_t last; };
+  static constexpr Range kZeroWidth[] = {
+      {0x0300, 0x036F}, {0x0483, 0x0489}, {0x0591, 0x05BD}, {0x05BF, 0x05BF},
+      {0x05C1, 0x05C2}, {0x05C4, 0x05C5}, {0x05C7, 0x05C7}, {0x0610, 0x061A},
+      {0x064B, 0x065F}, {0x0670, 0x0670}, {0x06D6, 0x06DC}, {0x06DF, 0x06E4},
+      {0x06E7, 0x06E8}, {0x06EA, 0x06ED}, {0x0E31, 0x0E31}, {0x0E34, 0x0E3A},
+      {0x0E47, 0x0E4E}, {0x1AB0, 0x1AFF}, {0x1DC0, 0x1DFF}, {0x200B, 0x200F},
+      {0x2060, 0x2064}, {0x20D0, 0x20FF}, {0x302A, 0x302D}, {0x3099, 0x309A},
+      {0xFE00, 0xFE0F}, {0xFE20, 0xFE2F}, {0xFEFF, 0xFEFF}, {0x1F3FB, 0x1F3FF},
+      {0xE0000, 0xE007F}, {0xE0100, 0xE01EF},
+  };
+  static constexpr Range kWide[] = {
+      {0x1100, 0x115F}, {0x231A, 0x231B}, {0x2329, 0x232A}, {0x23E9, 0x23EC},
+      {0x23F0, 0x23F0}, {0x23F3, 0x23F3}, {0x25FD, 0x25FE}, {0x2614, 0x2615},
+      {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693}, {0x26A1, 0x26A1},
+      {0x26AA, 0x26AB}, {0x26BD, 0x26BE}, {0x26C4, 0x26C5}, {0x26CE, 0x26CE},
+      {0x26D4, 0x26D4}, {0x26EA, 0x26EA}, {0x26F2, 0x26F3}, {0x26F5, 0x26F5},
+      {0x26FA, 0x26FA}, {0x26FD, 0x26FD}, {0x2705, 0x2705}, {0x270A, 0x270B},
+      {0x2728, 0x2728}, {0x274C, 0x274C}, {0x274E, 0x274E}, {0x2753, 0x2755},
+      {0x2757, 0x2757}, {0x2795, 0x2797}, {0x27B0, 0x27B0}, {0x27BF, 0x27BF},
+      {0x2B1B, 0x2B1C}, {0x2B50, 0x2B50}, {0x2B55, 0x2B55}, {0x2E80, 0x303E},
+      {0x3041, 0x33FF}, {0x3400, 0x4DBF}, {0x4E00, 0x9FFF}, {0xA000, 0xA4CF},
+      {0xA960, 0xA97F}, {0xAC00, 0xD7A3}, {0xF900, 0xFAFF}, {0xFE10, 0xFE19},
+      {0xFE30, 0xFE6F}, {0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x16FE0, 0x16FE4},
+      {0x17000, 0x18CFF}, {0x1B000, 0x1B2FF}, {0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF},
+      {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A}, {0x1F200, 0x1F202}, {0x1F210, 0x1F23B},
+      {0x1F240, 0x1F248}, {0x1F250, 0x1F251}, {0x1F260, 0x1F265}, {0x1F300, 0x1F64F},
+      {0x1F680, 0x1F6FF}, {0x1F7E0, 0x1F7EB}, {0x1F7F0, 0x1F7F0}, {0x1F900, 0x1F9FF},
+      {0x1FA70, 0x1FAFF}, {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD},
+  };
+  auto in = [cp](const auto& table) {
+    for (const auto& range : table) {
+      if (cp < range.first) return false;
+      if (cp <= range.last) return true;
+    }
+    return false;
+  };
+  if (in(kZeroWidth)) return 0;
+  return in(kWide) ? 2 : 1;
+}
+
+// Display width of UTF-8 text (see sql_codepoint_display_width). Invalid bytes
+// count one column each. An emoji joined by U+200D (ZWJ sequence such as a
+// family emoji) renders as one glyph, so joined components add no width; U+FE0F
+// requests emoji presentation, which widens a preceding narrow symbol (❤️).
+inline size_t sql_display_width(std::string_view s) {
+  size_t width = 0;
+  size_t previous = 0;
+  bool after_zwj = false;
+  for (size_t i = 0; i < s.size();) {
+    const unsigned char lead = static_cast<unsigned char>(s[i]);
+    size_t len = 1;
+    char32_t cp = lead;
+    if (lead >= 0xF0 && lead <= 0xF4) { len = 4; cp = lead & 0x07; }
+    else if (lead >= 0xE0) { len = 3; cp = lead & 0x0F; }
+    else if (lead >= 0xC2 && lead < 0xE0) { len = 2; cp = lead & 0x1F; }
+    else if (lead >= 0x80) len = 0;
+    if (len > 1) {
+      if (i + len > s.size()) len = 0;
+      for (size_t k = 1; len && k < len; ++k) {
+        const unsigned char cont = static_cast<unsigned char>(s[i + k]);
+        if ((cont & 0xC0) != 0x80) { len = 0; break; }
+        cp = (cp << 6) | (cont & 0x3F);
+      }
+    }
+    if (len == 0) {
+      ++width;
+      previous = 1;
+      after_zwj = false;
+      ++i;
+      continue;
+    }
+    i += len;
+    if (cp == 0x200D) { after_zwj = true; continue; }
+    if (cp == 0xFE0F && previous == 1) { ++width; previous = 2; continue; }
+    const size_t w = sql_codepoint_display_width(cp);
+    if (after_zwj && w > 0) { after_zwj = false; continue; }
+    after_zwj = false;
+    width += w;
+    if (w > 0) previous = w;
+  }
+  return width;
+}
+
+// ClickHouse heredoc literals: `$$body$$` or `$tag$body$tag$`. formatQuery
+// prints them as ordinary quoted strings, and the local post-processor's
+// scanners only know quotes, backticks and comments, so a heredoc body with a
+// quote, `--`, `/*` or an operator would be misread as SQL there. Heredocs are
+// therefore masked before formatting and restored byte-for-byte afterwards.
+inline std::vector<std::pair<size_t, size_t>> sql_heredoc_ranges(std::string_view sql) {
+  std::vector<std::pair<size_t, size_t>> ranges;
+  for (size_t i = 0; i < sql.size();) {
+    const char ch = sql[i];
+    const char next = (i + 1 < sql.size()) ? sql[i + 1] : '\0';
+    if (ch == '-' && next == '-') {
+      while (i < sql.size() && sql[i] != '\n') ++i;
+      continue;
+    }
+    if (ch == '#') {
+      while (i < sql.size() && sql[i] != '\n') ++i;
+      continue;
+    }
+    if (ch == '/' && next == '*') {
+      const size_t end = sql.find("*/", i + 2);
+      i = end == std::string_view::npos ? sql.size() : end + 2;
+      continue;
+    }
+    if (ch == '\'' || ch == '"' || ch == '`') {
+      ++i;
+      while (i < sql.size()) {
+        if (sql[i] == '\\' && ch != '`') { i += 2; continue; }
+        if (sql[i] == ch && i + 1 < sql.size() && sql[i + 1] == ch) { i += 2; continue; }
+        if (sql[i] == ch) { ++i; break; }
+        ++i;
+      }
+      continue;
+    }
+    if (sql_is_ident_continue(ch) || ch == '$') {
+      // `$` inside an identifier (a$b) never opens a heredoc.
+      const bool dollar = ch == '$';
+      if (!dollar) {
+        while (i < sql.size() && (sql_is_ident_continue(sql[i]) || sql[i] == '$')) ++i;
+        continue;
+      }
+      size_t tag_end = i + 1;
+      while (tag_end < sql.size() && sql_is_ident_continue(sql[tag_end])) ++tag_end;
+      if (tag_end < sql.size() && sql[tag_end] == '$') {
+        const std::string_view tag = sql.substr(i, tag_end + 1 - i);
+        const size_t close = sql.find(tag, tag_end + 1);
+        if (close != std::string_view::npos) {
+          ranges.emplace_back(i, close + tag.size());
+          i = close + tag.size();
+          continue;
+        }
+      }
+      ++i;
+      continue;
+    }
+    ++i;
+  }
+  return ranges;
+}
+
+struct SqlHeredocMask {
+  std::string sql;
+  // Placeholder literal -> exact heredoc spelling.
+  std::vector<std::pair<std::string, std::string>> heredocs;
+};
+
+// Replace each heredoc by a single-quoted placeholder literal with the same
+// display width, so alignment and wrapping decisions made on the masked text
+// stay right once the heredoc is put back. The placeholder body starts with a
+// private-use code point (U+E000 + index, one column) that user SQL never
+// contains, padded with `_`; heredocs are at least four columns wide (`$$$$`).
+inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
+  SqlHeredocMask mask;
+  const auto ranges = sql_heredoc_ranges(sql);
+  if (ranges.empty() || sql.find("\xEE") != std::string_view::npos) {
+    mask.sql.assign(sql);
+    return mask;
+  }
+  size_t cursor = 0;
+  for (const auto& [begin, end] : ranges) {
+    const std::string_view spelling = sql.substr(begin, end - begin);
+    const size_t index = mask.heredocs.size();
+    const size_t width = sql_display_width(spelling);
+    // A multiline heredoc keeps its exact bytes too; only the alignment of
+    // text after it can be off, as for any multiline literal.
+    if (index >= 0x1000 || width < 4) continue;
+    const char32_t marker = 0xE000 + static_cast<char32_t>(index);
+    std::string placeholder = "'";
+    placeholder.push_back(static_cast<char>(0xE0 | (marker >> 12)));
+    placeholder.push_back(static_cast<char>(0x80 | ((marker >> 6) & 0x3F)));
+    placeholder.push_back(static_cast<char>(0x80 | (marker & 0x3F)));
+    placeholder.append(width - 3, '_');
+    placeholder.push_back('\'');
+    mask.sql.append(sql.substr(cursor, begin - cursor));
+    mask.sql += placeholder;
+    mask.heredocs.emplace_back(std::move(placeholder), std::string(spelling));
+    cursor = end;
+  }
+  mask.sql.append(sql.substr(cursor));
+  return mask;
+}
+
+inline std::string restore_sql_heredocs(std::string formatted, const SqlHeredocMask& mask) {
+  if (mask.heredocs.empty()) return formatted;
+  std::string out;
+  out.reserve(formatted.size() + 64);
+  size_t cursor = 0;
+  for (const auto& [begin, end] : sql_single_quoted_literal_ranges(formatted)) {
+    const std::string_view literal = std::string_view(formatted).substr(begin, end - begin);
+    for (const auto& [placeholder, spelling] : mask.heredocs) {
+      if (literal != placeholder) continue;
+      out.append(formatted, cursor, begin - cursor);
+      out += spelling;
+      cursor = end;
+      break;
+    }
+  }
+  out.append(formatted, cursor, formatted.size() - cursor);
+  return out;
+}
+
 struct SqlIdentifierToken {
   size_t begin = 0;
   size_t end = 0;

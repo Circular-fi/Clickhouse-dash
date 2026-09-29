@@ -1,0 +1,1 @@
+SELECT a - -b AS x, a - (-b) AS y, (-a) - b AS z, -(-(a)) AS w, 1 - (2 - (3 - 4)) AS v, ((1 - 2) - 3) - 4 AS u, (a * b) % (c * d) AS mod2, (a / b) / (c / d) AS divs FROM t

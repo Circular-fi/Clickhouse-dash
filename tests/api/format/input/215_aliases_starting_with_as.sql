@@ -1,0 +1,1 @@
+select metric_value as ascending_rank, asset_key as asset_id, snapshot_date as as_of, entity_key as astro from anon.metrics_store

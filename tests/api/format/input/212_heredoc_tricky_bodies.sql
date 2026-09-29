@@ -1,0 +1,1 @@
+select entity_key, $$it's -- not a comment /* nor this */ a+b   spaced$$ as tricky_body, concat($x$prefix: "dq" `bt`$x$, entity_key) as prefixed_key, length($$$$) as empty_len from anon.metrics_store where note = $body$ a = 'b' AND c $body$ and entity_group != $$live$$

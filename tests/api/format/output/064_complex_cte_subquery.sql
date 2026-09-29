@@ -36,8 +36,8 @@ WITH
     ) AS `col_12`
 SELECT
     *,
-    (col_10 / col_8) * 100 AS `col_13`
+    col_10 / col_8 * 100 AS `col_13`
 FROM cte_2
-WHERE col_11 >= ((col_12 * 2) / 3)
+WHERE col_11 >= col_12 * 2 / 3
 ORDER BY col_10 / col_8 DESC
 LIMIT 10

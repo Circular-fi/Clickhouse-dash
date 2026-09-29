@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <initializer_list>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -142,6 +144,8 @@ string normalize_code_spacing(string_view s) {
   bool in_str = false;
   bool in_backtick = false;
   bool esc = false;
+  // End of the last unary sign written to `out`: `-(a + b)` stays glued.
+  size_t unary_sign_end = string::npos;
 
   auto rstrip_out = [&]() {
     while (!out.empty() && (out.back() == ' ' || out.back() == '\t')) out.pop_back();
@@ -227,12 +231,21 @@ string normalize_code_spacing(string_view s) {
                                out_word_before("THEN") || out_word_before("ELSE") ||
                                out_word_before("WHEN") || out_word_before("ON") ||
                                out_word_before("INTERPOLATE") ||
+                               // `GRANT SELECT(col)` is a privilege column list, not a projection.
+                               (out_word_before("SELECT") && !out_word_before("GRANT SELECT") &&
+                                !out_word_before("REVOKE SELECT")) ||
+                               out_word_before("WHERE") || out_word_before("PREWHERE") ||
+                               out_word_before("HAVING") || out_word_before("DISTINCT") ||
+                               out_word_before("BETWEEN") || out_word_before("CASE") ||
+                               out_word_before("LIKE") || out_word_before("ILIKE") ||
+                               out_word_before("DEFAULT") || out_word_before("MATERIALIZED") ||
+                               out_word_before("ALIAS") || out_word_before("EPHEMERAL") ||
                                prev_non_space() == ',' || prev_non_space() == '+' ||
                                prev_non_space() == '-' || prev_non_space() == '*' ||
                                prev_non_space() == '/' || prev_non_space() == '%' ||
                                prev_non_space() == '=' ||
                                prev_non_space() == '>' || prev_non_space() == '<';
-      if (needs_space) append_space();
+      if (needs_space && out.size() != unary_sign_end) append_space();
       out.push_back(c);
       while (i + 1 < s.size() && (s[i + 1] == ' ' || s[i + 1] == '\t')) ++i;
       continue;
@@ -261,10 +274,49 @@ string normalize_code_spacing(string_view s) {
       const char p = prev_non_space();
       const size_t qpos = next_non_space_pos(i + 1);
       const char q = qpos < s.size() ? s[qpos] : '\0';
-      const bool unary = (c == '-' || c == '+') &&
-                         (p == '\0' || p == '(' || p == '[' || p == ',' || p == '=' || p == '>' || p == '<') &&
-                         std::isdigit(static_cast<unsigned char>(q));
-      if (!unary) op = string(1, c);
+      // A sign is unary where an operand is expected: after an opening
+      // bracket, a separator, another operator or an expression keyword.
+      static const char* const operand_keywords[] = {
+          "SELECT", "WHERE", "PREWHERE", "HAVING", "AND", "OR", "NOT", "WHEN", "THEN",
+          "ELSE", "CASE", "BY", "ON", "LIMIT", "OFFSET", "BETWEEN", "DISTINCT", "IN", "QUALIFY"};
+      bool after_keyword = false;
+      if (p != '\0' && is_ident_char(p)) {
+        size_t end = out.size();
+        while (end > 0 && (out[end - 1] == ' ' || out[end - 1] == '\t')) --end;
+        size_t begin = end;
+        while (begin > 0 && (is_ident_char(out[begin - 1]) || out[begin - 1] == '.')) --begin;
+        const string_view word = string_view(out).substr(begin, end - begin);
+        // The exponent sign of a float literal (`1e-5`) is not an operator.
+        if ((c == '-' || c == '+') && end == out.size() && !word.empty() &&
+            std::isdigit(static_cast<unsigned char>(word.front())) &&
+            !(word.size() > 1 && (word[1] == 'x' || word[1] == 'X')) &&
+            (word.back() == 'e' || word.back() == 'E') &&
+            std::isdigit(static_cast<unsigned char>(q)) && qpos == i + 1) {
+          out.push_back(c);
+          continue;
+        }
+        for (const char* kw : operand_keywords) after_keyword = after_keyword || iequals_ascii(word, kw);
+      }
+      const bool operand_position =
+          p == '(' || p == '[' || p == ',' || p == '=' || p == '>' || p == '<' || p == '+' ||
+          p == '-' || p == '*' || p == '/' || p == '%' || p == '?' || p == ':' || after_keyword;
+      // At the start of a line a sign followed by a space is the binary
+      // continuation the formatter itself emits (`\n- rhs`); formatQuery prints
+      // unary minus glued to its operand (`-x`, `-(a + b)`).
+      const bool line_start_unary = p == '\0' && i + 1 < s.size() && s[i + 1] != ' ' && s[i + 1] != '\t';
+      const bool unary = (c == '-' || c == '+') && (operand_position || line_start_unary);
+      if (unary) {
+        // Print the sign glued to its operand (`-x`, not `- x`). `- -x` keeps
+        // its separating space: `--` would start a comment.
+        rstrip_out();
+        if (p != '(' && p != '[' && p != '\0') append_space();
+        out.push_back(c);
+        unary_sign_end = out.size();
+        while (i + 1 < s.size() && (s[i + 1] == ' ' || s[i + 1] == '\t')) ++i;
+        if (i + 1 < s.size() && (s[i + 1] == '-' || s[i + 1] == '+')) out.push_back(' ');
+        continue;
+      }
+      op = string(1, c);
     }
     if (!op.empty()) {
       if (op == "->") {
@@ -487,14 +539,11 @@ string join_lines(const vector<string>& lines) {
 
 
 
-// Display width used for alignment: UTF-8 code points, not bytes, so a
-// non-ASCII literal or identifier does not shift the aligned `AS` column.
+// Display width used for alignment: monospace columns, not bytes or code
+// points, so CJK (two columns), emoji (two) and combining marks (none) in a
+// literal or identifier do not shift the aligned `AS` column.
 size_t utf8_width(string_view s) {
-  size_t width = 0;
-  for (const char ch : s) {
-    if ((static_cast<unsigned char>(ch) & 0xC0) != 0x80) ++width;
-  }
-  return width;
+  return sql_display_width(s);
 }
 
 size_t last_line_length(string_view s) {
@@ -864,7 +913,10 @@ std::pair<string, string> split_top_level_as(string_view s) {
       const char prev = (i == 0) ? '\0' : s[i - 1];
       const char next = (i + 2 < s.size()) ? s[i + 2] : '\0';
       const bool prev_ok = prev == '\0' || std::isspace(static_cast<unsigned char>(prev)) || prev == ')' || prev == ']' || prev == '`';
-      const bool next_ok = next == '\0' || std::isspace(static_cast<unsigned char>(next)) || next == '`' || next == '"' || std::isalpha(static_cast<unsigned char>(next)) || next == '_';
+      // `AS` must be a whole word: the `as` prefix of an alias such as
+      // `ascii_label` is not the keyword (it used to split `x AS ascii_label`
+      // into `x AS` / `cii_label`).
+      const bool next_ok = next == '\0' || std::isspace(static_cast<unsigned char>(next)) || next == '`' || next == '"';
       const bool prev_word = prev != '\0' && is_ident_char(prev);
       if (prev_ok && next_ok && !prev_word) last = static_cast<int>(i);
     }
@@ -877,6 +929,11 @@ std::pair<string, string> split_top_level_as(string_view s) {
 static string format_alias_identifier(string_view alias) {
   const string trimmed = trim_ascii_spaces(alias);
   if (trimmed.empty()) return {};
+  // `AS z -- note` at the end of a projection: the comment follows the alias,
+  // it must never be quoted into the identifier.
+  if (auto [code, comment] = split_inline_comment(trimmed); !comment.empty() && !trim_ascii_spaces(code).empty()) {
+    return format_alias_identifier(code) + " " + comment;
+  }
   string normalized = trimmed;
   if (normalized.size() >= 2) {
     const char first = normalized.front();
@@ -1073,13 +1130,13 @@ void align_create_columns(vector<string>& lines) {
           const size_t close = t.find('`', 1);
           const string lhs = t.substr(0, close + 1);
           const string rhs = trim_ascii_spaces(t.substr(close + 1));
-          width = std::max(width, lhs.size());
+          width = std::max(width, utf8_width(lhs));
           cols.push_back({lhs, rhs, comma});
         }
         for (size_t k = 0; k < indexes.size(); ++k) {
           string rendered(indent, ' ');
           rendered += cols[k].lhs;
-          rendered += string(width - cols[k].lhs.size() + 1, ' ');
+          rendered += string(width - utf8_width(cols[k].lhs) + 1, ' ');
           rendered += cols[k].rhs;
           if (cols[k].comma) rendered += ',';
           lines[indexes[k]] = std::move(rendered);
@@ -1101,7 +1158,7 @@ void align_create_columns(vector<string>& lines) {
       const size_t close = t.find('`', 1);
       string lhs = t.substr(0, close + 1);
       string rhs = trim_ascii_spaces(t.substr(close + 1));
-      width = std::max(width, lhs.size());
+      width = std::max(width, utf8_width(lhs));
       cols.push_back({lhs, rhs, comma});
       ++j;
     }
@@ -1111,10 +1168,10 @@ void align_create_columns(vector<string>& lines) {
       for (const auto& col : cols) {
         string line(indent, ' ');
         line += col.lhs;
-        line += string(width - col.lhs.size() + 1, ' ');
+        line += string(width - utf8_width(col.lhs) + 1, ' ');
         line += col.rhs;
         if (col.comma) line += ',';
-        if (line.size() > 80) ok = false;
+        if (utf8_width(line) > 80) ok = false;
         rendered.push_back(std::move(line));
       }
       if (ok) {
@@ -1180,19 +1237,19 @@ void align_create_index_groups(vector<string>& lines) {
       size_t expression_width = 0;
       size_t type_width = 0;
       for (const auto& row : group) {
-        name_width = std::max(name_width, row.name.size());
-        expression_width = std::max(expression_width, row.expression.size());
-        type_width = std::max(type_width, row.type.size());
+        name_width = std::max(name_width, utf8_width(row.name));
+        expression_width = std::max(expression_width, utf8_width(row.expression));
+        type_width = std::max(type_width, utf8_width(row.type));
       }
       for (size_t k = 0; k < group.size(); ++k) {
         const auto& row = group[k];
         string rendered(indent, ' ');
         rendered += "INDEX " + row.name;
-        rendered += string(name_width - row.name.size() + 1, ' ');
+        rendered += string(name_width - utf8_width(row.name) + 1, ' ');
         rendered += row.expression;
-        rendered += string(expression_width - row.expression.size() + 1, ' ');
+        rendered += string(expression_width - utf8_width(row.expression) + 1, ' ');
         rendered += "TYPE " + row.type;
-        rendered += string(type_width - row.type.size() + 1, ' ');
+        rendered += string(type_width - utf8_width(row.type) + 1, ' ');
         rendered += "GRANULARITY " + row.granularity;
         if (row.comma) rendered += ',';
         lines[i + k] = std::move(rendered);
@@ -1470,6 +1527,371 @@ string normalize_final_layout(string_view s) {
   split_combined_limit_lines(lines);
   return join_lines(lines);
 }
+// ---------------------------------------------------------------------------
+// Redundant arithmetic parentheses.
+//
+// formatQuery parenthesizes every nested binary operator:
+// `(a*w1 + b*w2) / (w1 + w2)` comes back as
+// `((a * w1) + (b * w2)) / (w1 + w2)`. Parentheses never appear in the parsed
+// AST, so a group can be dropped whenever operator precedence already implies
+// the same tree. The decision uses only the tokens around the group and the
+// operators directly inside it; anything unfamiliar keeps its parentheses.
+
+enum class ArithTokenKind { Word, Number, Literal, Op, Open, Close, Comma, Comment, Other };
+
+struct ArithToken {
+  ArithTokenKind kind;
+  size_t begin;
+  size_t end;
+};
+
+vector<ArithToken> lex_arith_tokens(string_view s) {
+  vector<ArithToken> tokens;
+  size_t i = 0;
+  auto push = [&](ArithTokenKind kind, size_t begin, size_t end) { tokens.push_back({kind, begin, end}); };
+  while (i < s.size()) {
+    const char c = s[i];
+    const char n = i + 1 < s.size() ? s[i + 1] : '\0';
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { ++i; continue; }
+    const size_t b = i;
+    if ((c == '-' && n == '-') || c == '#') {
+      while (i < s.size() && s[i] != '\n') ++i;
+      push(ArithTokenKind::Comment, b, i);
+      continue;
+    }
+    if (c == '/' && n == '*') {
+      const size_t e = s.find("*/", i + 2);
+      i = e == string_view::npos ? s.size() : e + 2;
+      push(ArithTokenKind::Comment, b, i);
+      continue;
+    }
+    if (c == '\'' || c == '"' || c == '`') {
+      ++i;
+      while (i < s.size()) {
+        if (c != '`' && s[i] == '\\') { i += 2; continue; }
+        if (s[i] == c) {
+          if (i + 1 < s.size() && s[i + 1] == c) { i += 2; continue; }
+          ++i;
+          break;
+        }
+        ++i;
+      }
+      push(ArithTokenKind::Literal, b, std::min(i, s.size()));
+      continue;
+    }
+    if (std::isdigit(static_cast<unsigned char>(c))) {
+      const bool hex = c == '0' && (n == 'x' || n == 'X');
+      while (i < s.size() && (is_ident_char(s[i]) || s[i] == '.')) {
+        const char d = s[i++];
+        // Exponent sign: `1e-5` is a single literal token.
+        if (!hex && (d == 'e' || d == 'E') && i + 1 < s.size() && (s[i] == '-' || s[i] == '+') &&
+            std::isdigit(static_cast<unsigned char>(s[i + 1]))) ++i;
+      }
+      push(ArithTokenKind::Number, b, i);
+      continue;
+    }
+    if (is_ident_char(c)) {
+      while (i < s.size() && is_ident_char(s[i])) ++i;
+      push(ArithTokenKind::Word, b, i);
+      continue;
+    }
+    if (c == '(' || c == '[' || c == '{') { push(ArithTokenKind::Open, b, ++i); continue; }
+    if (c == ')' || c == ']' || c == '}') { push(ArithTokenKind::Close, b, ++i); continue; }
+    if (c == ',') { push(ArithTokenKind::Comma, b, ++i); continue; }
+    static const char* const two_char_ops[] = {"->", "::", "||", "<=", ">=", "!=", "<>", "=="};
+    bool matched = false;
+    for (const char* op : two_char_ops) {
+      if (c == op[0] && n == op[1]) {
+        i += 2;
+        push(ArithTokenKind::Op, b, i);
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    if (string_view("+-*/%=<>?:.!").find(c) != string_view::npos) { push(ArithTokenKind::Op, b, ++i); continue; }
+    push(ArithTokenKind::Other, b, ++i);
+  }
+  return tokens;
+}
+
+constexpr int kArithBoundary = -1;  // clause keyword, separator or bracket
+constexpr int kArithCompare = 9;
+constexpr int kArithAdditive = 11;
+constexpr int kArithMultiplicative = 12;
+constexpr int kArithUnary = 13;
+constexpr int kArithUnknown = -100;
+
+// Precedence of a binary operator token; kArithUnknown for anything else.
+// `||` is deliberately unknown: the parser flattens `a || b || c` into one
+// concat() call, so its parentheses are not transparent.
+int arith_binary_precedence(string_view op) {
+  if (op == "+" || op == "-") return kArithAdditive;
+  if (op == "*" || op == "/" || op == "%") return kArithMultiplicative;
+  if (op == "=" || op == "==" || op == "!=" || op == "<>" || op == "<" || op == ">" || op == "<=" || op == ">=") {
+    return kArithCompare;
+  }
+  return kArithUnknown;
+}
+
+bool arith_word_is(string_view word, std::initializer_list<const char*> words) {
+  for (const char* w : words) if (iequals_ascii(word, w)) return true;
+  return false;
+}
+
+string strip_redundant_arith_parentheses(string_view s) {
+  const vector<ArithToken> t = lex_arith_tokens(s);
+  if (t.empty()) return string(s);
+  auto text = [&](size_t k) { return s.substr(t[k].begin, t[k].end - t[k].begin); };
+  vector<size_t> match(t.size(), string::npos);
+  vector<size_t> parent(t.size(), string::npos);  // innermost enclosing open bracket
+  vector<size_t> stack;
+  for (size_t k = 0; k < t.size(); ++k) {
+    if (!stack.empty()) parent[k] = stack.back();
+    if (t[k].kind == ArithTokenKind::Open) stack.push_back(k);
+    else if (t[k].kind == ArithTokenKind::Close) {
+      if (stack.empty()) return string(s);
+      match[stack.back()] = k;
+      match[k] = stack.back();
+      parent[k] = parent[stack.back()];
+      stack.pop_back();
+    }
+  }
+  if (!stack.empty()) return string(s);
+
+  // True when the token at k (an operator) is used as a prefix sign.
+  auto starts_operand = [&](size_t k) {
+    if (k == 0) return true;
+    const ArithToken& p = t[k - 1];
+    if (p.kind == ArithTokenKind::Open || p.kind == ArithTokenKind::Comma || p.kind == ArithTokenKind::Op) return true;
+    return p.kind == ArithTokenKind::Word &&
+           arith_word_is(text(k - 1), {"SELECT", "WHERE", "PREWHERE", "HAVING", "BY", "AND", "OR", "NOT",
+                                       "THEN", "ELSE", "WHEN", "CASE", "IN", "BETWEEN", "LIMIT", "OFFSET"});
+  };
+
+  // Lowest operator precedence directly inside the group (open, close);
+  // kArithUnknown when the content is not a plain operator chain.
+  auto inner_precedence = [&](size_t open, size_t close, bool beside_operator) {
+    int lowest = std::numeric_limits<int>::max();
+    bool expect_operand = true;
+    bool signed_operand = false;
+    size_t operands = 0;
+    for (size_t k = open + 1; k < close; ++k) {
+      const ArithToken& tok = t[k];
+      const string_view tx = text(k);
+      if (expect_operand) {
+        if (tok.kind == ArithTokenKind::Op && (tx == "-" || tx == "+")) { signed_operand = true; continue; }
+        if (tok.kind == ArithTokenKind::Word || tok.kind == ArithTokenKind::Number || tok.kind == ArithTokenKind::Literal) {
+          ++operands;
+          expect_operand = false;
+          continue;
+        }
+        if (tok.kind == ArithTokenKind::Open) {
+          ++operands;
+          expect_operand = false;
+          k = match[k];
+          continue;
+        }
+        return kArithUnknown;
+      }
+      // Postfix forms bind tighter than any operator: calls, parametric
+      // calls, subscripts and tuple/member access.
+      if (tok.kind == ArithTokenKind::Open && (text(k) == "(" || text(k) == "[") &&
+          (t[k - 1].kind == ArithTokenKind::Word || t[k - 1].kind == ArithTokenKind::Close || text(k) == "[")) {
+        k = match[k];
+        continue;
+      }
+      if (tok.kind == ArithTokenKind::Op && tx == "." && k + 1 < close &&
+          (t[k + 1].kind == ArithTokenKind::Word || t[k + 1].kind == ArithTokenKind::Number)) {
+        ++k;
+        continue;
+      }
+      if (tok.kind != ArithTokenKind::Op) return kArithUnknown;
+      const int prec = arith_binary_precedence(tx);
+      if (prec == kArithUnknown) return kArithUnknown;
+      lowest = std::min(lowest, prec);
+      expect_operand = true;
+    }
+    if (expect_operand || operands == 0) return kArithUnknown;
+    if (lowest != std::numeric_limits<int>::max()) return lowest;
+    // `(-b)`: a lone signed operand binds tighter than every binary operator.
+    // A bare `(x)` keeps its parentheses: after IN or in DDL keys they can matter.
+    if (signed_operand && operands == 1) return kArithUnary;
+    // `(intDiv(a, b)) * c`, `(0.5) * x`: an atom next to an arithmetic
+    // operator binds tighter than it anyway.
+    if (operands == 1 && beside_operator) return kArithUnary;
+    // `concat((concat(a, b)), c)`: a lone operand wrapped as a whole function
+    // argument is transparent. Keyword lists are not: `GROUPING SETS ((a), ())`
+    // and `IN ((1), (2))` give their groups meaning.
+    const size_t owner = parent[open];
+    const bool call_argument = owner != string::npos && owner > 0 && text(owner) == "(" &&
+        t[owner - 1].kind == ArithTokenKind::Word &&
+        !arith_word_is(text(owner - 1), {"SETS", "IN", "USING", "VALUES", "AS", "BY", "ON", "JOIN", "FROM",
+                                         "OVER", "WITH", "AND", "OR", "NOT", "EXISTS", "ANY", "ALL",
+                                         "SELECT", "WHERE", "INTERPOLATE", "EXCEPT", "REPLACE", "APPLY"});
+    const bool arg_start = call_argument && (t[open - 1].kind == ArithTokenKind::Comma || open - 1 == owner);
+    const bool arg_end = close + 1 < t.size() &&
+        (t[close + 1].kind == ArithTokenKind::Comma || text(close + 1) == ")");
+    return operands == 1 && call_argument && arg_start && arg_end ? kArithUnary : kArithUnknown;
+  };
+
+  vector<bool> drop(t.size(), false);
+  for (size_t open = 0; open < t.size(); ++open) {
+    if (t[open].kind != ArithTokenKind::Open || text(open) != "(") continue;
+    const size_t close = match[open];
+    int left = kArithUnknown;
+    if (open == 0) left = kArithBoundary;
+    else {
+      const ArithToken& p = t[open - 1];
+      const string_view px = text(open - 1);
+      if ((p.kind == ArithTokenKind::Open && px != "{") || p.kind == ArithTokenKind::Comma) left = kArithBoundary;
+      else if (p.kind == ArithTokenKind::Word &&
+               arith_word_is(px, {"SELECT", "WHERE", "PREWHERE", "HAVING", "BY", "THEN", "ELSE", "WHEN"})) {
+        left = kArithBoundary;
+      } else if (p.kind == ArithTokenKind::Op && !starts_operand(open - 1)) {
+        left = arith_binary_precedence(px);
+      }
+    }
+    if (left == kArithUnknown) continue;
+    int right = kArithUnknown;
+    if (close + 1 == t.size()) right = kArithBoundary;
+    else {
+      const ArithToken& n = t[close + 1];
+      const string_view nx = text(close + 1);
+      if ((n.kind == ArithTokenKind::Close && nx != "}") || n.kind == ArithTokenKind::Comma) right = kArithBoundary;
+      else if (n.kind == ArithTokenKind::Word &&
+               arith_word_is(nx, {"AS", "AND", "OR", "FROM", "WHERE", "PREWHERE", "GROUP", "ORDER", "LIMIT",
+                                  "HAVING", "THEN", "ELSE", "END", "WHEN", "ASC", "DESC", "SETTINGS",
+                                  "FORMAT", "UNION", "WINDOW", "QUALIFY"})) {
+        right = kArithBoundary;
+      } else if (n.kind == ArithTokenKind::Op) {
+        right = arith_binary_precedence(nx);
+      }
+    }
+    if (right == kArithUnknown) continue;
+    const int inner = inner_precedence(open, close, left >= kArithAdditive || right >= kArithAdditive);
+    if (inner == kArithUnknown) continue;
+    // Binary operators are left-associative: `(a - b) - c` equals
+    // `a - b - c`, but `a - (b - c)` and `a + (b + c)` are different trees.
+    // Comparisons do not chain, so equal precedence keeps the group.
+    const bool right_ok = inner > right || (inner == right && inner >= kArithAdditive);
+    if (inner > left && right_ok) {
+      drop[open] = true;
+      drop[close] = true;
+    }
+  }
+
+  string out;
+  out.reserve(s.size());
+  size_t cursor = 0;
+  for (size_t k = 0; k < t.size(); ++k) {
+    if (!drop[k]) continue;
+    out.append(s.substr(cursor, t[k].begin - cursor));
+    cursor = t[k].end;
+    // `x - (-y)` must not become the comment opener `x --y`.
+    if (t[k].kind == ArithTokenKind::Open && !out.empty() && (out.back() == '-' || out.back() == '+') &&
+        k + 1 < t.size() && (text(k + 1) == "-" || text(k + 1) == "+")) {
+      out.push_back(' ');
+    }
+    // Keep a single separating space where `(` or `)` sat between tokens.
+    if (t[k].kind == ArithTokenKind::Open) {
+      while (cursor < s.size() && s[cursor] == ' ' && !out.empty() && (out.back() == ' ' || out.back() == '(' || out.back() == '[')) ++cursor;
+    } else {
+      while (!out.empty() && out.back() == ' ' && cursor < s.size() && s[cursor] == ' ') out.pop_back();
+    }
+  }
+  out.append(s.substr(cursor));
+  return out;
+}
+
+// Top-level binary operators of `s` when it is a plain operator chain
+// (`a * w + b / c - f(x)`): byte ranges and precedence of each operator.
+// Returns false for anything else (keywords, lambdas, `||`, `?:`, casts...).
+struct ArithChainOperator {
+  size_t begin;
+  size_t end;
+  int precedence;
+};
+
+bool split_arith_chain(string_view s, vector<ArithChainOperator>* ops) {
+  const vector<ArithToken> t = lex_arith_tokens(s);
+  vector<size_t> match(t.size(), string::npos);
+  vector<size_t> stack;
+  for (size_t k = 0; k < t.size(); ++k) {
+    if (t[k].kind == ArithTokenKind::Open) stack.push_back(k);
+    else if (t[k].kind == ArithTokenKind::Close) {
+      if (stack.empty()) return false;
+      match[stack.back()] = k;
+      stack.pop_back();
+    }
+  }
+  if (!stack.empty()) return false;
+  auto text = [&](size_t k) { return s.substr(t[k].begin, t[k].end - t[k].begin); };
+  bool expect_operand = true;
+  size_t operands = 0;
+  for (size_t k = 0; k < t.size(); ++k) {
+    const ArithToken& tok = t[k];
+    const string_view tx = text(k);
+    if (tok.kind == ArithTokenKind::Comment) return false;
+    if (expect_operand) {
+      if (tok.kind == ArithTokenKind::Op && (tx == "-" || tx == "+")) continue;
+      if (tok.kind == ArithTokenKind::Word || tok.kind == ArithTokenKind::Number || tok.kind == ArithTokenKind::Literal) {
+        ++operands;
+        expect_operand = false;
+        continue;
+      }
+      if (tok.kind == ArithTokenKind::Open) {
+        ++operands;
+        expect_operand = false;
+        k = match[k];
+        continue;
+      }
+      return false;
+    }
+    if (tok.kind == ArithTokenKind::Open && (tx == "(" || tx == "[") &&
+        (t[k - 1].kind == ArithTokenKind::Word || t[k - 1].kind == ArithTokenKind::Close || tx == "[")) {
+      k = match[k];
+      continue;
+    }
+    if (tok.kind == ArithTokenKind::Op && tx == "." && k + 1 < t.size() &&
+        (t[k + 1].kind == ArithTokenKind::Word || t[k + 1].kind == ArithTokenKind::Number)) {
+      ++k;
+      continue;
+    }
+    if (tok.kind != ArithTokenKind::Op) return false;
+    const int prec = arith_binary_precedence(tx);
+    if (prec != kArithAdditive && prec != kArithMultiplicative) return false;
+    if (ops) ops->push_back({tok.begin, tok.end, prec});
+    expect_operand = true;
+  }
+  return !expect_operand && operands >= 2;
+}
+
+// Re-indent continuation lines of an operator chain (`\n/ rhs`, `\n- rhs`)
+// that sit at bracket depth 0 so they hang one level under the first operand.
+string hang_operator_continuations(string value) {
+  const string masked = mask_sql_surface(value).code_lower;
+  vector<int> line_depths{0};
+  int depth = 0;
+  for (char ch : masked) {
+    if (ch == '(' || ch == '[' || ch == '{') ++depth;
+    else if ((ch == ')' || ch == ']' || ch == '}') && depth > 0) --depth;
+    if (ch == '\n') line_depths.push_back(depth);
+  }
+  auto lines = split_lines_keep(value);
+  for (size_t i = 1; i < lines.size() && i < line_depths.size(); ++i) {
+    if (line_depths[i] != 0) continue;
+    size_t content = 0;
+    while (content < lines[i].size() && (lines[i][content] == ' ' || lines[i][content] == '\t')) ++content;
+    const bool binary_continuation = content + 1 < lines[i].size() &&
+        (lines[i][content] == '-' || lines[i][content] == '/' || lines[i][content] == '%' ||
+         lines[i][content] == '+' || lines[i][content] == '*') &&
+        lines[i][content + 1] == ' ';
+    if (binary_continuation) lines[i].replace(0, content, 4, ' ');
+  }
+  return join_lines(lines);
+}
+
 struct Formatter {
   explicit Formatter(size_t threshold_) : threshold(threshold_) {}
 
@@ -1488,6 +1910,9 @@ struct Formatter {
   string format_expression(string_view expr);
   string format_over_clause(string_view expr);
   string format_function_call(string_view expr);
+  string format_parametric_call(const string& name, string_view params_src, string_view args_part);
+  string format_arith_chain(string_view expr, bool force);
+  string format_arith_operand(string_view operand, size_t block_width, bool* block);
   string format_array_literal(string_view expr);
   string format_bool_expr(string_view expr);
   string format_bool_term(string_view expr, bool in_and_chain);
@@ -1500,6 +1925,8 @@ struct Formatter {
   string format_insert_select_like(string_view s);
   string format_delete(string_view s);
   string format_optimize_table(string_view s);
+  string format_row_policy(string_view s);
+  string format_settings_profile(string_view s);
   string try_format_insert_values(string_view s);
   string cleanup_surface(string_view s) const;
   string take_leading_comments(string_view s, string* leading) const;
@@ -1623,9 +2050,17 @@ string align_multiline_settings(string text) {
 }
 
 string Formatter::format(string_view s) {
-  string text = trim_ascii_spaces(repair_split_clause_keywords(repair_line_comments(normalize_newlines(s))));
+  // One-line comment recovery only applies to a buffer pasted as a single
+  // line, where a `--` comment visibly swallows the clauses after it. In a
+  // multi-line buffer every comment ends at its newline, so comment prose such
+  // as `-- rows, even when AND is set` must stay a comment: re-splitting it
+  // would turn a valid query into different (or unparseable) SQL.
+  const string normalized = trim_ascii_spaces(normalize_newlines(s));
+  const bool one_line = normalized.find('\n') == string::npos;
+  string text = trim_ascii_spaces(repair_split_clause_keywords(one_line ? repair_line_comments(normalized) : normalized));
   if (text.empty()) return text;
   if (auto values = try_format_insert_values(text); !values.empty()) return values;
+  text = strip_redundant_arith_parentheses(text);
   string leading;
   text = take_leading_comments(text, &leading);
   string out = format_statement(text);
@@ -1651,6 +2086,10 @@ string Formatter::format_statement(string_view s) {
   else if (starts_with_ci(text, "INSERT INTO")) out = format_insert_select_like(text);
   else if (starts_with_ci(text, "DELETE FROM")) out = format_delete(text);
   else if (starts_with_ci(text, "OPTIMIZE TABLE")) out = format_optimize_table(text);
+  else if (starts_with_ci(text, "CREATE ROW POLICY") || starts_with_ci(text, "ALTER ROW POLICY")) out = format_row_policy(text);
+  // ALTER SETTINGS PROFILE is excluded: its ADD/MODIFY/DROP SETTINGS list
+  // grammar is not a plain `name = value` list and keeps the formatQuery line.
+  else if (starts_with_ci(text, "CREATE SETTINGS PROFILE")) out = format_settings_profile(text);
   else out = cleanup_surface(text);
   if (!leading.empty()) out = leading + "\n" + out;
   return out;
@@ -1820,7 +2259,8 @@ string Formatter::format_clause(string_view kw, string_view body) {
       const string inner = unwrap_outer_parens(rendered);
       if (!inner.empty() && inner.find('\n') != string::npos) rendered = "(\n" + indent_block(normalize_boolean_lines(inner), 4) + "\n)";
     }
-    return string(kw) + "\n" + indent_block(rendered, 4);
+    // A wrapped arithmetic term hangs under its own condition line.
+    return string(kw) + "\n" + indent_block(hang_operator_continuations(rendered), 4);
   }
   if (iequals_ascii(kw, "LIMIT") || iequals_ascii(kw, "OFFSET") || iequals_ascii(kw, "SAMPLE")) {
     // formatQuery prints `LIMIT n\n WITH TIES`; keep these clauses on one line.
@@ -2122,12 +2562,10 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
     string item = parsed[i].first;
     if (!parsed[i].second.empty()) {
       const string alias = format_alias_identifier(parsed[i].second);
-      if (item.find('\n') == string::npos && item.size() + alias.size() + 4 > threshold) {
-        const int minus = find_top_level_operator(item, '-');
-        if (minus > 0) {
-          const string lhs = trim_ascii_spaces(item.substr(0, static_cast<size_t>(minus)));
-          const string rhs = trim_ascii_spaces(item.substr(static_cast<size_t>(minus) + 1));
-          if (!lhs.empty() && !rhs.empty()) item = format_expression(lhs) + "\n    - " + format_expression(rhs);
+      // The alias itself can push an arithmetic item over the width.
+      if (item.find('\n') == string::npos && utf8_width(item) + utf8_width(alias) + 4 > threshold) {
+        if (string chain = format_arith_chain(item, true); !chain.empty()) {
+          item = normalize_aliased_operator_continuations(std::move(chain));
         }
       }
       if (can_align) item += string((width > last_line_length(item) ? width - last_line_length(item) : 0) + 2, ' ') + "AS " + alias;
@@ -2288,6 +2726,11 @@ string Formatter::format_function_call(string_view expr) {
   const string name = trim_ascii_spaces(s.substr(0, par));
   if (name.empty()) return {};
   for (char ch : name) if (!is_ident_char(ch)) return {};
+  if (const size_t params_close = find_matching_paren(s, par);
+      params_close != string::npos && params_close + 1 < s.size() && s[params_close + 1] == '(' &&
+      find_matching_paren(s, params_close + 1) == s.size() - 1) {
+    return format_parametric_call(name, s.substr(par + 1, params_close - par - 1), s.substr(params_close + 1));
+  }
   const string inner = unwrap_outer_parens(s.substr(par));
   if (inner.empty()) return {};
   const auto raw_args = split_top_level(inner, ',');
@@ -2413,9 +2856,7 @@ string Formatter::format_function_call(string_view expr) {
     const string compact = name + "(" + rendered.front() + ")";
     const bool heavy_one = contains_heavy_structure(args.front()) || slash >= 0;
     if (slash > 0 && (multiline || compact.size() + 8 > wrap_threshold || args.front().find('\n') != string::npos || rendered.front().find('\n') != string::npos)) {
-      const string lhs = trim_ascii_spaces(args.front().substr(0, static_cast<size_t>(slash)));
-      const string rhs = trim_ascii_spaces(args.front().substr(static_cast<size_t>(slash) + 1));
-      rendered.front() = format_expression(lhs) + "\n/ " + format_expression(rhs);
+      if (string chain = format_arith_chain(args.front(), true); !chain.empty()) rendered.front() = std::move(chain);
     }
     if (!multiline) multiline = rendered.front().find('\n') != string::npos || (compact.size() + 8 > wrap_threshold && heavy_one);
   }
@@ -2443,13 +2884,124 @@ string Formatter::format_function_call(string_view expr) {
     return out;
   }
   for (size_t i = 0; i < rendered.size(); ++i) {
-    out += indent_block(rendered[i], 4);
+    // Among several arguments an unindented `/ rhs` line would read as the
+    // next argument; a sole argument keeps its operators aligned.
+    out += indent_block(rendered.size() > 1 ? hang_operator_continuations(rendered[i]) : rendered[i], 4);
     if (i + 1 < rendered.size()) out += ',';
     if (i < comments_after.size() && !comments_after[i].empty()) out += " " + comments_after[i];
     out += '\n';
   }
   out += ')';
   return out;
+}
+
+// Parametric aggregates `name(params)(args)` (windowFunnel(3600)(...),
+// quantiles(0.5, 0.9)(x), sequenceMatch('(?1)(?2)')(t, c1, c2)): both lists
+// follow the ordinary function-call rules. The argument list is laid out as a
+// call whose head is the whole `name(params)` prefix, so it wraps exactly when
+// a plain call of the same length would; the parameter list goes vertical only
+// when the head alone does not fit.
+string Formatter::format_parametric_call(const string& name, string_view params_src, string_view args_part) {
+  const size_t wrap_threshold = std::min<size_t>(threshold, 80);
+  const auto params = split_top_level(params_src, ',');
+  string head = name + "(";
+  for (size_t i = 0; i < params.size(); ++i) {
+    if (i) head += ", ";
+    head += cleanup_surface(trim_ascii_spaces(params[i]));
+  }
+  head += ")";
+  const bool multiline_params = head.size() + 1 > wrap_threshold || params_src.find('\n') != string_view::npos;
+  // Same-width stand-in for the head: format_function_call only accepts an
+  // identifier before the argument list.
+  string stand_in(head.size(), 'P');
+  if (multiline_params) {
+    string block;
+    for (size_t i = 0; i < params.size(); ++i) {
+      block += indent_block(format_expression(params[i]), 4);
+      if (i + 1 < params.size()) block += ',';
+      block += '\n';
+    }
+    head = name + "(\n" + block + ")";
+    stand_in = "P";
+  }
+  const string args_rendered = format_function_call(stand_in + string(args_part));
+  if (args_rendered.empty()) {
+    if (!multiline_params) return {};
+    return head + cleanup_surface(args_part);
+  }
+  return head + args_rendered.substr(stand_in.size());
+}
+
+// Long arithmetic wraps at the operators of its lowest precedence level, one
+// operand per line with the operator leading (`a * w\n+ b * w\n+ c * w`), so
+// the grouping the parser applies is visible from the layout. Operands keep
+// their own structure: a parenthesized operand that is itself too long opens
+// a block. Continuation lines are returned unindented; the enclosing context
+// (SELECT item, WHERE term, function argument) decides how far they hang.
+string Formatter::format_arith_chain(string_view expr, bool force) {
+  const string s = trim_ascii_spaces(expr);
+  vector<ArithChainOperator> ops;
+  if (!split_arith_chain(s, &ops)) return {};
+  int lowest = kArithMultiplicative;
+  for (const auto& op : ops) lowest = std::min(lowest, op.precedence);
+  vector<string> operands;
+  vector<string> operators;
+  size_t start = 0;
+  for (const auto& op : ops) {
+    if (op.precedence != lowest) continue;
+    operands.push_back(trim_ascii_spaces(string_view(s).substr(start, op.begin - start)));
+    operators.push_back(s.substr(op.begin, op.end - op.begin));
+    start = op.end;
+  }
+  operands.push_back(trim_ascii_spaces(string_view(s).substr(start)));
+  vector<string> rendered;
+  vector<bool> blocks;
+  bool multiline = force || s.find('\n') != string::npos || utf8_width(s) > threshold;
+  bool any_block = false;
+  for (const auto& operand : operands) {
+    bool block = false;
+    rendered.push_back(format_arith_operand(operand, threshold, &block));
+    blocks.push_back(block);
+    any_block = any_block || block;
+    // Short chains stay inline even when an operand alone would expand (a
+    // three-argument call); heavy operands (lambdas, subqueries) never do.
+    if (operand.find('\n') != string::npos || contains_heavy_structure(operand)) multiline = true;
+  }
+  if (!multiline) return {};
+  // Sibling groups read alike: once one operand opened a block, other long
+  // parenthesized chains open theirs too (`(\n...\n) / (\n...\n)`).
+  if (any_block) {
+    for (size_t i = 0; i < operands.size(); ++i) {
+      if (blocks[i]) continue;
+      bool block = false;
+      string again = format_arith_operand(operands[i], threshold / 2, &block);
+      if (block) {
+        rendered[i] = std::move(again);
+        blocks[i] = true;
+      }
+    }
+  }
+  string out = rendered.front();
+  for (size_t i = 0; i < operators.size(); ++i) {
+    // After a closing block the operator continues on the `)` line, as `) AS`
+    // does for a multiline call; otherwise it leads the next line.
+    out += (blocks[i] ? " " : "\n") + operators[i] + " " + rendered[i + 1];
+  }
+  return out;
+}
+
+string Formatter::format_arith_operand(string_view operand, size_t block_width, bool* block) {
+  const string s = trim_ascii_spaces(operand);
+  // `(a * w + b * w + ...)` too long for one line: open a block and wrap the
+  // chain inside it at the same rules.
+  if (const string inner = unwrap_outer_parens(s); !inner.empty() && s.find('\n') == string::npos &&
+      utf8_width(s) + 8 > block_width) {
+    if (const string chain = format_arith_chain(inner, true); !chain.empty()) {
+      if (block) *block = true;
+      return "(\n" + indent_block(chain, 4) + "\n)";
+    }
+  }
+  return format_expression(s);
 }
 
 string Formatter::format_expression(string_view expr) {
@@ -2460,7 +3012,15 @@ string Formatter::format_expression(string_view expr) {
     const size_t close = find_matching_paren(s, 0);
     if (close != string::npos && close + 1 < s.size() && s[close + 1] == '.') {
       const string inner = trim_ascii_spaces(s.substr(1, close - 1));
-      if (!inner.empty() && !looks_like_query(inner) && find_top_level_keyword(inner, "AND") < 0 && find_top_level_keyword(inner, "OR") < 0) {
+      // Only an atom may lose its parentheses before `.`: `(x + 1).1` is
+      // tupleElement(x + 1, 1), while `x + 1.1` adds a float.
+      bool atom = !inner.empty();
+      ScanState st;
+      for (size_t k = 0; atom && k < inner.size(); ++k) {
+        if (is_top_level(st) && (inner[k] == ' ' || inner[k] == '\n')) atom = false;
+        step_scan(st, inner, k);
+      }
+      if (atom && !looks_like_query(inner)) {
         return format_expression(inner) + trim_ascii_spaces(s.substr(close + 1));
       }
     }
@@ -2514,23 +3074,7 @@ string Formatter::format_expression(string_view expr) {
   if (auto arr = format_array_literal(s); !arr.empty()) s = arr;
   if (auto fn = format_function_call(s); !fn.empty()) s = fn;
 
-  const int slash = find_top_level_operator(s, '/');
-  if (slash > 0) {
-    const string lhs = trim_ascii_spaces(s.substr(0, static_cast<size_t>(slash)));
-    const string rhs = trim_ascii_spaces(s.substr(static_cast<size_t>(slash) + 1));
-    if ((s.find('\n') != string::npos || s.size() > threshold) && !lhs.empty() && !rhs.empty()) {
-      return format_expression(lhs) + "\n/ " + format_expression(rhs);
-    }
-  }
-
-  const int minus = find_top_level_operator(s, '-');
-  if (minus > 0) {
-    const string lhs = trim_ascii_spaces(s.substr(0, static_cast<size_t>(minus)));
-    const string rhs = trim_ascii_spaces(s.substr(static_cast<size_t>(minus) + 1));
-    if (!lhs.empty() && !rhs.empty() && (s.size() > threshold || lhs.find('\n') != string::npos || rhs.find('\n') != string::npos || contains_heavy_structure(lhs) || contains_heavy_structure(rhs))) {
-      return format_expression(lhs) + "\n- " + format_expression(rhs);
-    }
-  }
+  if (auto chain = format_arith_chain(s, false); !chain.empty()) return chain;
 
   if (auto in_literal = format_in_literal(s); !in_literal.empty()) s = in_literal;
   s = strip_atomic_parentheses(s);
@@ -2541,14 +3085,23 @@ string Formatter::format_expression(string_view expr) {
       if (inner.empty()) return strip_atomic_parentheses(side);
       if (find_top_level_keyword(inner, "AND") >= 0 || find_top_level_keyword(inner, "OR") >= 0 || split_top_level(inner, ',').size() > 1) return side;
       if (find_top_level_keyword(inner, "SELECT") >= 0 || find_top_level_keyword(inner, "IN") >= 0) return side;
-      if (find_top_level_comparator(inner, nullptr) >= 0) return trim_ascii_spaces(inner);
+      // `(a > b) = (c > d)`: comparisons chain left to right, so a
+      // parenthesized comparison beside another comparator is load-bearing.
+      if (find_top_level_comparator(inner, nullptr) >= 0) return side;
       const string collapsed = collapse_whitespace(inner);
       if (starts_with_ci(collapsed, "now() - toInterval") || starts_with_ci(collapsed, "now() + toInterval")) return collapsed;
       if (inner.find('/') != string::npos || inner.find('*') != string::npos || inner.find('+') != string::npos || inner.find('-') != string::npos) return side;
       return trim_ascii_spaces(inner);
     };
-    const string lhs = strip_side(trim_ascii_spaces(s.substr(0, static_cast<size_t>(cmp))));
-    const string rhs = strip_side(trim_ascii_spaces(s.substr(static_cast<size_t>(cmp) + op.size())));
+    string lhs = strip_side(trim_ascii_spaces(s.substr(0, static_cast<size_t>(cmp))));
+    string rhs = strip_side(trim_ascii_spaces(s.substr(static_cast<size_t>(cmp) + op.size())));
+    // A comparison too long for one line wraps the arithmetic on either side
+    // (left side first); the continuation hangs under the comparison.
+    if (s.find('\n') == string::npos && utf8_width(lhs) + utf8_width(rhs) + op.size() + 2 > threshold) {
+      if (string chain = format_arith_chain(lhs, true); !chain.empty()) lhs = std::move(chain);
+      else if (string rchain = format_arith_chain(rhs, true); !rchain.empty()) rhs = std::move(rchain);
+      else if (string call = format_function_call(lhs); !call.empty()) lhs = std::move(call);
+    }
     s = lhs + " " + op + " " + rhs;
   }
   s = strip_lambda_parentheses(s);
@@ -2752,7 +3305,57 @@ string format_comma_clause_body(string_view body, bool align_equals) {
   return "\n" + out;
 }
 
-string format_table_tail_clauses(string_view tail) {
+// One TTL element (`expr [action] [WHERE cond]`). A conditional element that
+// does not fit is split like a WHERE clause, one condition per line, so a long
+// retention rule reads the same way as the filters used everywhere else.
+string format_ttl_element(string_view raw, size_t width) {
+  const string element = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw)));
+  const int where_pos = find_top_level_keyword(element, "WHERE");
+  if (where_pos <= 0 || utf8_width(element) <= width) return element;
+  const string head = rtrim_spaces(element.substr(0, static_cast<size_t>(where_pos)));
+  const string cond = trim_ascii_spaces(element.substr(static_cast<size_t>(where_pos) + 5));
+  string kw = "AND";
+  auto parts = split_top_level_keyword(cond, kw);
+  if (parts.empty()) {
+    kw = "OR";
+    parts = split_top_level_keyword(cond, kw);
+  }
+  if (parts.empty()) return head + "\nWHERE " + cond;
+  string out = head + "\nWHERE";
+  for (size_t i = 0; i < parts.size(); ++i) {
+    string part = trim_ascii_spaces(parts[i]);
+    // formatQuery wraps every AND operand in parentheses; they are redundant
+    // unless the operand is itself a boolean chain.
+    if (const string inner = unwrap_outer_parens(part); !inner.empty() &&
+        find_top_level_keyword(inner, "AND") < 0 && find_top_level_keyword(inner, "OR") < 0) {
+      part = trim_ascii_spaces(inner);
+    }
+    out += "\n    " + (i ? kw + " " : string()) + part;
+  }
+  return out;
+}
+
+// TTL lists: one element per line when there are several, or when the single
+// element does not fit on the `TTL` line (DDL lines follow the line width like
+// every other statement).
+string format_ttl_list(string_view head_kw, string_view body, size_t threshold) {
+  vector<string> elements;
+  for (const auto& raw : split_top_level(body, ',')) {
+    const string element = trim_ascii_spaces(raw);
+    if (!element.empty()) elements.push_back(element);
+  }
+  if (elements.empty()) return string(head_kw);
+  const string compact = string(head_kw) + " " + normalize_code_spacing(collapse_whitespace(elements.front()));
+  if (elements.size() == 1 && utf8_width(compact) <= threshold) return compact;
+  string out(head_kw);
+  for (size_t i = 0; i < elements.size(); ++i) {
+    out += "\n" + indent_block(format_ttl_element(elements[i], threshold > 4 ? threshold - 4 : threshold), 4);
+    if (i + 1 < elements.size()) out += ',';
+  }
+  return out;
+}
+
+string format_table_tail_clauses(string_view tail, size_t threshold) {
   string text = normalize_code_spacing(trim_ascii_spaces(tail));
   if (text.empty()) return {};
   static const char* clauses[] = {"ENGINE", "PARTITION BY", "ORDER BY", "TTL", "SETTINGS"};
@@ -2778,9 +3381,7 @@ string format_table_tail_clauses(string_view tail) {
       out += "SETTINGS";
       if (!formatted.empty()) out += formatted.front() == '\n' ? formatted : " " + formatted;
     } else if (poses[i].second == "TTL") {
-      const string formatted = format_comma_clause_body(body, false);
-      out += "TTL";
-      if (!formatted.empty()) out += formatted.front() == '\n' ? formatted : " " + formatted;
+      out += format_ttl_list("TTL", body, threshold);
     } else {
       out += poses[i].second;
       if (!body.empty()) out += " " + body;
@@ -2789,7 +3390,39 @@ string format_table_tail_clauses(string_view tail) {
   return out;
 }
 
-string format_create_view_head_clauses(string_view raw_head) {
+// `CREATE MATERIALIZED VIEW name REFRESH ... DEPENDS ON ... APPEND TO target`
+// easily exceeds the line width on one line. When it does, every head clause
+// starts its own line, like the clauses of the query that follows.
+string split_view_head_clauses(string_view raw, size_t threshold) {
+  const string head = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw)));
+  if (utf8_width(head) + 3 <= threshold) return head;
+  vector<int> starts;
+  for (const char* kw : {"REFRESH", "DEPENDS ON", "SETTINGS", "APPEND", "TO"}) {
+    int pos = find_top_level_keyword(head, kw);
+    // `APPEND TO target` is one clause: the TO belongs to APPEND.
+    if (pos > 0 && string_view(kw) == "TO") {
+      const string before = rtrim_spaces(head.substr(0, static_cast<size_t>(pos)));
+      if (ends_with_ci(before, " APPEND")) pos = -1;
+    }
+    if (pos > 0) starts.push_back(pos);
+  }
+  if (starts.empty()) return head;
+  std::sort(starts.begin(), starts.end());
+  string out = rtrim_spaces(head.substr(0, static_cast<size_t>(starts.front())));
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const size_t begin = static_cast<size_t>(starts[i]);
+    const size_t end = i + 1 < starts.size() ? static_cast<size_t>(starts[i + 1]) : head.size();
+    out += "\n" + trim_ascii_spaces(head.substr(begin, end - begin));
+  }
+  return out;
+}
+
+// A multi-line view head ends with `AS` on its own line, like CREATE TABLE AS.
+string attach_view_as(const string& head) {
+  return head + (head.find('\n') == string::npos ? " AS" : "\nAS");
+}
+
+string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
   string head = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw_head)));
   if (ends_with_ci(head, " AS")) {
     head = rtrim_spaces(head.substr(0, head.size() - 3));
@@ -2805,7 +3438,7 @@ string format_create_view_head_clauses(string_view raw_head) {
   if (par != string::npos && (engine_pos < 0 || par < static_cast<size_t>(engine_pos))) {
     const size_t close = find_matching_paren(head, par);
     if (close != string::npos) {
-      const string prefix = normalize_code_spacing(trim_ascii_spaces(head.substr(0, par)));
+      const string prefix = split_view_head_clauses(head.substr(0, par), threshold);
       const string cols = trim_ascii_spaces(head.substr(par + 1, close - par - 1));
       const auto items = split_top_level(cols, ',');
       vector<std::pair<string, string>> parsed;
@@ -2839,7 +3472,7 @@ string format_create_view_head_clauses(string_view raw_head) {
         const string remainder = trim_ascii_spaces(head.substr(close + 1));
         if (!remainder.empty()) {
           const int remainder_engine = find_top_level_keyword(remainder, "ENGINE");
-          if (remainder_engine == 0) out += "\n" + format_table_tail_clauses(remainder);
+          if (remainder_engine == 0) out += "\n" + format_table_tail_clauses(remainder, threshold);
           else out += "\n" + normalize_code_spacing(collapse_whitespace(remainder));
         }
         return out + " AS";
@@ -2847,9 +3480,9 @@ string format_create_view_head_clauses(string_view raw_head) {
     }
   }
 
-  if (engine_pos < 0) return normalize_code_spacing(head) + " AS";
-  string prefix = normalize_code_spacing(trim_ascii_spaces(head.substr(0, static_cast<size_t>(engine_pos))));
-  string tail = format_table_tail_clauses(head.substr(static_cast<size_t>(engine_pos)));
+  if (engine_pos < 0) return attach_view_as(split_view_head_clauses(head, threshold));
+  string prefix = split_view_head_clauses(head.substr(0, static_cast<size_t>(engine_pos)), threshold);
+  string tail = format_table_tail_clauses(head.substr(static_cast<size_t>(engine_pos)), threshold);
   return prefix + "\n" + tail + " AS";
 }
 
@@ -2893,7 +3526,7 @@ string Formatter::format_create_table(string_view s) {
         out += '\n';
       }
       out += ")";
-      if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail);
+      if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
       return out;
     }
   }
@@ -2919,7 +3552,7 @@ string Formatter::format_create_table(string_view s) {
     out += '\n';
   }
   out += ")";
-  if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail);
+  if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
   return out;
 }
 
@@ -2927,7 +3560,7 @@ string Formatter::format_create_view(string_view s, bool) {
   const string text = trim_ascii_spaces(s);
   const int pos = find_top_level_keyword(text, "SELECT");
   if (pos < 0) return cleanup_surface(text);
-  string head = format_create_view_head_clauses(text.substr(0, static_cast<size_t>(pos)));
+  string head = format_create_view_head_clauses(text.substr(0, static_cast<size_t>(pos)), threshold);
   string body = format_statement(text.substr(static_cast<size_t>(pos)));
   // CREATE VIEW/MV DDL is easier to scan when the projection is visually
   // separated from SELECT, even for a single `*`. Force the same representation
@@ -2952,7 +3585,10 @@ string Formatter::format_alter_table(string_view s) {
   if (!tail.empty() && tail.front() == ',') return cleanup_surface(text);
   if (!tail.empty() && !starts_with_ci(tail, "SETTINGS")) return cleanup_surface(text);
   if (!tail.empty()) tail = "\n" + format_clause("SETTINGS", trim_ascii_spaces(tail.substr(8)));
-  if (starts_with_ci(inner, "MODIFY TTL")) return head + "\n(\n    " + cleanup_surface(inner) + "\n)" + tail;
+  if (starts_with_ci(inner, "MODIFY TTL")) {
+    const string ttl = format_ttl_list("MODIFY TTL", inner.substr(10), threshold > 4 ? threshold - 4 : threshold);
+    return head + "\n(\n" + indent_block(ttl, 4) + "\n)" + tail;
+  }
   if (starts_with_ci(inner, "ADD COLUMN")) {
     const int after_pos = find_top_level_keyword(inner, "AFTER");
     const string before_after = after_pos > 0 ? trim_ascii_spaces(inner.substr(0, static_cast<size_t>(after_pos))) : inner;
@@ -2985,6 +3621,80 @@ string Formatter::format_alter_table(string_view s) {
   // Any other single command uses the same block layout. formatQuery already
   // indents continuation lines by 4 relative to the command start.
   return head + "\n(\n    " + cleanup_surface(inner) + "\n)" + tail;
+}
+
+// Top-level `TO` of an access-control statement (the role list), searched after
+// `from` so that `RENAME TO new_name` of an ALTER is never taken for it.
+int find_access_to_clause(string_view text, size_t from) {
+  int found = -1;
+  for (int pos = find_top_level_keyword(text, "TO", from); pos >= 0;
+       pos = find_top_level_keyword(text, "TO", static_cast<size_t>(pos) + 2)) {
+    if (!ends_with_ci(rtrim_spaces(text.substr(0, static_cast<size_t>(pos))), " RENAME")) found = pos;
+  }
+  return found;
+}
+
+// formatQuery prints access-control DDL on one line. A statement that fits
+// stays compact; a longer one puts every clause on its own line and formats
+// USING like a WHERE clause, so a row filter reads like any other filter.
+string Formatter::format_row_policy(string_view s) {
+  if (contains_top_level_comment(s)) return cleanup_surface(s);
+  const string text = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(s)));
+  if (utf8_width(text) <= threshold) return text;
+  const int using_pos = find_top_level_keyword(text, "USING");
+  const size_t head_limit = using_pos >= 0 ? static_cast<size_t>(using_pos) : text.size();
+  vector<std::pair<int, string>> poses;
+  // `RENAME TO`, `AS PERMISSIVE|RESTRICTIVE` and `FOR SELECT` precede USING.
+  for (const char* kw : {"RENAME", "AS", "FOR"}) {
+    const int pos = find_top_level_keyword(text, kw);
+    if (pos > 0 && static_cast<size_t>(pos) < head_limit) poses.push_back({pos, kw});
+  }
+  if (using_pos > 0) poses.push_back({using_pos, "USING"});
+  size_t to_from = 0;
+  for (const auto& entry : poses) to_from = std::max(to_from, static_cast<size_t>(entry.first) + entry.second.size());
+  if (const int to_pos = find_access_to_clause(text, to_from); to_pos > 0) poses.push_back({to_pos, "TO"});
+  if (poses.empty()) return text;
+  std::sort(poses.begin(), poses.end());
+  string out = rtrim_spaces(text.substr(0, static_cast<size_t>(poses.front().first)));
+  for (size_t i = 0; i < poses.size(); ++i) {
+    const size_t body_start = static_cast<size_t>(poses[i].first) + poses[i].second.size();
+    const size_t end = i + 1 < poses.size() ? static_cast<size_t>(poses[i + 1].first) : text.size();
+    const string body = trim_ascii_spaces(text.substr(body_start, end - body_start));
+    if (poses[i].second == "USING") {
+      out += "\nUSING" + format_clause("WHERE", body).substr(5);
+    } else {
+      out += "\n" + poses[i].second + (body.empty() ? string() : " " + body);
+    }
+  }
+  return out;
+}
+
+// Same layout for settings profiles: the SETTINGS list is formatted like the
+// statement-level SETTINGS clause, one setting per line with aligned `=`.
+string Formatter::format_settings_profile(string_view s) {
+  if (contains_top_level_comment(s)) return cleanup_surface(s);
+  const string text = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(s)));
+  if (utf8_width(text) <= threshold) return text;
+  // Skip the `SETTINGS` of the statement name itself (`CREATE SETTINGS PROFILE`).
+  const size_t name_start = text.find(' ', text.find(' ') + 1) + 1;
+  const int settings_pos = find_top_level_keyword(text, "SETTINGS", name_start);
+  const int to_pos = find_access_to_clause(text, settings_pos >= 0 ? static_cast<size_t>(settings_pos) : 0);
+  if (settings_pos <= 0 && to_pos <= 0) return text;
+  const size_t head_end = static_cast<size_t>(settings_pos > 0 ? settings_pos : to_pos);
+  string out = rtrim_spaces(text.substr(0, head_end));
+  if (settings_pos > 0) {
+    const size_t body_start = static_cast<size_t>(settings_pos) + 8;
+    const size_t end = to_pos > settings_pos ? static_cast<size_t>(to_pos) : text.size();
+    string block;
+    const auto items = split_top_level(text.substr(body_start, end - body_start), ',');
+    for (size_t i = 0; i < items.size(); ++i) {
+      block += "    " + trim_ascii_spaces(items[i]);
+      if (i + 1 < items.size()) block += ",\n";
+    }
+    out += "\nSETTINGS\n" + block;
+  }
+  if (to_pos > 0) out += "\nTO " + trim_ascii_spaces(text.substr(static_cast<size_t>(to_pos) + 2));
+  return out;
 }
 
 string Formatter::format_insert_select_like(string_view s) {

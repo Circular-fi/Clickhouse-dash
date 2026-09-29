@@ -1,0 +1,1 @@
+SELECT x BETWEEN (a + b) AND (c + d) AS r, NOT (a + b) AS n, (a DIV b) * c AS d, (a MOD b) + 1 AS m, (x::Int32) + 1 AS c, (t.1).2 AS tt, (a ? b : c) + 1 AS tern, [(a + b), (c * d)] AS arr, map('k', (a + b)) AS mp, (a + b) IS NULL AS isn, (a + b) IN (1, 2) AS inn, -(a) AS neg FROM t

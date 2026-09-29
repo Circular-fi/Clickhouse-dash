@@ -1,0 +1,7 @@
+CREATE SETTINGS PROFILE IF NOT EXISTS `analyst_profile` ON CLUSTER main
+SETTINGS
+    max_threads        = 8 MIN 1 MAX 16,
+    max_memory_usage   = 10000000000 CONST,
+    readonly           = 1,
+    max_execution_time = 300 CHANGEABLE_IN_READONLY
+TO analyst, reporting_role

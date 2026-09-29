@@ -1,0 +1,1 @@
+create materialized view if not exists anon.entity_hourly_rollup_mv to anon.entity_hourly_rollup_target as select toStartOfHour(event_timestamp) as event_hour, entity_key, count() as event_count from anon.metrics_store group by event_hour, entity_key

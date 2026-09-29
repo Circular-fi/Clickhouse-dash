@@ -5,7 +5,7 @@ SELECT
         0
     ) AS `active_metric`,
     entity_key IS NULL AS `missing_key`,
-    - metric_value AS `negated`
+    -metric_value AS `negated`
 FROM anon.metrics_store
 WHERE
     entity_key NOT LIKE 'tmp_%'

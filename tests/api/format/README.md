@@ -104,6 +104,17 @@ SELECT
 FROM anon.metrics_store
 ```
 
+Alignment uses monospace display width, not bytes or code points:
+East Asian Wide/Fullwidth characters (CJK, Hangul, fullwidth forms) and emoji
+count two columns, while combining marks, zero-width joiners and variation
+selectors count none, so literals and identifiers containing them stay aligned.
+
+### Literal spelling
+
+String literals keep the exact spelling of the input (`'it''s'` stays `'it''s'`),
+and heredoc literals keep their heredoc form, tag and body byte-for-byte
+(`$$raw 'text'$$`, `$tag$...$tag$`); they are never rewritten as quoted strings.
+
 ### Where alias alignment does not apply
 
 Keep `AS` compact outside projection lists, for example:
@@ -286,6 +297,83 @@ SELECT
 
 For multiline expressions with an alias, keep the closing `)` aligned with the expression block and place `AS alias_name` on the same line when readable.
 
+### Parametric aggregates
+
+A parametric aggregate `name(parameters)(arguments)` follows the same rules as
+any other call. The argument list wraps exactly when a plain call of the same
+length would, with `name(parameters)(` kept on the opening line. The parameter
+list goes vertical only when that head alone does not fit.
+
+```sql
+SELECT
+    windowFunnel(3600)(
+        event_timestamp,
+        event_name = 'view',
+        event_name = 'cart',
+        event_name = 'buy'
+    ) AS funnel_level,
+    quantiles(0.5, 0.9)(latency_ms) AS latency_quantiles,
+    quantilesExactWeighted(
+        0.01,
+        0.05,
+        ...
+        0.9999
+    )(response_time_ms, request_weight) AS weighted_quantiles
+```
+
+## Arithmetic Expressions
+
+Keep arithmetic inline while it fits. A longer expression wraps at the
+operators of its lowest precedence level: one operand per line, with the
+operator at the start of the line. The layout then shows how the parser groups
+the expression. Continuation lines hang one level (4 spaces) under the first
+operand. The exception is the sole argument of a call, whose lines stay
+aligned. An operand that is itself a long parenthesized expression opens a
+block. After a block closes, the operator stays on the `)` line, the way
+`) AS alias` does.
+
+```sql
+SELECT
+    metric_alpha * 0.25
+        + metric_beta * 0.25
+        + metric_gamma * 0.2 AS composite_score,
+    (
+        score_accuracy * weight_accuracy
+        + score_latency * weight_latency
+        + score_coverage * weight_coverage
+    ) / (
+        weight_accuracy
+        + weight_latency
+        + weight_coverage
+    ) AS weighted_score
+FROM anon.metrics_store
+WHERE
+    (metric_alpha * weight_alpha + metric_beta * weight_beta)
+        / (weight_alpha + weight_beta) > minimum_threshold_value
+    AND entity_group = 'group_live'
+```
+
+### Redundant parentheses
+
+`formatQuery` parenthesizes every nested operator, for example
+`((a * w1) + (b * w2)) / ((w1 + w2) + w3)`. Parentheses are not part of
+the parsed AST, so the formatter removes a group when operator precedence
+already produces the same tree. The input above becomes
+`(a * w1 + b * w2) / (w1 + w2 + w3)`. A group is kept when it matters:
+
+- the right operand of an operator at the same level: `a - (b - c)`, `a / (b * c)`, `a + (b + c)`
+- a lower-precedence operand: `(a + b) * c`
+- anything after a unary sign: `-(a + b)`, and `-(1)`, which is `negate(1)`, not the literal `-1`
+- `||` chains, because the parser flattens `a || b || c` into a single `concat`
+- comparisons next to a comparison: `(a > b) = (c > d)`
+- member access, `IN` lists, keyword lists and DDL keys: `(x + 1).1`, `x IN (5)`, `GROUPING SETS ((a), ())`, `ORDER BY (a)`
+
+### Unary minus
+
+A unary sign is written against its operand: `-x`, `-(a + b)`, `a * -b`,
+`x > -y`. The two signs of `- -x` keep their separating space, because `--`
+would start a comment.
+
 ## Lambda Expressions
 
 Keep lambda bodies compact unless the logic is genuinely complex.
@@ -392,6 +480,65 @@ ALTER TABLE anon.metrics_store
 )
 ```
 
+### TTL lists
+
+Keep a single short TTL rule on the `TTL` line. Put one rule per line when there
+are several, or when the rule does not fit; a conditional rule that does not fit
+splits its `WHERE` like a filter (the same applies to `ALTER TABLE ... MODIFY TTL`).
+
+```sql
+TTL
+    event_date + toIntervalDay(30) TO VOLUME 'cold',
+    event_date + toIntervalDay(365)
+```
+
+```sql
+TTL
+    event_date + toIntervalDay(90)
+    WHERE
+        entity_group = 'group_tmp'
+        AND metric_value = 0
+```
+
+### Access-control and refreshable view DDL
+
+`CREATE ROW POLICY`, `CREATE SETTINGS PROFILE` and materialized view heads stay
+on one line while they fit the line width. A longer statement puts every clause on
+its own line at column 0: `USING` is formatted like `WHERE`, `SETTINGS` lists one
+setting per line with aligned `=`, and a view head ends with `AS` on its own line
+before the query.
+
+```sql
+CREATE ROW POLICY tenant_isolation ON anon.metrics_store
+AS RESTRICTIVE
+FOR SELECT
+USING
+    tenant_id = currentUser()
+    AND is_deleted = 0
+TO analyst, reporting_role
+```
+
+```sql
+CREATE SETTINGS PROFILE `analyst_profile`
+SETTINGS
+    max_threads = 8 MIN 1 MAX 16,
+    readonly    = 1
+TO analyst
+```
+
+```sql
+CREATE MATERIALIZED VIEW anon.daily_mv
+REFRESH EVERY 1 HOUR OFFSET 5 MINUTE
+DEPENDS ON anon.hourly_mv
+APPEND TO anon.daily
+AS
+SELECT
+    ...
+```
+
+`ALTER SETTINGS PROFILE` keeps its single line: its `ADD`/`MODIFY`/`DROP SETTINGS`
+grammar is not a plain `name = value` list.
+
 ## INSERT Statements
 
 Keep short `VALUES` inserts compact.
@@ -426,6 +573,52 @@ Use this mental model when formatting:
 6. Use parentheses only when they improve structure.
 7. Keep formatting stable across similar query shapes.
 
+## Comments
+
+Comments are preserved: block comments before a statement or subquery are
+re-indented and reflowed, and a `--` comment stays at the end of the line of the
+item or predicate it follows.
+
+### One-line comment recovery
+
+A query pasted as a **single line** (the whole buffer has no newline) cannot
+contain a meaningful `--` comment in the middle: the comment swallows everything
+up to the end of the buffer. The formatter treats that as a collapsed
+multi-line query and splits each such comment from the SQL that follows it.
+The comment text ends at the earliest of:
+
+- a clause marker ` FROM `, ` WHERE `, ` PREWHERE `, ` GROUP BY `, ` ORDER BY `,
+  ` HAVING `, ` LIMIT `, ` SETTINGS `, ` FORMAT `, ` AND `, ` OR `,
+  ` UNION ALL `, ` SELECT `, ` NULL` (case-insensitive, never at the very start
+  of the comment);
+- an identifier directly followed by `,` (the next projection item).
+
+A comment whose text reaches none of these keeps the rest of the line, exactly
+as the parser reads it.
+
+```sql
+SELECT entity_key,-- stable identifier used for joins metric_value, metric_ratio FROM t
+```
+
+becomes
+
+```sql
+SELECT
+    entity_key, -- stable identifier used for joins
+    metric_value,
+    metric_ratio
+FROM t
+```
+
+This is deliberate: it recovers the query the author wrote. It is also the only
+case where the formatted output is not the same query as the input (the input
+parses as `SELECT entity_key`), which is why its fixture
+(`059_comments_header_and_select`) is the single entry of `AST_EQUIVALENCE_EXEMPT`.
+
+In a buffer with more than one line the recovery is **not** applied: every `--`
+comment ends at its newline, so prose such as `-- keep rows, even when ORDER BY
+is set` stays one comment (fixture `220_multiline_comment_prose_with_keywords`).
+
 ## Canonical Principle
 
 When in doubt, choose the formatting that makes two queries with the same structure look the same.
@@ -449,6 +642,7 @@ All `.sql` files are normalized without a trailing newline.
 
 Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`):
 `EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server,
-so formatting can never change what a query means. Fixtures whose input is intentionally not
-the same query (collapsed `--` comments that swallow the rest of the line) are listed with a
-reason in `AST_EQUIVALENCE_EXEMPT`.
+so formatting can never change what a query means. The only fixture whose input is
+intentionally not the same query is the one-line comment recovery fixture (see
+"One-line comment recovery"); it is listed with its reason in `AST_EQUIVALENCE_EXEMPT`.
+Comment fixtures must otherwise end every `--` comment with a newline so they stay checked.
