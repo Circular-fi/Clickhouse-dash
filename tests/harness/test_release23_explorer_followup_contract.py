@@ -12,7 +12,11 @@ def test_buffer_lineage_is_reversed_for_destination_details() -> None:
     # Buffer routing, reverse dependencies_* and view as_select share one
     # server-wide system.tables scan.
     assert "if(engine = 'Buffer', toString(engine_full), '')" in catalog
-    assert "(engine = 'Buffer' OR notEmpty(as_select) OR has(dependencies_table, " in catalog
+    # Engine-filtered scan (lets system.tables skip DDL formatting for other
+    # objects) plus a separate dependencies_* lookup.
+    assert "AND engine IN ('Buffer', 'View', 'MaterializedView', 'LiveView', 'WindowView')" in catalog
+    assert "OR notEmpty(as_select)" not in catalog
+    assert '"AND has(dependencies_table, " + tbl + ") "' in catalog
     assert 'args.size() >= 2 && args[0] == database && args[1] == table' in catalog
     assert 'append_dependency(buffer_db, buffer_table, "upstream")' in catalog
     assert '"Buffer reverse-lineage query failed: "' in catalog

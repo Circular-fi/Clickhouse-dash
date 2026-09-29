@@ -1,4 +1,5 @@
 #include "explorer_graph.hpp"
+#include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 
 #include <algorithm>
@@ -671,8 +672,13 @@ bool load_explorer_graph(
   std::vector<RawTable> raw;
   std::unordered_map<std::string, size_t> raw_index;
   std::string last_error;
+  // Identity/version columns only: the formatted DDL texts come from
+  // DdlTextCache, which re-reads them just for objects whose
+  // metadata_modification_time changed since the previous graph build.
+  std::vector<DdlObjectVersion> versions;
   const bool tables_loaded = try_select(system,
-      "SELECT toString(database), toString(name), toString(engine), toString(engine_full), toString(create_table_query), toString(as_select), arrayStringConcat(data_paths, char(31)) FROM system.tables",
+      std::string("SELECT toString(database), toString(name), toString(engine), arrayStringConcat(data_paths, char(31)), ") +
+          DdlTextCache::kVersionColumns + " FROM system.tables",
       [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           RawTable item;
@@ -680,14 +686,29 @@ bool load_explorer_graph(
           item.name = block_string_at(block, 1, row);
           if (!allowed.allows_table(item.database, item.name)) continue;
           item.engine = block_string_at(block, 2, row);
-          item.engine_full = block_string_at(block, 3, row);
-          item.ddl = block_string_at(block, 4, row);
-          item.as_select = block_string_at(block, 5, row);
-          item.data_paths = split_unit_separator(block_string_at(block, 6, row));
+          item.data_paths = split_unit_separator(block_string_at(block, 3, row));
+          versions.push_back(DdlObjectVersion{item.database, item.name, block_string_at(block, 4, row),
+                                              block_string_at(block, 5, row) == "1"});
           raw_index.emplace(table_key(item.database, item.name), raw.size());
           raw.push_back(std::move(item));
         }
       }, &last_error);
+  if (tables_loaded) {
+    try {
+      const auto texts = DdlTextCache::instance().get(system, "system", versions);
+      for (auto& item : raw) {
+        const auto it = texts.find(DdlTextCache::object_key(item.database, item.name));
+        if (it == texts.end()) continue;
+        item.engine_full = it->second.engine_full;
+        item.ddl = it->second.create_table_query;
+        item.as_select = it->second.as_select;
+      }
+    } catch (const std::exception& e) {
+      last_error = std::string("system.tables DDL lookup failed: ") + e.what();
+      if (error) *error = last_error;
+      return false;
+    }
+  }
   if (!tables_loaded) {
     if (error) *error = last_error.empty() ? "Unable to load system.tables for graph." : last_error;
     return false;

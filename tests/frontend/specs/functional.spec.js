@@ -393,7 +393,7 @@ test('System section maps server storage by database, by table and drills into a
   await expect(page.locator('#explorerListView')).toBeHidden();
   await expect(page.locator('#explorerTableModeTabs')).toBeHidden();
   await expect(page.locator('#explorerSectionSelectButton')).toHaveText('System');
-  await expect(page.locator('#explorerSystemMeta')).toContainText(/^\d+ databases · \d+ tables with data · \d+(?:\.\d+)?[KMGTP]?B$/, { timeout: 15_000 });
+  await expect(page.locator('#explorerSystemMeta')).toContainText(/^[\d,]+ databases · [\d,]+ tables with data · \d+(?:\.\d+)?[KMGTP]?B$/, { timeout: 15_000 });
 
   const otel = page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"][data-name="otel"]');
   await expect(otel).toBeVisible();

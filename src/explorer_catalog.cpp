@@ -1,4 +1,5 @@
 #include "explorer_catalog.hpp"
+#include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
 #include "json_clickhouse.hpp"
@@ -453,8 +454,11 @@ bool load_base_summaries(
     std::vector<ExplorerTableSummary>& summaries,
     std::string* error) {
   std::unordered_map<std::string, size_t> by_key;
+  std::vector<DdlObjectVersion> ddl_versions;
+  std::vector<DdlObjectVersion> runner_ddl_versions;
+  bool consuming_runner_fill = false;
   auto consume_tables = [&](const clickhouse::Block& block, bool has_storage_policy) {
-    constexpr size_t kExpectedColumns = 14;
+    constexpr size_t kExpectedColumns = 15;
     if (block.GetRowCount() > 0 && block.GetColumnCount() < kExpectedColumns) {
       throw std::runtime_error(
           "system.tables metadata block has " + std::to_string(block.GetColumnCount()) +
@@ -487,6 +491,9 @@ bool load_base_summaries(
       const auto total_uncompressed_bytes = parse_u64(block_string_at(block, 11, row));
       summary.data_paths = split_unit_separator(block_string_at(block, 12, row));
       summary.metadata_modification_time = block_string_at(block, 13, row);
+      (consuming_runner_fill ? runner_ddl_versions : ddl_versions)
+          .push_back(DdlObjectVersion{database, table, summary.metadata_modification_time,
+                                      block_string_at(block, 14, row) == "1"});
       // system.tables.total_bytes is a resident-memory estimate for in-memory
       // engines. Keep Buffer/Memory/Dictionary bytes in resident_bytes so Browse
       // never presents RAM as database/ClickHouse on-disk footprint. Dictionary
@@ -510,8 +517,11 @@ bool load_base_summaries(
   };
 
   const std::string table_select =
-    "SELECT toString(database), toString(name), toString(engine), toString(engine_full), toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), toString(storage_policy), "
-    "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time) "
+    // engine_full (column 3) is filled afterwards from DdlTextCache: formatting
+    // it for every object dominates this scan on large catalogs.
+    "SELECT toString(database), toString(name), toString(engine), '', toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), toString(storage_policy), "
+    "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), "
+    "toString(toUInt8(metadata_modification_time >= now() - 2)) "
     "FROM system.tables "
     "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') ";
 
@@ -524,9 +534,12 @@ bool load_base_summaries(
   // make every runner-readable object disappear. Retry the same backend-built
   // metadata query through the runner, whose AllowedObjectSet already defines
   // the exact visibility boundary.
+  bool metadata_from_runner = false;
   if (!ok) {
     summaries.clear();
     by_key.clear();
+    ddl_versions.clear();
+    metadata_from_runner = true;
     std::string runner_error;
     ok = try_select(runner, table_select + "ORDER BY database, name",
       [&](const clickhouse::Block& block) { consume_tables(block, true); }, &runner_error);
@@ -552,8 +565,28 @@ bool load_base_summaries(
         "AND database = " + quote_string(entry.database) +
         " AND name = " + quote_string(entry.table) + " LIMIT 1";
     std::string runner_error;
+    consuming_runner_fill = true;
     (void)try_select(runner, sql,
       [&](const clickhouse::Block& block) { consume_tables(block, true); }, &runner_error);
+    consuming_runner_fill = false;
+  }
+
+  // engine_full for every summary (the runner-filled entries above included).
+  try {
+    auto& ddl_client = metadata_from_runner ? runner : system;
+    auto texts = DdlTextCache::instance().get(ddl_client, metadata_from_runner ? "runner" : "system", ddl_versions);
+    if (!runner_ddl_versions.empty()) {
+      for (auto& [key, value] : DdlTextCache::instance().get(runner, "runner", runner_ddl_versions)) {
+        texts[key] = std::move(value);
+      }
+    }
+    for (auto& summary : summaries) {
+      const auto it = texts.find(DdlTextCache::object_key(summary.database, summary.name));
+      if (it != texts.end()) summary.engine_full = it->second.engine_full;
+    }
+  } catch (const std::exception& e) {
+    if (error) *error = std::string("system.tables engine_full lookup failed: ") + e.what();
+    return false;
   }
 
   std::sort(summaries.begin(), summaries.end(), [](const auto& a, const auto& b) {
@@ -2406,25 +2439,28 @@ bool load_explorer_table_detail(
     return false;
   }
 
-  // Reverse relations need a server-wide system.tables pass. Three sources are
-  // read in ONE scan instead of three (system.tables materializes metadata for
-  // every table, which dominates detail latency on large catalogs):
+  // Reverse relations need server-wide system.tables passes over three sources:
   //   * Buffer(database, table, ...) routing: ClickHouse does not consistently
   //     materialize Buffer destinations in dependencies_*, so reverse it here
   //     to keep the Buffer <-> target relationship symmetric;
-  //   * dependencies_* rows naming the selected object (upstream);
   //   * as_select of views/MVs: dependencies_* is not complete for ordinary
   //     View objects on all supported builds, so a bounded FROM/JOIN
-  //     identifier parser augments it (no string/comment guessing).
-  // Every returned name goes through the same visibility filter.
+  //     identifier parser augments it (no string/comment guessing);
+  //   * dependencies_* rows naming the selected object (upstream).
+  // system.tables can apply database/name/engine predicates *before*
+  // materializing expensive columns (engine_full, as_select format the stored
+  // DDL of every object). A single query with `OR has(dependencies_table, …)`
+  // defeated that and computed them for the whole server (125 ms at ~2k
+  // objects), so the engine-filtered scan and the dependency lookup are two
+  // cheap queries (~30 + 15 ms). Every returned name goes through the same
+  // visibility filter.
   section_error.clear();
   const bool reverse_lineage_loaded = try_select(system,
     "SELECT toString(database), toString(name), toString(engine), "
-    "if(engine = 'Buffer', toString(engine_full), ''), toString(as_select), "
-    "toString(toUInt8(has(arrayZip(dependencies_database, dependencies_table), tuple(" + db + ", " + tbl + ")))) "
+    "if(engine = 'Buffer', toString(engine_full), ''), toString(as_select) "
     "FROM system.tables "
     "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
-    "AND (engine = 'Buffer' OR notEmpty(as_select) OR has(dependencies_table, " + tbl + "))",
+    "AND engine IN ('Buffer', 'View', 'MaterializedView', 'LiveView', 'WindowView')",
     [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const std::string object_db = block_string_at(block, 0, row);
@@ -2437,9 +2473,6 @@ bool load_explorer_table_detail(
           if (args.size() >= 2 && args[0] == database && args[1] == table) {
             append_dependency(buffer_db, buffer_table, "upstream");
           }
-        }
-        if (block_string_at(block, 5, row) == "1") {
-          append_dependency(object_db, object_table, "upstream");
         }
         const std::string as_select = block_string_at(block, 4, row);
         if (as_select.empty()) continue;
@@ -2458,6 +2491,22 @@ bool load_explorer_table_detail(
     }, &section_error);
   if (!reverse_lineage_loaded) {
     if (error) *error = "Buffer reverse-lineage query failed: " + section_error;
+    return false;
+  }
+
+  section_error.clear();
+  const bool upstream_loaded = try_select(system,
+    "SELECT toString(database), toString(name) FROM system.tables "
+    "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
+    "AND has(dependencies_table, " + tbl + ") "
+    "AND has(arrayZip(dependencies_database, dependencies_table), tuple(" + db + ", " + tbl + "))",
+    [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        append_dependency(block_string_at(block, 0, row), block_string_at(block, 1, row), "upstream");
+      }
+    }, &section_error);
+  if (!upstream_loaded) {
+    if (error) *error = "Upstream lineage query failed: " + section_error;
     return false;
   }
 
