@@ -213,6 +213,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
     http_.Post("/api/explorer/table/data", [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); });
     http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
+    http_.Get("/api/explorer/storage", [&](const auto& req, auto& res) { handle_explorer_storage(req, res); });
     if (cfg_.explorer.graph_enabled()) {
       http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
     }

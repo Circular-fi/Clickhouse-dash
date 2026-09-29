@@ -23,7 +23,7 @@
 
   const hasCore = () => {
     const ns = window.ChDash;
-    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.pipelineViewer && ns.analysisData && ns.analysis && ns.download && ns.massExport && ns.explorerGraph && ns.explorer);
+    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.pipelineViewer && ns.analysisData && ns.analysis && ns.download && ns.massExport && ns.explorerGraph && ns.explorerTreemap && ns.explorer);
   };
 
   // Capture the bootstrap script location while document.currentScript is
@@ -79,6 +79,7 @@
       "app_export.js",
       "app_run.js",
       "app_explorer_graph.js",
+      "app_explorer_treemap.js",
       "app_explorer.js",
     ];
 

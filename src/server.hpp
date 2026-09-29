@@ -179,6 +179,7 @@ private:
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -238,6 +239,8 @@ private:
   StaleCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_;
   StaleCache<std::string, ExplorerGraph> explorer_graph_cache_;
   StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
+  // Server-wide storage distribution for the Explorer System section.
+  StaleCache<std::string, ExplorerStorageMap> explorer_storage_cache_;
 
   AppConfig cfg_;
   httplib::Server http_;

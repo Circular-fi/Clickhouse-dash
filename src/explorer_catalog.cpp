@@ -1122,6 +1122,172 @@ bool load_explorer_database_summaries(
 }
 
 
+namespace {
+
+// At most 100 siblings can each hold >= 1% of their parent, and the treemap
+// groups everything below 1% of the displayed root into "Others". Keeping the
+// 128 largest storing tables per database is therefore lossless for every
+// treemap the browser can draw (whole server, server without system databases,
+// or a single database), while bounding the payload for schemas with thousands
+// of tables. The remainder is still reported as exact aggregate counters.
+constexpr size_t kExplorerStorageTablesPerDatabase = 128;
+
+bool resident_memory_engine(const std::string& engine) {
+  return engine == "Buffer" || engine == "Memory" || engine == "Dictionary";
+}
+
+std::string sql_string_list(const std::vector<std::string>& values) {
+  std::string out;
+  for (const auto& value : values) {
+    if (!out.empty()) out += ", ";
+    out += quote_string(value);
+  }
+  return out;
+}
+
+} // namespace
+
+bool load_explorer_storage_map(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    ExplorerStorageMap& out,
+    std::string* error) {
+  out = ExplorerStorageMap{};
+  out.generated_at_ms = now_ms();
+  out.table_limit_per_database = kExplorerStorageTablesPerDatabase;
+
+  // Visibility boundary: exactly the lazy sidebar discovery (runner context).
+  // No name reaches the response unless the runner can SHOW it.
+  const auto databases = discover_visible_databases(runner);
+  if (databases.empty()) return true;
+  std::unordered_map<std::string, std::unordered_set<std::string>> visible;
+  for (const auto& database : databases) {
+    const auto objects = discover_visible_objects(runner, database);
+    visible.emplace(database, std::unordered_set<std::string>(objects.begin(), objects.end()));
+  }
+  const auto is_visible = [&](const std::string& database, const std::string& table) {
+    const auto it = visible.find(database);
+    return it != visible.end() && it->second.count(table) > 0;
+  };
+  const std::string database_filter = "database IN (" + sql_string_list(databases) + ")";
+
+  // One aggregated active-parts read for every visible database. This is pure
+  // part metadata: huge tables cost the same as small ones and no data is read.
+  struct PartTotals { uint64_t rows = 0; uint64_t bytes = 0; uint64_t parts = 0; };
+  std::unordered_map<std::string, PartTotals> parts_by_table;
+  const std::string parts_sql =
+      "SELECT toString(database), toString(`table`), toString(sum(rows)), "
+      "toString(sum(bytes_on_disk)), toString(count()) "
+      "FROM system.parts WHERE active AND " + database_filter +
+      " GROUP BY database, `table`";
+  auto consume_parts = [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      const std::string database = block_string_at(block, 0, row);
+      const std::string table = block_string_at(block, 1, row);
+      if (!is_visible(database, table)) continue;
+      PartTotals totals;
+      totals.rows = parse_u64(block_string_at(block, 2, row)).value_or(0);
+      totals.bytes = parse_u64(block_string_at(block, 3, row)).value_or(0);
+      totals.parts = parse_u64(block_string_at(block, 4, row)).value_or(0);
+      parts_by_table[table_key(database, table)] = totals;
+    }
+  };
+  std::string system_error;
+  if (!try_select(system, parts_sql, consume_parts, &system_error)) {
+    parts_by_table.clear();
+    std::string runner_error;
+    if (!try_select(runner, parts_sql, consume_parts, &runner_error)) {
+      if (error) {
+        *error = "system.parts storage aggregation failed: " + system_error +
+            "; runner fallback failed: " + runner_error;
+      }
+      return false;
+    }
+  }
+
+  // Engine identity for every visible object plus lightweight totals for
+  // engines that do not own MergeTree parts (Log family, Join/Set, ...).
+  struct TableMeta { std::string engine; std::optional<uint64_t> rows; std::optional<uint64_t> bytes; };
+  std::unordered_map<std::string, TableMeta> meta_by_table;
+  const std::string tables_sql =
+      "SELECT toString(database), toString(name), toString(engine), "
+      "toString(total_rows), toString(total_bytes) FROM system.tables WHERE " + database_filter;
+  auto consume_tables = [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      const std::string database = block_string_at(block, 0, row);
+      const std::string table = block_string_at(block, 1, row);
+      if (!is_visible(database, table)) continue;
+      TableMeta meta;
+      meta.engine = block_string_at(block, 2, row);
+      meta.rows = parse_u64(block_string_at(block, 3, row));
+      meta.bytes = parse_u64(block_string_at(block, 4, row));
+      meta_by_table[table_key(database, table)] = std::move(meta);
+    }
+  };
+  system_error.clear();
+  if (!try_select(system, tables_sql, consume_tables, &system_error)) {
+    meta_by_table.clear();
+    std::string runner_error;
+    if (!try_select(runner, tables_sql, consume_tables, &runner_error)) {
+      if (error) {
+        *error = "system.tables storage metadata failed: " + system_error +
+            "; runner fallback failed: " + runner_error;
+      }
+      return false;
+    }
+  }
+
+  for (const auto& database : databases) {
+    ExplorerStorageDatabase entry;
+    entry.name = database;
+    std::vector<ExplorerStorageTable> storing;
+    const auto& objects = visible[database];
+    entry.objects = objects.size();
+    for (const auto& table : objects) {
+      const std::string key = table_key(database, table);
+      const auto meta_it = meta_by_table.find(key);
+      const auto parts_it = parts_by_table.find(key);
+      ExplorerStorageTable item;
+      item.name = table;
+      if (meta_it != meta_by_table.end()) item.engine = meta_it->second.engine;
+      if (parts_it != parts_by_table.end()) {
+        item.bytes = parts_it->second.bytes;
+        item.rows = parts_it->second.rows;
+        item.parts = parts_it->second.parts;
+      } else if (meta_it != meta_by_table.end()) {
+        if (resident_memory_engine(item.engine)) {
+          // RAM allocation: reported, but never drawn as disk area.
+          entry.resident_bytes += meta_it->second.bytes.value_or(0);
+          continue;
+        }
+        item.bytes = meta_it->second.bytes.value_or(0);
+        item.rows = meta_it->second.rows;
+      }
+      if (item.bytes == 0) continue;
+      entry.bytes += item.bytes;
+      entry.rows += item.rows.value_or(0);
+      storing.push_back(std::move(item));
+    }
+    std::sort(storing.begin(), storing.end(), [](const auto& a, const auto& b) {
+      if (a.bytes != b.bytes) return a.bytes > b.bytes;
+      return a.name < b.name;
+    });
+    entry.storing_tables = storing.size();
+    for (size_t index = kExplorerStorageTablesPerDatabase; index < storing.size(); ++index) {
+      entry.omitted_tables += 1;
+      entry.omitted_bytes += storing[index].bytes;
+      entry.omitted_rows += storing[index].rows.value_or(0);
+    }
+    if (storing.size() > kExplorerStorageTablesPerDatabase) storing.resize(kExplorerStorageTablesPerDatabase);
+    entry.tables = std::move(storing);
+    out.databases.push_back(std::move(entry));
+  }
+  std::sort(out.databases.begin(), out.databases.end(), [](const auto& a, const auto& b) {
+    return a.name < b.name;
+  });
+  return true;
+}
+
 bool load_explorer_table_summary(
     clickhouse::Client& system,
     clickhouse::Client& runner,

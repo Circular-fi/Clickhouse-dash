@@ -347,6 +347,96 @@ test('graph table click keeps graph focus, browser selection and URL on the same
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 });
 
+test('database detail treemap sizes tables, shows a hover tooltip and opens the table', async ({ page }) => {
+  await openApp(page);
+  await openExplorerDatabase(page);
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
+  const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
+  await expect(map).not.toHaveClass(/is-layout-pending/);
+  const weather = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"][data-table="weather_observations"]');
+  await expect(weather).toBeVisible();
+  await expect(weather).toContainText('weather_observations');
+  // weather_observations holds almost all of chdash_ui, the remaining tiny
+  // tables are below 1% and must be grouped instead of drawn as slivers.
+  const box = await weather.boundingBox();
+  const mapBox = await map.boundingBox();
+  expect(box.width * box.height).toBeGreaterThan(mapBox.width * mapBox.height * 0.5);
+  await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="wide_types"]')).toHaveCount(0);
+  await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node.is-other')).toContainText(/Others/);
+  // Resident-memory engines never become on-disk treemap area.
+  await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="memory_weather"]')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerTreemapFootnote')).toContainText(/On-disk bytes.*Others/);
+
+  await weather.hover();
+  const tooltip = page.locator('#explorerDatabaseTreemap [data-treemap-tooltip]');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText('chdash_ui.weather_observations');
+  await expect(tooltip).toContainText(/\d(?:\.\d+)?[KMG]B · .*rows · Merge Tree · \d+(?:\.\d+)?% of chdash_ui/);
+  await expect(weather).toHaveClass(/is-hovered/);
+  await page.mouse.move(2, 2);
+  await expect(tooltip).toBeHidden();
+
+  await weather.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
+  await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
+});
+
+test('System section maps server storage by database, by table and drills into a database', async ({ page }) => {
+  await openApp(page);
+  await openExplorer(page);
+  await page.locator('#explorerSectionSelectButton').click();
+  await page.locator('#explorerSystemSectionButton').click();
+  await expect(page).toHaveURL(/\/explorer\/_system$/);
+  await expect(page.locator('#explorerSystemPane')).toBeVisible();
+  await expect(page.locator('#explorerListView')).toBeHidden();
+  await expect(page.locator('#explorerTableModeTabs')).toBeHidden();
+  await expect(page.locator('#explorerSectionSelectButton')).toHaveText('System');
+  await expect(page.locator('#explorerSystemMeta')).toContainText(/^\d+ databases · \d+ tables with data · \d+(?:\.\d+)?[KMGTP]?B$/, { timeout: 15_000 });
+
+  const otel = page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"][data-name="otel"]');
+  await expect(otel).toBeVisible();
+  await expect(otel).toHaveClass(/is-terminal/);
+  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"]')).toHaveCount(0);
+  await expect(page.locator('#explorerSystemDatabaseList .explorerSystemDatabase[data-database="chdash_ui"]')).toBeVisible();
+  await expect(page.locator('#explorerSystemDatabaseList .explorerSystemDatabase[data-database="system"]')).toHaveCount(0);
+
+  await otel.hover();
+  await expect(page.locator('#explorerSystemTreemap [data-treemap-tooltip]')).toContainText(/^otel/);
+
+  // The shared "include system databases" option adds system to the scope.
+  await page.locator('#explorerSystemIncludeSystem').check();
+  await expect(page.locator('#explorerSystemDatabaseList .explorerSystemDatabase[data-database="system"]')).toBeVisible();
+  await page.locator('#explorerSystemIncludeSystem').uncheck();
+  await expect(page.locator('#explorerSystemDatabaseList .explorerSystemDatabase[data-database="system"]')).toHaveCount(0);
+
+  await page.locator('#explorerSystemTablesButton').click();
+  await expect(page).toHaveURL(/\/explorer\/_system\?level=tables$/);
+  await expect(page.locator('#explorerSystemTablesButton')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"][data-table="otel_traces"]')).toBeVisible();
+  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"][data-name="otel"]')).toHaveClass(/is-branch/);
+
+  // A reload keeps the requested level.
+  await page.reload();
+  await expect(page.locator('#explorerSystemTablesButton')).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+  await page.locator('#explorerSystemDatabasesButton').click();
+  await expect(page).toHaveURL(/\/explorer\/_system$/);
+
+  await page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"][data-name="otel"]').click();
+  await expect(page).toHaveURL(/\/explorer\/otel\?view=browse$/);
+  await expect(page.locator('#explorerSectionSelectButton')).toHaveText('Tables');
+  await expect(page.locator('#explorerDetailName')).toHaveText('otel', { timeout: 15_000 });
+  await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="otel_traces"]')).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/explorer\/_system$/);
+  await expect(page.locator('#explorerSystemPane')).toBeVisible();
+  await page.locator('#explorerSystemDatabaseList .explorerSystemDatabase[data-database="chdash_ui"]').click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\?view=browse$/);
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
+});
+
 test('multiquery exposes global copy JSON and raw JSON download without clearing results', async ({ page }) => {
   await openApp(page);
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
