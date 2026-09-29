@@ -2357,10 +2357,30 @@
       if (y >= localTop - 0.001 && y <= localBottom + 0.001) ys.push(y);
     }
     const preferredHorizontalYs = isLogicalDependencyEdge(edge) && betweenRowYs.length ? betweenRowYs : rowYs;
+    // Distance to the nearest preferred lane, by binary search over the sorted
+    // lanes and memoized per y. It is evaluated on every horizontal A* step;
+    // scanning every row lane each time dominated routing on graphs with
+    // thousands of rows. The value is identical to min(|lane - y|).
+    const sortedLaneYs = preferredHorizontalYs.slice().sort((a, b) => a - b);
+    const lanePenaltyFactor = isLogicalDependencyEdge(edge) ? 1.35 : 0.55;
+    const lanePenaltyByY = new Map();
     const horizontalLanePenalty = (y) => {
-      if (!preferredHorizontalYs.length) return 0;
-      const nearest = Math.min(...preferredHorizontalYs.map((laneY) => Math.abs(laneY - y)));
-      return nearest * (isLogicalDependencyEdge(edge) ? 1.35 : 0.55);
+      if (!sortedLaneYs.length) return 0;
+      const cached = lanePenaltyByY.get(y);
+      if (cached !== undefined) return cached;
+      let lo = 0;
+      let hi = sortedLaneYs.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (sortedLaneYs[mid] < y) lo = mid + 1;
+        else hi = mid;
+      }
+      let nearest = Infinity;
+      if (lo < sortedLaneYs.length) nearest = Math.abs(sortedLaneYs[lo] - y);
+      if (lo > 0) nearest = Math.min(nearest, Math.abs(sortedLaneYs[lo - 1] - y));
+      const penalty = nearest * lanePenaltyFactor;
+      lanePenaltyByY.set(y, penalty);
+      return penalty;
     };
 
     for (const item of obstacles) {
@@ -2383,6 +2403,30 @@
       .filter((value, index, arr) => index === 0 || Math.abs(value - arr[index - 1]) > 0.01);
     const gridX = uniqueSorted(xs);
     const gridY = uniqueSorted(ys);
+    // The sparse grid is |xs| x |ys| points, each tested against every
+    // corridor obstacle, then searched with a re-sorted A* queue. On very large
+    // lineage graphs a single corridor can span thousands of rows (millions of
+    // points) and freeze the tab for minutes. Past this budget the edge gets a
+    // plain orthogonal H-V-H route; ordinary graphs stay far below it and are
+    // routed exactly as before.
+    if (gridX.length * gridY.length > ROUTE_GRID_POINT_BUDGET) {
+      const midX = sourceFan.x + (targetFan.x - sourceFan.x) / 2;
+      return assembleOrthogonalRoute(sourcePort, sourceFan, compressOrthogonalRoute([
+        sourceFan,
+        { x: midX, y: sourceFan.y },
+        { x: midX, y: targetFan.y },
+        targetFan,
+      ]), targetFan, targetPort);
+    }
+    // Every grid point lies inside [gridX] x [gridY], so a routed segment whose
+    // box is apart from that rectangle is apart from every candidate step and
+    // contributes exactly 0 in routeConflictPenalty(). Filter once per edge
+    // instead of scanning all routed segments on every A* relaxation (the
+    // dominant cost on large lineage graphs).
+    const gridCornerA = { x: gridX[0], y: gridY[0] };
+    const gridCornerB = { x: gridX[gridX.length - 1], y: gridY[gridY.length - 1] };
+    const corridorSegments = usedSegments.filter((segment) => !segmentsApart(gridCornerA, gridCornerB, segment.a, segment.b));
+    const corridorSegmentIndex = createSegmentYIndex(corridorSegments, gridCornerA.y, gridCornerB.y);
     const pointKey = (x, y) => `${x}\u0000${y}`;
     const points = new Map();
     for (const x of gridX) {
@@ -2438,15 +2482,20 @@
 
     const startKey = pointKey(sourceFan.x, sourceFan.y);
     const endKey = pointKey(targetFan.x, targetFan.y);
-    const queue = [{ key: startKey, dir: "N", cost: 0 }];
     const best = new Map([[`${startKey}\u0000N`, 0]]);
     const previous = new Map();
     let finalState = null;
     const heuristic = (point) => Math.abs(point.x - targetFan.x) + Math.abs(point.y - targetFan.y);
+    // Min-heap on (f = cost + heuristic, insertion order). It pops exactly the
+    // element the previous "stable sort the whole queue, then shift()" picked
+    // (lowest f, earliest pushed on ties) in O(log n) instead of
+    // O(n log n) per step, which made large corridors take minutes.
+    const queue = createRouteQueue();
+    const pushState = (state) => queue.push(state, state.cost + heuristic(points.get(state.key)));
+    pushState({ key: startKey, dir: "N", cost: 0 });
 
-    while (queue.length) {
-      queue.sort((a, b) => (a.cost + heuristic(points.get(a.key))) - (b.cost + heuristic(points.get(b.key))));
-      const current = queue.shift();
+    while (queue.size()) {
+      const current = queue.pop();
       const stateKey = `${current.key}\u0000${current.dir}`;
       if (current.cost !== best.get(stateKey)) continue;
       if (current.key === endKey) { finalState = current; break; }
@@ -2472,7 +2521,7 @@
         // Angles are deliberately expensive: for a clean DAG a short route
         // with 2 bends is preferable to a maze of small detours.
         const bend = current.dir !== "N" && current.dir !== next.dir ? 220 : 0;
-        const conflict = routeConflictPenalty(currentPoint, nextPoint, usedSegments, edge);
+        const conflict = routeConflictPenalty(currentPoint, nextPoint, corridorSegmentIndex.near(currentPoint, nextPoint), edge);
         const reverse = next.dir === "H" && direction * (nextPoint.x - currentPoint.x) < -0.001 ? 1400 : 0;
         const boundary = nextPoint.x < localLeft - 0.01 || nextPoint.x > localRight + 0.01
           || nextPoint.y < localTop - 0.01 || nextPoint.y > localBottom + 0.01 ? 20_000 : 0;
@@ -2482,7 +2531,7 @@
         if (cost + 0.001 >= (best.get(nextStateKey) ?? Infinity)) continue;
         best.set(nextStateKey, cost);
         previous.set(nextStateKey, stateKey);
-        queue.push({ key: next.key, dir: next.dir, cost });
+        pushState({ key: next.key, dir: next.dir, cost });
       }
     }
 
@@ -2555,6 +2604,80 @@
       body = compressOrthogonalRoute(body);
     }
 
+    return assembleOrthogonalRoute(sourcePort, sourceFan, body, targetFan, targetPort);
+  }
+
+  const ROUTE_GRID_POINT_BUDGET = 40000;
+
+  // Buckets routed segments by y so an A* step only examines segments whose
+  // vertical extent can touch it. near() returns them in their original order:
+  // skipped segments are exactly those segmentsApart() would reject (they add
+  // 0), so routeConflictPenalty() sums the same terms in the same order.
+  function createSegmentYIndex(segments, minY, maxY) {
+    const margin = 0.02;
+    if (segments.length <= 32 || !(maxY > minY)) {
+      return { near: () => segments };
+    }
+    const bucketCount = Math.min(512, Math.max(1, Math.ceil(segments.length / 8)));
+    const bucketHeight = (maxY - minY) / bucketCount;
+    const bucketOf = (y) => Math.max(0, Math.min(bucketCount - 1, Math.floor((y - minY) / bucketHeight)));
+    const buckets = Array.from({ length: bucketCount }, () => []);
+    segments.forEach((segment, index) => {
+      const lo = bucketOf(Math.min(segment.a.y, segment.b.y) - margin);
+      const hi = bucketOf(Math.max(segment.a.y, segment.b.y) + margin);
+      for (let bucket = lo; bucket <= hi; bucket += 1) buckets[bucket].push(index);
+    });
+    return {
+      near(a, b) {
+        const lo = bucketOf(Math.min(a.y, b.y) - margin);
+        const hi = bucketOf(Math.max(a.y, b.y) + margin);
+        if (lo === hi) return buckets[lo].map((index) => segments[index]);
+        const seen = new Set();
+        for (let bucket = lo; bucket <= hi; bucket += 1) for (const index of buckets[bucket]) seen.add(index);
+        return [...seen].sort((x, y) => x - y).map((index) => segments[index]);
+      },
+    };
+  }
+
+  function createRouteQueue() {
+    const heap = [];
+    let serial = 0;
+    const less = (a, b) => a.f < b.f || (a.f === b.f && a.seq < b.seq);
+    return {
+      size: () => heap.length,
+      push(value, f) {
+        heap.push({ value, f, seq: serial++ });
+        let i = heap.length - 1;
+        while (i > 0) {
+          const parent = (i - 1) >> 1;
+          if (!less(heap[i], heap[parent])) break;
+          [heap[i], heap[parent]] = [heap[parent], heap[i]];
+          i = parent;
+        }
+      },
+      pop() {
+        const top = heap[0];
+        const last = heap.pop();
+        if (heap.length) {
+          heap[0] = last;
+          let i = 0;
+          for (;;) {
+            const left = 2 * i + 1;
+            const right = left + 1;
+            let smallest = i;
+            if (left < heap.length && less(heap[left], heap[smallest])) smallest = left;
+            if (right < heap.length && less(heap[right], heap[smallest])) smallest = right;
+            if (smallest === i) break;
+            [heap[i], heap[smallest]] = [heap[smallest], heap[i]];
+            i = smallest;
+          }
+        }
+        return top.value;
+      },
+    };
+  }
+
+  function assembleOrthogonalRoute(sourcePort, sourceFan, body, targetFan, targetPort) {
     // Preserve sourceFan/targetFan as explicit anchors even when collinear.
     // Conflict detection can then exempt only the tiny shared port fan instead
     // of accidentally exempting a long merged segment.

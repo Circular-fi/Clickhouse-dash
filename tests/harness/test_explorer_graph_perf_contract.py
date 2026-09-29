@@ -33,3 +33,17 @@ def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
 def test_explorer_search_debounces_graph_focus() -> None:
     ui = read("src/static/app_explorer.js")
     assert "graphSearchTimer = setTimeout(() => graph?.searchFocus(), 200);" in ui
+
+
+def test_orthogonal_router_hot_paths_are_indexed_without_changing_routes() -> None:
+    graph = (ROOT / "src/static/app_explorer_graph.js").read_text(encoding="utf-8")
+    router = graph[graph.index("function orthogonalRouteForEdge("):graph.index("function assembleOrthogonalRoute(")]
+    # Heap on (f, insertion order) == the former stable sort + shift().
+    assert "const queue = createRouteQueue();" in router
+    assert "queue.sort(" not in router and "queue.shift()" not in router
+    assert "a.f < b.f || (a.f === b.f && a.seq < b.seq)" in graph
+    # Lane distance by binary search; conflicts only against nearby segments.
+    assert "sortedLaneYs" in router and "Math.min(...preferredHorizontalYs" not in router
+    assert "corridorSegmentIndex.near(currentPoint, nextPoint)" in router
+    assert "return [...seen].sort((x, y) => x - y).map((index) => segments[index]);" in graph
+    assert "ROUTE_GRID_POINT_BUDGET" in router
