@@ -37,6 +37,11 @@ private:
   };
 
   bool write_bytes(const void* data, size_t size);
+  // ZIP headers are assembled in `staged_` and sent as one sink write:
+  // emitting each 2-8 byte field separately produced ~16-22 chunked HTTP
+  // frames/send() calls per header.
+  bool stage(const void* data, size_t size);
+  bool flush_staged();
   bool write_u16(uint16_t value);
   bool write_u32(uint32_t value);
   bool write_u64(uint64_t value);
@@ -47,6 +52,7 @@ private:
   bool entry_open_ = false;
   bool finished_ = false;
   uint64_t offset_ = 0;
+  std::string staged_;
   uint32_t current_crc_ = 0xffffffffU;
   uint64_t current_size_ = 0;
   EntryMeta current_;

@@ -626,7 +626,7 @@ bool load_parts_summary(
   return try_select(system,
     "SELECT toString(database), toString(`table`), toString(sum(rows)), toString(sum(bytes_on_disk)), "
     "toString(sum(data_compressed_bytes)), toString(sum(data_uncompressed_bytes)), "
-    "toString(count()), toString(uniqExact(partition)), "
+    "toString(count()), toString(uniqExact(partition_id)), "
     "arrayStringConcat(arraySort(groupUniqArray(disk_name)), ','), "
     "toString(max(modification_time)) "
     "FROM system.parts WHERE active GROUP BY database, `table`",
@@ -745,7 +745,7 @@ bool load_query_ingress(
     "toString(sum(written_rows)), toString(sum(written_bytes)), "
     "toString(max(event_time)) "
     "FROM system.query_log "
-    "WHERE event_time >= now() - INTERVAL 1 HOUR AND type = 'QueryFinish' AND written_rows > 0 "
+    "WHERE event_date >= toDate(now() - INTERVAL 1 HOUR) AND event_time >= now() - INTERVAL 1 HOUR AND type = 'QueryFinish' AND written_rows > 0 "
     "GROUP BY object",
     [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -788,7 +788,7 @@ bool load_part_ingress(
     "toString(countIf(event_time >= now() - INTERVAL 1 MINUTE)), "
     "toString(max(event_time)) "
     "FROM system.part_log "
-    "WHERE event_time >= now() - INTERVAL 1 HOUR AND event_type = 'NewPart' "
+    "WHERE event_date >= toDate(now() - INTERVAL 1 HOUR) AND event_time >= now() - INTERVAL 1 HOUR AND event_type = 'NewPart' "
     "GROUP BY database, `table`",
     [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1244,7 +1244,7 @@ bool load_explorer_table_summary(
     std::string section_error;
     (void)try_select(system,
       "SELECT toString(sum(rows)), toString(sum(bytes_on_disk)), toString(sum(data_compressed_bytes)), "
-      "toString(sum(data_uncompressed_bytes)), toString(count()), toString(uniqExact(partition)), "
+      "toString(sum(data_uncompressed_bytes)), toString(count()), toString(uniqExact(partition_id)), "
       "arrayStringConcat(arraySort(groupUniqArray(disk_name)), ','), toString(max(modification_time)) "
       "FROM system.parts WHERE active AND database = " + db + " AND `table` = " + tbl,
       [&](const clickhouse::Block& block) {
@@ -1295,7 +1295,7 @@ bool load_explorer_table_summary(
     "toString(sumIf(written_bytes, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
     "toString(sum(written_bytes) / 3600.0), toString(sum(written_rows)), toString(sum(written_bytes)), "
     "toString(max(event_time)) FROM system.query_log "
-    "WHERE event_time >= now() - INTERVAL 1 HOUR AND type = 'QueryFinish' AND written_rows > 0 "
+    "WHERE event_date >= toDate(now() - INTERVAL 1 HOUR) AND event_time >= now() - INTERVAL 1 HOUR AND type = 'QueryFinish' AND written_rows > 0 "
     "AND has(tables, " + object + ")",
     [&](const clickhouse::Block& block) {
       if (!block.GetRowCount()) return;
@@ -1320,7 +1320,7 @@ bool load_explorer_table_summary(
     "toString(sumIf(size_in_bytes, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
     "toString(sum(size_in_bytes) / 3600.0), toString(sum(rows)), toString(sum(size_in_bytes)), "
     "toString(countIf(event_time >= now() - INTERVAL 1 MINUTE)), toString(max(event_time)) "
-    "FROM system.part_log WHERE event_time >= now() - INTERVAL 1 HOUR AND event_type = 'NewPart' "
+    "FROM system.part_log WHERE event_date >= toDate(now() - INTERVAL 1 HOUR) AND event_time >= now() - INTERVAL 1 HOUR AND event_type = 'NewPart' "
     "AND database = " + db + " AND `table` = " + tbl,
     [&](const clickhouse::Block& block) {
       if (!block.GetRowCount()) return;
@@ -2174,13 +2174,33 @@ bool load_explorer_table_detail(
   // system.tables, dependencies_* lists objects which depend on the current
   // object. Read both the selected row (downstream) and the reverse relation
   // (upstream) so a view/MV does not misleadingly show an empty Lineage tab.
+  //
+  // The per-object ACL set passed to this function contains only the selected
+  // table, so it cannot decide whether a *related* object is visible. Resolve
+  // lineage endpoints in the runner context instead (SHOW TABLES/DICTIONARIES,
+  // the same boundary as the lazy sidebar), memoized once per database.
+  std::unordered_map<std::string, std::vector<std::string>> lineage_visible_objects;
+  auto lineage_visible = [&](const std::string& dep_db, const std::string& dep_table) {
+    if (allowed.allows_table(dep_db, dep_table)) return true;
+    auto it = lineage_visible_objects.find(dep_db);
+    if (it == lineage_visible_objects.end()) {
+      std::vector<std::string> objects;
+      try {
+        objects = discover_visible_objects(runner, dep_db);
+      } catch (const std::exception&) {
+        // An unreadable database is simply not visible to this runner.
+      }
+      it = lineage_visible_objects.emplace(dep_db, std::move(objects)).first;
+    }
+    return std::binary_search(it->second.begin(), it->second.end(), dep_table);
+  };
   std::set<std::tuple<std::string, std::string, std::string>> dependency_seen;
   auto append_dependency = [&](const std::string& dep_db, const std::string& dep_table, const char* relation) {
     // ClickHouse may expose an internal `row`/`_row` pseudo dependency for
     // view-like objects. It is implementation metadata, not a navigable
     // ClickHouse object, so never expose it as Lineage.
     if (is_row_pseudo_object(dep_table)) return;
-    if (!allowed.allows_table(dep_db, dep_table)) return;
+    if (!lineage_visible(dep_db, dep_table)) return;
     auto key = std::make_tuple(dep_db, dep_table, std::string(relation));
     if (!dependency_seen.insert(key).second) return;
     out.dependencies.push_back({dep_db, dep_table, relation});
@@ -2206,32 +2226,6 @@ bool load_explorer_table_detail(
     }
   }
 
-  // Reverse Buffer(database, table, ...) routing as well. ClickHouse does not
-  // consistently materialize Buffer engine destinations in dependencies_*, so
-  // without this pass the Buffer showed its target as downstream while the
-  // target could not show the same Buffer as upstream. Keep the relationship
-  // symmetric and ACL-filtered for every Buffer table visible to the runner.
-  section_error.clear();
-  const bool buffer_upstream_loaded = try_select(system,
-    "SELECT toString(database), toString(name), toString(engine_full) "
-    "FROM system.tables WHERE engine = 'Buffer'",
-    [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const std::string buffer_db = block_string_at(block, 0, row);
-        const std::string buffer_table = block_string_at(block, 1, row);
-        if (!allowed.allows_table(buffer_db, buffer_table)) continue;
-        const auto args = parse_engine_arguments_local(block_string_at(block, 2, row), "Buffer");
-        if (args.size() < 2 || args[0].empty() || args[1].empty()) continue;
-        if (args[0] == database && args[1] == table) {
-          append_dependency(buffer_db, buffer_table, "upstream");
-        }
-      }
-    }, &section_error);
-  if (!buffer_upstream_loaded) {
-    if (error) *error = "Buffer reverse-lineage query failed: " + section_error;
-    return false;
-  }
-
   const bool downstream_loaded = try_select(system,
     "SELECT toString(tupleElement(dep, 1)), toString(tupleElement(dep, 2)) "
     "FROM (SELECT arrayJoin(arrayZip(dependencies_database, dependencies_table)) AS dep "
@@ -2246,35 +2240,48 @@ bool load_explorer_table_detail(
     return false;
   }
 
-  const bool upstream_loaded = try_select(system,
-    "SELECT toString(database), toString(name) "
-    "FROM (SELECT database, name, arrayJoin(arrayZip(dependencies_database, dependencies_table)) AS dep FROM system.tables) "
-    "WHERE toString(tupleElement(dep, 1)) = " + db + " AND toString(tupleElement(dep, 2)) = " + tbl,
-    [&](const clickhouse::Block& block) {
-      for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        append_dependency(block_string_at(block, 0, row), block_string_at(block, 1, row), "upstream");
-      }
-    }, &section_error);
-  if (!upstream_loaded) {
-    if (error) *error = "Upstream lineage query failed: " + section_error;
-    return false;
-  }
-
-  // dependencies_* is not complete for ordinary View objects on all supported
-  // ClickHouse builds. Augment it from system.tables.as_select using a bounded
-  // FROM/JOIN identifier parser (no string/comment guessing). The same ACL
-  // filter is applied before any object name is returned.
+  // Reverse relations need a server-wide system.tables pass. Three sources are
+  // read in ONE scan instead of three (system.tables materializes metadata for
+  // every table, which dominates detail latency on large catalogs):
+  //   * Buffer(database, table, ...) routing: ClickHouse does not consistently
+  //     materialize Buffer destinations in dependencies_*, so reverse it here
+  //     to keep the Buffer <-> target relationship symmetric;
+  //   * dependencies_* rows naming the selected object (upstream);
+  //   * as_select of views/MVs: dependencies_* is not complete for ordinary
+  //     View objects on all supported builds, so a bounded FROM/JOIN
+  //     identifier parser augments it (no string/comment guessing).
+  // Every returned name goes through the same visibility filter.
   section_error.clear();
-  const bool select_dependencies_loaded = try_select(system,
-    "SELECT toString(database), toString(name), toString(as_select) FROM system.tables WHERE notEmpty(as_select)",
+  const bool reverse_lineage_loaded = try_select(system,
+    "SELECT toString(database), toString(name), toString(engine), "
+    "if(engine = 'Buffer', toString(engine_full), ''), toString(as_select), "
+    "toString(toUInt8(has(arrayZip(dependencies_database, dependencies_table), tuple(" + db + ", " + tbl + ")))) "
+    "FROM system.tables "
+    "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
+    "AND (engine = 'Buffer' OR notEmpty(as_select) OR has(dependencies_table, " + tbl + "))",
     [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
-        const std::string view_db = block_string_at(block, 0, row);
-        const std::string view_table = block_string_at(block, 1, row);
-        if (!allowed.allows_table(view_db, view_table)) continue;
-        const auto sources = parse_relation_sources(block_string_at(block, 2, row), view_db);
-        for (const auto& source : sources) {
-          if (view_db == database && view_table == table) {
+        const std::string object_db = block_string_at(block, 0, row);
+        const std::string object_table = block_string_at(block, 1, row);
+        const std::string object_engine = block_string_at(block, 2, row);
+        if (object_engine == "Buffer") {
+          const std::string buffer_db = object_db;
+          const std::string buffer_table = object_table;
+          const auto args = parse_engine_arguments_local(block_string_at(block, 3, row), "Buffer");
+          if (args.size() >= 2 && args[0] == database && args[1] == table) {
+            append_dependency(buffer_db, buffer_table, "upstream");
+          }
+        }
+        if (block_string_at(block, 5, row) == "1") {
+          append_dependency(object_db, object_table, "upstream");
+        }
+        const std::string as_select = block_string_at(block, 4, row);
+        if (as_select.empty()) continue;
+        const std::string& view_db = object_db;
+        const std::string& view_table = object_table;
+        const bool is_selected_view = view_db == database && view_table == table;
+        for (const auto& source : parse_relation_sources(as_select, view_db)) {
+          if (is_selected_view) {
             append_dependency(source.database, source.table, "upstream");
           }
           if (source.database == database && source.table == table) {
@@ -2283,8 +2290,8 @@ bool load_explorer_table_detail(
         }
       }
     }, &section_error);
-  if (!select_dependencies_loaded) {
-    if (error) *error = "View lineage query failed: " + section_error;
+  if (!reverse_lineage_loaded) {
+    if (error) *error = "Buffer reverse-lineage query failed: " + section_error;
     return false;
   }
 

@@ -322,6 +322,27 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   // clients are still closed proactively by ClickHouseClientPool.
   opt.TcpKeepAlive(true);
 
+  // Native block compression, negotiated per connection. LZ4 is the default:
+  // result blocks and multi-GB exports typically shrink 3-10x on the wire for
+  // negligible CPU. compression=zstd trades CPU for ratio on slow links;
+  // compression=none restores uncompressed transport.
+  {
+    auto it = pu->query.find("compression");
+    std::string method = it == pu->query.end() ? std::string("lz4") : it->second;
+    std::transform(method.begin(), method.end(), method.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (method == "lz4" || method == "1" || method == "true") {
+      opt.SetCompressionMethod(clickhouse::CompressionMethod::LZ4);
+    } else if (method == "zstd") {
+      opt.SetCompressionMethod(clickhouse::CompressionMethod::ZSTD);
+    } else if (method == "none" || method == "0" || method == "false") {
+      opt.SetCompressionMethod(clickhouse::CompressionMethod::None);
+    } else {
+      if (err) *err = "unsupported compression query parameter (expected lz4, zstd or none): " + method;
+      return std::nullopt;
+    }
+  }
+
   // TLS via query params
   const bool secure = query_param_truthy(pu->query, "secure", false);
   if (secure) {

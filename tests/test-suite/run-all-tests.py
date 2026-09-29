@@ -180,6 +180,7 @@ def reset_clickhouse_fixtures(env: dict[str, str]) -> None:
     check_grant_as(system_user, system_password, "SHOW TABLES ON *.*", "1")
     check_grant_as(system_user, system_password, "SHOW COLUMNS ON *.*", "1")
     check_grant_as(system_user, system_password, "SHOW DICTIONARIES ON *.*", "1")
+    check_grant_as(system_user, system_password, "SELECT ON otel.otel_traces", "1")
 
     flush = requests.post(base + "/", data=b"SYSTEM FLUSH LOGS", auth=(system_user, system_password), timeout=15)
     if flush.status_code >= 400:
@@ -227,7 +228,7 @@ def main() -> int:
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/streaming.spec.js', '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,

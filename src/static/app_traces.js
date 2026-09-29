@@ -771,11 +771,23 @@
     return rows;
   }
 
+  // Single pass, no argument spreading: Math.min(...list) throws RangeError
+  // once a trace approaches ~100k spans and allocates two temporary arrays.
+  function spanExtent(spans) {
+    let start = Infinity;
+    let end = -Infinity;
+    for (const s of spans) {
+      const spanStart = Number(s.start_ns || 0);
+      const spanEnd = spanStart + Number(s.duration_ns || 0);
+      if (Number.isFinite(spanStart) && spanStart < start) start = spanStart;
+      if (spanEnd > end) end = spanEnd;
+    }
+    return { start, end };
+  }
+
   function traceBounds(spans) {
-    const starts = spans.map((s) => Number(s.start_ns || 0)).filter(Number.isFinite);
-    if (!starts.length) return { start: 0, end: 1, duration: 1 };
-    const start = Math.min(...starts);
-    const end = Math.max(...spans.map((s) => Number(s.start_ns || 0) + Number(s.duration_ns || 0)));
+    const { start, end } = spanExtent(spans);
+    if (!Number.isFinite(start)) return { start: 0, end: 1, duration: 1 };
     return { start, end, duration: Math.max(1, end - start) };
   }
 
@@ -922,8 +934,7 @@
     if (!spans.length) { dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">No spans.</div>'; return; }
     const tree = buildTree(spans);
     const allRows = visibleNodes(tree);
-    const fullStart = Math.min(...spans.map((s) => Number(s.start_ns || 0)));
-    const fullEnd = Math.max(...spans.map((s) => Number(s.start_ns || 0) + Number(s.duration_ns || 0)));
+    const { start: fullStart, end: fullEnd } = spanExtent(spans);
     const fullTotal = Math.max(1, fullEnd - fullStart);
     const viewRange = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
     const viewLo = Math.max(0, Math.min(1, Number(viewRange[0] || 0)));

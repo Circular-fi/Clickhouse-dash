@@ -954,7 +954,9 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
   if (force_refresh) {
     explorer_allowed_cache_.erase(security_key);
-    explorer_catalog_list_cache_.erase(list_key);
+    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>",
+    // so an exact erase of the bare prefix never matched any of them.
+    explorer_catalog_list_cache_.erase_prefix(list_key);
     explorer_catalog_cache_.erase(catalog_key);
     explorer_graph_cache_.erase(graph_key);
     explorer_functions_cache_.erase(functions_key);

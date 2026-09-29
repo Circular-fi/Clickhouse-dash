@@ -966,6 +966,14 @@ void QuerySession::run_query() {
         throw std::runtime_error("canceled");
       }
       client_query_->Execute(command);
+      // USE, SET (including SET ROLE) and temporary tables change native
+      // *session* state. Returning such a connection to the shared pool would
+      // leak the current database/settings/temporary objects into unrelated
+      // later runs (other tabs or users), so drop it instead.
+      if (first_keyword == "use" || first_keyword == "set" ||
+          mask_sql_surface(sql_).code_lower.find("temporary") != std::string::npos) {
+        discard_query_connection();
+      }
       {
         rapidjson::StringBuffer sb;
         rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -1286,9 +1294,18 @@ void QuerySession::run_query() {
         const size_t max_bytes_per_event = std::max<size_t>(16 * 1024, options_.result_rows_batch_bytes);
         size_t row = 0;
 
+        // Resolve column handles once per block: Block::operator[] returns a
+        // shared_ptr by value, which would otherwise cost atomic refcount
+        // traffic for every single cell.
+        std::vector<clickhouse::ColumnRef> columns;
+        columns.reserve(block.GetColumnCount());
+        for (size_t c = 0; c < block.GetColumnCount(); ++c) columns.push_back(block[c]);
+
+        // One event buffer per block, cleared (capacity kept) between events,
+        // so a multi-event block grows it once instead of once per event.
+        rapidjson::StringBuffer sb(nullptr, std::min<size_t>(max_bytes_per_event, 64 * 1024));
         while (row < block.GetRowCount() && rows_returned < row_limit) {
-          const size_t initial_capacity = std::min<size_t>(max_bytes_per_event, 64 * 1024);
-          rapidjson::StringBuffer sb(nullptr, initial_capacity);
+          sb.Clear();
           rapidjson::Writer<rapidjson::StringBuffer> w(sb);
           w.StartObject();
           w.Key("query_id"); w.String(query_id_.c_str());
@@ -1300,26 +1317,27 @@ void QuerySession::run_query() {
                  rows_in_event < max_rows_per_event &&
                  rows_returned < row_limit) {
             w.StartArray();
-            for (size_t c = 0; c < block.GetColumnCount(); ++c) {
+            for (size_t c = 0; c < columns.size(); ++c) {
               // Compatibility projections are already String columns. JSON and
               // 256-bit values stay strings for backwards compatibility. Opaque
               // aggregate states additionally get a valid-UTF8/hex safety guard.
-              rapidjson::StringBuffer cell_buffer(nullptr, 256);
-              rapidjson::Writer<rapidjson::StringBuffer> cell_writer(cell_buffer);
+              //
+              // Cells are serialized straight into the event buffer: a
+              // per-cell StringBuffer+Writer costs several heap allocations and
+              // an extra copy per cell. The cell size is the buffer delta (it
+              // includes at most one separator byte).
+              const size_t cell_start = sb.GetSize();
               if (column_plans[c] && column_plans[c]->mode == ResultTransportMode::Opaque) {
-                write_cell_json_declared(cell_writer, block[c], row, column_plans[c]->original_type);
+                write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
               } else {
-                write_cell_json(cell_writer, block[c], row);
+                write_cell_json(w, columns[c], row);
               }
-              if (cell_buffer.GetSize() > options_.max_result_cell_bytes) {
+              const size_t cell_bytes = sb.GetSize() - cell_start;
+              if (cell_bytes > options_.max_result_cell_bytes) {
                 throw std::runtime_error(
                     "result_cell_too_large: Result cell exceeds query.max_result_cell_bytes (" +
                     std::to_string(options_.max_result_cell_bytes) + " bytes).");
               }
-              w.RawValue(
-                  cell_buffer.GetString(),
-                  static_cast<rapidjson::SizeType>(cell_buffer.GetSize()),
-                  rapidjson::kNullType);
             }
             w.EndArray();
             ++row;

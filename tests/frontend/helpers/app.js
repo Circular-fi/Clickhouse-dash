@@ -41,6 +41,38 @@ export async function openExplorer(page) {
   await expect(page.locator('#explorerTableList')).toBeVisible({ timeout: 15_000 });
 }
 
+// The Explorer sidebar is lazy: the first paint lists database names only and
+// each branch loads its objects when expanded. Tests which need table rows must
+// therefore expand the owning database explicitly.
+export async function expandExplorerDatabase(page, database = 'chdash_ui') {
+  const toggle = page.locator(
+    `#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand ${database}"], ` +
+    `#explorerTableList .explorerTreeDatabaseToggle[aria-label="Collapse ${database}"]`,
+  );
+  await expect(toggle).toBeVisible({ timeout: 15_000 });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.locator(`#explorerTableList .explorerTreeDatabaseToggle[aria-label="Collapse ${database}"]`))
+    .toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#explorerTableList')).not.toContainText(/Loading tables/i, { timeout: 15_000 });
+}
+
+export async function openExplorerDatabase(page, database = 'chdash_ui') {
+  await openExplorer(page);
+  await expandExplorerDatabase(page, database);
+}
+
+// ClickHouse-side elapsed time needs an extra /api/query/execution lookup, so
+// it is an opt-in option of the Run settings (gear) menu, next to multiquery.
+export async function enableExecutionStats(page) {
+  await page.locator('#runSettingsButton').click();
+  await expect(page.locator('#runSettingsMenu')).toBeVisible();
+  const option = page.locator('#runOptExecutionStats');
+  if ((await option.getAttribute('aria-checked')) !== 'true') await option.click();
+  await expect(option).toHaveAttribute('aria-checked', 'true');
+  await page.locator('#runSettingsButton').click();
+  await expect(page.locator('#runSettingsMenu')).toBeHidden();
+}
+
 export async function openAnalysis(page) {
   await expect(page.locator('#analyzeQueryButton')).toBeVisible({ timeout: 10_000 });
   await page.locator('#analyzeQueryButton').click();

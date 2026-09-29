@@ -353,7 +353,26 @@ AllowedObjectSet discover_allowed_objects(clickhouse::Client& runner) {
     std::sort(objects.begin(), objects.end());
     objects.erase(std::unique(objects.begin(), objects.end()), objects.end());
 
+    // One database-wide CHECK GRANT replaces one (or more) per object when the
+    // runner can read the whole database. It is exact: any partial REVOKE on a
+    // table or column inside the database makes it return 0, and the
+    // per-object discovery below then decides the boundary as before.
+    bool database_granted = false;
+    try {
+      database_granted = check_grant(runner, "SELECT ON " + quote_ident(database) + ".*");
+    } catch (const std::exception&) {
+      database_granted = false;
+    }
+
     for (const auto& object : objects) {
+      if (database_granted) {
+        AllowedTable entry;
+        entry.database = database;
+        entry.table = object;
+        entry.all_columns = true;
+        allowed.add_table(std::move(entry));
+        continue;
+      }
       try {
         auto entry = inspect_table(runner, database, object);
         allowed.add_table(std::move(entry));

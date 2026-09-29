@@ -572,7 +572,15 @@ struct RawTable {
 };
 
 void add_edge_unique(ExplorerGraph& graph, std::unordered_set<std::string>& seen, ExplorerGraphEdge edge) {
-  const std::string key = edge.from + "\0" + edge.to + "\0" + edge.kind;
+  // "\0" as a string literal is empty; use an explicit NUL separator so
+  // different (from, to, kind) triples cannot collide in the dedup key.
+  std::string key;
+  key.reserve(edge.from.size() + edge.to.size() + edge.kind.size() + 2);
+  key += edge.from;
+  key.push_back('\0');
+  key += edge.to;
+  key.push_back('\0');
+  key += edge.kind;
   if (!seen.insert(key).second) return;
   edge.id = "edge:" + std::to_string(graph.edges.size() + 1);
   graph.edges.push_back(std::move(edge));

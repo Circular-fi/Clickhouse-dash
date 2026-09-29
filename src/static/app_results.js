@@ -116,6 +116,7 @@
   let sortDir = "";
   let scheduledFullRender = false;
   let fullRenderRafId = 0;
+  let scheduledFullRenderRebuild = false;
   let fullRenderToken = 0;
 
   let isVirtualResults = false;
@@ -310,7 +311,17 @@
     dom.resultsPanel.insertBefore(resultsStackElement, anchor);
   }
 
+  // Per-panel teardown callbacks (document/window listeners registered by
+  // multiquery panels). Without them every virtualized panel stayed reachable
+  // through its scroll/resize closures after the stack was cleared, retaining
+  // all of its rows and re-running layout reads on each page scroll.
+  const resultsStackDisposers = [];
+
   function clearResultsStack() {
+    while (resultsStackDisposers.length) {
+      const dispose = resultsStackDisposers.pop();
+      try { dispose(); } catch { /* teardown must not block clearing */ }
+    }
     if (!resultsStackElement) return;
     resultsStackElement.remove();
     resultsStackElement = null;
@@ -497,6 +508,7 @@
     const safeColumns = Array.isArray(columns) ? columns.map((column) => String(column ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((type) => String(type ?? "")) : [];
     const descriptors = [];
+    const tupleColumnIndexes = [];
     let changed = false;
 
     const containsTuple = (ast) => {
@@ -561,6 +573,7 @@
       const leaves = enabled && containsTuple(ast) ? collectTupleLeaves(ast) : [];
       if (leaves.length) {
         changed = true;
+        tupleColumnIndexes.push(columnIndex);
         for (const leaf of leaves) {
           descriptors.push({
             columnIndex,
@@ -582,6 +595,7 @@
     return {
       changed,
       descriptors,
+      tupleColumnIndexes,
       columns: descriptors.map((descriptor) => descriptor.name),
       types: descriptors.map((descriptor) => descriptor.type),
     };
@@ -589,7 +603,16 @@
 
   function flattenTupleRow(row, plan) {
     if (!plan?.changed) return row;
-    const out = plan.descriptors.map((descriptor) => descriptor.get(row));
+    // Parse each Tuple source cell once. Every leaf extractor used to
+    // JSON.parse the whole cell again, i.e. k parses per row for k fields
+    // (and the whole array k times for Array(Tuple(...))).
+    let source = row;
+    const tupleIndexes = plan.tupleColumnIndexes;
+    if (Array.isArray(row) && Array.isArray(tupleIndexes) && tupleIndexes.length) {
+      source = row.slice();
+      for (const index of tupleIndexes) source[index] = parseJsonStringIfLikely(row[index]);
+    }
+    const out = plan.descriptors.map((descriptor) => descriptor.get(source));
     if (row && typeof row === "object" && row.__chdashRowIndex) out.__chdashRowIndex = row.__chdashRowIndex;
     return out;
   }
@@ -1549,7 +1572,32 @@
     }
   }
 
-  function renderLiveTableFull() {
+  // Returns true when the currently mounted virtual window still matches the
+  // grown row set, after resizing (or creating/removing) the bottom spacer.
+  function updateVirtualTailSpacer() {
+    const tbody = dom.resultTableBody;
+    if (!tbody || virtualLastStart < 0 || isVerticalResults) return false;
+    const rows = virtualViewRows;
+    const rowH = Math.max(18, Number(virtualRowHeight) || virtualDefaultRowHeight);
+    const { start, end } = getVirtualRange(rows.length, rowH, tbody);
+    if (start !== virtualLastStart || end !== virtualLastEnd) return false;
+    const last = tbody.lastElementChild;
+    const hasBottomSpacer = !!last && last.classList.contains("resultTable__spacerRow")
+      && !(start > 0 && last === tbody.firstElementChild);
+    if (end >= rows.length) {
+      if (hasBottomSpacer) last.remove();
+      return true;
+    }
+    const tailHeight = (rows.length - end) * rowH;
+    if (hasBottomSpacer && last.firstElementChild) {
+      last.firstElementChild.style.height = `${Math.max(0, Math.round(tailHeight))}px`;
+    } else {
+      tbody.appendChild(createVirtualSpacerRow(tailHeight));
+    }
+    return true;
+  }
+
+  function renderLiveTableFull({ allowTailOnly = false } = {}) {
     if (isVerticalResults) return;
     if (!dom.resultTableBody) return;
 
@@ -1563,6 +1611,12 @@
     const rows = buildLiveViewRows();
 
     if (rows.length > virtualRowThreshold && dom.liveResultsWrap) {
+      // Unsorted streaming only appends to allResultRows. When the mounted
+      // window is unchanged, growing the bottom spacer is enough; rebuilding
+      // every mounted row (hundreds x columns) on each SSE batch was the
+      // dominant main-thread cost of large result streams.
+      const appendOnly = allowTailOnly && isVirtualResults && rows === allResultRows && virtualViewRows === allResultRows;
+      if (appendOnly && updateVirtualTailSpacer()) return;
       isVirtualResults = true;
       virtualViewRows = rows;
       virtualLastStart = -1;
@@ -1600,13 +1654,18 @@
     renderBatch(0);
   }
 
-  function scheduleLiveTableFullRender() {
+  // `appendOnly` callers only added rows at the end of an unsorted stream; any
+  // other caller in the same frame forces a real rebuild.
+  function scheduleLiveTableFullRender({ appendOnly = false } = {}) {
+    if (!appendOnly) scheduledFullRenderRebuild = true;
     if (scheduledFullRender) return;
     scheduledFullRender = true;
     fullRenderRafId = requestAnimationFrame(() => {
+      const rebuild = scheduledFullRenderRebuild;
       scheduledFullRender = false;
+      scheduledFullRenderRebuild = false;
       fullRenderRafId = 0;
-      renderLiveTableFull();
+      renderLiveTableFull({ allowTailOnly: !rebuild });
     });
   }
 
@@ -1777,7 +1836,7 @@
     // called the scheduler once per row, creating avoidable main-thread work.
     if (needsFullRender) {
       pendingRows.length = 0;
-      scheduleLiveTableFullRender();
+      scheduleLiveTableFullRender({ appendOnly: !isLiveSortActive() });
     } else if (pendingRows.length > 0) {
       scheduleFlush();
     }
@@ -2047,9 +2106,10 @@
     return {
       columns: Array.isArray(resultColumns) ? resultColumns.slice() : [],
       types: Array.isArray(resultTypes) ? resultTypes.slice() : [],
+      // Download/history consumers rebuild JSON/CSV from `rows` on demand.
+      // Pre-rendering both texts here converted every cell twice after each
+      // statement (seconds for 100k-row results) and retained the strings.
       rows: Array.isArray(allResultRows) ? allResultRows.slice() : [],
-      jsonText: buildCopyJsonText(),
-      csvText: buildCopyCsvText(),
       errorText: String(lastErrorMessage || ""),
       status: String(currentStatusValue || ""),
     };
@@ -2679,6 +2739,11 @@
       local.virtualScrollAttached = true;
       document.addEventListener("scroll", handleLocalVirtualScroll, { passive: true, capture: true });
       window.addEventListener("resize", scheduleLocalVirtualRender, { passive: true });
+      resultsStackDisposers.push(() => {
+        document.removeEventListener("scroll", handleLocalVirtualScroll, { capture: true });
+        window.removeEventListener("resize", scheduleLocalVirtualRender);
+        local.virtualScrollAttached = false;
+      });
     }
 
     function renderLocalTableFull() {
@@ -2991,8 +3056,6 @@
         columns: Array.isArray(local.columns) ? local.columns.slice() : [],
         types: Array.isArray(local.types) ? local.types.slice() : [],
         rows: Array.isArray(local.allRows) ? local.allRows.slice() : [],
-        jsonText: buildCopyJsonTextLocal(),
-        csvText: buildCopyCsvTextLocal(),
         errorText: String(local.errorText || ""),
       };
     }

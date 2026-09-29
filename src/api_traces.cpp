@@ -730,7 +730,42 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     }
   }
 
-  if (!used_trace_index_fast_path) {
+  if (!used_trace_index_fast_path && has_duration_filters) {
+    // Duration is a trace-level HAVING over every span in the window. The
+    // trace index cannot answer it: the OTel exporter's trace_id_ts MV stores
+    // End = max(Timestamp) (last span *start*), which underestimates duration.
+    // Instead, select the matching TraceIds with only the cheap min/max
+    // aggregates, then compute the expensive summary (argMin*, per-span
+    // service/status arrays) for those <= limit traces only. Same spans, same
+    // HAVING, same ORDER BY: identical results, ~4x less work on wide windows.
+    try {
+      const auto candidate_started = std::chrono::steady_clock::now();
+      std::vector<std::string> selected_ids;
+      const std::string candidate_sql =
+          (has_candidate_filters ? "WITH " + candidate_cte + " " : "") +
+          "SELECT toString(TraceId) FROM " + table + " PREWHERE " + time_predicate +
+          " WHERE " + visibility + candidate_where +
+          " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
+      client->Select(candidate_sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) selected_ids.push_back(ch_block_text_at(block, 0, row));
+      });
+      candidate_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - candidate_started).count());
+      if (!selected_ids.empty()) {
+        const auto summary_started = std::chrono::steady_clock::now();
+        const std::string summary_sql = aggregate_select +
+            "FROM " + table + " PREWHERE " + time_predicate +
+            " WHERE " + visibility + " AND TraceId IN " + trace_id_list_sql(selected_ids) +
+            " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
+        read_summary(summary_sql);
+        summary_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - summary_started).count());
+      }
+      search_path = "span_duration_two_phase";
+    } catch (const std::exception& e) {
+      return json_error(res, 503, "trace_search_failed", e.what());
+    }
+  } else if (!used_trace_index_fast_path) {
     try {
       const auto summary_started = std::chrono::steady_clock::now();
       const std::string summary_sql =
@@ -845,8 +880,6 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const bool has_candidate_filters = !span_filters.empty();
-  const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
-  const bool needs_span_match = has_candidate_filters || visibility != "1";
 
   const std::string candidate_cte = has_candidate_filters
       ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
@@ -902,55 +935,18 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
     for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
   };
 
+  // Duration quantiles are always computed from the spans themselves. The
+  // trace index cannot provide them: the OTel exporter's trace_id_ts MV stores
+  // End = max(Timestamp), i.e. the *start* of the last span, and one row per
+  // insert batch (so any single row may hold partial bounds). Index-based
+  // quantiles were therefore systematically wrong (e.g. P50 226 ms instead of
+  // 182 ms on the local fixture). Trace counts come from the same query so
+  // both charts describe exactly the same set of traces.
   uint64_t analytics_query_ms = 0;
-  bool used_trace_index_fast_path = false;
-  std::string analytics_path = "span_aggregation";
-  std::string quantile_source = "span_bounds";
-  const bool index_fast_path_eligible = !has_duration_filters && !cfg_.traces.trace_index_table.empty();
+  const std::string analytics_path = "span_aggregation";
+  const std::string quantile_source = "span_bounds";
 
-  if (index_fast_path_eligible) {
-    try {
-      const auto analytics_started = std::chrono::steady_clock::now();
-      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
-      const std::string index_time_predicate =
-          "Start >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND "
-          "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")";
-      const std::string trace_bounds_cte = needs_span_match
-          ? "WITH matching_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
-            " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId), "
-            "trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
-            " PREWHERE " + index_time_predicate +
-            " WHERE TraceId IN (SELECT TraceId FROM matching_ids) LIMIT 1 BY TraceId) "
-          : "WITH trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end FROM " + index_table +
-            " PREWHERE " + index_time_predicate + " LIMIT 1 BY TraceId) ";
-
-      const std::string index_duration_expr =
-          "greatest(toInt64(0), toInt64(toUnixTimestamp64Nano(toDateTime64(trace_end, 9))) - "
-          "toInt64(toUnixTimestamp64Nano(toDateTime64(trace_start, 9))))";
-      const std::string analytics_sql = trace_bounds_cte +
-          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(toDateTime64(trace_start, 9), "
-          "toIntervalSecond(" + std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, "
-          "toString(count()), "
-          "toString(toUInt64(quantileTDigest(0.50)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.90)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.95)(" + index_duration_expr + "))), "
-          "toString(toUInt64(quantileTDigest(0.99)(" + index_duration_expr + "))) "
-          "FROM trace_bounds GROUP BY bucket_ms ORDER BY bucket_ms";
-      read_analytics(analytics_sql);
-      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - analytics_started).count());
-      used_trace_index_fast_path = true;
-      analytics_path = "trace_index";
-      quantile_source = "trace_index_bounds";
-    } catch (...) {
-      trace_counts.clear();
-      quantiles.clear();
-      analytics_query_ms = 0;
-      analytics_path = "span_aggregation";
-    }
-  }
-
-  if (!used_trace_index_fast_path) {
+  {
     try {
       const auto analytics_started = std::chrono::steady_clock::now();
       const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility + candidate_where +

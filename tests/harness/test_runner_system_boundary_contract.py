@@ -118,7 +118,7 @@ def test_interactive_result_cell_and_event_limits_are_32_mib_by_default() -> Non
     assert "max_result_event_bytes = 32 * 1024 * 1024" in header
     assert "result_cell_too_large" in session
     assert "result_event_too_large" in session
-    assert "cell_buffer.GetSize() > options_.max_result_cell_bytes" in session
+    assert "cell_bytes > options_.max_result_cell_bytes" in session
     assert "chunk.size() > options_.max_result_event_bytes" in session
     assert 'int_attr(*query, "max_result_cell_bytes", "query")' in config
     assert 'int_attr(*query, "max_result_event_bytes", "query")' in config

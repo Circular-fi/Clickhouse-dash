@@ -71,9 +71,8 @@ def test_unfiltered_trace_search_uses_trace_index_fast_path_and_bounded_enrichme
     assert 'PREWHERE " + index_time_predicate' in cpp
     assert 'ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT' in cpp
     assert '" WHERE " + visibility + " AND TraceId IN " + trace_id_list' in cpp
-    assert 'trace_bounds AS (SELECT TraceId, Start AS trace_start, End AS trace_end' in cpp
     assert 'duration_quantiles_source' in cpp
     assert 'analytics_enabled' in cpp
-    assert 'trace_index_bounds' in cpp
+    assert 'span_bounds' in cpp
     assert 'w.Key("timing_ms")' in cpp
     assert 'w.Key("search_path")' in cpp

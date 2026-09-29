@@ -203,6 +203,12 @@ clickhouse {
 }
 ```
 
+Native protocol block compression is negotiated per connection through the
+`compression` URI query parameter: `lz4` (default), `zstd` or `none`, e.g.
+`clickhouse://chdash_runner@clickhouse:9000?compression=zstd`. LZ4 typically
+shrinks result and export traffic 3-10x for negligible CPU; use `none` only
+when ClickHouse is on the same host and CPU is the bottleneck.
+
 The file is read when a native ClickHouse client is created. One final LF or
 CRLF is removed; other whitespace is preserved. A NUL byte, an unreadable file,
 or combining a URI password with a password file causes client creation to

@@ -27,6 +27,7 @@
 #include <arpa/inet.h>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <cstring>
 #include <string>
@@ -201,37 +202,130 @@ inline std::string ipv6_to_string(std::string_view bytes16) {
   return r ? std::string(r) : std::string();
 }
 
-inline std::string datetime_to_iso(uint32_t seconds) {
-  std::time_t t = static_cast<std::time_t>(seconds);
-  std::tm tm{};
-  gmtime_r(&t, &tm);
-  char buf[32];
-  std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
-  return std::string(buf);
+// Calendar formatting is done arithmetically (Howard Hinnant's
+// civil_from_days, proleptic Gregorian, UTC). glibc gmtime_r takes the
+// process-wide tz lock on every call, which serialized every DateTime cell of
+// every concurrent query/export; strftime adds locale work on top. These
+// helpers are lock-free, allocation-free and correct for pre-1970 values.
+inline void civil_from_days(int64_t z, int64_t& y, unsigned& m, unsigned& d) {
+  z += 719468;
+  const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+  const unsigned doe = static_cast<unsigned>(z - era * 146097);
+  const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  y = static_cast<int64_t>(yoe) + era * 400;
+  const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  const unsigned mp = (5 * doy + 2) / 153;
+  d = doy - (153 * mp + 2) / 5 + 1;
+  m = mp < 10 ? mp + 3 : mp - 9;
+  if (m <= 2) ++y;
 }
 
-inline std::string datetime64_to_iso(int64_t scaled, size_t precision) {
+inline char* put_digits(char* p, unsigned v, int width) {
+  for (int i = width - 1; i >= 0; --i) {
+    p[i] = static_cast<char>('0' + v % 10);
+    v /= 10;
+  }
+  return p + width;
+}
+
+// Writes YYYY-MM-DD (years outside 0..9999 keep a sign/extra digits).
+// `out` must hold at least 24 bytes. Returns the end pointer.
+inline char* format_civil_date(char* out, int64_t days) {
+  int64_t y = 0;
+  unsigned m = 1, d = 1;
+  civil_from_days(days, y, m, d);
+  char* p = out;
+  if (y >= 0 && y <= 9999) {
+    p = put_digits(p, static_cast<unsigned>(y), 4);
+  } else {
+    p += std::snprintf(p, 16, "%lld", static_cast<long long>(y));
+  }
+  *p++ = '-';
+  p = put_digits(p, m, 2);
+  *p++ = '-';
+  return put_digits(p, d, 2);
+}
+
+// Writes YYYY-MM-DDTHH:MM:SS. `out` must hold at least 40 bytes.
+inline char* format_civil_datetime(char* out, int64_t seconds) {
+  int64_t days = seconds / 86400;
+  int64_t rem = seconds % 86400;
+  if (rem < 0) {
+    rem += 86400;
+    --days;
+  }
+  char* p = format_civil_date(out, days);
+  *p++ = 'T';
+  p = put_digits(p, static_cast<unsigned>(rem / 3600), 2);
+  *p++ = ':';
+  p = put_digits(p, static_cast<unsigned>((rem / 60) % 60), 2);
+  *p++ = ':';
+  return put_digits(p, static_cast<unsigned>(rem % 60), 2);
+}
+
+inline size_t format_datetime_iso(char* out, uint32_t seconds) {
+  char* p = format_civil_datetime(out, static_cast<int64_t>(seconds));
+  *p++ = 'Z';
+  return static_cast<size_t>(p - out);
+}
+
+// DateTime64 uses floor division so that negative (pre-epoch) values with a
+// fractional part are formatted correctly: -0.5 s is 1969-12-31T23:59:59.5Z.
+// `out` must hold at least 64 bytes.
+inline size_t format_datetime64_iso(char* out, int64_t scaled, size_t precision) {
+  if (precision > 18) precision = 18;
   int64_t pow10 = 1;
   for (size_t i = 0; i < precision; i++) pow10 *= 10;
   int64_t sec = scaled / pow10;
   int64_t frac = scaled % pow10;
-  if (frac < 0) frac = -frac;
-
-  std::time_t t = static_cast<std::time_t>(sec);
-  std::tm tm{};
-  gmtime_r(&t, &tm);
-  char base[32];
-  std::strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", &tm);
-
-  std::string out(base);
-  if (precision > 0) {
-    out.push_back('.');
-    std::string f = std::to_string(frac);
-    if (f.size() < precision) f.insert(f.begin(), precision - f.size(), '0');
-    out += f;
+  if (frac < 0) {
+    frac += pow10;
+    --sec;
   }
-  out += 'Z';
-  return out;
+  char* p = format_civil_datetime(out, sec);
+  if (precision > 0) {
+    *p++ = '.';
+    for (int i = static_cast<int>(precision) - 1; i >= 0; --i) {
+      p[i] = static_cast<char>('0' + frac % 10);
+      frac /= 10;
+    }
+    p += precision;
+  }
+  *p++ = 'Z';
+  return static_cast<size_t>(p - out);
+}
+
+inline std::string datetime_to_iso(uint32_t seconds) {
+  char buf[40];
+  return std::string(buf, format_datetime_iso(buf, seconds));
+}
+
+inline std::string datetime64_to_iso(int64_t scaled, size_t precision) {
+  char buf[64];
+  return std::string(buf, format_datetime64_iso(buf, scaled, precision));
+}
+
+inline std::string date_days_to_iso(int64_t days) {
+  char buf[24];
+  return std::string(buf, format_civil_date(buf, days));
+}
+
+// clickhouse-cpp stores Decimal32/64 in their native 4/8-byte integer widths
+// and ColumnDecimal::GetItem() reports the *logical* Decimal type code while
+// carrying the bytes of its physical Int32/Int64/Int128 storage column.
+// Reading every decimal as Int128 therefore triggers ItemView's strict size
+// check ("Requested size: 16 stored size: 8" on Decimal(18,6)). Select the
+// physical width from the precision, matching clickhouse-cpp's ColumnDecimal
+// (<=9 -> Int32, <=18 -> Int64, else Int128), then widen.
+inline clickhouse::Int128 decimal_raw_value(const clickhouse::ItemView& it, size_t precision) {
+  using clickhouse::Type;
+  if (it.type == Type::Decimal32 || (it.type == Type::Decimal && precision <= 9)) {
+    return static_cast<clickhouse::Int128>(it.get<int32_t>());
+  }
+  if (it.type == Type::Decimal64 || (it.type == Type::Decimal && precision <= 18)) {
+    return static_cast<clickhouse::Int128>(it.get<int64_t>());
+  }
+  return it.get<clickhouse::Int128>();
 }
 
 inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clickhouse::ItemView& it, const clickhouse::Type& ty) {
@@ -272,25 +366,30 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::Float32: writer_finite_double(w, static_cast<double>(it.get<float>())); return;
     case Type::Float64: writer_finite_double(w, it.get<double>()); return;
 
-    case Type::DateTime:
-      writer_string(w, datetime_to_iso(it.get<uint32_t>()));
+    case Type::DateTime: {
+      char buf[40];
+      writer_string(w, std::string_view(buf, format_datetime_iso(buf, it.get<uint32_t>())));
       return;
+    }
 
     case Type::DateTime64: {
       const auto* dt64 = ty.As<clickhouse::DateTime64Type>();
       const size_t p = dt64 ? dt64->GetPrecision() : 0;
-      writer_string(w, datetime64_to_iso(it.get<int64_t>(), p));
+      char buf[64];
+      writer_string(w, std::string_view(buf, format_datetime64_iso(buf, it.get<int64_t>(), p)));
       return;
     }
 
     case Type::Date: {
-      uint16_t days = it.get<uint16_t>();
-      std::time_t t = static_cast<std::time_t>(days) * 86400;
-      std::tm tm{};
-      gmtime_r(&t, &tm);
-      char buf[16];
-      std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
-      writer_string(w, std::string_view(buf));
+      char buf[24];
+      writer_string(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<uint16_t>()) - buf)));
+      return;
+    }
+
+    case Type::Date32: {
+      // Date32 is a signed day offset from 1970-01-01 (range 1900..2299).
+      char buf[24];
+      writer_string(w, std::string_view(buf, static_cast<size_t>(format_civil_date(buf, it.get<int32_t>()) - buf)));
       return;
     }
 
@@ -328,21 +427,11 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
       // widths. Reading every decimal as Int128 triggers ItemView's strict size
       // check (for example "Requested size: 16 stored size: 8" on
       // Decimal(18,6)). Widen only after reading the runtime-width value.
-      clickhouse::Int128 raw = 0;
       const size_t precision = d ? d->GetPrecision() : 38;
       // ColumnDecimal::GetItem() intentionally reports the *logical* Decimal
-      // type code while carrying the bytes of its physical Int32/Int64/Int128
-      // storage column. Therefore checking ItemView::type alone is not enough:
-      // a Decimal(18,6) arrives as Type::Decimal with 8 stored bytes. Select the
-      // physical width from Decimal precision, matching clickhouse-cpp's own
-      // ColumnDecimal implementation (<=9 -> Int32, <=18 -> Int64, else Int128).
-      if (it.type == Type::Decimal32 || (it.type == Type::Decimal && precision <= 9)) {
-        raw = static_cast<clickhouse::Int128>(it.get<int32_t>());
-      } else if (it.type == Type::Decimal64 || (it.type == Type::Decimal && precision <= 18)) {
-        raw = static_cast<clickhouse::Int128>(it.get<int64_t>());
-      } else {
-        raw = it.get<clickhouse::Int128>();
-      }
+      // type code; a Decimal(18,6) arrives as Type::Decimal with 8 stored
+      // bytes. decimal_raw_value() selects the physical width.
+      const clickhouse::Int128 raw = decimal_raw_value(it, precision);
       const auto s = decimal_to_string(raw, scale);
       w.RawValue(s.c_str(), static_cast<rapidjson::SizeType>(s.size()), rapidjson::kNumberType);
       return;
@@ -367,10 +456,19 @@ inline void write_array(rapidjson::Writer<rapidjson::StringBuffer>& w,
     w.Null();
     return;
   }
-  auto nested = a->GetAsColumn(row);
+  // Iterate the row's element range in the shared backing column instead of
+  // GetAsColumn(), which Slice()s -- allocating a new column and copying every
+  // element (strings included) -- for every single Array cell.
+  if (row >= a->Size()) {
+    w.Null();
+    return;
+  }
+  const clickhouse::ColumnRef data = a->GetData();
+  const size_t begin = a->GetOffset(row);
+  const size_t end = begin + a->GetSize(row);
   w.StartArray();
-  for (size_t i = 0; i < nested->Size(); i++) {
-    write_column_value(w, nested, i);
+  for (size_t i = begin; i < end; i++) {
+    write_column_value(w, data, i);
   }
   w.EndArray();
 }
@@ -438,7 +536,7 @@ inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
                                const clickhouse::ColumnRef& col,
                                size_t row) {
   using clickhouse::Type;
-  const auto code = col->Type()->GetCode();
+  const auto code = col->GetType().GetCode();
 
   // Nullable wrapper.
   if (code == Type::Nullable) {
@@ -485,7 +583,7 @@ inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
 
   // Scalars.
   const auto it = col->GetItem(row);
-  write_item(w, it, *col->Type());
+  write_item(w, it, col->GetType());
 }
 
 } // namespace detail

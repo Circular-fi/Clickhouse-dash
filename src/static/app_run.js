@@ -611,6 +611,20 @@
     return tables.processors_profile_log === true && tables.opentelemetry_span_log === true;
   }
 
+  // updateActionButtons runs on every editor input; splitting a large script
+  // (character-by-character scanner) on each keystroke is wasted work when the
+  // text has not changed since the previous call (state/host/button updates).
+  let cachedEditorStatementsText = null;
+  let cachedEditorStatements = [];
+  function editorStatementsForButtons() {
+    const text = String(dom.queryTextArea?.value || "").trim();
+    if (text !== cachedEditorStatementsText) {
+      cachedEditorStatementsText = text;
+      cachedEditorStatements = sql.splitSqlStatements(text);
+    }
+    return cachedEditorStatements;
+  }
+
   function updateActionButtons() {
     const busy = state.isRunning || state.isFormatting;
     const offline = state.apiOnline === false;
@@ -629,7 +643,7 @@
       dom.runMenuButton.hidden = state.isRunning;
       dom.runMenuButton.disabled = busy || offline;
     }
-    const editorStatements = sql.splitSqlStatements(String(dom.queryTextArea?.value || "").trim());
+    const editorStatements = editorStatementsForButtons();
     const editorIsMulti = editorStatements.length > 1;
     if (dom.runWithProfilingButton) {
       const profilingAvailable = selectedHostSupportsFullProfiling();

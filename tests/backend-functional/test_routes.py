@@ -132,7 +132,7 @@ def test_otel_projection_indexes_are_present():
         """
 SELECT throwIf(
     count() != 2,
-    concat('expected 2 OTEL projection indexes, found ', toString(count()))
+    'expected exactly 2 OTEL projection indexes (prj_traceid, prj_start)'
 )
 FROM system.projections
 WHERE database = 'otel'
@@ -165,7 +165,9 @@ def test_query_run_alias_stream_analysis_execution_and_deep_analysis():
     assert isinstance(analysis.get("session_elapsed_ms"), int)
     assert analysis.get("availability", {}).get("processors_profile_log") is True, analysis
     assert analysis.get("processor_profiling_recorded") is True, analysis
-    assert analysis.get("processors"), analysis
+    # The default analysis payload is compact; raw processor rows are only
+    # emitted in the debug section (release49 processor compact contract).
+    assert analysis.get("processors_compact"), analysis
     compact = analysis.get("trace_compact", {})
     assert compact.get("format") == "chdash.trace.json.lod.v2", analysis
     assert compact.get("timeline_px") == 3840, analysis
@@ -236,30 +238,40 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     assert fixture_tables["weather_buffer"].get("engine") == "Buffer"
     assert fixture_tables["station_dictionary_source"].get("engine") == "TinyLog"
     assert int(fixture_tables["memory_weather"].get("rows") or 0) == 3
-    # The fixture writes three active parts, but every observation_date is in
-    # the same YYYYMM partition. Parts and partitions are distinct metrics.
-    assert int(fixture_tables["weather_observations"].get("partitions") or 0) == 1
-    assert int(fixture_tables["weather_observations"].get("active_parts") or 0) >= 3
-    assert "rows_total_1h" in fixture_tables["weather_observations"].get("client_ingress", {})
-    assert "bytes_total_1h" in fixture_tables["weather_observations"].get("client_ingress", {})
-    assert "rows_total_1h" in fixture_tables["weather_observations"].get("physical_ingress", {})
+    assert int(fixture_tables["weather_observations"].get("rows") or 0) > 0
 
+    # The sidebar catalog is deliberately lightweight (names, engine, rows and
+    # bytes). Rich per-table storage metrics are loaded lazily by the table
+    # detail route, so they are asserted against /api/explorer/table below.
     database = next((item for item in catalog_payload.get("database_summaries", []) if item.get("name") == "chdash_ui"), None)
+    if database is None:
+        root = get("/api/explorer/catalog", params={"host_id": "local"})
+        assert root.status_code == 200, root.text
+        database = next((item for item in root.json().get("database_summaries", []) if item.get("name") == "chdash_ui"), None)
     assert database is not None, catalog_payload
     assert int(database.get("tables") or 0) >= 6, database
     assert int(database.get("rows") or 0) > 0, database
     assert int(database.get("bytes") or 0) > 0, database
-    assert database.get("disks"), database
-    for disk in database["disks"]:
-        assert isinstance(disk.get("host_name"), str) and disk.get("host_name"), disk
-        assert isinstance(disk.get("name"), str) and disk.get("name"), disk
-        assert disk.get("free_space") is None or int(disk["free_space"]) >= 0, disk
-        assert disk.get("total_space") is None or int(disk["total_space"]) > 0, disk
 
-    table = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_ui", "table": "weather_observations"})
+    # refresh=1: the session fixture just recreated these tables, so a detail
+    # cached by a concurrent client during the reset must not be served.
+    table = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_ui", "table": "weather_observations", "refresh": "1"})
     assert table.status_code == 200, table.text
     table_payload = table.json()
     assert table_payload.get("summary", {}).get("engine") == "MergeTree"
+    summary = table_payload.get("summary", {})
+    # The fixture writes three active parts, but every observation_date is in
+    # the same YYYYMM partition. Parts and partitions are distinct metrics.
+    assert int(summary.get("partitions") or 0) == 1, summary
+    assert int(summary.get("active_parts") or 0) >= 3, summary
+    assert "rows_total_1h" in summary.get("client_ingress", {}), summary
+    assert "bytes_total_1h" in summary.get("client_ingress", {}), summary
+    assert "rows_total_1h" in summary.get("physical_ingress", {}), summary
+    assert table_payload.get("storage"), table_payload
+    for disk in table_payload["storage"]:
+        assert isinstance(disk.get("disk"), str) and disk.get("disk"), disk
+        assert disk.get("free_space") is None or int(disk["free_space"]) >= 0, disk
+        assert disk.get("total_space") is None or int(disk["total_space"]) > 0, disk
     assert {column.get("name") for column in table_payload.get("columns", [])} >= {"observed_at", "id", "city", "temperature_c"}
     assert all("codec" in column for column in table_payload.get("columns", [])), table_payload
     assert table_payload.get("indexes_and_projections"), table_payload
@@ -270,7 +282,11 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     assert ("chdash_ui", "valid_weather_observations") in downstream, table_payload
     assert ("chdash_ui", "weather_daily_summary_mv") in downstream, table_payload
     assert ("chdash_ui", "weather_buffer") in upstream, table_payload
-    assert re.search(r"TTL\s+observed_at\s+\+\s+(?:INTERVAL\s+2\s+YEAR|toIntervalYear\(2\))", table_payload.get("ddl", ""), re.I), table_payload
+    # Fixture TTL: 30d RECOMPRESS, 60d TO VOLUME 'warm', 365d DELETE.
+    ddl = table_payload.get("ddl", "")
+    assert re.search(r"TTL\s+observed_at\s+\+\s+(?:INTERVAL\s+30\s+DAY|toIntervalDay\(30\))\s+RECOMPRESS", ddl, re.I), ddl
+    assert re.search(r"observed_at\s+\+\s+(?:INTERVAL\s+60\s+DAY|toIntervalDay\(60\))\s+TO\s+VOLUME\s+'warm'", ddl, re.I), ddl
+    assert re.search(r"observed_at\s+\+\s+(?:INTERVAL\s+365\s+DAY|toIntervalDay\(365\))", ddl, re.I), ddl
 
     mv_detail = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_ui", "table": "weather_daily_summary_mv"})
     assert mv_detail.status_code == 200, mv_detail.text
@@ -395,8 +411,10 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     assert ttl_rules[1].get("target_kind") == "volume" and ttl_rules[1].get("target") == "warm", ttl_rules
     assert not any(edge.get("kind") == "ttl_move" for edge in graph_payload.get("edges", [])), graph_payload
 
+    # The standalone activity route was removed; ingress metrics are part of
+    # the table summary asserted above.
     activity = get("/api/explorer/activity", params={"host_id": "local", "database": "chdash_ui"})
-    assert activity.status_code == 200, activity.text
+    assert activity.status_code == 404, activity.text
 
     functions = get("/api/explorer/functions", params={"host_id": "local"})
     assert functions.status_code == 200, functions.text
@@ -520,6 +538,48 @@ def test_export_routes_produce_downloadable_zip():
         assert execution[0]["logs_pending"] == "false", execution[0]
 
 
+TYPED_EXPORT_SQL = (
+    "SELECT toDecimal32(1.25, 2) AS d32, toDecimal64(-3.5, 6) AS d64, toDecimal128(7.125, 3) AS d128, "
+    "toDate32('1960-01-02') AS date32, toDateTime64(-0.5, 1, 'UTC') AS pre_epoch, "
+    "toFloat64(0.1) AS tenth"
+)
+
+
+def test_csv_export_serializes_narrow_decimals_date32_and_shortest_floats():
+    # Decimal32/64 are stored in 4/8 bytes; reading them as Int128 used to
+    # abort the whole CSV export.
+    response = post("/api/export/run", json={"host_id": "local", "format": "csv", "queries": [TYPED_EXPORT_SQL]})
+    assert response.status_code == 200, response.text
+    archive = SESSION.get(urljoin(BASE_URL + "/", response.json()["download_url"]), timeout=60)
+    assert archive.status_code == 200, archive.text
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
+        assert "results.csv" in zf.namelist(), zf.namelist()
+        rows = list(csv.DictReader(io.StringIO(zf.read("results.csv").decode("utf-8"))))
+        execution = list(csv.DictReader(io.StringIO(zf.read("execution.csv").decode("utf-8"))))
+    assert execution[0]["status"] == "finished", execution[0]
+    assert rows == [{
+        "d32": "1.25", "d64": "-3.500000", "d128": "7.125",
+        "date32": "1960-01-02", "pre_epoch": "1969-12-31T23:59:59.5Z", "tenth": "0.1",
+    }], rows
+
+
+def test_stream_serializes_date32_and_pre_epoch_datetime64():
+    _, events = run_sql(TYPED_EXPORT_SQL)
+    rows = [row for e in events if e["event"] == "result_rows" for row in e["data"]["rows"]]
+    assert rows == [[1.25, -3.5, 7.125, "1960-01-02", "1969-12-31T23:59:59.5Z", 0.1]], rows
+
+
+def test_session_state_does_not_leak_through_the_connection_pool():
+    # USE/SET change native session state; the pooled runner connection must
+    # not carry them into later, unrelated runs.
+    for sql in ["USE system", "SET max_threads = 3"]:
+        _, events = run_sql(sql)
+    for _ in range(3):
+        _, events = run_sql("SELECT currentDatabase() AS db, getSetting('max_threads') = 3 AS leaked")
+        rows = [row for e in events if e["event"] == "result_rows" for row in e["data"]["rows"]]
+        assert rows and rows[0][0] != "system" and rows[0][1] in (0, False), rows
+
+
 def test_multiquery_export_stops_at_first_failed_statement_with_explicit_error():
     response = post(
         "/api/export/run",
@@ -554,3 +614,61 @@ def test_multiquery_export_stops_at_first_failed_statement_with_explicit_error()
         execution = list(csv.DictReader(io.StringIO(zf.read("query-002/execution.csv").decode("utf-8"))))
         assert len(execution) == 1, execution
         assert execution[0]["status"] == "error", execution[0]
+
+
+def _otel_window_ms() -> tuple[int, int]:
+    base = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
+    auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+    response = requests.post(
+        base + "/",
+        data=b"SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts",
+        auth=auth, timeout=30,
+    )
+    assert response.status_code == 200, response.text
+    end_ms = int(response.text.strip() or 0)
+    if end_ms <= 0:
+        pytest.skip("OTEL fixture is empty")
+    return end_ms - 3_600_000, end_ms + 1
+
+
+def test_trace_search_detail_and_duration_filters_use_system_context():
+    # Trace Explorer reads OTEL tables through system_uri; this also guards the
+    # fixture grant, which used to be dropped by every fixture reset.
+    start_ms, end_ms = _otel_window_ms()
+    window = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": 20}
+    search = get("/api/traces/search", params=window)
+    assert search.status_code == 200, search.text
+    payload = search.json()
+    assert payload.get("search_path") == "trace_index", payload
+    assert payload.get("rows"), payload
+    trace_id = payload["rows"][0][0]
+
+    detail = get("/api/traces/trace", params={"host_id": "local", "trace_id": trace_id, "start_ms": start_ms, "end_ms": end_ms})
+    assert detail.status_code == 200, detail.text
+
+    durations = sorted(int(row[4]) for row in payload["rows"])
+    threshold_ns = durations[len(durations) // 2]
+    filtered = get("/api/traces/search", params={**window, "min_duration_ms": threshold_ns / 1_000_000})
+    assert filtered.status_code == 200, filtered.text
+    filtered_payload = filtered.json()
+    assert filtered_payload.get("search_path") == "span_duration_two_phase", filtered_payload
+    assert filtered_payload.get("rows"), filtered_payload
+    assert all(int(row[4]) >= threshold_ns for row in filtered_payload["rows"]), filtered_payload
+    bounded = get("/api/traces/search", params={**window, "max_duration_ms": threshold_ns / 1_000_000})
+    assert bounded.status_code == 200, bounded.text
+    assert all(int(row[4]) <= threshold_ns for row in bounded.json().get("rows", [])), bounded.text
+
+
+def test_trace_analytics_duration_quantiles_come_from_spans():
+    # The OTel trace index stores End = max(Timestamp) (last span start), so
+    # quantiles must be computed from span bounds, never from the index.
+    start_ms, end_ms = _otel_window_ms()
+    response = get("/api/traces/analytics", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms})
+    if response.status_code == 409 or response.json().get("error_code") == "trace_analytics_disabled":
+        pytest.skip("trace analytics disabled in this configuration")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload.get("analytics_path") == "span_aggregation", payload
+    assert payload.get("duration_quantiles_source") == "span_bounds", payload
+    assert payload.get("trace_count_chart"), payload
+    assert payload.get("duration_quantiles"), payload

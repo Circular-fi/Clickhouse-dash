@@ -276,6 +276,8 @@
     return detail;
   }
 
+  const DETAIL_CACHE_MAX_ENTRIES = 64;
+
   async function fetchTableDetail(hostId, database, table, force = false) {
     const key = detailCacheKey(hostId, database, table);
     if (force) model.detailCache.delete(key);
@@ -298,7 +300,14 @@
         detail = await api.getExplorerTable(hostId, database, table, true);
       }
       applyFreshSidebarSummary(detail, database, table);
+      // Map preserves insertion order: re-inserting keeps LRU order and the
+      // oldest entries are evicted. Rich details (columns, parts, DDL) were
+      // otherwise retained for every object visited during the session.
+      model.detailCache.delete(key);
       model.detailCache.set(key, { detail, cachedAtMs: Date.now() });
+      while (model.detailCache.size > DETAIL_CACHE_MAX_ENTRIES) {
+        model.detailCache.delete(model.detailCache.keys().next().value);
+      }
       return detail;
     })().finally(() => model.detailPromises.delete(key));
     model.detailPromises.set(key, promise);
@@ -1347,7 +1356,13 @@
   function renderTabs() {
     if (!dom.explorerDetailTabs) return;
     const tabs = availableTabs(model.detail);
-    if (!tabs.includes(model.tab)) model.tab = "Overview";
+    if (!tabs.includes(model.tab)) {
+      model.tab = "Overview";
+      // A deep link to a tab this object does not have (e.g. /operations on a
+      // MergeTree table) falls back to Overview; keep the address bar in sync
+      // once the real detail is known instead of leaving the stale tab path.
+      if (model.detail && !model.detail._loading) syncExplorerUrl("replace");
+    }
     if (tabs.length <= 1) {
       dom.explorerDetailTabs.hidden = true;
       dom.explorerDetailTabs.replaceChildren();

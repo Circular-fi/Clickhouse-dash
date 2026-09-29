@@ -40,7 +40,7 @@ def test_project_authored_sources_do_not_embed_business_fixture_names() -> None:
     for root in roots:
         paths = [root] if root.is_file() else [p for p in root.rglob("*") if p.is_file()]
         for path in paths:
-            if any(part in {"build", "node_modules", "third_party", "__pycache__"} for part in path.parts):
+            if any(part in {"build", "node_modules", "third_party", "__pycache__", "artifacts"} for part in path.parts):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")

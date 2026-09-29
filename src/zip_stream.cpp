@@ -20,17 +20,27 @@ constexpr uint16_t kFlags = 0x0808U; // UTF-8 + trailing data descriptor.
 constexpr uint16_t kStore = 0;
 constexpr uint16_t kZip64ExtraId = 0x0001U;
 
-const std::array<uint32_t, 256>& crc_table() {
-  static const std::array<uint32_t, 256> table = [] {
-    std::array<uint32_t, 256> out{};
+// Slicing-by-8 CRC-32 tables: processes 8 bytes per step instead of 1, which
+// made the byte-wise table loop (~0.5-1 GB/s) a visible cost on multi-GB
+// STORE exports. Table 0 is the classic byte-wise table.
+using CrcTables = std::array<std::array<uint32_t, 256>, 8>;
+
+const CrcTables& crc_tables() {
+  static const CrcTables tables = [] {
+    CrcTables out{};
     for (uint32_t n = 0; n < 256; ++n) {
       uint32_t c = n;
       for (int k = 0; k < 8; ++k) c = (c & 1U) ? (0xedb88320U ^ (c >> 1U)) : (c >> 1U);
-      out[n] = c;
+      out[0][n] = c;
+    }
+    for (uint32_t n = 0; n < 256; ++n) {
+      for (size_t t = 1; t < 8; ++t) {
+        out[t][n] = (out[t - 1][n] >> 8U) ^ out[0][out[t - 1][n] & 0xffU];
+      }
     }
     return out;
   }();
-  return table;
+  return tables;
 }
 
 std::pair<uint16_t, uint16_t> dos_timestamp() {
@@ -52,11 +62,19 @@ std::pair<uint16_t, uint16_t> dos_timestamp() {
 } // namespace
 
 uint32_t zip_crc32_update(uint32_t state, const char* data, size_t size) {
-  const auto& table = crc_table();
+  const auto& t = crc_tables();
+  const auto* p = reinterpret_cast<const unsigned char*>(data);
   uint32_t c = state;
-  for (size_t i = 0; i < size; ++i) {
-    c = table[(c ^ static_cast<unsigned char>(data[i])) & 0xffU] ^ (c >> 8U);
+  while (size >= 8) {
+    // Explicit little-endian assembly keeps this portable and alignment-free.
+    const uint32_t lo = c ^ (static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U) |
+                             (static_cast<uint32_t>(p[2]) << 16U) | (static_cast<uint32_t>(p[3]) << 24U));
+    c = t[7][lo & 0xffU] ^ t[6][(lo >> 8U) & 0xffU] ^ t[5][(lo >> 16U) & 0xffU] ^ t[4][lo >> 24U] ^
+        t[3][p[4]] ^ t[2][p[5]] ^ t[1][p[6]] ^ t[0][p[7]];
+    p += 8;
+    size -= 8;
   }
+  while (size--) c = t[0][(c ^ *p++) & 0xffU] ^ (c >> 8U);
   return c;
 }
 
@@ -84,11 +102,33 @@ bool Zip64StreamWriter::write_bytes(const void* data, size_t size) {
   return true;
 }
 
+bool Zip64StreamWriter::stage(const void* data, size_t size) {
+  if (!ok_) return false;
+  if (offset_ > std::numeric_limits<uint64_t>::max() - static_cast<uint64_t>(size)) {
+    fail("ZIP64 output offset overflow");
+    return false;
+  }
+  staged_.append(static_cast<const char*>(data), size);
+  offset_ += static_cast<uint64_t>(size);
+  return true;
+}
+
+bool Zip64StreamWriter::flush_staged() {
+  if (!ok_) return false;
+  if (staged_.empty()) return true;
+  if (!write_(staged_.data(), staged_.size())) {
+    fail("ZIP output sink closed");
+    return false;
+  }
+  staged_.clear();
+  return true;
+}
+
 bool Zip64StreamWriter::write_u16(uint16_t value) {
   const unsigned char b[2] = {
       static_cast<unsigned char>(value & 0xffU),
       static_cast<unsigned char>((value >> 8U) & 0xffU)};
-  return write_bytes(b, sizeof(b));
+  return stage(b, sizeof(b));
 }
 
 bool Zip64StreamWriter::write_u32(uint32_t value) {
@@ -97,13 +137,13 @@ bool Zip64StreamWriter::write_u32(uint32_t value) {
       static_cast<unsigned char>((value >> 8U) & 0xffU),
       static_cast<unsigned char>((value >> 16U) & 0xffU),
       static_cast<unsigned char>((value >> 24U) & 0xffU)};
-  return write_bytes(b, sizeof(b));
+  return stage(b, sizeof(b));
 }
 
 bool Zip64StreamWriter::write_u64(uint64_t value) {
   unsigned char b[8]{};
   for (size_t i = 0; i < 8; ++i) b[i] = static_cast<unsigned char>((value >> (8U * i)) & 0xffU);
-  return write_bytes(b, sizeof(b));
+  return stage(b, sizeof(b));
 }
 
 bool Zip64StreamWriter::begin_entry(const std::string& name) {
@@ -132,8 +172,8 @@ bool Zip64StreamWriter::begin_entry(const std::string& name) {
       !write_u16(kStore) || !write_u16(current_.dos_time) || !write_u16(current_.dos_date) ||
       !write_u32(0) || !write_u32(0xffffffffU) || !write_u32(0xffffffffU) ||
       !write_u16(static_cast<uint16_t>(name.size())) || !write_u16(20) ||
-      !write_bytes(name.data(), name.size()) || !write_u16(kZip64ExtraId) ||
-      !write_u16(16) || !write_u64(0) || !write_u64(0)) {
+      !stage(name.data(), name.size()) || !write_u16(kZip64ExtraId) ||
+      !write_u16(16) || !write_u64(0) || !write_u64(0) || !flush_staged()) {
     return false;
   }
 
@@ -156,7 +196,7 @@ bool Zip64StreamWriter::finish_entry() {
   current_.size = current_size_;
 
   if (!write_u32(kDataDescriptor) || !write_u32(current_.crc32) ||
-      !write_u64(current_.size) || !write_u64(current_.size)) {
+      !write_u64(current_.size) || !write_u64(current_.size) || !flush_staged()) {
     return false;
   }
   entries_.push_back(current_);
@@ -179,7 +219,7 @@ bool Zip64StreamWriter::finish_archive() {
         !write_u32(entry.crc32) || !write_u32(0xffffffffU) || !write_u32(0xffffffffU) ||
         !write_u16(static_cast<uint16_t>(entry.name.size())) || !write_u16(28) ||
         !write_u16(0) || !write_u16(0) || !write_u16(0) || !write_u32(0) ||
-        !write_u32(0xffffffffU) || !write_bytes(entry.name.data(), entry.name.size()) ||
+        !write_u32(0xffffffffU) || !stage(entry.name.data(), entry.name.size()) ||
         !write_u16(kZip64ExtraId) || !write_u16(24) ||
         !write_u64(entry.size) || !write_u64(entry.size) || !write_u64(entry.local_header_offset)) {
       return false;
@@ -195,7 +235,7 @@ bool Zip64StreamWriter::finish_archive() {
       !write_u32(kZip64Locator) || !write_u32(0) || !write_u64(zip64_end_offset) || !write_u32(1) ||
       !write_u32(kClassicEnd) || !write_u16(0) || !write_u16(0) ||
       !write_u16(0xffffU) || !write_u16(0xffffU) || !write_u32(0xffffffffU) ||
-      !write_u32(0xffffffffU) || !write_u16(0)) {
+      !write_u32(0xffffffffU) || !write_u16(0) || !flush_staged()) {
     return false;
   }
   finished_ = true;

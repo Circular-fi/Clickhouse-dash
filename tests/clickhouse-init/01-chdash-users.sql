@@ -25,3 +25,8 @@ GRANT SHOW COLUMNS ON *.* TO chdash_system;
 GRANT SHOW DICTIONARIES ON *.* TO chdash_system;
 GRANT KILL QUERY ON *.* TO chdash_system;
 GRANT SYSTEM FLUSH LOGS ON *.* TO chdash_system;
+-- Trace Explorer reads OTEL tables through system_uri. The REVOKE ALL above
+-- runs on every fixture reset (test runner + backend conftest), so the grant
+-- must live here too: keeping it only in 03-otel-traces.sql (volume init)
+-- silently broke Trace Explorer after the first test run.
+GRANT SELECT ON otel.* TO chdash_system;

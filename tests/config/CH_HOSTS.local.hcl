@@ -78,6 +78,8 @@ health {
 
 traces {
   enabled                  = true
+  # Enabled locally so the span-based duration-quantile graphs are exercised.
+  analytics                = true
   database                 = "otel"
   table                    = "otel_traces"
   trace_index_table        = "otel_traces_trace_id_ts"

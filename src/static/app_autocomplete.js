@@ -1515,7 +1515,7 @@
     return 0;
   }
 
-  function scoreSuggestion(s, prefix) {
+  function scoreSuggestion(s, prefix, boundaryRe) {
     const p = norm(prefix);
     const label = norm(s.label);
     let score = 0;
@@ -1525,7 +1525,8 @@
       if (label === p) score -= 1000;
       else if (label.startsWith(p)) score -= 800;
       else {
-        const boundaryIndex = label.search(new RegExp(`(?:^|[._])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        const re = boundaryRe || new RegExp(`(?:^|[._])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+        const boundaryIndex = label.search(re);
         if (boundaryIndex >= 0) score -= 520;
         else if (label.includes(p)) score -= 240;
       }
@@ -1572,15 +1573,23 @@
   }
 
   function sortAndLimit(list, prefix) {
-    list.sort((a, b) => {
-      const sa = scoreSuggestion(a, prefix);
-      const sb = scoreSuggestion(b, prefix);
-      if (sa !== sb) return sa - sb;
-      const ka = suggestionPriority(a.kind);
-      const kb = suggestionPriority(b.kind);
-      if (ka !== kb) return ka - kb;
-      return String(a.label).localeCompare(String(b.label));
+    // Score every candidate exactly once. Scoring inside the comparator ran
+    // scoreSuggestion (including a RegExp construction) ~2·n·log(n) times per
+    // keystroke over thousands of candidates.
+    const p = norm(prefix);
+    const boundaryRe = p ? new RegExp(`(?:^|[._])${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) : null;
+    const scored = list.map((item) => ({
+      item,
+      score: scoreSuggestion(item, prefix, boundaryRe),
+      priority: suggestionPriority(item.kind),
+      label: String(item.label),
+    }));
+    scored.sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score;
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.label.localeCompare(b.label);
     });
+    for (let i = 0; i < scored.length; i += 1) list[i] = scored[i].item;
     return { items: list.slice(0, maxSuggestions), total: list.length };
   }
 
@@ -3321,9 +3330,17 @@
       if (isOpen()) positionMenu(ta);
       renderDiagnosticsLayer();
     });
-    window.addEventListener("scroll", () => {
+    window.addEventListener("scroll", (ev) => {
       if (isOpen()) positionMenu(ta);
-      renderDiagnosticsLayer();
+      // Diagnostic marks are positioned relative to the editor wrap, so page
+      // or results-table scrolling cannot move them. Rebuilding the layer (a
+      // forced layout per mark) on every capture-phase scroll anywhere in the
+      // document was pure overhead, and on textarea scroll it ran before the
+      // overlay synced. The textarea's own scroll listener handles that case.
+      const target = ev.target instanceof Node ? ev.target : null;
+      if (!target || target === ta) return;
+      const editorWrap = ta.closest ? ta.closest(".editorWrap") : null;
+      if (editorWrap && editorWrap !== target && editorWrap.contains(target)) renderDiagnosticsLayer();
     }, true);
     document.addEventListener("pointerdown", (ev) => {
       const target = ev.target instanceof Node ? ev.target : null;

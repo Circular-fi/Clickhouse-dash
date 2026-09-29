@@ -47,7 +47,10 @@ def test_dependencies_are_filtered_before_they_are_exposed() -> None:
     assert "dependencies_database" in catalog
     assert "dependencies_table" in catalog
     assert "append_dependency" in catalog
-    assert "if (!allowed.allows_table(dep_db, dep_table)) return;" in catalog
+    # The per-object ACL set holds only the selected table; related objects
+    # are filtered by runner visibility before they are exposed.
+    assert "if (!lineage_visible(dep_db, dep_table)) return;" in catalog
+    assert "discover_visible_objects(runner, dep_db)" in catalog
     assert '"downstream"' in catalog and '"upstream"' in catalog
 
 

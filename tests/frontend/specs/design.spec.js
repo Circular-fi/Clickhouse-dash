@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { captureState } from '../helpers/review.js';
 import { installObservers } from '../helpers/observability.js';
-import { openApp, openExplorer, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 
 const deterministicQuery = `
 SELECT
@@ -152,7 +152,7 @@ test('profiling analysis renders Pipeline first and Tracing second', async ({ pa
 
 test('explorer captures file tree, all table views, graphs and function documentation', async ({ page }, testInfo) => {
   await openApp(page);
-  await openExplorer(page);
+  await openExplorerDatabase(page);
   await expect(page).toHaveURL(/\/explorer$/);
   await expect(page.locator('#explorerWorkspace')).toContainText('chdash_ui', { timeout: 15_000 });
   await expect(page.locator('#explorerTableList')).toContainText('weather_observations');
@@ -173,19 +173,42 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations');
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
 
+  // MergeTree tables expose Overview (footprint + lineage + DDL), Data and
+  // Storage (storage + former Operations sections).
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Storage']);
   for (const [name, capture] of [
     ['Overview', 'explorer-table-overview-schema'],
     ['Data', 'explorer-table-data'],
-    ['Lineage', 'explorer-table-lineage'],
     ['Storage', 'explorer-table-storage'],
-    ['Operations', 'explorer-table-operations'],
   ]) {
     const tab = page.locator('#explorerDetailTabs').getByRole('tab', { name, exact: true });
     await tab.click();
     await expect(tab).toHaveAttribute('aria-selected', 'true');
+    if (name === 'Overview') await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
     if (name === 'Data') await expect(page.locator('#explorerDetailContent .resultTable tbody tr').first()).toBeVisible({ timeout: 12_000 });
+    if (name === 'Storage') await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns')).toBeVisible();
     await captureState(page, testInfo, capture);
   }
+
+  // Lineage is rendered inside Overview rather than as its own tab.
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true }).click();
+  const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
+  await expect(lineage).toBeVisible();
+  await expect(lineage).toContainText('chdash_ui.weather_daily_summary_mv');
+  await lineage.scrollIntoViewIfNeeded();
+  await captureState(page, testInfo, 'explorer-table-lineage');
+
+  // Operations remains a tab for non-disk engines such as Buffer.
+  await page.getByText('weather_buffer', { exact: true }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_buffer');
+  const operations = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true });
+  await operations.click();
+  await expect(operations).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
+  await captureState(page, testInfo, 'explorer-table-operations');
+
+  await fixture.click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
 
   await page.locator('#explorerModeSelectButton').click();
   await page.locator('#explorerGraphModeButton').click();
@@ -217,12 +240,17 @@ test('explorer captures file tree, all table views, graphs and function document
 
   await page.locator('#explorerSectionSelectButton').click();
   await page.locator('#explorerTablesSectionButton').click();
+  // The Tables section keeps the graph mode chosen above; database detail is
+  // a browse-mode surface (in graph mode a database click focuses the graph).
+  await page.locator('#explorerModeSelectButton').click();
+  await page.locator('#explorerListModeButton').click();
+  await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();
   await expect(database).toBeVisible();
   await database.click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  await expect(page.locator('#explorerDetailMeta')).toContainText(/tables.*total/i);
-  await expect(page.locator('#explorerDetailContent')).toContainText('Disks used by this database');
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 

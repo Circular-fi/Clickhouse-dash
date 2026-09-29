@@ -35,8 +35,12 @@ def test_trace_analytics_is_separate_and_deduplicates_by_existence():
     analytics = cpp[cpp.index("void Server::handle_traces_analytics"):cpp.index("void Server::handle_trace_detail")]
     assert "read_analytics(analytics_sql)" not in search
     assert 'w.Key("trace_count_chart")' not in search
-    assert "matching_ids AS (SELECT TraceId" in analytics
-    assert "LIMIT 1 BY TraceId), " in analytics
+    # Span filters are deduplicated by existence before the span aggregation.
+    assert "candidate_ids AS (SELECT TraceId" in analytics
+    assert '" LIMIT 1 BY TraceId)"' in analytics
+    # Quantiles never come from the trace index (End = max(Timestamp)).
+    assert 'quantile_source = "span_bounds"' in analytics
+    assert "trace_bounds AS" not in analytics
     assert "read_analytics(analytics_sql)" in analytics
     assert "count_by_bucket" in analytics
     assert "std::gcd(bucket_seconds, quantile_bucket_seconds)" in analytics

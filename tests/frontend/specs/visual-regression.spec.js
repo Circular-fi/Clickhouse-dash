@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { openAnalysis, openApp, openExplorer, runSuccessfulQuery } from '../helpers/app.js';
+import { openAnalysis, openApp, openExplorerDatabase, runSuccessfulQuery } from '../helpers/app.js';
 import { stabilizePage } from '../helpers/review.js';
 
 const enabled = process.env.VISUAL_COMPARE === '1';
@@ -30,7 +30,7 @@ test.describe('visual regression baselines', () => {
 
   test('explorer baseline', async ({ page }) => {
     await openApp(page);
-    await openExplorer(page);
+    await openExplorerDatabase(page);
     await expect(page.locator('#explorerTableList')).toContainText('weather_observations');
     await stabilizePage(page);
     await expect(page).toHaveScreenshot('explorer.png', {

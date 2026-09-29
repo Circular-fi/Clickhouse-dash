@@ -8,6 +8,7 @@
 #include <clickhouse/types/types.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <ctime>
 #include <iomanip>
@@ -42,28 +43,19 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
           : item.get<double>();
       if (std::isnan(value)) return "nan";
       if (std::isinf(value)) return value < 0 ? "-inf" : "inf";
-      std::ostringstream out;
-      out << std::setprecision(17) << value;
-      return out.str();
+      // Shortest round-trip representation (0.1 stays "0.1"), without the
+      // locale and allocation overhead of an ostringstream per cell.
+      char buf[32];
+      const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+      return std::string(buf, res.ptr);
     }
     case Type::DateTime: return detail::datetime_to_iso(item.get<uint32_t>());
     case Type::DateTime64: {
       const auto* dt64 = type.As<clickhouse::DateTime64Type>();
       return detail::datetime64_to_iso(item.get<int64_t>(), dt64 ? dt64->GetPrecision() : 0);
     }
-    case Type::Date: {
-      const uint16_t days = item.get<uint16_t>();
-      std::time_t t = static_cast<std::time_t>(days) * 86400;
-      std::tm tm{};
-#if defined(_WIN32)
-      gmtime_s(&tm, &t);
-#else
-      gmtime_r(&t, &tm);
-#endif
-      char buf[16];
-      std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
-      return buf;
-    }
+    case Type::Date: return detail::date_days_to_iso(item.get<uint16_t>());
+    case Type::Date32: return detail::date_days_to_iso(item.get<int32_t>());
     case Type::UUID: return detail::uuid_to_string(item.AsBinaryData());
     case Type::IPv4: return detail::ipv4_to_string(item.get<uint32_t>());
     case Type::IPv6: return detail::ipv6_to_string(item.AsBinaryData());
@@ -73,8 +65,12 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
     case Type::Decimal32:
     case Type::Decimal64:
     case Type::Decimal128: {
+      // Decimal32/64 are stored in 4/8 bytes: reading them as Int128 threw
+      // and aborted every CSV export containing e.g. a Decimal(18,6) column.
       const auto* decimal = type.As<clickhouse::DecimalType>();
-      return detail::decimal_to_string(item.get<clickhouse::Int128>(), decimal ? decimal->GetScale() : 0);
+      return detail::decimal_to_string(
+          detail::decimal_raw_value(item, decimal ? decimal->GetPrecision() : 38),
+          decimal ? decimal->GetScale() : 0);
     }
     default:
       break;
@@ -104,6 +100,7 @@ bool simple_scalar_type(clickhouse::Type::Code code) {
     case Type::DateTime:
     case Type::DateTime64:
     case Type::Date:
+    case Type::Date32:
     case Type::UUID:
     case Type::IPv4:
     case Type::IPv6:
@@ -173,7 +170,10 @@ bool ExportSerializer::append(std::string_view value) {
 }
 
 bool ExportSerializer::append_char(char value) {
-  return append(std::string_view(&value, 1));
+  if (!ok_) return false;
+  if (buffer_.size() + 1 > buffer_limit_ && !flush()) return false;
+  buffer_.push_back(value);
+  return true;
 }
 
 bool ExportSerializer::write_csv_field(std::string_view value) {
@@ -199,7 +199,7 @@ bool ExportSerializer::write_csv_header(const clickhouse::Block& block) {
 
 bool ExportSerializer::write_csv_cell(const clickhouse::ColumnRef& column, size_t row) {
   using clickhouse::Type;
-  const auto code = column->Type()->GetCode();
+  const auto code = column->GetType().GetCode();
   if (code == Type::Nullable) {
     const auto nullable = column->As<clickhouse::ColumnNullable>();
     if (nullable && nullable->IsNull(row)) return write_csv_field("\\N");
@@ -224,17 +224,26 @@ bool ExportSerializer::write_csv_cell(const clickhouse::ColumnRef& column, size_
   return write_csv_field(cell_json(column, row));
 }
 
-bool ExportSerializer::write_csv_row(const clickhouse::Block& block, size_t row) {
-  for (size_t column = 0; column < block.GetColumnCount(); ++column) {
+bool ExportSerializer::write_csv_row(size_t row) {
+  for (size_t column = 0; column < columns_.size(); ++column) {
     if (column && !append_char(',')) return false;
-    if (!write_csv_cell(block[column], row)) return false;
+    if (!write_csv_cell(columns_[column], row)) return false;
   }
-  return append("\n");
+  return append_char('\n');
 }
 
-bool ExportSerializer::write_json_row(const clickhouse::Block& block, size_t row) {
-  const std::string encoded = encode_row_object(block, row);
-  return append(encoded) && append("\n");
+bool ExportSerializer::write_json_row(size_t row) {
+  // Same output as encode_row_object(), serialized into a reused buffer.
+  json_row_.Clear();
+  rapidjson::Writer<rapidjson::StringBuffer> w(json_row_);
+  w.StartObject();
+  for (size_t i = 0; i < columns_.size(); ++i) {
+    const auto& name = column_names_[i];
+    w.Key(name.c_str(), static_cast<rapidjson::SizeType>(name.size()));
+    detail::write_column_value(w, columns_[i], row);
+  }
+  w.EndObject();
+  return append(std::string_view(json_row_.GetString(), json_row_.GetSize())) && append_char('\n');
 }
 
 bool ExportSerializer::write_block(const clickhouse::Block& block) {
@@ -245,13 +254,26 @@ bool ExportSerializer::write_block(const clickhouse::Block& block) {
       return false;
     }
   }
+  columns_.clear();
+  column_names_.clear();
+  columns_.reserve(block.GetColumnCount());
+  column_names_.reserve(block.GetColumnCount());
+  for (size_t column = 0; column < block.GetColumnCount(); ++column) {
+    columns_.push_back(block[column]);
+    column_names_.push_back(block.GetColumnName(column));
+  }
   for (size_t row = 0; row < block.GetRowCount(); ++row) {
     const bool written = format_ == ExportFormat::Csv
-        ? write_csv_row(block, row)
-        : write_json_row(block, row);
-    if (!written) return false;
+        ? write_csv_row(row)
+        : write_json_row(row);
+    if (!written) {
+      columns_.clear();
+      return false;
+    }
     ++rows_written_;
   }
+  // Release the block's column references; capacity is kept for the next one.
+  columns_.clear();
   return true;
 }
 

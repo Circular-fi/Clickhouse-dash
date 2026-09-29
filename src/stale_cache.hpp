@@ -38,8 +38,8 @@ public:
     {
       std::unique_lock<std::mutex> lk(mu_);
       auto [it, inserted] = entries_.try_emplace(key, std::make_shared<Entry>());
-      (void)inserted;
       entry = it->second;
+      if (inserted && entries_.size() > kMaxEntries) evict_locked(key);
       auto& e = *entry;
       const uint64_t age_ms = now_ms >= e.fetched_at_ms ? now_ms - e.fetched_at_ms : 0;
       if (e.value && age_ms <= ttl_ms) {
@@ -137,12 +137,42 @@ public:
     entries_.erase(key);
   }
 
+  // Remove every key starting with `prefix` (e.g. every sidebar branch of one
+  // host/security scope). Only meaningful for string-like keys.
+  void erase_prefix(const Key& prefix) {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (auto it = entries_.begin(); it != entries_.end();) {
+      if (it->first.compare(0, prefix.size(), prefix) == 0) it = entries_.erase(it);
+      else ++it;
+    }
+  }
+
   void clear() {
     std::lock_guard<std::mutex> lk(mu_);
     entries_.clear();
   }
 
+  // Keys may be derived from client-supplied names (database/table detail),
+  // including lookups that fail. Bound the map so it cannot grow forever.
+  static constexpr size_t kMaxEntries = 4096;
+
 private:
+  // Called with mu_ held once the map exceeds kMaxEntries. Entries that are
+  // being refreshed are kept (a fetch thread still owns them); errors and
+  // value-less entries go first, then arbitrary idle ones down to half the cap.
+  // The sweep is O(n) but amortized over kMaxEntries/2 insertions.
+  void evict_locked(const Key& keep) {
+    for (auto it = entries_.begin(); it != entries_.end();) {
+      const Entry& e = *it->second;
+      if (it->first != keep && !e.refreshing && !e.value) it = entries_.erase(it);
+      else ++it;
+    }
+    for (auto it = entries_.begin(); it != entries_.end() && entries_.size() > kMaxEntries / 2;) {
+      if (it->first != keep && !it->second->refreshing) it = entries_.erase(it);
+      else ++it;
+    }
+  }
+
   struct Entry {
     uint64_t fetched_at_ms = 0;
     uint64_t retry_after_ms = 0;

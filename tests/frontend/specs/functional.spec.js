@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { openApp, openExplorer, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { enableExecutionStats, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -111,12 +111,13 @@ test('normal query cannot expose analysis', async ({ page }) => {
 
 test('query execution renders rows and terminal status', async ({ page }) => {
   await openApp(page);
+  await enableExecutionStats(page);
   await runSuccessfulQuery(page, `SELECT number AS id, concat('row-', toString(number)) AS label FROM numbers(24) ORDER BY id`);
   await expect(page.locator('#resultTableBody tr')).toHaveCount(24);
   await expect(page.locator('#resultTableBody')).toContainText('row-23');
   await expect(page.locator('#elapsedSecondsText')).not.toHaveText('-');
   await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 12_000 });
-  await expect(page.locator('#clickhouseElapsedText')).toHaveText(/^(?:\d+ms|\d+(?:\.\d+)?s)$/i);
+  await expect(page.locator('#clickhouseElapsedText')).toHaveText(/^\d+(?:\.\d+)?(?:ms|s)$/i);
   const elapsedBox = await page.locator('#elapsedSecondsText').boundingBox();
   const systemBox = await page.locator('#clickhouseElapsedText').boundingBox();
   expect(elapsedBox && systemBox && systemBox.y > elapsedBox.y).toBeTruthy();
@@ -179,7 +180,7 @@ LIMIT 100`;
 
 test('explorer opens fixture database and six table views', async ({ page }) => {
   await openApp(page);
-  await openExplorer(page);
+  await openExplorerDatabase(page);
   await expect(page.locator('#explorerWorkspace')).toContainText('chdash_ui', { timeout: 15_000 });
   const documentScroll = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, viewport: window.innerHeight }));
   expect(documentScroll.height).toBeLessThanOrEqual(documentScroll.viewport + 1);
@@ -189,9 +190,13 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await databaseRow.click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\?view=browse$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  await expect(page.locator('#explorerDetailMeta')).toContainText(/tables.*total/i);
-  await expect(page.locator('#explorerDetailContent')).toContainText('Disks used by this database');
+  // Database detail meta is "<n> tables · <database bytes>"; the per-database
+  // disk list was replaced by a per-object list with rows/footprint stats.
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
+  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').first()).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').filter({ has: page.getByText('weather_observations', { exact: true }) }))
+    .toContainText(/Merge Tree.*rows/);
   await page.getByText('station_dictionary', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toContainText('station_dictionary');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/Dictionary/i);
@@ -201,12 +206,22 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
 
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Schema', exact: true })).toHaveCount(0);
-  await expect(page.locator('#explorerDetailContent .explorerStorageBreakdown')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerStorageBreakdown__row').filter({ hasText: 'temperature_c' }).first()).toContainText('temperature_c');
-  await expect(page.locator('#explorerDetailContent .explorerPercentBar').first()).toBeVisible();
+  // Overview merges footprint, lineage and schema/DDL. Schema and Lineage are
+  // not separate tabs; MergeTree operations are folded into Storage.
+  const detailTabs = page.locator('#explorerDetailTabs').getByRole('tab');
+  await expect(detailTabs).toHaveText(['Overview', 'Data', 'Storage']);
+  await expect(page.locator('#explorerDetailContent .explorerScopeMeter--database .explorerScopeMeter__fill')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerScopeMeter--clickhouse')).toBeVisible();
+  const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
+  await expect(composition).toBeVisible();
+  await expect(composition).toContainText('Table storage');
+  await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
   await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent')).toContainText('Lineage');
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
+  const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
+  await expect(lineage).toBeVisible();
+  await expect(lineage.locator('.explorerDependencyGroup').filter({ hasText: 'Upstream' })).toContainText('chdash_ui.weather_buffer');
+  await expect(lineage.locator('.explorerDependencyGroup').filter({ hasText: 'Downstream' })).toContainText('chdash_ui.weather_daily_summary_mv');
 
   const dataTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true });
   await dataTab.click();
@@ -217,17 +232,29 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(explorerResults).toContainText(/Paris|Reykjavik|Lisbon/);
   await expect(explorerResults).toContainText('synthetic-weather');
 
-  for (const name of ['Storage', 'Operations']) {
-    const tab = page.locator('#explorerDetailTabs').getByRole('tab', { name, exact: true });
-    await tab.click();
-    await expect(tab).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(new RegExp(`/explorer/chdash_ui/weather_observations/${name.toLowerCase()}\\?view=browse$`));
-  }
+  const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true });
+  await storageTab.click();
+  await expect(storageTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/storage\?view=browse$/);
+  // Per-column storage accounting lives in the Storage tab's shared result table.
+  const columnStorage = page.locator('#explorerDetailContent .explorerStorageResultTable--columns');
+  await expect(columnStorage).toBeVisible();
+  await expect(columnStorage.locator('tbody tr').filter({ hasText: 'temperature_c' }).first()).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B/);
+  await expect(columnStorage.locator('.explorerStoragePercentCell').first()).toBeVisible();
+  // The former Operations surface is merged into Storage for MergeTree tables.
+  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
+  await expect(page.locator('#explorerDetailContent')).toContainText('Merge activity');
+  // An old /operations deep link for a MergeTree table falls back to Overview.
+  await page.goto('/explorer/chdash_ui/weather_observations/operations');
+  await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
 
   await page.goto('/explorer/chdash_ui/weather_observations/schema');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
-  await expect(page.locator('#explorerDetailContent .explorerStorageBreakdown')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
 
   const reloadedData = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true });
   await reloadedData.click();
@@ -235,7 +262,8 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await page.goBack();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#explorerDetailContent .explorerStorageBreakdown__row').filter({ hasText: 'temperature_c' }).first()).toContainText('temperature_c');
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
   await page.locator('#explorerSectionSelectButton').click();
   await page.locator('#explorerFunctionsSectionButton').click();
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
@@ -246,7 +274,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
 
 test('explorer renders MV lineage, engine-specific tables, TTL and merged schema/DDL', async ({ page }) => {
   await openApp(page);
-  await openExplorer(page);
+  await openExplorerDatabase(page);
 
   await page.getByText('weather_daily_summary_mv', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Materialized View');
@@ -259,33 +287,52 @@ test('explorer renders MV lineage, engine-specific tables, TTL and merged schema
   await expect(page.locator('#explorerDetailContent .explorerDdlCopy')).toBeVisible();
 
   await page.getByText('weather_observations', { exact: true }).first().click();
-  await expect(page.locator('#explorerDetailContent')).toContainText(/(?:INTERVAL\s+60\s+DAY|toIntervalDay\(60\)).*TO VOLUME/i);
-  await expect(page.locator('#explorerDetailContent .explorerStorageBreakdown__row').filter({ hasText: 'temperature_c' }).first()).toContainText('temperature_c');
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText(/(?:INTERVAL\s+60\s+DAY|toIntervalDay\(60\)).*TO VOLUME/i);
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Schema', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true })).toHaveCount(0);
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns tbody tr').filter({ hasText: 'temperature_c' }).first()).toBeVisible();
+  // TTL moves parts to the cold volume, so the storage policy is tiered.
+  await expect(page.locator('#explorerDetailContent .explorerStorageMetaLine')).toContainText('fixture_tiered');
 
   await page.getByText('memory_weather', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Memory');
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/RAM/);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Operations']);
+  await expect(page.locator('#explorerDetailContent .explorerScopeMeters')).toHaveCount(0);
 
   await page.getByText('weather_buffer', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Buffer');
-  await expect(page.locator('#explorerDetailContent')).toContainText('chdash_ui.weather_observations');
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerDependencyGroup').filter({ hasText: 'Downstream' })).toContainText('chdash_ui.weather_observations');
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Operations']);
 
+  // Log-family tables are disk-backed: they now get a Storage tab limited to
+  // real storage + ingestion surfaces (no MergeTree merges/parts sections).
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Tiny Log');
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/on disk/);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Storage']);
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await expect(page.locator('#explorerDetailContent .explorerStorageMetaLine')).toContainText(/Storage medium\s*Disk/);
+  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
+  await expect(page.locator('#explorerDetailContent')).not.toContainText('Merge activity');
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns')).toHaveCount(0);
 
   await page.getByText('station_dictionary', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Dictionary');
-  await expect(page.locator('#explorerDetailContent')).toContainText(/Size|Allocated/);
+  // Dictionary memory footprint is reported in the header meta ("<bytes> RAM").
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B RAM/);
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('CREATE DICTIONARY');
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true })).toHaveCount(0);
 });
 
 test('graph table click keeps graph focus, browser selection and URL on the same table', async ({ page }) => {
   await openApp(page);
-  await openExplorer(page);
+  await openExplorerDatabase(page);
   await page.getByText('weather_observations', { exact: true }).first().click();
   await page.locator('#explorerModeSelectButton').click();
   await page.locator('#explorerGraphModeButton').click();
@@ -351,22 +398,36 @@ test('multiquery exposes global copy JSON and raw JSON download without clearing
 
 test('wide_types browse shows flat storage accounting, contextual DDL keywords and opens Query with SQL', async ({ page }) => {
   await openApp(page);
-  await openExplorer(page);
+  await openExplorerDatabase(page);
   await page.getByText('wide_types', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 
-  const breakdown = page.locator('#explorerDetailContent .explorerStorageBreakdown');
-  await expect(breakdown).toBeVisible();
-  await expect(breakdown).toContainText('tuple_value.code');
-  await expect(breakdown).toContainText('idx_wide_types_state');
-  await expect(breakdown).toContainText('prj_wide_types_state');
-  await expect(page.locator('#explorerDetailContent .explorerWideSummary').first()).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerPercentBar').first()).toBeVisible();
+  // Overview: flat part-format / projection / index composition of the table footprint.
+  const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
+  await expect(composition).toBeVisible();
+  await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
+  const legendLabels = await composition.locator('.explorerStorageCompositionLegend__label').allTextContents();
+  expect(legendLabels).toEqual(expect.arrayContaining(['Projections', 'Indexes']));
+  expect(legendLabels.some((label) => label === 'Wide' || label === 'Compact')).toBeTruthy();
 
   const keywordTexts = await page.locator('#explorerDetailContent .explorerDdl .tok-kw').allTextContents();
   for (const keyword of ['INDEX', 'PROJECTION', 'TYPE', 'GRANULARITY']) {
     expect(keywordTexts.map((value) => value.toUpperCase())).toContain(keyword);
   }
+
+  // Storage: per-column table with collapsible Tuple children, plus separate
+  // index and projection accounting tables.
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/storage\?view=browse$/);
+  const columnStorage = page.locator('#explorerDetailContent .explorerStorageResultTable--columns');
+  await expect(columnStorage).toBeVisible();
+  const tupleChild = columnStorage.locator('tbody tr').filter({ hasText: 'tuple_value.code' }).first();
+  await expect(tupleChild).toBeHidden();
+  await columnStorage.getByRole('button', { name: 'Expand tuple_value', exact: true }).click();
+  await expect(tupleChild).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--indexes')).toContainText('idx_wide_types_state');
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections')).toContainText('prj_wide_types_state');
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections .explorerStoragePercentCell').first()).toHaveText(/%/);
 
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
   const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');

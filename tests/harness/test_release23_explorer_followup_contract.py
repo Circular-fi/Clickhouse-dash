@@ -9,8 +9,11 @@ def read(path: str) -> str:
 
 def test_buffer_lineage_is_reversed_for_destination_details() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    assert 'FROM system.tables WHERE engine = \'Buffer\'' in catalog
-    assert 'if (args[0] == database && args[1] == table)' in catalog
+    # Buffer routing, reverse dependencies_* and view as_select share one
+    # server-wide system.tables scan.
+    assert "if(engine = 'Buffer', toString(engine_full), '')" in catalog
+    assert "(engine = 'Buffer' OR notEmpty(as_select) OR has(dependencies_table, " in catalog
+    assert 'args.size() >= 2 && args[0] == database && args[1] == table' in catalog
     assert 'append_dependency(buffer_db, buffer_table, "upstream")' in catalog
     assert '"Buffer reverse-lineage query failed: "' in catalog
 
