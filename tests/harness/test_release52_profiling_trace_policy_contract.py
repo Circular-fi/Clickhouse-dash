@@ -41,7 +41,7 @@ def test_direct_trace_url_lookup_is_not_bounded_by_search_lookback():
     detail = api[api.index("void Server::handle_trace_detail"): ]
     assert "full_trace_id_lookup" not in detail
     assert 'WITH " + trace_literal + " AS trace' in detail
-    assert "PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end" in detail
+    assert "PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)" in detail
     assert 'WHERE TraceId = trace AND' in detail
     assert "trace_index_lookup_failed" in detail
     assert "max_lookback_minutes" not in detail

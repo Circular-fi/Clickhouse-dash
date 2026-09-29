@@ -334,7 +334,11 @@
     const rowByKey = new Map();
     const toggleByKey = new Map();
     const foldedByKey = new Map();
-    const mounted = visibleRows(model, new Set()).slice(0, maxRows);
+    // The first maxRows spans in tree order may be shown. Rows are mounted
+    // lazily: the initial fold usually shows <= 50 of them, so building DOM
+    // for every folded descendant up front only slowed the first paint.
+    // A branch mounts its children the first time it is expanded.
+    const mountable = new Set(visibleRows(model, new Set()).slice(0, maxRows).map((span) => span.key));
 
     const rowHidden = (span) => {
       let parent = span?.parent || null;
@@ -367,18 +371,48 @@
     };
 
     const syncAll = () => {
-      for (const span of mounted) {
-        const row = rowByKey.get(span.key);
-        if (row) row.hidden = rowHidden(span);
+      for (const [key, row] of rowByKey) {
+        const span = spanByKey.get(key);
+        if (!span) continue;
+        row.hidden = rowHidden(span);
         syncBranchUi(span);
       }
+    };
+
+    const spanByKey = new Map(model.spans.map((span) => [span.key, span]));
+    let buildRow = null;
+
+    // Mounts the rows of span's subtree that are visible under the current fold
+    // and not yet in the DOM, keeping tree (DFS) order: each new row goes right
+    // after the previous mounted row of the walk.
+    const revealSubtree = (span) => {
+      let cursor = rowByKey.get(span.key);
+      if (!cursor) return;
+      const visit = (node, visible) => {
+        for (const child of node.children) {
+          let row = rowByKey.get(child.key);
+          if (!row) {
+            if (!visible || !mountable.has(child.key)) continue;
+            row = buildRow(child);
+            cursor.after(row);
+            syncBranchUi(child);
+          }
+          cursor = row;
+          visit(child, visible && !collapsed.has(child.key));
+        }
+      };
+      visit(span, !collapsed.has(span.key));
     };
 
 
     const controller = {
       model,
       collapsed,
-      expandAll() { collapsed.clear(); syncAll(); },
+      expandAll() {
+        collapsed.clear();
+        for (const root of model.roots) revealSubtree(root);
+        syncAll();
+      },
       collapseAll() {
         for (const key of branchKeys(model)) collapsed.add(key);
         syncAll();
@@ -494,7 +528,7 @@
     const body = document.createElement("div");
     body.className = "traceViewer__body";
     const fragment = document.createDocumentFragment();
-    for (const span of mounted) {
+    buildRow = (span) => {
       const row = document.createElement("div");
       row.className = "traceViewer__row";
       row.dataset.spanId = span.spanId;
@@ -519,6 +553,7 @@
           event.stopPropagation();
           if (collapsed.has(span.key)) collapsed.delete(span.key);
           else collapsed.add(span.key);
+          if (!collapsed.has(span.key)) revealSubtree(span);
           syncBranchUi(span);
           for (const child of span.children) {
             const childRow = rowByKey.get(child.key);
@@ -610,7 +645,10 @@
         }
       }
       row.append(identity, timeline);
-      fragment.appendChild(row);
+      return row;
+    };
+    for (const span of visibleRows(model, collapsed)) {
+      if (mountable.has(span.key)) fragment.appendChild(buildRow(span));
     }
     body.appendChild(fragment);
     scroll.appendChild(body);

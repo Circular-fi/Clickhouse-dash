@@ -68,7 +68,10 @@ def test_unfiltered_trace_search_uses_trace_index_fast_path_and_bounded_enrichme
     cpp = read('src/api_traces.cpp')
     assert 'index_fast_path_eligible' in cpp
     assert 'trace_index_table' in cpp
-    assert 'PREWHERE " + index_time_predicate' in cpp
+    # The index is walked newest-first through bounded Start slices (keyset),
+    # never by re-sorting the whole window per page.
+    assert 'class TraceIndexCursor' in cpp
+    assert '" PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_)' in cpp
     assert 'ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT' in cpp
     assert '" WHERE " + visibility + " AND TraceId IN " + trace_id_list' in cpp
     assert 'duration_quantiles_source' in cpp

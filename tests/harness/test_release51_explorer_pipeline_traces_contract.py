@@ -101,9 +101,10 @@ def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
     assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in api
     detail = api[api.index("void Server::handle_trace_detail"): ]
     assert 'WITH " + trace_literal + " AS trace' in detail
-    assert "SELECT min(Start) - toIntervalSecond(1)" in detail
-    assert "SELECT max(End) + toIntervalSecond(1)" in detail
-    assert "PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end" in detail
+    # One index pass yields both bounds of the trace's time window.
+    assert "SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1))" in detail
+    assert "SELECT min(Start) - toIntervalSecond(1)" not in detail
+    assert "PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)" in detail
     assert "WHERE TraceId = trace AND" in detail
     assert 'w.Key("range_source"); w.String("trace_index");' in detail
     assert "full_trace_id_lookup" not in detail

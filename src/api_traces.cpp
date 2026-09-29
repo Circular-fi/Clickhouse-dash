@@ -16,6 +16,7 @@
 #include <limits>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <map>
 #include <numeric>
 #include <set>
@@ -358,6 +359,306 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
   }
 }
 
+// Tagged searches only need to know whether the attribute columns are Maps.
+// That schema fact changes on DDL, not per request, so cache it per source
+// (system URI + table) instead of querying system.columns on every search.
+// /api/traces/meta always reads it fresh and refreshes the cache.
+struct AttributeMapCacheEntry {
+  bool span_map = false;
+  bool resource_map = false;
+  std::chrono::steady_clock::time_point loaded_at;
+};
+constexpr auto kAttributeMapCacheTtl = std::chrono::seconds(60);
+std::mutex g_attribute_map_mutex;
+std::unordered_map<std::string, AttributeMapCacheEntry> g_attribute_map_cache;
+
+std::string attribute_map_cache_key(const HostSpec& host, const TraceSettings& cfg) {
+  return host.system_uri + '\x1f' + cfg.database + '\x1f' + cfg.table;
+}
+
+void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, bool span_map, bool resource_map) {
+  std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
+  g_attribute_map_cache[attribute_map_cache_key(host, cfg)] =
+      AttributeMapCacheEntry{span_map, resource_map, std::chrono::steady_clock::now()};
+}
+
+void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
+                                 bool* span_map, bool* resource_map) {
+  const std::string key = attribute_map_cache_key(host, cfg);
+  {
+    std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
+    const auto it = g_attribute_map_cache.find(key);
+    if (it != g_attribute_map_cache.end() &&
+        std::chrono::steady_clock::now() - it->second.loaded_at < kAttributeMapCacheTtl) {
+      *span_map = it->second.span_map;
+      *resource_map = it->second.resource_map;
+      return;
+    }
+  }
+  // Only successful lookups are cached; a transient failure is retried next time.
+  if (trace_attribute_maps(client, cfg, span_map, resource_map)) {
+    store_trace_attribute_maps(host, cfg, *span_map, *resource_map);
+  }
+}
+
+constexpr int64_t kNsPerMs = 1000000;
+
+std::string ns_time(int64_t ns) {
+  return "fromUnixTimestamp64Nano(" + std::to_string(ns) + ")";
+}
+
+std::string trace_id_list_sql(const std::vector<std::string>& ids) {
+  std::string out = "(";
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (i) out += ",";
+    out += quote_string(ids[i]);
+  }
+  out += ")";
+  return out;
+}
+
+// Walks the trace index newest-first in exactly the order of
+//   ORDER BY Start DESC LIMIT 1 BY TraceId
+// over the whole search window, i.e. traces ranked by their newest index row.
+// Paging that query with OFFSET re-sorts the entire window for every page (a
+// 7-day window reads ~25M index rows per page). The cursor instead reads a
+// bounded Start slice through prj_start and continues from the last returned
+// Start (keyset), so a page costs roughly the rows it returns.
+//
+// Keyset invariant: every trace whose newest in-window row is newer than hi_ns_
+// has already been emitted. After a full page the walk restarts at the last
+// returned Start (inclusive) and drops already-emitted traces, which re-appear
+// through an older row of the same trace (the OTel MV writes one row per
+// insert batch). After an exhausted slice it continues below the slice and
+// widens the next one, so sparse windows and data gaps take few queries.
+class TraceIndexCursor {
+ public:
+  struct Hit {
+    std::string trace_id;
+    int64_t start_ns = 0;
+  };
+
+  TraceIndexCursor(clickhouse::Client& client, std::string index_table, int64_t start_ms, int64_t end_ms)
+      : client_(client),
+        table_(std::move(index_table)),
+        window_("Start >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND "
+                "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")"),
+        lo_ns_(start_ms * kNsPerMs),
+        hi_ns_(end_ms * kNsPerMs),
+        slice_ns_(std::max<int64_t>(1, std::min<int64_t>(kInitialSliceNs, hi_ns_ - lo_ns_))) {}
+
+  const std::string& window() const { return window_; }
+  const std::string& table() const { return table_; }
+
+  // Up to n not-yet-emitted traces in rank order; fewer only when the window
+  // has no more traces.
+  std::vector<Hit> next(size_t n) {
+    std::vector<Hit> out;
+    while (out.size() < n && !exhausted_) {
+      const size_t want = n - out.size();
+      const int64_t lo = std::max(lo_ns_, hi_ns_ - slice_ns_);
+      const std::string sql =
+          "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(Start)) FROM " + table_ +
+          " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
+          " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(want);
+      size_t rows = 0;
+      size_t fresh = 0;
+      int64_t last = hi_ns_;
+      client_.Select(sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          ++rows;
+          std::string id = ch_block_text_at(block, 0, row);
+          last = std::stoll(ch_block_text_at(block, 1, row));
+          if (seen_.insert(id).second) {
+            out.push_back(Hit{std::move(id), last});
+            ++fresh;
+          }
+        }
+      });
+      if (rows >= want) {
+        // More traces remain in this slice. A full page made only of already
+        // emitted traces tied at hi steps past the tie so the walk progresses.
+        hi_ns_ = (fresh == 0 && last >= hi_ns_) ? last - 1 : last;
+      } else if (lo <= lo_ns_) {
+        exhausted_ = true;
+      } else {
+        hi_ns_ = lo - 1;
+        slice_ns_ = std::min<int64_t>(slice_ns_ * 4, std::max<int64_t>(1, hi_ns_ - lo_ns_ + 1));
+      }
+    }
+    return out;
+  }
+
+ private:
+  static constexpr int64_t kInitialSliceNs = 60LL * 1000 * kNsPerMs;
+
+  clickhouse::Client& client_;
+  std::string table_;
+  std::string window_;
+  int64_t lo_ns_ = 0;
+  int64_t hi_ns_ = 0;
+  int64_t slice_ns_ = 1;
+  bool exhausted_ = false;
+  std::unordered_set<std::string> seen_;
+};
+
+// Span filters (service, operation, status, tags) select traces having at
+// least one matching visible span. Two equivalent SQL forms exist:
+//   narrow: TraceId IN (candidate_ids)   -- cheap when few traces match
+//   broad:  HAVING countIf(filters) > 0  -- one pass, no giant IN set
+// With a broad filter the IN set holds most traces of the window, and building
+// and probing it costs more than the aggregation itself (24 h, one service:
+// 6.5 s vs 3.7 s). Only primary-key filters (service / operation) are probed:
+// their candidate scan is cheap, and a LIMIT stops it early when the filter
+// is broad. Status and tag filters keep the narrow form.
+constexpr double kBroadFilterShare = 0.25;
+
+bool filters_are_broad(clickhouse::Client& client, const std::string& table, const std::string& index_table,
+                       const std::string& time_predicate, const std::string& visibility,
+                       const std::string& span_filters, int64_t start_ms, int64_t end_ms) {
+  if (span_filters.empty() || index_table.empty()) return false;
+  // Only a performance hint: any failure (e.g. a missing index table) keeps
+  // the narrow form, which needs no index.
+  try {
+    uint64_t index_rows = 0;
+    client.Select(
+        "SELECT toString(count()) FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
+            std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")",
+        [&](const clickhouse::Block& block) {
+          if (block.GetRowCount()) index_rows = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
+        });
+    // Index rows >= traces (one row per insert batch), so the share is conservative.
+    const uint64_t threshold =
+        std::max<uint64_t>(1000, static_cast<uint64_t>(static_cast<double>(index_rows) * kBroadFilterShare));
+    uint64_t matching = 0;
+    client.Select(
+        "SELECT toString(count()) FROM (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
+            " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId LIMIT " + std::to_string(threshold) + ")",
+        [&](const clickhouse::Block& block) {
+          if (block.GetRowCount()) matching = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
+        });
+    return matching >= threshold;
+  } catch (...) {
+    return false;
+  }
+}
+
+// " HAVING a AND b" -> "a AND b".
+std::string having_terms(const std::string& having) {
+  static const std::string kPrefix = " HAVING ";
+  return having.rfind(kPrefix, 0) == 0 ? having.substr(kPrefix.size()) : having;
+}
+
+struct SpanRankQuery {
+  std::string table;
+  std::string time_predicate;
+  std::string visibility;
+  std::string span_filters;  // " AND ..." or empty
+  std::string having;        // " HAVING ..." or empty
+  bool broad_filters = false;  // evaluate span_filters as HAVING countIf(...) > 0
+  int64_t start_ms = 0;
+  int64_t end_ms = 0;
+  size_t limit = 0;
+};
+
+struct RankedTrace {
+  std::string trace_id;
+  int64_t first_span_ns = 0;  // min(Timestamp) of its visible window spans
+  // max(Timestamp + Duration) when a duration HAVING already aggregates it,
+  // else 0 (unknown): an extra per-trace aggregate is not free on wide windows.
+  int64_t span_end_ns = 0;
+};
+
+// Exact, newest-slice-first evaluation of
+//   [WITH candidate_ids AS (spans matching the filters, LIMIT 1 BY TraceId)]
+//   SELECT TraceId FROM spans PREWHERE window WHERE visibility [AND TraceId IN candidate_ids]
+//   GROUP BY TraceId [HAVING duration] ORDER BY min(Timestamp) DESC LIMIT limit
+// Aggregating every trace of a wide window only to keep the newest `limit` is
+// the dominant cost of span-based search. A trace whose first visible window
+// span is at or after t has all of its window spans in [t, end], so a query
+// restricted to that slice computes exactly the same min/duration/filter
+// match for it. Other traces seen in the slice ("straddlers") have visible
+// spans before t; they rank below every trace starting at or after t, their
+// slice aggregates are partial, and they are dropped after an IN-list
+// existence probe on [start, t). When the slice yields `limit` exact traces
+// they are the global answer; otherwise the slice widens, ending with the
+// plain whole-window query.
+std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const SpanRankQuery& q) {
+  const int64_t lo_ns = q.start_ms * kNsPerMs;
+  const int64_t hi_ns = q.end_ms * kNsPerMs;
+  const int64_t range_ns = hi_ns - lo_ns;
+  constexpr int64_t kMinSliceNs = 5LL * 60 * 1000 * kNsPerMs;
+  const bool has_filters = !q.span_filters.empty() && !q.broad_filters;
+  std::string having = q.having;
+  if (!q.span_filters.empty() && q.broad_filters) {
+    having = " HAVING countIf(1" + q.span_filters + ") > 0" + (q.having.empty() ? std::string{} : " AND " + having_terms(q.having));
+  }
+  double fraction = range_ns > 16 * kMinSliceNs ? 1.0 / 16.0 : 1.0;
+  size_t pad = 16;
+
+  while (true) {
+    const bool whole = fraction >= 1.0;
+    const int64_t t = whole ? lo_ns : hi_ns - static_cast<int64_t>(static_cast<double>(range_ns) * fraction);
+    const std::string slice = whole ? std::string{} : " AND Timestamp >= " + ns_time(t);
+    const std::string candidates = has_filters
+        ? "WITH candidate_ids AS (SELECT TraceId FROM " + q.table + " PREWHERE " + q.time_predicate + slice +
+          " WHERE " + q.visibility + q.span_filters + " LIMIT 1 BY TraceId) "
+        : std::string{};
+    const std::string candidate_where = has_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
+    const size_t fetch = whole ? q.limit : q.limit + pad;
+    // Same expression as the duration HAVING, so it is aggregated only once.
+    const std::string span_end = q.having.empty()
+        ? std::string("'0'")
+        : std::string("toString(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)))");
+    const std::string sql = candidates +
+        "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(min(Timestamp))), " + span_end +
+        " FROM " + q.table +
+        " PREWHERE " + q.time_predicate + slice + " WHERE " + q.visibility + candidate_where +
+        " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(fetch);
+    std::vector<RankedTrace> rows;
+    client.Select(sql, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        rows.push_back(RankedTrace{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row)),
+                                   std::stoll(ch_block_text_at(block, 2, row))});
+      }
+    });
+    if (whole) return rows;
+
+    std::unordered_set<std::string> straddlers;
+    if (!rows.empty()) {
+      std::vector<std::string> ids;
+      ids.reserve(rows.size());
+      for (const auto& row : rows) ids.push_back(row.trace_id);
+      const std::string probe_sql =
+          "SELECT DISTINCT toString(TraceId) FROM " + q.table + " PREWHERE " + q.time_predicate +
+          " AND Timestamp < " + ns_time(t) + " WHERE " + q.visibility + " AND TraceId IN " + trace_id_list_sql(ids);
+      client.Select(probe_sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) straddlers.insert(ch_block_text_at(block, 0, row));
+      });
+    }
+    std::vector<RankedTrace> kept;
+    for (auto& row : rows) {
+      if (straddlers.count(row.trace_id) == 0) kept.push_back(std::move(row));
+    }
+    if (kept.size() >= q.limit) {
+      kept.resize(q.limit);
+      return kept;
+    }
+    if (rows.size() >= fetch && pad < 1024) {
+      // Straddlers took result slots and the slice holds more traces.
+      pad *= 4;
+      continue;
+    }
+    // Widen from the observed density; an empty slice goes straight to the
+    // whole window so sparse results cost at most one extra slice.
+    fraction = kept.empty()
+        ? fraction * 8.0
+        : fraction * std::max(2.0, 1.5 * static_cast<double>(q.limit) / static_cast<double>(kept.size()));
+    if (fraction > 0.4 || rows.size() >= fetch) fraction = 1.0;
+    pad = 16;
+  }
+}
+
 } // namespace
 
 void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& res) {
@@ -401,7 +702,9 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
     return json_error(res, 503, "trace_schema_failed", e.what());
   }
 
-  trace_attribute_maps(*client, cfg_.traces, &span_attribute_map, &resource_attribute_map);
+  if (trace_attribute_maps(*client, cfg_.traces, &span_attribute_map, &resource_attribute_map)) {
+    store_trace_attribute_maps(*host, cfg_.traces, span_attribute_map, resource_attribute_map);
+  }
 
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -538,7 +841,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
 
   if (req.has_param("tag_key") && !req.get_param_value("tag_key").empty()) {
     bool span_map = false, resource_map = false;
-    trace_attribute_maps(*client, cfg_.traces, &span_map, &resource_map);
+    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
     const std::string scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
     if ((scope == "span" && !span_map) || (scope == "resource" && !resource_map) ||
         (scope == "any" && !span_map && !resource_map)) {
@@ -550,14 +853,14 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const bool has_candidate_filters = !span_filters.empty();
+  // Only service / operation filters (primary-key columns) may use the broad form.
+  const bool key_only_filters = has_candidate_filters &&
+      (!req.has_param("status") || req.get_param_value("status").empty()) &&
+      (!req.has_param("tag_key") || req.get_param_value("tag_key").empty());
   const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
   const bool needs_span_match = has_candidate_filters || visibility != "1";
-
-  const std::string candidate_cte = has_candidate_filters
-      ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
-        " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId)"
-      : std::string{};
-  const std::string candidate_where = has_candidate_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
+  const bool has_index = !cfg_.traces.trace_index_table.empty();
+  const std::string index_table = has_index ? qualified(cfg_.traces.database, cfg_.traces.trace_index_table) : std::string{};
 
   // Duration is a trace-level filter and therefore stays after candidate span matching.
   const std::string duration_expr =
@@ -593,16 +896,18 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
         out.duration_ns = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
         out.spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
         out.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
-        std::map<std::string, ServiceStat> stats;
+        // One "service RS spans RS errors" item per service (see aggregate_select).
         for (const auto& item : split_char(ch_block_text_at(block, 7, row), '\x1f')) {
-          const auto pair = split_char(item, '\x1e');
-          if (pair.empty() || pair[0].empty()) continue;
-          auto& stat = stats[pair[0]];
-          stat.service = pair[0];
-          stat.spans += 1;
-          if (pair.size() > 1 && pair[1] == "Error") stat.errors += 1;
+          const size_t errors_sep = item.rfind('\x1e');
+          if (errors_sep == std::string::npos || errors_sep == 0) continue;
+          const size_t spans_sep = item.rfind('\x1e', errors_sep - 1);
+          if (spans_sep == std::string::npos || spans_sep == 0) continue;
+          ServiceStat stat;
+          stat.service = item.substr(0, spans_sep);
+          stat.spans = static_cast<uint64_t>(std::stoull(item.substr(spans_sep + 1, errors_sep - spans_sep - 1)));
+          stat.errors = static_cast<uint64_t>(std::stoull(item.substr(errors_sep + 1)));
+          out.service_stats.push_back(std::move(stat));
         }
-        for (auto& entry : stats) out.service_stats.push_back(std::move(entry.second));
         std::sort(out.service_stats.begin(), out.service_stats.end(), [](const ServiceStat& a, const ServiceStat& b) {
           if (a.spans != b.spans) return a.spans > b.spans;
           return a.service < b.service;
@@ -612,113 +917,138 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     });
   };
 
+  // Per-service span/error counts are aggregated server-side with sumMap, so
+  // the per-trace state and the payload are O(services), not O(spans).
+  // Spans without a ServiceName are not reported as a service (as before).
+  const std::string service_stats_map =
+      "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])";
   const std::string aggregate_select =
       "SELECT toString(TraceId), toString(toUnixTimestamp64Milli(min(Timestamp))), "
       "toString(if(empty(argMinIf(SpanName, Timestamp, empty(ParentSpanId))), argMin(SpanName, Timestamp), argMinIf(SpanName, Timestamp, empty(ParentSpanId)))), "
       "toString(if(empty(argMinIf(ServiceName, Timestamp, empty(ParentSpanId))), argMin(ServiceName, Timestamp), argMinIf(ServiceName, Timestamp, empty(ParentSpanId)))), "
       "toString(" + duration_expr + "), toString(count()), toString(countIf(StatusCode = 'Error')), "
-      "arrayStringConcat(groupArray(concat(toString(ServiceName), char(30), toString(StatusCode))), char(31)) ";
+      "arrayStringConcat(arrayMap(stat -> concat(stat.1, char(30), toString(stat.2), char(30), toString(stat.3)), "
+      "arrayFilter(stat -> notEmpty(stat.1), arrayZip(tupleElement(" + service_stats_map + ", 1), tupleElement(" +
+      service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3)))), char(31)) ";
 
-  auto trace_id_list_sql = [&](const std::vector<std::string>& ids) {
-    std::string out = "(";
-    for (size_t i = 0; i < ids.size(); ++i) {
-      if (i) out += ",";
-      out += quote_string(ids[i]);
+  // The summary aggregates every window span of <= limit selected traces, so
+  // it only needs the time range those spans occupy instead of probing every
+  // part of the window. Span-ranked traces carry exact bounds (earliest window
+  // span, and the latest span end when the duration HAVING computed it);
+  // index-selected traces use their index bounds (every span Timestamp is
+  // covered by the [Start, End] row of its insert batch) with the same 1 s
+  // margin as trace detail.
+  auto summary_sql_for = [&](const std::vector<std::string>& selected_ids, int64_t first_span_ns, int64_t span_end_ns) {
+    const std::string trace_id_list = trace_id_list_sql(selected_ids);
+    std::string with;
+    std::string bounds;
+    if (first_span_ns > 0) {
+      bounds = " AND Timestamp >= " + ns_time(first_span_ns);
+      if (span_end_ns >= first_span_ns) bounds += " AND Timestamp <= " + ns_time(span_end_ns);
+    } else if (has_index) {
+      with = "WITH (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
+             " WHERE TraceId IN " + trace_id_list + ") AS trace_bounds ";
+      bounds = " AND Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)";
     }
-    out += ")";
-    return out;
+    return with + aggregate_select +
+        "FROM " + table + " PREWHERE " + time_predicate + bounds +
+        " WHERE " + visibility + " AND TraceId IN " + trace_id_list +
+        " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
+  };
+
+  auto elapsed_ms = [](std::chrono::steady_clock::time_point since) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - since).count());
   };
 
   uint64_t candidate_query_ms = 0;
   uint64_t summary_query_ms = 0;
   bool used_trace_index_fast_path = false;
   std::string search_path = "span_aggregation";
-  const bool index_fast_path_eligible = !has_duration_filters && !cfg_.traces.trace_index_table.empty();
+  const bool index_fast_path_eligible = !has_duration_filters && has_index;
 
   if (index_fast_path_eligible) {
     try {
-      const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
-      const std::string index_time_predicate =
-          "Start >= fromUnixTimestamp64Milli(" + std::to_string(start_ms) + ") AND "
-          "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")";
-
+      TraceIndexCursor cursor(*client, index_table, start_ms, end_ms);
       std::vector<std::string> selected_ids;
       const auto candidate_started = std::chrono::steady_clock::now();
 
       if (!needs_span_match) {
-        const std::string candidate_sql =
-            "SELECT toString(TraceId), toString(Start), toString(End) FROM " + index_table +
-            " PREWHERE " + index_time_predicate +
-            " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(limit);
-        client->Select(candidate_sql, [&](const clickhouse::Block& block) {
-          for (size_t row = 0; row < block.GetRowCount(); ++row) selected_ids.push_back(ch_block_text_at(block, 0, row));
-        });
+        for (auto& hit : cursor.next(static_cast<size_t>(limit))) selected_ids.push_back(std::move(hit.trace_id));
         search_path = "trace_index";
       } else {
+        // Traces are tested in index rank order until `limit` match, over at
+        // most the newest kCandidateScanCap traces (then the span fallback
+        // below answers). Pages start at kCandidateBatch traces and grow when
+        // matches are rare, so a rare filter reaches the cap in a handful of
+        // pages instead of 64 fixed ones; the traces tested and their order
+        // are unchanged.
         constexpr size_t kCandidateBatch = 1000;
+        constexpr size_t kMaxCandidateBatch = 32000;
         constexpr size_t kCandidateScanCap = 64000;
-        size_t offset = 0;
+        size_t considered = 0;
+        size_t batch_size = kCandidateBatch;
         bool exhausted = false;
 
-        while (selected_ids.size() < static_cast<size_t>(limit) && offset < kCandidateScanCap) {
-          std::vector<std::string> batch_ids;
-          const std::string candidate_sql =
-              "SELECT toString(TraceId), toString(Start), toString(End) FROM " + index_table +
-              " PREWHERE " + index_time_predicate +
-              " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(kCandidateBatch) +
-              " OFFSET " + std::to_string(offset);
-          client->Select(candidate_sql, [&](const clickhouse::Block& block) {
-            for (size_t row = 0; row < block.GetRowCount(); ++row) batch_ids.push_back(ch_block_text_at(block, 0, row));
-          });
-
-          if (batch_ids.empty()) {
+        while (selected_ids.size() < static_cast<size_t>(limit) && considered < kCandidateScanCap) {
+          const auto batch = cursor.next(std::min(batch_size, kCandidateScanCap - considered));
+          if (batch.empty()) {
             exhausted = true;
             break;
           }
+          considered += batch.size();
 
-          const std::string batch_list = trace_id_list_sql(batch_ids);
+          // The page is every trace whose newest index row lies in
+          // [newest, oldest] Start of the page (plus older rows of already
+          // tested traces, discarded below). Its spans lie inside the page's
+          // index bounds, so matching reads only that time range rather than
+          // probing the whole window.
+          const std::string batch_ids =
+              "(SELECT TraceId FROM " + index_table + " PREWHERE " + cursor.window() +
+              " AND Start >= " + ns_time(batch.back().start_ns) + " AND Start <= " + ns_time(batch.front().start_ns) + ")";
           std::unordered_set<std::string> matching_ids;
           const std::string match_sql =
+              "WITH (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
+              " WHERE TraceId IN " + batch_ids + ") AS batch_bounds "
               "SELECT toString(TraceId) FROM " + table +
               " PREWHERE " + time_predicate +
-              " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_list +
+              " AND Timestamp >= tupleElement(batch_bounds, 1) AND Timestamp <= tupleElement(batch_bounds, 2)"
+              " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_ids +
               " LIMIT 1 BY TraceId";
           client->Select(match_sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) matching_ids.insert(ch_block_text_at(block, 0, row));
           });
 
-          for (const auto& id : batch_ids) {
-            if (matching_ids.find(id) == matching_ids.end()) continue;
-            selected_ids.push_back(id);
+          for (const auto& hit : batch) {
+            if (matching_ids.find(hit.trace_id) == matching_ids.end()) continue;
+            selected_ids.push_back(hit.trace_id);
             if (selected_ids.size() >= static_cast<size_t>(limit)) break;
           }
-
-          if (batch_ids.size() < kCandidateBatch) {
+          if (batch.size() < std::min(batch_size, kCandidateScanCap - (considered - batch.size()))) {
             exhausted = true;
             break;
           }
-          offset += kCandidateBatch;
+
+          const size_t missing = static_cast<size_t>(limit) - std::min(selected_ids.size(), static_cast<size_t>(limit));
+          if (missing == 0) break;
+          const double projected = selected_ids.empty()
+              ? static_cast<double>(batch_size) * 4.0
+              : 1.25 * static_cast<double>(missing) * static_cast<double>(considered) / static_cast<double>(selected_ids.size());
+          batch_size = std::max(kCandidateBatch, std::min(kMaxCandidateBatch, static_cast<size_t>(projected)));
         }
 
-        if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && offset >= kCandidateScanCap) {
+        if (selected_ids.size() < static_cast<size_t>(limit) && !exhausted && considered >= kCandidateScanCap) {
           throw std::runtime_error("filtered trace-index candidate scan cap reached");
         }
         search_path = "trace_index_filtered";
       }
 
-      candidate_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - candidate_started).count());
+      candidate_query_ms = elapsed_ms(candidate_started);
 
       if (!selected_ids.empty()) {
         const auto summary_started = std::chrono::steady_clock::now();
-        const std::string trace_id_list = trace_id_list_sql(selected_ids);
-        const std::string summary_sql = aggregate_select +
-            "FROM " + table + " PREWHERE " + time_predicate +
-            " WHERE " + visibility + " AND TraceId IN " + trace_id_list +
-            " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
-        read_summary(summary_sql);
-        summary_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - summary_started).count());
+        read_summary(summary_sql_for(selected_ids, 0, 0));
+        summary_query_ms = elapsed_ms(summary_started);
       }
 
       used_trace_index_fast_path = true;
@@ -730,51 +1060,47 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     }
   }
 
-  if (!used_trace_index_fast_path && has_duration_filters) {
-    // Duration is a trace-level HAVING over every span in the window. The
-    // trace index cannot answer it: the OTel exporter's trace_id_ts MV stores
-    // End = max(Timestamp) (last span *start*), which underestimates duration.
-    // Instead, select the matching TraceIds with only the cheap min/max
-    // aggregates, then compute the expensive summary (argMin*, per-span
-    // service/status arrays) for those <= limit traces only. Same spans, same
-    // HAVING, same ORDER BY: identical results, ~4x less work on wide windows.
+  if (!used_trace_index_fast_path) {
+    // Span-based search: duration filters (a trace-level HAVING the index
+    // cannot answer -- the OTel exporter's trace_id_ts MV stores
+    // End = max(Timestamp), the last span *start*), no trace index, or the
+    // filtered index scan reached its cap. Rank the TraceIds with only the
+    // cheap min/max aggregates (newest slice first, see
+    // rank_traces_by_start), then compute the expensive summary (argMin*,
+    // per-service stats) for those <= limit traces only. Same spans, same
+    // HAVING, same ORDER BY as a single whole-window aggregation.
     try {
       const auto candidate_started = std::chrono::steady_clock::now();
-      std::vector<std::string> selected_ids;
-      const std::string candidate_sql =
-          (has_candidate_filters ? "WITH " + candidate_cte + " " : "") +
-          "SELECT toString(TraceId) FROM " + table + " PREWHERE " + time_predicate +
-          " WHERE " + visibility + candidate_where +
-          " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
-      client->Select(candidate_sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) selected_ids.push_back(ch_block_text_at(block, 0, row));
-      });
-      candidate_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - candidate_started).count());
-      if (!selected_ids.empty()) {
+      SpanRankQuery rank;
+      rank.table = table;
+      rank.time_predicate = time_predicate;
+      rank.visibility = visibility;
+      rank.span_filters = span_filters;
+      rank.having = having;
+      rank.broad_filters = key_only_filters &&
+          filters_are_broad(*client, table, index_table, time_predicate, visibility, span_filters, start_ms, end_ms);
+      rank.start_ms = start_ms;
+      rank.end_ms = end_ms;
+      rank.limit = static_cast<size_t>(limit);
+      const auto ranked = rank_traces_by_start(*client, rank);
+      candidate_query_ms = elapsed_ms(candidate_started);
+      if (!ranked.empty()) {
+        std::vector<std::string> selected_ids;
+        int64_t first_span_ns = std::numeric_limits<int64_t>::max();
+        int64_t span_end_ns = 0;
+        bool span_end_known = true;
+        for (const auto& trace : ranked) {
+          selected_ids.push_back(trace.trace_id);
+          first_span_ns = std::min(first_span_ns, trace.first_span_ns);
+          span_end_known = span_end_known && trace.span_end_ns > 0;
+          span_end_ns = std::max(span_end_ns, trace.span_end_ns);
+        }
+        if (!span_end_known) span_end_ns = 0;
         const auto summary_started = std::chrono::steady_clock::now();
-        const std::string summary_sql = aggregate_select +
-            "FROM " + table + " PREWHERE " + time_predicate +
-            " WHERE " + visibility + " AND TraceId IN " + trace_id_list_sql(selected_ids) +
-            " GROUP BY TraceId ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
-        read_summary(summary_sql);
-        summary_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - summary_started).count());
+        read_summary(summary_sql_for(selected_ids, first_span_ns, span_end_ns));
+        summary_query_ms = elapsed_ms(summary_started);
       }
-      search_path = "span_duration_two_phase";
-    } catch (const std::exception& e) {
-      return json_error(res, 503, "trace_search_failed", e.what());
-    }
-  } else if (!used_trace_index_fast_path) {
-    try {
-      const auto summary_started = std::chrono::steady_clock::now();
-      const std::string summary_sql =
-          (has_candidate_filters ? "WITH " + candidate_cte + " " : "") + aggregate_select +
-          "FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility + candidate_where +
-          " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(limit);
-      read_summary(summary_sql);
-      summary_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - summary_started).count());
+      if (has_duration_filters) search_path = "span_duration_two_phase";
     } catch (const std::exception& e) {
       return json_error(res, 503, "trace_search_failed", e.what());
     }
@@ -868,7 +1194,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
 
   if (req.has_param("tag_key") && !req.get_param_value("tag_key").empty()) {
     bool span_map = false, resource_map = false;
-    trace_attribute_maps(*client, cfg_.traces, &span_map, &resource_map);
+    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
     const std::string scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
     if ((scope == "span" && !span_map) || (scope == "resource" && !resource_map) ||
         (scope == "any" && !span_map && !resource_map)) {
@@ -877,9 +1203,16 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   }
 
   const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string index_table = cfg_.traces.trace_index_table.empty()
+      ? std::string{}
+      : qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
   const std::string time_predicate = trace_time_predicate(start_ms, end_ms);
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const bool has_candidate_filters = !span_filters.empty();
+  // Only service / operation filters (primary-key columns) may use the broad form.
+  const bool key_only_filters = has_candidate_filters &&
+      (!req.has_param("status") || req.get_param_value("status").empty()) &&
+      (!req.has_param("tag_key") || req.get_param_value("tag_key").empty());
 
   const std::string candidate_cte = has_candidate_filters
       ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
@@ -949,9 +1282,16 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   {
     try {
       const auto analytics_started = std::chrono::steady_clock::now();
-      const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility + candidate_where +
-          " GROUP BY TraceId" + having;
-      const std::string with_candidate = has_candidate_filters ? "WITH " + candidate_cte + ", " : "WITH ";
+      // Broad service / operation filters aggregate once with HAVING countIf
+      // instead of building an IN set of most traces (see filters_are_broad).
+      const bool broad = key_only_filters && filters_are_broad(
+          *client, table, index_table, time_predicate, visibility, span_filters, start_ms, end_ms);
+      const std::string scope_having = broad
+          ? " HAVING countIf(1" + span_filters + ") > 0" + (having.empty() ? std::string{} : " AND " + having_terms(having))
+          : having;
+      const std::string trace_scope = " FROM " + table + " PREWHERE " + time_predicate + " WHERE " + visibility +
+          (broad ? std::string{} : candidate_where) + " GROUP BY TraceId" + scope_having;
+      const std::string with_candidate = has_candidate_filters && !broad ? "WITH " + candidate_cte + ", " : "WITH ";
       const std::string trace_durations_cte = with_candidate +
           "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + duration_expr + " AS duration_ns" + trace_scope + ") ";
       const std::string analytics_sql = trace_durations_cte +
@@ -1080,12 +1420,14 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
 
   try {
     const std::string index_table = qualified(cfg_.traces.database, cfg_.traces.trace_index_table);
+    // One index lookup yields both bounds (previously two scalar subqueries
+    // each read the trace's index rows).
     const std::string indexed_sql =
         "WITH " + trace_literal + " AS trace, "
-        "(SELECT min(Start) - toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_start, "
-        "(SELECT max(End) + toIntervalSecond(1) FROM " + index_table + " WHERE TraceId = trace) AS trace_end " +
+        "(SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
+        " WHERE TraceId = trace) AS trace_bounds " +
         select_columns +
-        "FROM " + main_table + " PREWHERE Timestamp >= trace_start AND Timestamp <= trace_end "
+        "FROM " + main_table + " PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2) "
         "WHERE TraceId = trace AND " + visibility +
         " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
     load_spans(indexed_sql);
