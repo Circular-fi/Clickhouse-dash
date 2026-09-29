@@ -229,7 +229,9 @@ bool trace_time_range(const TraceSettings& cfg, const httplib::Request& req, int
     hi = now_ms;
     lo = hi - static_cast<int64_t>(lookback) * 60 * 1000;
   }
-  if (lo < 0 || hi <= lo) {
+  // Searches convert bounds to nanoseconds (int64 overflows after year 2262).
+  constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
+  if (lo < 0 || hi <= lo || hi > kMaxTraceTimeMs) {
     if (error) *error = "Invalid trace time range.";
     return false;
   }
@@ -418,20 +420,25 @@ std::string trace_id_list_sql(const std::vector<std::string>& ids) {
   return out;
 }
 
-// Walks the trace index newest-first in exactly the order of
+// Walks the trace index newest-first in the order of
 //   ORDER BY Start DESC LIMIT 1 BY TraceId
-// over the whole search window, i.e. traces ranked by their newest index row.
+// over the whole search window, i.e. traces ranked by their newest in-window
+// index row (ties at an identical Start are unordered, as in that query).
 // Paging that query with OFFSET re-sorts the entire window for every page (a
-// 7-day window reads ~25M index rows per page). The cursor instead reads a
-// bounded Start slice through prj_start and continues from the last returned
-// Start (keyset), so a page costs roughly the rows it returns.
-//
-// Keyset invariant: every trace whose newest in-window row is newer than hi_ns_
-// has already been emitted. After a full page the walk restarts at the last
-// returned Start (inclusive) and drops already-emitted traces, which re-appear
-// through an older row of the same trace (the OTel MV writes one row per
-// insert batch). After an exhausted slice it continues below the slice and
-// widens the next one, so sparse windows and data gaps take few queries.
+// 7-day window reads ~25M index rows per page). The cursor instead walks
+// disjoint Start slices [lo, hi] newest-first through prj_start and reads each
+// slice *completely*, one row per trace (max(Start) GROUP BY TraceId), into a
+// buffer that next() drains:
+//   * slices never overlap, so equal Starts can never straddle a page seam
+//     (no skipped or duplicated trace on ties);
+//   * a trace appears at most once per slice however many index rows it has
+//     (the OTel MV writes one row per insert batch), so long-lived traces cannot
+//     multiply the number of queries;
+//   * a trace whose newest row was in an earlier slice re-appears in later
+//     slices only through older rows and is dropped via seen_.
+// Slice width adapts to the observed density; a slice holding more than
+// kSliceRowCap traces is halved and re-read, so memory and per-query cost stay
+// bounded.
 class TraceIndexCursor {
  public:
   struct Hit {
@@ -446,7 +453,7 @@ class TraceIndexCursor {
                 "Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")"),
         lo_ns_(start_ms * kNsPerMs),
         hi_ns_(end_ms * kNsPerMs),
-        slice_ns_(std::max<int64_t>(1, std::min<int64_t>(kInitialSliceNs, hi_ns_ - lo_ns_))) {}
+        slice_ns_(std::max<int64_t>(1, std::min<int64_t>(kInitialSliceNs, hi_ns_ - lo_ns_ + 1))) {}
 
   const std::string& window() const { return window_; }
   const std::string& table() const { return table_; }
@@ -455,43 +462,74 @@ class TraceIndexCursor {
   // has no more traces.
   std::vector<Hit> next(size_t n) {
     std::vector<Hit> out;
-    while (out.size() < n && !exhausted_) {
-      const size_t want = n - out.size();
-      const int64_t lo = std::max(lo_ns_, hi_ns_ - slice_ns_);
-      const std::string sql =
-          "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(Start)) FROM " + table_ +
-          " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
-          " ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT " + std::to_string(want);
-      size_t rows = 0;
-      size_t fresh = 0;
-      int64_t last = hi_ns_;
-      client_.Select(sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          ++rows;
-          std::string id = ch_block_text_at(block, 0, row);
-          last = std::stoll(ch_block_text_at(block, 1, row));
-          if (seen_.insert(id).second) {
-            out.push_back(Hit{std::move(id), last});
-            ++fresh;
-          }
-        }
-      });
-      if (rows >= want) {
-        // More traces remain in this slice. A full page made only of already
-        // emitted traces tied at hi steps past the tie so the walk progresses.
-        hi_ns_ = (fresh == 0 && last >= hi_ns_) ? last - 1 : last;
-      } else if (lo <= lo_ns_) {
-        exhausted_ = true;
-      } else {
-        hi_ns_ = lo - 1;
-        slice_ns_ = std::min<int64_t>(slice_ns_ * 4, std::max<int64_t>(1, hi_ns_ - lo_ns_ + 1));
+    while (out.size() < n) {
+      if (buffer_pos_ < buffer_.size()) {
+        out.push_back(std::move(buffer_[buffer_pos_++]));
+        continue;
       }
+      if (exhausted_) break;
+      fill(n - out.size());
     }
     return out;
   }
 
  private:
   static constexpr int64_t kInitialSliceNs = 60LL * 1000 * kNsPerMs;
+  static constexpr size_t kSliceRowCap = 20000;
+
+  // Read the next non-empty slice below hi_ns_ into buffer_ (or exhaust).
+  void fill(size_t wanted) {
+    buffer_.clear();
+    buffer_pos_ = 0;
+    while (buffer_.empty() && !exhausted_) {
+      if (hi_ns_ < lo_ns_) {
+        exhausted_ = true;
+        return;
+      }
+      const int64_t lo = std::max(lo_ns_, hi_ns_ - slice_ns_ + 1);
+      // toDateTime64(…, 9) accepts both DateTime and DateTime64 index schemas.
+      const std::string sql =
+          "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(toDateTime64(max(Start), 9))) FROM " + table_ +
+          " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
+          " GROUP BY TraceId LIMIT " + std::to_string(kSliceRowCap + 1);
+      std::vector<Hit> rows;
+      client_.Select(sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          rows.push_back(Hit{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row))});
+        }
+      });
+      if (rows.size() > kSliceRowCap && slice_ns_ > 1) {
+        // Too dense to read in one piece: re-read a narrower slice.
+        slice_ns_ = std::max<int64_t>(1, slice_ns_ / 4);
+        continue;
+      }
+      size_t fresh = 0;
+      for (auto& row : rows) {
+        if (!seen_.insert(row.trace_id).second) continue;
+        buffer_.push_back(std::move(row));
+        ++fresh;
+      }
+      std::sort(buffer_.begin(), buffer_.end(), [](const Hit& a, const Hit& b) {
+        if (a.start_ns != b.start_ns) return a.start_ns > b.start_ns;
+        return a.trace_id < b.trace_id;
+      });
+      if (lo <= lo_ns_) {
+        exhausted_ = true;
+      } else {
+        hi_ns_ = lo - 1;
+        // Aim the next slice at roughly the traces still wanted (x2 headroom),
+        // growing at most 8x per step; empty slices grow 4x.
+        double factor = 4.0;
+        if (fresh > 0) {
+          factor = std::min(8.0, std::max(0.5, 2.0 * static_cast<double>(std::max<size_t>(wanted, 1)) /
+                                                    static_cast<double>(fresh)));
+        }
+        const double next = static_cast<double>(slice_ns_) * factor;
+        const double remaining = static_cast<double>(hi_ns_ - lo_ns_ + 1);
+        slice_ns_ = static_cast<int64_t>(std::max(1.0, std::min(next, remaining)));
+      }
+    }
+  }
 
   clickhouse::Client& client_;
   std::string table_;
@@ -500,6 +538,8 @@ class TraceIndexCursor {
   int64_t hi_ns_ = 0;
   int64_t slice_ns_ = 1;
   bool exhausted_ = false;
+  std::vector<Hit> buffer_;
+  size_t buffer_pos_ = 0;
   std::unordered_set<std::string> seen_;
 };
 

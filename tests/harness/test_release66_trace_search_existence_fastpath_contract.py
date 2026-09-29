@@ -25,11 +25,15 @@ def test_filtered_trace_search_is_index_driven_and_bounded_before_enrichment():
     assert "kCandidateBatch = 1000" in search
     assert "kCandidateScanCap = 64000" in search
     assert "TraceIndexCursor cursor(*client, index_table, start_ms, end_ms);" in search
-    # Keyset pagination: no OFFSET re-sorting of the whole window per page.
-    assert "ORDER BY Start DESC LIMIT 1 BY TraceId LIMIT" in cursor
+    # Keyset pagination over disjoint, fully-read Start slices: no OFFSET
+    # re-sorting per page, no tie skipped at a page seam, one row per trace
+    # per slice (bounded queries for traces with many index rows).
     assert "OFFSET " not in search and "OFFSET " not in cursor
-    assert "hi_ns_ = (fresh == 0 && last >= hi_ns_) ? last - 1 : last;" in cursor
-    assert "seen_.insert(id).second" in cursor
+    assert "max(Start), 9)" in cursor and '" GROUP BY TraceId LIMIT "' in cursor
+    assert "hi_ns_ = lo - 1;" in cursor
+    assert "kSliceRowCap" in cursor
+    assert "seen_.insert(row.trace_id).second" in cursor
+    assert "last - 1" not in cursor
     # Each page's span match reads only the page's index time bounds.
     assert "AS batch_bounds" in search
     assert "tupleElement(batch_bounds, 1)" in search and "tupleElement(batch_bounds, 2)" in search

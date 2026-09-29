@@ -111,3 +111,7 @@ service_allowlist = ["test_*"]
 
 `/api/traces/prefill` scans every span of the window (existence only, `LIMIT 1 BY ServiceName, SpanName`). The browser requests it on every time-range change and page load, so the server answers from a 60 s cache keyed by the minute-aligned superset of the requested range: requests made within the same minute share one scan, and the picker lists may include pairs seen up to one minute outside the exact range.
 
+### Trace index assumptions
+
+Index-driven search pages walk `otel_traces_trace_id_ts` newest-first in disjoint `Start` slices that are read completely (one row per trace per slice), so equal `Start` values never straddle a page and a trace with many index rows (one per exporter insert batch) costs one row per slice. `Start`/`End` may be `DateTime` or `DateTime64`. Like trace detail, search summaries and per-page span matching bound span timestamps by the trace's index rows (`[min(Start) - 1 s, max(End) + 1 s]`): this assumes every insert batch has its index row, which the exporter's materialized view guarantees for data inserted after the view exists. Backfill the index (or keep equal TTLs) if older spans predate it.
+
