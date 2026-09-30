@@ -598,7 +598,7 @@ test('row details menu is not offered for a single-row (already vertical) result
   expect(prevented).toBe(false);
 });
 
-test('right-click Details expands a result row inline, under the row, and dismisses on outside click or Escape', async ({ page }) => {
+test('right-click Details expands a result row inline, under the row, and closes only from its cross, Escape inside it or another Details', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, rowDetailsQuery);
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
@@ -695,8 +695,16 @@ test('right-click Details expands a result row inline, under the row, and dismis
   await view.locator('.rowDetails__copy').click();
   await expect(view).toBeVisible();
 
-  // A click on another row dismisses it.
+  // Clicks on another row or elsewhere on the page keep it open.
   await rows.nth(4).locator('td').nth(1).click();
+  await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await expect(row3).toHaveClass(/is-rowExpanded/);
+  // Escape outside the detail does not close it either.
+  await page.locator('#queryTextArea').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await page.locator('.rowDetails__close').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   await expect(row3).not.toHaveClass(/is-rowExpanded/);
 
@@ -707,8 +715,7 @@ test('right-click Details expands a result row inline, under the row, and dismis
   await expect(rows.nth(1)).not.toHaveClass(/is-rowExpanded/);
   await expectDetailRightAfter(rows.nth(3));
 
-  // A click elsewhere on the page dismisses it.
-  await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
+  await page.locator('.rowDetails__close').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
   // The close button and Escape dismiss it; the keyboard path (Enter on the
@@ -740,7 +747,7 @@ test('right-click Details expands a result row inline, under the row, and dismis
   await waitForTerminal(page);
 });
 
-test('row menu Details on another row replaces the open detail, and copies a value or the whole row', async ({ page }) => {
+test('row menu Details on another row replaces the open detail, and copies a cell, the row or the column', async ({ page }) => {
   await openApp(page);
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   // Enough rows for the page to scroll past an open detail.
@@ -765,16 +772,41 @@ test('row menu Details on another row replaces the open detail, and copies a val
     return window.__chdashTestCopiedText || '';
   });
 
-  // The menu offers Details, Copy value and Copy row, with no hint line.
+  // The menu offers Details, Copy cell, Copy row and Copy column, with no
+  // hint line, in compact items; the row shows its accent bar meanwhile.
   await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
   const menu = page.locator('.rowDetailsMenu');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Details', 'Copy value', 'Copy row']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Details', 'Copy cell', 'Copy row', 'Copy column']);
   await expect(menu).not.toContainText(/shift/i);
-  // Copy value: the right-clicked cell only (`name` of row 3).
-  await menu.getByRole('menuitem', { name: 'Copy value' }).click();
+  expect((await menu.getByRole('menuitem').first().boundingBox()).height).toBeLessThanOrEqual(28);
+  await expect(rows.nth(2)).toHaveClass(/is-rowMenuTarget/);
+  expect(await rows.nth(2).locator('td.resultTable__rowIndex').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('inset');
+  // Hovering an action lights exactly what it copies.
+  const lit = () => page.evaluate(() => [...document.querySelectorAll('.is-copyTarget')].map((el) => {
+    const tr = el.parentElement;
+    return `${tr.parentElement.tagName}:${[...tr.parentElement.children].indexOf(tr)}:${el.cellIndex}`;
+  }));
+  await menu.getByRole('menuitem', { name: 'Copy cell' }).hover();
+  await expect.poll(lit).toEqual(['TBODY:2:2']);
+  await menu.getByRole('menuitem', { name: 'Copy row' }).hover();
+  await expect.poll(async () => (await lit()).length).toBe(await rows.nth(2).locator('td').count());
+  expect((await lit()).every((key) => key.startsWith('TBODY:2:'))).toBe(true);
+  await menu.getByRole('menuitem', { name: 'Copy column' }).hover();
+  await expect.poll(async () => (await lit()).every((key) => key.endsWith(':2'))).toBe(true);
+  expect((await lit())[0]).toBe('THEAD:0:2');
+  expect((await lit()).length).toBeGreaterThan(6);
+  // Copy cell: the right-clicked cell only (`name` of row 3).
+  await menu.getByRole('menuitem', { name: 'Copy cell' }).click();
   await expect(menu).toHaveCount(0);
+  await expect(page.locator('.is-copyTarget')).toHaveCount(0);
+  await expect(rows.nth(2)).not.toHaveClass(/is-rowMenuTarget/);
   await expect.poll(readClipboard).toBe('name-2');
+  // Copy column: every value of the column, one per line, in data order.
+  await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Copy column' }).click();
+  await expect.poll(async () => (await readClipboard()).split('\n').slice(0, 3)).toEqual(['name-0', 'name-1', 'name-2']);
+  expect((await readClipboard()).split('\n')).toHaveLength(60);
   // Copy row: the whole row as JSON (tuple flattened like the table).
   await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Copy row' }).click();
@@ -940,16 +972,19 @@ test('inline row details stay attached to their virtualized row and are counted 
   const back = await extent();
   expect(Math.abs(back.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
 
-  // Closing while the detail is above the viewport does not move the rows
-  // the user is looking at.
+  // Opening another row's Details while this one is above the viewport
+  // closes it without moving the rows the user is looking at.
   await scrollBy(Math.round(open.detail) + 40 * 32);
   await page.waitForTimeout(60);
   const before = await visibleRowIndex();
   expect(before).toBeGreaterThan(index);
-  await page.keyboard.press('Escape');
-  await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(0);
+  await openRowDetailsFromRow(page, rowFor(before + 10));
+  await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await expect(body.locator('.rowDetails')).toHaveAttribute('data-row', String(before + 10));
   await page.waitForTimeout(60);
   expect(Math.abs((await visibleRowIndex()) - before)).toBeLessThanOrEqual(1);
+  await body.locator('.rowDetails__close').click();
+  await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(0);
   const after = await extent();
   expect(Math.abs(after.body - total * closed.rowH)).toBeLessThanOrEqual(2);
   expect(await layoutError(total + 1, 0, closed.rowH)).toBeLessThanOrEqual(2);
@@ -975,6 +1010,8 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   const pushed = await rows.nth(3).evaluate((tr) => tr.getBoundingClientRect().top - tr.previousElementSibling.getBoundingClientRect().bottom);
   expect(Math.abs(pushed)).toBeLessThanOrEqual(1);
   await page.mouse.click(4, 4);
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await view.locator('.rowDetails__close').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
   // The single-row panel is vertical: no custom menu there.
@@ -1063,7 +1100,11 @@ test('inline row details remove every document/window listener they add', async 
     expect(await page.evaluate(() => window.__chdashLiveListenerCount())).toBeGreaterThan(before);
     if (i === 0) await page.keyboard.press('Escape');
     else if (i === 1) await page.locator('.rowDetails__close').click();
-    else await page.locator('#resultsPanel .panel__header').click({ position: { x: 5, y: 5 } });
+    else {
+      // Replaced by another row's Details, then closed.
+      await openRowDetailsFromRow(page, rows.nth(0));
+      await page.locator('.rowDetails__close').click();
+    }
     await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   }
   await rows.nth(1).locator('td').nth(1).click({ button: 'right' });

@@ -2529,6 +2529,7 @@
         typeAsts: local.typeAsts,
       }), {
         rowCount: () => (local.isVertical ? 1 : local.allRows.length),
+        allRows: () => local.allRows,
         viewRows: () => (local.isVirtual && !local.isVertical ? local.virtualViewRows : null),
         relayout: () => { if (local.isVirtual && !local.isVertical) renderLocalVirtualRows(true); },
       });
@@ -3219,6 +3220,7 @@
     if (rowDetails) {
       registerRowDetailsSource(table, () => ({ columns: safeColumns, types: safeTypes, typeAsts }), {
         rowCount: () => safeRows.length,
+        allRows: () => safeRows,
       });
     }
 
@@ -3398,8 +3400,9 @@
   // `rowCount()` gates the menu (single-row results are already vertical);
   // `viewRows()` returns the virtualized view rows (null when not virtual);
   // `relayout()` re-runs the virtual range after the detail height changed.
-  function registerRowDetailsSource(table, getContext, { rowCount = null, viewRows = null, relayout = null } = {}) {
-    if (table && typeof getContext === "function") rowDetailsSources.set(table, { getContext, rowCount, viewRows, relayout });
+  // `allRows()` returns every data row (Copy column).
+  function registerRowDetailsSource(table, getContext, { rowCount = null, viewRows = null, relayout = null, allRows = null } = {}) {
+    if (table && typeof getContext === "function") rowDetailsSources.set(table, { getContext, rowCount, viewRows, relayout, allRows });
   }
 
   function bindRowDetails(tr, row, label) {
@@ -3571,17 +3574,6 @@
     return Math.max(0, Math.min(rect.height, viewportTop - rect.top));
   }
 
-  // Dragging a scrollbar (page, workspace or wide table) to read the detail
-  // must not dismiss it.
-  function isScrollbarPointer(ev, target) {
-    if (!(target instanceof Element)) return false;
-    if (target === document.documentElement) {
-      return ev.clientX >= target.clientWidth || ev.clientY >= target.clientHeight;
-    }
-    const scrolls = target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth;
-    return scrolls && (ev.offsetX >= target.clientWidth || ev.offsetY >= target.clientHeight);
-  }
-
   function scrollRowDetailsOwnerBy(table, dy) {
     const owner = findVerticalScrollOwner(table) || document.scrollingElement || document.documentElement;
     if (owner) owner.scrollTop += dy;
@@ -3593,12 +3585,47 @@
     rowDetailsMenu = null;
     runDisposers(menu.disposers);
     menu.el.remove();
+    menu.clearHighlight();
+    if (menu.tr) menu.tr.classList.remove("is-rowMenuTarget");
     if (restoreFocus && menu.returnFocus && menu.returnFocus.isConnected) {
       try { menu.returnFocus.focus({ preventScroll: true }); } catch { null; }
     }
   }
 
-  function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1) {
+  // The cells an action applies to, lit while its menu item is hovered or
+  // focused: the cell, the row, or the column (mounted cells and header).
+  function rowMenuTargetCells(table, tr, columnIndex, scope) {
+    const offset = tr && tr.cells[0] && tr.cells[0].classList.contains("resultTable__rowIndex") ? 1 : 0;
+    const col = columnIndex + offset;
+    if (scope === "row") return tr ? [...tr.cells] : [];
+    if (scope === "cell") return tr && tr.cells[col] ? [tr.cells[col]] : [];
+    if (scope !== "column") return [];
+    const cells = [];
+    const head = table.tHead && table.tHead.rows[0];
+    if (head && head.cells[col]) cells.push(head.cells[col]);
+    for (const body of table.tBodies) {
+      for (const row of body.rows) {
+        if (rowDetailsBindings.has(row) && row.cells[col]) cells.push(row.cells[col]);
+      }
+    }
+    return cells;
+  }
+
+  function columnCopyText(ctx, rows, columnIndex) {
+    const ast = ctx.typeAsts[columnIndex] || null;
+    const lines = [];
+    for (const row of rows || []) {
+      if (!Array.isArray(row)) continue;
+      const value = coerceDeepTyped(row[columnIndex], ast);
+      if (value === null || value === undefined) lines.push("");
+      else if (typeof value === "string") lines.push(value);
+      else if (typeof value === "number" || typeof value === "boolean") lines.push(String(value));
+      else lines.push(JSON.stringify(value));
+    }
+    return lines.join("\n");
+  }
+
+  function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, tr = null) {
     closeRowDetailsMenu();
     const el = document.createElement("div");
     el.className = "runMenu rowDetailsMenu";
@@ -3607,7 +3634,20 @@
     el.tabIndex = -1;
 
     const items = [];
-    const addItem = (text, onPick) => {
+    let lit = [];
+    const clearHighlight = () => {
+      for (const cell of lit) cell.classList.remove("is-copyTarget", "is-copyTarget--cell");
+      lit = [];
+    };
+    const highlight = (scope) => {
+      clearHighlight();
+      lit = rowMenuTargetCells(table, tr, columnIndex, scope);
+      for (const cell of lit) {
+        cell.classList.add("is-copyTarget");
+        if (scope === "cell") cell.classList.add("is-copyTarget--cell");
+      }
+    };
+    const addItem = (text, onPick, scope = "") => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "runMenu__opt";
@@ -3620,6 +3660,10 @@
         closeRowDetailsMenu();
         onPick();
       });
+      btn.addEventListener("pointerenter", () => highlight(scope));
+      btn.addEventListener("pointerleave", clearHighlight);
+      btn.addEventListener("focus", () => highlight(scope));
+      btn.addEventListener("blur", clearHighlight);
       el.appendChild(btn);
       items.push(btn);
     };
@@ -3630,10 +3674,16 @@
     const ctx = rowDetailsContext(table);
     // The value of the cell under the pointer, spelled as the result copy
     // spells single values (strings raw, JSON pretty-printed, NULL empty).
-    if (ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length) {
-      addItem("Copy value", () => copy(buildCopyValue(coerceDeepTyped(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null))));
+    const onColumn = ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length;
+    if (onColumn) {
+      addItem("Copy cell", () => copy(buildCopyValue(coerceDeepTyped(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null))), "cell");
     }
-    if (ctx) addItem("Copy row", () => copy(JSON.stringify(buildRowDetailsObject(ctx, binding.row), null, 2)));
+    if (ctx) addItem("Copy row", () => copy(JSON.stringify(buildRowDetailsObject(ctx, binding.row), null, 2)), "row");
+    if (onColumn) {
+      const source = rowDetailsSources.get(table);
+      // One value per line, in data order: pastes as a spreadsheet column.
+      addItem("Copy column", () => copy(columnCopyText(ctx, source && typeof source.allRows === "function" ? source.allRows() : [], columnIndex)), "column");
+    }
     const selection = selectedTextWithin(table);
     if (selection) addItem("Copy selection", () => copy(selection));
 
@@ -3649,7 +3699,9 @@
     el.classList.add("is-open");
 
     const disposers = [];
-    rowDetailsMenu = { el, disposers, returnFocus };
+    // The right-clicked row shows its accent bar while its menu is open.
+    if (tr) tr.classList.add("is-rowMenuTarget");
+    rowDetailsMenu = { el, disposers, returnFocus, tr, clearHighlight };
     const close = () => closeRowDetailsMenu();
     listenUntilClosed(disposers, document, "pointerdown", (ev) => {
       if (!(ev.target instanceof Node) || !el.contains(ev.target)) close();
@@ -3814,25 +3866,13 @@
     relayoutRowDetails(view);
     if (rowDetailsView !== view) return;
 
-    listenUntilClosed(disposers, document, "pointerdown", (ev) => {
-      const target = ev.target instanceof Node ? ev.target : null;
-      if (target && el.contains(target)) return;
-      // Picking in the row menu: "Details" on another row replaces this one
-      // itself. Closing here scrolled the page (height compensation), which
-      // dismissed the menu before its click and left no detail open.
-      if (target instanceof Element && target.closest(".rowDetailsMenu")) return;
-      if (isScrollbarPointer(ev, target)) return;
-      // Sorting from the same table's header re-renders it around the detail.
-      if (target && table.tHead && table.tHead.contains(target)) return;
-      // A right-click opens the row menu: collapsing now would move the row
-      // under the pointer before `contextmenu` fires. "Details" replaces it.
-      if (ev.button === 2 && !ev.shiftKey && target instanceof Element && rowDetailsBindings.has(target.closest("tr"))) return;
-      closeRowDetails();
-    }, true);
+    // Only the close cross (or Escape from inside the detail) and opening
+    // another row's Details close it: clicks elsewhere, selecting, sorting
+    // or scrolling keep it open.
     listenUntilClosed(disposers, document, "keydown", (ev) => {
-      if (ev.key !== "Escape" || rowDetailsMenu) return;
+      if (ev.key !== "Escape" || rowDetailsMenu || !el.contains(document.activeElement)) return;
       ev.preventDefault();
-      closeRowDetails({ restoreFocus: el.contains(document.activeElement) });
+      closeRowDetails({ restoreFocus: true });
     });
     listenUntilClosed(disposers, window, "popstate", () => closeRowDetails());
     if (typeof ResizeObserver === "function") {
@@ -3866,7 +3906,7 @@
     const td = target.closest("td");
     const offset = tr.cells[0] && tr.cells[0].classList.contains("resultTable__rowIndex") ? 1 : 0;
     const columnIndex = td && td.parentElement === tr ? td.cellIndex - offset : -1;
-    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table, columnIndex);
+    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table, columnIndex, tr);
   }
 
   document.addEventListener("contextmenu", onResultRowContextMenu);
@@ -3877,6 +3917,7 @@
       typeAsts: resultTypeAsts,
     }), {
       rowCount: () => (isVerticalResults ? 1 : allResultRows.length),
+      allRows: () => allResultRows,
       viewRows: () => (isVirtualResults && !isVerticalResults ? virtualViewRows : null),
       relayout: () => { if (isVirtualResults && !isVerticalResults) renderVirtualRows(true); },
     });

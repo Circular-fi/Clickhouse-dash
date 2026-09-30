@@ -12169,11 +12169,39 @@ body[data-page="traces"] .tracePicker--range .tracePicker__menu {
 .runMenu.rowDetailsMenu {
   position: fixed;
   right: auto;
-  min-width: 11rem;
-  border-radius: 0.75rem;
-  padding: 0.35rem;
+  min-width: 9.5rem;
+  border-radius: 0.6rem;
+  padding: 0.25rem;
   z-index: 1000;
   transform-origin: top left;
+}
+
+/* Compact items: a context menu, not a toolbar. */
+.rowDetailsMenu .runMenu__opt {
+  padding: 0.3rem 0.55rem;
+  border-radius: 7px;
+  font-size: .76rem;
+  line-height: 1.25;
+}
+
+/* The row a menu is open on shows the expanded row's accent bar. */
+.resultTable tbody tr.is-rowMenuTarget > td.resultTable__rowIndex {
+  box-shadow: inset 3px 0 0 var(--accentBorder);
+}
+
+/* What the hovered / focused copy action applies to: the cell, the row or
+   the column; a single cell also gets an inset ring (layout and gauge fill
+   stay intact). */
+.resultTable tbody td.is-copyTarget,
+.resultTable thead th.is-copyTarget,
+.resultTable:not(.resultTable--vertical) tbody tr > td.resultTable__stickyLeft.is-copyTarget,
+.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.is-copyTarget,
+.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft.is-copyTarget {
+  background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
+}
+
+.resultTable tbody td.is-copyTarget--cell {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accentBorder) 70%, transparent);
 }
 
 .runMenu.rowDetailsMenu.is-open {
