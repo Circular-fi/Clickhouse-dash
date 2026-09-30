@@ -4039,7 +4039,10 @@ string Formatter::format_expression(string_view expr) {
   }
   if (auto q = format_parenthesized_query(s); !q.empty()) return q;
   if (const int arrow = find_top_level_arrow(s); arrow > 0) {
-    const string lhs = cleanup_surface(trim_ascii_spaces(s.substr(0, static_cast<size_t>(arrow))));
+    string lhs = cleanup_surface(trim_ascii_spaces(s.substr(0, static_cast<size_t>(arrow))));
+    // Parameters with comments between them (`(k, -- key` …) are laid out
+    // like a commented tuple, one per line.
+    if (lhs.find('\n') != string::npos && mask_sql_surface(lhs).has_comments) lhs = format_expression(lhs);
     string rhs_src = trim_ascii_spaces(s.substr(static_cast<size_t>(arrow) + 2));
     const bool grouped_rhs = !unwrap_outer_parens(rhs_src).empty();
     if (const string inner_rhs = unwrap_outer_parens(rhs_src); !inner_rhs.empty() &&
