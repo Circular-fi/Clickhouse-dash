@@ -970,6 +970,19 @@ static string format_alias_identifier(string_view alias) {
   if (auto [code, comment] = split_inline_comment(trimmed); !comment.empty() && !trim_ascii_spaces(code).empty()) {
     return format_alias_identifier(code) + " " + comment;
   }
+  // The same for a trailing block comment: `AS traces /* distinct */`.
+  {
+    ScanState st;
+    for (size_t i = 0; i + 1 < trimmed.size(); ++i) {
+      if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment &&
+          trimmed[i] == '/' && trimmed[i + 1] == '*') {
+        const string code = trim_ascii_spaces(string_view(trimmed).substr(0, i));
+        if (!code.empty()) return format_alias_identifier(code) + " " + trimmed.substr(i);
+        break;
+      }
+      step_scan(st, trimmed, i);
+    }
+  }
   string normalized = trimmed;
   if (normalized.size() >= 2) {
     const char first = normalized.front();
