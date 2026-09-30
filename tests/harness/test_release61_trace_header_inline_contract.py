@@ -13,7 +13,9 @@ def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
     assert 'id="traceDetailStats"' in title_row
     render_header = js.split('function renderTraceHeader()', 1)[1].split('function renderWaterfall()', 1)[0]
     assert 'tracePageHeader__traceId' in render_header
-    assert 'shortId(trace.trace_id, 10)' in render_header
+    # The complete trace id, like the result list.
+    assert '<code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>' in render_header
+    assert 'shortId(trace.trace_id, 10)' not in render_header
     assert 'title="${esc(trace.trace_id)}"' in render_header
     assert 'data-copy-active-trace="${esc(trace.trace_id)}"' in render_header
 

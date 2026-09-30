@@ -13797,3 +13797,21 @@ html[data-theme="light"] {
   line-height: 1.25;
 }
 .traceGraph__legend b { color: var(--text); text-align: center; }
+
+/* The trace detail header shows the complete trace id, like the result
+   list; the operation title shrinks first when the row is tight. */
+#traceDetailHeader .tracePageHeader__traceId {
+  flex: 0 0 auto;
+  max-width: none;
+  overflow: visible !important;
+}
+#traceDetailHeader .tracePageHeader__traceId code {
+  max-width: none !important;
+  overflow: visible !important;
+}
+#traceDetailTitle > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

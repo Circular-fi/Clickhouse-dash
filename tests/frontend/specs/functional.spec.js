@@ -1571,6 +1571,10 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
   await expect(page.locator('#traceDetail')).toBeVisible();
   const spanRows = page.locator('#traceWaterfall .traceSpanRow');
   await expect(spanRows).toHaveCount(detailSpans.length, { timeout: 30_000 });
+  // The complete trace id, not clipped, like the result list.
+  const headerId = page.locator('#traceDetailTitle .tracePageHeader__traceId code');
+  await expect(headerId).toHaveText(traceId);
+  expect(await headerId.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= el.closest('.tracePageHeader__titleRow').getBoundingClientRect().right)).toBe(true);
   const split = page.locator('#traceDetailHeader .tracePageHeader__titleRow > #traceCopySplit');
   const button = split.locator('#traceCopyJsonButton');
   await expect(button).toBeVisible();
