@@ -480,6 +480,18 @@ ALTER TABLE anon.metrics_store
 )
 ```
 
+### Index definitions
+
+`INDEX name expr TYPE type GRANULARITY n` rows of one table are aligned in
+columns while every aligned row fits the line width. When any row would
+overflow, the rows are stacked instead, one clause per continuation line:
+
+```sql
+    INDEX idx_attributes_keys mapKeys(attributes)
+        TYPE text(tokenizer = array)
+        GRANULARITY 100000000
+```
+
 ### TTL lists
 
 Keep a single short TTL rule on the `TTL` line. Put one rule per line when there

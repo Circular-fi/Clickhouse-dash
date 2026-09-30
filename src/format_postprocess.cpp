@@ -1224,11 +1224,12 @@ optional<IndexAlignmentLine> parse_index_alignment_line(string_view line) {
   if (granularity_pos <= type_pos) return std::nullopt;
 
   const string left = trim_ascii_spaces(rest.substr(0, static_cast<size_t>(type_pos)));
-  const size_t name_end = left.find_first_of(" \t\n");
-  if (name_end == string::npos) return std::nullopt;
+  // `INDEX name expr` or `INDEX name(expr)` (no space before the expression).
+  const size_t name_end = left.find_first_of(" \t\n(");
+  if (name_end == string::npos || name_end == 0) return std::nullopt;
   IndexAlignmentLine out;
   out.name = trim_ascii_spaces(left.substr(0, name_end));
-  out.expression = trim_ascii_spaces(left.substr(name_end + 1));
+  out.expression = trim_ascii_spaces(left.substr(left[name_end] == '(' ? name_end : name_end + 1));
   out.type = trim_ascii_spaces(rest.substr(static_cast<size_t>(type_pos) + 4,
       static_cast<size_t>(granularity_pos - type_pos - 4)));
   out.granularity = trim_ascii_spaces(rest.substr(static_cast<size_t>(granularity_pos) + 11));
@@ -1237,7 +1238,7 @@ optional<IndexAlignmentLine> parse_index_alignment_line(string_view line) {
   return out;
 }
 
-void align_create_index_groups(vector<string>& lines) {
+void align_create_index_groups(vector<string>& lines, size_t width) {
   for (size_t i = 0; i < lines.size();) {
     auto first = parse_index_alignment_line(lines[i]);
     if (!first) { ++i; continue; }
@@ -1249,6 +1250,40 @@ void align_create_index_groups(vector<string>& lines) {
       if (!parsed) break;
       group.push_back(std::move(*parsed));
       ++j;
+    }
+    // An index that does not fit the width (aligned or alone) is stacked:
+    // `INDEX name expr` then `TYPE …` and `GRANULARITY …` as continuation
+    // lines. Alignment only applies when every aligned row fits.
+    auto stacked = [&](const IndexAlignmentLine& row) {
+      const string pad(indent, ' ');
+      string rendered = pad + "INDEX " + row.name + " " + row.expression;
+      rendered += "\n" + pad + "    TYPE " + row.type;
+      rendered += "\n" + pad + "    GRANULARITY " + row.granularity;
+      if (row.comma) rendered += ',';
+      return rendered;
+    };
+    auto flat_width = [&](const IndexAlignmentLine& row) {
+      return indent + utf8_width("INDEX " + row.name + " " + row.expression + " TYPE " + row.type +
+                                 " GRANULARITY " + row.granularity) + (row.comma ? 1 : 0);
+    };
+    bool stack_group = false;
+    if (group.size() >= 2) {
+      size_t n = 0, e = 0, t = 0;
+      for (const auto& row : group) {
+        n = std::max(n, utf8_width(row.name));
+        e = std::max(e, utf8_width(row.expression));
+        t = std::max(t, utf8_width(row.type));
+      }
+      for (const auto& row : group) {
+        if (indent + 6 + n + 1 + e + 1 + 5 + t + 1 + 12 + utf8_width(row.granularity) + 1 > width) stack_group = true;
+      }
+    } else if (flat_width(group.front()) > width) {
+      stack_group = true;
+    }
+    if (stack_group) {
+      for (size_t k = 0; k < group.size(); ++k) lines[i + k] = stacked(group[k]);
+      i = j;
+      continue;
     }
     if (group.size() >= 2) {
       size_t name_width = 0;
@@ -1535,12 +1570,12 @@ string format_long_enum_type_lines(string_view source) {
   return join_lines(rendered);
 }
 
-string normalize_final_layout(string_view s) {
+string normalize_final_layout(string_view s, size_t width) {
   const string enum_formatted = format_long_enum_type_lines(s);
   vector<string> lines = split_lines_keep(align_multiline_tuple_closers(enum_formatted));
   split_long_string_alias_lines(lines);
   align_create_columns(lines);
-  align_create_index_groups(lines);
+  align_create_index_groups(lines, width);
   align_alias_groups(lines);
   split_combined_limit_lines(lines);
   return join_lines(lines);
@@ -2083,7 +2118,7 @@ string Formatter::format(string_view s) {
   text = take_leading_comments(text, &leading);
   string out = format_statement(text);
   if (!leading.empty()) out = leading + "\n" + out;
-  return align_multiline_settings(normalize_final_layout(cleanup_surface(out)));
+  return align_multiline_settings(normalize_final_layout(cleanup_surface(out), threshold));
 }
 
 string Formatter::format_statement(string_view s) {

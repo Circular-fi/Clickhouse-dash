@@ -86,8 +86,14 @@ def explain_ast(ch, auth, sql):
     return r.text if r.status_code == 200 else None
 
 
+LINE_WIDTH = None
+
+
 def fmt(api, sql):
-    r = requests.post(api + "/api/format", json={"host_id": "local", "sql": sql}, timeout=60)
+    payload = {"host_id": "local", "sql": sql}
+    if LINE_WIDTH:
+        payload["line_width"] = LINE_WIDTH
+    r = requests.post(api + "/api/format", json=payload, timeout=60)
     if r.status_code != 200:
         return None, f"HTTP {r.status_code}: {r.text[:300]}", 80
     body = r.json()
@@ -128,7 +134,11 @@ def main() -> int:
     ap.add_argument("--user", default="test"); ap.add_argument("--password", default="test")
     ap.add_argument("--out", default="corpus-report.json")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--line-width", type=int, default=0,
+                    help="format at this width (e.g. 40) to stress wrapping paths")
     args = ap.parse_args()
+    global LINE_WIDTH
+    LINE_WIDTH = args.line_width or None
     auth = (args.user, args.password)
     items = corpus(args.ch, auth)
     if args.limit: items = items[: args.limit]
