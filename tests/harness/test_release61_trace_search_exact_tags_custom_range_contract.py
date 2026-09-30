@@ -9,7 +9,7 @@ def test_duration_ticks_helper_exists_for_trace_overview_and_waterfall():
     ui = read("src/static/app_traces.js")
     assert "function durationTicks(" in ui
     assert "durationTicks(bounds.duration, 5)" in ui
-    assert "durationTicks(total, 5)" in ui
+    assert "durationTicks(total, TIMELINE_TICKS, offset)" in ui
 
 def test_service_operation_are_selection_only_and_status_labels_uppercase():
     html = read("src/static/traces.html")

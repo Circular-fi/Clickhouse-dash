@@ -10,6 +10,13 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
     css = read("src/static/style.css")
     assert 'traceIdLookupInput' not in html
     assert 'traceSpanSearch' not in html
+    # No in-trace span search or trace id lookup left anywhere: no DOM
+    # handles, wiring, match state or styles.
+    js = read("src/static/app_traces.js")
+    dom = read("src/static/app_dom.js")
+    for source in (js, dom, css):
+        for dead in ('traceSpanSearch', 'traceIdLookup', 'spanSearchText', 'is-search-match', 'tracePageFind'):
+            assert dead not in source
     # The time range panel is the range picker's dropdown (absolutely
     # positioned menu), so editing a range never reflows the search bar.
     assert 'class="themeSelect__menu tracePicker__menu timeRangePanel"' in html

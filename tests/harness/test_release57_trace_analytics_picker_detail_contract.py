@@ -35,6 +35,7 @@ def test_trace_detail_has_jaeger_style_overview_and_dense_timeline():
     assert 'traceIdLookupInput' not in html
     assert 'traceOverview' in html
     assert 'Trace Start' in ui and '["Duration", formatDuration(bounds.duration)]' in ui
-    assert '["Services"' not in ui and '["Depth"' not in ui and '["Total Spans"' not in ui
+    # Jaeger's header items: services, depth and span count are back.
+    assert '["Services", String(cache.serviceCount)]' in ui and '["Depth", String(cache.maxLevel + 1)]' in ui and '["Total Spans", String(spans.length)]' in ui
     assert 'data-trace-collapse-all' in ui and 'data-trace-expand-all' in ui
     assert 'grid-template-columns: minmax(285px, 25%) minmax(0, 75%);' in css

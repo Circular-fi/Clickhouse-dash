@@ -14,7 +14,7 @@ def test_trace_overview_is_full_width_scrubbable_and_ticks_use_one_scale():
     assert "data-overview-handle=\"start\"" in js
     assert "graph.addEventListener(\"dblclick\"" in js
     assert "durationTicks(bounds.duration, 5)" in js
-    assert "durationTicks(total, 5)" in js
+    assert "durationTicks(total, TIMELINE_TICKS, offset)" in js
     assert ".traceOverview__ticks," in css
     assert "margin-left: 0 !important;" in css
 
