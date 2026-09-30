@@ -958,8 +958,15 @@ def _assert_trace_summaries_match_spans(payload: dict, start_ms: int, end_ms: in
         f"SELECT TraceId, toUnixTimestamp64Milli(min(Timestamp)), "
         f"toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))) "
         f"FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} AND TraceId IN {_sql_list(ids)} GROUP BY TraceId")}
+    # Parent span ids no window span of the trace carries (the "Incomplete" hint).
+    missing = {r[0]: int(r[1]) for r in _ch_rows(
+        f"SELECT TraceId, length(arrayFilter(parent -> NOT has(ids, parent), parents)) FROM ("
+        f"SELECT TraceId, groupUniqArray(SpanId) AS ids, groupUniqArrayIf(ParentSpanId, ParentSpanId != '') AS parents "
+        f"FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} AND TraceId IN {_sql_list(ids)} GROUP BY TraceId)")}
+    assert payload["columns"][-1] == "missing_parents", payload["columns"]
     for row in rows:
-        trace_id, first_ms, _, _, duration_ns, span_count, error_count, stats = row
+        trace_id, first_ms, _, _, duration_ns, span_count, error_count, stats, missing_parents = row
+        assert missing_parents == missing[trace_id], row
         per_service = truth[trace_id]
         assert span_count == sum(v[0] for v in per_service.values()), row
         assert error_count == sum(v[1] for v in per_service.values()), row

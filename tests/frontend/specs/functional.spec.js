@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
+import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -1710,7 +1711,7 @@ test('traces: each listed trace shows its services in the order of their first s
   await expect(rows).toHaveCount(payload.rows.length, { timeout: 30_000 });
   const rendered = Object.fromEntries(await rows.evaluateAll((items) => items.map((item) => [
     item.getAttribute('data-trace-id'),
-    [...item.querySelectorAll('.traceServiceStats .traceServiceStat > b')].map((b) => b.textContent),
+    [...item.querySelectorAll('.traceSvcPills > .traceSvcPill')].map((pill) => pill.dataset.service),
   ])));
 
   const services = payload.services;
@@ -2131,11 +2132,12 @@ test.describe('traces analytics in a UTC+2 browser', () => {
         await expect(tooltip).toBeVisible();
         await expect(tooltip).toContainText(/[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d/);
         await expect(tooltip).not.toContainText(decimalUnits);
-        await expect(page.locator(`${chart} ${marker}`)).toHaveCount(1);
+        // Near a listed trace's dot the dot is picked instead of the bucket.
+        await expect(page.locator(`${chart} ${marker}, ${chart} .traceScatterDot.is-hovered`)).toHaveCount(1);
       }
       await page.mouse.move(box.x + box.width / 2, box.y - 80);
       await expect(tooltip).toBeHidden();
-      await expect(page.locator(`${chart} ${marker}`)).toHaveCount(0);
+      await expect(page.locator(`${chart} ${marker}, ${chart} .traceScatterDot.is-hovered`)).toHaveCount(0);
     }
   });
 });
@@ -2169,12 +2171,12 @@ test('traces: a result shows its error span count next to its title and the head
   const rows = (await (await answered).json()).rows;
   expect(rows.length).toBeGreaterThanOrEqual(3);
   await expect(page.locator('#tracesResults .traceResult[data-trace-id]')).toHaveCount(rows.length);
-  await expect(page.locator('#tracesResultCount')).toHaveText(`${rows.length} Traces · 2 with errors`);
+  await expect(page.locator('#tracesResultCount')).toHaveText(new RegExp(`^${rows.length} Traces \\(in [\\d.]+ (µs|ms|s)\\) · 2 with errors$`));
   for (const [id, errors] of errorsById) {
     const card = page.locator(`#tracesResults .traceResult[data-trace-id="${id}"]`);
     if (errors) {
       const badge = card.locator('.traceResult__wideTitle + .traceErrorCount--title');
-      await expect(badge).toHaveText(String(errors));
+      await expect(badge).toHaveText(`${errors} Error${errors === 1 ? '' : 's'}`);
       await expect(badge).toHaveAttribute('title', `${errors} error span${errors === 1 ? '' : 's'}`);
     } else {
       await expect(card.locator('.traceErrorCount--title')).toHaveCount(0);
@@ -2182,6 +2184,264 @@ test('traces: a result shows its error span count next to its title and the head
   }
   // The total is shown once, next to the title (per-service badges stay).
   await expect(page.locator('#tracesResults .traceErrorCount--total')).toHaveCount(0);
-  const color = await page.locator('#tracesResults .traceErrorCount--title').first().evaluate((node) => getComputedStyle(node).backgroundColor);
+  const color = await page.locator('#tracesResults .traceErrorCount--title').first().evaluate((node) => getComputedStyle(node).color);
   expect(color).toBe('rgb(214, 69, 69)');
+});
+
+// --- Traces search results: Jaeger result items, table view, scatter -------
+async function openSyntheticTraces(page, options = {}) {
+  const searches = await mockTraceResults(page, options);
+  const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.goto('/traces');
+  await answered;
+  await expect(page.locator('#tracesResults [data-trace-id]').first()).toBeVisible({ timeout: 30_000 });
+  return searches;
+}
+
+const syntheticById = Object.fromEntries(SYNTHETIC_TRACES.map((trace) => [trace.trace_id, trace]));
+const syntheticName = (trace) => `${trace.service}: ${trace.operation}`;
+
+test('traces: result items carry a duration bar, Jaeger tags, the full trace id and one line of service pills', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openSyntheticTraces(page);
+  const items = page.locator('#tracesResults .traceResultItem[data-trace-id]');
+  await expect(items).toHaveCount(SYNTHETIC_TRACES.length);
+  // "N Traces (in X ms)": the search latency measured by the browser.
+  await expect(page.locator('#tracesResultCount')).toHaveText(/^6 Traces \(in \d+(\.\d+)? (µs|ms|s)\) · 2 with errors$/);
+
+  const maxMs = Math.max(...SYNTHETIC_TRACES.map((trace) => trace.duration_ms));
+  for (const trace of SYNTHETIC_TRACES) {
+    const item = page.locator(`#tracesResults .traceResultItem[data-trace-id="${trace.trace_id}"]`);
+    // Duration bar: the share of the longest listed duration, behind the title line.
+    const [barWidth, lineWidth] = await item.locator('.traceResultItem__title').evaluate((line) => [line.querySelector('.traceResultItem__durationBar').getBoundingClientRect().width, line.getBoundingClientRect().width]);
+    expect(Math.abs(barWidth / lineWidth - trace.duration_ms / maxMs)).toBeLessThan(0.01);
+    await expect(item.locator('.traceResult__wideTitle')).toHaveText(syntheticName(trace));
+    // The full trace id, never shortened or clipped.
+    const id = item.locator('.traceResult__fullId');
+    await expect(id).toHaveText(trace.trace_id);
+    expect(await id.evaluate((node) => node.scrollWidth <= node.clientWidth + 0.5)).toBe(true);
+    await expect(item.locator('.traceTag--spans')).toHaveText(`${trace.spans} Span${trace.spans === 1 ? '' : 's'}`);
+    const errorTag = item.locator('.traceResult__wideTitle + .traceErrorCount--title');
+    if (trace.errors) {
+      await expect(errorTag).toHaveText(`${trace.errors} Error${trace.errors === 1 ? '' : 's'}`);
+      await expect(errorTag).toHaveAttribute('title', `${trace.errors} error span${trace.errors === 1 ? '' : 's'}`);
+      expect(await errorTag.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(214, 69, 69)');
+    } else {
+      await expect(item.locator('.traceErrorCount--title')).toHaveCount(0);
+    }
+    const incomplete = item.locator('.traceTag--incomplete');
+    if (trace.missing) {
+      await expect(incomplete).toHaveText('Incomplete');
+      await expect(incomplete).toHaveAttribute('title', new RegExp(`may be incomplete: .*${trace.missing} parent spans`));
+    } else {
+      await expect(incomplete).toHaveCount(0);
+    }
+    // Service pills in first-span order, "name (count)", colored left border,
+    // (!) before services with error spans.
+    const pills = item.locator('.traceSvcPills > .traceSvcPill');
+    const expected = [...trace.services].sort((a, b) => a[3] - b[3]);
+    expect(await pills.evaluateAll((nodes) => nodes.map((node) => node.dataset.service))).toEqual(expected.map(([name]) => name));
+    const first = pills.first();
+    if (await first.isVisible()) {
+      const [name, spans, errors] = expected[0];
+      await expect(first).toHaveText(`${errors ? '!' : ''}${name} (${spans})`);
+      const border = await first.evaluate((node) => { const style = getComputedStyle(node); return [style.borderLeftWidth, style.borderLeftColor, style.getPropertyValue('--trace-service-color').trim()]; });
+      expect(border[0]).toBe('4px');
+      const probe = await page.evaluate((color) => { const el = document.createElement('i'); el.style.color = color; document.body.appendChild(el); const out = getComputedStyle(el).color; el.remove(); return out; }, border[2]);
+      expect(border[1]).toBe(probe);
+    }
+    for (const [name, , errors] of expected) {
+      await expect(item.locator(`.traceSvcPill[data-service="${name}"] .traceSvcPill__error`)).toHaveCount(errors ? 1 : 0);
+    }
+  }
+
+  // The 20-service trace: one line, the rest behind "+N" with a popover.
+  const mesh = page.locator('#tracesResults .traceResultItem[data-trace-id="c1d2e3f4a5b60718293a4b5c6d7e8f90"]');
+  const visible = mesh.locator('.traceSvcPills > .traceSvcPill:visible');
+  const shown = await visible.count();
+  expect(shown).toBeGreaterThan(0);
+  expect(shown).toBeLessThan(20);
+  const more = mesh.locator('.traceSvcMore');
+  await expect(more).toBeVisible();
+  await expect(more).toHaveText(`+${20 - shown}`);
+  const geometry = await mesh.locator('.traceSvcPills').evaluate((group) => {
+    const box = group.getBoundingClientRect();
+    const shownNodes = [...group.children].filter((node) => !node.hidden);
+    return { tops: [...new Set(shownNodes.map((node) => Math.round(node.getBoundingClientRect().top)))], right: Math.max(...shownNodes.map((node) => node.getBoundingClientRect().right)), boxRight: box.right };
+  });
+  expect(geometry.tops).toHaveLength(1);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.boxRight + 0.5);
+  await more.hover();
+  const popover = page.locator('.traceSvcPopover');
+  await expect(popover).toBeVisible();
+  const hiddenNames = await mesh.locator('.traceSvcPills > .traceSvcPill[hidden]').evaluateAll((nodes) => nodes.map((node) => node.dataset.service));
+  expect(await popover.locator('.traceSvcPill').evaluateAll((nodes) => nodes.map((node) => node.dataset.service))).toEqual(hiddenNames);
+  await page.mouse.move(5, 5);
+  await expect(popover).toBeHidden();
+  // A narrower window shows fewer pills, still on one line.
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect.poll(() => mesh.locator('.traceSvcPills > .traceSvcPill:visible').count()).toBeLessThan(shown);
+  await expect(more).toHaveText(`+${20 - await mesh.locator('.traceSvcPills > .traceSvcPill:visible').count()}`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('traces: the table view sorts every column both ways, opens a row, and is remembered', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openSyntheticTraces(page);
+  await expect(page.locator('[data-results-view="list"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-results-view="table"]').click();
+  await expect(page.locator('[data-results-view="table"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('chdash.traceResultsView.v1'))).toBe('table');
+  // Like Jaeger, the sort picker drives the list only.
+  await expect(page.locator('.traceResultsSort')).toBeHidden();
+  const table = page.locator('#tracesResults table.resultTable.traceTable');
+  await expect(table).toBeVisible();
+  await expect(table.locator('thead th')).toHaveText(['Name', 'Services', 'Spans', 'Errors', 'Duration', 'Start']);
+  const rows = table.locator('tbody tr[data-trace-id]');
+  await expect(rows).toHaveCount(SYNTHETIC_TRACES.length);
+  const order = () => rows.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceId));
+  // The picker's order (Most Recent) carries over: Start, newest first.
+  await expect(table.locator('th[data-table-sort="start"]')).toHaveAttribute('data-sort', 'desc');
+  const byKey = {
+    name: (t) => syntheticName(t).toLowerCase(),
+    services: (t) => t.services.length,
+    spans: (t) => t.spans,
+    errors: (t) => t.errors,
+    duration: (t) => t.duration_ms,
+    start: (t) => -t.minutesAgo,
+  };
+  const expectedOrder = (key, dir) => [...SYNTHETIC_TRACES].sort((a, b) => {
+    const av = byKey[key](a), bv = byKey[key](b);
+    const cmp = typeof av === 'string' ? (av < bv ? -1 : av > bv ? 1 : 0) : av - bv;
+    return (dir === 'asc' ? cmp : -cmp) || (a.minutesAgo - b.minutesAgo);
+  }).map((t) => t.trace_id);
+  for (const key of ['name', 'services', 'spans', 'errors', 'duration', 'start']) {
+    const th = table.locator(`th[data-table-sort="${key}"]`);
+    await th.click();
+    const firstDir = key === 'name' ? 'asc' : 'desc';
+    await expect(th).toHaveAttribute('data-sort', firstDir);
+    expect(await order(), `${key} ${firstDir}`).toEqual(expectedOrder(key, firstDir));
+    await th.click();
+    const secondDir = firstDir === 'asc' ? 'desc' : 'asc';
+    await expect(th).toHaveAttribute('data-sort', secondDir);
+    expect(await order(), `${key} ${secondDir}`).toEqual(expectedOrder(key, secondDir));
+    await expect(table.locator('th[data-sort]')).toHaveCount(1);
+  }
+  // Cells: pills with overflow, error tag, relative duration bar, start.
+  const mesh = rows.filter({ has: page.locator('[data-service="mesh-service-00"]') });
+  await expect(mesh.locator('.traceSvcMore')).toBeVisible();
+  await expect(mesh.locator('.traceSvcMore')).toHaveText(/^\+\d+$/);
+  const failing = table.locator('tr[data-trace-id="0af7651916cd43dd8448eb211c80319c"]');
+  await expect(failing.locator('[data-cell="errors"] .traceTag--error')).toHaveText('3');
+  await expect(failing.locator('[data-cell="name"]')).toHaveText('frontend: GET /checkout');
+  await expect(failing.locator('[data-cell="duration"]')).toContainText('420 ms');
+  const percent = Number(await failing.locator('[data-cell="duration"] [data-duration-percent]').getAttribute('data-duration-percent'));
+  expect(Math.abs(percent - (420 / 610) * 100)).toBeLessThan(0.05);
+  await expect(table.locator('tr[data-trace-id="5b8efff798038103d269b633813fc60c"] .traceTag--incomplete')).toHaveCount(1);
+  const start = failing.locator('[data-cell="start"]');
+  await expect(start).toHaveText(/^[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d:\d\d [AP]M$/);
+  await expect(start).toHaveAttribute('title', /ago$/);
+  await table.locator('[data-start-toggle]').click();
+  await expect(start).toHaveText(/^\d+ minutes? ago$/);
+  await expect(start).toHaveAttribute('title', /^[A-Z][a-z]{2} \d{1,2}/);
+  // Sorting by Start is numeric, not by the displayed text.
+  await table.locator('th[data-table-sort="start"]').click();
+  expect(await order()).toEqual(expectedOrder('start', 'desc'));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // The choice survives a reload.
+  const again = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.reload();
+  await again;
+  await expect(page.locator('#tracesResults table.traceTable tbody tr[data-trace-id]')).toHaveCount(SYNTHETIC_TRACES.length);
+  await expect(page.locator('[data-results-view="table"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#tracesResults table.traceTable [data-cell="start"]').first()).toHaveText(/ago$/);
+
+  // A row (and Enter on a focused row) opens its trace.
+  await page.locator('#tracesResults tr[data-trace-id="ffeeddccbbaa99887766554433221100"] [data-cell="spans"]').click();
+  await expect(page).toHaveURL(/\/traces\/ffeeddccbbaa99887766554433221100$/);
+  await expect(page.locator('#traceDetail')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#tracesSearchView')).toBeVisible();
+  const row = page.locator('#tracesResults tr[data-trace-id="00112233445566778899aabbccddeeff"]');
+  await row.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/traces\/00112233445566778899aabbccddeeff$/);
+});
+
+test('traces: the duration chart plots the listed traces as dots over a padded duration axis, and a dot opens its trace', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openSyntheticTraces(page);
+  const chart = page.locator('#traceDurationChart');
+  const dots = chart.locator('.traceScatterDot');
+  await expect(dots).toHaveCount(SYNTHETIC_TRACES.length);
+  expect((await dots.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceDot))).sort()).toEqual(SYNTHETIC_TRACES.map((t) => t.trace_id).sort());
+  const errorIds = SYNTHETIC_TRACES.filter((t) => t.errors).map((t) => t.trace_id).sort();
+  expect((await chart.locator('.traceScatterDot.is-error').evaluateAll((nodes) => nodes.map((node) => node.dataset.traceDot))).sort()).toEqual(errorIds);
+  expect(await chart.locator('.traceScatterDot.is-error').first().evaluate((node) => getComputedStyle(node).fill)).toBe('rgb(214, 69, 69)');
+  // Radius grows with the span count; a longer trace sits higher.
+  const geometry = Object.fromEntries(await dots.evaluateAll((nodes) => nodes.map((node) => [node.dataset.traceDot, { r: Number(node.getAttribute('r')), cx: Number(node.getAttribute('cx')), cy: Number(node.getAttribute('cy')) }])));
+  const bySpans = [...SYNTHETIC_TRACES].sort((a, b) => a.spans - b.spans);
+  for (let i = 1; i < bySpans.length; i += 1) expect(geometry[bySpans[i].trace_id].r).toBeGreaterThanOrEqual(geometry[bySpans[i - 1].trace_id].r);
+  expect(geometry[bySpans[bySpans.length - 1].trace_id].r).toBeGreaterThan(geometry[bySpans[0].trace_id].r);
+  const byDuration = [...SYNTHETIC_TRACES].sort((a, b) => a.duration_ms - b.duration_ms);
+  for (let i = 1; i < byDuration.length; i += 1) expect(geometry[byDuration[i].trace_id].cy).toBeLessThan(geometry[byDuration[i - 1].trace_id].cy);
+  const byStart = [...SYNTHETIC_TRACES].sort((a, b) => b.minutesAgo - a.minutesAgo);
+  for (let i = 1; i < byStart.length; i += 1) expect(geometry[byStart[i].trace_id].cx).toBeGreaterThan(geometry[byStart[i - 1].trace_id].cx);
+
+  // Padded min-max domain (Jaeger's ['auto', 'auto']): 330-610 ms of data and
+  // 400-440 ms percentiles read 300 ms to 650 ms, not from 0.
+  const svg = chart.locator('svg');
+  expect(Number(await svg.getAttribute('data-y-min'))).toBe(300e6);
+  expect(Number(await svg.getAttribute('data-y-max'))).toBe(650e6);
+  const yLabels = await chart.locator('.traceChart__tick:not([data-time-tick])').allTextContents();
+  expect(yLabels).toEqual(['300 ms', '350 ms', '400 ms', '450 ms', '500 ms', '550 ms', '600 ms', '650 ms']);
+  // The percentile lines use the same axis: P99 (440 ms) above P50 (400 ms), inside the plot.
+  const lineYs = await chart.locator('.traceDurationLine--p50, .traceDurationLine--p99').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('points').split(' ')[0].split(',')[1])));
+  expect(lineYs[1]).toBeLessThan(lineYs[0]);
+
+  // Hovering a dot picks it over the percentile snap; clicking opens the trace.
+  const target = SYNTHETIC_TRACES[3];
+  const box = await chart.locator(`[data-trace-dot="${target.trace_id}"]`).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const tooltip = chart.locator('.traceChartTooltip');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip.locator('strong')).toHaveText(syntheticName(target));
+  await expect(tooltip).toContainText(`Spans ${target.spans}`);
+  await expect(tooltip).toContainText(`Services ${target.services.length}`);
+  await expect(tooltip).toContainText('Duration 610 ms');
+  await expect(tooltip).toContainText(/Start [A-Z][a-z]{2} \d{1,2}, \d\d:\d\d:\d\d/);
+  await expect(chart.locator(`[data-trace-dot="${target.trace_id}"]`)).toHaveClass(/is-hovered/);
+  await expect(chart.locator('.traceQuantileHover.is-active')).toHaveCount(0);
+  // Away from the dots the pointer snaps to the percentile buckets again.
+  const plot = await svg.boundingBox();
+  await page.mouse.move(plot.x + plot.width * 0.2, plot.y + 14);
+  await expect(chart.locator('.traceQuantileHover.is-active')).toHaveCount(1);
+  await expect(chart.locator('.traceScatterDot.is-hovered')).toHaveCount(0);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page).toHaveURL(new RegExp(`/traces/${target.trace_id}$`));
+  await expect(page.locator('#traceDetail')).toBeVisible();
+});
+
+test('traces: an empty result names the searched range and zooms out from there', async ({ page }) => {
+  test.setTimeout(90_000);
+  const searches = await mockTraceResults(page, { traces: [] });
+  const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.goto('/traces');
+  await answered;
+  const empty = page.locator('#tracesResults [data-empty-results]');
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText('No traces found');
+  const first = searches[searches.length - 1];
+  const format = (ms) => page.evaluate((value) => window.ChDash.timeRange.formatDateTime(value), ms);
+  await expect(empty).toContainText(`No traces match these filters between ${await format(Number(first.start_ms))} and ${await format(Number(first.end_ms))}.`);
+  await expect(page.locator('#tracesResultCount')).toHaveText(/^0 Traces \(in [\d.]+ (µs|ms|s)\)$/);
+  const next = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await empty.locator('[data-results-zoom-out]').click();
+  const params = searchParams(await next);
+  const span = Number(first.end_ms) - Number(first.start_ms);
+  expect(Number(params.end_ms) - Number(params.start_ms)).toBeGreaterThanOrEqual(span * 2 - 2000);
+  expect(Number(params.start_ms)).toBeLessThan(Number(first.start_ms));
 });

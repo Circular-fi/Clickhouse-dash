@@ -203,6 +203,10 @@
           <div class="traceSearchResults__toolbar">
             <h2 id="tracesResultCount">0 Traces</h2>
             <label class="traceResultsSort"><span>Sort:</span><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+            <div class="traceViewToggle" role="group" aria-label="Results view">
+              <button type="button" class="traceViewToggle__button is-active" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
+              <button type="button" class="traceViewToggle__button" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
+            </div>
           </div>
           <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="tracesEmpty">Search to load traces.</div></div>
         </section>

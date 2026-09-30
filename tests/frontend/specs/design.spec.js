@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { captureState } from '../helpers/review.js';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 
 const deterministicQuery = `
 SELECT
@@ -370,5 +371,30 @@ for (const theme of ['dark', 'light']) {
     await page.locator('#tracesCustomRangeApply').click();
     await expect(page.locator('#tracesRangeError')).toBeVisible();
     await captureState(page, testInfo, `traces-time-range-error-${theme}`);
+  });
+}
+
+for (const theme of ['dark', 'light']) {
+  test(`captures the traces search results as a list and as a table (${theme})`, async ({ page }, testInfo) => {
+    await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
+    await mockTraceResults(page);
+    await page.goto('/traces');
+    await expect(page.locator('#tracesResults .traceResultItem')).toHaveCount(SYNTHETIC_TRACES.length, { timeout: 30_000 });
+    await expect(page.locator('#traceDurationChart .traceScatterDot')).toHaveCount(SYNTHETIC_TRACES.length);
+    const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(await noOverflow()).toBe(true);
+    await captureState(page, testInfo, `traces-results-list-${theme}`);
+    await page.locator('.traceSvcMore:visible').first().hover();
+    await expect(page.locator('.traceSvcPopover')).toBeVisible();
+    await captureState(page, testInfo, `traces-results-services-popover-${theme}`);
+    const dot = await page.locator('#traceDurationChart .traceScatterDot').first().boundingBox();
+    await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
+    await expect(page.locator('#traceDurationChart .traceChartTooltip')).toBeVisible();
+    await captureState(page, testInfo, `traces-results-scatter-${theme}`);
+    await page.locator('[data-results-view="table"]').click();
+    await expect(page.locator('#tracesResults table.traceTable tbody tr')).toHaveCount(SYNTHETIC_TRACES.length);
+    await page.mouse.move(2, 2);
+    expect(await noOverflow()).toBe(true);
+    await captureState(page, testInfo, `traces-results-table-${theme}`);
   });
 }

@@ -50,7 +50,7 @@ def test_search_controls_embed_field_names_and_use_theme_colors():
 def test_chart_hover_highlights_and_duration_axis_has_more_uniform_ticks():
     js = read("src/static/app_traces.js")
     css = read("src/static/style.css")
-    assert "durationAxis(yMax, 7)" in js
+    assert "durationAxis(yMin, yMax, 7)" in js
     assert "countAxis(maxTotal, 7)" in js
     assert "timeAxisTicks(startMs, endMs, plotW)" in js
     assert "data-count-bar" in js

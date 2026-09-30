@@ -948,7 +948,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   struct Row {
     std::string trace_id, operation, service;
     int64_t start_ms = 0;
-    uint64_t duration_ns = 0, spans = 0, errors = 0;
+    uint64_t duration_ns = 0, spans = 0, errors = 0, missing_parents = 0;
     std::vector<ServiceStat> service_stats;
   };
   std::vector<Row> rows;
@@ -984,6 +984,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
           if (a.spans != b.spans) return a.spans > b.spans;
           return a.service < b.service;
         });
+        out.missing_parents = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 8, row)));
         rows.push_back(std::move(out));
       }
     });
@@ -997,6 +998,12 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   const std::string service_stats_map =
       "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])";
   const std::string service_first_span_map = "minMap([toString(ServiceName)], [toUnixTimestamp64Nano(Timestamp)])";
+  // Parent span ids that no span of the trace carries (Jaeger's "incomplete
+  // trace" hint): distinct span and parent ids minus distinct span ids, over
+  // the same window spans as the other columns.
+  const std::string missing_parents_expr =
+      "toString(uniqExactArray(arrayFilter(id -> notEmpty(id), [toString(SpanId), toString(ParentSpanId)])) - "
+      "uniqExactIf(toString(SpanId), notEmpty(SpanId)))";
   const std::string aggregate_select =
       "SELECT toString(TraceId), toString(toUnixTimestamp64Milli(min(Timestamp))), "
       "toString(if(empty(argMinIf(SpanName, Timestamp, empty(ParentSpanId))), argMin(SpanName, Timestamp), argMinIf(SpanName, Timestamp, empty(ParentSpanId)))), "
@@ -1006,7 +1013,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       "toString(stat.4 - toUnixTimestamp64Nano(min(Timestamp)))), "
       "arrayFilter(stat -> notEmpty(stat.1), arrayZip(tupleElement(" + service_stats_map + ", 1), tupleElement(" +
       service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3), tupleElement(" + service_first_span_map +
-      ", 2)))), char(31)) ";
+      ", 2)))), char(31)), " + missing_parents_expr + " ";
 
   // The summary aggregates every window span of <= limit selected traces, so
   // it only needs the time range those spans occupy instead of probing every
@@ -1214,7 +1221,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   w.EndObject();
   w.Key("services"); write_string_array(w, service_dict);
   w.Key("columns"); w.StartArray();
-  for (const char* col : {"trace_id", "start_ms", "root_operation", "root_service", "duration_ns", "span_count", "error_count", "service_stats"}) w.String(col);
+  for (const char* col : {"trace_id", "start_ms", "root_operation", "root_service", "duration_ns", "span_count", "error_count", "service_stats", "missing_parents"}) w.String(col);
   w.EndArray();
   w.Key("rows"); w.StartArray();
   for (const auto& row : rows) {
@@ -1227,6 +1234,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       w.EndArray();
     }
     w.EndArray();
+    w.Uint64(row.missing_parents);
     w.EndArray();
   }
   w.EndArray();

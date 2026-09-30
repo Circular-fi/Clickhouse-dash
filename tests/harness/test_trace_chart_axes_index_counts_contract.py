@@ -47,7 +47,7 @@ def test_charts_load_counts_first_and_surface_errors():
 def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
     js = read("src/static/app_traces.js")
     assert 'preserveAspectRatio="none"' not in js
-    assert "function attachChartTooltips(container, points, htmlFor, onHover = null)" in js
+    assert "function attachChartTooltips(container, points, htmlFor, onHover = null, pick = null, onPick = null)" in js
     assert 'class="traceChartHit"' in js
     assert "new ResizeObserver(" in js
 

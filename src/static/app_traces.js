@@ -31,6 +31,12 @@
     detailSeq: 0,
     timeRange: { from: "now-1h", to: "now" },
     timeRangeTouched: false,
+    searched: false,
+    searchLatencyMs: NaN,
+    lastSearchRange: null,
+    resultsView: "list",
+    tableSort: null,
+    startDisplay: "absolute",
   };
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
@@ -107,13 +113,32 @@
     return { axisMax, values };
   }
 
-  function durationAxis(maxNsValue, targetIntervals = 7) {
-    const maxNs = Math.max(1, Number(maxNsValue || 0));
-    const step = DURATION_AXIS_STEPS_NS.find((candidate) => maxNs / candidate <= targetIntervals) || DURATION_AXIS_STEPS_NS[DURATION_AXIS_STEPS_NS.length - 1];
-    const axisMax = Math.max(step, Math.ceil(maxNs / step) * step);
-    const values = [];
-    for (let i = 0; i * step <= axisMax * 1.000001; i += 1) values.push({ value: i * step, label: i ? formatDuration(i * step) : "0" });
-    return { axisMax, values };
+  // Jaeger's ['auto', 'auto'] duration domain: the data range padded by 5 %
+  // on each side (a flat series by 10 % of its value), snapped to whole
+  // steps, so close percentiles do not flatten against a zero baseline. The
+  // step is the finest one whose labels all differ.
+  function durationAxis(minNsValue, maxNsValue, targetIntervals = 7) {
+    let lo = Math.max(0, Number(minNsValue) || 0);
+    let hi = Math.max(lo, Number(maxNsValue) || 0);
+    if (!(hi > 0)) hi = 1;
+    const pad = hi > lo ? (hi - lo) * 0.05 : Math.max(1, hi * 0.1);
+    lo = Math.max(0, lo - pad);
+    hi += pad;
+    const last = DURATION_AXIS_STEPS_NS[DURATION_AXIS_STEPS_NS.length - 1];
+    const first = DURATION_AXIS_STEPS_NS.findIndex((candidate) => (hi - lo) / candidate <= targetIntervals);
+    for (let index = first < 0 ? DURATION_AXIS_STEPS_NS.length - 1 : first; index < DURATION_AXIS_STEPS_NS.length; index += 1) {
+      const step = DURATION_AXIS_STEPS_NS[index];
+      const axisMin = Math.floor(lo / step) * step;
+      const axisMax = Math.max(axisMin + step, Math.ceil(hi / step) * step);
+      const values = [];
+      for (let i = 0; axisMin + i * step <= axisMax + step * 1e-6; i += 1) {
+        const value = axisMin + i * step;
+        values.push({ value, label: value ? formatDuration(value) : "0" });
+      }
+      const distinct = new Set(values.map((tick) => tick.label)).size === values.length;
+      if (distinct || step === last) return { axisMin, axisMax, values };
+    }
+    return { axisMin: 0, axisMax: last, values: [{ value: 0, label: "0" }, { value: last, label: formatDuration(last) }] };
   }
 
   function durationTicks(durationNs, count = 5) {
@@ -642,16 +667,6 @@
 
   function renderSource() {}
 
-  function sortedResults() {
-    const rows = [...(model.traces || [])];
-    const mode = String(dom.tracesSort?.value || "recent");
-    if (mode === "longest") rows.sort((a, b) => Number(b.duration_ns || 0) - Number(a.duration_ns || 0));
-    else if (mode === "shortest") rows.sort((a, b) => Number(a.duration_ns || 0) - Number(b.duration_ns || 0));
-    else if (mode === "spans") rows.sort((a, b) => Number(b.span_count || 0) - Number(a.span_count || 0));
-    else rows.sort((a, b) => Number(b.start_ms || 0) - Number(a.start_ms || 0));
-    return rows;
-  }
-
   function unpackSearch(payload) {
     const services = Array.isArray(payload?.services) ? payload.services : [];
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -664,6 +679,8 @@
       span_count: Number(row?.[5] || 0),
       error_count: Number(row?.[6] || 0),
       service_stats: orderByFirstSpan((Array.isArray(row?.[7]) ? row[7] : []).map((stat) => ({ service: services[Number(stat?.[0] || 0)] || "unknown", spans: Number(stat?.[1] || 0), errors: Number(stat?.[2] || 0), first_span_ns: Number(stat?.[3] || 0) }))),
+      // Parent span ids no listed span carries (0 from older servers).
+      missing_parents: Number(row?.[8] || 0),
     }));
   }
 
@@ -713,11 +730,13 @@
   // Grafana-like hover: the whole chart area is one hit surface; the pointer
   // snaps to the nearest plotted point (points: [{ x, key }] sorted by x, in
   // SVG units), so there are no dead zones between buckets.
-  function attachChartTooltips(container, points, htmlFor, onHover = null) {
+  // pick(x, y) may return a nearer 2-D target (a scatter dot) that wins over
+  // the x snap; onPick(point) runs when such a target is clicked.
+  function attachChartTooltips(container, points, htmlFor, onHover = null, pick = null, onPick = null) {
     if (!container) return;
     const svg = container.querySelector("svg");
     const surface = container.querySelector(".traceChartHit");
-    if (!svg || !surface || !points.length) return;
+    if (!svg || !surface || (!points.length && !pick)) return;
     let tooltip = container.querySelector(".traceChartTooltip");
     if (!tooltip) {
       tooltip = document.createElement("div");
@@ -726,8 +745,16 @@
       container.appendChild(tooltip);
     }
     const viewWidth = Number(svg.viewBox?.baseVal?.width || 0);
+    const viewHeight = Number(svg.viewBox?.baseVal?.height || 0);
+    // Pointer position in SVG units, or null before the chart is laid out.
+    const svgPoint = (event) => {
+      const box = svg.getBoundingClientRect();
+      if (!box.width || !box.height) return null;
+      return [(event.clientX - box.left) * ((viewWidth || box.width) / box.width), (event.clientY - box.top) * ((viewHeight || box.height) / box.height)];
+    };
     const xs = points.map((point) => point.x);
     const nearest = (x) => {
+      if (!xs.length) return null;
       let lo = 0, hi = xs.length - 1;
       while (hi - lo > 1) {
         const mid = (lo + hi) >> 1;
@@ -744,10 +771,11 @@
       current = null;
     };
     const move = (event) => {
-      const box = svg.getBoundingClientRect();
-      if (!box.width) return;
-      const x = (event.clientX - box.left) * ((viewWidth || box.width) / box.width);
-      const point = nearest(x);
+      const at = svgPoint(event);
+      if (!at) return;
+      const point = pick?.(at[0], at[1]) || nearest(at[0]);
+      surface.classList.toggle("is-pickable", !!point?.pickable);
+      if (!point) { hide(); return; }
       if (current !== point) {
         if (current) onHover?.(current, false);
         const html = htmlFor(point);
@@ -774,7 +802,14 @@
     };
     surface.addEventListener("pointerenter", move);
     surface.addEventListener("pointermove", move);
-    surface.addEventListener("pointerleave", hide);
+    surface.addEventListener("pointerleave", () => { surface.classList.remove("is-pickable"); hide(); });
+    if (pick && onPick) {
+      surface.addEventListener("click", (event) => {
+        const at = svgPoint(event);
+        const target = at && pick(at[0], at[1]);
+        if (target) onPick(target);
+      });
+    }
   }
 
   function chartMessage(container, text, isError = false) {
@@ -845,16 +880,22 @@
     if (!qs.length) { chartMessage(container, "No trace durations in this range."); return; }
     const range = a?.range || [qs[0][0], qs[qs.length - 1][0]];
     const xMin = Number(range[0] || 0), xMax = Math.max(xMin + 1000, Number(range[1] || xMin + 1000));
-    let yMax = 1;
-    for (const q of qs) for (let i = 1; i <= 4; i += 1) yMax = Math.max(yMax, q[i] || 0);
-    const durationScaleAxis = durationAxis(yMax, 7);
+    // Jaeger's scatter plot: one dot per listed trace (x = start, y =
+    // duration, radius by span count, red with errors), over the percentiles.
+    const listed = (model.traces || []).filter((trace) => Number(trace.start_ms) > 0 && Number.isFinite(Number(trace.duration_ns)));
+    let yMin = Infinity, yMax = 0;
+    for (const q of qs) for (let i = 1; i <= 4; i += 1) { const v = Number(q[i]); if (Number.isFinite(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); } }
+    for (const trace of listed) { const v = Number(trace.duration_ns); yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
+    if (!Number.isFinite(yMin)) yMin = 0;
+    const durationScaleAxis = durationAxis(yMin, yMax, 7);
     const W = chartWidth(container), H = CHART_HEIGHT, top = 10, bottom = 30, right = 12;
     const left = Math.ceil(10 + Math.max(...durationScaleAxis.values.map((tick) => labelWidthPx(tick.label))));
     const plotW = W - left - right, plotH = H - top - bottom;
     const qBucketMs = Math.max(1000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
     const xOf = (ms) => Math.min(left + plotW, Math.max(left, left + ((Number(ms) - xMin) / (xMax - xMin)) * plotW));
-    const yOf = (ns) => top + plotH - (Number(ns || 0) / durationScaleAxis.axisMax) * plotH;
-    const yTicks = durationScaleAxis.values.map((tick) => { const y = top + plotH - (tick.value / durationScaleAxis.axisMax) * plotH; return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tick.label)}</text>`; }).join("");
+    const ySpan = Math.max(1, durationScaleAxis.axisMax - durationScaleAxis.axisMin);
+    const yOf = (ns) => top + plotH - ((Number(ns || 0) - durationScaleAxis.axisMin) / ySpan) * plotH;
+    const yTicks = durationScaleAxis.values.map((tick) => { const y = yOf(tick.value); return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tick.label)}</text>`; }).join("");
     const xTicks = timeAxisSvg(xMin, xMax, left, plotW, H, W);
     const qDefs = [[1, "p50"], [2, "p90"], [3, "p95"], [4, "p99"]];
     // Lines break where buckets have no traces instead of bridging the gap,
@@ -876,14 +917,48 @@
       const xs = x.toFixed(2);
       return `<g class="traceQuantileHover" data-q-hover="${q[0]}" data-q-ts="${q[0]}"><line x1="${xs}" x2="${xs}" y1="${top}" y2="${top + plotH}"/>${qDefs.map(([col, cls]) => `<circle class="${cls}" cx="${xs}" cy="${yOf(q[col]).toFixed(2)}" r="3.5"/>`).join("")}</g>`;
     }).join("");
-    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg">${yTicks}${xTicks}${lines}${hoverPoints}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg><div class="traceChartLegend traceChartLegend--quantiles"><span class="p50">P50</span><span class="p90">P90</span><span class="p95">P95</span><span class="p99">P99</span></div>`;
+    const spanCounts = listed.map((trace) => Number(trace.span_count || 0));
+    const spanMin = Math.min(...spanCounts), spanMax = Math.max(...spanCounts);
+    const dots = listed.map((trace) => {
+      const spans = Number(trace.span_count || 0);
+      const r = spanMax > spanMin ? 2.5 + 6.5 * ((spans - spanMin) / (spanMax - spanMin)) : 3.5;
+      return { trace, x: xOf(trace.start_ms), y: yOf(trace.duration_ns), r, pickable: true };
+    }).sort((p, q) => q.r - p.r);
+    const dotsSvg = dots.map((dot, index) => {
+      dot.key = index;
+      const errors = Number(dot.trace.error_count || 0) > 0;
+      return `<circle cx="${dot.x.toFixed(2)}" cy="${dot.y.toFixed(2)}" r="${dot.r.toFixed(2)}" class="traceScatterDot${errors ? " is-error" : ""}" data-trace-dot="${esc(dot.trace.trace_id)}" data-dot-key="${index}" data-spans="${Number(dot.trace.span_count || 0)}"/>`;
+    }).join("");
+    // The dot under the pointer (within 3 px of its edge); among overlapping
+    // dots the closer and smaller one wins, so a small dot on a big one stays
+    // reachable.
+    const pickDot = (x, y) => {
+      let best = null, bestScore = Infinity;
+      for (const dot of dots) {
+        const d = Math.hypot(dot.x - x, dot.y - y);
+        if (d > dot.r + 3) continue;
+        const score = d / (dot.r + 3) + dot.r / 100;
+        if (score < bestScore) { best = dot; bestScore = score; }
+      }
+      return best;
+    };
+    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg" data-y-min="${durationScaleAxis.axisMin}" data-y-max="${durationScaleAxis.axisMax}">${yTicks}${xTicks}<g class="traceScatter">${dotsSvg}</g>${lines}${hoverPoints}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg><div class="traceChartLegend traceChartLegend--quantiles">${dots.length ? '<span class="traces" title="One dot per listed trace; size by span count, red with errors. Click a dot to open its trace.">Listed traces</span>' : ""}<span class="p50">P50</span><span class="p90">P90</span><span class="p95">P95</span><span class="p99">P99</span></div>`;
+    const dotTooltip = (dot) => {
+      const trace = dot.trace;
+      const ms = parseStartMs(trace.start_ms);
+      const errors = Number(trace.error_count || 0);
+      const services = (trace.service_stats || []).length;
+      return `<strong>${esc(traceName(trace))}</strong><span>Spans <b>${Number(trace.span_count || 0)}</b></span><span>Services <b>${services}</b></span>${errors ? `<span class="is-error">Errors <b>${errors}</b></span>` : ""}<span>Duration <b>${esc(formatDuration(trace.duration_ns))}</b></span><span>Start <b>${esc(Number.isFinite(ms) ? `${dayLabel(ms)}, ${clockLabel(ms, true)}` : "")}</b></span>`;
+    };
     attachChartTooltips(container, hover, (point) => {
+      if (point.trace) return dotTooltip(point);
       const [bucket, p50, p90, p95, p99] = point.q;
       return `<strong>${esc(bucketRangeLabel(bucket, qBucketMs))}</strong><span>P50 <b>${esc(formatDuration(p50))}</b></span><span>P90 <b>${esc(formatDuration(p90))}</b></span><span>P95 <b>${esc(formatDuration(p95))}</b></span><span>P99 <b>${esc(formatDuration(p99))}</b></span>`;
     }, (point, active) => {
-      container.querySelector(`[data-q-hover="${point.key}"]`)?.classList.toggle("is-active", active);
-    });
-    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
+      if (point.trace) container.querySelector(`[data-dot-key="${point.key}"]`)?.classList.toggle("is-hovered", active);
+      else container.querySelector(`[data-q-hover="${point.key}"]`)?.classList.toggle("is-active", active);
+    }, dots.length ? pickDot : null, (dot) => loadTrace(dot.trace.trace_id, { push: true }));
+    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${dots.length ? `${dots.length} listed trace${dots.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
   }
 
   // Remembers whether meta enables analytics for the head script of the next
@@ -950,45 +1025,395 @@
     }).catch(() => {});
   }
 
-  function renderResults() {
-    if (!dom.tracesResults) return;
-    const rows = sortedResults();
-    const count = document.getElementById("tracesResultCount");
-    if (count) {
-      const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
-      count.innerHTML = `${rows.length} Trace${rows.length === 1 ? "" : "s"}${withErrors ? ` <span class="tracesResultCount__errors" title="${withErrors} of the listed traces have error spans">· ${withErrors} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
+  // --- Search results: Jaeger-style list and sortable table ---------------
+  const RESULTS_VIEW_KEY = "chdash.traceResultsView.v1";
+  const START_DISPLAY_KEY = "chdash.traceStartDisplay.v1";
+
+  function readStored(key, allowed, fallback) {
+    try {
+      const value = localStorage.getItem(key);
+      return allowed.includes(value) ? value : fallback;
+    } catch { return fallback; }
+  }
+
+  function writeStored(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* storage may be unavailable */ }
+  }
+
+  // The list follows the sort picker; the table sorts by its column headers
+  // (both directions), starting from the picker's order.
+  const LIST_SORTS = {
+    recent: { key: "start", dir: "desc" },
+    longest: { key: "duration", dir: "desc" },
+    shortest: { key: "duration", dir: "asc" },
+    spans: { key: "spans", dir: "desc" },
+  };
+  const TABLE_COLUMNS = [
+    { key: "name", label: "Name", numeric: false },
+    { key: "services", label: "Services", numeric: true },
+    { key: "spans", label: "Spans", numeric: true },
+    { key: "errors", label: "Errors", numeric: true },
+    { key: "duration", label: "Duration", numeric: true },
+    { key: "start", label: "Start", numeric: true },
+  ];
+
+  function traceName(trace) {
+    return `${trace.root_service || "unknown"}: ${trace.root_operation || "trace"}`;
+  }
+
+  function compareText(a, b) {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+
+  function traceSortValue(trace, key) {
+    if (key === "name") return traceName(trace).toLowerCase();
+    if (key === "services") return (trace.service_stats || []).length;
+    if (key === "spans") return Number(trace.span_count || 0);
+    if (key === "errors") return Number(trace.error_count || 0);
+    if (key === "duration") return Number(trace.duration_ns || 0);
+    return Number(trace.start_ms || 0);
+  }
+
+  function sortTraces(rows, { key, dir }) {
+    const sign = dir === "asc" ? 1 : -1;
+    // Ties keep the newest trace first, then the trace id, in both directions.
+    return rows.sort((a, b) => {
+      const av = traceSortValue(a, key), bv = traceSortValue(b, key);
+      const cmp = typeof av === "string" ? compareText(av, bv) : av - bv;
+      return (cmp * sign) || (Number(b.start_ms || 0) - Number(a.start_ms || 0)) || compareText(a.trace_id, b.trace_id);
+    });
+  }
+
+  function listSort() {
+    return LIST_SORTS[String(dom.tracesSort?.value || "recent")] || LIST_SORTS.recent;
+  }
+
+  function sortedResults() {
+    const rows = [...(model.traces || [])];
+    return sortTraces(rows, model.resultsView === "table" ? (model.tableSort || listSort()) : listSort());
+  }
+
+  function incompleteTooltip(count) {
+    const noun = count === 1 ? "span" : "spans";
+    return `This trace may be incomplete: its spans reference ${count} parent ${noun} missing from the searched range. `
+      + "This happens when the trace crosses the range, when a parent span belongs to a service you cannot see, "
+      + "or while the trace is still being collected.";
+  }
+
+  function errorTagHtml(errors) {
+    const label = `${errors} Error${errors === 1 ? "" : "s"}`;
+    return `<span class="traceErrorCount traceErrorCount--title traceTag traceTag--error" title="${errors} error span${errors === 1 ? "" : "s"}" aria-label="${errors} error span${errors === 1 ? "" : "s"}">${label}</span>`;
+  }
+
+  function incompleteTagHtml(missing) {
+    return `<span class="traceTag traceTag--incomplete" data-missing-parents="${missing}" title="${esc(incompleteTooltip(missing))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 15.2 14.4H.8Z"/><path class="traceTag__glyph" d="M8 6v4M8 11.6v.9"/></svg>Incomplete</span>`;
+  }
+
+  function servicePillHtml(stat) {
+    const errors = Number(stat.errors || 0);
+    const errorTitle = errors ? ` · ${errors} error span${errors === 1 ? "" : "s"}` : "";
+    return `<span class="traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${serviceColor(stat.service)}" title="${esc(stat.service)} · ${stat.spans} span${stat.spans === 1 ? "" : "s"}${errorTitle}">${errors ? '<i class="traceSvcPill__error" aria-label="has errors">!</i>' : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${stat.spans})</span></span>`;
+  }
+
+  // One line of service pills; layoutServicePills hides the ones that do not
+  // fit and shows them behind a "+N" chip.
+  function servicePillsHtml(stats) {
+    if (!stats.length) return '<div class="traceSvcPills is-empty">—</div>';
+    return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" aria-haspopup="true" aria-expanded="false" hidden>+0</button></div>`;
+  }
+
+  function layoutServicePills(scope) {
+    const groups = [...(scope?.querySelectorAll?.(".traceSvcPills:not(.is-empty)") || [])];
+    if (!groups.length) return;
+    // Write, read, then write again: one layout pass for the whole list.
+    const prepared = groups.map((group) => {
+      const pills = [...group.querySelectorAll(":scope > .traceSvcPill")];
+      const more = group.querySelector(":scope > .traceSvcMore");
+      for (const pill of pills) pill.hidden = false;
+      if (more) { more.hidden = false; more.textContent = `+${pills.length}`; }
+      // Natural widths: no pill shrinks while measuring.
+      group.classList.add("is-measuring");
+      return { group, pills, more };
+    });
+    const gap = parseFloat(getComputedStyle(groups[0]).columnGap) || 4;
+    const measured = prepared.map((item) => ({
+      ...item,
+      width: item.group.clientWidth,
+      widths: item.pills.map((pill) => pill.offsetWidth),
+      moreWidth: item.more ? item.more.offsetWidth : 0,
+    }));
+    for (const { group, pills, more, width, widths, moreWidth } of measured) {
+      group.classList.remove("is-measuring");
+      if (!width) { if (more) more.hidden = true; continue; }
+      let used = 0;
+      let shown = 0;
+      const total = widths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, widths.length - 1);
+      if (total <= width + 0.5) shown = pills.length;
+      else {
+        for (let i = 0; i < widths.length; i += 1) {
+          const next = used + (i ? gap : 0) + widths[i];
+          if (next + gap + moreWidth > width + 0.5) break;
+          used = next;
+          shown = i + 1;
+        }
+        // The first pill always shows (ellipsized when it alone is too wide).
+        shown = Math.max(1, shown);
+      }
+      pills.forEach((pill, index) => { pill.hidden = index >= shown; });
+      if (more) {
+        const rest = pills.length - shown;
+        more.hidden = rest <= 0;
+        more.textContent = `+${rest}`;
+        more.setAttribute("aria-label", `${rest} more service${rest === 1 ? "" : "s"}`);
+      }
+      group.classList.toggle("is-overflowing", shown < pills.length);
     }
-    renderAnalytics();
-    if (!rows.length) {
-      dom.tracesResults.innerHTML = '<div class="tracesEmpty">No traces match these filters.</div>';
-      return;
+  }
+
+  let servicePopover = null;
+  let servicePopoverOwner = null;
+  function hideServicePopover() {
+    if (servicePopoverOwner) servicePopoverOwner.setAttribute("aria-expanded", "false");
+    servicePopoverOwner = null;
+    if (servicePopover) servicePopover.hidden = true;
+  }
+
+  // The hidden pills of a row, in a floating card under its "+N" chip.
+  function showServicePopover(more) {
+    if (!more || more.hidden) return;
+    if (!servicePopover) {
+      servicePopover = document.createElement("div");
+      servicePopover.className = "traceSvcPopover";
+      servicePopover.setAttribute("role", "tooltip");
+      servicePopover.hidden = true;
+      document.body.appendChild(servicePopover);
     }
-    dom.tracesResults.innerHTML = rows.map((trace) => {
-      const errors = Number(trace.error_count || 0);
-      const title = trace.root_operation || "trace";
-      const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
-      const stats = services.map((stat) => `<span class="traceServiceStat${stat.errors ? " is-error" : ""}" style="--trace-service-color:${serviceColor(stat.service)}"><i></i><b>${esc(stat.service)}</b><span>${stat.spans}</span>${stat.errors ? `<em class="traceErrorCount" title="${stat.errors} error span${stat.errors === 1 ? "" : "s"}">${stat.errors}</em>` : ""}</span>`).join("");
-      return `<div class="traceResult traceResult--wide" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
-        <div class="traceResult__line traceResult__line--main">
-          <strong class="traceResult__wideTitle">${esc(title)}</strong>${errors ? `<span class="traceErrorCount traceErrorCount--title" title="${errors} error span${errors === 1 ? "" : "s"}" aria-label="${errors} error span${errors === 1 ? "" : "s"}">${errors}</span>` : ""}
+    const group = more.parentElement;
+    const hidden = [...group.querySelectorAll(":scope > .traceSvcPill[hidden]")];
+    if (!hidden.length) { hideServicePopover(); return; }
+    if (servicePopoverOwner && servicePopoverOwner !== more) servicePopoverOwner.setAttribute("aria-expanded", "false");
+    servicePopoverOwner = more;
+    more.setAttribute("aria-expanded", "true");
+    servicePopover.replaceChildren(...hidden.map((pill) => { const copy = pill.cloneNode(true); copy.hidden = false; return copy; }));
+    servicePopover.hidden = false;
+    const anchor = more.getBoundingClientRect();
+    const size = servicePopover.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - size.width - 8, anchor.left + anchor.width / 2 - size.width / 2));
+    const below = anchor.bottom + 6;
+    const top = below + size.height > window.innerHeight - 8 ? Math.max(8, anchor.top - size.height - 6) : below;
+    servicePopover.style.left = `${Math.round(left)}px`;
+    servicePopover.style.top = `${Math.round(top)}px`;
+  }
+
+  function startTooltip(trace) {
+    const ms = parseStartMs(trace.start_ms);
+    if (!Number.isFinite(ms)) return "";
+    const exact = ns.timeRange ? ns.timeRange.formatDateTime(ms) : new Date(ms).toISOString();
+    return `${exact} · ${formatAgo(trace.start_ms)}`;
+  }
+
+  function resultItemHtml(trace, maxDurationNs) {
+    const errors = Number(trace.error_count || 0);
+    const missing = Number(trace.missing_parents || 0);
+    const title = traceName(trace);
+    const spans = Number(trace.span_count || 0);
+    const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
+    const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
+    return `<div class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
+        <div class="traceResult__line traceResult__line--main traceResultItem__title">
+          <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
+          <strong title="${esc(title)}" class="traceResult__wideTitle">${esc(title)}</strong>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
           <button type="button" class="traceCopyButton" data-copy-trace="${esc(trace.trace_id)}" title="Copy Trace ID" aria-label="Copy Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button>
-          <span class="traceResult__right"><span class="traceResult__when"><time>${esc(formatStart(trace.start_ms))}</time><small>${esc(formatAgo(trace.start_ms))}</small></span><b>${esc(formatDuration(trace.duration_ns))}</b></span>
+          <span class="traceResult__right"><b>${esc(formatDuration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
-          <span class="traceResult__count">${trace.span_count}</span>
-          <div class="traceServiceStats">${stats}</div>
+          <span class="traceTag traceTag--spans">${spans} Span${spans === 1 ? "" : "s"}</span>
+          ${servicePillsHtml(services)}
+          <span class="traceResult__when" title="${esc(startTooltip(trace))}"><time>${esc(formatStart(trace.start_ms))}</time><small>${esc(formatAgo(trace.start_ms))}</small></span>
         </div>
       </div>`;
+  }
+
+  function resultTableHtml(rows, maxDurationNs) {
+    const sort = model.tableSort || listSort();
+    const relative = model.startDisplay === "relative";
+    const head = TABLE_COLUMNS.map((column) => {
+      const active = sort.key === column.key;
+      const aria = active ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
+      const toggle = column.key === "start"
+        ? `<button type="button" class="traceTable__startToggle" data-start-toggle title="${relative ? "Show absolute time" : "Show relative time"}" aria-label="Toggle start time format"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg></button>`
+        : "";
+      return `<th class="resultTable__thSortable traceTable__th traceTable__th--${column.key}" data-table-sort="${column.key}"${active ? ` data-sort="${sort.dir}"` : ""} aria-sort="${aria}" tabindex="0" scope="col"><span>${column.label}</span>${toggle}</th>`;
     }).join("");
-    for (const row of dom.tracesResults.querySelectorAll("[data-trace-id]")) {
-      const open = () => loadTrace(row.getAttribute("data-trace-id"), { push: true });
-      row.addEventListener("click", (event) => { if (!event.target.closest("[data-copy-trace]")) open(); });
-      row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    const body = rows.map((trace) => {
+      const errors = Number(trace.error_count || 0);
+      const missing = Number(trace.missing_parents || 0);
+      const name = traceName(trace);
+      const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
+      const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
+      const absolute = formatStart(trace.start_ms);
+      const ago = formatAgo(trace.start_ms);
+      return `<tr class="traceTable__row" data-trace-id="${esc(trace.trace_id)}" tabindex="0">
+        <td class="traceTable__name" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}</td>
+        <td class="traceTable__services" data-cell="services">${servicePillsHtml(services)}</td>
+        <td class="resultTable__numeric" data-cell="spans">${Number(trace.span_count || 0)}</td>
+        <td class="resultTable__numeric" data-cell="errors">${errors ? `<span class="traceTag traceTag--error">${errors}</span>` : "0"}</td>
+        <td class="traceTable__duration" data-cell="duration" title="${esc(formatDuration(trace.duration_ns))}"><span class="traceTable__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}"></i></span><span class="traceTable__durationText">${esc(formatDuration(trace.duration_ns))}</span></td>
+        <td class="traceTable__start" data-cell="start" title="${esc(relative ? absolute : ago)}">${esc(relative ? ago : absolute)}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="tableWrap traceTableWrap"><table class="resultTable traceTable"><colgroup><col class="traceTable__col--name"><col class="traceTable__col--services"><col class="traceTable__col--spans"><col class="traceTable__col--errors"><col class="traceTable__col--duration"><col class="traceTable__col--start"></colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function syncResultsViewControls() {
+    const table = model.resultsView === "table";
+    for (const button of document.querySelectorAll("[data-results-view]")) {
+      const active = button.getAttribute("data-results-view") === model.resultsView;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
     }
-    for (const button of dom.tracesResults.querySelectorAll("[data-copy-trace]")) {
-      button.addEventListener("click", (event) => { event.stopPropagation(); copyText(button.getAttribute("data-copy-trace") || "", button); });
+    // Like Jaeger, the sort picker drives the list; the table sorts by its headers.
+    const sortLabel = document.querySelector(".traceResultsSort");
+    if (sortLabel) sortLabel.hidden = table;
+    dom.tracesResults?.classList.toggle("tracesResults--table", table);
+  }
+
+  function setResultsView(view) {
+    const next = view === "table" ? "table" : "list";
+    if (next === model.resultsView) return;
+    model.resultsView = next;
+    writeStored(RESULTS_VIEW_KEY, next);
+    if (next === "table") model.tableSort = { ...listSort() };
+    renderResults();
+  }
+
+  function sortTableBy(key) {
+    const column = TABLE_COLUMNS.find((item) => item.key === key);
+    if (!column) return;
+    const current = model.tableSort || listSort();
+    model.tableSort = current.key === key
+      ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+      : { key, dir: column.numeric ? "desc" : "asc" };
+    renderResults();
+    dom.tracesResults?.querySelector(`[data-table-sort="${key}"]`)?.focus({ preventScroll: true });
+  }
+
+  function emptyResultsHtml() {
+    if (!model.searched) return '<div class="tracesEmpty">Search to load traces.</div>';
+    const range = model.lastSearchRange;
+    const tr = ns.timeRange;
+    const when = range && tr ? `between ${tr.formatDateTime(range.start_ms)} and ${tr.formatDateTime(range.end_ms)}` : "in this range";
+    const zoom = dom.tracesRangeZoomOut;
+    const canZoom = !!zoom && !zoom.disabled;
+    return `<div class="tracesEmpty tracesEmpty--search" data-empty-results>
+        <strong>No traces found</strong>
+        <span>No traces match these filters ${esc(when)}.</span>
+        ${canZoom ? '<button type="button" class="button button--small tracesEmpty__zoom" data-results-zoom-out><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg><span>Zoom out</span></button>' : ""}
+      </div>`;
+  }
+
+  function renderResultCount(rows) {
+    const count = document.getElementById("tracesResultCount");
+    if (!count) return;
+    const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
+    const latency = model.searched && Number.isFinite(model.searchLatencyMs)
+      ? ` <span class="tracesResultCount__latency" title="Search request time, measured in the browser">(in ${esc(formatDuration(model.searchLatencyMs * 1e6))})</span>`
+      : "";
+    count.innerHTML = `${rows.length} Trace${rows.length === 1 ? "" : "s"}${latency}${withErrors ? ` <span class="tracesResultCount__errors" title="${withErrors} of the listed traces have error spans">· ${withErrors} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
+  }
+
+  let resultsResizeObserver = null;
+  let resultsResizeFrame = 0;
+  function watchResultsWidth() {
+    if (resultsResizeObserver || typeof ResizeObserver !== "function" || !dom.tracesResults) return;
+    let lastWidth = -1;
+    resultsResizeObserver = new ResizeObserver((entries) => {
+      const width = Math.round(entries[entries.length - 1]?.contentRect?.width || 0);
+      if (width === lastWidth || resultsResizeFrame) return;
+      lastWidth = width;
+      resultsResizeFrame = requestAnimationFrame(() => {
+        resultsResizeFrame = 0;
+        hideServicePopover();
+        layoutServicePills(dom.tracesResults);
+      });
+    });
+    resultsResizeObserver.observe(dom.tracesResults);
+  }
+
+  let resultEventsBound = false;
+  function bindResultEvents() {
+    const root = dom.tracesResults;
+    if (resultEventsBound || !root) return;
+    resultEventsBound = true;
+    const openRow = (row) => { const id = row?.getAttribute("data-trace-id"); if (id) loadTrace(id, { push: true }); };
+    root.addEventListener("click", (event) => {
+      const target = event.target;
+      const copy = target.closest("[data-copy-trace]");
+      if (copy) { event.stopPropagation(); copyText(copy.getAttribute("data-copy-trace") || "", copy); return; }
+      const more = target.closest(".traceSvcMore");
+      if (more) {
+        event.stopPropagation();
+        if (servicePopoverOwner === more) hideServicePopover(); else showServicePopover(more);
+        return;
+      }
+      if (target.closest("[data-results-zoom-out]")) { dom.tracesRangeZoomOut?.click(); return; }
+      if (target.closest("[data-start-toggle]")) {
+        event.stopPropagation();
+        model.startDisplay = model.startDisplay === "relative" ? "absolute" : "relative";
+        writeStored(START_DISPLAY_KEY, model.startDisplay);
+        renderResults();
+        dom.tracesResults?.querySelector("[data-start-toggle]")?.focus({ preventScroll: true });
+        return;
+      }
+      const th = target.closest("[data-table-sort]");
+      if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
+      const row = target.closest("[data-trace-id]");
+      if (row && root.contains(row)) openRow(row);
+    });
+    root.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = event.target;
+      if (target.closest("button")) return;
+      const th = target.closest("[data-table-sort]");
+      if (th) { event.preventDefault(); sortTableBy(th.getAttribute("data-table-sort")); return; }
+      const row = target.closest("[data-trace-id]");
+      if (row === target) { event.preventDefault(); openRow(row); }
+    });
+    root.addEventListener("pointerover", (event) => {
+      const more = event.target.closest?.(".traceSvcMore");
+      if (more && more !== servicePopoverOwner) showServicePopover(more);
+    });
+    root.addEventListener("pointerout", (event) => {
+      const more = event.target.closest?.(".traceSvcMore");
+      if (more && !more.contains(event.relatedTarget)) hideServicePopover();
+    });
+    root.addEventListener("focusin", (event) => { const more = event.target.closest?.(".traceSvcMore"); if (more) showServicePopover(more); });
+    root.addEventListener("focusout", (event) => { if (event.target.closest?.(".traceSvcMore")) hideServicePopover(); });
+    window.addEventListener("scroll", hideServicePopover, { passive: true });
+    for (const button of document.querySelectorAll("[data-results-view]")) {
+      button.addEventListener("click", () => setResultsView(button.getAttribute("data-results-view")));
     }
+  }
+
+  function renderResults() {
+    if (!dom.tracesResults) return;
+    bindResultEvents();
+    watchResultsWidth();
+    hideServicePopover();
+    syncResultsViewControls();
+    const rows = sortedResults();
+    renderResultCount(rows);
+    renderAnalytics();
+    if (!rows.length) {
+      dom.tracesResults.innerHTML = emptyResultsHtml();
+      return;
+    }
+    const maxDurationNs = Math.max(0, ...rows.map((trace) => Number(trace.duration_ns || 0)));
+    dom.tracesResults.innerHTML = model.resultsView === "table"
+      ? resultTableHtml(rows, maxDurationNs)
+      : rows.map((trace) => resultItemHtml(trace, maxDurationNs)).join("");
+    layoutServicePills(dom.tracesResults);
   }
 
   function buildTree(spans) {
@@ -1945,8 +2370,12 @@
     model.durationsError = "";
     renderAnalytics();
     try {
+      const requested = performance.now();
       const payload = await api.searchTraces(currentHost(), filters);
       if (seq !== model.searchSeq) return;
+      model.searchLatencyMs = performance.now() - requested;
+      model.searched = true;
+      model.lastSearchRange = { start_ms: Number(filters.start_ms), end_ms: Number(filters.end_ms) };
       unpackSearch(payload);
       renderResults();
       // Search results are intentionally delivered first. Heavy graph analytics
@@ -1955,6 +2384,7 @@
     } catch (error) {
       if (seq !== model.searchSeq) return;
       model.traces = [];
+      model.searched = false;
       model.analytics = null;
       model.analyticsLoading = false;
       renderResults();
@@ -2015,6 +2445,7 @@
   async function reloadForHost() {
     model.meta = null;
     model.traces = [];
+    model.searched = false;
     model.analytics = null;
     model.analyticsLoading = false;
     model.analyticsError = "";
@@ -2043,6 +2474,8 @@
 
   function init() {
     ui?.setPageSelectorValue?.("traces");
+    model.resultsView = readStored(RESULTS_VIEW_KEY, ["list", "table"], "list");
+    model.startDisplay = readStored(START_DISPLAY_KEY, ["absolute", "relative"], "absolute");
     initTracePickers();
     initWaterfallEvents();
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
