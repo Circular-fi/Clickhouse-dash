@@ -1378,6 +1378,8 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
   expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
   expect(buttonBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
   expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+  // Its disabled -> enabled opacity transition must settle too.
+  await expect(page.locator('#traceCopyJsonButton')).toHaveCSS('opacity', '1');
   expect(await copyButtonLook('#traceCopyJsonButton')).toEqual(editorLook);
 
   // Outside a secure context the app copies through a hidden textarea:
@@ -1440,6 +1442,7 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
     }
     return window.__chdashTestCopiedText || '';
   })).toBe(traceId);
+});
 
 async function otelRows(request, sql) {
   const base = (process.env.CLICKHOUSE_URL || 'http://clickhouse:8123').replace(/\/$/, '');
