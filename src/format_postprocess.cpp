@@ -2619,6 +2619,7 @@ struct Formatter {
   string format_in_subquery(string_view expr, bool break_after_in);
   string format_in_literal(string_view expr);
   string format_create_table(string_view s);
+  string format_create_dictionary(string_view s);
   string format_commented_column_list(const string& head, const string& cols, const string& tail);
   string format_create_view(string_view s, bool materialized);
   string format_alter_table(string_view s);
@@ -2916,6 +2917,7 @@ string Formatter::format_statement(string_view s) {
   } else if (starts_with_ci(text, "WITH") || starts_with_ci(text, "SELECT")) out = format_select_like(text);
   else if (starts_with_ci(text, "CREATE TABLE") || starts_with_ci(text, "CREATE OR REPLACE TABLE") ||
            starts_with_ci(text, "CREATE TEMPORARY TABLE") || starts_with_ci(text, "REPLACE TABLE")) out = format_create_table(text);
+  else if (starts_with_ci(text, "CREATE DICTIONARY") || starts_with_ci(text, "CREATE OR REPLACE DICTIONARY")) out = format_create_dictionary(text);
   else if (starts_with_ci(text, "CREATE MATERIALIZED VIEW")) out = format_create_view(text, true);
   else if (starts_with_ci(text, "CREATE VIEW") || starts_with_ci(text, "CREATE OR REPLACE VIEW")) out = format_create_view(text, false);
   else if (starts_with_ci(text, "ALTER TABLE")) out = format_alter_table(text);
@@ -4446,10 +4448,32 @@ string uppercase_column_clause_keyword(string rhs) {
   size_t e = i;
   while (e < rhs.size() && is_ident_char(rhs[e])) ++e;
   const string_view word = string_view(rhs).substr(i, e - i);
-  for (const char* kw : {"DEFAULT", "MATERIALIZED", "ALIAS", "EPHEMERAL", "CODEC", "TTL", "COMMENT"}) {
+  for (const char* kw : {"DEFAULT", "MATERIALIZED", "ALIAS", "EPHEMERAL", "CODEC", "TTL", "COMMENT", "EXPRESSION"}) {
     if (!iequals_ascii(word, kw)) continue;
     for (size_t k = i; k < e; ++k) rhs[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(rhs[k])));
     break;
+  }
+  // Dictionary attribute flags are not expressions: upper-case them where
+  // they stand at the top level of the definition.
+  const SqlMaskResult masked = mask_sql_surface(rhs);
+  int level = 0;
+  string_view previous_word;
+  for (size_t k = 0; k < rhs.size(); ++k) {
+    const char c = masked.code_lower[k];
+    if (c == '(' || c == '[') ++level;
+    else if ((c == ')' || c == ']') && level > 0) --level;
+    if (level != 0 || !is_ident_char(c) || (k > 0 && is_ident_char(masked.code_lower[k - 1]))) continue;
+    size_t w = k;
+    while (w < rhs.size() && is_ident_char(masked.code_lower[w])) ++w;
+    const string_view flag = string_view(masked.code_lower).substr(k, w - k);
+    // `DEFAULT 0 EXPRESSION expr`: EXPRESSION after a value, never as one.
+    const bool value_position = previous_word == "default" || previous_word == "expression";
+    if (flag == "hierarchical" || flag == "injective" || flag == "is_object_id" || flag == "bidirectional" ||
+        (flag == "expression" && !value_position)) {
+      for (size_t q = k; q < w; ++q) rhs[q] = static_cast<char>(std::toupper(static_cast<unsigned char>(rhs[q])));
+    }
+    previous_word = flag;
+    k = w - 1;
   }
   return rhs;
 }
@@ -4625,7 +4649,7 @@ string normalize_create_head(const string& head) {
   if (!take({"CREATE"}) && !take({"ATTACH"}) && !take({"REPLACE"})) return head;
   take({"OR", "REPLACE"});
   take({"TEMPORARY"});
-  if (!take({"TABLE"}) && !take({"MATERIALIZED", "VIEW"}) && !take({"VIEW"})) return head;
+  if (!take({"TABLE"}) && !take({"MATERIALIZED", "VIEW"}) && !take({"VIEW"}) && !take({"DICTIONARY"})) return head;
   take({"IF", "NOT", "EXISTS"});
   if (i < words.size()) ++i;  // the table name
   if (take({"ON", "CLUSTER"}) && i < words.size()) ++i;
@@ -4708,6 +4732,115 @@ string Formatter::format_create_table(string_view s) {
   }
   out += ")";
   if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
+  return out;
+}
+
+// `name(KEY value KEY value ...)` as in dictionary SOURCE / LAYOUT / RANGE /
+// LIFETIME: the name and keys in upper case, values kept. Returns the pairs
+// (key, value) of the inner list, or {} when the list is not key/value pairs.
+vector<std::pair<string, string>> dictionary_key_values(string_view inner) {
+  vector<string> tokens;
+  const CallScan scan = scan_call_brackets(inner);
+  int depth = 0;
+  size_t start = string::npos;
+  for (size_t i = 0; i <= inner.size(); ++i) {
+    const bool end = i == inner.size();
+    const char c = end ? ' ' : inner[i];
+    const bool code = end || scan.kind[i] == kCallCode;
+    if (code && (c == '(' || c == '[')) ++depth;
+    if (code && (c == ')' || c == ']') && depth > 0) --depth;
+    const bool space = code && depth == 0 && (c == ' ' || c == '\n' || c == '\t');
+    if (space) {
+      if (start != string::npos) tokens.emplace_back(inner.substr(start, i - start));
+      start = string::npos;
+    } else if (start == string::npos) {
+      start = i;
+    }
+  }
+  vector<std::pair<string, string>> pairs;
+  // `CLICKHOUSE(... STRUCTURE (a UInt8))`: a value may be separated from its
+  // key by a space before `(`; keys are bare words.
+  for (size_t i = 0; i < tokens.size();) {
+    const string& key = tokens[i];
+    bool word = !key.empty();
+    for (const char ch : key) word = word && is_ident_char(ch);
+    if (!word || i + 1 >= tokens.size()) return {};
+    pairs.emplace_back(key, tokens[i + 1]);
+    i += 2;
+  }
+  return pairs;
+}
+
+string upper_ascii(string s) {
+  for (char& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+  return s;
+}
+
+// `source(clickhouse(table 'x' db 'y'))` → `SOURCE(CLICKHOUSE(TABLE 'x' DB 'y'))`;
+// `lifetime(300)` → `LIFETIME(MIN 0 MAX 300)` like formatQuery. A call that
+// does not fit the width puts one `KEY value` pair per line.
+string format_dictionary_clause(const string& clause, size_t threshold) {
+  const size_t open = clause.find('(');
+  const size_t close = open == string::npos ? string::npos : find_matching_paren(clause, open);
+  if (open == string::npos || close == string::npos || !trim_ascii_spaces(string_view(clause).substr(close + 1)).empty()) {
+    return collapse_whitespace(clause);
+  }
+  const string name = upper_ascii(trim_ascii_spaces(clause.substr(0, open)));
+  const string inner = trim_ascii_spaces(clause.substr(open + 1, close - open - 1));
+  if (name == "LIFETIME") {
+    bool digits = !inner.empty();
+    for (const char ch : inner) digits = digits && std::isdigit(static_cast<unsigned char>(ch));
+    if (digits) return "LIFETIME(MIN 0 MAX " + inner + ")";
+  }
+  if (name == "SETTINGS") return name + "(" + collapse_whitespace(inner) + ")";
+  auto render_pairs = [](const vector<std::pair<string, string>>& pairs, const string& sep) {
+    string out;
+    for (size_t i = 0; i < pairs.size(); ++i) out += (i ? sep : "") + upper_ascii(pairs[i].first) + " " + collapse_whitespace(pairs[i].second);
+    return out;
+  };
+  // SOURCE(TYPE(pairs)) / LAYOUT(TYPE(pairs)): one nested call.
+  const size_t inner_open = inner.find('(');
+  if (inner_open != string::npos && find_matching_paren(inner, inner_open) == inner.size() - 1) {
+    string type = trim_ascii_spaces(inner.substr(0, inner_open));
+    bool word = !type.empty();
+    for (const char ch : type) word = word && is_ident_char(ch);
+    if (word) {
+      type = upper_ascii(type);
+      const string args = trim_ascii_spaces(inner.substr(inner_open + 1, inner.size() - inner_open - 2));
+      if (args.empty()) return name + "(" + type + "())";
+      const auto pairs = dictionary_key_values(args);
+      if (pairs.empty()) return name + "(" + type + "(" + collapse_whitespace(args) + "))";
+      const string one_line = name + "(" + type + "(" + render_pairs(pairs, " ") + "))";
+      if (utf8_width(one_line) <= threshold) return one_line;
+      return name + "(" + type + "(\n    " + render_pairs(pairs, "\n    ") + "\n))";
+    }
+  }
+  if (const auto pairs = dictionary_key_values(inner); !pairs.empty()) return name + "(" + render_pairs(pairs, " ") + ")";
+  return name + "(" + collapse_whitespace(inner) + ")";
+}
+
+string Formatter::format_create_dictionary(string_view s) {
+  const string text = trim_ascii_spaces(s);
+  const size_t par = text.find('(');
+  const size_t close = par == string::npos ? string::npos : find_matching_paren(text, par);
+  if (close == string::npos) return cleanup_surface(text);
+  // The attribute list is laid out like table columns.
+  string out = format_create_table(text.substr(0, close + 1));
+  const string tail = trim_ascii_spaces(text.substr(close + 1));
+  static const vector<string_view> clauses = {"PRIMARY KEY", "SOURCE", "LIFETIME", "LAYOUT", "RANGE", "SETTINGS", "COMMENT"};
+  vector<std::pair<int, string>> poses = find_select_clauses(tail, 0, clauses);
+  if (poses.empty() || poses.front().first != 0) return tail.empty() ? out : out + "\n" + cleanup_surface(tail);
+  for (size_t i = 0; i < poses.size(); ++i) {
+    const size_t from = static_cast<size_t>(poses[i].first);
+    const size_t to = i + 1 < poses.size() ? static_cast<size_t>(poses[i + 1].first) : tail.size();
+    const string kw = upper_ascii(string(poses[i].second));
+    const string body = trim_ascii_spaces(tail.substr(from + poses[i].second.size(), to - from - poses[i].second.size()));
+    if (kw == "PRIMARY KEY" || kw == "COMMENT") {
+      out += "\n" + kw + " " + collapse_whitespace(normalize_code_spacing(body));
+    } else {
+      out += "\n" + format_dictionary_clause(kw + body, threshold);
+    }
+  }
   return out;
 }
 

@@ -1,0 +1,2 @@
+-- service names resolved from the catalogue table
+create dictionary if not exists service_catalog_dict (service_id UInt64, service_name String default 'unknown', owner_team String) primary key service_id source(clickhouse(host 'localhost' port 9000 user 'default' table 'service_catalog_source' db currentDatabase())) lifetime(min 300 max 600) layout(hashed())
