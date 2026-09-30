@@ -3365,19 +3365,12 @@ string Formatter::format_function_call(string_view expr, bool force) {
   for (size_t i = 0; i < args.size(); ++i) {
     // A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(a AND b)`)
     // is laid out like a WHERE condition, which also drops the parentheses
-    // formatQuery puts around each operand, and joined back onto one line
-    // when that line is short enough.
+    // formatQuery puts around each operand. It stays wrapped here; the width
+    // pass joins it back onto one line when it fits at its final position.
     const bool condition = (iequals_ascii(name, "if") && i == 0) ||
         (find_top_level_arrow(args[i]) < 0 && !looks_like_query(args[i]) && !contains_top_level_comment(args[i]) &&
          (find_top_level_keyword(args[i], "AND") >= 0 || find_top_level_keyword(args[i], "OR") >= 0));
-    if (condition) {
-      string cond = format_bool_expr(args[i]);
-      if (cond.find('\n') != string::npos) {
-        const string compact = join_code_lines(cond);
-        if (!compact.empty() && utf8_width(compact) + 8 <= wrap_threshold) cond = compact;
-      }
-      rendered.push_back(cond);
-    } else rendered.push_back(format_expression(args[i]));
+    rendered.push_back(condition ? format_bool_expr(args[i]) : format_expression(args[i]));
   }
 
   if (iequals_ascii(name, "arrayMin") && args.size() == 1 && trim_ascii_spaces(args.front()).find("arrayMap(") != string::npos && trim_ascii_spaces(args.front()).find("tupleElement") != string::npos) {
