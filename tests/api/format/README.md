@@ -260,42 +260,212 @@ FROM (
 
 ### IN subquery
 
+A single condition stays on the `WHERE` line; its block is indented two levels
+and its `)` one level, where the condition would sit in the multi-condition
+layout.
+
 ```sql
 WHERE entity_key IN (
-    SELECT entity_key
-    FROM anon.reference_table
-)
+        SELECT entity_key
+        FROM anon.reference_table
+    )
 ```
 
 ### EXISTS subquery
 
 ```sql
 WHERE exists(
-    SELECT 1
-    FROM anon.reference_table AS ref_src
-    WHERE ref_src.entity_key = base_src.entity_key
-)
+        SELECT 1
+        FROM anon.reference_table AS ref_src
+        WHERE ref_src.entity_key = base_src.entity_key
+    )
 ```
 
 ## Functions and Multiline Expressions
 
-Keep short function calls inline.
-Break long or nested expressions vertically.
+Function calls, array literals and `IN` value lists are laid out by one rule:
+**a call stays on one line when that whole line fits; otherwise it explodes, one
+argument per line.** The fixtures `230`–`280` show every case below.
 
-Example:
+### Width
+
+- The line width is 80 columns (the `line_width` request field, 40–200),
+  measured in display columns (see "Alias alignment").
+- "The line" is the complete output line: indentation, the text before the call
+  on the same line (`AND `, `x -> `, `ON a = `) and everything after it
+  (` AS alias`, the trailing comma, the `)` of an enclosing call, `> 0`).
+  A call that fits by itself but not with its alias explodes.
+- A single token longer than the width (a long string literal, a long type
+  string) stays whole on its own line; nothing else may exceed the width.
+
+### Inline or exploded
+
+The decision is taken outermost first. When the outermost call fits, it and
+everything inside it stay on one line. When it does not fit it explodes:
+
+- `name(` ends the line;
+- each argument goes on its own line, one level (4 spaces) deeper, followed by a
+  comma except the last one;
+- `)` goes on its own line at the indentation of the line that opened the call,
+  followed by the rest of that line: `) AS alias,`, `),`, `) >= 2`.
+
+Each argument is then laid out again at its new position by the same rule, so
+an inner call that fits there stays inline:
 
 ```sql
 SELECT
-    multiIf(
-        metric_value >= 1000,
-        'high',
-        metric_value >= 100,
-        'medium',
-        'low'
-    ) AS metric_tier
+    coalesce(
+        nullIf(span_attributes['http.route'], ''),
+        nullIf(span_attributes['url.path'], ''),
+        span_name
+    ) AS `route`,
+    toStartOfInterval(timestamp, toIntervalMinute(5)) AS `bucket`
 ```
 
-For multiline expressions with an alias, keep the closing `)` aligned with the expression block and place `AS alias_name` on the same line when readable.
+A sole argument is never hugged: it goes on its own line like any other, so
+closing parentheses never pile up (`))`) and every `)` sits under the line that
+opened it.
+
+```sql
+SELECT
+    sipHash64(
+        concat(
+            toString(user_id),
+            '|',
+            session_id,
+            '|',
+            toString(toStartOfHour(event_time))
+        )
+    ) AS `session_bucket_key`
+```
+
+Not `sipHash64(concat(` with a shared closer.
+
+### Decision tables and pairs
+
+- `multiIf` with two or more conditions, and `CASE` with two or more `WHEN`
+  branches, are always vertical, whatever their width: one `condition, result`
+  pair per line, the default last. `CASE x WHEN ...` (printed as
+  `caseWithExpression`) keeps its operand on the first line. With a single
+  condition they follow the width rule (`multiIf(retries > 3, 'flaky', NULL)`).
+  A call that contains such a table is never joined onto one line.
+- An exploded `map(...)` puts one `key, value` pair per line.
+
+```sql
+SELECT
+    caseWithExpression(
+        severity_number,
+        9, 'info',
+        13, 'warn',
+        'other'
+    ) AS `severity_bucket`
+```
+
+### Lambdas
+
+A lambda `x -> body` is one argument. Its body stays on the lambda's line when
+it fits. A body that is a call explodes from `x -> f(`, its `)` under the
+lambda's line. A boolean body wraps before `AND` / `OR`, the continuation
+lines one level deeper than the lambda. A tuple body keeps its parentheses:
+`(k, v) -> (k, v * 2)` returns a tuple, and without them `v * 2` would become
+the next argument of the call.
+
+```sql
+SELECT
+    arrayFilter(
+        s -> s.duration_ms > 250
+            AND s.status = 'error'
+            AND s.service NOT IN ('healthcheck', 'metrics-scraper'),
+        spans
+    ) AS `slow_error_spans`,
+    arrayMap((k, v) -> (k, v * 2), pairs) AS `doubled`
+```
+
+### Conditions and arithmetic as arguments
+
+A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(c)`) is formatted
+like a `WHERE` condition, without the parentheses formatQuery puts around each
+comparison. Inside an exploded list, the continuation lines of a wrapped
+condition or arithmetic argument hang one level deeper, so they cannot be
+mistaken for the next argument. A sole argument keeps its operators aligned
+under its first operand (see "Arithmetic Expressions").
+
+```sql
+SELECT
+    if(
+        isNotNull(parent_span_id)
+            AND parent_span_id != ''
+            AND service_name != 'frontend-proxy',
+        concat(service_name, ' <- ', parent_service),
+        service_name
+    ) AS `edge`
+```
+
+### Literals as arguments
+
+Array literals, tuples inside them and `IN (...)` value lists follow the same
+rule: inline when the line fits, otherwise one element per line. An element
+that fits (a tuple in an array of tuples) stays on one line.
+
+```sql
+SELECT
+    [
+        ('checkout', 'payments', 250, 0.999),
+        ('payments', 'fraud-detection', 120, 0.9995)
+    ] AS `dependency_slos`
+```
+
+A literal followed by `::Type` is kept exactly as written:
+`[110, 120]::Array(DateTime)` casts the literal's source text, so its spacing
+is part of the query.
+
+### Where the call sits
+
+- A single projection that fits stays on the `SELECT` line; one that needs
+  several lines goes into the indented block, like a list.
+- A single `WHERE` / `PREWHERE` / `HAVING` condition stays on the keyword line.
+  When it explodes, its arguments are indented two levels and its `)` one
+  level, the place the condition takes in the multi-condition layout. `IN` and
+  `exists` subqueries and long `IN` value lists use the same layout.
+- In a condition list (`AND` / `OR` lines, `JOIN ... ON` lines), a call explodes
+  under its own line.
+- A table function in `FROM` or `JOIN` explodes like a `FROM` subquery:
+  `FROM s3(` then the arguments, then `) AS alias`.
+- `GROUP BY` and `ORDER BY` items follow the same rule as projections.
+- A window function keeps its `OVER (...)` layout (see the window fixtures);
+  a call containing a multi-line `OVER` specification is never joined.
+
+```sql
+SELECT count()
+FROM s3(
+    'https://observability-archive.s3.eu-west-1.amazonaws.com/otel/logs/*.parquet',
+    'Parquet'
+)
+WHERE positionCaseInsensitive(
+        body,
+        'connection reset by peer while reading response header from upstream'
+    ) > 0
+```
+
+### Comments inside argument lists
+
+A comment pins the layout it sits in: a call containing a comment is never
+joined onto one line, and a `--` comment stays after its argument's comma.
+
+### Alignment after joining
+
+Joining calls can turn a multi-line item into a one-line item. Projection
+aliases are then aligned as for any run of one-line items (see "Alias
+alignment"); a run whose aligned form would exceed the width is not aligned,
+and a closing line (`) AS x`, `] AS x`) is never padded.
+
+### Scope
+
+The width rule applies to queries (`SELECT`, `WITH`, `INSERT ... SELECT`, view
+bodies). DDL keeps its own layout: column types such as
+`Array(Tuple(...))`, `INDEX ... TYPE ...`, `CODEC(...)`, `GRANT SELECT(...)`
+and keywords followed by a parenthesis (`GROUPING SETS (`) are not treated as
+calls.
 
 ### Parametric aggregates
 
@@ -376,8 +546,9 @@ would start a comment.
 
 ## Lambda Expressions
 
-Keep lambda bodies compact unless the logic is genuinely complex.
-Do not add unnecessary parentheses around simple lambda expressions.
+Keep lambda bodies compact; they wrap by the width rule (see "Lambdas" above).
+Do not add unnecessary parentheses around simple lambda expressions, and keep
+the parentheses of a tuple body.
 
 Preferred:
 
@@ -639,6 +810,10 @@ Each fixture must exist in both folders with the same file name. For example:
 The test fails during collection when an `input/` fixture has no matching `output/` fixture, or when an `output/` fixture has no matching `input/` fixture.
 
 All `.sql` files are normalized without a trailing newline.
+
+Every expected output is also formatted again (`test_expected_format_fixtures_are_idempotent_in_batch`)
+and must come back unchanged. That request sends `"cache": false`: the API caches each output as
+the answer for itself, which would otherwise make the check pass without running the formatter.
 
 Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`):
 `EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server,

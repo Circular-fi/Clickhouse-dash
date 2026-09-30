@@ -1,1 +1,1 @@
-select arrayMap(x -> multiIf(x < 100, 'fast', x < 1000, 'ok', 'slow'), durations) as classes, arrayMap(x -> if(x < 100, 'fast', 'slow'), durations) as coarse_classes from otel.trace_rollups
+select arrayMap(x -> multiIf(x < 100, 'quick', x < 1000, 'ok', 'slow'), durations) as classes, arrayMap(x -> if(x < 100, 'quick', 'slow'), durations) as coarse_classes from otel.trace_rollups

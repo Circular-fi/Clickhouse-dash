@@ -7,7 +7,7 @@ SELECT
         )
     ) AS `penalty`,
     multiIf(
-        latency_ms < 100, 'fast',
+        latency_ms < 100, 'quick',
         latency_ms < 1000, 'normal',
         'slow'
     ) AS `latency_class`
