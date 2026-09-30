@@ -12262,14 +12262,16 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   cursor: pointer;
 }
 
-.rowDetails__close:hover {
-  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+/* Hover lights up the cross itself, never a button shape behind it. */
+.rowDetails__close:hover,
+.rowDetails__close:focus-visible {
+  background: transparent;
   color: var(--text);
 }
 
 .rowDetails__close:focus-visible {
-  outline: 1px solid var(--accentBorder);
-  outline-offset: -1px;
+  outline: none;
+  text-shadow: 0 0 6px var(--accentBorder);
 }
 
 /* Mirrors .resultTable--vertical tbody th / td (the one-row result view). */

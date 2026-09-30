@@ -809,6 +809,15 @@ test('row menu Details on another row replaces the open detail, and copies a val
   expect(frame.border).toBe('0px');
   expect(frame.shadow).toBe('none');
   expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
+  // Hover highlights the cross itself: its colour changes, no shape appears.
+  const idleColor = await close.evaluate((el) => getComputedStyle(el).color);
+  await close.hover();
+  await expect.poll(() => close.evaluate((el) => getComputedStyle(el).color)).not.toBe(idleColor);
+  const hovered = await close.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow };
+  });
+  expect(hovered).toEqual({ bg: 'rgba(0, 0, 0, 0)', border: '0px', shadow: 'none' });
 });
 
 test('inline row details stay attached to their virtualized row and are counted in the scroll extent', async ({ page }) => {
