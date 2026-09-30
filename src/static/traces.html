@@ -52,6 +52,14 @@
             document.documentElement.classList.add("chdash-trace-analytics");
           }
         } catch (_) {}
+        // The attribute facets sidebar keeps its open / hidden state (hidden
+        // by default on narrow windows) from the first paint.
+        try {
+          var facets = localStorage.getItem("chdash.traceFacetsCollapsed.v1");
+          if (facets === "1" || (facets !== "0" && window.innerWidth < 1100)) {
+            document.documentElement.classList.add("chdash-trace-facets-collapsed");
+          }
+        } catch (_) {}
         window.__chdashEarlyState = { themeMode: mode };
       } catch (_) {}
     })();
@@ -171,8 +179,9 @@
           </label>
 
           <div class="traceTagSearch">
-            <div class="traceTagSearch__inputs">
-              <input id="tracesTagKey" type="text" placeholder="Tag" aria-label="Tag" autocomplete="off" spellcheck="false" />
+            <div class="traceTagSearch__inputs traceTagSearch__inputs--op">
+              <input id="tracesTagKey" type="text" placeholder="Tag" aria-label="Tag" autocomplete="off" spellcheck="false" title="Attribute key; prefix span: or resource: to search one attribute map. Enter adds the filter." />
+              <button id="tracesTagOp" class="traceTagSearch__op" type="button" data-op="=" aria-label="Tag operator: equals" title="Operator: = (click for !=, exists, not exists)">=</button>
               <input id="tracesTagValue" type="text" placeholder="Value" aria-label="Value" autocomplete="off" spellcheck="false" />
             </div>
           </div>
@@ -187,7 +196,20 @@
 
           <button id="tracesSearchButton" class="button button--primary traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
         </form>
+        <div id="tracesFilterChips" class="traceFilterChips" role="list" aria-label="Active filters" hidden></div>
 
+        <div class="traceSearchBody">
+        <aside id="traceFacets" class="traceFacets" aria-label="Attribute filters">
+          <div class="traceFacets__head">
+            <button id="traceFacetsToggle" class="traceFacets__toggle" type="button" aria-expanded="true" aria-controls="traceFacetsBody" title="Hide attributes"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3h11l-4.3 5.2v4.3l-2.4 1V8.2z"/></svg><span>Attributes</span></button>
+            <span id="traceFacetsMeta" class="traceFacets__meta"></span>
+          </div>
+          <div id="traceFacetsBody" class="traceFacets__body">
+            <input id="traceFacetsSearch" class="traceFacets__search" type="search" placeholder="Filter keys" aria-label="Filter attribute keys" autocomplete="off" spellcheck="false" />
+            <div id="traceFacetsList" class="traceFacets__list"><div class="traceFacets__empty">Search to discover attributes.</div></div>
+          </div>
+        </aside>
+        <div class="traceSearchMain">
         <section id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden>
           <article class="traceAnalyticsCard">
             <header><strong>Matching traces</strong><span id="traceServiceChartMeta">traces over time</span></header>
@@ -210,6 +232,8 @@
           </div>
           <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="tracesEmpty">Search to load traces.</div></div>
         </section>
+        </div>
+        </div>
       </section>
 
       <section id="traceDetail" class="traceDetailPane traceDetailPane--jaeger" aria-live="polite" hidden>

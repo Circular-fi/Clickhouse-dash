@@ -1089,6 +1089,187 @@ def test_trace_prefill_is_cached_per_minute_aligned_range():
     assert all(len(pair) == 3 and pair[0] and pair[1] for pair in payload["pairs"]), payload
 
 
+def _q(value: str) -> str:
+    return _sql_list([value])[1:-1]
+
+
+def _map_has(column: str, key: str, values: list[str]) -> str:
+    # Independent ground-truth form of one attribute condition.
+    return f"(has(mapKeys({column}), {_q(key)}) AND {column}[{_q(key)}] IN {_sql_list(values)})"
+
+
+def _fixture_names(start_ms: int, end_ms: int) -> tuple[str, str]:
+    pairs = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}).json().get("pairs") or []
+    assert pairs, "OTEL fixture has no service/operation pairs"
+    return pairs[0][0], pairs[0][1]
+
+
+def test_trace_multiple_and_negated_tag_filters_match_ground_truth():
+    # Filters describe one span; one key's `tag` values match any of them,
+    # `tag_not` excludes (a missing key counts as different), exists / missing
+    # test the key; service / operation / status negations are column filters.
+    start_ms, end_ms = _otel_window_ms()
+    limit = 30
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "limit": limit}
+    service, operation = _fixture_names(start_ms, end_ms)
+    bucket_any = f"({_map_has('SpanAttributes', 'fixture.bucket', ['3', '5'])} OR {_map_has('ResourceAttributes', 'fixture.bucket', ['3', '5'])})"
+    cases = [
+        ({"tag": ["fixture.bucket=3", "fixture.bucket=5"]}, bucket_any),
+        ({"tag": ["span:fixture.bucket=3"], "tag_not": [f"resource:service.name={service}"]},
+         f"{_map_has('SpanAttributes', 'fixture.bucket', ['3'])} AND NOT {_map_has('ResourceAttributes', 'service.name', [service])}"),
+        ({"tag_exists": ["span:fixture.bucket"], "tag_missing": ["no.such.key"], "service_not": [service]},
+         "has(mapKeys(SpanAttributes), 'fixture.bucket') AND NOT has(mapKeys(SpanAttributes), 'no.such.key') "
+         f"AND NOT has(mapKeys(ResourceAttributes), 'no.such.key') AND ServiceName != {_q(service)}"),
+        ({"status_not": ["Error"], "operation_not": [operation], "tag_not": ["span:fixture.bucket=7"]},
+         f"StatusCode != 'Error' AND SpanName != {_q(operation)} AND NOT {_map_has('SpanAttributes', 'fixture.bucket', ['7'])}"),
+        # Legacy single-tag parameters still work, next to the new ones.
+        ({"tag_scope": "span", "tag_key": "fixture.bucket", "tag_value": "2", "tag_not": ["span:otel.scope.name=nope"]},
+         f"{_map_has('SpanAttributes', 'fixture.bucket', ['2'])} AND NOT {_map_has('SpanAttributes', 'otel.scope.name', ['nope'])}"),
+    ]
+    for params, span_filter in cases:
+        response = get("/api/traces/search", params={**base, **params}, timeout=120)
+        assert response.status_code == 200, (params, response.text)
+        payload = response.json()
+        ids = [row[0] for row in payload["rows"]]
+        assert ids, params
+        expected = _expected_trace_ids(payload["search_path"], start_ms, end_ms, limit, span_filter)
+        assert set(ids) == set(expected), (params, payload["search_path"])
+        _assert_trace_summaries_match_spans(payload, start_ms, end_ms)
+
+
+def test_trace_filters_reject_malformed_or_unsupported_values():
+    start_ms, end_ms = _otel_window_ms()
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}
+    for params in ({"tag": "no-equals-sign"}, {"tag": "=value"}, {"tag_not": "span:=x"}, {"status_not": "Nope"},
+                   {"tag_exists": "span:"}, {"tag": ["k=v"] * 1 + [f"k{i}=v" for i in range(40)]}):
+        for route in ("/api/traces/search", "/api/traces/prefill", "/api/traces/facets"):
+            response = get(route, params={**base, **params})
+            assert response.status_code == 400, (route, params, response.text)
+            assert response.json().get("error_code") == "invalid_trace_filter", response.text
+    bad_facet = get("/api/traces/facet_values", params={**base, "scope": "any", "key": "fixture.bucket"})
+    assert bad_facet.status_code == 400 and bad_facet.json().get("error_code") == "invalid_trace_facet", bad_facet.text
+    missing_key = get("/api/traces/facet_values", params={**base, "scope": "span"})
+    assert missing_key.status_code == 400, missing_key.text
+
+
+def test_trace_analytics_and_prefill_follow_tag_filters():
+    start_ms, end_ms = _otel_window_ms()
+    params = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "align_buckets": "0",
+              "bucket_origin_ms": _ORIGIN_MS, "tag": ["span:fixture.bucket=4"], "tag_not": ["resource:telemetry.synthetic=false"]}
+    span_filter = (f"{_map_has('SpanAttributes', 'fixture.bucket', ['4'])} AND NOT "
+                   f"{_map_has('ResourceAttributes', 'telemetry.synthetic', ['false'])}")
+    payload = _analytics({**params, "charts": "counts"})
+    bucket_ms = int(payload["bucket_ms"])
+    origin = int(payload["bucket_origin_ms"])
+    chart = {int(bucket): int(count) for bucket, count in payload["trace_count_chart"]}
+    expected = {
+        int(bucket): int(count)
+        for bucket, count in _ch_rows(
+            f"SELECT {origin} + intDiv(toUnixTimestamp64Milli(s) - {origin}, {bucket_ms}) * {bucket_ms}, count() "
+            f"FROM (SELECT min(Timestamp) AS s FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} "
+            f"AND TraceId IN (SELECT TraceId FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} AND {span_filter}) "
+            f"GROUP BY TraceId) GROUP BY 1")
+    }
+    assert chart and chart == expected
+
+    # The pickers' pairs: those of the spans carrying the tag filters, over
+    # the minute-aligned range; one hour is read completely (not estimated).
+    prefill = get("/api/traces/prefill", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms,
+                                                   "tag": ["span:fixture.bucket=4"]}, timeout=60)
+    assert prefill.status_code == 200, prefill.text
+    body = prefill.json()
+    assert body.get("tag_filtered") is True and body.get("estimated") is False, body
+    aligned_start = start_ms // 60000 * 60000
+    aligned_end = -(-end_ms // 60000) * 60000
+    truth = sorted(tuple(row) for row in _ch_rows(
+        f"SELECT DISTINCT ServiceName, SpanName FROM otel.otel_traces WHERE {_span_window(aligned_start, aligned_end)} "
+        f"AND {_map_has('SpanAttributes', 'fixture.bucket', ['4'])}"))
+    assert sorted((p[0], p[1]) for p in body["pairs"]) == truth
+
+
+def _fresh_window(hours: float) -> tuple[int, int]:
+    # A window not cached by an earlier run (facets are cached per minute-aligned range).
+    _, end_ms = _otel_window_ms()
+    end_ms -= (int(time.time()) % 600) * 60_000
+    return end_ms - int(hours * 3_600_000), end_ms
+
+
+def test_trace_facet_keys_are_capped_estimated_and_within_budget():
+    start_ms, end_ms = _fresh_window(1)
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}
+    started = time.monotonic()
+    response = get("/api/traces/facets", params=base, timeout=30)
+    elapsed = time.monotonic() - started
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["cached"] is False, payload
+    assert elapsed < 1.0, f"1 h facet keys took {elapsed:.2f} s"
+    keys = {(scope, key): count for scope, key, count in payload["keys"]}
+    assert ("span", "fixture.bucket") in keys and ("span", "otel.scope.name") in keys, keys
+    assert ("resource", "service.name") in keys, keys
+    (spans,), = _ch_rows(f"SELECT count() FROM otel.otel_traces WHERE {_span_window(start_ms // 60000 * 60000, -(-end_ms // 60000) * 60000)}")
+    # The fixture's hour holds far more spans than the sample: capped, estimated.
+    assert int(spans) > payload["sample_limit"], spans
+    assert payload["sampled_spans"] == payload["sample_limit"] and payload["estimated"] is True, payload
+    assert all(count <= payload["sampled_spans"] for count in keys.values())
+    # Served from the 60 s cache the second time.
+    again = get("/api/traces/facets", params=base).json()
+    assert again["cached"] is True and again["keys"] == payload["keys"]
+
+    # Seven days stay bounded by the same caps.
+    week_start, week_end = _fresh_window(24 * 7 - 1)
+    started = time.monotonic()
+    week = get("/api/traces/facets", params={"host_id": "local", "start_ms": week_start, "end_ms": week_end}, timeout=30)
+    elapsed = time.monotonic() - started
+    assert week.status_code == 200, week.text
+    assert week.json()["estimated"] is True
+    assert elapsed < 2.0, f"7 d facet keys took {elapsed:.2f} s"
+
+    # A selective filter reads at most read_rows_limit rows, and still answers.
+    started = time.monotonic()
+    rare = get("/api/traces/facets", params={"host_id": "local", "start_ms": week_start, "end_ms": week_end,
+                                              "tag": ["span:fixture.bucket=3"], "tag_not": ["resource:service.name=nope"]}, timeout=30)
+    elapsed = time.monotonic() - started
+    assert rare.status_code == 200, rare.text
+    assert rare.json()["keys"], rare.json()
+    assert elapsed < 3.0, f"7 d filtered facet keys took {elapsed:.2f} s"
+
+
+def test_trace_facet_values_match_ground_truth_and_ignore_their_own_filter():
+    start_ms, end_ms = _fresh_window(0.5)
+    aligned = (start_ms // 60000 * 60000, -(-end_ms // 60000) * 60000)
+    base = {"host_id": "local", "start_ms": start_ms, "end_ms": end_ms}
+    started = time.monotonic()
+    response = get("/api/traces/facet_values", params={**base, "scope": "span", "key": "fixture.bucket", "limit": 5,
+                                                        "tag": ["span:fixture.bucket=3"]}, timeout=30)
+    elapsed = time.monotonic() - started
+    assert response.status_code == 200, response.text
+    assert elapsed < 1.0, f"facet values took {elapsed:.2f} s"
+    payload = response.json()
+    # Its own filter (bucket 3) is ignored: other buckets stay listed.
+    assert len(payload["values"]) == 5 and payload["has_more"] is True, payload
+    assert payload["distinct_values"] == 16, payload
+    counts = [count for _, count in payload["values"]]
+    assert counts == sorted(counts, reverse=True)
+
+    # Another key under a filter: exact counts when the (small) filtered set
+    # is read completely.
+    filtered = get("/api/traces/facet_values", params={**base, "scope": "resource", "key": "service.name", "limit": 50,
+                                                        "tag": ["span:fixture.bucket=3"], "service_not": ["api_service"]}, timeout=30)
+    assert filtered.status_code == 200, filtered.text
+    body = filtered.json()
+    truth = {value: int(count) for value, count in _ch_rows(
+        f"SELECT ResourceAttributes['service.name'], count() FROM otel.otel_traces WHERE {_span_window(*aligned)} "
+        f"AND has(mapKeys(ResourceAttributes), 'service.name') AND {_map_has('SpanAttributes', 'fixture.bucket', ['3'])} "
+        f"AND ServiceName != 'api_service' GROUP BY 1")}
+    got = {value: count for value, count in body["values"]}
+    if body["estimated"]:
+        assert set(got) <= set(truth) and all(got[v] <= truth[v] for v in got), (got, truth)
+    else:
+        assert got == truth, (got, truth)
+    assert "api_service" not in got
+
+
 def test_replicated_fixture_exposes_replica_counts_badges_and_distributed_topology():
     # chdash_repl lives on chdash_cluster (clickhouse + clickhouse_replica).
     detail = get("/api/explorer/table", params={"host_id": "local", "database": "chdash_repl", "table": "replicated_events", "refresh": "1"})

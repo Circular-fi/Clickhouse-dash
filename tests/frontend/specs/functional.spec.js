@@ -2363,14 +2363,15 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
 
   // A row (and Enter on a focused row) opens its trace.
   await page.locator('#tracesResults tr[data-trace-id="ffeeddccbbaa99887766554433221100"] [data-cell="spans"]').click();
-  await expect(page).toHaveURL(/\/traces\/ffeeddccbbaa99887766554433221100$/);
+  // The trace URL carries the search context (here the table view).
+  await expect(page).toHaveURL(/\/traces\/ffeeddccbbaa99887766554433221100(?:\?results=table)?$/);
   await expect(page.locator('#traceDetail')).toBeVisible();
   await page.goBack();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
   const row = page.locator('#tracesResults tr[data-trace-id="00112233445566778899aabbccddeeff"]');
   await row.focus();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/traces\/00112233445566778899aabbccddeeff$/);
+  await expect(page).toHaveURL(/\/traces\/00112233445566778899aabbccddeeff(?:\?results=table)?$/);
 });
 
 test('traces: the duration chart plots the listed traces as dots over a padded duration axis, and a dot opens its trace', async ({ page }) => {

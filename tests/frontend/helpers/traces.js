@@ -123,3 +123,30 @@ export async function mockTraceResults(page, { traces = SYNTHETIC_TRACES } = {})
   });
   return searches;
 }
+
+// Attribute facets: 25 keys (span + resource), sampled (estimated) counts.
+export const FACET_KEYS = [
+  ['span', 'http.method', 1200],
+  ['resource', 'deployment.environment', 1100],
+  ...Array.from({ length: 23 }, (_, i) => ['span', `app.key${String(i).padStart(2, '0')}`, 900 - i]),
+];
+
+// Serves /api/traces/facets and /api/traces/facet_values (25 keys, values
+// for http.method and deployment.environment); returns the requests seen.
+export async function mockTraceFacets(page) {
+  const seen = { keys: [], values: [] };
+  await page.route('**/api/traces/facets?**', (route) => {
+    seen.keys.push(new URL(route.request().url()).searchParams);
+    return route.fulfill({ json: { v: 1, supported: true, scopes: ['span', 'resource'], estimated: true, timed_out: false, sampled_spans: 3000000, truncated: false, keys: FACET_KEYS } });
+  });
+  await page.route('**/api/traces/facet_values?**', (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    seen.values.push(params);
+    const limit = Number(params.get('limit'));
+    const values = params.get('key') === 'http.method'
+      ? [['GET', 700], ['POST', 300], ['PUT', 120], ['DELETE', 50], ['PATCH', 20], ['HEAD', 9], ['OPTIONS', 8], ['TRACE', 4], ['CONNECT', 2], ['LINK', 1], ['UNLINK', 1]].slice(0, limit)
+      : [['prod', 800], ['staging', 300]];
+    return route.fulfill({ json: { v: 1, scope: params.get('scope'), key: params.get('key'), limit, estimated: false, spans_with_key: 1300, distinct_values: params.get('key') === 'http.method' ? 11 : 2, has_more: params.get('key') === 'http.method' && limit < 11, values } });
+  });
+  return seen;
+}

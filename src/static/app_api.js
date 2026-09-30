@@ -194,7 +194,7 @@
   function traceQuery(hostId, filters = {}) {
     const query = new URLSearchParams();
     if (hostId) query.set("host_id", String(hostId));
-    for (const key of ["start_ms", "end_ms", "service", "operation", "status", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets", "bucket_origin_ms", "charts"]) {
+    for (const key of ["start_ms", "end_ms", "service", "operation", "status", "service_not", "operation_not", "status_not", "tag", "tag_not", "tag_exists", "tag_missing", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets", "bucket_origin_ms", "charts", "scope", "key"]) {
       const value = filters?.[key];
       if (Array.isArray(value)) {
         for (const item of value) if (item != null && String(item) !== "") query.append(key, String(item));
@@ -215,6 +215,16 @@
 
   async function getTraceAnalytics(hostId, filters = {}) {
     return getJson(`api/traces/analytics?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  // Attribute keys / one key's values of the spans matching the filters
+  // (bounded and cached server-side; "estimated" when a cap stopped the scan).
+  async function getTraceFacets(hostId, filters = {}) {
+    return getJson(`api/traces/facets?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTraceFacetValues(hostId, filters = {}) {
+    return getJson(`api/traces/facet_values?${traceQuery(hostId, filters).toString()}`);
   }
 
   async function getTrace(hostId, traceId) {
@@ -372,7 +382,7 @@
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
-    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTrace,
+    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace,
     getTraceLinkedFrom, getTraceContext,
   };
 })();

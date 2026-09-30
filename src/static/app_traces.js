@@ -676,9 +676,12 @@
   function replaceSelectOptions(select, values, allLabel) {
     if (!select) return;
     const previous = String(select.value || "");
-    const unique = [...new Set((values || []).map((value) => String(value || "")).filter(Boolean))].sort();
+    // A value applied from the URL or a filter action (app_trace_search.js)
+    // stays selectable even when the discovered pairs do not list it.
+    const wanted = String(select.dataset.wanted || "");
+    const unique = [...new Set([...(values || []), wanted].map((value) => String(value || "")).filter(Boolean))].sort();
     select.innerHTML = `<option value="">${esc(allLabel || "ALL")}</option>` + unique.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
-    select.value = unique.includes(previous) ? previous : "";
+    select.value = wanted || (unique.includes(previous) ? previous : "");
     select.dispatchEvent(new Event("tracepicker-refresh"));
   }
 
@@ -754,6 +757,8 @@
     const tagEnabled = model.meta?.tag_search_supported !== false;
     if (dom.tracesTagKey) dom.tracesTagKey.disabled = !tagEnabled;
     if (dom.tracesTagValue) dom.tracesTagValue.disabled = !tagEnabled;
+    const tagOp = document.getElementById("tracesTagOp");
+    if (tagOp) tagOp.disabled = !tagEnabled;
     renderAnalytics();
   }
 
@@ -1372,13 +1377,16 @@
     dom.tracesResults?.classList.toggle("tracesResults--table", table);
   }
 
-  function setResultsView(view) {
+  // persist: false for a view restored from the URL (the stored preference
+  // is the user's own last choice).
+  function setResultsView(view, { persist = true } = {}) {
     const next = view === "table" ? "table" : "list";
     if (next === model.resultsView) return;
     model.resultsView = next;
-    writeStored(RESULTS_VIEW_KEY, next);
+    if (persist) writeStored(RESULTS_VIEW_KEY, next);
     if (next === "table") model.tableSort = { ...listSort() };
     renderResults();
+    if (persist && !traceIdFromPath()) ns.traceSearch?.writeUrl?.("replace");
   }
 
   function sortTableBy(key) {
@@ -2035,7 +2043,10 @@
     const root = spans.find((s) => !parentSpanId(s)) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
     document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
     if (dom.traceDetailTitle) {
-      dom.traceDetailTitle.innerHTML = `<strong><span>${esc(root?.service_name || "trace")}:</span> ${esc(root?.span_name || "trace")}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code><button type="button" class="traceCopyButton traceCopyButton--header" data-copy-active-trace="${esc(trace.trace_id)}" aria-label="Copy Trace ID" title="Copy full Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
+      const filterable = (field, value, text) => (value
+        ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
+        : text);
+      dom.traceDetailTitle.innerHTML = `<strong><span>${filterable("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterable("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code><button type="button" class="traceCopyButton traceCopyButton--header" data-copy-active-trace="${esc(trace.trace_id)}" aria-label="Copy Trace ID" title="Copy full Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
       dom.traceDetailTitle.querySelector("[data-copy-active-trace]")?.addEventListener("click", (event) => {
         event.stopPropagation();
         copyText(trace.trace_id, event.currentTarget);
@@ -2902,7 +2913,9 @@
     return `<details class="traceJson"${isOpen ? " open" : ""}><summary><span class="traceJson__brace">${open}</span><span class="traceJson__fold">…${close}</span><span class="traceJson__count">${count}</span></summary><div class="traceJson__body">${body}</div><span class="traceJson__brace">${close}</span></details>`;
   }
 
-  function attributeRowHtml(key, value) {
+  // filterScope ("span" / "resource"): the value opens the click-to-filter
+  // menu (app_trace_search.js) for that attribute map.
+  function attributeRowHtml(key, value, filterScope = "") {
     const name = String(key);
     const tree = attributeJsonValue(value);
     const headerList = Array.isArray(tree) && /^http\.(?:request|response)\.header\./.test(name);
@@ -2910,8 +2923,9 @@
     const keyHtml = `<span class="traceKv__key${otel ? " is-otel" : ""}"${otel ? ` title="${esc(OTEL_KEY_TITLE)}"` : ""}>${esc(name)}</span>`;
     let json;
     try { json = JSON.stringify(value === undefined ? null : value); } catch (_) { json = JSON.stringify(String(value)); }
-    const actions = '<span class="traceKv__actions"><button type="button" class="traceKv__action" data-kv-copy="value" title="Copy value">Copy</button><button type="button" class="traceKv__action" data-kv-copy="json" title="Copy JSON">JSON</button></span>';
-    const attrs = `data-kv-key="${esc(name)}" data-kv-json="${esc(json)}"`;
+    const filter = filterScope ? '<button type="button" class="traceKv__action" data-kv-filter aria-haspopup="menu" title="Filter traces by this value">Filter</button>' : "";
+    const actions = `<span class="traceKv__actions">${filter}<button type="button" class="traceKv__action" data-kv-copy="value" title="Copy value">Copy</button><button type="button" class="traceKv__action" data-kv-copy="json" title="Copy JSON">JSON</button></span>`;
+    const attrs = `data-kv-key="${esc(name)}" data-kv-json="${esc(json)}"${filterScope ? ` data-filter-scope="${esc(filterScope)}"` : ""}`;
     if (tree && !headerList) {
       const size = Array.isArray(tree) ? tree.length : Object.keys(tree).length;
       return `<div class="traceKv__row traceKv__row--tree" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}<div class="traceKv__tree">${jsonTreeHtml(tree, size <= 10)}</div></div></div>`;
@@ -2922,10 +2936,10 @@
     return `<div class="traceKv__row" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}${valueHtml}</div></div>`;
   }
 
-  function renderAttributeTable(raw, emptyText = "No attributes") {
+  function renderAttributeTable(raw, emptyText = "No attributes", filterScope = "") {
     const entries = attributeEntries(raw);
     if (!entries.length) return emptyText ? `<span class="traceJaegerEmpty">${esc(emptyText)}</span>` : "";
-    return `<div class="traceKv">${entries.map(([key, value]) => attributeRowHtml(key, value)).join("")}</div>`;
+    return `<div class="traceKv">${entries.map(([key, value]) => attributeRowHtml(key, value, filterScope)).join("")}</div>`;
   }
 
   function attributeValueText(value) {
@@ -2945,8 +2959,8 @@
 
   // Jaeger's AccordionAttributes: "Label:" + preview while collapsed, the
   // attribute table once open.
-  function renderJaegerAttributes(label, raw, { emptyText = "No attributes", open = false } = {}) {
-    return `<details class="traceJaegerGroup traceJaegerGroup--summary" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}<i class="traceJaegerGroup__colon">:</i></b>${renderAttributePreview(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText)}</div></details>`;
+  function renderJaegerAttributes(label, raw, { emptyText = "No attributes", open = false, filterScope = "" } = {}) {
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}<i class="traceJaegerGroup__colon">:</i></b>${renderAttributePreview(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText, filterScope)}</div></details>`;
   }
 
   function jsonList(raw) {
@@ -3048,8 +3062,12 @@
     return cache.linkedFrom.get(String(span.span_id || "")) || [];
   }
 
+  // Trace URLs carry the search context (range, filters, view) after the
+  // span, so "back to search" and shared links return to the same search.
   function spanTraceUrl(traceId, spanId = "") {
-    return `${route(`traces/${encodeURIComponent(traceId)}`)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;
+    const params = new URLSearchParams(ns.traceSearch?.contextQuery?.() || "");
+    const query = `${spanId ? `span=${encodeURIComponent(spanId)}` : ""}${spanId && params.toString() ? "&" : ""}${params.toString()}`;
+    return `${route(`traces/${encodeURIComponent(traceId)}`)}${query ? `?${query}` : ""}`;
   }
 
   function referenceItemHtml(kind, ref, cache) {
@@ -3104,21 +3122,21 @@
     const startNs = Number(span.start_ns || 0);
     const startOffset = Math.max(0, startNs - bounds.start);
     const statusClass = esc(String(status).toLowerCase());
-    const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}" title="Span status">${esc(status)}</span>`;
+    const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}" title="Span status (click to filter)" data-filter-field="status" data-filter-value="${esc(status)}" tabindex="0" role="button" aria-haspopup="menu">${esc(status)}</span>`;
     const statusMessage = String(span.status_message || "").trim();
     const color = serviceColor(span.service_name);
     const absolute = absoluteTimeText(startNs, span.timestamp);
     const id = String(span.span_id || "");
     return `<section class="traceInspector traceInspector--jaeger traceInspector--inline" style="--trace-service-color:${color}" data-inspector-span="${esc(id)}">
       <div class="traceInspectorHead traceInspectorHead--jaeger">
-        <strong title="${esc(span.span_name || "span")}">${esc(span.span_name || "span")}</strong>
-        <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(formatDuration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
+        <strong title="${esc(span.span_name || "span")}"><span class="traceFilterable" data-filter-field="operation" data-filter-value="${esc(span.span_name || "")}" tabindex="0" role="button" aria-haspopup="menu">${esc(span.span_name || "span")}</span></strong>
+        <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service traceFilterable" data-filter-field="service" data-filter-value="${esc(span.service_name || "")}" tabindex="0" role="button" aria-haspopup="menu">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(formatDuration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
       </div>
       ${ns.traceInsights?.exceptionSectionHtml(span, bounds) || ""}
       ${statusMessage ? `<div class="traceInspectorStatusMessage"><b>Status message</b><span>${esc(statusMessage)}</span></div>` : ""}
       <div class="traceInspectorIdentity">${idCopyHtml("SpanID", id, "Span ID")}${idCopyHtml("Parent", String(span.parent_span_id || ""), "parent Span ID")}<button type="button" class="traceInspectorIdentity__deepLink" data-copy-deep-link="${esc(id)}" title="Copy a link that opens this trace on this span">Copy deep link</button>${ns.traceInsights ? `<button type="button" class="traceInspectorIdentity__deepLink traceInspectorIdentity__context" data-span-context="${esc(id)}" title="Spans of any trace around this span's start time">Context</button>` : ""}</div>
-      ${renderJaegerAttributes("Tags", span.span_attributes, { open: sectionOpen(id, "tags") })}
-      ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: sectionOpen(id, "process") }) : ""}
+      ${renderJaegerAttributes("Tags", span.span_attributes, { open: sectionOpen(id, "tags"), filterScope: "span" })}
+      ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: sectionOpen(id, "process"), filterScope: "resource" }) : ""}
       ${renderJaegerEvents(span, bounds)}
       ${renderJaegerLinks(span, cache)}
     </section>`;
@@ -3270,28 +3288,26 @@
     return { scope: key ? "any" : "", key, value };
   }
 
-  function searchFilters({ includeTag = true } = {}) {
+  // The Tag / Value inputs feed the filter chips (app_trace_search.js); the
+  // chips become tag / tag_not / tag_exists / tag_missing and
+  // service_not / operation_not / status_not parameters.
+  function searchFilters() {
     const range = selectedRange();
     const services = resolvedServiceValues();
     const operations = resolvedOperationValues();
-    if (services.length && operations.length && !serviceOperationPairExists(services[0], operations[0])) {
+    // A tag-filtered prefill lists only the pairs seen with those attributes
+    // (and may be a sampled subset): it cannot rule a pair out.
+    if (services.length && operations.length && !model.prefillTagFiltered && !serviceOperationPairExists(services[0], operations[0])) {
       throw new Error("Selected service / operation combination does not exist in this time range.");
     }
-    const filters = {
+    return {
       ...range,
       service: services,
       operation: operations,
       status: String(dom.tracesStatus?.value || ""),
       limit: String(dom.tracesLimit?.value || Math.min(50, Number(model.meta?.search_limit || 50))),
+      ...(ns.traceSearch?.chipParams?.() || {}),
     };
-    if (includeTag) {
-      const tag = currentTag();
-      const hasKey = !!tag.key;
-      const hasValue = tag.value !== "";
-      if (hasKey !== hasValue) throw new Error("Tag and value must both be provided.");
-      if (hasKey && hasValue) Object.assign(filters, { tag_scope: "any", tag_key: tag.key, tag_value: tag.value });
-    }
-    return filters;
   }
 
   function invalidateDiscovery({ pairs = true } = {}) {
@@ -3310,8 +3326,13 @@
       showError("");
       try {
         const range = selectedRange();
-        const payload = await api.prefillTraces(currentHost(), range);
+        // Tag chips narrow the service / operation lists to the pairs seen
+        // with those attributes.
+        const tags = ns.traceSearch?.prefillTagParams?.() || {};
+        ns.traceSearch?.notePrefillTags?.(tags);
+        const payload = await api.prefillTraces(currentHost(), { ...range, ...tags });
         if (seq !== model.prefillSeq) return;
+        model.prefillTagFiltered = payload?.tag_filtered === true;
         model.prefillPairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
         updateServiceOptions();
         updateOperationOptions();
@@ -3423,13 +3444,36 @@
     }
   }
 
-  async function search() {
+  // url: "push" (a new search: its own history entry), "replace" (the
+  // page-load search) or "none" (restored from history, the URL is already
+  // this search).
+  async function search({ url = "push" } = {}) {
     if (!model.meta) await loadMeta().catch(() => null);
+    const searchState = ns.traceSearch;
+    try {
+      searchState?.commitPendingTag?.();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (searchState?.prefillTagsChanged?.() && model.prefillPairs.length) {
+      // New tag chips narrow the pickers; the current choices stay selected.
+      for (const select of [dom.tracesService, dom.tracesOperation]) if (select?.value) select.dataset.wanted = select.value;
+      void prefill({ force: true });
+    }
     await ensurePrefillForFilters();
     const seq = ++model.searchSeq;
     ++model.analyticsSeq;
-    const filters = searchFilters();
-    if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    let filters;
+    try {
+      filters = searchFilters();
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (searchState) searchState.writeUrl(url);
+    else if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    model.lastSearchKey = searchState?.searchKey?.() || "";
     setView(false);
     setButtonLoading(dom.tracesSearchButton, true);
     showError("");
@@ -3451,6 +3495,7 @@
       // Search results are intentionally delivered first. Heavy graph analytics
       // starts only after the trace list has rendered, on its own API route.
       void loadAnalytics(filters);
+      searchState?.onSearched?.(filters);
     } catch (error) {
       if (seq !== model.searchSeq) return;
       model.traces = [];
@@ -3510,10 +3555,17 @@
     model.traceViewRange = [0, 1];
     model.disabledServices.clear();
     model.collapsed.clear();
-    if (push) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    ns.traceSearch?.closeMenu?.();
+    if (push) {
+      if (ns.traceSearch) ns.traceSearch.writeUrl("push");
+      else window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    }
     ns.traceInsights?.onTraceChanged(null);
     setView(false);
-    if (!model.traces.length) search();
+    // The trace's search context may differ from the listed results (a
+    // shared link, or Back / Forward across searches).
+    const key = ns.traceSearch?.searchKey?.() || "";
+    if (!model.traces.length || !model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
   }
 
   async function reloadForHost() {
@@ -3533,6 +3585,7 @@
     model.traceViewRange = [0, 1];
     model.disabledServices.clear();
     model.collapsed.clear();
+    ns.traceSearch?.resetFacets?.();
     renderResults();
     renderSource();
     try {
@@ -3541,7 +3594,7 @@
       if (id) await loadTrace(id, { push: false });
       else {
         await prefill();
-        await search();
+        await search({ url: "replace" });
       }
     } catch (_) {}
   }
@@ -3566,8 +3619,22 @@
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
+    ns.traceSearch?.install?.({
+      model, dom, api, esc, route, copyText, currentHost, currentTag,
+      runSearch: (options) => search(options),
+      syncRange: () => syncRangeControls(),
+      refreshServiceOperationOptions: () => { updateServiceOptions(); updateOperationOptions(); },
+      syncServiceOperationPair,
+      setResultsView: (view, options) => setResultsView(view, options),
+    });
+    // Search state from the URL (a shared link, a reload, a trace detail URL
+    // carrying its search context).
+    ns.traceSearch?.applyLocation?.({ initial: true });
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
-    dom.tracesSort?.addEventListener("change", renderResults);
+    dom.tracesSort?.addEventListener("change", () => {
+      renderResults();
+      if (!traceIdFromPath()) ns.traceSearch?.writeUrl?.("replace");
+    });
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));
@@ -3591,6 +3658,8 @@
     window.addEventListener("popstate", () => {
       const id = traceIdFromPath();
       // Same trace, other ?span= / ?view=: no reload.
+      // Every entry carries its search state: restore it first.
+      ns.traceSearch?.applyLocation?.();
       if (id && id === String(model.activeTrace?.trace_id || "")) ns.traceViews?.applyLocation?.();
       else if (id) loadTrace(id, { push: false });
       else backToSearch({ push: false });

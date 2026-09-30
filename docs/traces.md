@@ -84,9 +84,69 @@ The result summary reads only the selected traces' time range (exact span bounds
 
 Search results and global analytics are intentionally separate. `/api/traces/search` returns only the bounded result list and never runs the matching-trace or duration-percentile aggregation. `/api/traces/analytics` computes the two graphs independently and starts only after the browser has rendered the search results. Trace analytics are disabled by default. Set `traces.analytics = true` to show the graphs and enable the analytics query. Both graphs are computed from the spans themselves (`max(Timestamp + Duration) - min(Timestamp)` per trace); broad service/operation filters use the same `HAVING countIf` form as search. The trace index is deliberately not used for durations: the OTel exporter's `trace_id_ts` materialized view stores `End = max(Timestamp)` — the start of the last span — and one row per insert batch, so index-derived durations underestimate real trace durations.
 
-Service/operation prefill is an existence query: it uses `LIMIT 1 BY` rather than counting every matching span. Tag discovery is disabled; tag filters are entered directly as exact key/value pairs.
+Service/operation prefill is an existence query: it uses `LIMIT 1 BY` rather than counting every matching span. The old unbounded tag discovery stays removed; attribute keys and values are discovered by the capped facet queries below.
 
-The service/operation prefill is automatic: changing the selected time range refreshes the discovered combinations. There is no manual Prefill button. Tag filters use exact key/value equality only; there is no tag discovery button and no LIKE/ILIKE matching.
+The service/operation prefill is automatic: changing the selected time range refreshes the discovered combinations. There is no manual Prefill button. Tag filters use exact equality only; there is no LIKE/ILIKE matching.
+
+## Search filters
+
+Every filter describes one span: a trace is listed when at least one of its visible spans matches all of them (Jaeger's semantics). `/api/traces/search`, `/api/traces/analytics`, `/api/traces/prefill` and the facet endpoints accept the same repeated parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `service`, `operation`, `status` | column equals (repeated: any of the values) |
+| `service_not`, `operation_not`, `status_not` | column differs from every value |
+| `tag=[scope:]key=value` | attribute equals |
+| `tag_not=[scope:]key=value` | attribute absent or different |
+| `tag_exists=[scope:]key`, `tag_missing=[scope:]key` | attribute key present / absent |
+
+`scope` is `span:` (`SpanAttributes`), `resource:` (`ResourceAttributes`) or omitted (either map). The value is everything after the first `=`. Different keys are ANDed; several `tag` values of one key match any of them (one attribute holds one value, so an AND would never match) and several `tag_not` values exclude all of them. At most 32 attribute filters are accepted, keys up to 512 bytes, values up to 4096 bytes. The older `tag_scope` + `tag_key` + `tag_value` form is still accepted as one `tag`.
+
+The SQL is built server-side: values reach it only through string quoting, as `(mapContains(C, 'k') AND C['k'] IN ('v1', 'v2'))`, `NOT (...)`, `mapContains(C, 'k')`, one term per usable map for an unscoped key. Tag filters need `Map(String, String)` attribute columns (a JSON column answers `trace_tag_search_unsupported`) and an attribute scope hidden by `traces.features` answers `trace_filter_disabled`, so a disabled scope cannot be probed through filters. `service_allowlist` is ANDed to every query as before. Service and operation filters, positive or negated, are primary-key predicates and may use the broad `HAVING countIf` form; status and tag filters use the candidate `IN` set. Search keeps the index-first paths.
+
+On the prefill only the tag filters apply, so the service/operation pickers list the pairs seen with those attributes; a tagged prefill reads the attribute maps and stops after 100 M rows read (`max_rows_to_read` with `read_overflow_mode = 'break'`), answering `estimated: true` with the pairs found so far. It is cached like the untagged prefill, per tag filter set.
+
+In the UI the Tag / Value inputs (with an `=` / `!=` / `exists` / `missing` operator button) add a removable chip; a chip's operator toggles between `=` and `!=`. Values shown by the trace pages (span inspector Tags and Process attributes, the inspector's service, operation and status, the trace header's service and operation, the result list's service pills) open a menu: *Filter for this value*, *Exclude this value*, *Search only this* (replaces every filter, keeps the range and limit) and *Copy*. Applying one returns to the search page with the filter applied.
+
+### Search state in the URL
+
+The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `limit`, `sort` and `results=table`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
+
+## Attribute facets
+
+The search page's sidebar (after HyperDX's search filters) lists the attribute keys of the spans matching the current range and filters, span (`S`) and resource (`R`) keys by the number of sampled spans carrying them. A key expands to its top values with counts; a value's checkbox adds or removes a `tag` chip, its exclude button a `tag_not` chip. Keys can be pinned to the top (stored in the browser), filtered by name and loaded 20 at a time; values load 10, then 50, 200 and 500. The sidebar folds into a rail (remembered; folded by default below 1100 px) and loads nothing while folded.
+
+`/api/traces/facets` returns the keys in one pass that reads only the maps' key subcolumns:
+
+```sql
+SELECT toString(sampled), toString(t.1), toString(t.2), toString(t.3) FROM (
+  SELECT count() AS sampled,
+         sumMap(sk, arrayResize([toUInt64(1)], length(sk), toUInt64(1))) AS sm,
+         sumMap(rk, arrayResize([toUInt64(1)], length(rk), toUInt64(1))) AS rm
+  FROM (SELECT SpanAttributes.keys AS sk, ResourceAttributes.keys AS rk FROM otel.otel_traces
+        PREWHERE <window> WHERE <allowlist> <filters> LIMIT 3000000))
+LEFT ARRAY JOIN arrayConcat(<('span', key, count) tuples>, <('resource', key, count) tuples>) AS t
+SETTINGS max_execution_time = 5, timeout_overflow_mode = 'break',
+         max_rows_to_read = 50000000, read_overflow_mode = 'break'
+```
+
+`/api/traces/facet_values?scope=span|resource&key=…&limit=…` counts one key's values the same way (`GROUP BY` over `C['key']` of the sampled spans having the key, `sum(c) OVER ()` / `count() OVER ()` for the totals, plus `max_rows_to_group_by = 100000, group_by_overflow_mode = 'any'`). A key's own filters are left out of its values query, so its other values stay listed and can be added.
+
+The caps bound every facet query: at most 3 M sampled spans, at most 50 M rows read from storage (a selective filter would otherwise scan the whole window looking for enough spans; the read cap stops like an exhausted source, so the aggregate still answers from what was read), at most 100 k distinct values grouped, and a 5 s time budget as the last resort. The answer says `estimated: true` whenever the scan did not read every row it would have read (the progress packets' `read_rows < total_rows_to_read`: the sample limit or the read cap stopped it) or hit the time budget; counts are then sample counts and the UI prefixes them with `≈`. Answers are cached for 60 s per host, minute-aligned range and filter set, like the prefill. Keys and values need `Map` attribute columns; a scope disabled by `traces.features` is left out of the keys and rejected for values.
+
+Measured on the local fixture (about 2.0 B spans over 7 days, 11 to 18 M spans per hour, cold cache): medians of three requests through the API.
+
+| Request | Median | Note |
+| --- | --- | --- |
+| keys, 1 h | 94 ms | 3 M sampled spans (estimated) |
+| keys, 7 days | 123 ms | 3 M sampled spans (estimated) |
+| keys, 7 days, one tag filter | 519 ms | the filter reads the span map |
+| keys, 7 days, rare filter (tag + service + status) | 423 ms | stopped by the 50 M read cap, 2,274 spans sampled |
+| values of a span key, 1 h / 7 days | 37 ms / 70 ms | |
+| values of a resource key, 7 days, one tag filter | 860 ms | |
+| tagged prefill, 1 h / 7 days | 134 ms / 889 ms | the 7-day scan stops at the 100 M read cap (estimated) |
+| search, two tag filters (= and !=), 1 h / 7 days | 76 ms / 288 ms | `trace_index_filtered` |
+| analytics counts, two tag filters, 1 h | 343 ms | span aggregation |
 
 ## Trace detail rendering
 

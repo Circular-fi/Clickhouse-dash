@@ -28,7 +28,9 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     cpp = read("src/api_traces.cpp")
     assert 'id="tracesTagKey"' in html and 'type="text"' in html
     assert 'id="tracesTagValue"' in html and 'type="text"' in html
-    assert 'scope: "any"' in ui
+    # Tag input chips without a span: / resource: prefix search both maps.
+    assert 'return { scope: "any", rest: raw };' in read("src/static/app_trace_search.js")
+    assert "function currentTag()" in ui
     # No scope prefix (and the legacy tag_scope=any) searches both maps.
     assert 'tag_scope != "any"' in cpp and 'return "any";' in cpp
     assert 'group.scope != "resource"' in cpp and 'group.scope != "span"' in cpp

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { captureState } from '../helpers/review.js';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
-import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
+import { SYNTHETIC_TRACES, mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 
 const deterministicQuery = `
 SELECT
@@ -371,6 +371,36 @@ for (const theme of ['dark', 'light']) {
     await page.locator('#tracesCustomRangeApply').click();
     await expect(page.locator('#tracesRangeError')).toBeVisible();
     await captureState(page, testInfo, `traces-time-range-error-${theme}`);
+  });
+}
+
+for (const theme of ['dark', 'light']) {
+  test(`captures the traces filter chips, attribute facets and click-to-filter menu (${theme})`, async ({ page }, testInfo) => {
+    await page.addInitScript((mode) => {
+      localStorage.setItem('chdash.theme', mode);
+      localStorage.setItem('chdash.traceFacetsCollapsed.v1', '0');
+      localStorage.setItem('chdash.traceFacetPins.v1', JSON.stringify([['resource', 'deployment.environment']]));
+    }, theme);
+    await mockTraceResults(page);
+    await mockTraceFacets(page);
+    await page.goto('/traces?tag=span%3Ahttp.method%3DGET&tag_not=resource%3Adeployment.environment%3Dstaging&tag_exists=db.system&service_not=cron');
+    await expect(page.locator('#tracesResults .traceResultItem')).toHaveCount(SYNTHETIC_TRACES.length, { timeout: 30_000 });
+    await expect(page.locator('#tracesFilterChips .traceFilterChip')).toHaveCount(4);
+    const method = page.locator('#traceFacets .traceFacet[data-facet-key="http.method"]');
+    await method.locator('[data-facet-expand]').click();
+    await expect(method.locator('.traceFacetValue')).toHaveCount(10);
+    const env = page.locator('#traceFacets .traceFacet[data-facet-key="deployment.environment"]');
+    await env.locator('[data-facet-expand]').click();
+    await expect(env.locator('.traceFacetValue.is-excluded')).toHaveCount(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await captureState(page, testInfo, `traces-filters-facets-${theme}`);
+    await page.locator('#tracesResults .traceSvcPill[data-service="checkout"]').first().click();
+    await expect(page.locator('#traceFilterMenu')).toBeVisible();
+    await captureState(page, testInfo, `traces-filters-menu-${theme}`);
+    await page.keyboard.press('Escape');
+    await page.locator('#traceFacetsToggle').click();
+    await expect(page.locator('#traceFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
+    await captureState(page, testInfo, `traces-filters-facets-folded-${theme}`);
   });
 }
 
