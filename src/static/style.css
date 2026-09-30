@@ -9931,6 +9931,12 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font: 9px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .traceCopyButton--header { width: 18px; height: 18px; font-size: 10px; }
+/* Copy trace JSON: the query editor copy control (same icon, size, frameless
+   style and copied check), laid out at the end of the trace header row. */
+.editorCopyButton.traceCopyJsonButton {
+  position: static;
+  flex: 0 0 auto;
+}
 .tracePageFind {
   width: min(390px, 34vw);
   flex: 0 1 390px;

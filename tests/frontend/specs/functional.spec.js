@@ -1316,3 +1316,117 @@ test('traces: time range, status and result pickers have their final style at fi
     await api.release();
   }
 });
+
+test('traces: the trace header copies the whole trace as JSON with the query editor copy icon', async ({ page }) => {
+  test.setTimeout(90_000);
+  // Visual reference: the query editor copy button, idle and just copied.
+  const copyButtonLook = (selector) => page.evaluate((sel) => {
+    const button = document.querySelector(sel);
+    const icon = button.querySelector('.editorCopyButton__icon');
+    const pick = (el, keys) => { const cs = getComputedStyle(el); return Object.fromEntries(keys.map((k) => [k, cs[k]])); };
+    const idle = {
+      button: pick(button, ['width', 'height', 'borderTopWidth', 'borderTopStyle', 'backgroundColor', 'color', 'boxShadow', 'cursor', 'opacity']),
+      icon: pick(icon, ['width', 'height', 'backgroundColor', 'maskImage', 'maskSize', 'maskPosition', 'opacity']),
+    };
+    button.classList.add('is-copied');
+    const copiedMask = getComputedStyle(icon).maskImage;
+    button.classList.remove('is-copied');
+    return { ...idle, copiedMask };
+  }, selector);
+  await openApp(page);
+  await page.locator('#queryTextArea').fill('SELECT 1');
+  await expect(page.locator('#editorCopyButton')).toBeEnabled();
+  // Let its disabled -> enabled opacity transition settle.
+  await expect(page.locator('#editorCopyButton')).toHaveCSS('opacity', '1');
+  const editorLook = await copyButtonLook('#editorCopyButton');
+
+  // The OTel fixture is seeded days back: find the newest week holding traces.
+  let rows = [];
+  for (let week = 0; week < 6 && !rows.length; week += 1) {
+    const endMs = Date.now() - week * 7 * 86_400_000;
+    const response = await page.request.get('/api/traces/search', {
+      params: { host_id: 'local', start_ms: String(endMs - 7 * 86_400_000 + 1), end_ms: String(endMs), limit: '20' },
+      timeout: 60_000,
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    rows = (await response.json()).rows || [];
+  }
+  expect(rows.length).toBeGreaterThan(0);
+  const traceId = rows.filter((row) => Number(row[5]) > 1).sort((a, b) => Number(a[5]) - Number(b[5]))[0]?.[0] || rows[0][0];
+  const detail = await page.request.get('/api/traces/trace', { params: { host_id: 'local', trace_id: traceId } });
+  expect(detail.ok()).toBe(true);
+  const detailText = await detail.text();
+  const detailSpans = JSON.parse(detailText).spans;
+
+  await page.goto(`/traces/${encodeURIComponent(traceId)}`);
+  await expect(page.locator('#traceDetail')).toBeVisible();
+  const spanRows = page.locator('#traceWaterfall .traceSpanRow');
+  await expect(spanRows).toHaveCount(detailSpans.length, { timeout: 30_000 });
+  const button = page.locator('#traceDetailHeader .tracePageHeader__titleRow > #traceCopyJsonButton');
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await expect(button).toHaveAttribute('aria-label', 'Copy trace JSON');
+  await expect(button).toHaveAttribute('title', 'Copy trace JSON');
+  await expect(button).toHaveClass(/\beditorCopyButton\b/);
+  // Last control of the header row, after the trace start / duration stats.
+  const [statsBox, buttonBox, rowBox] = await Promise.all([
+    page.locator('#traceDetailStats').boundingBox(),
+    button.boundingBox(),
+    page.locator('#traceDetailHeader .tracePageHeader__titleRow').boundingBox(),
+  ]);
+  expect(buttonBox.x).toBeGreaterThanOrEqual(statsBox.x + statsBox.width - 1);
+  expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+  expect(buttonBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
+  expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+  expect(await copyButtonLook('#traceCopyJsonButton')).toEqual(editorLook);
+
+  // Outside a secure context the app copies through a hidden textarea:
+  // capture what that copy selects (or read the clipboard when available).
+  await page.evaluate(() => {
+    window.__chdashTestCopiedText = '';
+    document.addEventListener('copy', () => {
+      const active = document.activeElement;
+      if (active && typeof active.value === 'string') {
+        window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
+      }
+    }, true);
+  });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await button.click();
+  await expect(button).toHaveClass(/\bis-copied\b/);
+  // The copied check mark is the editor's; it returns to idle afterwards.
+  expect(await page.locator('#traceCopyJsonButton .editorCopyButton__icon').evaluate((el) => getComputedStyle(el).maskImage)).toBe(editorLook.copiedMask);
+  const copied = await page.evaluate(async () => {
+    if (window.isSecureContext && navigator.clipboard) {
+      try { return await navigator.clipboard.readText(); } catch (_) {}
+    }
+    return window.__chdashTestCopiedText || '';
+  });
+  const doc = JSON.parse(copied);
+  // Indented by 2 spaces (start_ns digits aside, which JS numbers round).
+  const anyStart = (text) => text.replace(/"start_ns": \d+/g, '"start_ns": 0');
+  expect(anyStart(copied)).toBe(anyStart(JSON.stringify(doc, null, 2)));
+  expect(Object.keys(doc)).toEqual(['trace_id', 'truncated', 'span_count', 'spans']);
+  expect(doc.trace_id).toBe(traceId);
+  expect(doc.span_count).toBe(await spanRows.count());
+  expect(doc.spans).toHaveLength(detailSpans.length);
+  expect(doc.spans.map((span) => span.span_id).sort()).toEqual(detailSpans.map((span) => span.span_id).sort());
+  const starts = doc.spans.map((span) => Number(span.start_ns));
+  expect(starts).toEqual([...starts].sort((a, b) => a - b));
+  // start_ns keeps every digit the endpoint sent (it is past 2^53).
+  const exactStarts = (text, spacing) => [...text.matchAll(new RegExp(`"start_ns":${spacing}(\\d+)`, 'g'))].map((m) => m[1]).sort();
+  expect(exactStarts(copied, ' ')).toEqual(exactStarts(detailText, ''));
+  const byId = new Map(detailSpans.map((span) => [span.span_id, span]));
+  for (const span of doc.spans) {
+    const source = byId.get(span.span_id);
+    expect(span.trace_id).toBe(traceId);
+    for (const key of ['parent_span_id', 'service_name', 'span_name', 'span_kind', 'timestamp', 'duration_ns', 'status_code', 'status_message']) {
+      expect(span[key]).toEqual(source[key]);
+    }
+    if ('span_attributes' in source) expect(span.span_attributes).toEqual(JSON.parse(source.span_attributes));
+    if ('resource_attributes' in source) expect(span.resource_attributes).toEqual(JSON.parse(source.resource_attributes));
+    if ('events_name' in source) expect(span.events).toHaveLength(JSON.parse(source.events_name).length);
+    if ('links_trace_id' in source) expect(span.links).toHaveLength(JSON.parse(source.links_trace_id).length);
+  }
+  await expect(button).not.toHaveClass(/\bis-copied\b/, { timeout: 4_000 });
+});

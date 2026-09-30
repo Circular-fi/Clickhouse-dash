@@ -1019,6 +1019,7 @@
   function renderTraceHeader() {
     const trace = model.activeTrace;
     const spans = trace?.spans || [];
+    if (dom.traceCopyJsonButton) dom.traceCopyJsonButton.disabled = !spans.length;
     if (!spans.length) {
       if (dom.traceDetailTitle) dom.traceDetailTitle.innerHTML = '<strong>Trace</strong><span>Select a trace to inspect its spans.</span>';
       if (dom.traceDetailStats) dom.traceDetailStats.innerHTML = "";
@@ -1287,6 +1288,90 @@
     if (!text) return null;
     try { return JSON.parse(text); } catch (_) {}
     return null;
+  }
+
+  // "Copy trace JSON" document: what /api/traces/trace returned for the open
+  // trace, spans ordered by start time (then span id), 2-space indented:
+  //   { trace_id, truncated, span_count, spans: [{ trace_id, span_id,
+  //     parent_span_id, service_name, span_name, span_kind, timestamp,
+  //     start_ns, duration_ns, status_code, status_message,
+  //     span_attributes?, resource_attributes?,
+  //     events?: [{ timestamp, name, attributes }],
+  //     links?: [{ trace_id, span_id, attributes }] }] }
+  // The endpoint ships attributes, events and links as JSON-encoded columns;
+  // they are decoded here, events and links zipped into one object each. Keys
+  // marked ? exist only when the endpoint returns them (per-feature columns).
+  // start_ns keeps the endpoint's exact integer (see traceJsonExactStartNs).
+  const TRACE_JSON_SPAN_KEYS = ["trace_id", "span_id", "parent_span_id", "service_name", "span_name", "span_kind",
+    "timestamp", "start_ns", "duration_ns", "status_code", "status_message"];
+  const TRACE_JSON_EXACT_NS = "\u0000exact-ns:";
+
+  // start_ns is an epoch in nanoseconds, past 2^53: the parsed JSON number
+  // lost its last digits. The span's `timestamp` string ends with the exact
+  // nanoseconds of its second, which restore the integer the endpoint sent.
+  function traceJsonExactStartNs(span) {
+    const rounded = Number(span.start_ns);
+    const fraction = /\.(\d{9})$/.exec(String(span.timestamp || ""));
+    if (!Number.isFinite(rounded) || Number.isSafeInteger(rounded) || !fraction) return null;
+    const fractionNs = Number(fraction[1]);
+    const exact = BigInt(Math.round((rounded - fractionNs) / 1e9)) * 1000000000n + BigInt(fractionNs);
+    return Math.abs(Number(exact) - rounded) < 1e6 ? exact.toString() : null;
+  }
+
+  function traceJsonColumns(columns) {
+    const lists = Object.entries(columns).map(([key, raw]) => {
+      const value = parseStructuredValue(raw);
+      return [key, Array.isArray(value) ? value : []];
+    });
+    const count = Math.max(0, ...lists.map(([, list]) => list.length));
+    return Array.from({ length: count }, (_, index) => Object.fromEntries(lists.map(([key, list]) => [key, list[index] ?? null])));
+  }
+
+  function traceJsonSpan(span) {
+    const out = {};
+    for (const key of TRACE_JSON_SPAN_KEYS) if (key in span) out[key] = span[key];
+    const exactStart = "start_ns" in span ? traceJsonExactStartNs(span) : null;
+    if (exactStart) out.start_ns = TRACE_JSON_EXACT_NS + exactStart;
+    for (const key of ["span_attributes", "resource_attributes"]) {
+      if (!(key in span)) continue;
+      const value = parseStructuredValue(span[key]);
+      out[key] = value == null ? span[key] : value;
+    }
+    if ("events_name" in span) {
+      out.events = traceJsonColumns({ timestamp: span.events_timestamp, name: span.events_name, attributes: span.events_attributes });
+    }
+    if ("links_trace_id" in span) {
+      out.links = traceJsonColumns({ trace_id: span.links_trace_id, span_id: span.links_span_id, attributes: span.links_attributes });
+    }
+    return out;
+  }
+
+  function traceJsonText(trace) {
+    const text = (value) => String(value == null ? "" : value);
+    const spans = (trace?.spans || []).slice().sort((a, b) => (Number(a.start_ns || 0) - Number(b.start_ns || 0))
+      || text(a.timestamp).localeCompare(text(b.timestamp)) || text(a.span_id).localeCompare(text(b.span_id)));
+    return JSON.stringify({
+      trace_id: trace?.trace_id || "",
+      truncated: trace?.truncated === true,
+      span_count: spans.length,
+      spans: spans.map(traceJsonSpan),
+    }, null, 2).replace(/"start_ns": "\\u0000exact-ns:(\d+)"/g, '"start_ns": $1');
+  }
+
+  let traceJsonCopiedTimer = 0;
+  async function copyTraceJson() {
+    const button = dom.traceCopyJsonButton;
+    const trace = model.activeTrace;
+    if (!button || !trace?.spans?.length) return;
+    try {
+      await util.copyTextToClipboard(traceJsonText(trace));
+      button.classList.add("is-copied");
+      if (traceJsonCopiedTimer) clearTimeout(traceJsonCopiedTimer);
+      traceJsonCopiedTimer = window.setTimeout(() => {
+        button.classList.remove("is-copied");
+        traceJsonCopiedTimer = 0;
+      }, 1200);
+    } catch (_) {}
   }
 
   function attributeEntries(raw) {
@@ -1692,6 +1777,7 @@
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));
+    dom.traceCopyJsonButton?.addEventListener("click", () => { void copyTraceJson(); });
     dom.traceSpanSearch?.addEventListener("input", renderWaterfall);
     dom.traceSpanSearch?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;

@@ -94,6 +94,7 @@
     traceDetailHeader: byId("traceDetailHeader"),
     traceDetailTitle: byId("traceDetailTitle"),
     traceDetailStats: byId("traceDetailStats"),
+    traceCopyJsonButton: byId("traceCopyJsonButton"),
     traceServiceFilters: byId("traceServiceFilters"),
     traceBackButton: byId("traceBackButton"),
     traceSpanSearch: byId("traceSpanSearch"),
