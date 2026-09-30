@@ -709,8 +709,16 @@
     if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `percentiles · bucket ${formatDuration(qBucketMs * 1e6)}`;
   }
 
+  // Remembers whether meta enables analytics for the head script of the next
+  // page load (see traces.html), and drops the early class once meta is known.
+  function rememberAnalyticsEnabled(enabled) {
+    try { localStorage.setItem("chdash.traceAnalytics.v1", enabled ? "1" : "0"); } catch { /* storage may be unavailable */ }
+    document.documentElement.classList.remove("chdash-trace-analytics");
+  }
+
   function renderAnalytics() {
     const enabled = model.meta?.analytics_enabled === true;
+    if (model.meta) rememberAnalyticsEnabled(enabled);
     if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
     if (!enabled) return;
     if (model.analyticsLoading && !model.analytics) {

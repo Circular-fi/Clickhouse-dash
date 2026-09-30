@@ -497,6 +497,9 @@
     const resolved = getResolvedTheme(mode);
     if (mode === "system") delete dom.root.dataset.theme;
     else dom.root.dataset.theme = resolved;
+    // Drives the theme button icon from CSS (see style.css), like the head
+    // script does before the first paint.
+    dom.root.dataset.themeMode = mode;
 
     if (dom.themeSelectText) dom.themeSelectText.className = `themeIcon themeIcon--${mode}`;
     if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);

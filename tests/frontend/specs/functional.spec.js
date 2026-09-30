@@ -1379,6 +1379,67 @@ async function holdRequests(page, pattern) {
 }
 
 for (const path of ['/query', '/explorer', '/traces']) {
+  test(`${path}: the theme button shows the saved theme from the first paint, before any page script`, async ({ page }) => {
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    for (const mode of ['light', 'dark']) {
+      await page.evaluate((m) => localStorage.setItem('chdash.theme', m), mode);
+      const scripts = await holdRequests(page, '**/static/*.js');
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const icon = await page.evaluate((m) => {
+          const probe = document.createElement('span');
+          probe.className = `themeIcon themeIcon--${m}`;
+          document.body.appendChild(probe);
+          const expected = getComputedStyle(probe).maskImage;
+          probe.remove();
+          return { shown: getComputedStyle(document.getElementById('themeSelectText')).maskImage, expected, mode: document.documentElement.dataset.themeMode };
+        }, mode);
+        expect(icon.mode).toBe(mode);
+        expect(icon.shown).toBe(icon.expected);
+      } finally {
+        await scripts.release();
+      }
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+    }
+    await page.evaluate(() => localStorage.removeItem('chdash.theme'));
+  });
+}
+
+test('/traces: the analytics charts hold their place from the first paint, so the results never jump down', async ({ page }) => {
+  test.setTimeout(90_000);
+  // A first visit learns from /api/traces/meta that analytics are enabled.
+  await page.goto('/traces');
+  await expect(page.locator('#traceAnalyticsGrid')).toBeVisible({ timeout: 30_000 });
+  const toolbarTop = () => page.evaluate(() => Math.round(document.querySelector('.traceSearchResults__toolbar').getBoundingClientRect().top));
+  const api = await holdRequests(page, '**/api/**');
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    // Page scripts are running but no API answer (meta included) arrived:
+    // the grid is already laid out.
+    await expect.poll(() => api.count()).toBeGreaterThan(0);
+    await expect(page.locator('#traceAnalyticsGrid')).toBeVisible();
+    const before = await toolbarTop();
+    await api.release();
+    await expect(page.locator('html')).not.toHaveClass(/chdash-trace-analytics/, { timeout: 30_000 });
+    await expect(page.locator('#traceAnalyticsGrid')).toBeVisible();
+    expect(Math.abs((await toolbarTop()) - before)).toBeLessThanOrEqual(1);
+  } finally {
+    await api.release();
+  }
+  // A deployment without analytics does not reserve the space. (Set before
+  // any script of the next document runs: the open page may still re-render
+  // its analytics and write the flag again.)
+  await page.addInitScript(() => localStorage.setItem('chdash.traceAnalytics.v1', '0'));
+  const held = await holdRequests(page, '**/api/**');
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#traceAnalyticsGrid')).toBeHidden();
+  } finally {
+    await held.release();
+  }
+});
+
+for (const path of ['/query', '/explorer', '/traces']) {
   test(`${path}: the Query / Explorer / Traces switcher is painted with the shell, before any API answer`, async ({ page }) => {
     const api = await holdRequests(page, '**/api/**');
     try {

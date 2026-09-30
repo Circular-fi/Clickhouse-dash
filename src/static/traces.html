@@ -43,6 +43,15 @@
             document.documentElement.classList.add("chdash-page-select-hidden");
           }
         } catch (_) {}
+        // Trace analytics (the two charts above the results) are shown only
+        // when /api/traces/meta enables them. The last answer is cached so the
+        // charts' space is there from the first paint instead of pushing the
+        // results down once meta arrives.
+        try {
+          if (localStorage.getItem("chdash.traceAnalytics.v1") === "1") {
+            document.documentElement.classList.add("chdash-trace-analytics");
+          }
+        } catch (_) {}
         window.__chdashEarlyState = { themeMode: mode };
       } catch (_) {}
     })();
