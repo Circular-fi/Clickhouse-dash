@@ -1535,28 +1535,18 @@ test('traces: time range, status and result pickers have their final style at fi
   }
 });
 
-test('traces: the trace header copies the whole trace as JSON with the query editor copy icon', async ({ page }) => {
+test('traces: the trace header copies or downloads the whole trace as JSON with the query results control', async ({ page }) => {
   test.setTimeout(90_000);
-  // Visual reference: the query editor copy button, idle and just copied.
-  const copyButtonLook = (selector) => page.evaluate((sel) => {
-    const button = document.querySelector(sel);
-    const icon = button.querySelector('.editorCopyButton__icon');
-    const pick = (el, keys) => { const cs = getComputedStyle(el); return Object.fromEntries(keys.map((k) => [k, cs[k]])); };
-    const idle = {
-      button: pick(button, ['width', 'height', 'borderTopWidth', 'borderTopStyle', 'backgroundColor', 'color', 'boxShadow', 'cursor', 'opacity']),
-      icon: pick(icon, ['width', 'height', 'backgroundColor', 'maskImage', 'maskSize', 'maskPosition', 'opacity']),
-    };
-    button.classList.add('is-copied');
-    const copiedMask = getComputedStyle(icon).maskImage;
-    button.classList.remove('is-copied');
-    return { ...idle, copiedMask };
-  }, selector);
+  // Visual reference: the query results' Copy JSON split control.
+  const splitLook = (mainSel, toggleSel) => page.evaluate(([m, t]) => {
+    const pick = (el) => { const cs = getComputedStyle(el); return Object.fromEntries(['height', 'fontSize', 'fontWeight', 'borderTopWidth', 'borderTopStyle', 'backgroundColor', 'color', 'borderRadius', 'paddingLeft'].map((k) => [k, cs[k]])); };
+    return { main: pick(document.querySelector(m)), toggle: pick(document.querySelector(t)) };
+  }, [mainSel, toggleSel]);
   await openApp(page);
-  await page.locator('#queryTextArea').fill('SELECT 1');
-  await expect(page.locator('#editorCopyButton')).toBeEnabled();
-  // Let its disabled -> enabled opacity transition settle.
-  await expect(page.locator('#editorCopyButton')).toHaveCSS('opacity', '1');
-  const editorLook = await copyButtonLook('#editorCopyButton');
+  await runSuccessfulQuery(page, 'SELECT number FROM numbers(3)');
+  await expect(page.locator('#copyJsonButton')).toBeEnabled();
+  await expect(page.locator('#copyJsonButton')).toHaveCSS('opacity', '1');
+  const resultsLook = await splitLook('#copyJsonButton', '#copyMenuButton');
 
   // The OTel fixture is seeded days back: find the newest week holding traces.
   let rows = [];
@@ -1580,25 +1570,25 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
   await expect(page.locator('#traceDetail')).toBeVisible();
   const spanRows = page.locator('#traceWaterfall .traceSpanRow');
   await expect(spanRows).toHaveCount(detailSpans.length, { timeout: 30_000 });
-  const button = page.locator('#traceDetailHeader .tracePageHeader__titleRow > #traceCopyJsonButton');
+  const split = page.locator('#traceDetailHeader .tracePageHeader__titleRow > #traceCopySplit');
+  const button = split.locator('#traceCopyJsonButton');
   await expect(button).toBeVisible();
   await expect(button).toBeEnabled();
-  await expect(button).toHaveAttribute('aria-label', 'Copy trace JSON');
+  await expect(button).toHaveText('Copy JSON');
   await expect(button).toHaveAttribute('title', 'Copy trace JSON');
-  await expect(button).toHaveClass(/\beditorCopyButton\b/);
+  await expect(split.locator('#traceCopyMenuButton')).toBeEnabled();
   // Last control of the header row, after the trace start / duration stats.
-  const [statsBox, buttonBox, rowBox] = await Promise.all([
+  const [statsBox, splitBox, rowBox] = await Promise.all([
     page.locator('#traceDetailStats').boundingBox(),
-    button.boundingBox(),
+    split.boundingBox(),
     page.locator('#traceDetailHeader .tracePageHeader__titleRow').boundingBox(),
   ]);
-  expect(buttonBox.x).toBeGreaterThanOrEqual(statsBox.x + statsBox.width - 1);
-  expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
-  expect(buttonBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
-  expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
-  // Its disabled -> enabled opacity transition must settle too.
-  await expect(page.locator('#traceCopyJsonButton')).toHaveCSS('opacity', '1');
-  expect(await copyButtonLook('#traceCopyJsonButton')).toEqual(editorLook);
+  expect(splitBox.x).toBeGreaterThanOrEqual(statsBox.x + statsBox.width - 1);
+  expect(splitBox.x + splitBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+  expect(splitBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
+  expect(splitBox.y + splitBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 1);
+  await expect(button).toHaveCSS('opacity', '1');
+  expect(await splitLook('#traceCopyJsonButton', '#traceCopyMenuButton')).toEqual(resultsLook);
 
   // Outside a secure context the app copies through a hidden textarea:
   // capture what that copy selects (or read the clipboard when available).
@@ -1613,9 +1603,8 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
   });
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await button.click();
-  await expect(button).toHaveClass(/\bis-copied\b/);
-  // The copied check mark is the editor's; it returns to idle afterwards.
-  expect(await page.locator('#traceCopyJsonButton .editorCopyButton__icon').evaluate((el) => getComputedStyle(el).maskImage)).toBe(editorLook.copiedMask);
+  // Same feedback as the results control.
+  await expect(button).toHaveText('Copied');
   const copied = await page.evaluate(async () => {
     if (window.isSecureContext && navigator.clipboard) {
       try { return await navigator.clipboard.readText(); } catch (_) {}
@@ -1648,7 +1637,25 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
     if ('events_name' in source) expect(span.events).toHaveLength(JSON.parse(source.events_name).length);
     if ('links_trace_id' in source) expect(span.links).toHaveLength(JSON.parse(source.links_trace_id).length);
   }
-  await expect(button).not.toHaveClass(/\bis-copied\b/, { timeout: 4_000 });
+  await expect(button).toHaveText('Copy JSON', { timeout: 4_000 });
+  // Download JSON (menu): the same document, as trace-<id>.json.
+  await split.locator('#traceCopyMenuButton').click();
+  await expect(page.locator('#traceCopyMenu')).toBeVisible();
+  await expect(page.locator('#traceCopyMenu').getByRole('menuitem')).toHaveText(['Download JSON']);
+  // Painted on top (the service filter row below the header must not cover it).
+  expect(await page.locator('#traceDownloadJsonButton').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  })).toBe(true);
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.locator('#traceDownloadJsonButton').click(),
+  ]);
+  expect(download.suggestedFilename()).toBe(`trace-${traceId}.json`);
+  const fs = await import('node:fs/promises');
+  const downloaded = await fs.readFile(await download.path(), 'utf8');
+  expect(downloaded).toBe(copied);
+  await expect(page.locator('#traceCopyMenu')).toBeHidden();
 
   // The header's Trace ID copy button also copies outside secure contexts
   // (shared clipboard helper with the textarea fallback).

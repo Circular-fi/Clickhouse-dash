@@ -9927,11 +9927,19 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font: 9px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .traceCopyButton--header { width: 18px; height: 18px; font-size: 10px; }
-/* Copy trace JSON: the query editor copy control (same icon, size, frameless
-   style and copied check), laid out at the end of the trace header row. */
-.editorCopyButton.traceCopyJsonButton {
-  position: static;
+/* Copy JSON / Download JSON for the open trace: the query results' split
+   control, at the end of the trace header row. The title row stacks above
+   the service filter row below it, so the open menu is not covered. */
+.traceCopySplit {
   flex: 0 0 auto;
+}
+#traceDetailHeader .tracePageHeader__titleRow {
+  position: relative;
+  z-index: 4;
+  /* Clip only horizontally (the nowrap row must not overflow sideways) so
+     the copy menu can hang below the row. */
+  overflow: visible;
+  overflow-x: clip;
 }
 .tracePageFind {
   width: min(390px, 34vw);

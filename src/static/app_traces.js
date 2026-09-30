@@ -1243,6 +1243,8 @@
     const trace = model.activeTrace;
     const spans = trace?.spans || [];
     if (dom.traceCopyJsonButton) dom.traceCopyJsonButton.disabled = !spans.length;
+    if (dom.traceCopyMenuButton) dom.traceCopyMenuButton.disabled = !spans.length;
+    if (!spans.length) closeTraceCopyMenu({ immediate: true });
     if (!spans.length) {
       if (dom.traceDetailTitle) dom.traceDetailTitle.innerHTML = '<strong>Trace</strong><span>Select a trace to inspect its spans.</span>';
       if (dom.traceDetailStats) dom.traceDetailStats.innerHTML = "";
@@ -1581,20 +1583,66 @@
     }, null, 2).replace(/"start_ns": "\\u0000exact-ns:(\d+)"/g, '"start_ns": $1');
   }
 
-  let traceJsonCopiedTimer = 0;
+  // Copy JSON / Download JSON, the same split control as a query's results.
   async function copyTraceJson() {
     const button = dom.traceCopyJsonButton;
     const trace = model.activeTrace;
     if (!button || !trace?.spans?.length) return;
+    util.flashButtonText(button, { copiedText: "Copied" });
     try {
       await util.copyTextToClipboard(traceJsonText(trace));
-      button.classList.add("is-copied");
-      if (traceJsonCopiedTimer) clearTimeout(traceJsonCopiedTimer);
-      traceJsonCopiedTimer = window.setTimeout(() => {
-        button.classList.remove("is-copied");
-        traceJsonCopiedTimer = 0;
-      }, 1200);
-    } catch (_) {}
+    } catch {
+      util.flashButtonText(button, { copiedText: "Copy failed", durationMs: 1500 });
+    }
+  }
+
+  function downloadTraceJson() {
+    const trace = model.activeTrace;
+    if (!trace?.spans?.length) return;
+    const blob = new Blob([traceJsonText(trace)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `trace-${String(trace.trace_id || "trace").replace(/[^0-9A-Za-z_-]/g, "")}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  let traceCopyMenuCleanup = null;
+  function closeTraceCopyMenu({ immediate = false } = {}) {
+    const split = dom.traceCopySplit;
+    const menu = dom.traceCopyMenu;
+    if (!split || !menu) return;
+    dom.traceCopyMenuButton?.setAttribute("aria-expanded", "false");
+    split.classList.remove("is-open");
+    const finish = () => {
+      if (split.classList.contains("is-open")) return;
+      menu.hidden = true;
+      if (traceCopyMenuCleanup) traceCopyMenuCleanup();
+      traceCopyMenuCleanup = null;
+    };
+    if (immediate) finish();
+    else setTimeout(finish, 160);
+  }
+
+  function openTraceCopyMenu() {
+    const split = dom.traceCopySplit;
+    const menu = dom.traceCopyMenu;
+    if (!split || !menu || !menu.hidden) return;
+    menu.hidden = false;
+    dom.traceCopyMenuButton?.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => split.classList.add("is-open"));
+    try { menu.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
+    const onDocClick = (ev) => { if (ev.target instanceof Node && !split.contains(ev.target)) closeTraceCopyMenu(); };
+    const onKey = (ev) => { if (ev.key === "Escape") closeTraceCopyMenu({ immediate: true }); };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKey);
+    traceCopyMenuCleanup = () => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }
 
   function attributeEntries(raw) {
@@ -2006,6 +2054,14 @@
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));
     dom.traceCopyJsonButton?.addEventListener("click", () => { void copyTraceJson(); });
+    dom.traceCopyMenuButton?.addEventListener("click", () => {
+      if (dom.traceCopyMenu?.hidden) openTraceCopyMenu();
+      else closeTraceCopyMenu();
+    });
+    dom.traceDownloadJsonButton?.addEventListener("click", () => {
+      closeTraceCopyMenu({ immediate: true });
+      downloadTraceJson();
+    });
     dom.traceSpanSearch?.addEventListener("input", renderWaterfall);
     dom.traceSpanSearch?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;

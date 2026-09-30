@@ -214,7 +214,17 @@
             <button id="traceBackButton" type="button" class="tracePageBack" aria-label="Back to trace search" title="Back to search"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 512 512" aria-hidden="true"><path fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="48" d="M244 400 100 256l144-144M120 256h292"></path></svg></button>
             <div id="traceDetailTitle" class="tracePageHeader__title"><strong>Trace</strong><span>Select a trace to inspect its spans.</span></div>
             <div id="traceDetailStats" class="tracePageHeader__overview"></div>
-            <button id="traceCopyJsonButton" class="editorCopyButton traceCopyJsonButton" type="button" aria-label="Copy trace JSON" title="Copy trace JSON" disabled><span class="editorCopyButton__icon" aria-hidden="true"></span></button>
+            <div id="traceCopySplit" class="runSplit copySplit traceCopySplit">
+              <div class="runSplit__buttons">
+                <button id="traceCopyJsonButton" class="button button--small resultsStack__copy runSplit__main" type="button" title="Copy trace JSON" disabled>Copy JSON</button>
+                <button id="traceCopyMenuButton" class="button button--small runSplit__toggle" type="button" aria-haspopup="menu" aria-expanded="false" title="Copy options" disabled></button>
+              </div>
+              <div id="traceCopyMenu" class="runMenu copyMenu" role="menu" tabindex="-1" hidden>
+                <button id="traceDownloadJsonButton" class="runMenu__opt" type="button" role="menuitem">
+                  <span class="runMenu__optText">Download JSON</span>
+                </button>
+              </div>
+            </div>
           </div>
           <div id="traceServiceFilters" class="traceServiceFilters" aria-label="Filter trace services"></div>
           <div id="traceOverview" class="traceOverview" aria-label="Trace overview"></div>
