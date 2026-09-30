@@ -4,13 +4,7 @@ SELECT
 FROM
 (
     SELECT
-        arrayJoin(
-            [
-                ('key_a', 10),
-                ('key_b', 20),
-                ('key_c', 30)
-            ]
-        ) AS `pair_item`
+        arrayJoin([('key_a', 10), ('key_b', 20), ('key_c', 30)]) AS `pair_item`
 )
 ORDER BY
     score_value DESC,

@@ -4,8 +4,5 @@ AS PERMISSIVE
 FOR SELECT
 USING
     tenant_id = currentUser()
-    OR has(
-        currentRoles(),
-        'global_reader'
-    )
+    OR has(currentRoles(), 'global_reader')
 TO ALL EXCEPT guest_role
