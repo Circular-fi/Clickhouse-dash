@@ -10,6 +10,9 @@
   const SAVED_QUERIES_STORAGE_KEY = "chdash.savedQueries.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
+  // Last page availability reported by /api/version, read by each page's head
+  // script so the Query / Explorer / Traces switcher is settled at first paint.
+  const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";
   const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
   const META_PREFIX = "chdash.meta.v1.";
   const HISTORY_MAX_ENTRIES = 50;
@@ -124,6 +127,7 @@
     SAVED_QUERIES_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
+    PAGE_NAV_STORAGE_KEY,
     EDITOR_HEIGHT_PREFIX,
     META_PREFIX,
 
@@ -135,6 +139,16 @@
 
     setSavedThemeMode(mode) {
       safeWrite(THEME_STORAGE_KEY, String(mode));
+    },
+
+    loadPageNav() {
+      const obj = safeReadJson(PAGE_NAV_STORAGE_KEY, null);
+      if (!obj || typeof obj !== "object") return null;
+      return { explorer: obj.explorer !== false, traces: obj.traces === true };
+    },
+
+    savePageNav(nav) {
+      safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, traces: nav?.traces === true });
     },
 
     getStoredHostId() {

@@ -275,24 +275,37 @@
   function enhanceTraceSelect(select) {
     if (!select || select.dataset.tracePickerReady === "1") return;
     select.dataset.tracePickerReady = "1";
-    const root = document.createElement("div");
-    root.className = "themeSelect tracePicker";
-    if (select === dom.tracesRangeUnit) root.classList.add("tracePicker--range");
-    select.parentNode.insertBefore(root, select);
-    root.appendChild(select);
+    // traces.html ships every picker already built (root, native select,
+    // button, menu) so the first paint has the final look; adopt that markup
+    // and only build the picker for a select that arrives without it.
+    const shipped = select.parentElement?.classList.contains("tracePicker") ? select.parentElement : null;
+    const root = shipped || document.createElement("div");
+    let button = shipped?.querySelector(":scope > .tracePicker__button") || null;
+    let menu = shipped?.querySelector(":scope > .tracePicker__menu") || null;
+    if (!shipped) {
+      root.className = "themeSelect tracePicker";
+      if (select === dom.tracesRangeUnit) root.classList.add("tracePicker--range");
+      select.parentNode.insertBefore(root, select);
+      root.appendChild(select);
+    }
     select.classList.add("tracePicker__native");
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "button themeSelect__button tracePicker__button";
-    button.setAttribute("aria-haspopup", "listbox");
-    button.setAttribute("aria-expanded", "false");
-    const menu = document.createElement("div");
-    menu.className = "themeSelect__menu tracePicker__menu";
-    menu.setAttribute("role", "listbox");
-    menu.tabIndex = -1;
-    menu.hidden = true;
-    root.append(button, menu);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "button themeSelect__button tracePicker__button";
+      button.setAttribute("aria-haspopup", "listbox");
+      button.setAttribute("aria-expanded", "false");
+      root.appendChild(button);
+    }
+    if (!menu) {
+      menu = document.createElement("div");
+      menu.className = "themeSelect__menu tracePicker__menu";
+      menu.setAttribute("role", "listbox");
+      menu.tabIndex = -1;
+      menu.hidden = true;
+      root.appendChild(menu);
+    }
     tracePickers.add(root);
 
     const refresh = () => {

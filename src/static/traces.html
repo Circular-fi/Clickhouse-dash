@@ -20,10 +20,11 @@
           if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return raw;
           return appBase + raw.replace(/^\/+/, "");
         };
-        var css = document.createElement("link");
-        css.rel = "stylesheet";
-        css.href = window.__chdashUrl("static/style.css");
-        document.head.appendChild(css);
+        // Written by the parser, not appended: a script-appended <link> does not
+        // block rendering, so the shell would first paint unstyled (native
+        // selects, plain buttons) and restyle once style.css lands.
+        var cssHref = window.__chdashUrl("static/style.css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        document.write('<link rel="stylesheet" href="' + cssHref + '">');
         var favicon = document.createElement("link");
         favicon.rel = "icon"; favicon.type = "image/svg+xml";
         favicon.href = window.__chdashUrl("static/images/logo.svg");
@@ -33,6 +34,15 @@
         if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
         else delete document.documentElement.dataset.theme;
         document.documentElement.dataset.themeMode = mode;
+        // The Query / Explorer / Traces switcher is part of the page shell and
+        // never waits on /api/version. Only a server that last reported neither
+        // Explorer nor Traces hides it, before the first paint.
+        try {
+          var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true) {
+            document.documentElement.classList.add("chdash-page-select-hidden");
+          }
+        } catch (_) {}
         window.__chdashEarlyState = { themeMode: mode };
       } catch (_) {}
     })();
@@ -56,7 +66,7 @@
         </button>
         <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
       </div>
-      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page" hidden>
+      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">
         <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Traces</button>
         <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
           <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="false">Query</button>
@@ -83,22 +93,26 @@
         <form id="tracesForm" class="traceSearchBar" autocomplete="off">
           <div class="traceSearchBar__range">
             <div class="traceRangeCompact traceRangeCompact--preset">
-              <select id="tracesRangeUnit" data-field-label="Time range" aria-label="Time range">
-                <option value="5" data-minutes="5">Last 5 minutes</option>
-                <option value="15" data-minutes="15">Last 15 minutes</option>
-                <option value="30" data-minutes="30">Last 30 minutes</option>
-                <option value="60" data-minutes="60" selected>Last 1 hour</option>
-                <option value="180" data-minutes="180">Last 3 hours</option>
-                <option value="720" data-minutes="720">Last 12 hours</option>
-                <option value="1440" data-minutes="1440">Last 24 hours</option>
-                <option value="2880" data-minutes="2880">Last 48 hours</option>
-                <option value="10080" data-minutes="10080">Last 7 days</option>
-                <option value="43200" data-minutes="43200">Last 30 days</option>
-                <option value="129600" data-minutes="129600">Last 3 months</option>
-                <option value="259200" data-minutes="259200">Last 6 months</option>
-                <option value="525600" data-minutes="525600">Last 12 months</option>
-                <option value="custom">Custom range…</option>
-              </select>
+              <div class="themeSelect tracePicker tracePicker--range">
+                <select id="tracesRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native">
+                  <option value="5" data-minutes="5">Last 5 minutes</option>
+                  <option value="15" data-minutes="15">Last 15 minutes</option>
+                  <option value="30" data-minutes="30">Last 30 minutes</option>
+                  <option value="60" data-minutes="60" selected>Last 1 hour</option>
+                  <option value="180" data-minutes="180">Last 3 hours</option>
+                  <option value="720" data-minutes="720">Last 12 hours</option>
+                  <option value="1440" data-minutes="1440">Last 24 hours</option>
+                  <option value="2880" data-minutes="2880">Last 48 hours</option>
+                  <option value="10080" data-minutes="10080">Last 7 days</option>
+                  <option value="43200" data-minutes="43200">Last 30 days</option>
+                  <option value="129600" data-minutes="129600">Last 3 months</option>
+                  <option value="259200" data-minutes="259200">Last 6 months</option>
+                  <option value="525600" data-minutes="525600">Last 12 months</option>
+                  <option value="custom">Custom range…</option>
+                </select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Time range · Last 1 hour</button>
+                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+              </div>
             </div>
             <div id="tracesCustomRange" class="traceCustomRange" hidden>
               <label class="traceCustomRange__field">
@@ -116,19 +130,31 @@
           </div>
 
           <div class="traceSearchField traceSearchField--status">
-            <select id="tracesStatus" data-field-label="Status" aria-label="Status"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
+            <div class="themeSelect tracePicker">
+              <select id="tracesStatus" data-field-label="Status" aria-label="Status" class="tracePicker__native"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Status · ALL</button>
+              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+            </div>
           </div>
 
           <label class="traceSearchField traceSearchField--service">
-            <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service">
-              <option value="" selected>ALL</option>
-            </select>
+            <div class="themeSelect tracePicker is-disabled is-empty">
+              <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service" class="tracePicker__native">
+                <option value="" selected>ALL</option>
+              </select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Service · ALL</button>
+              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+            </div>
           </label>
 
           <label class="traceSearchField traceSearchField--operation">
-            <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation">
-              <option value="" selected>ALL</option>
-            </select>
+            <div class="themeSelect tracePicker is-disabled is-empty">
+              <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation" class="tracePicker__native">
+                <option value="" selected>ALL</option>
+              </select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Operation · ALL</button>
+              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+            </div>
           </label>
 
           <div class="traceTagSearch">
@@ -139,7 +165,11 @@
           </div>
 
           <label class="traceSearchField traceSearchField--limit">
-            <select id="tracesLimit" data-field-label="Results" aria-label="Results"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250" hidden disabled>250</option><option value="500" hidden disabled>500</option></select>
+            <div class="themeSelect tracePicker">
+              <select id="tracesLimit" data-field-label="Results" aria-label="Results" class="tracePicker__native"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250" hidden disabled>250</option><option value="500" hidden disabled>500</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Results · 50</button>
+              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+            </div>
           </label>
 
           <button id="tracesSearchButton" class="button button--primary traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
@@ -159,7 +189,7 @@
         <section class="traceResultsSection" aria-label="Trace search results">
           <div class="traceSearchResults__toolbar">
             <h2 id="tracesResultCount">0 Traces</h2>
-            <label class="traceResultsSort"><span>Sort:</span><select id="tracesSort"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select></label>
+            <label class="traceResultsSort"><span>Sort:</span><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
           </div>
           <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="tracesEmpty">Search to load traces.</div></div>
         </section>

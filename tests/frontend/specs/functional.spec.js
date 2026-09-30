@@ -1144,3 +1144,117 @@ FROM numbers(${n})`;
     expect(details.values).toEqual(vertical.values);
   });
 }
+
+// Parks every request matching `pattern` until release(), so a test can look
+// at the page exactly as it is painted before that resource answers.
+async function holdRequests(page, pattern) {
+  const parked = [];
+  let released = false;
+  await page.route(pattern, (route) => {
+    if (released) return route.continue();
+    parked.push(route);
+  });
+  return {
+    count: () => parked.length,
+    async release() {
+      released = true;
+      await Promise.all(parked.splice(0).map((route) => route.continue()));
+    },
+  };
+}
+
+for (const path of ['/query', '/explorer', '/traces']) {
+  test(`${path}: the Query / Explorer / Traces switcher is painted with the shell, before any API answer`, async ({ page }) => {
+    const api = await holdRequests(page, '**/api/**');
+    try {
+      const pageSelectBox = () => page.evaluate(() => {
+        const el = document.getElementById('pageSelect');
+        const r = el.getBoundingClientRect();
+        return { hidden: el.hidden, display: getComputedStyle(el).display, x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#pageSelectButton')).toBeVisible();
+      // Scripts have started and their /api calls (version, hosts) are parked.
+      await expect.poll(() => api.count()).toBeGreaterThan(0);
+      await expect(page.locator('#versionBadge')).toHaveText('--');
+      await expect(page.locator('#pageSelectButton')).toBeVisible();
+      const early = await pageSelectBox();
+      expect(early.hidden).toBe(false);
+      expect(early.width).toBeGreaterThan(0);
+
+      await api.release();
+      await expect(page.locator('#versionBadge')).not.toHaveText('--');
+      await expect(page.locator('#hostPickerText')).not.toHaveText('Host');
+      await expect(page.locator('#pageSelectButton')).toBeVisible();
+      expect(await pageSelectBox()).toEqual(early);
+      // The open menu lists the two other pages (the current one is implied).
+      await page.locator('#pageSelectButton').click();
+      const others = ['query', 'explorer', 'traces'].filter((name) => `/${name}` !== path);
+      await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(others.map((name) => name[0].toUpperCase() + name.slice(1)));
+    } finally {
+      await api.release();
+    }
+  });
+}
+
+test('traces: time range, status and result pickers have their final style at first paint', async ({ page }) => {
+  const scripts = await holdRequests(page, '**/static/*.js');
+  const api = await holdRequests(page, '**/api/**');
+  try {
+    const pickers = ['tracesRangeUnit', 'tracesStatus', 'tracesService', 'tracesOperation', 'tracesLimit', 'tracesSort'];
+    const snapshot = (ids) => page.evaluate((list) => Object.fromEntries(list.map((id) => {
+      const select = document.getElementById(id);
+      const root = select.parentElement;
+      const button = root.querySelector(':scope > .tracePicker__button');
+      const cs = getComputedStyle(button);
+      const r = button.getBoundingClientRect();
+      const keys = ['display', 'height', 'width', 'paddingLeft', 'paddingRight', 'borderTopWidth', 'borderTopStyle', 'borderTopColor',
+        'borderTopLeftRadius', 'backgroundColor', 'color', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'opacity'];
+      return [id, {
+        rootClass: root.className,
+        selectClass: select.className,
+        selectPosition: getComputedStyle(select).position,
+        buttonClass: button.className,
+        text: button.textContent,
+        disabled: button.disabled,
+        box: [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 10) / 10),
+        style: Object.fromEntries(keys.map((k) => [k, cs[k]])),
+      }];
+    })), ids);
+
+    await page.goto('/traces', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
+    // No application script has run yet: this is the page as first painted.
+    expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
+    const firstPaint = await snapshot(pickers);
+    expect(firstPaint.tracesRangeUnit.text).toBe('Time range · Last 1 hour');
+    expect(firstPaint.tracesStatus.text).toBe('Status · ALL');
+    expect(firstPaint.tracesLimit.text).toBe('Results · 50');
+    expect(firstPaint.tracesService.disabled).toBe(true);
+
+    await scripts.release();
+    await page.waitForFunction((ids) => window.ChDash && window.ChDash.traces
+      && ids.every((id) => document.getElementById(id).dataset.tracePickerReady === '1'), pickers);
+    await expect.poll(() => api.count()).toBeGreaterThan(0);
+    expect(await snapshot(pickers)).toEqual(firstPaint);
+    // One picker per select: the shipped markup is adopted, never doubled.
+    await expect(page.locator('#tracesForm .tracePicker')).toHaveCount(5);
+    await expect(page.locator('.traceResultsSort .tracePicker')).toHaveCount(1);
+
+    // The search bar pickers do not depend on the answers either (the results
+    // toolbar below them moves down once analytics render, which is expected).
+    const settled = ['tracesRangeUnit', 'tracesStatus', 'tracesLimit'];
+    await api.release();
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#hostPickerText')).not.toHaveText('Host');
+    const afterData = await snapshot(settled);
+    for (const id of settled) expect(afterData[id]).toEqual(firstPaint[id]);
+
+    const statusPicker = page.locator('.traceSearchField--status .tracePicker');
+    await statusPicker.locator('.tracePicker__button').click();
+    await expect(statusPicker.locator('.tracePicker__option')).toHaveCount(4);
+  } finally {
+    await scripts.release();
+    await api.release();
+  }
+});

@@ -24,10 +24,11 @@
           return appBase + raw.replace(/^\/+/, "");
         };
 
-        var css = document.createElement("link");
-        css.rel = "stylesheet";
-        css.href = window.__chdashUrl("static/style.css");
-        document.head.appendChild(css);
+        // Written by the parser, not appended: a script-appended <link> does not
+        // block rendering, so the shell would first paint unstyled (native
+        // selects, plain buttons) and restyle once style.css lands.
+        var cssHref = window.__chdashUrl("static/style.css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        document.write('<link rel="stylesheet" href="' + cssHref + '">');
         var favicon = document.createElement("link");
         favicon.rel = "icon"; favicon.type = "image/svg+xml";
         favicon.href = window.__chdashUrl("static/images/logo.svg");
@@ -46,6 +47,15 @@
           delete root.dataset.theme;
         }
         root.dataset.themeMode = mode;
+        // The Query / Explorer / Traces switcher is part of the page shell and
+        // never waits on /api/version. Only a server that last reported neither
+        // Explorer nor Traces hides it, before the first paint.
+        try {
+          var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true) {
+            document.documentElement.classList.add("chdash-page-select-hidden");
+          }
+        } catch (_) {}
 
         // Apply editor UI preferences before CSS loads to avoid a one-frame flash
         // of disabled controls such as the copy button and line numbers.
@@ -109,7 +119,7 @@
         <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
       </div>
 
-      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page" hidden>
+      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">
         <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Query</button>
         <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
           <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="true">Query</button>

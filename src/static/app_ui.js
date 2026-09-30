@@ -413,13 +413,25 @@
     }
   }
 
+  // The page switcher ships visible in every page shell. Only a server with
+  // neither Explorer nor Traces hides it; the head script of each page applies
+  // the last known availability (chdash-page-select-hidden) before first paint.
+  function applyPageNavigation(nav) {
+    const explorerEnabled = nav.explorer !== false;
+    const tracesEnabled = nav.traces === true;
+    const hidden = !explorerEnabled && !tracesEnabled;
+    dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
+    if (dom.pageSelect) dom.pageSelect.hidden = hidden;
+    if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
+    if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
+  }
+
   function applyProductFeatures() {
     const f = state.features?.explorer || {};
     const explorerEnabled = f.enabled !== false;
     const tracesEnabled = state.features?.traces?.enabled === true;
-    if (dom.pageSelect) dom.pageSelect.hidden = !explorerEnabled && !tracesEnabled;
-    if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
-    if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
+    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled });
+    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       const next = api.resolveUrl("query");
       window.history.replaceState({ workspace: "query" }, "", next);
@@ -1451,6 +1463,9 @@
   function init() {
     applyRunOptionsUi();
 
+    // Menu entries follow the last known availability until /api/version answers.
+    const cachedPageNav = storage?.loadPageNav?.();
+    if (cachedPageNav) applyPageNavigation(cachedPageNav);
     loadMeta();
     initEditor();
     initEditorCopyButton();

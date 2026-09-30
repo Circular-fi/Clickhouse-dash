@@ -6030,6 +6030,11 @@ body {
 .pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
   display: none !important;
 }
+/* The page shells render the selector from the first paint; each head script
+   sets this class only when the server last reported no Explorer and no Traces. */
+html.chdash-page-select-hidden .pageSelect {
+  display: none !important;
+}
 
 /* Small settings cog immediately before Run. The menu expands from the cog but
    the cog itself has no redundant dropdown chevron. */
