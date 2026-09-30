@@ -3187,6 +3187,7 @@
     indexSortable = true,
     rowIndexValue = null,
     rowDetails = false,
+    nullsLast = false,
   } = {}) {
     const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
@@ -3324,7 +3325,21 @@
       let display = safeRows.map((row, index) => ({ row, index: index + 1 }));
       if (sortKey !== null && sortDir) {
         const key = sortKey;
+        // nullsLast: missing values (null / undefined / "") stay below every
+        // present value in both directions, like ClickHouse's default
+        // NULLS LAST, instead of rising to the top of a descending sort.
+        const missing = (entry) => {
+          if (key === -1 || !Array.isArray(entry.row)) return false;
+          const value = entry.row[key];
+          return value == null || value === "";
+        };
         display.sort((a, b) => {
+          if (nullsLast) {
+            const am = missing(a);
+            const bm = missing(b);
+            if (am !== bm) return am ? 1 : -1;
+            if (am) return a.index - b.index;
+          }
           const cmp = compareRows(a, b, key);
           if (cmp === 0) return a.index - b.index;
           return sortDir === "desc" ? -cmp : cmp;

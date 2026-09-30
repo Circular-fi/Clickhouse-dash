@@ -476,6 +476,12 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.Key("bytes");
     if (table.resident_bytes) w.Uint64(*table.resident_bytes);
     else write_optional_u64(w, table.logical_bytes);
+    // Database detail object table: filled by the per-database parts
+    // aggregation (MergeTree); null / 0 / "" for other engines.
+    w.Key("compressed_bytes"); write_optional_u64(w, table.compressed_bytes);
+    w.Key("uncompressed_bytes"); write_optional_u64(w, table.uncompressed_bytes);
+    w.Key("active_parts"); w.Uint64(table.active_parts);
+    w.Key("last_part_time"); w.String(table.last_part_time.c_str());
     w.EndObject();
   }
   w.EndArray();

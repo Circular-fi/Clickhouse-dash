@@ -5036,55 +5036,41 @@ body {
   white-space: nowrap;
 }
 
-.explorerDatabaseDetailTables {
-  display: grid;
-  gap: 4px;
+/* Database detail object table: the shared Query result table; only the name
+   cell becomes a link-like button that opens the object. */
+.explorerDatabaseObjectsTable {
+  margin-top: 8px;
+  margin-bottom: 12px;
 }
 
-.explorerDatabaseDetailTable {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 7px 9px;
-  background: transparent;
-  color: var(--text);
+.explorerDatabaseObjectsTable .resultTable > tbody > tr > td {
+  white-space: nowrap;
+}
+
+.explorerDatabaseObjectsTable__open {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.explorerDatabaseDetailTable:hover,
-.explorerDatabaseDetailTable:focus-visible {
-  border-color: var(--border);
-  background: var(--rowHover);
+.explorerDatabaseObjectsTable__open:hover,
+.explorerDatabaseObjectsTable__open:focus-visible {
+  text-decoration: underline;
   outline: none;
 }
 
-.explorerDatabaseDetailTable__labels {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.explorerDatabaseDetailTable__labels strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 600 .72rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.explorerDatabaseDetailTable__labels span,
-.explorerDatabaseDetailTable__stats {
+.explorerDatabaseObjectsTable__missing {
   color: var(--muted);
-  font-size: .64rem;
-}
-
-.explorerDatabaseDetailTable__stats {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Explorer storage treemap (database detail + System section). Port of the

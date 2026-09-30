@@ -250,7 +250,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await database.click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
-  await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').first()).toBeVisible();
+  await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 

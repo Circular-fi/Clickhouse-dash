@@ -239,10 +239,21 @@ def test_explorer_routes_cover_catalog_table_data_graph_activity_and_functions()
     assert fixture_tables["station_dictionary_source"].get("engine") == "TinyLog"
     assert int(fixture_tables["memory_weather"].get("rows") or 0) == 3
     assert int(fixture_tables["weather_observations"].get("rows") or 0) > 0
+    # The database detail object table reads the same per-database parts
+    # aggregation: compressed / uncompressed data bytes, active parts and the
+    # newest part time (MergeTree only; null for views and RAM engines).
+    weather = fixture_tables["weather_observations"]
+    assert int(weather.get("compressed_bytes") or 0) > 0, weather
+    assert int(weather.get("uncompressed_bytes") or 0) >= int(weather["compressed_bytes"]), weather
+    assert int(weather.get("active_parts") or 0) >= 1, weather
+    assert re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$", weather.get("last_part_time") or ""), weather
+    assert fixture_tables["valid_weather_observations"].get("compressed_bytes") is None
+    assert fixture_tables["memory_weather"].get("uncompressed_bytes") is None
 
-    # The sidebar catalog is deliberately lightweight (names, engine, rows and
-    # bytes). Rich per-table storage metrics are loaded lazily by the table
-    # detail route, so they are asserted against /api/explorer/table below.
+    # The sidebar catalog is deliberately lightweight (names, engine, rows,
+    # bytes and the parts aggregation above). Rich per-table storage metrics
+    # are loaded lazily by the table detail route, so they are asserted
+    # against /api/explorer/table below.
     database = next((item for item in catalog_payload.get("database_summaries", []) if item.get("name") == "chdash_ui"), None)
     if database is None:
         root = get("/api/explorer/catalog", params={"host_id": "local"})

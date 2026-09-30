@@ -1185,13 +1185,18 @@ bool load_explorer_catalog_index(
 
   // Keep sidebar row/size statistics useful without loading the rich table
   // detail payload. For a single lazily-expanded database, one bounded parts
-  // aggregation gives exact MergeTree rows/bytes for every visible table.
+  // aggregation gives exact MergeTree rows/bytes for every visible table. The
+  // same GROUP BY also feeds the database detail object table (compressed /
+  // uncompressed data bytes, active part count, newest part time): extra sums
+  // over the already-scanned system.parts rows, no per-table query.
   if (out.databases.size() == 1) {
     std::unordered_map<std::string, ExplorerTableSummary*> by_name;
     for (auto& item : out.tables) by_name.emplace(item.name, &item);
     std::string ignored;
     (void)try_select(system,
-      "SELECT toString(`table`), toString(sum(rows)), toString(sum(bytes_on_disk)) "
+      "SELECT toString(`table`), toString(sum(rows)), toString(sum(bytes_on_disk)), "
+      "toString(sum(data_compressed_bytes)), toString(sum(data_uncompressed_bytes)), "
+      "toString(count()), toString(max(modification_time)) "
       "FROM system.parts WHERE active AND database = " + quote_string(out.databases.front()) +
       " GROUP BY `table`",
       [&](const clickhouse::Block& block) {
@@ -1202,7 +1207,10 @@ bool load_explorer_catalog_index(
           const auto bytes = parse_u64(block_string_at(block, 2, row));
           it->second->logical_bytes = bytes;
           it->second->physical_bytes = bytes;
-          it->second->compressed_bytes = bytes;
+          it->second->compressed_bytes = parse_u64(block_string_at(block, 3, row));
+          it->second->uncompressed_bytes = parse_u64(block_string_at(block, 4, row));
+          it->second->active_parts = parse_u64(block_string_at(block, 5, row)).value_or(0);
+          it->second->last_part_time = block_string_at(block, 6, row);
         }
       }, &ignored);
   }

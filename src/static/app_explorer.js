@@ -1388,20 +1388,126 @@
     clear(dom.explorerDetailContent);
     renderDatabaseStorage(dom.explorerDetailContent, name);
     dom.explorerDetailContent.appendChild(sectionTitle("Objects"));
+    renderDatabaseObjects(dom.explorerDetailContent, name, tables);
+  }
 
-    const list = node("div", "explorerDatabaseDetailTables");
-    for (const table of tables) {
-      const button = node("button", "explorerDatabaseDetailTable");
-      button.type = "button";
-      const labels = node("span", "explorerDatabaseDetailTable__labels");
-      const footprint = summaryFootprintBytes(table);
-      const stats = [summaryRowsLabel(table, { compact: true }), footprint == null ? null : util.formatBytes(footprint)].filter(Boolean).join(" · ");
-      labels.append(node("strong", "", table.name), node("span", "", humanEngine(table.engine)));
-      button.append(labels, node("span", "explorerDatabaseDetailTable__stats", stats || "—"));
-      button.addEventListener("click", () => void selectTable(table.database, table.name));
-      list.appendChild(button);
+  // Database detail object table: every visible object of the database in the
+  // shared Query result table (sortable headers, numeric gauges). Data comes
+  // only from the per-database catalog payload already loaded for the sidebar
+  // and the treemap (system.tables + one system.parts GROUP BY), never from
+  // per-table requests. Missing values sort last in both directions.
+  const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Uncompressed", "Ratio", "% database", "Parts", "Modified"];
+  const DATABASE_OBJECT_TYPES = ["String", "String", "UInt64", "UInt64", "UInt64", "UInt64", "Float64", "Float64", "UInt64", "DateTime"];
+  const DATABASE_OBJECT_BYTE_COLUMNS = new Set([3, 4, 5]);
+
+  function validCatalogTime(value) {
+    const text = String(value || "").trim();
+    return text && !text.startsWith("1970-01-01") ? text : null;
+  }
+
+  function databaseObjectRow(table, onDiskTotal) {
+    const optional = (value) => {
+      if (value == null || value === "") return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+    const resident = isResidentMemorySummary(table);
+    const footprint = summaryFootprintBytes(table);
+    const compressed = resident ? null : optional(table.compressed_bytes);
+    const uncompressed = resident ? null : optional(table.uncompressed_bytes);
+    const ratio = compressed > 0 && uncompressed > 0 ? uncompressed / compressed : null;
+    const share = !resident && footprint != null && onDiskTotal > 0 ? footprint / onDiskTotal * 100 : null;
+    const parts = isMergeTreeSummary(table) && table.active_parts != null ? optional(table.active_parts) : null;
+    const times = [validCatalogTime(table.last_part_time), validCatalogTime(table.metadata_modification_time)].filter(Boolean).sort();
+    const row = [
+      String(table.name || ""),
+      humanEngine(table.engine) || String(table.engine || "") || null,
+      optional(table.rows),
+      footprint,
+      compressed,
+      uncompressed,
+      ratio,
+      share,
+      parts,
+      times.length ? times[times.length - 1] : null,
+    ];
+    row.__explorerObject = { database: String(table.database || ""), name: String(table.name || ""), resident };
+    return row;
+  }
+
+  function renderDatabaseObjects(container, database, tables) {
+    if (!tables.length) {
+      container.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
+      return;
     }
-    dom.explorerDetailContent.appendChild(list);
+    const onDiskTotal = databaseStorageTree(database).root.bytes;
+    const rows = tables.map((table) => databaseObjectRow(table, onDiskTotal));
+    const maxima = DATABASE_OBJECT_COLUMNS.map((_, index) => Math.max(0, ...rows.map((row) => Number(row[index]) || 0)));
+    maxima[7] = 100;
+    const gauges = rows.length > 1;
+    const setGauge = (td, value, max, text) => {
+      td.classList.add("resultTable__numeric");
+      if (gauges) {
+        td.classList.add("resultTable__gaugeCell", "explorerStorageGaugeCell");
+        const fill = value == null || max <= 0 ? 0 : Math.max(0, Math.min(100, (value / max) * 100));
+        td.style.setProperty("--gaugeFill", `${fill}%`);
+      }
+      td.textContent = text;
+    };
+    const objectTable = ns.results?.createStaticResultTable?.({
+      columns: DATABASE_OBJECT_COLUMNS,
+      types: DATABASE_OBJECT_TYPES,
+      rows,
+      className: "explorerResultTable explorerDatabaseObjectsTable",
+      nullsLast: true,
+      decorateHeader: (th, ctx) => {
+        th.title = {
+          3: "On-disk bytes of active parts (resident memory for Memory / Buffer / Dictionary)",
+          4: "Compressed data bytes of active parts",
+          5: "Uncompressed data bytes of active parts",
+          6: "Uncompressed / compressed",
+          7: "Share of the database on-disk bytes (the treemap area)",
+          8: "Active parts",
+          9: "Latest of the newest part and the metadata modification time",
+        }[ctx.columnIndex] || "";
+      },
+      decorateRow: (tr, ctx) => {
+        const item = ctx.row?.__explorerObject;
+        if (item) tr.dataset.table = item.name;
+      },
+      renderCell: (td, ctx) => {
+        const item = ctx.row?.__explorerObject || null;
+        const value = ctx.value;
+        if (ctx.columnIndex >= 2 && ctx.columnIndex <= 8) td.dataset.value = value == null ? "" : String(value);
+        if (ctx.columnIndex === 0) {
+          const button = node("button", "explorerDatabaseObjectsTable__open", String(value || ""));
+          button.type = "button";
+          button.title = `Open ${database}.${value}`;
+          const table = item || { database, name: String(value || "") };
+          button.addEventListener("click", () => void selectTable(table.database, table.name));
+          td.appendChild(button);
+          return true;
+        }
+        if (value == null) {
+          if (ctx.columnIndex >= 2 && ctx.columnIndex <= 8) td.classList.add("resultTable__numeric");
+          td.textContent = "—";
+          td.classList.add("explorerDatabaseObjectsTable__missing");
+          return true;
+        }
+        if (DATABASE_OBJECT_BYTE_COLUMNS.has(ctx.columnIndex)) {
+          const text = util.formatBytes(value);
+          setGauge(td, value, maxima[ctx.columnIndex], ctx.columnIndex === 3 && item?.resident ? `${text} RAM` : text);
+          if (ctx.columnIndex === 3 && item?.resident) td.title = "RAM held by the object, not on disk";
+          return true;
+        }
+        if (ctx.columnIndex === 6) { setGauge(td, value, maxima[6], `${value.toFixed(2)}×`); return true; }
+        if (ctx.columnIndex === 7) { setGauge(td, value, 100, fmtPercent(value)); return true; }
+        return false;
+      },
+    });
+    if (!objectTable) throw new Error("Shared result table component is unavailable.");
+    objectTable.id = "explorerDatabaseObjects";
+    container.appendChild(objectTable);
   }
 
   function selectDatabase(database, { historyMode = "push", expand = true } = {}) {

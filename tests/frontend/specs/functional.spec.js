@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { enableExecutionStats, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
+import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -232,9 +232,9 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // disk list was replaced by a per-object list with rows/footprint stats.
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
-  await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').first()).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerDatabaseDetailTable').filter({ has: page.getByText('weather_observations', { exact: true }) }))
-    .toContainText(/Merge Tree.*rows/);
+  await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
+  await expect(page.locator('#explorerDatabaseObjects tbody tr[data-table="weather_observations"]'))
+    .toContainText(/weather_observations\s*Merge Tree\s*[\d,]+/);
   await page.getByText('station_dictionary', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toContainText('station_dictionary');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/Dictionary/i);
@@ -419,6 +419,163 @@ test('database detail treemap sizes tables, shows a hover tooltip and opens the 
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
   await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
+});
+
+// Database detail object table (under the treemap): display-order snapshot of
+// every row, numeric cells carry their raw value in data-value.
+const DATABASE_OBJECT_HEADERS = ['#', 'Name', 'Engine', 'Rows', 'Size', 'Compressed', 'Uncompressed', 'Ratio', '% database', 'Parts', 'Modified'];
+
+async function databaseObjectRows(page) {
+  return page.locator('#explorerDatabaseObjects tbody tr').evaluateAll((rows) => rows.map((tr) => ({
+    name: tr.dataset.table,
+    cells: [...tr.children].slice(1).map((td) => ({ text: td.textContent.trim(), value: td.dataset.value ?? null })),
+  })));
+}
+
+function textSortKey(value) { return String(value).toLowerCase(); }
+
+// Clicks a header and checks the displayed order: present values monotonic in
+// the header's direction (numbers compared as numbers), missing values last.
+async function expectObjectColumnSorted(page, column, direction) {
+  const header = page.locator('#explorerDatabaseObjects thead th').nth(column + 1);
+  await header.click();
+  await expect(header).toHaveAttribute('data-sort', direction);
+  const rows = await databaseObjectRows(page);
+  const numeric = column >= 2 && column <= 8;
+  const keys = rows.map((row) => {
+    const cell = row.cells[column];
+    if (numeric) return cell.value === '' || cell.value == null ? null : Number(cell.value);
+    return cell.text === '—' ? null : textSortKey(cell.text);
+  });
+  const firstMissing = keys.indexOf(null);
+  if (firstMissing >= 0) expect(keys.slice(firstMissing).every((key) => key === null), `column ${column}: missing values last`).toBe(true);
+  const present = firstMissing >= 0 ? keys.slice(0, firstMissing) : keys;
+  for (let index = 1; index < present.length; index++) {
+    const ordered = direction === 'asc' ? present[index - 1] <= present[index] : present[index - 1] >= present[index];
+    expect(ordered, `column ${column} ${direction} at ${index}: ${present[index - 1]} / ${present[index]}`).toBe(true);
+  }
+  return rows;
+}
+
+test('database detail lists every object under the treemap, sorts each column and opens a table', async ({ page }) => {
+  const catalogResponse = page.waitForResponse((response) => response.url().includes('api/explorer/catalog') && response.url().includes('database=chdash_ui'));
+  await openApp(page);
+  await openExplorerDatabase(page);
+  const catalog = await (await catalogResponse).json();
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
+  const objects = page.locator('#explorerDatabaseObjects');
+  await expect(objects).toBeVisible();
+  await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
+  await expect(objects.locator('thead th.resultTable__thSortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
+  // Placed under the treemap.
+  const mapBox = await page.locator('#explorerDatabaseTreemap').boundingBox();
+  const tableBox = await objects.boundingBox();
+  expect(tableBox.y).toBeGreaterThan(mapBox.y + mapBox.height);
+
+  // One row per object of the database, alphabetical by default.
+  const expectedNames = catalog.tables.map((table) => table.name).sort((a, b) => a.localeCompare(b));
+  let rows = await databaseObjectRows(page);
+  expect(rows.map((row) => row.name)).toEqual(expectedNames);
+  expect(rows.length).toBeGreaterThan(10);
+
+  const weather = rows.find((row) => row.name === 'weather_observations').cells;
+  const weatherSummary = catalog.tables.find((table) => table.name === 'weather_observations');
+  expect(weather[1].text).toBe('Merge Tree');
+  expect(Number(weather[2].value)).toBe(weatherSummary.rows);
+  expect(Number(weather[3].value)).toBe(weatherSummary.bytes);
+  expect(weather[3].text).toMatch(/^\d+(?:\.\d+)?[KMG]B$/);
+  expect(weather[4].text).toMatch(/^\d+(?:\.\d+)?[KMG]B$/);
+  expect(Number(weather[5].value)).toBe(weatherSummary.uncompressed_bytes);
+  expect(weather[6].text).toMatch(/^\d+\.\d\d×$/);
+  expect(Number(weather[7].value)).toBeGreaterThan(50);
+  expect(weather[7].text).toMatch(/^\d+(?:\.\d)?%$/);
+  expect(Number(weather[8].value)).toBe(weatherSummary.active_parts);
+  expect(weather[9].text).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+  // Resident memory is labelled and never takes a share of the on-disk total.
+  const memory = rows.find((row) => row.name === 'memory_weather').cells;
+  expect(memory[3].text).toMatch(/RAM$/);
+  expect(memory[7].text).toBe('—');
+  // Views have no storage: dashes, not zeros.
+  const view = rows.find((row) => row.name === 'valid_weather_observations').cells;
+  expect(view[1].text).toBe('View');
+  expect(view[3].text).toBe('—');
+  // Byte columns use the shared numeric gauge.
+  await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(4)).toHaveClass(/resultTable__gaugeCell/);
+
+  // Text columns start ascending, numeric ones descending; each toggles.
+  for (let column = 0; column < 10; column++) {
+    const numeric = column >= 2 && column <= 8;
+    const first = numeric ? 'desc' : 'asc';
+    const second = numeric ? 'asc' : 'desc';
+    rows = await expectObjectColumnSorted(page, column, first);
+    if (column === 3) expect(rows[0].name).toBe('weather_observations');
+    rows = await expectObjectColumnSorted(page, column, second);
+  }
+
+  await objects.locator('.explorerDatabaseObjectsTable__open', { hasText: /^weather_observations$/ }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
+  await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
+});
+
+test('database object table handles hundreds of tables and empty databases', async ({ page }) => {
+  // Synthetic catalogs through the real endpoint: 300 tables whose sizes sort
+  // differently as text and as numbers, and a database without objects.
+  const count = 300;
+  const synthetic = Array.from({ length: count }, (_, index) => {
+    const bytes = (index % 7 + 1) * 10 ** (index % 6);
+    return {
+      database: 'chdash_perf',
+      name: `t_${String(index).padStart(3, '0')}`,
+      engine: 'MergeTree',
+      metadata_modification_time: '2026-09-01 00:00:00',
+      rows: (index * 37) % 1000,
+      bytes,
+      compressed_bytes: bytes,
+      uncompressed_bytes: bytes * (index % 4 + 1),
+      active_parts: index % 11,
+      last_part_time: `2026-09-${String(index % 28 + 1).padStart(2, '0')} 10:00:00`,
+    };
+  });
+  await page.route(/\/api\/explorer\/catalog\?.*database=(chdash_perf|otel)(?:&|$)/, async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.tables = route.request().url().includes('database=otel') ? [] : synthetic;
+    await route.fulfill({ response, json });
+  });
+  await openApp(page);
+  await openExplorerDatabase(page, 'chdash_perf');
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_perf' }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_perf');
+  await expect(page.locator('#explorerDetailMeta')).toContainText(`${count} tables`);
+  await expect(page.locator('#explorerDatabaseObjects tbody tr')).toHaveCount(count);
+
+  const sizeHeader = page.locator('#explorerDatabaseObjects thead th').nth(4);
+  const elapsedMs = await sizeHeader.evaluate((th) => {
+    const started = performance.now();
+    th.click();
+    return performance.now() - started;
+  });
+  expect(elapsedMs).toBeLessThan(1000);
+  await expect(sizeHeader).toHaveAttribute('data-sort', 'desc');
+  const maxBytes = Math.max(...synthetic.map((table) => table.bytes));
+  const rows = await databaseObjectRows(page);
+  expect(Number(rows[0].cells[3].value)).toBe(maxBytes);
+  expect(rows[0].cells[3].text).toMatch(/^\d+(?:\.\d+)?[KM]B$/);
+  const sizes = rows.map((row) => Number(row.cells[3].value));
+  expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+  await expectObjectColumnSorted(page, 3, 'asc');
+  await expectObjectColumnSorted(page, 2, 'desc');
+  await expectObjectColumnSorted(page, 8, 'desc');
+
+  await expandExplorerDatabase(page, 'otel');
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'otel' }).first().click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('otel');
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^0 tables/);
+  await expect(page.locator('#explorerDetailContent')).toContainText('No on-disk data in this database.');
+  await expect(page.locator('#explorerDetailContent')).toContainText('No objects in this database.');
+  await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
 });
 
 test('System section maps server storage by database, by table and drills into a database', async ({ page }) => {
