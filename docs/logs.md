@@ -4,8 +4,8 @@ ChDash can read OpenTelemetry logs stored by the OpenTelemetry Collector
 contrib ClickHouse exporter (`otel_logs`). Like traces, logs follow the host
 selected in the UI and are read through that host's `system_uri`.
 
-This document covers the configuration and the schema-detection endpoint.
-The logs UIs (logs in the trace detail, a logs explorer) build on it.
+This document covers the configuration, the schema-detection endpoint and
+the Logs explorer (the `/logs` page and its `/api/logs/*` routes).
 
 ## Configuration
 
@@ -224,6 +224,161 @@ A log belongs to the span of its `SpanId`. `(TraceId, SpanId)` is not always
 unique (the same span stored twice at different times): a log then belongs
 to the span whose interval holds it, else to the nearest one. Logs without a
 span of the trace are listed in the panel only.
+
+## Logs explorer: the `/logs` page
+
+When `logs.enabled = true` the page switcher gains a **Logs** entry (hidden
+otherwise; the availability is cached in `chdash.pageNav.v1` for the first
+paint like the other pages). The page is modelled on HyperDX's search page:
+
+- **Search bar**: the Traces time range picker (quick ranges, absolute
+  range, calendar), services (multi-select, with record counts for the
+  range), minimum level, Body text and `key=value` / `key!=value` filters.
+  `TraceId=<id>` in the filter box filters one trace. Every setting is in the
+  URL (`from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `tab`,
+  `cols`, `denoise`), so a search can be shared, reloaded and navigated with
+  Back / Forward.
+- **Volume histogram**: records over time stacked by severity class (error,
+  warn, info, debug); the total is the sum of the buckets. Buckets align on
+  the browser's local midnight. Drag over the chart to zoom the time range;
+  the legend toggles severity classes.
+- **Results**: a virtualised newest-first table (time, level, service, body;
+  host, TraceId, SpanId, scope and any attribute can be added from
+  **Columns**). Scrolling loads older pages through keyset cursors.
+  Service colours are the Traces page colours (same session assignment).
+- **Record panel**: click a row (or use the arrow keys) for every field and
+  attribute. Each value has *filter*, *exclude*, *search only this* and *copy*
+  actions; **Open trace** goes to `/traces/<TraceId>?span=<SpanId>`.
+  **Surrounding context** lists the records around it: anything, same
+  service, same host (`ResourceAttributes['host.name']`) or same trace,
+  within ±1 min to ±1 h.
+- **Patterns**: templates mined from a sample of the search (count, share,
+  trend, a sample record). **Denoise** hides the patterns above 10 % of the
+  sample. Clicking a pattern searches its constant words.
+- **Live**: polls every 3 s for records newer than the newest shown one
+  (an absolute range switches to the last 15 minutes).
+
+Token search (`body_search = "token"`) matches whole tokens, case-sensitively
+(the exporter index is on `Body`, not `lower(Body)`): `miss` matches
+`cache miss`, `mis` does not. Separate terms must all match; `"quoted text"`
+must appear verbatim; `-term` excludes.
+
+## Logs API
+
+All routes take `host_id` (optional with one host) and are registered only
+when `logs.enabled = true`. Searches, histograms and patterns share the
+filter parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `start_ms`, `end_ms` | Range, both inclusive (`end_ms` covers its whole millisecond). Without them: `lookback_minutes` (default 15). At most `logs.max_lookback_minutes`. |
+| `service` (repeated) | `ServiceName IN (...)`. `traces.service_allowlist` always applies. |
+| `severity_min` | `SeverityNumber >= n` (0-24). |
+| `severity` (repeated) | Classes `error` (>= 17), `warn` (13-16), `info` (9-12), `debug` (<= 8). |
+| `q` | Body search, see below. |
+| `attr` (repeated) | `key=value` or `key!=value`. A bare key matches `LogAttributes` or `ResourceAttributes`; `LogAttributes.<key>`, `ResourceAttributes.<key>`, `ScopeAttributes.<key>` pick one map; `ServiceName`, `SeverityText`, `TraceId`, `SpanId`, `ScopeName`, `ScopeVersion` compare the column. |
+| `trace_id`, `span_id` | Hexadecimal ids. |
+
+Every query filters the primary-key columns first (`ServiceName`, and
+`TimestampTime` on the older exporter layout, plus the exact `Timestamp`
+bound) and runs with `max_execution_time = 30` and
+`max_rows_to_read = 1000000000` (`read_overflow_mode = 'throw'`). A query over
+that guard answers `422 logs_scan_limit`, a timeout `504 logs_timeout`.
+
+**Body search.** `token`: the text is split into terms (whitespace,
+`"quoted phrases"`, `-negations`), each term into tokens exactly like
+`tokenbf_v1` does (every ASCII non-alphanumeric byte separates), and every
+token becomes `hasToken(Body, 'token')`, so the `idx_body` index skips
+granules and `hasToken()` never sees a separator. A term with separators
+(`analytics.events_buffer`, `key=user:12`) also needs
+`position(Body, 'term') > 0`. With a `lower(Body)` index the search uses
+`hasToken(lower(Body), ...)` and `positionCaseInsensitive`. `substring`:
+`Body ILIKE '%term%'`; searches then scan 15-minute windows only, and
+histograms / patterns with text are limited to 6 hours
+(`400 logs_substring_range`). `off`: `q` answers `400 logs_body_search_disabled`.
+
+### `GET /api/logs/search`
+
+Newest-first records. `limit` (default and maximum `logs.search_limit`),
+`cursor` (next page), `after` (live tail).
+
+- **Order and cursor.** `ORDER BY Timestamp DESC, cityHash64(ServiceName,
+  TraceId, SpanId, SeverityNumber, Body) DESC`; each row's `id` is
+  `<Timestamp ns>-<tiebreak>` and `next_cursor` continues strictly after the
+  last row: `Timestamp < ts OR (Timestamp = ts AND tiebreak < h)`. No
+  `OFFSET`: a page costs the same at any depth, and records sharing a
+  timestamp are never skipped or repeated.
+- **Progressive windows** (HyperDX `searchWindows`): the newest 15 minutes are
+  read first, then 1 h, 6 h and 24 h windows further back until the page is
+  full or the range start is reached. `windows` lists them with their row
+  counts and durations. After 12 s the search stops widening and answers
+  with a `next_cursor` that resumes below the last scanned window
+  (`budget_exhausted: true`).
+- **Live tail.** `after=<row id>` returns the records newer than that row
+  (newest first, `limit` at most; `tail_gap: true` when more arrived).
+
+Response: `rows` (`id`, `ts_ns`, `ts_ms`, `service`, `severity_text`,
+`severity_number`, `body` (first 16384 characters, `body_truncated` /
+`body_length` beyond), `trace_id`, `span_id`, `trace_flags`, `scope_name`,
+`scope_version`, `log_attributes`, `resource_attributes`,
+`scope_attributes`), `row_count`, `next_cursor`, `exhausted`, `truncated`,
+`windows`, `text_search: {active, mode, index_backed}`, `timing_ms`.
+
+```sql
+SELECT ... FROM otel.otel_logs
+WHERE TimestampTime >= toDateTime(lo_s) AND TimestampTime <= toDateTime(hi_s)
+  AND Timestamp >= fromUnixTimestamp64Nano(lo_ns) AND Timestamp <= fromUnixTimestamp64Nano(hi_ns)
+  AND <allowlist> AND ServiceName IN (...) AND hasToken(Body, 'cache') AND hasToken(Body, 'miss')
+ORDER BY Timestamp DESC, cityHash64(ServiceName, TraceId, SpanId, SeverityNumber, Body) DESC
+LIMIT 200
+SETTINGS max_execution_time = 30, timeout_overflow_mode = 'throw',
+         max_rows_to_read = 1000000000, read_overflow_mode = 'throw'
+```
+
+### `GET /api/logs/histogram`
+
+Record counts per bucket and severity class for the same filters. `buckets`
+(target count, 10-300, default 80) picks a 1 s .. 7 d bucket; `bucket_origin_ms`
+anchors the grid (the browser sends its local midnight, as the Traces
+analytics do). Response: `bucket_ms`, `bucket_origin_ms` (origin modulo the
+bucket), `buckets: [[start_ms, error, warn, info, debug], ...]` and `totals`
+(`total` is the sum of the buckets). Second-aligned grids bucket
+`TimestampTime` instead of `Timestamp`.
+
+### `GET /api/logs/context`
+
+Records around one record, ignoring the search filters: `ts_ns` and `tie`
+(the two halves of a row `id`), `preset` = `anything` | `service`
+(`service=`) | `host` (`host=`, matched on `ResourceAttributes['host.name']`) |
+`trace` (`trace_id=`), `window_ms` (1 s .. 1 h, default 5 min) and `limit` per
+side (default 50, maximum 200). Response: `rows` newest first with the anchor
+among them (`anchor_found`), `before_count`, `after_count`, `more_before`,
+`more_after`.
+
+### `GET /api/logs/patterns`
+
+Drain templates (the algorithm of HyperDX's `common-utils/drain`: depth 4,
+similarity 0.4, 100 children per node) mined server-side from a bounded
+sample. The route counts the matching records, then reads at most `sample`
+(default 10000) of them: all when they fit, else a deterministic block
+sample (`cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < rate`),
+which reads `Body` only for the granules holding a picked block (about a
+fifth of the bytes of `ORDER BY rand()` on the test fixture). Bodies are
+masked first (quoted strings, UUIDs and hex ids, numbers not glued to a
+word become `<*>`).
+
+Response: `total`, `sample_size`, `sampled`, `sample_method` (`all` or
+`block_hash`), `scale` (`total / sample_size`), `pattern_count` and
+`patterns` sorted by count: `pattern`, `sample_count`, `count` (scaled),
+`share` (of the sample), `noisy` (`share > 0.10`, hidden by Denoise),
+`sample` (one record), `search` (the constant words, usable as `q`),
+`service` / `service_count`, `severity` (most frequent class) and `sparkline`
+(scaled counts over `sparkline_buckets` equal slices of the range).
+
+### `GET /api/logs/services`
+
+Service names with record counts in the range (allowlist applied, other
+filters ignored), for the service picker.
 
 ## Test fixture
 

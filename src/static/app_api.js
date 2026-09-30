@@ -391,10 +391,17 @@
     return !!(payload && payload.ok);
   }
 
+  // Logs explorer routes: api/logs/{meta,search,histogram,context,patterns,services}.
+  async function getLogs(endpoint, params) {
+    const query = params instanceof URLSearchParams ? params : new URLSearchParams(params || {});
+    return getJson(`api/logs/${endpoint}?${query.toString()}`);
+  }
+
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
+    getLogs,
   };
 })();

@@ -1440,8 +1440,8 @@ test('/traces: the analytics charts hold their place from the first paint, so th
   }
 });
 
-for (const path of ['/query', '/explorer', '/traces']) {
-  test(`${path}: the Query / Explorer / Traces switcher is painted with the shell, before any API answer`, async ({ page }) => {
+for (const path of ['/query', '/explorer', '/traces', '/logs']) {
+  test(`${path}: the Query / Explorer / Traces / Logs switcher is painted with the shell, before any API answer`, async ({ page }) => {
     const api = await holdRequests(page, '**/api/**');
     try {
       const pageSelectBox = () => page.evaluate(() => {
@@ -1466,7 +1466,7 @@ for (const path of ['/query', '/explorer', '/traces']) {
       expect(await pageSelectBox()).toEqual(early);
       // The open menu lists the two other pages (the current one is implied).
       await page.locator('#pageSelectButton').click();
-      const others = ['query', 'explorer', 'traces'].filter((name) => `/${name}` !== path);
+      const others = ['query', 'explorer', 'traces', 'logs'].filter((name) => `/${name}` !== path);
       await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(others.map((name) => name[0].toUpperCase() + name.slice(1)));
     } finally {
       await api.release();

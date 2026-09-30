@@ -16,6 +16,9 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
     config = read("src/config.cpp")
     header = read("src/server.hpp")
     api = read("src/api_traces.cpp")
+    # The predicate lives in a header shared by the traces and logs routes.
+    assert '#include "otel_allowlist.hpp"' in api
+    api += read("src/otel_allowlist.hpp")
     example = read("config.example.hcl")
 
     assert "std::vector<std::string>" in hpp

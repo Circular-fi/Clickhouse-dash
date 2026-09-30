@@ -231,6 +231,11 @@ private:
   void handle_logs_meta(const httplib::Request& req, httplib::Response& res);
   // Logs of one trace for the trace detail page (api_trace_logs.cpp).
   void handle_trace_logs(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_search(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_histogram(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_context(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_patterns(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_services(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_meta(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();

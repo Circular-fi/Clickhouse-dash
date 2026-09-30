@@ -446,3 +446,32 @@ test('traces search bar fits the viewport: nothing clipped, Search fully visible
   expect(fit.buttonInside).toBe(true);
   expect(fit.docOverflow).toBeLessThanOrEqual(1);
 });
+
+for (const theme of ['dark', 'light']) {
+  test(`captures the logs explorer: results, record panel, context and patterns (${theme})`, async ({ page, request }, testInfo) => {
+    const meta = await (await request.get('/api/logs/meta')).json();
+    test.skip(!meta.enabled || !meta.time_bounds, 'logs are disabled or empty');
+    const fmt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+    const end = Number(meta.time_bounds.max_ms);
+    await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
+    await page.goto(`/logs?from=${encodeURIComponent(fmt(end - 30 * 60000))}&to=${encodeURIComponent(fmt(end + 1000))}`);
+    const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
+    await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('#logsHistogram rect.logsBar').first()).toBeVisible();
+    const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(await noOverflow()).toBe(true);
+    await captureState(page, testInfo, `logs-results-${theme}`);
+    await rows.nth(1).click();
+    await expect(page.locator('#logsSidePanel')).toBeVisible();
+    expect(await noOverflow()).toBe(true);
+    await captureState(page, testInfo, `logs-record-${theme}`);
+    await page.locator('#logsSideTabContext').click();
+    await expect(page.locator('#logsContextRows .logsContextRow.is-anchor')).toBeVisible();
+    await captureState(page, testInfo, `logs-context-${theme}`);
+    await page.locator('#logsSideClose').click();
+    await page.locator('#logsTabPatterns').click();
+    await expect(page.locator('#logsPatterns .logsPatternRow').first()).toBeVisible({ timeout: 30_000 });
+    expect(await noOverflow()).toBe(true);
+    await captureState(page, testInfo, `logs-patterns-${theme}`);
+  });
+}

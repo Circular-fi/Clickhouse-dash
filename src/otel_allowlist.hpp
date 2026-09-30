@@ -94,4 +94,9 @@ inline std::string service_allowlist_predicate(const TraceSettings& cfg) {
 }
 
 } // namespace otel
+
+// Unqualified spelling used by the logs and metrics routes.
+using otel::service_allowlist_predicate;
+using otel::service_pattern_predicate;
+
 } // namespace chdash

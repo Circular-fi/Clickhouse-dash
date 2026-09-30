@@ -62,6 +62,7 @@
     navQueryButton: byId("navQueryButton"),
     navExplorerButton: byId("navExplorerButton"),
     navTracesButton: byId("navTracesButton"),
+    navLogsButton: byId("navLogsButton"),
     queryWorkspace: byId("queryWorkspace"),
     explorerWorkspace: byId("explorerWorkspace"),
     tracesWorkspace: byId("tracesWorkspace"),

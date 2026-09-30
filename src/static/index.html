@@ -46,12 +46,12 @@
           delete root.dataset.theme;
         }
         root.dataset.themeMode = mode;
-        // The Query / Explorer / Traces switcher is part of the page shell and
+        // The Query / Explorer / Traces / Logs switcher is part of the page shell and
         // never waits on /api/version. Only a server that last reported neither
-        // Explorer nor Traces hides it, before the first paint.
+        // Explorer, Traces nor Logs hides it, before the first paint.
         try {
           var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
-          if (pageNav && pageNav.explorer === false && pageNav.traces !== true) {
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true) {
             document.documentElement.classList.add("chdash-page-select-hidden");
           }
         } catch (_) {}

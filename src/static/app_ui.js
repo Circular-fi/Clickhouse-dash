@@ -45,7 +45,7 @@
       const traces = data && data.features && data.features.traces ? data.features.traces : {};
       state.features.traces = { enabled: traces.enabled === true };
       const logs = data && data.features && data.features.logs ? data.features.logs : {};
-      state.features.logs = { enabled: logs.enabled === true };
+      state.features.logs = { enabled: logs.enabled === true, body_search: String(logs.body_search || "token") };
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
@@ -416,24 +416,28 @@
   }
 
   // The page switcher ships visible in every page shell. Only a server with
-  // neither Explorer nor Traces hides it; the head script of each page applies
-  // the last known availability (chdash-page-select-hidden) before first paint.
+  // neither Explorer, Traces nor Logs hides it; the head script of each page
+  // applies the last known availability (chdash-page-select-hidden) before
+  // first paint.
   function applyPageNavigation(nav) {
     const explorerEnabled = nav.explorer !== false;
     const tracesEnabled = nav.traces === true;
-    const hidden = !explorerEnabled && !tracesEnabled;
+    const logsEnabled = nav.logs === true;
+    const hidden = !explorerEnabled && !tracesEnabled && !logsEnabled;
     dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
     if (dom.pageSelect) dom.pageSelect.hidden = hidden;
     if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
     if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
+    if (dom.navLogsButton) dom.navLogsButton.hidden = !logsEnabled;
   }
 
   function applyProductFeatures() {
     const f = state.features?.explorer || {};
     const explorerEnabled = f.enabled !== false;
     const tracesEnabled = state.features?.traces?.enabled === true;
-    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled });
-    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled });
+    const logsEnabled = state.features?.logs?.enabled === true;
+    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled });
+    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       const next = api.resolveUrl("query");
       window.history.replaceState({ workspace: "query" }, "", next);
@@ -443,12 +447,17 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {} } }));
+    if (!logsEnabled && /\/logs(?:\/|$)/.test(window.location.pathname)) {
+      window.location.replace(api.resolveUrl("query"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {}, logs: state.features?.logs || {} } }));
   }
 
   function setPageSelectorValue(value) {
-    const page = value === "explorer" ? "explorer" : value === "traces" ? "traces" : "query";
-    if (dom.pageSelectButton) dom.pageSelectButton.textContent = page === "explorer" ? "Explorer" : page === "traces" ? "Traces" : "Query";
+    const labels = { query: "Query", explorer: "Explorer", traces: "Traces", logs: "Logs" };
+    const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
+    if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
       for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) {
         b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));

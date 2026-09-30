@@ -152,6 +152,15 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
+  const auto serve_logs_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/logs.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("logs.html not found", "text/plain");
+    }
+  };
+
   const auto serve_traces_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
     shell_req.path = "/traces.html";
@@ -170,6 +179,9 @@ Server::Server(AppConfig cfg, bool start_background)
   if (cfg_.traces.enabled) {
     http_.Get("/traces", serve_traces_shell);
     http_.Get(R"(/traces/.*)", serve_traces_shell);
+  }
+  if (cfg_.logs.enabled) {
+    http_.Get("/logs", serve_logs_shell);
   }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
@@ -218,6 +230,13 @@ Server::Server(AppConfig cfg, bool start_background)
   // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
   http_.Get("/api/logs/meta", [&](const auto& req, auto& res) { handle_logs_meta(req, res); });
   http_.Get("/api/metrics/meta", [&](const auto& req, auto& res) { handle_metrics_meta(req, res); });
+  if (cfg_.logs.enabled) {
+    http_.Get("/api/logs/search", [&](const auto& req, auto& res) { handle_logs_search(req, res); });
+    http_.Get("/api/logs/histogram", [&](const auto& req, auto& res) { handle_logs_histogram(req, res); });
+    http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
+    http_.Get("/api/logs/patterns", [&](const auto& req, auto& res) { handle_logs_patterns(req, res); });
+    http_.Get("/api/logs/services", [&](const auto& req, auto& res) { handle_logs_services(req, res); });
+  }
 
   if (cfg_.explorer.enabled()) {
     http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });

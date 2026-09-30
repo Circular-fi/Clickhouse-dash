@@ -3301,6 +3301,7 @@
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
     dom.navTracesButton?.addEventListener("click", () => window.location.assign(appRoute("/traces")));
+    dom.navLogsButton?.addEventListener("click", () => window.location.assign(appRoute("/logs")));
     window.addEventListener("popstate", () => { void applyRouteFromLocation(); });
     dom.explorerSectionSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu));
     dom.explorerModeSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu));

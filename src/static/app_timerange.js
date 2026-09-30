@@ -272,6 +272,7 @@
   //   getMaxMinutes()       -> widest range the server accepts
   //   onApply(raw, source)  -> the user applied a range ("form", "quick", "recent", "shift", "zoom")
   //   open() / close()      -> open / close the dropdown (shared picker motion)
+  //   settingName           -> server setting named by the max range error
   function mountPicker(el, options) {
     const { button, menu, select, fromInput, toInput, fromError, toError, rangeError, calendar, hint, applyButton, quickSearch, lists, timeZone, shiftBack, shiftForward, zoomOut } = el;
     const maxMs = () => Math.max(1, Number(options.getMaxMinutes()) || 1) * 60000;
@@ -422,7 +423,7 @@
       const errors = { from: Number.isFinite(startMs) ? "" : invalid, to: Number.isFinite(endMs) ? "" : invalid, range: "" };
       if (!errors.from && !errors.to) {
         if (startMs >= endMs) errors.range = '"From" must be before "To".';
-        else if (endMs - startMs > maxMs()) errors.range = `Max range is ${formatMinutes(options.getMaxMinutes())} (server setting traces.max_lookback_minutes).`;
+        else if (endMs - startMs > maxMs()) errors.range = `Max range is ${formatMinutes(options.getMaxMinutes())} (server setting ${options.settingName || "traces.max_lookback_minutes"}).`;
       }
       return { raw: { from, to }, errors, ok: !errors.from && !errors.to && !errors.range };
     }

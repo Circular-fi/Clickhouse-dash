@@ -13,7 +13,8 @@ def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
     assert ".min = " not in picker and ".max = " not in picker
     assert "function syncCustomRangeBounds()" not in js
     assert "if (startMs >= endMs) errors.range = '\"From\" must be before \"To\".';" in picker
-    assert "else if (endMs - startMs > maxMs()) errors.range = `Max range is ${formatMinutes(options.getMaxMinutes())} (server setting traces.max_lookback_minutes).`;" in picker
+    # The Logs page mounts the same picker and names its own setting.
+    assert "else if (endMs - startMs > maxMs()) errors.range = `Max range is ${formatMinutes(options.getMaxMinutes())} (server setting ${options.settingName || \"traces.max_lookback_minutes\"}).`;" in picker
     assert "setError(rangeError, null, result.errors.range);" in picker
     # The calendar disables end days past start + max range, never start days.
     assert "const disabled = picking && t - startMs >= limit;" in picker

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PAGES = ["index.html", "query.html", "explorer.html", "traces.html"]
+PAGES = ["index.html", "query.html", "explorer.html", "traces.html", "logs.html"]
 
 
 def read(rel):
@@ -20,7 +20,7 @@ def test_page_switcher_ships_visible_in_every_shell():
     css = read("src/static/style.css")
     assert "function applyPageNavigation(nav)" in ui
     assert 'dom.root?.classList.toggle("chdash-page-select-hidden", hidden);' in ui
-    assert "storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled });" in ui
+    assert "storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled });" in ui
     assert 'const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";' in state
     assert "html.chdash-page-select-hidden .pageSelect {" in css
 
