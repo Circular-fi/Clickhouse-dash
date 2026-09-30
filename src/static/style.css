@@ -6005,7 +6005,6 @@ body {
 /* Reserve scrollbar space on every persistent scroll surface so content does
    not shift when a scrollbar appears. */
 #queryTextArea,
-.tableWrap,
 .resultsStack__body,
 .queryLibraryMenu__content,
 .explorerListPane,
@@ -12189,14 +12188,29 @@ body[data-page="traces"] .tracePicker--range .tracePicker__menu {
   line-height: 1.25;
 }
 
-/* The row a menu is open on shows the expanded row's accent bar. */
-.resultTable tbody tr.is-rowMenuTarget > td.resultTable__rowIndex {
-  box-shadow: inset 3px 0 0 var(--accentBorder);
+/* Accent bar of the expanded row, of the row a menu is open on, and of the
+   detail under it: one 3px strip at the same x (just inside the cells' 1px
+   left border), drawn above the cell content so no background tints it. The
+   detail's bar starts 1px higher, over the row's bottom border (the index
+   cell clips its own overflow), so row and detail bars join. */
+.resultTable tbody td.resultTable__rowIndex:not(.resultTable__stickyLeft) {
+  position: relative;
+}
+
+.resultTable tbody tr.is-rowExpanded > td.resultTable__rowIndex::before,
+.resultTable tbody tr.is-rowMenuTarget > td.resultTable__rowIndex::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accentBorder);
+  pointer-events: none;
 }
 
 /* What the hovered / focused copy action applies to: the cell, the row or
-   the column; a single cell also gets an inset ring (layout and gauge fill
-   stay intact). */
+   the column, all with the same fill. */
 .resultTable tbody td.is-copyTarget,
 .resultTable thead th.is-copyTarget,
 .resultTable:not(.resultTable--vertical) tbody tr > td.resultTable__stickyLeft.is-copyTarget,
@@ -12205,9 +12219,6 @@ body[data-page="traces"] .tracePicker--range .tracePicker__menu {
   background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
 }
 
-.resultTable tbody td.is-copyTarget--cell {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accentBorder) 70%, transparent);
-}
 
 .runMenu.rowDetailsMenu.is-open {
   opacity: 1;
@@ -12250,14 +12261,25 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   box-sizing: border-box;
   max-width: 100%;
   min-width: 16rem;
-  /* Same accent bar as the expanded row's index cell: a 1px cell border then
-     a 3px inset bar, so both bars share the exact same x position. */
+  /* A 1px border like the cells, then the accent bar (::before), so the
+     detail's bar sits at the exact x of its row's bar. */
   border-left: 1px solid var(--rowDivider);
-  box-shadow: inset 3px 0 0 var(--accentBorder);
   background: transparent;
   color: var(--text);
   outline: none;
   cursor: auto;
+}
+
+.rowDetails::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  bottom: 0;
+  width: 3px;
+  z-index: 1;
+  background: var(--accentBorder);
+  pointer-events: none;
 }
 
 .rowDetails:focus-visible {
@@ -12374,6 +12396,4 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   background-color: color-mix(in srgb, var(--accentBorder) 16%, var(--panel));
 }
 
-.resultTable tbody tr.is-rowExpanded > td.resultTable__rowIndex {
-  box-shadow: inset 3px 0 0 var(--accentBorder);
-}
+

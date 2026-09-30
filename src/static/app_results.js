@@ -3611,19 +3611,17 @@
     return cells;
   }
 
+  // The column as a JSON array of its typed values, in data order, spelled
+  // like Copy row / Copy JSON.
   function columnCopyText(ctx, rows, columnIndex) {
     const ast = ctx.typeAsts[columnIndex] || null;
-    const lines = [];
+    const values = [];
     for (const row of rows || []) {
-      if (!Array.isArray(row)) continue;
-      const value = coerceDeepTyped(row[columnIndex], ast);
-      if (value === null || value === undefined) lines.push("");
-      else if (typeof value === "string") lines.push(value);
-      else if (typeof value === "number" || typeof value === "boolean") lines.push(String(value));
-      else lines.push(JSON.stringify(value));
+      if (Array.isArray(row)) values.push(coerceDeepTyped(row[columnIndex], ast));
     }
-    return lines.join("\n");
+    return JSON.stringify(values, null, 2);
   }
+
 
   function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, tr = null) {
     closeRowDetailsMenu();
@@ -3636,16 +3634,13 @@
     const items = [];
     let lit = [];
     const clearHighlight = () => {
-      for (const cell of lit) cell.classList.remove("is-copyTarget", "is-copyTarget--cell");
+      for (const cell of lit) cell.classList.remove("is-copyTarget");
       lit = [];
     };
     const highlight = (scope) => {
       clearHighlight();
       lit = rowMenuTargetCells(table, tr, columnIndex, scope);
-      for (const cell of lit) {
-        cell.classList.add("is-copyTarget");
-        if (scope === "cell") cell.classList.add("is-copyTarget--cell");
-      }
+      for (const cell of lit) cell.classList.add("is-copyTarget");
     };
     const addItem = (text, onPick, scope = "") => {
       const btn = document.createElement("button");
@@ -3681,7 +3676,6 @@
     if (ctx) addItem("Copy row", () => copy(JSON.stringify(buildRowDetailsObject(ctx, binding.row), null, 2)), "row");
     if (onColumn) {
       const source = rowDetailsSources.get(table);
-      // One value per line, in data order: pastes as a spreadsheet column.
       addItem("Copy column", () => copy(columnCopyText(ctx, source && typeof source.allRows === "function" ? source.allRows() : [], columnIndex)), "column");
     }
     const selection = selectedTextWithin(table);

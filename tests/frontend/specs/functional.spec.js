@@ -629,9 +629,27 @@ test('right-click Details expands a result row inline, under the row, and closes
     const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.resultTable__rowIndex');
     const detail = document.querySelector('.rowDetails');
     const inner = (el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).borderLeftWidth);
-    return { row: inner(index), detail: inner(detail) };
+    const bar = (el) => {
+      const cs = getComputedStyle(el, '::before');
+      return { bg: cs.backgroundColor, width: cs.width, left: cs.left, top: cs.top, z: cs.zIndex };
+    };
+    return {
+      row: inner(index), detail: inner(detail), rowBar: bar(index), detailBar: bar(detail),
+      gap: detail.getBoundingClientRect().top - index.getBoundingClientRect().bottom,
+    };
   });
   expect(Math.abs(bars.row - bars.detail)).toBeLessThan(0.5);
+  // Same colour, drawn above the detail content (nothing tints it), and the
+  // detail bar starts over the row's bottom border to meet the row bar.
+  expect(bars.rowBar.bg).toBe('rgb(37, 99, 235)');
+  expect(bars.detailBar.bg).toBe(bars.rowBar.bg);
+  expect([bars.rowBar.width, bars.detailBar.width]).toEqual(['3px', '3px']);
+  expect([bars.rowBar.left, bars.detailBar.left]).toEqual(['0px', '0px']);
+  expect(bars.detailBar.top).toBe('-1px');
+  expect(bars.detailBar.z).toBe('1');
+  expect(Math.abs(bars.gap)).toBeLessThanOrEqual(1);
+  // Result table wraps do not reserve a scrollbar gutter.
+  expect(await page.locator('#resultTableBody').evaluate((tbody) => getComputedStyle(tbody.closest('.tableWrap')).scrollbarGutter)).toBe('auto');
   const values = view.locator('.rowDetails__value');
   await expect(values).toHaveCount(8);
   await expect(values.nth(0)).toHaveText('2');
@@ -781,32 +799,44 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await expect(menu).not.toContainText(/shift/i);
   expect((await menu.getByRole('menuitem').first().boundingBox()).height).toBeLessThanOrEqual(28);
   await expect(rows.nth(2)).toHaveClass(/is-rowMenuTarget/);
-  expect(await rows.nth(2).locator('td.resultTable__rowIndex').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('inset');
+  expect(await rows.nth(2).locator('td.resultTable__rowIndex').evaluate((td) => getComputedStyle(td, '::before').backgroundColor)).toBe('rgb(37, 99, 235)');
   // Hovering an action lights exactly what it copies.
   const lit = () => page.evaluate(() => [...document.querySelectorAll('.is-copyTarget')].map((el) => {
     const tr = el.parentElement;
     return `${tr.parentElement.tagName}:${[...tr.parentElement.children].indexOf(tr)}:${el.cellIndex}`;
   }));
+  const fill = () => page.evaluate(() => [...new Set([...document.querySelectorAll('td.is-copyTarget')].map((el) => {
+    const cs = getComputedStyle(el);
+    return `${cs.backgroundColor}|${cs.boxShadow}`;
+  }))]);
   await menu.getByRole('menuitem', { name: 'Copy cell' }).hover();
   await expect.poll(lit).toEqual(['TBODY:2:2']);
+  const cellFill = await fill();
+  expect(cellFill).toHaveLength(1);
   await menu.getByRole('menuitem', { name: 'Copy row' }).hover();
   await expect.poll(async () => (await lit()).length).toBe(await rows.nth(2).locator('td').count());
   expect((await lit()).every((key) => key.startsWith('TBODY:2:'))).toBe(true);
+  // Same highlight as Copy cell (the index cell keeps its accent bar).
+  expect((await fill()).filter((f) => f !== cellFill[0]).length).toBeLessThanOrEqual(1);
   await menu.getByRole('menuitem', { name: 'Copy column' }).hover();
   await expect.poll(async () => (await lit()).every((key) => key.endsWith(':2'))).toBe(true);
   expect((await lit())[0]).toBe('THEAD:0:2');
   expect((await lit()).length).toBeGreaterThan(6);
+  expect(await fill()).toEqual(cellFill);
   // Copy cell: the right-clicked cell only (`name` of row 3).
   await menu.getByRole('menuitem', { name: 'Copy cell' }).click();
   await expect(menu).toHaveCount(0);
   await expect(page.locator('.is-copyTarget')).toHaveCount(0);
   await expect(rows.nth(2)).not.toHaveClass(/is-rowMenuTarget/);
   await expect.poll(readClipboard).toBe('name-2');
-  // Copy column: every value of the column, one per line, in data order.
+  // Copy column: a JSON array of the column's values, in data order.
   await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Copy column' }).click();
-  await expect.poll(async () => (await readClipboard()).split('\n').slice(0, 3)).toEqual(['name-0', 'name-1', 'name-2']);
-  expect((await readClipboard()).split('\n')).toHaveLength(60);
+  await expect.poll(async () => { try { return JSON.parse(await readClipboard()).slice(0, 3); } catch { return null; } }).toEqual(['name-0', 'name-1', 'name-2']);
+  expect(JSON.parse(await readClipboard())).toHaveLength(60);
+  await rows.nth(2).locator('td').nth(3).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Copy column' }).click();
+  await expect.poll(async () => { try { return JSON.parse(await readClipboard())[2]; } catch { return null; } }).toEqual([0, 1, 2]);
   // Copy row: the whole row as JSON (tuple flattened like the table).
   await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
   await menu.getByRole('menuitem', { name: 'Copy row' }).click();
