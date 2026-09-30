@@ -5,8 +5,11 @@
   if (!ns) return;
 
   const { dom, util, state } = ns;
+  const queryChart = ns.queryChart || null;
 
   let resultsStackElement = null;
+  // Table / Chart view of the main result panel (multiquery panels own theirs).
+  let mainChart = null;
 
   let resultColumns = [];
   let resultTypes = [];
@@ -243,6 +246,7 @@
     closeRowDetailsMenu();
     closeRowDetails({ silent: true });
     liveRowIngest.reset();
+    if (mainChart) mainChart.reset();
     const wasResultsVisible = dom.resultsPanel && !dom.resultsPanel.classList.contains("is-hidden");
     const preservedBodyScrollHeight = getDocumentScrollHeight();
     resultColumns = [];
@@ -1765,6 +1769,7 @@
       virtualScrollRafId = 0;
     }
     if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
+    if (mainChart) mainChart.setMeta(resultColumns, resultTypes);
     // Deliberately do not reveal headers yet. We need either two rows (horizontal)
     // or the terminal event (0 rows / one-row vertical) to choose the layout.
   }
@@ -1834,6 +1839,7 @@
         else needsFullRender = true;
       }
     }
+    if (mainChart) mainChart.rowsChanged();
 
     if (!livePresentationCommitted && allResultRows.length >= 2) {
       commitHorizontalPresentation();
@@ -2010,6 +2016,7 @@
     }
     maybeSwitchToVerticalSingleRow();
     maybeRenderSingleRowValueCell();
+    if (mainChart) mainChart.done();
   }
 
   function buildCopyValue(value) {
@@ -2489,6 +2496,21 @@
       wrapClone = wrap.cloneNode(true);
       removeIds(wrapClone);
       body.appendChild(wrapClone);
+    }
+
+    // Each panel keeps its own Table / Chart view and chart settings.
+    const panelChart = queryChart ? queryChart.createController({
+      getData: () => ({ rows: local.allRows }),
+      viewRoot: body,
+      onViewChange: (view) => {
+        closeRowDetailsMenu();
+        if (view === "table" && local.isVirtual && !local.isVertical) renderLocalVirtualRows(true);
+      },
+    }) : null;
+    if (panelChart) {
+      right.insertBefore(panelChart.toggleEl, copyCtrl.el);
+      body.appendChild(panelChart.hostEl);
+      resultsStackDisposers.push(() => panelChart.destroy());
     }
 
     block.appendChild(header);
@@ -3009,6 +3031,7 @@
         resetTableModeLocal();
         clearTableIn(local.wrap);
       }
+      if (panelChart) panelChart.setMeta(local.columns, local.types);
       // Do not commit a horizontal layout on result_meta alone. One-row
       // statements are only rendered vertically after their terminal event.
       updateMetaText();
@@ -3027,6 +3050,7 @@
         updateLocalGaugeMaximaFromRow(row);
         local.allRows.push(row);
       }
+      if (panelChart) panelChart.rowsChanged();
       if (!local.presentationCommitted) {
         if (local.allRows.length >= 2) commitLocalHorizontalPresentation();
         updateMetaText();
@@ -3117,6 +3141,7 @@
       clearLiveResults: () => {
         localRowIngest.reset();
         clearTableIn(local.wrap);
+        if (panelChart) panelChart.reset();
       },
       finalizeAfterDone: () => localRowIngest.whenIdle(),
       getRowCount: () => local.allRows.length,
@@ -3166,6 +3191,7 @@
           if (local.gaugesEnabled && hasGaugeCols) local.gaugesPainted = true;
         }
         maybeRenderSingleRowValueCellLocal();
+        if (panelChart) panelChart.done();
         if (autoToggle) setBlockExpandedLocal(blockObj, !!expandedByDefault);
       },
     };
@@ -3932,6 +3958,21 @@
       viewRows: () => (isVirtualResults && !isVerticalResults ? virtualViewRows : null),
       relayout: () => { if (isVirtualResults && !isVerticalResults) renderVirtualRows(true); },
     });
+  }
+
+  if (queryChart && dom.resultsPanel && dom.liveResultsWrap) {
+    mainChart = queryChart.createController({
+      getData: () => ({ rows: allResultRows }),
+      viewRoot: dom.resultsPanel,
+      toggleClassName: "resultsViewToggle--main",
+      onViewChange: (view) => {
+        closeRowDetailsMenu();
+        if (view === "table" && isVirtualResults && !isVerticalResults) renderVirtualRows(true);
+      },
+    });
+    const headerMeta = dom.resultsPanel.querySelector(".panel__header .panel__meta");
+    if (headerMeta) headerMeta.insertBefore(mainChart.toggleEl, dom.copySplit && dom.copySplit.parentElement === headerMeta ? dom.copySplit : null);
+    dom.liveResultsWrap.after(mainChart.hostEl);
   }
 
   ns.results = {

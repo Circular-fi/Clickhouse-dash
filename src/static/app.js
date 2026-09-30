@@ -69,6 +69,7 @@
       "app_meta.js",
       "app_highlight.js",
       "app_autocomplete.js",
+      "app_query_chart.js",
       "app_results.js",
       "app_ui.js",
       "app_trace_viewer.js",
