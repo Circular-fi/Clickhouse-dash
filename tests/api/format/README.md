@@ -368,6 +368,13 @@ SELECT
   condition they follow the width rule (`multiIf(retries > 3, 'flaky', NULL)`).
   A call that contains such a table is never joined onto one line.
 - An exploded `map(...)` puts one `key, value` pair per line.
+- A `CASE` that keeps its keywords (a statement with comments, which does not
+  go through formatQuery) follows the same rule: `CASE [operand]` stays on the
+  line, one `WHEN ... THEN ...` branch per line one level deeper, `ELSE` last,
+  and `END` back at the line's indentation followed by the rest of the line
+  (`END AS kind,`, `END = 1`). Operator keywords on that path are printed in
+  upper case like formatQuery does (`NOT`, `NULL`, `AS`, `IS`, `IN`, `LIKE`,
+  `BETWEEN`, CASE words, `ASC` / `DESC`, `NULLS FIRST`).
 
 ```sql
 SELECT

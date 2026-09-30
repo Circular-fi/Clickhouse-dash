@@ -1174,8 +1174,9 @@ string align_alias_line(string_view line, size_t target_as) {
 
 bool line_is_alignable_alias(string_view line) {
   const string t = trim_ascii_spaces(line);
-  // A closer line ends a multi-line item: `) AS x` and `] AS x` keep one space.
-  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "]") || starts_with_ci(t, "FROM ") ||
+  // A closer line ends a multi-line item: `) AS x`, `] AS x` and a CASE's
+  // `END AS x` keep one space.
+  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "]") || starts_with_ci(t, "END AS ") || starts_with_ci(t, "FROM ") ||
       starts_with_ci(t, "JOIN ") || starts_with_ci(t, "ARRAY JOIN ") ||
       starts_with_ci(t, "GLOBAL ARRAY JOIN ")) return false;
   const int as_pos = find_alias_marker_for_alignment(line);
@@ -1201,7 +1202,7 @@ void align_alias_groups(vector<string>& lines) {
     bool previous_multiline_alias = false;
     if (i > 0) {
       const string prev = trim_ascii_spaces(lines[i - 1]);
-      previous_multiline_alias = starts_with_ci(prev, ") AS `");
+      previous_multiline_alias = starts_with_ci(prev, ") AS `") || starts_with_ci(prev, "END AS `");
     }
     bool followed_by_table_cte = false;
     if (j < lines.size()) {
@@ -2759,6 +2760,85 @@ string align_multiline_settings(string text) {
 
 string take_trailing_line_comments(string* text);
 
+// formatQuery prints operator keywords in upper case; on the local
+// (comment-preserving) path the user's spelling reached the output
+// (`x -> not isNull(x)`, `[1, null]`, `tuple(1 as a)`, `case when ... end`).
+// Only words that cannot be identifiers in their position are changed:
+// never after `.` or `AS`, never a call name (`and(a, b)`), CASE words only
+// between CASE and its END, and nothing inside literals, quoted names or
+// comments. Same length, so no layout decision depends on it.
+string uppercase_expression_keywords(string s) {
+  const SqlMaskResult masked = mask_sql_surface(s);
+  const string& code = masked.code_lower;
+  struct Word { size_t begin; size_t end; };
+  vector<Word> words;
+  for (size_t i = 0; i < code.size();) {
+    if (!is_ident_char(code[i]) || (i > 0 && is_ident_char(code[i - 1]))) { ++i; continue; }
+    size_t e = i;
+    while (e < code.size() && is_ident_char(code[e])) ++e;
+    words.push_back({i, e});
+    i = e;
+  }
+  auto text = [&](size_t k) { return string_view(code).substr(words[k].begin, words[k].end - words[k].begin); };
+  auto next_char = [&](size_t pos) {
+    while (pos < code.size() && (code[pos] == ' ' || code[pos] == '\t' || code[pos] == '\n' || code[pos] == '\r')) ++pos;
+    return pos < code.size() ? code[pos] : '\0';
+  };
+  auto prev_char = [&](size_t pos) {
+    while (pos > 0 && (code[pos - 1] == ' ' || code[pos - 1] == '\t' || code[pos - 1] == '\n' || code[pos - 1] == '\r')) --pos;
+    return pos > 0 ? code[pos - 1] : '\0';
+  };
+  static const char* operators[] = {"null", "not", "and", "or", "as", "is", "in", "like", "ilike", "between"};
+  static const char* case_words[] = {"when", "then", "else"};
+  int case_depth = 0;
+  for (size_t k = 0; k < words.size(); ++k) {
+    const string_view w = text(k);
+    const size_t b = words[k].begin;
+    const size_t e = words[k].end;
+    const char before = prev_char(b);
+    const char after = next_char(e);
+    if (before == '.' || after == '.' || (b > 0 && (s[b - 1] == '`' || s[b - 1] == '"')) || std::isdigit(static_cast<unsigned char>(code[b]))) continue;
+    // An alias name, and format / engine names (`FORMAT Null`, `ENGINE =
+    // Null` are case-sensitive names, not the NULL literal).
+    if (k > 0 && (text(k - 1) == "as" || text(k - 1) == "format" || text(k - 1) == "engine")) continue;
+    bool upper = false;
+    auto next_word_is = [&](std::initializer_list<const char*> options) {
+      if (k + 1 >= words.size() || next_char(e) != code[words[k + 1].begin]) return false;
+      for (const char* o : options) if (text(k + 1) == o) return true;
+      return false;
+    };
+    const bool after_expression = is_ident_char(before) || before == ')' || before == ']' || before == '\'' || before == '`';
+    const bool prev_is_by = k > 0 && (text(k - 1) == "by" || text(k - 1) == "select");
+    if ((w == "asc" || w == "desc") && after_expression && !prev_is_by) {
+      // ORDER BY direction: followed by the end of the item or its modifiers.
+      upper = after == '\0' || after == ',' || after == ')' || after == ';' ||
+              next_word_is({"nulls", "limit", "offset", "settings", "format", "with", "collate", "union", "into"});
+    } else if (w == "nulls" && after_expression && !prev_is_by && next_word_is({"first", "last"})) {
+      upper = true;
+    } else if ((w == "first" || w == "last") && k > 0 && text(k - 1) == "nulls") {
+      upper = true;
+    } else if (w == "case" && after != '(') {
+      ++case_depth;
+      upper = true;
+    } else if (w == "end" && case_depth > 0) {
+      --case_depth;
+      upper = true;
+    } else if (case_depth > 0 && std::any_of(std::begin(case_words), std::end(case_words), [&](const char* cw) { return w == cw; })) {
+      upper = true;
+    } else if (std::any_of(std::begin(operators), std::end(operators), [&](const char* op) { return w == op; })) {
+      // An operator sits before an operand: a call name (`and(a, b)`), a
+      // list entry or an assignment target is left alone. `NOT (x)`,
+      // `IN (1, 2)` and `AS (SELECT ...)` take a parenthesized operand.
+      if (w == "null") upper = after != '(';
+      else if (after == '(') upper = w == "not" || w == "in" || w == "as";
+      else upper = after != '\0' && after != ',' && after != ')' && after != '=' && after != ']' && after != ';';
+    }
+    if (!upper) continue;
+    for (size_t i = b; i < e; ++i) s[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[i])));
+  }
+  return s;
+}
+
 string Formatter::format(string_view s) {
   // One-line comment recovery only applies to a buffer pasted as a single
   // line, where a `--` comment visibly swallows the clauses after it. In a
@@ -2778,7 +2858,7 @@ string Formatter::format(string_view s) {
     return body;
   };
   if (auto values = try_format_insert_values(text); !values.empty()) return with_comments(values);
-  text = strip_redundant_arith_parentheses(text);
+  text = uppercase_expression_keywords(strip_redundant_arith_parentheses(text));
   // Calls are exploded by width only inside queries; DDL lines (columns,
   // indexes, types, grants) keep the layout of their own formatters.
   bool query = false;
@@ -4349,6 +4429,31 @@ string backquote_plain_column_name(const string& name) {
   return plain ? "`" + name + "`" : name;
 }
 
+// `String default 'x'` → `String DEFAULT 'x'`: the column clause keyword
+// right after the type, as formatQuery prints it. Only that position: these
+// words are also common column names inside the clause expressions.
+string uppercase_column_clause_keyword(string rhs) {
+  const CallScan scan = scan_call_brackets(rhs);
+  int depth = 0;
+  size_t i = 0;
+  for (; i < rhs.size(); ++i) {
+    if (scan.kind[i] != kCallCode) continue;
+    if (rhs[i] == '(' || rhs[i] == '[') ++depth;
+    else if ((rhs[i] == ')' || rhs[i] == ']') && depth > 0) --depth;
+    else if (depth == 0 && rhs[i] == ' ') break;
+  }
+  while (i < rhs.size() && rhs[i] == ' ') ++i;
+  size_t e = i;
+  while (e < rhs.size() && is_ident_char(rhs[e])) ++e;
+  const string_view word = string_view(rhs).substr(i, e - i);
+  for (const char* kw : {"DEFAULT", "MATERIALIZED", "ALIAS", "EPHEMERAL", "CODEC", "TTL", "COMMENT"}) {
+    if (!iequals_ascii(word, kw)) continue;
+    for (size_t k = i; k < e; ++k) rhs[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(rhs[k])));
+    break;
+  }
+  return rhs;
+}
+
 // formatQuery prints a column type's Tuple with two or more elements one
 // element per line (4 spaces per Tuple level below the column) and its closer
 // hugging the last element; the schema pass after it puts each Tuple closer on
@@ -4478,7 +4583,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
       lhs = render_name(lhs);
       width = std::max(width, utf8_width(lhs));
     }
-    parsed.emplace_back(structural ? "" : lhs, structural ? col : explode_tuple_types_like_format_query(rhs, 4));
+    parsed.emplace_back(structural ? "" : lhs, structural ? col : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4));
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
@@ -4593,7 +4698,7 @@ string Formatter::format_create_table(string_view s) {
     lhs = backquote_plain_column_name(lhs);
     width = std::max(width, utf8_width(lhs));
     const bool structural = lhs.front() != '`' && lhs.front() != '"';
-    parsed.push_back({lhs, structural ? rhs : explode_tuple_types_like_format_query(rhs, 4)});
+    parsed.push_back({lhs, structural ? rhs : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4)});
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
@@ -4947,6 +5052,74 @@ string Formatter::try_format_insert_values(string_view s) {
 // Width rule on the final text (see collapse_fitting_calls): join what fits,
 // then explode one-line calls that overflow. Exploding is limited to query
 // statements; DDL keeps its column, index and type lines.
+// `CASE [operand] WHEN c THEN v ... [ELSE e] END` written on one line (the
+// local path; formatQuery turns CASE into multiIf): like multiIf, vertical
+// with two or more WHEN branches or when the line is too long, one branch per
+// line one level deeper and END back at the line's indentation followed by
+// the rest of the line (`END AS kind,`, `END = 1`). Returns {} when the line
+// has no complete top-level CASE to lay out.
+vector<string> explode_case_expression(const string& line, size_t threshold) {
+  const CallScan scan = scan_call_brackets(line);
+  for (const unsigned char k : scan.kind) if (k == kCallComment) return {};
+  struct Word { size_t begin; size_t end; int depth; };
+  vector<Word> words;
+  int depth = 0;
+  for (size_t i = 0; i < line.size(); ++i) {
+    if (scan.kind[i] != kCallCode) continue;
+    const char c = line[i];
+    if (c == '(' || c == '[') { ++depth; continue; }
+    if (c == ')' || c == ']') { if (depth > 0) --depth; continue; }
+    if (!is_ident_char(c) || (i > 0 && is_ident_char(line[i - 1]))) continue;
+    size_t e = i;
+    while (e < line.size() && is_ident_char(line[e])) ++e;
+    words.push_back({i, e, depth});
+    i = e - 1;
+  }
+  auto is = [&](size_t k, const char* kw) {
+    return iequals_ascii(string_view(line).substr(words[k].begin, words[k].end - words[k].begin), kw);
+  };
+  size_t case_k = string::npos;
+  for (size_t k = 0; k < words.size(); ++k) {
+    if (words[k].depth == 0 && is(k, "CASE")) { case_k = k; break; }
+  }
+  if (case_k == string::npos) return {};
+  // Branch keywords of this CASE (nested CASE ... END skipped).
+  vector<size_t> marks;
+  size_t end_k = string::npos;
+  int nested = 0;
+  for (size_t k = case_k + 1; k < words.size(); ++k) {
+    if (words[k].depth != 0) continue;
+    if (is(k, "CASE")) { ++nested; continue; }
+    if (is(k, "END")) {
+      if (nested > 0) { --nested; continue; }
+      end_k = k;
+      break;
+    }
+    if (nested == 0 && (is(k, "WHEN") || is(k, "THEN") || is(k, "ELSE"))) marks.push_back(k);
+  }
+  if (end_k == string::npos || marks.empty() || !is(marks.front(), "WHEN")) return {};
+  size_t whens = 0;
+  for (const size_t m : marks) whens += is(m, "WHEN") ? 1 : 0;
+  if (whens < 2 && utf8_width(line) <= threshold) return {};
+
+  const size_t indent = leading_space_count(line);
+  auto piece = [&](size_t from, size_t to) { return trim_ascii_spaces(string_view(line).substr(from, to - from)); };
+  vector<string> out;
+  const string operand = piece(words[case_k].end, words[marks.front()].begin);
+  out.push_back(line.substr(0, words[case_k].end) + (operand.empty() ? "" : " " + operand));
+  for (size_t m = 0; m < marks.size(); ++m) {
+    const size_t next = m + 1 < marks.size() ? words[marks[m + 1]].begin : words[end_k].begin;
+    const string body = piece(words[marks[m]].begin, next);
+    if (is(marks[m], "THEN")) {
+      out.back() += " " + body;
+    } else {
+      out.push_back(string(indent + 4, ' ') + body);
+    }
+  }
+  out.push_back(string(indent, ' ') + line.substr(words[end_k].begin));
+  return out;
+}
+
 string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   vector<size_t> joined_rows;
   string out = collapse_fitting_calls(text, threshold, &joined_rows);
@@ -4954,7 +5127,17 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   if (!allow_explode) return attach_operators_to_closers(out, threshold);
   vector<string> result;
   bool exploded = false;
-  for (const string& line : split_lines_keep(out)) {
+  // CASE branches first (they may nest), then calls on the resulting lines.
+  vector<string> pending = split_lines_keep(out);
+  std::reverse(pending.begin(), pending.end());
+  while (!pending.empty()) {
+    string line = std::move(pending.back());
+    pending.pop_back();
+    if (vector<string> branches = explode_case_expression(line, threshold); !branches.empty()) {
+      for (auto it = branches.rbegin(); it != branches.rend(); ++it) pending.push_back(std::move(*it));
+      exploded = true;
+      continue;
+    }
     vector<string> pieces = explode_overlong_line(line, 0);
     exploded = exploded || pieces.size() > 1;
     for (string& piece : pieces) result.push_back(std::move(piece));

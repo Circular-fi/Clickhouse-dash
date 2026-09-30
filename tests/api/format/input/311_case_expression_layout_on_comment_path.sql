@@ -1,0 +1,2 @@
+-- classify spans
+select case when status_code = 'Error' and duration_ms > 1000 then 'slow error' when status_code = 'Error' then 'error' else 'ok' end as kind, case http_method when 'GET' then 'read' else 'write' end as access, count() as spans from otel.traces group by kind, access

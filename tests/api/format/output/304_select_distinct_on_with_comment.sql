@@ -4,4 +4,4 @@ SELECT DISTINCT ON (service_name, span_name)
     span_name,
     duration_ms
 FROM otel.traces
-ORDER BY timestamp desc
+ORDER BY timestamp DESC
