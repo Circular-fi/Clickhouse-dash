@@ -712,6 +712,13 @@ vector<std::pair<int, string>> find_select_clauses(
         // the alias token as a clause truncates the SELECT projection before
         // the formatter gets a chance to quote the reserved identifier.
         if (previous_word_is_as(text, i)) continue;
+        // `format('{} {}', a, b)` is the string function, not the FORMAT
+        // clause: a FORMAT clause is followed by a format name, never `(`.
+        if (iequals_ascii(clause, "FORMAT")) {
+          size_t after = i + clause.size();
+          while (after < text.size() && (text[after] == ' ' || text[after] == '\n' || text[after] == '\t')) ++after;
+          if (after < text.size() && text[after] == '(') continue;
+        }
         if (matched.empty() || clause.size() > matched.size()) matched = clause;
       }
       if (!matched.empty()) {
@@ -841,14 +848,25 @@ bool contains_top_level_comment(string_view s) {
 bool contains_heavy_structure(string_view s) {
   const string text = trim_ascii_spaces(s);
   if (looks_like_query(text)) return true;
+  // Layout decisions must not depend on literal or comment contents: a format
+  // string such as '{} {}', a '[...]' in text or '-> SELECT' inside a string is
+  // not structure. Search the lower-cased code surface (literals and comments
+  // blanked) with lower-cased needles.
+  const string code = mask_sql_surface(text).code_lower;
   static const char* needles[] = {
-      "->", "SELECT", "exists(", "OVER (", "arrayZip(", "map(", "dictGet(",
-      "dictGetOrDefault(", "JSONExtract", "multiIf(", "arrayMap(", "arrayFilter(", "arrayExists(",
-      "arrayAll(", "arrayCount("};
+      "->", "exists(", "over (", "arrayzip(", "map(", "dictget(",
+      "dictgetordefault(", "jsonextract", "multiif(", "arraymap(", "arrayfilter(", "arrayexists(",
+      "arrayall(", "arraycount("};
   for (const char* needle : needles) {
-    if (text.find(needle) != string::npos) return true;
+    if (code.find(needle) != string::npos) return true;
   }
-  return text.find('[') != string::npos || text.find('{') != string::npos;
+  // SELECT as a keyword only (not `selected_rows`).
+  for (size_t at = code.find("select"); at != string::npos; at = code.find("select", at + 1)) {
+    const bool left = at == 0 || !is_ident_char(code[at - 1]);
+    const bool right = at + 6 >= code.size() || !is_ident_char(code[at + 6]);
+    if (left && right) return true;
+  }
+  return code.find('[') != string::npos || code.find('{') != string::npos;
 }
 
 

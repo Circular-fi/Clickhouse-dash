@@ -306,7 +306,10 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     // neither formatQuery (which re-quotes them) nor the local scanners (which
     // do not know heredocs) see their bodies; the exact spelling is put back
     // at the end, like other literal spellings.
-    const SqlHeredocMask heredocs = mask_sql_heredocs(sql);
+    SqlHeredocMask heredocs = mask_sql_heredocs(sql);
+    // Placeholders use private-use code points: never mask SQL that already
+    // contains them (same guard as mask_sql_heredocs).
+    if (sql.find("\xEE") == std::string::npos) mask_sql_multiline_literals(heredocs);
     const std::string& source_sql = heredocs.sql;
 
     std::string pretty;

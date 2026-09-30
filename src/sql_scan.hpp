@@ -563,6 +563,49 @@ inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
   return mask;
 }
 
+// Multi-line single-quoted literals are masked like heredocs. The line-based
+// post-processor re-indents and re-spaces every line it sees, so the body of a
+// literal spanning several lines (HTTP headers, HTML, JSON documents...) was
+// rewritten as if it were SQL (`Content-Type` -> `Content - Type`, indentation
+// injected into the string), changing the value. The placeholder is one line
+// as wide as the literal's widest line; the exact bytes are restored at the end.
+inline void mask_sql_multiline_literals(SqlHeredocMask& mask) {
+  const std::string source = mask.sql;
+  if (source.find('\n') == std::string::npos) return;
+  const auto ranges = sql_single_quoted_literal_ranges(source);
+  std::string out;
+  out.reserve(source.size());
+  size_t cursor = 0;
+  for (const auto& [begin, end] : ranges) {
+    const std::string_view spelling = std::string_view(source).substr(begin, end - begin);
+    if (spelling.find('\n') == std::string_view::npos) continue;
+    const size_t index = mask.heredocs.size();
+    if (index >= 0x1000) break;
+    size_t width = 4;
+    for (size_t line_start = 0; line_start <= spelling.size();) {
+      const size_t nl = spelling.find('\n', line_start);
+      const size_t line_end = nl == std::string_view::npos ? spelling.size() : nl;
+      width = std::max(width, sql_display_width(spelling.substr(line_start, line_end - line_start)));
+      if (nl == std::string_view::npos) break;
+      line_start = nl + 1;
+    }
+    const char32_t marker = 0xE000 + static_cast<char32_t>(index);
+    std::string placeholder = "'";
+    placeholder.push_back(static_cast<char>(0xE0 | (marker >> 12)));
+    placeholder.push_back(static_cast<char>(0x80 | ((marker >> 6) & 0x3F)));
+    placeholder.push_back(static_cast<char>(0x80 | (marker & 0x3F)));
+    placeholder.append(width - 3, '_');
+    placeholder.push_back('\'');
+    out.append(source, cursor, begin - cursor);
+    out += placeholder;
+    mask.heredocs.emplace_back(std::move(placeholder), std::string(spelling));
+    cursor = end;
+  }
+  if (cursor == 0 && out.empty()) return;
+  out.append(source, cursor, source.size() - cursor);
+  mask.sql = std::move(out);
+}
+
 inline std::string restore_sql_heredocs(std::string formatted, const SqlHeredocMask& mask) {
   if (mask.heredocs.empty()) return formatted;
   std::string out;
