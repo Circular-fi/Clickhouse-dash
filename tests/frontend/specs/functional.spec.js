@@ -90,6 +90,17 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await expect(format).toBeDisabled();
   await expect(clear).toBeDisabled();
+  // Format is an icon button (indented lines) between Queries and the run
+  // settings cog, on the same line.
+  await expect(format).toHaveAttribute('aria-label', 'Format SQL');
+  await expect(format).toHaveText('');
+  await expect(format.locator('.formatButton__icon')).toBeVisible();
+  const order = await page.evaluate(() => {
+    const box = (id) => document.getElementById(id).getBoundingClientRect();
+    const q = box('queryLibraryButton'); const f = box('formatButton'); const c = box('runSettingsButton');
+    return { afterQueries: f.left >= q.right, beforeCog: f.right <= c.left, sameLine: Math.abs((f.top + f.bottom) / 2 - (c.top + c.bottom) / 2) <= 2 };
+  });
+  expect(order).toEqual({ afterQueries: true, beforeCog: true, sameLine: true });
   await editor.fill('select  1 as x');
   await expect(format).toBeEnabled();
   await format.click();

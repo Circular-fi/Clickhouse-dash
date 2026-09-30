@@ -305,8 +305,6 @@
               </button>
             </div>
           </div>
-          <button id="formatButton" class="button" type="button">Format</button>
-
           <div id="queryLibrary" class="themeSelect queryLibrary" aria-label="Query actions">
             <button
               id="queryLibraryButton"
@@ -322,6 +320,9 @@
               <div id="queryLibraryContent" class="queryLibraryMenu__content"></div>
             </div>
           </div>
+          <!-- Format: an icon button between Queries and the run settings cog. -->
+          <button id="formatButton" class="formatButton" type="button" aria-label="Format SQL" title="Format SQL"><span class="formatButton__icon" aria-hidden="true"></span></button>
+
           <div id="runSettings" class="themeSelect runSettings" aria-label="Run settings">
             <button id="runSettingsButton" class="runSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Run settings" title="Run settings"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
             <div id="runSettingsMenu" class="themeSelect__menu runSettings__menu" role="menu" tabindex="-1" hidden>
