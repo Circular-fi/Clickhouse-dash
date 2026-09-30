@@ -115,7 +115,8 @@ async function openTrace(page, query = '') {
 }
 
 const row = (page, id) => page.locator(`#traceWaterfall .traceSpanRow[data-span-id="${id}"]`);
-const openSpan = (page, id) => row(page, id).click({ position: { x: 4, y: 8 } });
+// On the span name: the left edge holds the tree guides and collapse box.
+const openSpan = (page, id) => row(page, id).locator('.traceSpanRow__name').click();
 const inspector = (page, id) => page.locator(`#traceWaterfall [data-inspector-span="${id}"]`);
 
 async function captureCopies(page) {
