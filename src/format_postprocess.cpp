@@ -3564,10 +3564,56 @@ string Formatter::format_over_clause(string_view expr) {
   return head + " OVER (\n" + indent_block(join_lines(lines), 4) + "\n)";
 }
 
+// A comma list whose items carry `--` comments: each whole-line comment
+// before an item belongs after the previous item (it was written after that
+// item's comma), comments before the first item stay above it. Returns false
+// when a comment sits inside an item (block comments, a comment within a
+// value), which the caller then leaves alone.
+struct CommentedItems {
+  vector<string> items;
+  vector<string> after;
+  string before_first;
+};
+
+bool split_commented_items(string_view inner, CommentedItems* out) {
+  for (const auto& raw : split_top_level(inner, ',')) {
+    string value = trim_ascii_spaces(raw);
+    while (starts_with_ci(value, "--") || starts_with_ci(value, "#")) {
+      auto [lead, rest] = split_leading_line_comment(value);
+      if (out->items.empty()) out->before_first += (out->before_first.empty() ? "" : "\n") + lead;
+      else out->after.back() += (out->after.back().empty() ? "" : " ") + lead;
+      value = rest;
+    }
+    // An empty item is a trailing comma (`('a',)` is a one-element tuple,
+    // not a parenthesized string): leave such a list as written.
+    if (value.empty()) return false;
+    auto [code, trailing] = split_inline_comment(value);
+    // Comments nested in brackets are laid out by the item's own formatter;
+    // a block comment at the item's top level has no place here.
+    if (contains_top_level_comment(code)) return false;
+    out->items.push_back(trim_ascii_spaces(code));
+    out->after.push_back(trailing);
+  }
+  return !out->items.empty();
+}
+
 string Formatter::format_array_literal(string_view expr) {
   const string s = trim_ascii_spaces(expr);
   if (s.size() < 2 || s.front() != '[' || s.back() != ']') return {};
   const string inner = trim_ascii_spaces(s.substr(1, s.size() - 2));
+  if (mask_sql_surface(inner).has_comments) {
+    CommentedItems list;
+    if (!split_commented_items(inner, &list)) return {};
+    string out = "[\n";
+    if (!list.before_first.empty()) out += indent_block(list.before_first, 4) + "\n";
+    for (size_t i = 0; i < list.items.size(); ++i) {
+      out += indent_block(format_expression(list.items[i]), 4);
+      if (i + 1 < list.items.size()) out += ',';
+      if (!list.after[i].empty()) out += " " + list.after[i];
+      out += '\n';
+    }
+    return out + "]";
+  }
   const auto items = split_top_level(inner, ',');
   const bool multiline = s.find('\n') != string::npos || s.size() > threshold || inner.find('(') != string::npos || inner.find('[') != string::npos || inner.find('{') != string::npos;
   if (items.size() <= 1 && !multiline) return {};
@@ -3635,6 +3681,10 @@ string Formatter::format_function_call(string_view expr, bool force) {
     }
     string current = remainder.empty() ? trim_ascii_spaces(raw) : remainder;
     if (current.empty()) continue;
+    // A comment before the first argument has no argument to trail: it stays
+    // on its own line above that argument (the expression formatter keeps a
+    // leading comment line).
+    if (!leading_comment.empty() && args.empty()) current = leading_comment + "\n" + current;
     args.push_back(current);
     comments_after.emplace_back();
   }
@@ -3651,7 +3701,13 @@ string Formatter::format_function_call(string_view expr, bool force) {
     return compact;
   };
 
-  if (!force && iequals_ascii(name, "arrayFilter") && args.size() >= 2) {
+  // The compact forms below join the source arguments: never with a comment
+  // between or inside them.
+  bool arg_comments = false;
+  for (size_t i = 0; i < args.size(); ++i) {
+    arg_comments = arg_comments || !comments_after[i].empty() || mask_sql_surface(args[i]).has_comments;
+  }
+  if (!force && !arg_comments && iequals_ascii(name, "arrayFilter") && args.size() >= 2) {
     string compact = compact_source_args();
     const int arrow = find_top_level_arrow(args.front());
     string rhs = arrow > 0 ? trim_ascii_spaces(string_view(args.front()).substr(static_cast<size_t>(arrow) + 2)) : string();
@@ -3662,7 +3718,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     }
   }
 
-  if (!force && s.find('\n') == string::npos) {
+  if (!force && !arg_comments && s.find('\n') == string::npos) {
     string compact = compact_source_args();
     const bool compact_fits = compact.size() <= wrap_threshold;
     if (compact_fits && (iequals_ascii(name, "CAST") || iequals_ascii(name, "roundBankers") ||
@@ -3757,28 +3813,42 @@ string Formatter::format_function_call(string_view expr, bool force) {
   }
 
   string out = name + "(\n";
-  if (iequals_ascii(name, "multiIf") && rendered.size() >= 3) {
+  // Pair layouts keep a comment written after a pair's second element at the
+  // end of the pair line; a comment after the first element of a pair (or
+  // after a multi-line element) has no place there, so the call falls back to
+  // one argument per line.
+  auto comment_after = [&](size_t i) { return i < comments_after.size() ? comments_after[i] : string(); };
+  auto with_comment = [&](size_t i) { const string c = comment_after(i); return c.empty() ? string() : " " + c; };
+  auto pairs_fit_comments = [&](size_t first) {
+    for (size_t i = first; i < rendered.size(); ++i) {
+      const bool second = (i - first) % 2 == 1 || i + 1 == rendered.size();
+      if (!comment_after(i).empty() && (!second || rendered[i].find('\n') != string::npos)) return false;
+    }
+    return true;
+  };
+  if (iequals_ascii(name, "multiIf") && rendered.size() >= 3 && pairs_fit_comments(0)) {
     for (size_t i = 0; i + 1 < rendered.size(); i += 2) {
       if (i + 1 == rendered.size() - 1) break;
-      out += "    " + rendered[i] + ", " + rendered[i + 1] + ",\n";
+      out += "    " + rendered[i] + ", " + rendered[i + 1] + "," + with_comment(i + 1) + "\n";
     }
-    out += "    " + rendered.back() + "\n)";
+    out += "    " + rendered.back() + with_comment(rendered.size() - 1) + "\n)";
     return out;
   }
   // `CASE x WHEN ... END` reaches us as caseWithExpression(x, w1, t1, ..., else):
   // the operand keeps its own line, then one `when, then` pair per line.
-  if (iequals_ascii(name, "caseWithExpression") && rendered.size() >= 4 && rendered.size() % 2 == 0) {
+  if (iequals_ascii(name, "caseWithExpression") && rendered.size() >= 4 && rendered.size() % 2 == 0 &&
+      comment_after(0).empty() && pairs_fit_comments(1)) {
     out += "    " + rendered.front() + ",\n";
-    for (size_t i = 1; i + 1 < rendered.size(); i += 2) out += "    " + rendered[i] + ", " + rendered[i + 1] + ",\n";
-    out += "    " + rendered.back() + "\n)";
+    for (size_t i = 1; i + 1 < rendered.size(); i += 2) out += "    " + rendered[i] + ", " + rendered[i + 1] + "," + with_comment(i + 1) + "\n";
+    out += "    " + rendered.back() + with_comment(rendered.size() - 1) + "\n)";
     return out;
   }
-  if (iequals_ascii(name, "map") && rendered.size() >= 2) {
+  if (iequals_ascii(name, "map") && rendered.size() >= 2 && pairs_fit_comments(0)) {
     for (size_t i = 0; i < rendered.size(); i += 2) {
       out += "    " + rendered[i];
       if (i + 1 < rendered.size()) out += ", " + rendered[i + 1];
       if (i + 2 < rendered.size()) out += ',';
-      out += '\n';
+      out += with_comment(std::min(i + 1, rendered.size() - 1)) + '\n';
     }
     out += ')';
     return out;
@@ -3931,6 +4001,25 @@ string Formatter::format_expression(string_view expr) {
   // formatter does not re-render (`f(\n    x\n).1`) would otherwise keep its
   // input indentation and be indented again on every pass.
   if (s.find('\n') != string::npos && !mask_sql_surface(s).has_comments) s = collapse_whitespace(s);
+  // A tuple literal with comments between its items: one item per line, like
+  // an array literal, instead of the input lines (which kept their input
+  // indentation and drifted on every pass).
+  if (s.size() > 2 && s.front() == '(' && find_matching_paren(s, 0) == s.size() - 1) {
+    const string inner = trim_ascii_spaces(s.substr(1, s.size() - 2));
+    CommentedItems list;
+    if (mask_sql_surface(inner).has_comments && !looks_like_query(inner) && split_top_level(inner, ',').size() > 1 &&
+        split_commented_items(inner, &list)) {
+      string out = "(\n";
+      if (!list.before_first.empty()) out += indent_block(list.before_first, 4) + "\n";
+      for (size_t i = 0; i < list.items.size(); ++i) {
+        out += indent_block(format_expression(list.items[i]), 4);
+        if (i + 1 < list.items.size()) out += ',';
+        if (!list.after[i].empty()) out += " " + list.after[i];
+        out += '\n';
+      }
+      return out + ")";
+    }
+  }
   if (!s.empty() && s.front() == '(') {
     const size_t close = find_matching_paren(s, 0);
     if (close != string::npos && close + 1 < s.size() && s[close + 1] == '.') {
@@ -4031,6 +4120,19 @@ string Formatter::format_expression(string_view expr) {
     s = lhs + " " + op + " " + rhs;
   }
   s = strip_lambda_parentheses(s);
+  // Kept as written. With a comment inside a line (`f(a, -- c` ...), the
+  // text keeps its line breaks; its continuation lines carry the input's absolute indentation, which the
+  // caller would indent again on every pass: hang them one level under the
+  // first line instead (stable, since the result is its own input).
+  // An already exploded shape (first line ending with its opener) keeps its
+  // own relative layout.
+  const string first_code = rtrim_spaces(split_inline_comment(s.substr(0, s.find('\n'))).first);
+  const bool opener_line = !first_code.empty() && (first_code.back() == '(' || first_code.back() == '[');
+  if (s.find('\n') != string::npos && !opener_line && mask_sql_surface(s).has_comments) {
+    vector<string> lines = split_lines_keep(cleanup_surface(s));
+    for (size_t k = 1; k < lines.size(); ++k) lines[k] = "    " + trim_ascii_spaces(lines[k]);
+    return join_lines(lines);
+  }
   return cleanup_surface(s);
 }
 
@@ -4077,6 +4179,9 @@ string Formatter::format_in_literal(string_view expr) {
       for (const char* raw : ops) {
         const string_view op(raw);
         if (i + op.size() > expr.size() || !iequals_ascii(expr.substr(i, op.size()), op)) continue;
+        // Whole words only: the `in` of `argMin(` or `min_value` is not IN.
+        if ((i > 0 && is_ident_char(expr[i - 1])) ||
+            (i + op.size() < expr.size() && is_ident_char(expr[i + op.size()]))) continue;
         const string left = trim_ascii_spaces(expr.substr(0, i));
         const string right = trim_ascii_spaces(expr.substr(i + op.size()));
         if (left.empty() || right.empty()) continue;
@@ -4103,6 +4208,26 @@ string Formatter::format_in_literal(string_view expr) {
 
         const string right_inner = unwrap_outer_parens(right);
         if (!right_inner.empty() && looks_like_query(right_inner)) continue;
+        // A value list with comments: one value per line, each comment kept
+        // after the value it follows (the width pass never touches lines
+        // with comments, so they would otherwise keep their input indentation
+        // and drift on every pass).
+        if (!right_inner.empty() && mask_sql_surface(right_inner).has_comments) {
+          CommentedItems list;
+          if (!split_commented_items(right_inner, &list)) return {};
+          const vector<string>& values = list.items;
+          const vector<string>& after = list.after;
+          const string& before_first = list.before_first;
+          string rendered = left + " " + string(op) + " (\n";
+          if (!before_first.empty()) rendered += indent_block(before_first, 4) + "\n";
+          for (size_t j = 0; j < values.size(); ++j) {
+            rendered += "    " + format_expression(values[j]);
+            if (j + 1 < values.size()) rendered += ',';
+            if (!after[j].empty()) rendered += " " + after[j];
+            rendered += '\n';
+          }
+          return rendered + ")";
+        }
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};

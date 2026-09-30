@@ -77,6 +77,19 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
     for path in sorted((ROOT / "tests/api/format/input").glob("*.sql")):
         for stmt in split_statements(path.read_text(encoding="utf-8")):
             items.append((f"fixture:{path.name}", stmt))
+    if COMMA_COMMENTS:
+        # A numbered line comment after every comma of the code: each one must
+        # come out exactly once (comments are the author's, never dropped).
+        commented = []
+        for origin, stmt in items:
+            # `[..]::T` casts the bracket text itself: a comment inside it is
+            # part of the literal (and of the AST).
+            if "--" in stmt or "/*" in stmt or "$$" in stmt or "]::" in stmt or ")::" in stmt or stmt.upper().startswith("INSERT"):
+                continue
+            marked = inject_comma_comments(stmt)
+            if marked != stmt:
+                commented.append((origin + "+comma-comments", marked))
+        items = commented
     if COMMENTS:
         # Comments route statements through the local formatter instead of
         # ClickHouse's formatQuery; they never change the AST.
@@ -93,6 +106,26 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
     return unique
 
 
+def inject_comma_comments(sql):
+    out, quote, n = [], None, 0
+    i = 0
+    while i < len(sql):
+        c = sql[i]
+        out.append(c)
+        if quote:
+            if c == "\\" and quote in "'\"":
+                out.append(sql[i + 1: i + 2]); i += 2; continue
+            if c == quote:
+                quote = None
+        elif c in "'\"`":
+            quote = c
+        elif c == ",":
+            n += 1
+            out.append(f" -- c{n}\n")
+        i += 1
+    return "".join(out)
+
+
 def explain_ast(ch, auth, sql):
     params = {f"param_{m}": "1" for m in re.findall(r"\{(\w+):", sql)}
     r = requests.post(ch, params=params, data=("EXPLAIN AST " + sql).encode(), auth=auth, timeout=30)
@@ -101,6 +134,7 @@ def explain_ast(ch, auth, sql):
 
 LINE_WIDTH = None
 COMMENTS = False
+COMMA_COMMENTS = False
 
 
 def fmt(api, sql):
@@ -129,6 +163,11 @@ def check(api, ch, auth, origin, sql):
     after = explain_ast(ch, auth, out)
     if after != before:
         res["issues"].append({"kind": "ast", "detail": (after or "output does not parse")[:400]})
+    if origin.endswith("+comma-comments"):
+        markers = re.findall(r"-- c\d+\b", sql)
+        lost = [m for m in markers if len(re.findall(re.escape(m) + r"\b", out)) != 1]
+        if lost:
+            res["issues"].append({"kind": "comments", "detail": lost[:10]})
     again, err2, _ = fmt(api, out)
     if again is not None and again != out:
         res["issues"].append({"kind": "idempotent", "detail": again})
@@ -162,9 +201,12 @@ def main() -> int:
                     help="format at this width (e.g. 40) to stress wrapping paths")
     ap.add_argument("--comments", action="store_true",
                     help="inject comments so every statement takes the local (non-formatQuery) path")
+    ap.add_argument("--comma-comments", action="store_true",
+                    help="inject a numbered line comment after every comma and check none is lost")
     args = ap.parse_args()
     ap_comments = args.comments
-    global LINE_WIDTH, COMMENTS
+    global LINE_WIDTH, COMMENTS, COMMA_COMMENTS
+    COMMA_COMMENTS = args.comma_comments
     LINE_WIDTH = args.line_width or None
     COMMENTS = ap_comments
     auth = (args.user, args.password)
@@ -181,7 +223,7 @@ def main() -> int:
                "clean": sum(1 for r in checked if not r["issues"]), "issues": by_kind}
     Path(args.out).write_text(json.dumps({"summary": summary, "results": [r for r in checked if r["issues"]]}, indent=1), encoding="utf-8")
     print(json.dumps(summary))
-    return 0 if not by_kind.get("ast") and not by_kind.get("format_error") else 1
+    return 0 if not any(by_kind.get(k) for k in ("ast", "format_error", "comments")) else 1
 
 
 if __name__ == "__main__":

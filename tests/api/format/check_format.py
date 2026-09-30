@@ -816,3 +816,37 @@ def test_builtin_documentation_corpus_is_semantically_stable() -> None:
     assert not failures, "\n\n".join(
         f"{r['origin']}: {[i['kind'] for i in r['issues']]}\nIN:  {r['input'][:300]}\nOUT: {r.get('output', '')[:300]}"
         for r in failures[:10])
+
+
+def test_builtin_documentation_corpus_keeps_comments_after_commas() -> None:
+    """The same corpus with a numbered `-- cN` line comment after every comma
+    of the code (so every statement takes the comment-preserving path): no
+    comment is lost or duplicated, and the AST never changes. Remaining layout
+    drifts on a second pass are reported in the artifact only."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("run_corpus_comma", Path(__file__).parent / "corpus" / "run_corpus.py")
+    corpus = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(corpus)
+    corpus.COMMA_COMMENTS = True
+    ch = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/") + "/"
+    auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+    items = corpus.corpus(ch, auth)
+    assert len(items) > 500, len(items)
+    import concurrent.futures as cf
+
+    with cf.ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda item: corpus.check(BASE_URL, ch, auth, *item), items))
+    failures = [r for r in results if any(i["kind"] in {"ast", "format_error", "comments"} for i in r["issues"])]
+    drifts = [r for r in results if any(i["kind"] == "idempotent" for i in r["issues"])]
+    artifacts = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tmp")) / "format_corpus"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "comma_comments_report.json").write_text(json.dumps({
+        "statements": len(items),
+        "failures": failures,
+        "second_pass_drifts": drifts,
+    }, indent=1), encoding="utf-8")
+    assert not failures, "\n\n".join(
+        f"{r['origin']}: {[i['kind'] for i in r['issues']]}\nIN:  {r['input'][:300]}\nOUT: {r.get('output', '')[:300]}"
+        for r in failures[:10])
