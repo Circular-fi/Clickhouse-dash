@@ -285,7 +285,7 @@ WHERE exists(
 
 Function calls, array literals and `IN` value lists are laid out by one rule:
 **a call stays on one line when that whole line fits; otherwise it explodes, one
-argument per line.** The fixtures `230`–`286` show every case below.
+argument per line.** The fixtures `230`–`287` show every case below.
 
 ### Width
 
@@ -308,7 +308,9 @@ everything inside it stay on one line. When it does not fit it explodes:
 - each argument goes on its own line, one level (4 spaces) deeper, followed by a
   comma except the last one;
 - `)` goes on its own line at the indentation of the line that opened the call,
-  followed by the rest of that line: `) AS alias,`, `),`, `) >= 2`.
+  followed by the rest of that line: `) AS alias,`, `),`, `) >= 2`. An
+  arithmetic operator after the call also continues on the `)` line when it
+  fits (`) / nullIf(sum(duration_ms), 0),`), as after a parenthesized block.
 
 Each argument is then laid out again at its new position by the same rule, so
 an inner call that fits there stays inline:
