@@ -12189,17 +12189,6 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   background: rgba(0, 0, 0, 0.06);
 }
 
-.rowDetailsMenu__hint {
-  margin: 0.1rem 0.35rem 0;
-  padding: 0.35rem 0.3rem 0.15rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.6875rem;
-  font-weight: 650;
-  white-space: nowrap;
-  user-select: none;
-}
-
 /* Inline expanded row: a detail <tr> right under the clicked row. Its content
    sticks to the left edge of the (horizontally scrollable) table wrap and is
    as wide as the visible area (width set from JS), so wide tables never need
@@ -12245,6 +12234,7 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   top: 0.3rem;
   right: 0.4rem;
   display: flex;
+  align-items: center;
   gap: 0.3rem;
   opacity: 0.85;
 }
@@ -12254,11 +12244,32 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   opacity: 1;
 }
 
+/* Frameless icon button, like the editor's options cog. */
 .rowDetails__close {
-  min-width: 1.9rem;
-  padding-inline: 0.45rem;
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font: inherit;
+  font-size: 1.1rem;
   line-height: 1;
+  cursor: pointer;
+}
+
+.rowDetails__close:hover {
+  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  color: var(--text);
+}
+
+.rowDetails__close:focus-visible {
+  outline: 1px solid var(--accentBorder);
+  outline-offset: -1px;
 }
 
 /* Mirrors .resultTable--vertical tbody th / td (the one-row result view). */

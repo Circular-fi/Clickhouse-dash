@@ -730,6 +730,87 @@ test('right-click Details expands a result row inline, under the row, and dismis
   await waitForTerminal(page);
 });
 
+test('row menu Details on another row replaces the open detail, and copies a value or the whole row', async ({ page }) => {
+  await openApp(page);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Enough rows for the page to scroll past an open detail.
+  await runSuccessfulQuery(page, rowDetailsQuery.replace('numbers(6)', 'numbers(60)'));
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  await expect(rows.nth(5)).toBeVisible();
+  // Outside a secure context the app copies through a hidden textarea:
+  // capture what that copy selects (or read the clipboard when available).
+  await page.evaluate(() => {
+    window.__chdashTestCopiedText = '';
+    document.addEventListener('copy', () => {
+      const active = document.activeElement;
+      if (active && typeof active.value === 'string') {
+        window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
+      }
+    }, true);
+  });
+  const readClipboard = () => page.evaluate(async () => {
+    if (window.isSecureContext && navigator.clipboard) {
+      try { return await navigator.clipboard.readText(); } catch (_) {}
+    }
+    return window.__chdashTestCopiedText || '';
+  });
+
+  // The menu offers Details, Copy value and Copy row, with no hint line.
+  await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
+  const menu = page.locator('.rowDetailsMenu');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Details', 'Copy value', 'Copy row']);
+  await expect(menu).not.toContainText(/shift/i);
+  // Copy value: the right-clicked cell only (`name` of row 3).
+  await menu.getByRole('menuitem', { name: 'Copy value' }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(readClipboard).toBe('name-2');
+  // Copy row: the whole row as JSON (tuple flattened like the table).
+  await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Copy row' }).click();
+  await expect.poll(async () => JSON.parse(await readClipboard()).name).toBe('name-2');
+  const copiedRow = JSON.parse(await readClipboard());
+  expect(Object.keys(copiedRow)).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
+  expect(copiedRow.arr).toEqual([0, 1, 2]);
+
+  // Details on row 1, then scroll so its top is above the viewport: picking
+  // Details on another row closes the old detail (which scrolls to keep the
+  // rows in place) and must still open the new one.
+  await openRowDetailsFromRow(page, rows.nth(0));
+  await page.evaluate(() => {
+    const detail = document.querySelector('#resultTableBody tr.resultTable__detailRow');
+    const ws = document.getElementById('queryWorkspace');
+    const owner = ws && ws.scrollHeight > ws.clientHeight + 1 ? ws : document.scrollingElement;
+    const ownerTop = owner === document.scrollingElement ? 0 : owner.getBoundingClientRect().top;
+    owner.scrollTop += detail.getBoundingClientRect().top - ownerTop + 60;
+  });
+  const next = rows.nth(1);
+  await next.locator('td').nth(2).click({ button: 'right' });
+  await expect(menu).toBeVisible();
+  // A human press keeps the button down long enough for the scroll that
+  // compensates the closing detail to land before the click.
+  const box = await menu.getByRole('menuitem', { name: 'Details' }).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
+  await expect(page.locator('.rowDetails')).toHaveAttribute('data-row', '2');
+  await expect(next).toHaveClass(/is-rowExpanded/);
+  await expect(rows.nth(0)).not.toHaveClass(/is-rowExpanded/);
+  await expectDetailRightAfter(next);
+
+  // The close button is frameless, like the editor options cog.
+  const close = page.locator('.rowDetails__close');
+  const frame = await close.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { border: cs.borderTopWidth, shadow: cs.boxShadow, bg: cs.backgroundColor };
+  });
+  expect(frame.border).toBe('0px');
+  expect(frame.shadow).toBe('none');
+  expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
+});
+
 test('inline row details stay attached to their virtualized row and are counted in the scroll extent', async ({ page }) => {
   const total = 20000;
   await openApp(page);

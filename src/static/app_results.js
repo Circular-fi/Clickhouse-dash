@@ -3388,7 +3388,8 @@
   // on scroll, so the detail row follows the row *data* and is re-inserted
   // after whichever <tr> currently renders it. Virtualized renderers add the
   // detail's measured height to their range math and spacers (see
-  // rowDetailsVirtualSlot). Shift+right-click keeps the native menu.
+  // rowDetailsVirtualSlot). Shift+right-click keeps the native menu (not
+  // advertised in the menu).
   const rowDetailsBindings = new WeakMap(); // <tr> -> { row, label }
   const rowDetailsSources = new WeakMap(); // <table> -> { getContext, rowCount, viewRows, relayout }
   let rowDetailsMenu = null;
@@ -3597,7 +3598,7 @@
     }
   }
 
-  function openRowDetailsMenu(clientX, clientY, binding, table) {
+  function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1) {
     closeRowDetailsMenu();
     const el = document.createElement("div");
     el.className = "runMenu rowDetailsMenu";
@@ -3624,15 +3625,17 @@
     };
 
     const returnFocus = document.activeElement;
+    const copy = (text) => { void util.copyTextToClipboard(text).catch(() => undefined); };
     addItem("Details", () => openRowDetails(binding, table, returnFocus));
+    const ctx = rowDetailsContext(table);
+    // The value of the cell under the pointer, spelled as the result copy
+    // spells single values (strings raw, JSON pretty-printed, NULL empty).
+    if (ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length) {
+      addItem("Copy value", () => copy(buildCopyValue(coerceDeepTyped(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null))));
+    }
+    if (ctx) addItem("Copy row", () => copy(JSON.stringify(buildRowDetailsObject(ctx, binding.row), null, 2)));
     const selection = selectedTextWithin(table);
-    if (selection) addItem("Copy selection", () => { void util.copyTextToClipboard(selection).catch(() => undefined); });
-
-    const hint = document.createElement("div");
-    hint.className = "rowDetailsMenu__hint";
-    hint.setAttribute("role", "none");
-    hint.textContent = "Shift+right-click: browser menu";
-    el.appendChild(hint);
+    if (selection) addItem("Copy selection", () => copy(selection));
 
     document.body.appendChild(el);
     const vw = window.innerWidth || 0;
@@ -3728,7 +3731,7 @@
     });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
-    closeBtn.className = "button button--small rowDetails__close";
+    closeBtn.className = "rowDetails__close";
     closeBtn.setAttribute("aria-label", "Close row details");
     closeBtn.title = "Close (Esc)";
     closeBtn.textContent = "×";
@@ -3766,15 +3769,22 @@
     return content;
   }
 
-  function openRowDetails(binding, table, returnFocus = null) {
-    const source = rowDetailsSources.get(table);
-    if (!source || !binding) return;
+  function rowDetailsContext(table) {
+    const source = table ? rowDetailsSources.get(table) : null;
+    if (!source) return null;
     const raw = source.getContext() || {};
-    const ctx = {
+    return {
       columns: Array.isArray(raw.columns) ? raw.columns : [],
       types: Array.isArray(raw.types) ? raw.types : [],
       typeAsts: Array.isArray(raw.typeAsts) ? raw.typeAsts : [],
     };
+  }
+
+  function openRowDetails(binding, table, returnFocus = null) {
+    const source = rowDetailsSources.get(table);
+    if (!source || !binding) return;
+    const ctx = rowDetailsContext(table);
+    // Opening on another row replaces the current detail.
     closeRowDetails();
     const row = binding.row;
     // Closing a previous detail may have re-rendered a virtual window.
@@ -3807,6 +3817,10 @@
     listenUntilClosed(disposers, document, "pointerdown", (ev) => {
       const target = ev.target instanceof Node ? ev.target : null;
       if (target && el.contains(target)) return;
+      // Picking in the row menu: "Details" on another row replaces this one
+      // itself. Closing here scrolled the page (height compensation), which
+      // dismissed the menu before its click and left no detail open.
+      if (target instanceof Element && target.closest(".rowDetailsMenu")) return;
       if (isScrollbarPointer(ev, target)) return;
       // Sorting from the same table's header re-renders it around the detail.
       if (target && table.tHead && table.tHead.contains(target)) return;
@@ -3848,7 +3862,11 @@
     const count = typeof source.rowCount === "function" ? Number(source.rowCount()) || 0 : 0;
     if (count < 2) return;
     ev.preventDefault();
-    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table);
+    // Data cells follow the row-number cell.
+    const td = target.closest("td");
+    const offset = tr.cells[0] && tr.cells[0].classList.contains("resultTable__rowIndex") ? 1 : 0;
+    const columnIndex = td && td.parentElement === tr ? td.cellIndex - offset : -1;
+    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table, columnIndex);
   }
 
   document.addEventListener("contextmenu", onResultRowContextMenu);
