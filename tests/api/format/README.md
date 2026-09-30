@@ -285,7 +285,7 @@ WHERE exists(
 
 Function calls, array literals and `IN` value lists are laid out by one rule:
 **a call stays on one line when that whole line fits; otherwise it explodes, one
-argument per line.** The fixtures `230`–`280` show every case below.
+argument per line.** The fixtures `230`–`286` show every case below.
 
 ### Width
 
@@ -296,7 +296,8 @@ argument per line.** The fixtures `230`–`280` show every case below.
   (` AS alias`, the trailing comma, the `)` of an enclosing call, `> 0`).
   A call that fits by itself but not with its alias explodes.
 - A single token longer than the width (a long string literal, a long type
-  string) stays whole on its own line; nothing else may exceed the width.
+  string) cannot be split: it stays whole on its own argument line. Comments
+  are never moved to make room.
 
 ### Inline or exploded
 
