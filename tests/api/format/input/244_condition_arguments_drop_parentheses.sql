@@ -1,0 +1,1 @@
+select toDecimal64(sumIf(amount, currency = 'EUR' and status = 'settled') / nullIf(countIf(currency = 'EUR' and status = 'settled'), 0), 4) as avg_eur_settled, uniqExactIf(user_id, status = 'refunded' or status = 'chargeback') as disputed_users from payments.transactions

@@ -1,0 +1,1 @@
+select service_name, count() over (partition by service_name, deployment_environment order by timestamp asc rows between unbounded preceding and current row) as running_spans, lagInFrame(duration_ms, 1, 0) over (partition by service_name order by timestamp) as previous_duration_ms from otel.traces

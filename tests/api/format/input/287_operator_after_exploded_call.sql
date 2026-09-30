@@ -1,0 +1,1 @@
+select round(sum(if(status_code >= 500 and service_name = 'checkout-service-eu', duration_ms, 0)) / nullIf(sum(duration_ms), 0), 4) as checkout_error_time_share from http.access_log

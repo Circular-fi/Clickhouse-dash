@@ -1,0 +1,1 @@
+select count() from otel.logs where severity_number >= 17 and service_name in ('checkout', 'payments', 'inventory', 'shipping', 'recommendations', 'frontend-proxy') and body ilike '%timeout%'

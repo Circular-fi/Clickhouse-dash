@@ -1,0 +1,1 @@
+select count() as spans from otel.traces group by service_name, toStartOfInterval(timestamp, interval 15 minute), JSONExtractString(resource_attributes_json, 'deployment.environment.name', 'value')

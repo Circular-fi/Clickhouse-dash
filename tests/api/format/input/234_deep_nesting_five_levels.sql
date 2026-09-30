@@ -1,0 +1,1 @@
+select toUnixTimestamp64Milli(toDateTime64(parseDateTimeBestEffortOrNull(JSONExtractString(log_attributes_json, 'event', 'occurred_at')), 3, 'UTC')) as occurred_at_ms from otel.logs where severity_text = 'ERROR'

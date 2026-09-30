@@ -1,0 +1,1 @@
+select l.trace_id, l.body, t.span_name from otel.logs as l inner join otel.traces as t on t.trace_id = l.trace_id and toStartOfMinute(t.timestamp) = toStartOfMinute(l.timestamp) and lower(t.service_name) = lower(l.service_name)

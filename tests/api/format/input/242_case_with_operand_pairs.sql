@@ -1,0 +1,1 @@
+select CASE severity_number WHEN 9 THEN 'info' WHEN 13 THEN 'warn' WHEN 17 THEN 'error' ELSE 'other' END as severity_bucket, CASE env WHEN 'prod' THEN 1 ELSE 0 END as is_prod from otel.logs

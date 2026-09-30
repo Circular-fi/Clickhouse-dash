@@ -1,0 +1,1 @@
+insert into otel.service_hourly select service_name, toStartOfHour(timestamp) as hour, countIf(status_code = 'STATUS_CODE_ERROR') as errors, quantilesTDigest(0.5, 0.9, 0.99)(duration_ns / 1000000) as latency_ms_quantiles from otel.traces where timestamp >= toStartOfHour(now() - interval 1 hour) group by service_name, hour

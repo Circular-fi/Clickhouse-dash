@@ -11,10 +11,7 @@ WITH
         raw_items
     ) AS `raw_scores`,
     arrayMap(
-        score_list -> arrayMap(
-            score -> toInt32(score),
-            score_list
-        ),
+        score_list -> arrayMap(score -> toInt32(score), score_list),
         raw_scores
     ) AS `parsed_scores`,
     arrayMap(

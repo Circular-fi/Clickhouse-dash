@@ -1,0 +1,1 @@
+select arrayMap(x -> round(x, 2), quantiles(0.5, 0.9, 0.99)(duration_ms)) as latency_quantiles, arrayFilter(t -> t != '', splitByChar(',', tags)) as clean_tags from otel.traces group by tags

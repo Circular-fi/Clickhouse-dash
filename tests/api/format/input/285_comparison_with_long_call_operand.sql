@@ -1,0 +1,1 @@
+select * from otel.traces where timestamp >= toStartOfInterval(now() - interval 3 hour, interval 5 minute) and timestamp < toStartOfInterval(now(), interval 5 minute) and service_name = 'checkout'

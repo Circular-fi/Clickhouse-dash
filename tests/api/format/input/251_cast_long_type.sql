@@ -1,0 +1,1 @@
+select CAST(attributes AS Map(String, Array(Tuple(key String, value Nullable(Float64), unit LowCardinality(String))))) as typed_attributes, CAST(status_code AS UInt16) as status from otel.metrics_raw

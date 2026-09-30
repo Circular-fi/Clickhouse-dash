@@ -728,12 +728,15 @@ def test_format_clamps_line_width() -> None:
 
 
 def test_expected_format_fixtures_are_idempotent_in_batch() -> None:
+    # `"cache": False` makes the formatter really run on its own output. With
+    # the cache, the output-to-output entry stored by the roundtrip test would
+    # answer every request and hide a non-idempotent layout.
     fixtures = iter_output_sql_files()
     for offset in range(0, len(fixtures), 20):
         batch = fixtures[offset : offset + 20]
         expected = [load_sql_text(path) for path in batch]
         try:
-            payload = post_format_payload({"sqls": expected}).json()
+            payload = post_format_payload({"sqls": expected, "cache": False}).json()
         except AssertionError as exc:
             names = ", ".join(path.name for path in batch)
             raise AssertionError(

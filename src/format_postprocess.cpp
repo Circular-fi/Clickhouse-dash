@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -696,6 +697,41 @@ void step_scan(ScanState& st, string_view s, size_t& i) {
   else if (c == '}' && st.brc > 0) --st.brc;
 }
 
+// Removes the indentation common to the lines after the first. A predicate
+// that follows a leading `--` comment keeps the indentation it had in the
+// input; without this, formatting the output again would indent it twice.
+// Lines that start inside a quoted literal keep their spacing.
+string dedent_after_first_line(string_view s) {
+  const size_t first_nl = s.find('\n');
+  if (first_nl == string_view::npos) return string(s);
+  vector<size_t> starts;
+  ScanState st;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\n' && i >= first_nl) {
+      if (st.in_str || st.in_double_quote || st.in_backtick || st.in_block_comment) return string(s);
+      starts.push_back(i + 1);
+    }
+    step_scan(st, s, i);
+  }
+  size_t common = static_cast<size_t>(-1);
+  for (const size_t start : starts) {
+    size_t k = start;
+    while (k < s.size() && s[k] == ' ') ++k;
+    if (k < s.size() && s[k] != '\n') common = std::min(common, k - start);
+  }
+  if (common == 0 || common == static_cast<size_t>(-1)) return string(s);
+  string out;
+  size_t cursor = 0;
+  for (const size_t start : starts) {
+    out.append(s.substr(cursor, start - cursor));
+    size_t k = start;
+    while (k < s.size() && k - start < common && s[k] == ' ') ++k;
+    cursor = k;
+  }
+  out.append(s.substr(cursor));
+  return out;
+}
+
 size_t find_matching_paren(string_view s, size_t open_pos) {
   if (open_pos >= s.size() || s[open_pos] != '(') return string::npos;
   ScanState st;
@@ -996,6 +1032,19 @@ static string format_alias_identifier(string_view alias) {
   if (auto [code, comment] = split_inline_comment(trimmed); !comment.empty() && !trim_ascii_spaces(code).empty()) {
     return format_alias_identifier(code) + " " + comment;
   }
+  // The same for a trailing block comment: `AS traces /* distinct */`.
+  {
+    ScanState st;
+    for (size_t i = 0; i + 1 < trimmed.size(); ++i) {
+      if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment &&
+          trimmed[i] == '/' && trimmed[i + 1] == '*') {
+        const string code = trim_ascii_spaces(string_view(trimmed).substr(0, i));
+        if (!code.empty()) return format_alias_identifier(code) + " " + trimmed.substr(i);
+        break;
+      }
+      step_scan(st, trimmed, i);
+    }
+  }
   string normalized = trimmed;
   if (normalized.size() >= 2) {
     const char first = normalized.front();
@@ -1072,7 +1121,8 @@ string align_alias_line(string_view line, size_t target_as) {
 
 bool line_is_alignable_alias(string_view line) {
   const string t = trim_ascii_spaces(line);
-  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "FROM ") ||
+  // A closer line ends a multi-line item: `) AS x` and `] AS x` keep one space.
+  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "]") || starts_with_ci(t, "FROM ") ||
       starts_with_ci(t, "JOIN ") || starts_with_ci(t, "ARRAY JOIN ") ||
       starts_with_ci(t, "GLOBAL ARRAY JOIN ")) return false;
   const int as_pos = find_alias_marker_for_alignment(line);
@@ -1968,7 +2018,9 @@ bool split_arith_chain(string_view s, vector<ArithChainOperator>* ops) {
 
 // Re-indent continuation lines of an operator chain (`\n/ rhs`, `\n- rhs`)
 // that sit at bracket depth 0 so they hang one level under the first operand.
-string hang_operator_continuations(string value) {
+// `logical` also hangs `AND` / `OR` continuations: inside an argument list a
+// wrapped condition must not start its lines where the next argument starts.
+string hang_operator_continuations(string value, bool logical = false) {
   const string masked = mask_sql_surface(value).code_lower;
   vector<int> line_depths{0};
   int depth = 0;
@@ -1986,9 +2038,489 @@ string hang_operator_continuations(string value) {
         (lines[i][content] == '-' || lines[i][content] == '/' || lines[i][content] == '%' ||
          lines[i][content] == '+' || lines[i][content] == '*') &&
         lines[i][content + 1] == ' ';
-    if (binary_continuation) lines[i].replace(0, content, 4, ' ');
+    const string_view rest = string_view(lines[i]).substr(content);
+    const bool logical_continuation = logical && (starts_with_ci(rest, "AND ") || starts_with_ci(rest, "OR "));
+    if (binary_continuation || logical_continuation) lines[i].replace(0, content, 4, ' ');
   }
   return join_lines(lines);
+}
+
+// ---------------------------------------------------------------------------
+// Function-call layout by line width.
+//
+// The expression formatter above decides call layout without knowing the
+// column its text will land on, so it explodes calls by shape (nested calls,
+// lambdas, several arguments). This pass applies the width rule on the final
+// text, where columns are known: a call (or array / IN list) whose one-line
+// form fits on its line is joined back onto one line, outermost first, and a
+// one-line call that overflows the line is exploded one argument per line.
+// Both directions only move whitespace between tokens, so the parsed query is
+// unchanged.
+
+enum : unsigned char { kCallCode = 0, kCallLiteral = 1, kCallComment = 2 };
+
+struct CallScan {
+  vector<unsigned char> kind;  // per byte: code, literal/quoted name, comment
+  vector<size_t> match;        // `(` / `[` in code: position of its closer
+  vector<size_t> parent;       // `(` / `[` in code: innermost enclosing opener
+  vector<size_t> opener;       // `)` / `]` in code: position of its opener
+};
+
+CallScan scan_call_brackets(string_view s) {
+  CallScan out;
+  out.kind.assign(s.size(), kCallCode);
+  out.match.assign(s.size(), string::npos);
+  out.parent.assign(s.size(), string::npos);
+  out.opener.assign(s.size(), string::npos);
+  enum class State { Code, Single, Double, Back, Line, Block };
+  State state = State::Code;
+  vector<size_t> stack;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    const char n = i + 1 < s.size() ? s[i + 1] : '\0';
+    auto mark_next = [&](unsigned char k) { if (i + 1 < s.size()) out.kind[i + 1] = k; };
+    switch (state) {
+      case State::Line:
+        if (c == '\n') state = State::Code;
+        else out.kind[i] = kCallComment;
+        continue;
+      case State::Block:
+        out.kind[i] = kCallComment;
+        if (c == '*' && n == '/') { mark_next(kCallComment); ++i; state = State::Code; }
+        continue;
+      case State::Single:
+      case State::Double: {
+        out.kind[i] = kCallLiteral;
+        const char quote = state == State::Single ? '\'' : '"';
+        if (c == '\\') { mark_next(kCallLiteral); ++i; }
+        else if (c == quote && n == quote) { mark_next(kCallLiteral); ++i; }
+        else if (c == quote) state = State::Code;
+        continue;
+      }
+      case State::Back:
+        out.kind[i] = kCallLiteral;
+        if (c == '`' && n == '`') { mark_next(kCallLiteral); ++i; }
+        else if (c == '`') state = State::Code;
+        continue;
+      case State::Code:
+        break;
+    }
+    if (c == '\'' || c == '"' || c == '`') {
+      out.kind[i] = kCallLiteral;
+      state = c == '\'' ? State::Single : (c == '"' ? State::Double : State::Back);
+    } else if ((c == '-' && n == '-') || c == '#') {
+      out.kind[i] = kCallComment;
+      state = State::Line;
+    } else if (c == '/' && n == '*') {
+      out.kind[i] = kCallComment;
+      mark_next(kCallComment);
+      ++i;
+      state = State::Block;
+    } else if (c == '(' || c == '[') {
+      out.parent[i] = stack.empty() ? string::npos : stack.back();
+      stack.push_back(i);
+    } else if (c == ')' || c == ']') {
+      if (!stack.empty() && s[stack.back()] == (c == ')' ? '(' : '[')) {
+        out.match[stack.back()] = i;
+        out.opener[i] = stack.back();
+        stack.pop_back();
+      }
+    }
+  }
+  return out;
+}
+
+// Joins a multi-line expression onto one line (one space between lines, none
+// after an opener or before a closer). Empty when a line break sits inside a
+// literal or a comment, where joining would change the text.
+string join_code_lines(string_view s) {
+  const CallScan scan = scan_call_brackets(s);
+  string out;
+  size_t start = 0;
+  while (start <= s.size()) {
+    size_t nl = s.find('\n', start);
+    if (nl != string_view::npos && scan.kind[nl] != kCallCode) return {};
+    if (nl != string_view::npos && nl > 0 && scan.kind[nl - 1] == kCallComment) return {};
+    const string t = trim_ascii_spaces(s.substr(start, (nl == string_view::npos ? s.size() : nl) - start));
+    if (!t.empty()) {
+      if (out.empty() || out.back() == '(' || out.back() == '[' || t.front() == ')' || t.front() == ']') out += t;
+      else out += " " + t;
+    }
+    if (nl == string_view::npos) break;
+    start = nl + 1;
+  }
+  return out;
+}
+
+bool is_call_ident_char(char ch) {
+  return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+}
+
+// Identifiers before `(` that are type constructors or keywords, not calls:
+// DDL types keep their own layout, and `GROUPING SETS(`, `CODEC(` or
+// `SELECT(` in a GRANT are clause syntax.
+bool is_layout_call_name(string_view name) {
+  static const char* excluded[] = {
+      "Array", "Tuple", "Map", "Nullable", "LowCardinality", "Nested", "Enum", "Enum8", "Enum16",
+      "Decimal", "Decimal32", "Decimal64", "Decimal128", "Decimal256", "DateTime", "DateTime64",
+      "FixedString", "Variant", "Dynamic", "JSON", "Object", "AggregateFunction",
+      "SimpleAggregateFunction", "SETS", "IN", "VALUES", "USING", "CODEC", "TTL", "INDEX",
+      "ON", "AND", "OR", "NOT", "AS", "BY", "OVER", "SELECT", "FROM", "WHERE", "JOIN", "FILTER"};
+  if (name.empty() || std::isdigit(static_cast<unsigned char>(name.front()))) return false;
+  for (const char* word : excluded) {
+    if (name == word) return false;
+  }
+  return true;
+}
+
+// What the bracket at `pos` opens, for the width pass: a call's argument
+// list (`name(` or the `(args)` of a parametric `name(params)(`), an array
+// literal, a tuple list after `IN`, or a tuple element of an array literal.
+// `name_begin` receives where the call's name starts.
+enum class CallOpener { None, Call, Array, InList, ArrayTuple };
+
+CallOpener classify_call_opener(string_view s, const CallScan& scan, size_t pos, size_t* name_begin) {
+  if (name_begin) *name_begin = pos;
+  if (s[pos] == '[') {
+    // `arr[` is subscript syntax, not a literal.
+    if (pos > 0 && (is_call_ident_char(s[pos - 1]) || s[pos - 1] == ')' || s[pos - 1] == ']' || s[pos - 1] == '`')) return CallOpener::None;
+    return CallOpener::Array;
+  }
+  if (pos == 0) return CallOpener::None;
+  const char prev = s[pos - 1];
+  if (is_call_ident_char(prev) && scan.kind[pos - 1] == kCallCode) {
+    size_t b = pos - 1;
+    while (b > 0 && is_call_ident_char(s[b - 1]) && scan.kind[b - 1] == kCallCode) --b;
+    if (b > 0 && (s[b - 1] == '.' || s[b - 1] == '`')) return CallOpener::None;
+    if (!is_layout_call_name(s.substr(b, pos - b))) return CallOpener::None;
+    if (name_begin) *name_begin = b;
+    return CallOpener::Call;
+  }
+  if (prev == '`' && scan.kind[pos - 1] == kCallLiteral && pos >= 2) {
+    // A quoted function name, as formatQuery prints the VALUES table
+    // function: `VALUES`('k String', ('a', 1), ...).
+    const size_t b = s.rfind('`', pos - 2);
+    if (b == string_view::npos || (b > 0 && (scan.kind[b - 1] != kCallCode || s[b - 1] == '.'))) return CallOpener::None;
+    if (name_begin) *name_begin = b;
+    return CallOpener::Call;
+  }
+  if (prev == ')' && scan.kind[pos - 1] == kCallCode) {
+    // Parametric aggregate: `name(params)(` — find `name(` of the params.
+    const size_t open = scan.opener[pos - 1];
+    if (open == string::npos) return CallOpener::None;
+    size_t begin = open;
+    if (classify_call_opener(s, scan, open, &begin) != CallOpener::Call) return CallOpener::None;
+    if (name_begin) *name_begin = begin;
+    return CallOpener::Call;
+  }
+  size_t k = pos;
+  while (k > 0 && (s[k - 1] == ' ' || s[k - 1] == '\t')) --k;
+  if (k >= 2 && (s[k - 1] == 'N' || s[k - 1] == 'n') && (s[k - 2] == 'I' || s[k - 2] == 'i') &&
+      (k == 2 || !is_call_ident_char(s[k - 3])) && k < pos) {
+    return CallOpener::InList;
+  }
+  if (k > 0 && s[k - 1] != '\n') return CallOpener::None;
+  const size_t parent = scan.parent[pos];
+  if (parent != string::npos && s[parent] == '[') return CallOpener::ArrayTuple;
+  return CallOpener::None;
+}
+
+// `[1, 2]::Array(UInt8)` casts the literal's source text: the bytes between
+// the brackets end up in the AST, so their whitespace must stay as written.
+bool closer_starts_text_cast(string_view s, size_t close) {
+  return close + 2 < s.size() && s[close + 1] == ':' && s[close + 2] == ':';
+}
+
+// Number of top-level arguments between an opener and its closer.
+size_t count_call_arguments(string_view s, const CallScan& scan, size_t open, size_t close) {
+  size_t count = 1;
+  int depth = 0;
+  bool any = false;
+  for (size_t i = open + 1; i < close; ++i) {
+    if (scan.kind[i] != kCallCode) { any = true; continue; }
+    const char c = s[i];
+    if (c == '(' || c == '[' || c == '{') ++depth;
+    else if (c == ')' || c == ']' || c == '}') --depth;
+    else if (c == ',' && depth == 0) ++count;
+    else if (c != ' ' && c != '\n') any = true;
+  }
+  return any ? count : 0;
+}
+
+bool call_name_is(string_view s, size_t name_begin, size_t open, const char* name) {
+  return s.substr(name_begin, open - name_begin) == name;
+}
+
+// multiIf and CASE with two or more branches read as a decision table and
+// stay one branch per line whatever their width.
+bool is_vertical_branch_call(string_view s, const CallScan& scan, size_t name_begin, size_t open) {
+  const size_t close = scan.match[open];
+  if (close == string::npos) return false;
+  if (call_name_is(s, name_begin, open, "multiIf")) return count_call_arguments(s, scan, open, close) >= 5;
+  if (call_name_is(s, name_begin, open, "caseWithExpression")) return count_call_arguments(s, scan, open, close) >= 6;
+  return false;
+}
+
+// Joins exploded calls whose one-line form fits in `width`, outermost first.
+// Regions holding comments, subqueries, window specifications or a line break
+// inside a literal keep their lines. `joined_rows` (when given) receives the
+// output line numbers produced by a join.
+string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* joined_rows = nullptr) {
+  const CallScan scan = scan_call_brackets(text);
+  vector<size_t> starts{0};
+  for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\n') starts.push_back(i + 1);
+  const size_t line_count = starts.size();
+  auto line_end = [&](size_t l) { return l + 1 < line_count ? starts[l + 1] - 1 : text.size(); };
+  auto line_of = [&](size_t pos) {
+    return static_cast<size_t>(std::upper_bound(starts.begin(), starts.end(), pos) - starts.begin()) - 1;
+  };
+  vector<string> rows;
+  rows.reserve(line_count);
+  for (size_t l = 0; l < line_count; ++l) rows.emplace_back(text.substr(starts[l], line_end(l) - starts[l]));
+  vector<size_t> owner(line_count);
+  for (size_t l = 0; l < line_count; ++l) owner[l] = l;
+  vector<bool> removed(line_count, false);
+  vector<bool> joined(line_count, false);
+  vector<bool> join_tail(line_count, false);
+
+  for (size_t o = 0; o < line_count; ++o) {
+    // Lines strictly inside a joined region are gone; the closing line of a
+    // joined region lives on as the tail of its owner row and may itself end
+    // with an opener (`) AND has(`).
+    if (removed[o] && !join_tail[o]) continue;
+    size_t p = line_end(o);
+    while (p > starts[o] && (text[p - 1] == ' ' || text[p - 1] == '\t')) --p;
+    if (p == starts[o]) continue;
+    const size_t open = p - 1;
+    if (scan.kind[open] != kCallCode || (text[open] != '(' && text[open] != '[')) continue;
+    size_t name_begin = open;
+    const CallOpener kind = classify_call_opener(text, scan, open, &name_begin);
+    if (kind == CallOpener::None) continue;
+    const size_t close = scan.match[open];
+    if (close == string::npos) continue;
+    const size_t k = line_of(close);
+    if (k <= o || closer_starts_text_cast(text, close)) continue;
+    size_t first = starts[k];
+    while (first < close && (text[first] == ' ' || text[first] == '\t')) ++first;
+    if (first != close) continue;
+    if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
+    bool blocked = false;
+    // A decision table nested anywhere inside keeps the enclosing call open.
+    for (size_t i = open + 1; i < close && !blocked; ++i) {
+      if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
+      for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
+        if (i >= branch_name.size() && text.substr(i - branch_name.size(), branch_name.size()) == branch_name &&
+            is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
+      }
+    }
+    for (size_t i = starts[o]; i < line_end(k) && !blocked; ++i) {
+      if (scan.kind[i] == kCallComment) blocked = true;
+      else if (text[i] == '\n' && scan.kind[i] == kCallLiteral) blocked = true;
+    }
+    if (blocked) continue;
+    {
+      const auto masked = mask_sql_surface(text.substr(open, close - open));
+      const string& code = masked.code_lower;
+      for (size_t i = 0; i + 6 <= code.size() && !blocked; ++i) {
+        if (code.compare(i, 6, "select") == 0 && (i == 0 || !is_call_ident_char(code[i - 1])) &&
+            (i + 6 == code.size() || !is_call_ident_char(code[i + 6]))) blocked = true;
+      }
+      for (size_t l = o + 1; l < k && !blocked; ++l) {
+        const string row = rtrim_spaces(string_view(code).substr(starts[l] - open, line_end(l) - starts[l]));
+        if (ends_with_ci(row, "over (")) blocked = true;
+      }
+    }
+    if (blocked) continue;
+    const size_t r = owner[o];
+    string line = rows[r];
+    for (size_t l = o + 1; l <= k; ++l) {
+      const string t = trim_ascii_spaces(rows[l]);
+      if (t.empty()) continue;
+      const char last = line.empty() ? ' ' : line.back();
+      if (last == '(' || last == '[' || t.front() == ')' || t.front() == ']') line += t;
+      else line += " " + t;
+    }
+    if (utf8_width(line) > width) continue;
+    rows[r] = std::move(line);
+    joined[r] = true;
+    for (size_t l = o + 1; l <= k; ++l) {
+      owner[l] = r;
+      removed[l] = true;
+      join_tail[l] = l == k;
+    }
+    join_tail[o] = false;
+  }
+  string out;
+  size_t out_line = 0;
+  for (size_t l = 0; l < line_count; ++l) {
+    if (removed[l]) continue;
+    if (out_line) out.push_back('\n');
+    if (joined_rows && joined[l]) joined_rows->push_back(out_line);
+    out += rows[l];
+    ++out_line;
+  }
+  return out;
+}
+
+// One pass of join_fitting_arguments (below).
+string join_fitting_arguments_once(const string& text, size_t width, bool* changed) {
+  const CallScan scan = scan_call_brackets(text);
+  vector<size_t> starts{0};
+  for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\n') starts.push_back(i + 1);
+  const size_t line_count = starts.size();
+  auto line_of = [&](size_t pos) {
+    return static_cast<size_t>(std::upper_bound(starts.begin(), starts.end(), pos) - starts.begin()) - 1;
+  };
+  auto line_end = [&](size_t l) { return l + 1 < line_count ? starts[l + 1] - 1 : text.size(); };
+  vector<string> rows;
+  rows.reserve(line_count);
+  for (size_t l = 0; l < line_count; ++l) rows.emplace_back(text.substr(starts[l], line_end(l) - starts[l]));
+  vector<bool> removed(line_count, false);
+  vector<bool> touched(line_count, false);
+  // One pass in text order: an outer list's arguments come before the lists
+  // nested in them, and a joined argument takes its nested lists with it.
+  size_t joined_until = 0;
+  for (size_t open = 0; open < text.size(); ++open) {
+    if (scan.kind[open] != kCallCode || (text[open] != '(' && text[open] != '[')) continue;
+    const size_t close = scan.match[open];
+    if (close == string::npos || open < joined_until || line_of(close) == line_of(open)) continue;
+    size_t name_begin = open;
+    const CallOpener kind = classify_call_opener(text, scan, open, &name_begin);
+    if (kind == CallOpener::None) continue;
+    if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
+    vector<std::pair<size_t, size_t>> args;
+    size_t arg_start = open + 1;
+    int depth = 0;
+    for (size_t i = open + 1; i <= close; ++i) {
+      if (scan.kind[i] != kCallCode) continue;
+      const char c = text[i];
+      if (i < close && (c == '(' || c == '[' || c == '{')) ++depth;
+      else if (i < close && (c == ')' || c == ']' || c == '}')) --depth;
+      else if ((c == ',' && depth == 0) || i == close) {
+        args.push_back({arg_start, i});
+        arg_start = i + 1;
+      }
+    }
+    for (const auto& [begin, end] : args) {
+      size_t fa = begin;
+      while (fa < end && std::isspace(static_cast<unsigned char>(text[fa]))) ++fa;
+      size_t la = end;
+      while (la > fa && std::isspace(static_cast<unsigned char>(text[la - 1]))) --la;
+      if (fa >= la || fa < joined_until) continue;
+      const size_t first_line = line_of(fa);
+      const size_t last_line = line_of(la - 1);
+      if (first_line == last_line || touched[first_line] || touched[last_line]) continue;
+      bool blocked = false;
+      for (size_t i = starts[first_line]; i < line_end(last_line) && !blocked; ++i) {
+        if (scan.kind[i] == kCallComment) blocked = true;
+      }
+      const string_view arg = string_view(text).substr(fa, la - fa);
+      if (blocked || arg.find("::") != string_view::npos) continue;
+      const auto masked = mask_sql_surface(arg);
+      const string& code = masked.code_lower;
+      for (size_t i = 0; i + 6 <= code.size() && !blocked; ++i) {
+        if (code.compare(i, 6, "select") == 0 && (i == 0 || !is_call_ident_char(code[i - 1])) &&
+            (i + 6 == code.size() || !is_call_ident_char(code[i + 6]))) blocked = true;
+      }
+      if (blocked || code.find("over (\n") != string::npos) continue;
+      for (size_t i = fa; i < la && !blocked; ++i) {
+        if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
+        for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
+          if (i >= branch_name.size() && string_view(text).substr(i - branch_name.size(), branch_name.size()) == branch_name &&
+              is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
+        }
+      }
+      if (blocked) continue;
+      const string joined_arg = join_code_lines(arg);
+      if (joined_arg.empty()) continue;
+      string line = text.substr(starts[first_line], fa - starts[first_line]) + joined_arg +
+                    text.substr(la, line_end(last_line) - la);
+      if (utf8_width(line) > width) continue;
+      rows[first_line] = std::move(line);
+      for (size_t l = first_line; l <= last_line; ++l) {
+        touched[l] = true;
+        removed[l] = l != first_line;
+      }
+      joined_until = std::max(joined_until, la);
+      *changed = true;
+    }
+  }
+  string out;
+  bool first = true;
+  for (size_t l = 0; l < line_count; ++l) {
+    if (removed[l]) continue;
+    if (!first) out.push_back('\n');
+    first = false;
+    out += rows[l];
+  }
+  return out;
+}
+
+// An argument of an exploded list that still spans several lines (a wrapped
+// arithmetic or boolean chain, a lambda whose body wrapped) is joined back
+// onto its own line when it fits there: every argument is laid out again at
+// the position the explosion gave it. Arguments sharing a line with one just
+// joined wait for the next pass.
+string join_fitting_arguments(string text, size_t width) {
+  for (int pass = 0; pass < 4; ++pass) {
+    bool changed = false;
+    text = join_fitting_arguments_once(text, width, &changed);
+    if (!changed) break;
+  }
+  return text;
+}
+
+// After an exploded call closes, a following arithmetic operator continues
+// on the `)` line when it fits, as it does after a parenthesized block and as
+// `) AS alias` does: `) / nullIf(sum(duration_ms), 0),`.
+string attach_operators_to_closers(string_view text, size_t width) {
+  vector<string> lines = split_lines_keep(text);
+  vector<string> out;
+  out.reserve(lines.size());
+  for (string& line : lines) {
+    if (!out.empty()) {
+      const string prev = trim_ascii_spaces(out.back());
+      const string cur = trim_ascii_spaces(line);
+      bool op = false;
+      for (const char* lead : {"+ ", "- ", "* ", "/ ", "% "}) op = op || starts_with_ci(cur, lead);
+      if (op && (prev == ")" || prev == "]") && !contains_top_level_comment(cur)) {
+        string merged = rtrim_spaces(out.back()) + " " + cur;
+        if (utf8_width(merged) <= width) {
+          out.back() = std::move(merged);
+          continue;
+        }
+      }
+    }
+    out.push_back(std::move(line));
+  }
+  return join_lines(out);
+}
+
+// After a join, a single projection (or GROUP BY / ORDER BY item) that became
+// one line moves back onto the keyword line when it fits there, as it would
+// have if the expression formatter had kept it inline:
+// `SELECT greatest(least(x, hi), lo) AS v`.
+string merge_joined_single_select_items(string_view text, const vector<size_t>& joined_rows, size_t width) {
+  if (joined_rows.empty()) return string(text);
+  vector<string> lines = split_lines_keep(text);
+  vector<bool> drop(lines.size(), false);
+  for (const size_t r : joined_rows) {
+    if (r == 0 || r >= lines.size()) continue;
+    const size_t head_indent = leading_space_count(lines[r - 1]);
+    const string head = trim_ascii_spaces(lines[r - 1]);
+    const bool select = head == "SELECT";
+    if ((!select && head != "GROUP BY" && head != "ORDER BY") || leading_space_count(lines[r]) != head_indent + 4) continue;
+    if (r + 1 < lines.size() && leading_space_count(lines[r + 1]) > head_indent) continue;
+    const string item = trim_ascii_spaces(lines[r]);
+    if (item.empty() || item.back() == ',' || contains_top_level_comment(item) || (select && contains_heavy_structure(item))) continue;
+    string merged = rtrim_spaces(lines[r - 1]) + " " + item;
+    if (utf8_width(merged) > width) continue;
+    lines[r - 1] = std::move(merged);
+    drop[r] = true;
+  }
+  vector<string> kept;
+  for (size_t i = 0; i < lines.size(); ++i) if (!drop[i]) kept.push_back(std::move(lines[i]));
+  return join_lines(kept);
 }
 
 struct Formatter {
@@ -2008,8 +2540,10 @@ struct Formatter {
   string format_simple_item_block(const vector<string>& items);
   string format_expression(string_view expr);
   string format_over_clause(string_view expr);
-  string format_function_call(string_view expr);
-  string format_parametric_call(const string& name, string_view params_src, string_view args_part);
+  string format_function_call(string_view expr, bool force = false);
+  string format_parametric_call(const string& name, string_view params_src, string_view args_part, bool force = false);
+  string layout_calls_by_width(string_view text, bool allow_explode);
+  vector<string> explode_overlong_line(const string& line, int depth);
   string format_arith_chain(string_view expr, bool force);
   string format_arith_operand(string_view operand, size_t block_width, bool* block);
   string format_array_literal(string_view expr);
@@ -2180,9 +2714,15 @@ string Formatter::format(string_view s) {
   };
   if (auto values = try_format_insert_values(text); !values.empty()) return with_comments(values);
   text = strip_redundant_arith_parentheses(text);
+  // Calls are exploded by width only inside queries; DDL lines (columns,
+  // indexes, types, grants) keep the layout of their own formatters.
+  bool query = false;
+  for (const char* head : {"SELECT", "WITH", "INSERT", "EXPLAIN", "CREATE VIEW", "CREATE MATERIALIZED VIEW", "CREATE OR REPLACE VIEW"}) {
+    if (starts_with_ci(text, head)) query = true;
+  }
   string out = format_statement(text);
   if (!leading.empty()) out = leading + "\n" + out;
-  out = align_multiline_settings(normalize_final_layout(cleanup_surface(out), threshold));
+  out = align_multiline_settings(normalize_final_layout(layout_calls_by_width(cleanup_surface(out), query), threshold));
   if (!trailing.empty()) out += "\n" + trailing;
   return out;
 }
@@ -2418,6 +2958,7 @@ string Formatter::format_clause(string_view kw, string_view body) {
       if (cond.find('\n') == string::npos) return string(kw) + " " + cond;
       if (cond.find(" IN (\n") != string::npos || cond.find(" GLOBAL IN (\n") != string::npos) return string(kw) + " " + cond;
       if (starts_with_ci(cond, "exists(\n")) return string(kw) + " " + indent_after_first_line(cond, 4);
+      if (starts_with_ci(cond, "--")) return string(kw) + " " + indent_after_first_line(dedent_after_first_line(cond), 4);
       return string(kw) + " " + indent_after_first_line(cond, 4);
     }
     string rendered = cond;
@@ -2463,9 +3004,14 @@ string Formatter::format_clause(string_view kw, string_view body) {
     }
     const auto items = split_top_level(base, ',');
     if (items.size() == 1 && trim_ascii_spaces(base).find('\n') == string::npos) {
-      string line = string(kw) + " " + format_expression(items.front());
-      if (!suffix.empty()) line += " " + suffix;
-      return line;
+      const string item = format_expression(items.front());
+      // Like a single projection: only a one-line item shares the keyword
+      // line, a multi-line one goes into the block.
+      if (item.find('\n') == string::npos || iequals_ascii(kw, "WINDOW")) {
+        string line = string(kw) + " " + item;
+        if (!suffix.empty()) line += " " + suffix;
+        return line;
+      }
     }
     string block = format_simple_item_block(items);
     if (!suffix.empty()) block += " " + suffix;
@@ -2885,7 +3431,7 @@ string Formatter::format_array_literal(string_view expr) {
   return out;
 }
 
-string Formatter::format_function_call(string_view expr) {
+string Formatter::format_function_call(string_view expr, bool force) {
   const string s = trim_ascii_spaces(expr);
   const size_t par = s.find('(');
   if (par == string::npos || !ends_with_ci(s, ")")) return {};
@@ -2895,7 +3441,7 @@ string Formatter::format_function_call(string_view expr) {
   if (const size_t params_close = find_matching_paren(s, par);
       params_close != string::npos && params_close + 1 < s.size() && s[params_close + 1] == '(' &&
       find_matching_paren(s, params_close + 1) == s.size() - 1) {
-    return format_parametric_call(name, s.substr(par + 1, params_close - par - 1), s.substr(params_close + 1));
+    return format_parametric_call(name, s.substr(par + 1, params_close - par - 1), s.substr(params_close + 1), force);
   }
   const string inner = unwrap_outer_parens(s.substr(par));
   if (inner.empty()) return {};
@@ -2936,7 +3482,7 @@ string Formatter::format_function_call(string_view expr) {
     return compact;
   };
 
-  if (iequals_ascii(name, "arrayFilter") && args.size() >= 2) {
+  if (!force && iequals_ascii(name, "arrayFilter") && args.size() >= 2) {
     string compact = compact_source_args();
     const int arrow = find_top_level_arrow(args.front());
     string rhs = arrow > 0 ? trim_ascii_spaces(string_view(args.front()).substr(static_cast<size_t>(arrow) + 2)) : string();
@@ -2947,7 +3493,7 @@ string Formatter::format_function_call(string_view expr) {
     }
   }
 
-  if (s.find('\n') == string::npos) {
+  if (!force && s.find('\n') == string::npos) {
     string compact = compact_source_args();
     const bool compact_fits = compact.size() <= wrap_threshold;
     if (compact_fits && (iequals_ascii(name, "CAST") || iequals_ascii(name, "roundBankers") ||
@@ -2964,7 +3510,7 @@ string Formatter::format_function_call(string_view expr) {
     }
   }
 
-  bool multiline = s.find('\n') != string::npos || iequals_ascii(name, "multiIf") || iequals_ascii(name, "map") ||
+  bool multiline = force || s.find('\n') != string::npos || iequals_ascii(name, "multiIf") || iequals_ascii(name, "map") ||
                    iequals_ascii(name, "dictGet") || iequals_ascii(name, "dictGetOrDefault") ||
                    iequals_ascii(name, "arrayZip") || looks_like_query(inner) || s.size() > wrap_threshold;
   if (!multiline && raw_args.size() >= 3 &&
@@ -3003,14 +3549,14 @@ string Formatter::format_function_call(string_view expr) {
   vector<string> rendered;
   rendered.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
-    if (iequals_ascii(name, "if") && i == 0) {
-      string cond = format_bool_expr(args[i]);
-      if (cond.find('\n') != string::npos) {
-        string compact = collapse_whitespace(cond);
-        if (compact.size() + 8 <= wrap_threshold) cond = compact;
-      }
-      rendered.push_back(cond);
-    } else rendered.push_back(format_expression(args[i]));
+    // A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(a AND b)`)
+    // is laid out like a WHERE condition, which also drops the parentheses
+    // formatQuery puts around each operand. It stays wrapped here; the width
+    // pass joins it back onto one line when it fits at its final position.
+    const bool condition = (iequals_ascii(name, "if") && i == 0) ||
+        (find_top_level_arrow(args[i]) < 0 && !looks_like_query(args[i]) && !contains_top_level_comment(args[i]) &&
+         (find_top_level_keyword(args[i], "AND") >= 0 || find_top_level_keyword(args[i], "OR") >= 0));
+    rendered.push_back(condition ? format_bool_expr(args[i]) : format_expression(args[i]));
   }
 
   if (iequals_ascii(name, "arrayMin") && args.size() == 1 && trim_ascii_spaces(args.front()).find("arrayMap(") != string::npos && trim_ascii_spaces(args.front()).find("tupleElement") != string::npos) {
@@ -3027,8 +3573,19 @@ string Formatter::format_function_call(string_view expr) {
     if (!multiline) multiline = rendered.front().find('\n') != string::npos || (compact.size() + 8 > wrap_threshold && heavy_one);
   }
 
-  if (!multiline && args.size() <= 1 && !iequals_ascii(name, "arrayJoin")) return {};
-  if (!multiline) return {};
+  if (!multiline) {
+    // An inline call still carries its formatted arguments, so a condition
+    // nested in it (`nullIf(countIf((a = 1) AND (b = 2)), 0)`) loses the
+    // operand parentheses formatQuery added, as it would in an exploded call.
+    string inline_call = name + "(";
+    for (size_t i = 0; i < rendered.size(); ++i) {
+      if (rendered[i].find('\n') != string::npos || (i < comments_after.size() && !comments_after[i].empty())) return {};
+      if (i) inline_call += ", ";
+      inline_call += rendered[i];
+    }
+    inline_call += ")";
+    return inline_call == s ? string() : inline_call;
+  }
 
   string out = name + "(\n";
   if (iequals_ascii(name, "multiIf") && rendered.size() >= 3) {
@@ -3036,6 +3593,14 @@ string Formatter::format_function_call(string_view expr) {
       if (i + 1 == rendered.size() - 1) break;
       out += "    " + rendered[i] + ", " + rendered[i + 1] + ",\n";
     }
+    out += "    " + rendered.back() + "\n)";
+    return out;
+  }
+  // `CASE x WHEN ... END` reaches us as caseWithExpression(x, w1, t1, ..., else):
+  // the operand keeps its own line, then one `when, then` pair per line.
+  if (iequals_ascii(name, "caseWithExpression") && rendered.size() >= 4 && rendered.size() % 2 == 0) {
+    out += "    " + rendered.front() + ",\n";
+    for (size_t i = 1; i + 1 < rendered.size(); i += 2) out += "    " + rendered[i] + ", " + rendered[i + 1] + ",\n";
     out += "    " + rendered.back() + "\n)";
     return out;
   }
@@ -3052,7 +3617,7 @@ string Formatter::format_function_call(string_view expr) {
   for (size_t i = 0; i < rendered.size(); ++i) {
     // Among several arguments an unindented `/ rhs` line would read as the
     // next argument; a sole argument keeps its operators aligned.
-    out += indent_block(rendered.size() > 1 ? hang_operator_continuations(rendered[i]) : rendered[i], 4);
+    out += indent_block(rendered.size() > 1 ? hang_operator_continuations(rendered[i], true) : rendered[i], 4);
     if (i + 1 < rendered.size()) out += ',';
     if (i < comments_after.size() && !comments_after[i].empty()) out += " " + comments_after[i];
     out += '\n';
@@ -3067,7 +3632,7 @@ string Formatter::format_function_call(string_view expr) {
 // call whose head is the whole `name(params)` prefix, so it wraps exactly when
 // a plain call of the same length would; the parameter list goes vertical only
 // when the head alone does not fit.
-string Formatter::format_parametric_call(const string& name, string_view params_src, string_view args_part) {
+string Formatter::format_parametric_call(const string& name, string_view params_src, string_view args_part, bool force) {
   const size_t wrap_threshold = std::min<size_t>(threshold, 80);
   const auto params = split_top_level(params_src, ',');
   string head = name + "(";
@@ -3090,7 +3655,7 @@ string Formatter::format_parametric_call(const string& name, string_view params_
     head = name + "(\n" + block + ")";
     stand_in = "P";
   }
-  const string args_rendered = format_function_call(stand_in + string(args_part));
+  const string args_rendered = format_function_call(stand_in + string(args_part), force);
   if (args_rendered.empty()) {
     if (!multiline_params) return {};
     return head + cleanup_surface(args_part);
@@ -3173,7 +3738,30 @@ string Formatter::format_arith_operand(string_view operand, size_t block_width, 
 string Formatter::format_expression(string_view expr) {
   string s = trim_ascii_spaces(expr);
   if (s.empty()) return s;
-  if (contains_top_level_comment(s)) return cleanup_surface(s);
+  if (contains_top_level_comment(s)) {
+    // A comment that trails the previous list item arrives at the head of
+    // this one (`-- note\n    f(\n        x\n    )`). The code after it is
+    // formatted normally: kept verbatim, its input indentation would be
+    // indented again on every pass.
+    string lead;
+    string rest;
+    if (starts_with_ci(s, "/*")) {
+      if (const size_t end = s.find("*/"); end != string::npos && s.find('\n', end) != string::npos &&
+          trim_ascii_spaces(string_view(s).substr(end + 2, s.find('\n', end) - end - 2)).empty()) {
+        lead = s.substr(0, end + 2);
+        rest = trim_ascii_spaces(string_view(s).substr(end + 2));
+      }
+    } else {
+      std::tie(lead, rest) = split_leading_line_comment(s);
+    }
+    if (!lead.empty() && !rest.empty()) return lead + "\n" + format_expression(rest);
+    return cleanup_surface(s);
+  }
+  // On the local path the user's line breaks reach this point (formatQuery
+  // joins them). Without comments they carry no meaning: an expression the
+  // formatter does not re-render (`f(\n    x\n).1`) would otherwise keep its
+  // input indentation and be indented again on every pass.
+  if (s.find('\n') != string::npos && !mask_sql_surface(s).has_comments) s = collapse_whitespace(s);
   if (!s.empty() && s.front() == '(') {
     const size_t close = find_matching_paren(s, 0);
     if (close != string::npos && close + 1 < s.size() && s[close + 1] == '.') {
@@ -3233,7 +3821,10 @@ string Formatter::format_expression(string_view expr) {
         }
       }
     }
-    if (const string inner = unwrap_outer_parens(rhs); !inner.empty() && !looks_like_query(inner) && find_top_level_keyword(inner, "AND") < 0 && find_top_level_keyword(inner, "OR") < 0) rhs = trim_ascii_spaces(inner);
+    // `x -> (a, b)` returns a tuple: its parentheses are the tuple, not a
+    // grouping, and dropping them would make `b` the next function argument.
+    if (const string inner = unwrap_outer_parens(rhs); !inner.empty() && !looks_like_query(inner) && find_top_level_keyword(inner, "AND") < 0 &&
+        find_top_level_keyword(inner, "OR") < 0 && split_top_level(inner, ',').size() == 1) rhs = trim_ascii_spaces(inner);
     return lhs + " -> " + rhs;
   }
   if (auto over = format_over_clause(s); !over.empty()) s = over;
@@ -3346,6 +3937,9 @@ string Formatter::format_in_literal(string_view expr) {
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};
+        // A long value list on the right is split by the width pass, one
+        // value per line; the tuple on the left stays whole.
+        if (right.size() > left.size() && left.find('\n') == string::npos) return {};
         const auto left_items = split_top_level(left_inner, ',');
         string rendered_left = "(\n";
         for (size_t j = 0; j < left_items.size(); ++j) {
@@ -4169,6 +4763,208 @@ string Formatter::try_format_insert_values(string_view s) {
       out += '\n';
     }
     out += "    )" + suffix;
+  }
+  return out;
+}
+
+
+// Width rule on the final text (see collapse_fitting_calls): join what fits,
+// then explode one-line calls that overflow. Exploding is limited to query
+// statements; DDL keeps its column, index and type lines.
+string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
+  vector<size_t> joined_rows;
+  string out = collapse_fitting_calls(text, threshold, &joined_rows);
+  out = join_fitting_arguments(merge_joined_single_select_items(out, joined_rows, threshold), threshold);
+  if (!allow_explode) return attach_operators_to_closers(out, threshold);
+  vector<string> result;
+  bool exploded = false;
+  for (const string& line : split_lines_keep(out)) {
+    vector<string> pieces = explode_overlong_line(line, 0);
+    exploded = exploded || pieces.size() > 1;
+    for (string& piece : pieces) result.push_back(std::move(piece));
+  }
+  // Splitting a line can leave the rest of its call on later lines with room
+  // to join (`name(\n    params\n)(` followed by the argument lines).
+  const string settled = exploded ? join_fitting_arguments(collapse_fitting_calls(join_lines(result), threshold), threshold) : join_lines(result);
+  return attach_operators_to_closers(settled, threshold);
+}
+
+// An item line made only of operands joined by binary operators
+// with a call or bracket before the first break
+// (`hmac(...) = HMAC(...) AS same,`) breaks before its lowest-precedence
+// operators first, each one leading its own line at the item's indentation
+// like an arithmetic chain; the operands are then decided like any other
+// line. Exploding the first operand's call instead left `) = HMAC(...)`
+// lines that the next pass laid out differently. Returns {} when the line is
+// anything else (keywords, lambdas, CASE, IN, BETWEEN, a clause head, ...).
+vector<string> split_item_at_binary_operators(const string& line, const CallScan& scan) {
+  auto equals_ci = [](string_view a, string_view b) { return a.size() == b.size() && starts_with_ci(a, b); };
+  const size_t indent = leading_space_count(line);
+  // Tokens separated by single spaces outside brackets, quotes and comments.
+  vector<std::pair<size_t, size_t>> tokens;
+  int depth = 0;
+  size_t start = indent;
+  for (size_t i = indent; i < line.size(); ++i) {
+    if (scan.kind[i] != kCallCode) continue;
+    const char c = line[i];
+    if (c == '(' || c == '[') ++depth;
+    else if ((c == ')' || c == ']') && depth > 0) --depth;
+    else if (depth == 0 && (c == '{' || c == '}' || c == '\t')) return {};
+    else if (depth == 0 && c == ' ') {
+      if (i == start) return {};
+      tokens.emplace_back(start, i);
+      start = i + 1;
+    }
+  }
+  if (start >= line.size()) return {};
+  tokens.emplace_back(start, line.size());
+
+  auto text = [&](size_t k) { return string_view(line).substr(tokens[k].first, tokens[k].second - tokens[k].first); };
+  auto tier = [](string_view t) {
+    for (const char* op : {"=", "==", "!=", "<>", "<", ">", "<=", ">="}) if (t == op) return 1;
+    for (const char* op : {"+", "-", "||"}) if (t == op) return 2;
+    for (const char* op : {"*", "/", "%"}) if (t == op) return 3;
+    return 0;
+  };
+  auto operand = [&](size_t k) {
+    const string_view t = text(k);
+    if (tier(t) != 0 || equals_ci(t, "AS")) return false;
+    // A bare word operand must not be a keyword (`NOT`, `CASE`, `INTERVAL`).
+    bool word = true;
+    for (const char ch : t) word = word && sql_is_ident_continue(ch);
+    if (!word) return true;
+    for (const char* kw : {"NOT", "CASE", "WHEN", "THEN", "ELSE", "END", "INTERVAL", "AND", "OR", "IN", "IS",
+                           "BETWEEN", "LIKE", "ILIKE", "GLOBAL", "EXISTS", "DISTINCT", "ASC", "DESC", "SELECT",
+                           "WHERE", "PREWHERE", "HAVING", "QUALIFY", "FROM", "ON", "USING", "WITH", "LIMIT", "OFFSET",
+                           "ORDER", "GROUP", "BY", "SETTINGS", "FORMAT", "JOIN", "ARRAY", "TTL", "DEFAULT"}) {
+      if (equals_ci(t, kw)) return false;
+    }
+    return true;
+  };
+  size_t k = 0;
+  if (!operand(k)) return {};
+  vector<size_t> ops;
+  while (k + 2 < tokens.size() && tier(text(k + 1)) != 0 && operand(k + 2)) {
+    ops.push_back(k + 1);
+    k += 2;
+  }
+  if (ops.empty()) return {};
+  if (k + 1 < tokens.size()) {
+    // Only ` AS alias` (and its comma) may follow the last operand.
+    if (k + 3 != tokens.size() || !equals_ci(text(k + 1), "AS")) return {};
+  }
+  int lowest = 3;
+  for (const size_t op : ops) lowest = std::min(lowest, tier(text(op)));
+  // A bare first operand (`timestamp >= toStartOfInterval(...)`) reads better
+  // with the call exploded after it than alone on its line.
+  size_t first_cut = 0;
+  for (const size_t op : ops) if (tier(text(op)) == lowest) { first_cut = tokens[op].first; break; }
+  if (line.find_first_of("([", indent) >= first_cut) return {};
+  vector<string> out;
+  size_t from = 0;
+  for (const size_t op : ops) {
+    if (tier(text(op)) != lowest) continue;
+    const size_t cut = tokens[op].first - 1;
+    out.push_back(from == 0 ? line.substr(0, cut) : string(indent + 4, ' ') + line.substr(from, cut - from));
+    from = tokens[op].first;
+  }
+  out.push_back(string(indent + 4, ' ') + line.substr(from));
+  return out;
+}
+
+// Explodes the widest call, array or IN list that starts on an overflowing
+// line: `name(` stays on the line, one argument per line one level deeper,
+// `)` back at the line's indentation followed by the rest of the line
+// (`) AS alias,`). A single condition on the WHERE line hangs one more level,
+// like the other single multi-line conditions. The new lines get the same
+// treatment until they fit or nothing is left to split.
+vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
+  if (depth > 16 || utf8_width(line) <= threshold) return {line};
+  const CallScan scan = scan_call_brackets(line);
+  for (const unsigned char k : scan.kind) if (k == kCallComment) return {line};
+  const size_t indent = leading_space_count(line);
+  const string trimmed = line.substr(indent);
+  if (starts_with_ci(trimmed, "CREATE ") || find_top_level_keyword(trimmed, "WITH FILL") >= 0) return {line};
+  for (const char* kw : {"SELECT ", "ORDER BY ", "GROUP BY "}) {
+    if (!starts_with_ci(trimmed, kw) || starts_with_ci(trimmed, "SELECT DISTINCT")) continue;
+    // A single item too long for the clause line goes into the block.
+    vector<string> out{string(indent, ' ') + rtrim_spaces(kw)};
+    for (string& piece : explode_overlong_line(string(indent + 4, ' ') + trimmed.substr(std::char_traits<char>::length(kw)), depth + 1)) {
+      out.push_back(std::move(piece));
+    }
+    return out;
+  }
+  if (const vector<string> operands = split_item_at_binary_operators(line, scan); !operands.empty()) {
+    vector<string> out;
+    for (const string& piece_line : operands) {
+      for (string& piece : explode_overlong_line(piece_line, depth + 1)) out.push_back(std::move(piece));
+    }
+    return out;
+  }
+  // The widest candidate at the shallowest nesting level: the outermost call
+  // on an item line, or the call inside a tuple row `('k', encrypt(...)),`.
+  size_t best_begin = string::npos;
+  size_t best_open = string::npos;
+  size_t best_end = string::npos;
+  int best_level = 0;
+  CallOpener best_kind = CallOpener::None;
+  int level = 0;
+  for (size_t i = 0; i < line.size(); ++i) {
+    if (scan.kind[i] != kCallCode) continue;
+    const char c = line[i];
+    if (c == ')' || c == ']') { if (level > 0) --level; continue; }
+    if (c != '(' && c != '[') continue;
+    const int here = level++;
+    if (scan.match[i] == string::npos || (best_begin != string::npos && here > best_level)) continue;
+    size_t begin = i;
+    const CallOpener kind = classify_call_opener(line, scan, i, &begin);
+    if (kind != CallOpener::Call && kind != CallOpener::Array && kind != CallOpener::InList) continue;
+    if (count_call_arguments(line, scan, i, scan.match[i]) == 0 || closer_starts_text_cast(line, scan.match[i])) continue;
+    size_t end = scan.match[i];
+    if (kind == CallOpener::Call && end + 1 < line.size() && line[end + 1] == '(' && scan.match[end + 1] != string::npos) {
+      end = scan.match[end + 1];
+    }
+    if (utf8_width(string_view(line).substr(0, i + 1)) > threshold) continue;
+    if (best_begin == string::npos || here < best_level || end - begin > best_end - best_begin) {
+      best_begin = begin;
+      best_open = i;
+      best_end = end;
+      best_level = here;
+      best_kind = kind;
+    }
+  }
+  if (best_begin == string::npos) return {line};
+  const string call = line.substr(best_begin, best_end + 1 - best_begin);
+  string rendered;
+  if (best_kind == CallOpener::Call) rendered = format_function_call(call, true);
+  if (rendered.empty()) {
+    // Arrays, IN lists and calls the expression formatter does not take
+    // (a quoted name): one item per line.
+    const size_t open_rel = best_open - best_begin;
+    const size_t close_rel = best_kind == CallOpener::Call ? scan.match[best_open] - best_begin : call.size() - 1;
+    const auto items = split_top_level(string_view(call).substr(open_rel + 1, close_rel - open_rel - 1), ',');
+    rendered = call.substr(0, open_rel + 1) + "\n";
+    for (size_t i = 0; i < items.size(); ++i) {
+      rendered += indent_block(hang_operator_continuations(format_expression(items[i])), 4);
+      rendered += i + 1 < items.size() ? ",\n" : "\n";
+    }
+    rendered += call.substr(close_rel);
+  }
+  if (rendered.find('\n') == string::npos) return {line};
+  size_t base = indent;
+  for (const char* kw : {"WHERE ", "PREWHERE ", "HAVING ", "QUALIFY "}) {
+    if (starts_with_ci(trimmed, kw)) base = indent + 4;
+  }
+  const vector<string> parts = split_lines_keep(rendered);
+  vector<string> produced;
+  produced.push_back(line.substr(0, best_begin) + parts.front());
+  for (size_t i = 1; i + 1 < parts.size(); ++i) produced.push_back(string(base, ' ') + parts[i]);
+  produced.push_back(string(base, ' ') + parts.back() + line.substr(best_end + 1));
+  const string settled = join_fitting_arguments(collapse_fitting_calls(join_lines(produced), threshold), threshold);
+  vector<string> out;
+  for (const string& piece_line : split_lines_keep(settled)) {
+    if (piece_line == line) return {line};
+    for (string& piece : explode_overlong_line(piece_line, depth + 1)) out.push_back(std::move(piece));
   }
   return out;
 }

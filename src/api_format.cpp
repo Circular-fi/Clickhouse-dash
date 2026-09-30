@@ -275,6 +275,10 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   }
 
   const int line_width = requested_line_width(doc);
+  // `"cache": false` formats from scratch: the output-to-output cache entry
+  // below would otherwise answer any idempotence check without running the
+  // formatter a second time.
+  const bool use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
   size_t cache_hits = 0;
   size_t cache_misses = 0;
   size_t request_deduplicated = 0;
@@ -337,7 +341,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       if (out_pretty) *out_pretty = local->second;
       return true;
     }
-    if (format_cache_) {
+    if (format_cache_ && use_cache) {
       if (auto cached = format_cache_->get(key)) {
         ++cache_hits;
         request_results.emplace(key, cached);
@@ -433,7 +437,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);
-    if (format_cache_) format_cache_->put(key, value);
+    if (format_cache_ && use_cache) format_cache_->put(key, value);
 
     // A formatter output is itself a canonical formatter input. Cache that
     // reverse key as well so re-formatting a freshly formatted editor buffer
@@ -441,7 +445,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     // trip. This is especially important for surfaces that the post-processor
     // deliberately preserves more exactly than ClickHouse formatQuery.
     const std::string canonical_key = format_cache_key(host_id, line_width, *value);
-    if (canonical_key != key) {
+    if (canonical_key != key && use_cache) {
       request_results.emplace(canonical_key, value);
       if (format_cache_) format_cache_->put(canonical_key, value);
     }

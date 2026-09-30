@@ -1,0 +1,1 @@
+select count() as spans from otel.traces group by JSONExtractString(resource_attributes_json, 'deployment.environment.name', 'value', 'fallback') order by toStartOfHour(min(timestamp))

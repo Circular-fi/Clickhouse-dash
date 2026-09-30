@@ -1,0 +1,1 @@
+select number, toDate('2026-09-01') + number as day from numbers(30) union all select number, today() from numbers(1)

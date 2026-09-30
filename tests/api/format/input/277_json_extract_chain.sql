@@ -1,0 +1,1 @@
+select JSONExtractString(JSONExtractRaw(log_attributes_json, 'http'), 'request', 'headers', 'user-agent') as user_agent, JSONExtractUInt(log_attributes_json, 'http', 'status') as status from otel.logs

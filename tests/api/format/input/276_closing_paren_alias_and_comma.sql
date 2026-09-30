@@ -1,0 +1,1 @@
+select service_name, replaceRegexpAll(lower(trim(both ' ' from user_agent)), '[^a-z0-9]+', '_') as ua_key, count() as hits, JSONExtract(payload, 'Tuple(status String, retries UInt8, upstream Nullable(String))') as parsed_payload from http.access_log group by service_name, ua_key, parsed_payload

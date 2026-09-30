@@ -1,0 +1,1 @@
+select multiIf(status_code >= 500, 'error', 'ok') as outcome, CASE WHEN retries > 3 THEN 'flaky' END as retry_label from http.access_log

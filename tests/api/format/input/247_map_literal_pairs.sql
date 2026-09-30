@@ -1,0 +1,1 @@
+select map('checkout', 99.9, 'payments', 99.95, 'inventory', 99.5, 'shipping', 99.0, 'frontend', 99.99) as slo_targets, map('env', 'prod') as labels, map('checkout', ['payments', 'inventory', 'shipping'], 'frontend', ['checkout', 'recommendations', 'ad-service', 'cart']) as dependencies

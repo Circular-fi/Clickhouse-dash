@@ -1,0 +1,1 @@
+select toStartOfInterval(timestamp, interval 5 minute) as bucket, coalesce(nullIf(route, ''), 'unknown') as route_label, if(duration_ms > 1000, 'slow', 'quick') as speed, count() as spans from otel.traces group by bucket, route_label, speed

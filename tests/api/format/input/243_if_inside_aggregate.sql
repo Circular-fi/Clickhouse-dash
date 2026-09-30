@@ -1,0 +1,1 @@
+select sum(if(status_code >= 500 and service_name in ('checkout', 'payments', 'inventory'), 1, 0)) as critical_errors, sum(if(status_code >= 500, 1, 0)) as all_errors from http.access_log

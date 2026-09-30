@@ -1,0 +1,1 @@
+select trace_id from otel.traces where has(mapKeys(span_attributes), 'http.status_code') and toUInt16OrZero(span_attributes['http.status_code']) >= 500 and match(span_name, '(?i)timeout|deadline exceeded|connection reset by peer')

@@ -1,0 +1,1 @@
+select round(avg(duration_ms) over (partition by service_name order by timestamp rows between 10 preceding and current row), 2) as smoothed_duration_ms from otel.traces

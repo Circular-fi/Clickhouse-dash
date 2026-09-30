@@ -1,0 +1,1 @@
+select parseDateTime64BestEffortOrNull(log_attributes['event.time']) as event_time_from_attributes, formatDateTime(event_time, '%Y-%m-%d %H:%i:%S', 'Europe/Paris') as local_event_time from otel.logs

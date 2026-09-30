@@ -1,0 +1,1 @@
+select greatest(least(toFloat64(value), upper_bound), lower_bound) as clamped from metrics.gauges

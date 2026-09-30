@@ -1,0 +1,1 @@
+select arrayMap(x -> arrayMap(y -> arrayFilter(z -> z > y and z < x + 100 and z % 7 != 0, bucket_values), bucket_lower_bounds), bucket_upper_bounds) as nested_buckets from metrics.histograms

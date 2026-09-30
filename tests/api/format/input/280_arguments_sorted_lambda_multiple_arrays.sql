@@ -1,0 +1,1 @@
+select arraySort((name, score) -> score, names, scores) as sorted_names, arrayFold((acc, x) -> acc + x, line_amounts, toUInt64(0)) as folded_total, arrayReduce('sum', arrayMap((b, c) -> b * c, bucket_bounds, bucket_counts)) as weighted_total from billing.invoice_lines

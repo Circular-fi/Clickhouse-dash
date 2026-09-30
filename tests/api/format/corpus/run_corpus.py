@@ -104,7 +104,9 @@ COMMENTS = False
 
 
 def fmt(api, sql):
-    payload = {"host_id": "local", "sql": sql}
+    # cache off: the output-to-output cache entry would otherwise answer the
+    # idempotence request and hide a layout that changes on a second pass.
+    payload = {"host_id": "local", "sql": sql, "cache": False}
     if LINE_WIDTH:
         payload["line_width"] = LINE_WIDTH
     r = requests.post(api + "/api/format", json=payload, timeout=60)

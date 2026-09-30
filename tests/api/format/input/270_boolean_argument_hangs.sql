@@ -1,0 +1,1 @@
+select if(isNotNull(parent_span_id) and parent_span_id != '' and service_name != 'frontend-proxy', concat(service_name, ' <- ', dictGetOrDefault('obs.span_parents', 'service_name', parent_span_id, 'unknown')), service_name) as edge from otel.traces
