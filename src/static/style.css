@@ -12236,11 +12236,16 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.3rem;
+}
+
+/* Each action lights up on its own hover: hovering the cross must not
+   highlight Copy JSON next to it. */
+.rowDetails__copy {
   opacity: 0.85;
 }
 
-.rowDetails__actions:hover,
-.rowDetails__actions:focus-within {
+.rowDetails__copy:hover,
+.rowDetails__copy:focus-visible {
   opacity: 1;
 }
 

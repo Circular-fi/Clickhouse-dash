@@ -811,6 +811,11 @@ test('row menu Details on another row replaces the open detail, and copies a val
   expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
   // Hover highlights the cross itself: its colour changes, no shape appears.
   const idleColor = await close.evaluate((el) => getComputedStyle(el).color);
+  const copyBtn = page.locator('.rowDetails__copy');
+  const copyIdle = await copyBtn.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return [cs.opacity, cs.backgroundColor, cs.color, cs.borderTopColor].join('|');
+  });
   await close.hover();
   await expect.poll(() => close.evaluate((el) => getComputedStyle(el).color)).not.toBe(idleColor);
   const hovered = await close.evaluate((el) => {
@@ -818,6 +823,11 @@ test('row menu Details on another row replaces the open detail, and copies a val
     return { bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow };
   });
   expect(hovered).toEqual({ bg: 'rgba(0, 0, 0, 0)', border: '0px', shadow: 'none' });
+  // …and leaves Copy JSON next to it untouched.
+  expect(await copyBtn.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return [cs.opacity, cs.backgroundColor, cs.color, cs.borderTopColor].join('|');
+  })).toBe(copyIdle);
 });
 
 test('inline row details stay attached to their virtualized row and are counted in the scroll extent', async ({ page }) => {
