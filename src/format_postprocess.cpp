@@ -1152,18 +1152,19 @@ void align_create_columns(vector<string>& lines) {
 
       if (indexes.size() >= 2) {
         size_t width = 0;
-        struct ColLine { string lhs; string rhs; bool comma; };
+        struct ColLine { string lhs; string rhs; bool comma; string comment; };
         vector<ColLine> cols;
         cols.reserve(indexes.size());
         for (const size_t index : indexes) {
-          string t = trim_ascii_spaces(lines[index]);
+          auto [code_part, comment] = split_inline_comment(lines[index]);
+          string t = trim_ascii_spaces(code_part);
           bool comma = false;
           if (!t.empty() && t.back() == ',') { comma = true; t.pop_back(); t = rtrim_spaces(t); }
           const size_t close = t.find('`', 1);
           const string lhs = t.substr(0, close + 1);
           const string rhs = trim_ascii_spaces(t.substr(close + 1));
           width = std::max(width, utf8_width(lhs));
-          cols.push_back({lhs, rhs, comma});
+          cols.push_back({lhs, rhs, comma, comment});
         }
         for (size_t k = 0; k < indexes.size(); ++k) {
           string rendered(indent, ' ');
@@ -1171,6 +1172,7 @@ void align_create_columns(vector<string>& lines) {
           rendered += string(width - utf8_width(cols[k].lhs) + 1, ' ');
           rendered += cols[k].rhs;
           if (cols[k].comma) rendered += ',';
+          if (!cols[k].comment.empty()) rendered += " " + cols[k].comment;
           lines[indexes[k]] = std::move(rendered);
         }
       }
@@ -1987,6 +1989,7 @@ struct Formatter {
   string format_in_subquery(string_view expr, bool break_after_in);
   string format_in_literal(string_view expr);
   string format_create_table(string_view s);
+  string format_commented_column_list(const string& head, const string& cols, const string& tail);
   string format_create_view(string_view s, bool materialized);
   string format_alter_table(string_view s);
   string format_insert_select_like(string_view s);
@@ -2010,12 +2013,21 @@ string Formatter::cleanup_surface(string_view s) const {
   while (start <= s.size()) {
     const size_t nl = s.find('\n', start);
     const size_t end = (nl == string_view::npos) ? s.size() : nl;
-    auto [code, comment] = split_inline_comment(s.substr(start, end - start));
+    const string_view raw_line = s.substr(start, end - start);
+    auto [code, comment] = split_inline_comment(raw_line);
     size_t lead = 0;
     while (lead < code.size() && (code[lead] == ' ' || code[lead] == '\t')) ++lead;
     string prefix = code.substr(0, lead);
     code = prefix + normalize_code_spacing(string_view(code).substr(lead));
-    lines.push_back(comment.empty() ? code : (code.empty() ? comment : code + ' ' + comment));
+    if (trim_ascii_spaces(code).empty() && !comment.empty()) {
+      // A comment-only line keeps its indentation (it was lost when the code
+      // part, and thus the measured indent, was empty).
+      size_t indent = 0;
+      while (indent < raw_line.size() && (raw_line[indent] == ' ' || raw_line[indent] == '\t')) ++indent;
+      lines.push_back(string(raw_line.substr(0, indent)) + comment);
+    } else {
+      lines.push_back(comment.empty() ? code : (code.empty() ? comment : code + ' ' + comment));
+    }
     if (nl == string_view::npos) break;
     start = nl + 1;
   }
@@ -3599,6 +3611,114 @@ string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
 }
 
 
+// `name` -> `` `name` `` for a plain identifier column name; structural heads
+// (INDEX, PROJECTION, CONSTRAINT, PRIMARY KEY), quoted and non-plain names
+// are returned unchanged.
+string backquote_plain_column_name(const string& name) {
+  if (name.empty() || name.front() == '`' || name.front() == '"') return name;
+  for (const char* kw : {"INDEX", "PROJECTION", "CONSTRAINT", "PRIMARY", "TTL"}) {
+    if (iequals_ascii(name, kw)) return name;
+  }
+  bool plain = !std::isdigit(static_cast<unsigned char>(name.front()));
+  for (const char ch : name) plain = plain && is_ident_char(ch);
+  return plain ? "`" + name + "`" : name;
+}
+
+// Column lists written with comments (usually one per column) take the local
+// formatter path, where formatQuery neither quotes nor aligns the columns and
+// the comments must survive. A comment right after a column's comma belongs
+// to that column (kept at the end of its line); a comment on its own line
+// stays on its own line before the next column. Column names are back-quoted
+// and aligned like formatQuery output. A comment inside a definition falls
+// back to the generic rendering.
+string Formatter::format_commented_column_list(const string& head, const string& cols, const string& tail) {
+  struct Column {
+    vector<string> leading;
+    string code;
+    string trailing;
+  };
+  vector<Column> columns;
+  const auto raw = split_top_level(cols, ',');
+  for (size_t k = 0; k < raw.size(); ++k) {
+    const string& item = raw[k];
+    Column column;
+    size_t i = 0;
+    bool same_line = k > 0;
+    while (i < item.size()) {
+      const char c = item[i];
+      if (c == ' ' || c == '\t' || c == '\r') { ++i; continue; }
+      if (c == '\n') { same_line = false; ++i; continue; }
+      string comment;
+      if (c == '-' && i + 1 < item.size() && item[i + 1] == '-') {
+        const size_t e = item.find('\n', i);
+        comment = trim_ascii_spaces(item.substr(i, e == string::npos ? string::npos : e - i));
+        i = e == string::npos ? item.size() : e;
+      } else if (c == '/' && i + 1 < item.size() && item[i + 1] == '*') {
+        const size_t e = item.find("*/", i + 2);
+        if (e == string::npos) return {};
+        comment = item.substr(i, e + 2 - i);
+        if (comment.find('\n') != string::npos) return {};
+        i = e + 2;
+      } else {
+        break;
+      }
+      if (same_line && !columns.empty()) {
+        string& trailing = columns.back().trailing;
+        trailing += (trailing.empty() ? "" : " ") + comment;
+      } else {
+        column.leading.push_back(comment);
+      }
+    }
+    string code = item.substr(i);
+    // Only the last column can carry a comment after its code (others have
+    // theirs after the comma, i.e. in the next item).
+    {
+      const size_t last_nl = code.rfind('\n');
+      const size_t line_start = last_nl == string::npos ? 0 : last_nl + 1;
+      auto [line_code, line_comment] = split_inline_comment(string_view(code).substr(line_start));
+      if (!line_comment.empty()) {
+        column.trailing = line_comment;
+        code = code.substr(0, line_start) + line_code;
+      }
+    }
+    code = trim_ascii_spaces(code);
+    if (code.empty() || mask_sql_surface(code).has_comments) return {};
+    column.code = std::move(code);
+    columns.push_back(std::move(column));
+  }
+
+  auto render_name = [](const string& name) { return backquote_plain_column_name(name); };
+  static const char* kNonColumnHeads[] = {"INDEX", "PROJECTION", "CONSTRAINT", "PRIMARY"};
+  vector<std::pair<string, string>> parsed;
+  size_t width = 0;
+  for (const auto& column : columns) {
+    const string col = collapse_whitespace(column.code);
+    const size_t sp = col.find_first_of(" \t\n");
+    string lhs = sp == string::npos ? col : col.substr(0, sp);
+    const string rhs = sp == string::npos ? string() : trim_ascii_spaces(col.substr(sp + 1));
+    bool structural = false;
+    for (const char* kw : kNonColumnHeads) structural = structural || iequals_ascii(lhs, kw);
+    if (!structural) {
+      lhs = render_name(lhs);
+      width = std::max(width, utf8_width(lhs));
+    }
+    parsed.emplace_back(structural ? "" : lhs, structural ? col : rhs);
+  }
+  string out = head + "\n(\n";
+  for (size_t i = 0; i < parsed.size(); ++i) {
+    for (const auto& comment : columns[i].leading) out += "    " + comment + "\n";
+    string line = "    ";
+    if (parsed[i].first.empty()) line += parsed[i].second;
+    else line += parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
+    if (i + 1 < parsed.size()) line += ',';
+    if (!columns[i].trailing.empty()) line += " " + columns[i].trailing;
+    out += rtrim_spaces(line) + "\n";
+  }
+  out += ")";
+  if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
+  return out;
+}
+
 string Formatter::format_create_table(string_view s) {
   const string text = trim_ascii_spaces(s);
   // CREATE TABLE ... [ENGINE ...] AS SELECT: the stored query is a statement of
@@ -3646,20 +3766,26 @@ string Formatter::format_create_table(string_view s) {
   const string head = trim_ascii_spaces(text.substr(0, par));
   const string cols = trim_ascii_spaces(text.substr(par + 1, close - par - 1));
   const string tail = trim_ascii_spaces(text.substr(close + 1));
+  if (mask_sql_surface(cols).has_comments) {
+    if (auto commented = format_commented_column_list(head, cols, tail); !commented.empty()) return commented;
+  }
   const auto items = split_top_level(cols, ',');
   size_t width = 0;
   vector<std::pair<string, string>> parsed;
   for (const auto& item : items) {
     const string col = trim_ascii_spaces(item);
     const size_t sp = col.find_first_of(" \t\n");
-    const string lhs = (sp == string::npos) ? col : trim_ascii_spaces(col.substr(0, sp));
+    string lhs = (sp == string::npos) ? col : trim_ascii_spaces(col.substr(0, sp));
     const string rhs = (sp == string::npos) ? string() : trim_ascii_spaces(col.substr(sp + 1));
-    width = std::max(width, lhs.size());
+    // Column names are back-quoted like formatQuery output, so a statement
+    // that took the local (comment-preserving) path looks the same.
+    lhs = backquote_plain_column_name(lhs);
+    width = std::max(width, utf8_width(lhs));
     parsed.push_back({lhs, rhs});
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
-    out += "    " + parsed[i].first + string(width - parsed[i].first.size() + 1, ' ') + parsed[i].second;
+    out += "    " + parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
     if (i + 1 < parsed.size()) out += ',';
     out += '\n';
   }
