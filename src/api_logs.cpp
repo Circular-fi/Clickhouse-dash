@@ -74,7 +74,7 @@ std::string quote_ident(std::string_view ident) {
   return out + "`";
 }
 
-std::string quote(std::string_view value) { return otel_allowlist_detail::quote_string(value); }
+std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
 
 std::string settings_clause() {
   return " SETTINGS max_execution_time = " + std::to_string(kMaxExecutionSeconds) +
