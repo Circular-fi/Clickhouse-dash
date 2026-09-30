@@ -49,7 +49,8 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     traces = read("src/static/app_traces.js")
     html = read("src/static/traces.html")
     boot = read("src/static/app_traces_bootstrap.js")
-    assert '"app_trace_views.js", "app_trace_search.js"' in boot
+    assert '"app_trace_search.js"' in boot
+    assert boot.index('"app_traces.js"') < boot.index('"app_trace_search.js"')
     for name in ('"from"', '"to"', '"status"', '"service"', '"operation"', '"limit"', '"sort"', '"results"',
                  '"tag"', '"tag_not"', '"tag_exists"', '"tag_missing"', '"service_not"', '"operation_not"', '"status_not"'):
         assert name in js[js.index("const SEARCH_PARAMS"):js.index("const PIN_STORE_KEY")]
