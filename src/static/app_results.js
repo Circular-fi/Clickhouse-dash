@@ -3731,7 +3731,7 @@
     });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
-    closeBtn.className = "rowDetails__close";
+    closeBtn.className = "closeCross rowDetails__close";
     closeBtn.setAttribute("aria-label", "Close row details");
     closeBtn.title = "Close (Esc)";
     closeBtn.textContent = "×";

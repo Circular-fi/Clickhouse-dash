@@ -4322,14 +4322,24 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 /* Query workspace keeps the original desktop telemetry rail at the right.
    The base .layout/.metricColumn rules above are authoritative. */
 
-/* Numeric gauges remain informative but no longer dominate result readability. */
+/* Numeric gauges remain informative but no longer dominate result readability.
+   The bar is clipped to the content box; a second, transparent bottom layer
+   clips the background *colour* to the padding box, so a row highlight
+   (hover, expanded row) fills the whole gauge cell like every other cell
+   instead of stopping at the content box. */
 .resultTable tbody td.resultTable__gaugeCell,
 .resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image: linear-gradient(
-    to right,
-    color-mix(in srgb, var(--accentBorder) 8%, transparent),
-    color-mix(in srgb, var(--accentBorder) 8%, transparent)
-  );
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--accentBorder) 8%, transparent),
+      color-mix(in srgb, var(--accentBorder) 8%, transparent)
+    ),
+    linear-gradient(transparent, transparent);
+  background-repeat: no-repeat, no-repeat;
+  background-origin: content-box, padding-box;
+  background-clip: content-box, padding-box;
+  background-size: var(--gaugeFill, 0%) 100%, 100% 100%;
 }
 
 /* Analysis uses almost the full viewport. The header remains fixed while the
@@ -4546,11 +4556,6 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.resultsClearButton {
-  font-size: .68rem;
-  font-weight: 600;
 }
 
 @media (max-width: 820px) {
@@ -12249,8 +12254,9 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   opacity: 1;
 }
 
-/* Frameless icon button, like the editor's options cog. */
-.rowDetails__close {
+/* Frameless close cross (row details, results Clear), like the editor's
+   options cog: no button shape, hover lights up the cross itself. */
+.closeCross {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -12260,23 +12266,31 @@ html[data-theme="light"] .rowDetailsMenu .runMenu__opt:focus-visible {
   border: 0;
   border-radius: 9px;
   background: transparent;
+  box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   font: inherit;
   font-size: 1.1rem;
+  font-weight: 400;
   line-height: 1;
   cursor: pointer;
 }
 
-/* Hover lights up the cross itself, never a button shape behind it. */
-.rowDetails__close:hover,
-.rowDetails__close:focus-visible {
+.closeCross:hover:not(:disabled),
+.closeCross:focus-visible {
   background: transparent;
+  box-shadow: none;
   color: var(--text);
 }
 
-.rowDetails__close:focus-visible {
+.closeCross:focus-visible {
   outline: none;
   text-shadow: 0 0 6px var(--accentBorder);
+}
+
+.closeCross:disabled {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 45%, transparent);
+  cursor: default;
 }
 
 /* Mirrors .resultTable--vertical tbody th / td (the one-row result view). */

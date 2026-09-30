@@ -99,6 +99,16 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await runSuccessfulQuery(page, await editor.inputValue());
   await expect(clear).toBeEnabled();
+  // Clear is the same frameless cross as the row details close button.
+  await expect(clear).toHaveText('×');
+  await expect(clear).toHaveAttribute('aria-label', 'Clear results');
+  const idle = await clear.evaluate((el) => getComputedStyle(el).color);
+  await clear.hover();
+  await expect.poll(() => clear.evaluate((el) => getComputedStyle(el).color)).not.toBe(idle);
+  expect(await clear.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow };
+  })).toEqual({ bg: 'rgba(0, 0, 0, 0)', border: '0px', shadow: 'none' });
   await clear.click();
   await expect(clear).toBeDisabled();
 });
@@ -799,6 +809,11 @@ test('row menu Details on another row replaces the open detail, and copies a val
   await expect(next).toHaveClass(/is-rowExpanded/);
   await expect(rows.nth(0)).not.toHaveClass(/is-rowExpanded/);
   await expectDetailRightAfter(next);
+
+  // The expanded row's highlight fills its numeric gauge cells edge to edge
+  // (the gauge bar is clipped to the content box, the row colour is not).
+  const gaugeClip = await next.locator('td.resultTable__gaugeCell').first().evaluate((td) => getComputedStyle(td).backgroundClip);
+  expect(gaugeClip).toBe('content-box, padding-box');
 
   // The close button is frameless, like the editor options cog.
   const close = page.locator('.rowDetails__close');
