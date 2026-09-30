@@ -779,3 +779,37 @@ WHERE
     assert formatted.count(signature) == 2
     assert "WITH" in formatted
     assert "FROM analytics.transactions" in formatted
+
+
+def test_builtin_documentation_corpus_is_semantically_stable() -> None:
+    """Every SQL example shipped in ClickHouse's own documentation tables
+    (system.functions.examples, …) plus every fixture input keeps its EXPLAIN
+    AST, formats idempotently and never fails. Width overflows are reported in
+    the artifact but not fatal (long literals, comments)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("run_corpus", Path(__file__).parent / "corpus" / "run_corpus.py")
+    corpus = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(corpus)
+    ch = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/") + "/"
+    auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))
+    items = corpus.corpus(ch, auth)
+    assert len(items) > 500, len(items)
+    import concurrent.futures as cf
+
+    with cf.ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda item: corpus.check(BASE_URL, ch, auth, *item), items))
+    failures = [r for r in results if any(i["kind"] in {"ast", "format_error", "idempotent"} for i in r["issues"])]
+    widths = [r for r in results if any(i["kind"] == "width" for i in r["issues"])]
+    artifacts = Path(os.environ.get("TEST_ARTIFACTS_DIR", "/tmp")) / "format_corpus"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "report.json").write_text(json.dumps({
+        "statements": len(items),
+        "checked": sum(1 for r in results if "skipped" not in r),
+        "semantic_failures": failures,
+        "width_overflows": widths,
+    }, indent=1), encoding="utf-8")
+    assert not failures, "\n\n".join(
+        f"{r['origin']}: {[i['kind'] for i in r['issues']]}\nIN:  {r['input'][:300]}\nOUT: {r.get('output', '')[:300]}"
+        for r in failures[:10])
