@@ -105,6 +105,9 @@ void normalize_config(AppConfig& cfg) {
   }
   cfg.logs.max_lookback_minutes = std::max(1, std::min(365 * 24 * 60, cfg.logs.max_lookback_minutes));
   cfg.logs.search_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.search_limit));
+  cfg.logs.trace_logs_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.trace_logs_limit));
+  cfg.logs.trace_margin_before_seconds = std::max(0, std::min(3600, cfg.logs.trace_margin_before_seconds));
+  cfg.logs.trace_margin_after_seconds = std::max(0, std::min(3600, cfg.logs.trace_margin_after_seconds));
   if (cfg.logs.body_search != "token" && cfg.logs.body_search != "substring" && cfg.logs.body_search != "off") {
     throw std::runtime_error("logs.body_search must be token, substring, or off");
   }
@@ -415,13 +418,17 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   // traces.service_allowlist, so there is no per-signal allowlist key.
   if (const auto* logs = optional_block(root, "logs", source)) {
     validate_object(*logs, "logs", {
-        "enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search"}, {});
+        "enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",
+        "trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});
     if (auto v = bool_attr(*logs, "enabled", "logs")) cfg.logs.enabled = *v;
     if (auto v = string_attr(*logs, "database", "logs")) cfg.logs.database = *v;
     if (auto v = string_attr(*logs, "table", "logs")) cfg.logs.table = *v;
     if (auto v = int_attr(*logs, "max_lookback_minutes", "logs")) cfg.logs.max_lookback_minutes = int_value(*v, "logs.max_lookback_minutes");
     if (auto v = int_attr(*logs, "search_limit", "logs")) cfg.logs.search_limit = size_value(*v, "logs.search_limit");
     if (auto v = string_attr(*logs, "body_search", "logs")) cfg.logs.body_search = *v;
+    if (auto v = int_attr(*logs, "trace_logs_limit", "logs")) cfg.logs.trace_logs_limit = size_value(*v, "logs.trace_logs_limit");
+    if (auto v = int_attr(*logs, "trace_margin_before_seconds", "logs")) cfg.logs.trace_margin_before_seconds = int_value(*v, "logs.trace_margin_before_seconds");
+    if (auto v = int_attr(*logs, "trace_margin_after_seconds", "logs")) cfg.logs.trace_margin_after_seconds = int_value(*v, "logs.trace_margin_after_seconds");
   }
 
   if (const auto* metrics = optional_block(root, "metrics", source)) {

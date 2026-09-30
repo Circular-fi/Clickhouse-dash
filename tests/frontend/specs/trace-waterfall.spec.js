@@ -111,7 +111,8 @@ test('trace detail: header items like Jaeger\'s, with Errors and an Incomplete t
   const trace = nestedTrace();
   await openTrace(page, trace);
   const item = (label) => page.locator(`#traceDetailStats [data-trace-header-item="${label}"] > strong`);
-  await expect(page.locator('#traceDetailStats [data-trace-header-item] > span')).toHaveText(['Trace Start', 'Duration', 'Services', 'Depth', 'Total Spans', 'Errors']);
+  // Then the trace's logs (app_trace_logs.js, when logs are enabled).
+  await expect(page.locator('#traceDetailStats [data-trace-header-item] > span')).toHaveText(['Trace Start', 'Duration', 'Services', 'Depth', 'Total Spans', 'Errors', 'Logs']);
   // Browser-local (UTC here), with the year, seconds and muted milliseconds.
   await expect(item('Trace Start')).toHaveText('Sep 20 2026, 01:22:52.000');
   await expect(item('Trace Start').locator('small')).toHaveText('.000');

@@ -24,11 +24,14 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
     assert '"service_allowlist"' in config
     assert 'service_allowlist        = ["*"]' in example
 
+    # The predicate is shared by every OTel signal (traces, logs).
+    allowlist = read("src/otel_allowlist.hpp")
     assert "service_allowlist_predicate" in api
-    assert 'pattern == "*"' in api
-    assert "startsWith(ServiceName" in api
-    assert "endsWith(ServiceName" in api
-    assert "match(ServiceName" in api
+    assert '#include "otel_allowlist.hpp"' in api
+    assert 'pattern == "*"' in allowlist
+    assert "startsWith(ServiceName" in allowlist
+    assert "endsWith(ServiceName" in allowlist
+    assert "match(ServiceName" in allowlist
     assert '" WHERE " + visibility' in api
     assert '"WHERE TraceId = trace AND " + visibility' in api
     assert '"WHERE TraceId = trace AND " + visibility' in api

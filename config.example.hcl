@@ -108,6 +108,12 @@ logs {
   # Body search: "token" (hasToken, served by the exporter's tokenbf_v1/text
   # Body index), "substring" (case-insensitive scan) or "off".
   body_search          = "token"
+  # Logs of one trace (trace detail page): at most trace_logs_limit records,
+  # from the trace start - trace_margin_before_seconds to its end +
+  # trace_margin_after_seconds.
+  trace_logs_limit            = 1000
+  trace_margin_before_seconds = 5
+  trace_margin_after_seconds  = 30
 }
 
 # OpenTelemetry metrics written by the OTel Collector ClickHouse exporter

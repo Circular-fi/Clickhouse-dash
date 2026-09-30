@@ -14764,3 +14764,428 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
       minmax(96px, 160px);
   }
 }
+
+/* ==========================================================================
+   Trace logs (app_trace_logs.js): header toggle, logs panel, span row badges
+   and markers, logs listed under a span, inspector Logs group.
+   ========================================================================== */
+:root {
+  --trace-log-fatal: #ff5f8a;
+  --trace-log-error: var(--trace-error);
+  --trace-log-warn: var(--trace-warning);
+  --trace-log-info: #3fb950;
+  --trace-log-debug: #58a6ff;
+  --trace-log-trace: #8d96a0;
+  --trace-log-unset: #8d96a0;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --trace-log-fatal: #b4235a;
+    --trace-log-info: #1a7f37;
+    --trace-log-debug: #0969da;
+    --trace-log-trace: #6e7781;
+    --trace-log-unset: #6e7781;
+  }
+}
+html[data-theme="dark"] {
+  --trace-log-fatal: #ff5f8a;
+  --trace-log-info: #3fb950;
+  --trace-log-debug: #58a6ff;
+  --trace-log-trace: #8d96a0;
+  --trace-log-unset: #8d96a0;
+}
+html[data-theme="light"] {
+  --trace-log-fatal: #b4235a;
+  --trace-log-info: #1a7f37;
+  --trace-log-debug: #0969da;
+  --trace-log-trace: #6e7781;
+  --trace-log-unset: #6e7781;
+}
+[data-sev="fatal"] { --trace-log-color: var(--trace-log-fatal); }
+[data-sev="error"] { --trace-log-color: var(--trace-log-error); }
+[data-sev="warn"] { --trace-log-color: var(--trace-log-warn); }
+[data-sev="info"] { --trace-log-color: var(--trace-log-info); }
+[data-sev="debug"] { --trace-log-color: var(--trace-log-debug); }
+[data-sev="trace"] { --trace-log-color: var(--trace-log-trace); }
+[data-sev="unset"] { --trace-log-color: var(--trace-log-unset); }
+
+/* Header item: "Logs" with a count button toggling the panel. */
+.traceLogsToggle {
+  height: 17px;
+  padding: 0 6px 0 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--trace-log-info) 10%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.traceLogsToggle svg,
+.traceLogsPanel__title svg,
+.traceSpanLogsBadge svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.traceLogsToggle:hover,
+.traceLogsToggle:focus-visible { border-color: var(--accentBorder); outline: none; }
+.traceLogsToggle.is-open { border-color: color-mix(in srgb, var(--trace-log-info) 70%, transparent); background: color-mix(in srgb, var(--trace-log-info) 20%, transparent); }
+.traceLogsToggle__errors {
+  margin-left: 3px;
+  color: var(--trace-error);
+  font-size: .9em;
+  font-weight: 700;
+}
+.traceLogsToggle.is-error { color: var(--trace-error); border-color: color-mix(in srgb, var(--trace-error) 60%, transparent); }
+.traceLogsToggle.is-unavailable { color: var(--muted); background: transparent; }
+.traceLogsToggle.is-loading .traceButtonSpinner { display: inline-block; margin: 0; width: 8px; height: 8px; }
+
+/* Panel between the header and the view bar. */
+.traceLogsPanel {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-height: min(44vh, 460px);
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+  --traceKvString: color-mix(in srgb, var(--text) 74%, #22c55e);
+  --traceKvNumber: color-mix(in srgb, var(--text) 70%, #f59e0b);
+  --traceKvBool: color-mix(in srgb, var(--text) 70%, #a78bfa);
+  --traceKvNull: color-mix(in srgb, var(--muted) 75%, var(--text));
+}
+.traceLogsPanel__bar {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 3px 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theadBg) 40%, var(--panelBg));
+}
+.traceLogsPanel__title { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; }
+.traceLogsPanel__chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.traceLogsChip {
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: 650 10px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+}
+.traceLogsChip > i { width: 7px; height: 7px; border-radius: 2px; background: var(--trace-log-color); }
+.traceLogsChip > b { color: var(--text); font-weight: 650; }
+.traceLogsChip:hover,
+.traceLogsChip:focus-visible { border-color: var(--trace-log-color); outline: none; }
+.traceLogsChip[aria-pressed="true"] {
+  border-color: var(--trace-log-color);
+  background: color-mix(in srgb, var(--trace-log-color) 16%, transparent);
+  color: var(--text);
+}
+.traceLogsPanel__bar > .traceLogsPanel__service { width: auto; flex: 0 0 auto; position: relative; }
+.traceLogsPanel__service .tracePicker__button { height: 22px; min-width: 150px; max-width: 260px; font-size: 11px; }
+.traceLogsPanel__filter {
+  width: 220px;
+  max-width: 36vw;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 5px;
+  background: var(--inputBg);
+  color: var(--text);
+  font-size: 11px;
+}
+.traceLogsPanel__filter:focus { outline: none; border-color: var(--accentBorder); box-shadow: var(--ring); }
+.traceLogsPanel__source { min-width: 0; margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.traceLogsPanel__close {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.traceLogsPanel__bar > .traceLogsPanel__title + .traceLogsPanel__close { margin-left: auto; }
+.traceLogsPanel__close:hover,
+.traceLogsPanel__close:focus-visible { color: var(--text); outline: none; }
+.traceLogsPanel__notice {
+  padding: 3px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.traceLogsPanel__notice.is-truncated { color: var(--trace-warning); }
+.traceLogsPanel__matches { color: var(--text); font-weight: 600; }
+.traceLogsPanel__list { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; }
+.traceLogsPanel__more,
+.traceSpanLogsRow__more,
+.traceLogsState__action,
+.traceLog__openSpan {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 10.5px Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.traceLogsPanel__more { margin: 6px 10px; }
+.traceLogsPanel__more:hover,
+.traceSpanLogsRow__more:hover,
+.traceLogsState__action:hover,
+.traceLog__openSpan:hover,
+.traceLog__openSpan:focus-visible { color: var(--text); border-color: var(--accentBorder); outline: none; }
+.traceLogsState {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.traceLogsState.is-error { color: var(--trace-error); }
+.traceLogsState .traceButtonSpinner { display: inline-block; margin: 0; }
+
+/* One log: toggle, severity, offset, [service, span], body. */
+.traceLog { min-width: 0; border-bottom: 1px solid var(--rowDivider); }
+.traceLog__row {
+  min-width: 0;
+  height: 24px;
+  padding: 0 10px 0 4px;
+  display: grid;
+  grid-template-columns: 16px 50px 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  box-shadow: inset 2px 0 0 var(--trace-log-color);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.traceLog--panel > .traceLog__row { grid-template-columns: 16px 50px 76px minmax(70px, 150px) minmax(80px, 200px) minmax(0, 1fr); }
+.traceLog__row:hover { background: var(--rowHover); }
+.traceLog__row:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
+.traceLog.is-target > .traceLog__row { background: color-mix(in srgb, var(--accentBorder) 14%, transparent); }
+.traceLog__toggle {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.traceLog__toggle::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform .12s ease;
+}
+.traceLog.is-open > .traceLog__row .traceLog__toggle::before { transform: rotate(90deg); }
+.traceLog__sev {
+  min-width: 0;
+  color: var(--trace-log-color);
+  font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: .02em;
+}
+.traceLog__offset { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.traceLog__service,
+.traceLog__span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.traceLog__service::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 1px;
+  background: var(--trace-service-color, var(--accentBorder));
+}
+.traceLog__span { color: var(--muted); }
+.traceLog__span.is-missing { font-style: italic; opacity: .75; }
+.traceLog__body {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  color: var(--text);
+  font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.traceLog__details {
+  padding: 6px 10px 8px 30px;
+  display: grid;
+  gap: 6px;
+  background: color-mix(in srgb, var(--theadBg) 30%, transparent);
+  box-shadow: inset 2px 0 0 var(--trace-log-color);
+  font-size: 11px;
+  cursor: auto;
+}
+.traceLog__fullBody {
+  max-height: 240px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--editorSolidBg, var(--panelBg));
+  color: var(--text);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.traceLog__cut { color: var(--trace-warning); }
+.traceLog__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 14px; color: var(--muted); }
+.traceLog__meta b { color: var(--text); font-weight: 600; }
+.traceLog__meta code { font-size: 10.5px; }
+.traceLog__metaService::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-radius: 1px;
+  background: var(--trace-service-color, var(--accentBorder));
+}
+.traceLog__meta .traceLog__openSpan { margin-left: auto; }
+.traceLog__attrs { display: grid; gap: 3px; }
+.traceLog__attrs > b,
+.traceLog__resource > summary { color: var(--muted); font-size: 10.5px; font-weight: 700; }
+.traceLog__resource > summary { cursor: pointer; }
+.traceLog__resource[open] > summary { margin-bottom: 3px; }
+
+/* Span rows: log count badge (label) and log markers (timeline). */
+.traceSpanLogsBadge {
+  height: 15px;
+  margin-left: auto;
+  padding: 0 4px 0 3px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid color-mix(in srgb, var(--trace-log-color) 55%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--trace-log-color) 12%, transparent);
+  color: var(--trace-log-color);
+  font: 650 9.5px/1 Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.traceSpanLogsBadge svg { width: 10px; height: 10px; }
+.traceSpanLogsBadge:hover,
+.traceSpanLogsBadge:focus-visible { border-color: var(--trace-log-color); outline: none; }
+.traceSpanLogsBadge[aria-expanded="true"] { background: color-mix(in srgb, var(--trace-log-color) 26%, transparent); }
+.traceSpanLogMarker {
+  position: absolute;
+  z-index: 5;
+  bottom: 2px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--trace-log-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--panelBg) 80%, transparent);
+  cursor: pointer;
+}
+.traceSpanLogMarker:hover { transform: scale(1.5); }
+
+/* The logs of a span listed under its row, on the waterfall grid. */
+.traceSpanLogsRow {
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--trace-log-info) 4%, var(--panelBg));
+}
+.traceLogLine {
+  height: 22px !important;
+  padding: 0 !important;
+  grid-template-columns: minmax(220px, var(--trace-label-width)) minmax(0, 1fr) !important;
+  gap: 0 !important;
+  box-shadow: none;
+}
+.traceLogLine__label {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  box-sizing: border-box;
+  padding-right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-right: 1px solid var(--border);
+}
+.traceLogLine__glyph {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: var(--trace-log-color);
+}
+.traceLogLine .traceLog__sev { flex: 0 0 38px; }
+.traceLogLine .traceLog__body { flex: 1 1 auto; }
+.traceLogLine__timeline { position: relative; min-width: 0; height: 100%; overflow: hidden; }
+.traceLogLine__marker {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  transform: rotate(45deg);
+  border-radius: 1px;
+  background: var(--trace-log-color);
+}
+.traceLogLine__offset {
+  position: absolute;
+  top: 50%;
+  transform: translate(8px, -50%);
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.traceLogLine__offset.is-left { transform: translate(calc(-100% - 8px), -50%); }
+.traceLogLine__offset.is-outside { left: 8px; transform: translateY(-50%); font-style: italic; }
+.traceLog--inline > .traceLog__details { padding-left: 48px; }
+.traceSpanLogsRow__more { margin: 3px 0 4px 36px; }
+
+/* Inspector Logs group. */
+.traceSpanLogs__summary { min-width: 0; display: inline-flex; gap: 6px; overflow: hidden; }
+.traceSpanLogs__sev { color: var(--trace-log-color); font: 650 9.5px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.traceSpanLogs[open] > summary .traceSpanLogs__summary { display: none; }
+.traceSpanLogs__list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 3px;
+}
+.traceSpanLogs__list .traceLog:last-child { border-bottom: 0; }

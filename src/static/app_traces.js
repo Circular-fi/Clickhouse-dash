@@ -2067,7 +2067,7 @@
       const incomplete = orphans
         ? `<span class="tracePageHeader__incomplete" data-trace-incomplete title="${esc(`${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`)}">${WARNING_ICON}Incomplete</span>`
         : "";
-      dom.traceDetailStats.innerHTML = itemsHtml + incomplete + (ns.traceInsights?.traceExceptionTagHtml(cache) || "");
+      dom.traceDetailStats.innerHTML = itemsHtml + (ns.traceLogs?.headerItemHtml?.() || "") + incomplete + (ns.traceInsights?.traceExceptionTagHtml(cache) || "");
     }
     ns.traceInsights?.renderHighlights(cache);
     renderTraceServiceFilters(spans);
@@ -2212,13 +2212,16 @@
   const SPAN_ROW_PX = 24;
   const INSPECTOR_ESTIMATE_PX = 260;
   const inspectorHeights = new Map();
+  const logsRowHeights = new Map();
   let virtualWaterfall = null;
   let virtualFrame = 0;
   let inspectorObserver = null;
 
   function virtualItemHeight(node) {
     const id = spanKey(node);
-    return SPAN_ROW_PX + (model.openSpanIds.has(id) ? (inspectorHeights.get(id) || INSPECTOR_ESTIMATE_PX) : 0);
+    const logsEstimate = ns.traceLogs?.inlineHeight?.(node) || 0;
+    return SPAN_ROW_PX + (model.openSpanIds.has(id) ? (inspectorHeights.get(id) || INSPECTOR_ESTIMATE_PX) : 0)
+      + (logsEstimate ? (logsRowHeights.get(id) || logsEstimate) : 0);
   }
 
   function virtualOffsets(nodes) {
@@ -2282,10 +2285,12 @@
         if (!state) return;
         let changed = false;
         for (const entry of entries) {
-          const id = entry.target.previousElementSibling?.getAttribute?.("data-span-id");
+          const logsFor = entry.target.getAttribute?.("data-span-logs-for");
+          const id = logsFor || entry.target.previousElementSibling?.getAttribute?.("data-span-id");
+          const heights = logsFor ? logsRowHeights : inspectorHeights;
           const height = entry.target.getBoundingClientRect().height;
-          if (id && height && Math.abs((inspectorHeights.get(id) || 0) - height) > 0.5) {
-            inspectorHeights.set(id, height);
+          if (id && height && Math.abs((heights.get(id) || 0) - height) > 0.5) {
+            heights.set(id, height);
             changed = true;
           }
         }
@@ -2298,7 +2303,7 @@
       });
     }
     inspectorObserver.disconnect();
-    for (const el of body.querySelectorAll(".traceSpanInspectorRow")) inspectorObserver.observe(el);
+    for (const el of body.querySelectorAll(".traceSpanInspectorRow, .traceSpanLogsRow")) inspectorObserver.observe(el);
   }
 
   function scheduleVirtualWindow() {
@@ -2354,15 +2359,19 @@
       ? '<span class="traceSpanRow__errorBadge" title="Span status: Error" aria-label="Error span">!</span>'
       : childError ? '<span class="traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow" title="An error span is inside this collapsed branch" aria-label="Error span in this collapsed branch">!</span>' : "")
       + (ns.traceInsights?.exceptionBadgeHtml(span) || "");
+    // Log count badge and log markers (app_trace_logs.js).
+    const logs = ns.traceLogs;
     return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="button" tabindex="0" aria-expanded="${active ? "true" : "false"}">
-        <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}</div></div>
-        <div class="traceSpanRow__timeline">${bar}${critical}${eventMarkers}</div>
+        <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}${logs?.spanBadgeHtml?.(span) || ""}</div></div>
+        <div class="traceSpanRow__timeline">${bar}${critical}${eventMarkers}${logs?.spanMarkersHtml?.(span, ctx) || ""}</div>
       </div>`;
   }
 
   function waterfallRowHtml(node, ctx) {
     const rowHtml = spanRowHtml(node, ctx);
-    return model.openSpanIds.has(String(node.span.span_id || "")) ? rowHtml + spanInspectorRowHtml(node, ctx.cache) : rowHtml;
+    const inspector = model.openSpanIds.has(String(node.span.span_id || "")) ? spanInspectorRowHtml(node, ctx.cache) : "";
+    // The span's logs listed under it (app_trace_logs.js), after its inspector.
+    return rowHtml + inspector + (ns.traceLogs?.inlineRowHtml?.(node, ctx) || "");
   }
 
   // Folding or unfolding one branch only removes or inserts that branch's
@@ -2389,7 +2398,10 @@
     const fresh = template.content.firstElementChild;
     row.replaceWith(fresh);
     if (refocus) fresh.querySelector("[data-toggle-span]")?.focus({ preventScroll: true });
-    const own = fresh.nextElementSibling?.classList.contains("traceSpanInspectorRow") ? fresh.nextElementSibling : fresh;
+    // A span row's attachments (inspector, logs) stay with it.
+    const isAttachment = (el) => el?.classList.contains("traceSpanInspectorRow") || el?.classList.contains("traceSpanLogsRow");
+    let own = fresh;
+    while (isAttachment(own.nextElementSibling)) own = own.nextElementSibling;
     if (collapsing) {
       const isDescendant = (candidate) => {
         for (let parent = cache.parentOf.get(candidate); parent; parent = cache.parentOf.get(parent)) {
@@ -2399,7 +2411,7 @@
       };
       let el = own.nextElementSibling;
       while (el) {
-        if (!el.classList.contains("traceSpanInspectorRow")) {
+        if (!isAttachment(el)) {
           const other = cache.nodeById.get(String(el.getAttribute("data-span-id") || ""));
           if (!other || !isDescendant(other)) break;
         }
@@ -3139,6 +3151,7 @@
       ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: sectionOpen(id, "process"), filterScope: "resource" }) : ""}
       ${renderJaegerEvents(span, bounds)}
       ${renderJaegerLinks(span, cache)}
+      ${ns.traceLogs?.inspectorSectionHtml?.(span) || ""}
     </section>`;
   }
 
@@ -3519,6 +3532,7 @@
     setView(true);
     if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace…</div>';
     if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.innerHTML = ""; }
+    void ns.traceLogs?.load?.(null);
     try {
       const trace = await api.getTrace(currentHost(), id);
       if (seq !== model.detailSeq) return;
@@ -3534,6 +3548,8 @@
       if (push) window.history.pushState({ traceId: id }, "", spanTraceUrl(id, pendingSpanId));
       renderTrace();
       ns.traceViews?.applyLocation?.();
+      // Logs load after the trace is on screen, never before.
+      void ns.traceLogs?.load?.(trace);
     } catch (error) {
       if (seq !== model.detailSeq) return;
       model.activeTrace = null;
@@ -3606,6 +3622,11 @@
     initTracePickers();
     initWaterfallEvents();
     initSpanDetailEvents();
+    ns.traceLogs?.install?.({
+      model, activeTraceCache, renderWaterfall, focusSpanInTimeline, enhanceTraceSelect, serviceColor, formatDuration, esc,
+      parseStructuredValue, renderAttributeTable, absoluteTimeText, spanDetailClick, currentHost,
+      waterfallWindow: () => waterfallContext(activeTraceCache()),
+    });
     ns.traceViews?.install?.({
       model, activeTraceCache, renderWaterfall, focusSpanInTimeline, spanTraceUrl, enhanceTraceSelect,
       serviceColor, formatDuration, esc, copyText, spanEventList, eventItemHtml, parseStructuredValue, spanDetailClick,

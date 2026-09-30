@@ -44,6 +44,8 @@
       };
       const traces = data && data.features && data.features.traces ? data.features.traces : {};
       state.features.traces = { enabled: traces.enabled === true };
+      const logs = data && data.features && data.features.logs ? data.features.logs : {};
+      state.features.logs = { enabled: logs.enabled === true };
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");

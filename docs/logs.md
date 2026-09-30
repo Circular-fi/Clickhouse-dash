@@ -118,6 +118,113 @@ Notes for query builders:
   second for `toDate(<time>)` partitions, day precision otherwise) and are
   table-wide: they are not narrowed by the service allowlist.
 
+## Logs of a trace: `GET /api/traces/logs`
+
+The trace detail page lists the logs of the open trace (see below). The route
+is registered with the other trace routes (when `traces.enabled = true`).
+
+Parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `trace_id` | Required. |
+| `start_ns`, `end_ns` | Required: the trace bounds in epoch nanoseconds. A request without them is rejected (`400 missing_time_range`): a `TraceId` lookup is never run over the whole table. |
+| `service` | Repeated: the services of the trace. They restrict `ServiceName`, the first primary key column. Without them the lookup relies on the time range and the `TraceId` skip index alone. |
+| `span_id` | Optional: the logs of one span. |
+| `limit` | Optional, 1..`logs.trace_logs_limit` (default: that limit). |
+| `host_id` | Optional when one host is configured. |
+
+Query (one statement, read through the host's `system_uri`):
+
+```sql
+SELECT toString(toUnixTimestamp64Nano(Timestamp)), toString(Timestamp, 'UTC'), SeverityText, SeverityNumber,
+       ServiceName, SpanId, substring(Body, 1, 65536), length(Body),
+       toJSONString(LogAttributes), toJSONString(ResourceAttributes), ScopeName[, EventName]
+FROM otel.otel_logs
+PREWHERE TimestampTime BETWEEN toDateTime(<start s> - trace_margin_before_seconds)
+                           AND toDateTime(<end s> + 1 + trace_margin_after_seconds)
+WHERE ServiceName IN (<services>) AND TraceId = '<trace>' [AND SpanId = '<span>']
+  AND <traces.service_allowlist predicate>
+ORDER BY Timestamp
+LIMIT <limit + 1>
+SETTINGS max_execution_time = 10, merge_tree_min_rows_for_concurrent_read = 8192,
+         merge_tree_min_bytes_for_concurrent_read = 1
+```
+
+- The margins (`logs.trace_margin_before_seconds`, default 5, and
+  `logs.trace_margin_after_seconds`, default 30) catch records written just
+  before the first span or after the last one ends (exporters often flush
+  logs later than their span). The window is clamped to
+  `logs.max_lookback_minutes` from its start (`window.clamped: true`).
+- Without a `TimestampTime` column (newer exporter layouts) the range is on
+  `Timestamp`. `Map` and `JSON` attribute columns are both serialized with
+  `toJSONString`; the column types are read from `system.columns` and cached
+  60 seconds per source.
+- The `ServiceName` allowlist is the one of the traces
+  (`src/otel_allowlist.hpp`, shared by the trace and log routes).
+- One more row than the limit is read: `truncated: true` means the trace has
+  more logs than returned.
+- The small time window leaves only a few granules after the indexes; the
+  concurrent-read settings let ClickHouse read them with several threads
+  instead of one (about 25 ms instead of 45 ms on the test fixture).
+
+On the test stack (17 million log rows, 2 billion spans) a trace of the last
+fixture hour with about 80 logs answers in 20-35 ms (server `elapsed_ms`,
+round trip included).
+
+Response (abridged):
+
+```json
+{
+  "enabled": true, "signal": "logs", "table_exists": true, "source_host_id": "local",
+  "database": "otel", "table": "otel_logs", "trace_id": "000000000000000000000000017c5287", "span_id": "",
+  "window": {"start_ns": "1789865553877551302", "end_ns": "1789865554067551302", "from_s": 1789865548,
+             "to_s": 1789865585, "margin_before_s": 5, "margin_after_s": 30, "time_column": "TimestampTime",
+             "clamped": false},
+  "services": ["api_service", "..."], "attributes": {"log": "map", "resource": "map"},
+  "limit": 1000, "count": 79, "truncated": false, "elapsed_ms": 24,
+  "logs": [{"timestamp_ns": "1789865553889660032", "timestamp": "2026-09-20 00:52:33.889660032",
+            "severity_text": "INFO", "severity_number": 9, "service_name": "clickhouse_writer",
+            "span_id": "00000000be294383", "body": "inserted 156 rows into analytics.events_buffer in 19 ms",
+            "log_attributes": "{\"code.function\":\"...\"}", "resource_attributes": "{...}",
+            "scope_name": "clickhouse_writer"}]
+}
+```
+
+`timestamp_ns` is exact (text); `timestamp` is UTC. A body longer than 64 KiB
+is cut, with `body_truncated: true` and the full `body_bytes`. When logs are
+disabled the route answers `200 {"enabled": false, "error_code":
+"logs_disabled", "logs": []}`; a missing table answers `200` with
+`table_exists: false` and `error_code: "logs_table_missing"`; a table without
+`TraceId`/`SpanId` answers `logs_trace_correlation_unavailable`. Invalid
+parameters answer `400`, an unknown host `404`, a connection or query failure
+`503`.
+
+### In the trace detail page
+
+The logs load after the trace has rendered (the trace is never delayed by
+them), and not at all when `/api/version` reports `features.logs.enabled =
+false`.
+
+- **Header**: a `Logs` item with the count (`n+` when truncated) and the
+  number of error logs; a click shows or hides the logs panel (remembered).
+- **Logs panel**: every log of the trace in time order, with severity,
+  offset from the trace start (absolute time on hover), service, span and
+  body; severity chips, a service picker and a text filter over the loaded
+  logs. A row click opens its span (`?span=`) with the inspector's Logs
+  group open and the log marked; the arrow expands the full body, the log
+  attributes and the resource attributes.
+- **Waterfall**: a log count badge on each span row with logs (coloured by
+  its most severe log) and a marker per log on the row's timeline. The badge
+  or a marker lists the span's logs under its row, on the waterfall columns
+  (a diamond at each log's time).
+- **Span inspector**: a `Logs (n)` group with the span's logs.
+
+A log belongs to the span of its `SpanId`. `(TraceId, SpanId)` is not always
+unique (the same span stored twice at different times): a log then belongs
+to the span whose interval holds it, else to the nearest one. Logs without a
+span of the trace are listed in the panel only.
+
 ## Test fixture
 
 The test stack creates `otel.otel_logs` with the exporter DDL

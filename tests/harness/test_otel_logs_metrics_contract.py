@@ -15,7 +15,8 @@ def test_logs_and_metrics_blocks_are_strict_optional_hcl():
     assert '"traces", "logs", "metrics", "explorer", "analysis", "export", "clickhouse"' in config
     assert 'optional_block(root, "logs", source)' in config
     assert 'optional_block(root, "metrics", source)' in config
-    assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search"}, {});' in config
+    assert '"enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search",\n' in config
+    assert '"trace_logs_limit", "trace_margin_before_seconds", "trace_margin_after_seconds"}, {});' in config
     assert 'validate_object(*metrics, "metrics", {"enabled", "database", "table_prefix"}, {});' in config
     assert "logs.body_search must be token, substring, or off" in config
     assert "logs.database and logs.table cannot be empty" in config

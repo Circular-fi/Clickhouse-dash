@@ -5,6 +5,7 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -129,65 +130,8 @@ void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std
   w.EndArray();
 }
 
-std::string regex_escape(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() * 2);
-  for (char ch : value) {
-    switch (ch) {
-      case '.': case '^': case '$': case '|': case '(': case ')':
-      case '[': case ']': case '{': case '}': case '+': case '?': case '\\':
-        out.push_back('\\');
-        break;
-      default:
-        break;
-    }
-    out.push_back(ch);
-  }
-  return out;
-}
-
-std::string service_pattern_predicate(std::string_view pattern) {
-  if (pattern == "*") return "1";
-  const size_t first = pattern.find('*');
-  if (first == std::string_view::npos) {
-    return "ServiceName = " + quote_string(pattern);
-  }
-  if (first == pattern.size() - 1 && pattern.find('*', first + 1) == std::string_view::npos) {
-    return "startsWith(ServiceName, " + quote_string(pattern.substr(0, pattern.size() - 1)) + ")";
-  }
-  if (first == 0 && pattern.find('*', 1) == std::string_view::npos) {
-    return "endsWith(ServiceName, " + quote_string(pattern.substr(1)) + ")";
-  }
-
-  std::string regex = "^";
-  size_t start = 0;
-  while (start <= pattern.size()) {
-    const size_t star = pattern.find('*', start);
-    const size_t end = star == std::string_view::npos ? pattern.size() : star;
-    regex += regex_escape(pattern.substr(start, end - start));
-    if (star == std::string_view::npos) break;
-    regex += ".*";
-    start = star + 1;
-  }
-  regex += "$";
-  return "match(ServiceName, " + quote_string(regex) + ")";
-}
-
-std::string service_allowlist_predicate(const TraceSettings& cfg) {
-  if (cfg.service_allowlist.empty()) return "0";
-  for (const auto& pattern : cfg.service_allowlist) {
-    if (pattern == "*") return "1";
-  }
-  std::string out = "(";
-  bool first = true;
-  for (const auto& pattern : cfg.service_allowlist) {
-    if (!first) out += " OR ";
-    first = false;
-    out += service_pattern_predicate(pattern);
-  }
-  out += ")";
-  return out;
-}
+// The ServiceName allowlist predicate is shared with the other OTel signals.
+using otel::service_allowlist_predicate;
 
 bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& req, std::string* message) {
   struct Check { const char* param; bool enabled; const char* label; };

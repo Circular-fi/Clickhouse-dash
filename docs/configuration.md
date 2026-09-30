@@ -128,6 +128,9 @@ logs {
   max_lookback_minutes = 10080
   search_limit         = 200
   body_search          = "token" # token | substring | off
+  trace_logs_limit            = 1000
+  trace_margin_before_seconds = 5
+  trace_margin_after_seconds  = 30
 }
 
 metrics {
@@ -137,7 +140,7 @@ metrics {
 }
 ```
 
-`logs.max_lookback_minutes` is clamped to 1 minute..365 days and `logs.search_limit` to 1..10000; `logs.body_search` must be `token`, `substring`, or `off`. `/api/version` reports `features.logs.enabled`, `features.logs.body_search`, and `features.metrics.enabled`; `/api/logs/meta` and `/api/metrics/meta` describe the detected schema (see `docs/logs.md` and `docs/metrics.md`).
+`logs.max_lookback_minutes` is clamped to 1 minute..365 days and `logs.search_limit` to 1..10000; `logs.body_search` must be `token`, `substring`, or `off`. `logs.trace_logs_limit` (1..10000) caps the log records of one trace shown on the trace page, read from the trace start minus `logs.trace_margin_before_seconds` to its end plus `logs.trace_margin_after_seconds` (each 0..3600). `/api/version` reports `features.logs.enabled`, `features.logs.body_search`, and `features.metrics.enabled`; `/api/logs/meta` and `/api/metrics/meta` describe the detected schema (see `docs/logs.md` and `docs/metrics.md`).
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
 

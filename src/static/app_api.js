@@ -251,6 +251,17 @@
   // Spans around a span's start time (surrounding context).
   async function getTraceContext(hostId, params = {}) {
     return getJson(`api/traces/context?${optionalParams(hostId, params).toString()}`);
+
+  // Logs of one trace: the trace bounds (epoch ns) and its services bound
+  // the lookup; span_id narrows it to one span.
+  async function getTraceLogs(hostId, { traceId, startNs, endNs, services = [], spanId = "", limit = 0 } = {}) {
+    if (!traceId) throw new Error("No trace selected.");
+    const query = new URLSearchParams({ trace_id: String(traceId), start_ns: String(startNs), end_ns: String(endNs) });
+    if (hostId) query.set("host_id", String(hostId));
+    for (const service of services) if (service) query.append("service", String(service));
+    if (spanId) query.set("span_id", String(spanId));
+    if (limit) query.set("limit", String(limit));
+    return getJson(`api/traces/logs?${query.toString()}`);
   }
 
   // Server-wide storage distribution (runner-visible databases -> tables) for
@@ -382,7 +393,7 @@
   ns.api = { resolveUrl,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
-    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace,
+    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
   };
 })();

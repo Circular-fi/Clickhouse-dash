@@ -85,6 +85,12 @@ struct LogSettings {
   // "token" (hasToken, index-backed by a tokenbf_v1/text Body index),
   // "substring" (ILIKE-style scan) or "off" (no Body search).
   std::string body_search = "token";
+  // Logs of one trace (trace detail): at most trace_logs_limit records, read
+  // from the trace start - trace_margin_before_seconds to its end +
+  // trace_margin_after_seconds (records are often written after their span).
+  size_t trace_logs_limit = 1000;
+  int trace_margin_before_seconds = 5;
+  int trace_margin_after_seconds = 30;
 };
 
 // OpenTelemetry metrics (ClickHouse exporter <table_prefix>_{gauge,sum,
@@ -223,6 +229,8 @@ private:
 
   // OTel logs / metrics schema detection (api_otel_signals.cpp).
   void handle_logs_meta(const httplib::Request& req, httplib::Response& res);
+  // Logs of one trace for the trace detail page (api_trace_logs.cpp).
+  void handle_trace_logs(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_meta(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();
