@@ -2052,3 +2052,129 @@ test('traces: shift and zoom out move the applied window like Grafana, within th
   await openTimeRange(page);
   await expect(page.locator('#tracesRangeZoomOut')).toBeDisabled();
 });
+
+// --- Traces analytics charts --------------------------------------------------
+const isAnalyticsPart = (charts) => (response) => new URL(response.url()).pathname.endsWith('/api/traces/analytics')
+  && new URL(response.url()).searchParams.get('charts') === charts;
+
+test.describe('traces analytics in a UTC+2 browser', () => {
+  // Paris in September: local midnight is 22:00 UTC, off the UTC 3 h grid
+  // that used to leave the count chart empty for such ranges.
+  test.use({ timezoneId: 'Europe/Paris' });
+
+  test('traces: a 7-day range fills both charts with dated ticks, whole-unit durations, and hover snaps anywhere', async ({ page, request }) => {
+    test.setTimeout(240_000);
+    const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
+    const dataEnd = Number(endText);
+    test.skip(!(dataEnd > 0), 'OTEL fixture is empty');
+    await openTracesIdle(page);
+    // The fixture's last seven local days.
+    const [firstDay, lastDay] = await page.evaluate((end) => {
+      const last = new Date(end);
+      const first = new Date(last.getFullYear(), last.getMonth(), last.getDate() - 6);
+      const day = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return [day(first), day(last)];
+    }, dataEnd);
+    await openTimeRange(page);
+    await page.locator('#tracesRangeStart').fill(`${firstDay} 00:00:00`);
+    await page.locator('#tracesRangeEnd').fill(`${lastDay} 23:59:59`);
+    const counts = page.waitForResponse(isAnalyticsPart('counts'), { timeout: 60_000 });
+    const durations = page.waitForResponse(isAnalyticsPart('durations'), { timeout: 200_000 });
+    await page.locator('#tracesCustomRangeApply').click();
+
+    const countsResponse = await counts;
+    expect(countsResponse.status()).toBe(200);
+    const countsParams = new URL(countsResponse.url()).searchParams;
+    // Buckets are anchored at the browser's local midnight (the range start).
+    expect(countsParams.get('bucket_origin_ms')).toBe(countsParams.get('start_ms'));
+    const countsPayload = await countsResponse.json();
+    expect(countsPayload.trace_count_chart.length).toBeGreaterThan(0);
+    await expect(page.locator('#traceServiceChart .traceCountBar').first()).toBeVisible({ timeout: 30_000 });
+
+    const durationsResponse = await durations;
+    expect(durationsResponse.status()).toBe(200);
+    const durationsPayload = await durationsResponse.json();
+    expect(durationsPayload.duration_quantiles.length).toBeGreaterThan(0);
+    await expect(page.locator('#traceDurationChart .traceQuantileHover')).toHaveCount(durationsPayload.duration_quantiles.length);
+    expect(await page.locator('#traceDurationChart .traceDurationLine, #traceDurationChart .traceDurationDot').count()).toBeGreaterThan(0);
+    const bars = await page.locator('#traceServiceChart .traceCountBar').count();
+    expect(bars).toBe(durationsPayload.trace_count_chart.filter(([, count]) => Number(count) > 0).length);
+
+    for (const chart of ['#traceServiceChart', '#traceDurationChart']) {
+      const ticks = page.locator(`${chart} [data-time-tick]`);
+      const labels = await ticks.allTextContents();
+      expect(labels.length).toBeGreaterThanOrEqual(4);
+      // A multi-day axis names days ("Sep 13", or "Sep 13 12:00"), never a bare hour.
+      for (const label of labels) expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}( \d\d:\d\d)?$/);
+      const spans = await ticks.evaluateAll((nodes) => nodes.map((node) => { const r = node.getBoundingClientRect(); return [r.left, r.right]; }));
+      for (let i = 1; i < spans.length; i += 1) expect(spans[i][0]).toBeGreaterThan(spans[i - 1][1] + 4);
+    }
+    // Whole units: "10 min", "8 min 30 s", never "8.5 min".
+    const decimalUnits = /\d\.\d+\s*(min|h|d)\b/;
+    for (const label of await page.locator('#traceDurationChart .traceChart__tick:not([data-time-tick])').allTextContents()) expect(label).not.toMatch(decimalUnits);
+    for (const label of await page.locator('#tracesResults .traceResult__right > b').allTextContents()) expect(label).not.toMatch(decimalUnits);
+
+    // Every x position over a chart snaps to a bucket: a tooltip with the
+    // bucket's date and time, and exactly one highlighted marker.
+    for (const [chart, marker] of [['#traceServiceChart', '.traceCountBar.is-hovered'], ['#traceDurationChart', '.traceQuantileHover.is-active']]) {
+      const box = await page.locator(`${chart} svg`).boundingBox();
+      const tooltip = page.locator(`${chart} .traceChartTooltip`);
+      for (let i = 0; i <= 30; i += 1) {
+        await page.mouse.move(box.x + 1 + (box.width - 2) * (i / 30), box.y + box.height * (0.15 + 0.7 * ((i % 4) / 3)));
+        await expect(tooltip).toBeVisible();
+        await expect(tooltip).toContainText(/[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d/);
+        await expect(tooltip).not.toContainText(decimalUnits);
+        await expect(page.locator(`${chart} ${marker}`)).toHaveCount(1);
+      }
+      await page.mouse.move(box.x + box.width / 2, box.y - 80);
+      await expect(tooltip).toBeHidden();
+      await expect(page.locator(`${chart} ${marker}`)).toHaveCount(0);
+    }
+  });
+});
+
+test('traces: a result shows its error span count next to its title and the header counts traces with errors', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
+  const dataEnd = Number(endText);
+  test.skip(!(dataEnd > 0), 'OTEL fixture is empty');
+  // Known error counts on the real answer: 3 and 1 on the first two traces, none elsewhere.
+  const errorsById = new Map();
+  await page.route('**/api/traces/search?**', async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    errorsById.clear();
+    payload.rows = (payload.rows || []).map((row, i) => {
+      const copy = [...row];
+      copy[6] = i === 0 ? 3 : i === 1 ? 1 : 0;
+      errorsById.set(String(copy[0]), copy[6]);
+      return copy;
+    });
+    await route.fulfill({ response, json: payload });
+  });
+  await openTracesIdle(page);
+  const utc = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+  await openTimeRange(page);
+  await page.locator('#tracesRangeStart').fill(utc(dataEnd - 3_600_000));
+  await page.locator('#tracesRangeEnd').fill(utc(dataEnd + 1000));
+  const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  const rows = (await (await answered).json()).rows;
+  expect(rows.length).toBeGreaterThanOrEqual(3);
+  await expect(page.locator('#tracesResults .traceResult[data-trace-id]')).toHaveCount(rows.length);
+  await expect(page.locator('#tracesResultCount')).toHaveText(`${rows.length} Traces · 2 with errors`);
+  for (const [id, errors] of errorsById) {
+    const card = page.locator(`#tracesResults .traceResult[data-trace-id="${id}"]`);
+    if (errors) {
+      const badge = card.locator('.traceResult__wideTitle + .traceErrorCount--title');
+      await expect(badge).toHaveText(String(errors));
+      await expect(badge).toHaveAttribute('title', `${errors} error span${errors === 1 ? '' : 's'}`);
+    } else {
+      await expect(card.locator('.traceErrorCount--title')).toHaveCount(0);
+    }
+  }
+  // The total is shown once, next to the title (per-service badges stay).
+  await expect(page.locator('#tracesResults .traceErrorCount--total')).toHaveCount(0);
+  const color = await page.locator('#tracesResults .traceErrorCount--title').first().evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(color).toBe('rgb(214, 69, 69)');
+});

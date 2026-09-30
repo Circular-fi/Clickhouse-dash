@@ -9705,7 +9705,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceChart > .tracesEmpty { min-height: 220px; display: grid; place-items: center; }
 .traceChart__svg { display: block; width: 100%; height: 196px; overflow: visible; }
 .traceChart__grid { stroke: var(--rowDivider); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.traceChart__tick { fill: var(--muted); font: 9px Arial, Helvetica, sans-serif; }
+.traceChart__tick { fill: var(--muted); font: 10px Arial, Helvetica, sans-serif; }
 .traceChartLegend { min-height: 25px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px; padding: 2px 4px 0; color: var(--muted); font-size: 8px; }
 .traceChartLegend > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .traceChartLegend i { width: 7px; height: 7px; border-radius: 2px; }
@@ -10708,11 +10708,24 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font: 700 9px/1 Arial, Helvetica, sans-serif !important;
   font-style: normal;
 }
-.traceErrorCount--total {
-  width: 17px;
-  height: 17px;
-  flex-basis: 17px;
+/* Error span count right after a result's title: a pill that fits any count. */
+.traceErrorCount--title {
+  width: auto;
+  min-width: 16px;
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  cursor: help;
 }
+.tracesResultCount__errors {
+  color: #d64545;
+  font-weight: 600;
+}
+.traceChartError { color: #d64545; padding: 0 16px; text-align: center; }
+.traceDurationDot--p50 { fill: #54a24b; }
+.traceDurationDot--p90 { fill: #4c78a8; }
+.traceDurationDot--p95 { fill: #f58518; }
+.traceDurationDot--p99 { fill: #b279a2; }
 .traceServiceStat.is-error > span { color: var(--muted); }
 .traceServiceStat.is-error { border-color: color-mix(in srgb, #d64545 35%, var(--border)); }
 

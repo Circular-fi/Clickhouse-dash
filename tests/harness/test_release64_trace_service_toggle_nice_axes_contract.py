@@ -19,6 +19,8 @@ def test_analytics_axes_use_nice_round_ticks_and_more_time_labels():
     assert 'function niceStep(' in js
     assert 'function countAxis(' in js
     assert 'function durationAxis(' in js
-    assert 'timeTickRatios(7)' in js
+    # Time labels adapt to the range and the chart width (local wall clock).
+    assert 'function timeAxisTicks(' in js
+    assert 'timeAxisSvg(start, end, left, plotW, H, W)' in js
     assert 'countScale.values.map' in js
     assert 'durationScaleAxis.values.map' in js

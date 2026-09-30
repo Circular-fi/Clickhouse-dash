@@ -9,7 +9,10 @@ def read(rel):
 
 def test_trace_analytics_buckets_cast_datetime_to_datetime64_before_millis_conversion():
     cpp = read('src/api_traces.cpp')
-    assert 'toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(trace_start' in cpp
+    # Buckets are computed on the DateTime64 millis (a grid anchored at the
+    # browser's local midnight), never on a DateTime-typed toStartOfInterval.
+    assert '" + intDiv(toUnixTimestamp64Milli(" + column + ") - "' in cpp
+    assert 'grid_bucket_sql("trace_start", quantile_bucket_ms, quantile_origin_ms)' in cpp
     assert 'toUnixTimestamp64Milli(toStartOfInterval(trace_start' not in cpp
 
 

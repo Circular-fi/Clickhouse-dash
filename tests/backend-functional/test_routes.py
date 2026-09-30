@@ -807,6 +807,106 @@ def test_trace_analytics_duration_quantiles_come_from_spans():
     assert payload.get("duration_quantiles"), payload
 
 
+# A browser in UTC+1 sends its local midnight: buckets must start there
+# (01:00 UTC for 3 h buckets), whatever the requested range start.
+_ORIGIN_MS = 3_600_000
+
+
+def _analytics(params: dict, timeout: int = 90):
+    response = get("/api/traces/analytics", params={"host_id": "local", **params}, timeout=timeout)
+    if response.status_code == 404 and response.json().get("error_code") == "trace_analytics_disabled":
+        pytest.skip("trace analytics disabled in this configuration")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_trace_analytics_seven_day_counts_come_from_the_index_quickly_and_match_it():
+    # Seven days of spans (~1.6 B rows on the large local fixture) take ~15 s
+    # to group by TraceId; the count chart reads the trace index instead.
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 7 * 86_400_000 + 1000
+    started = time.monotonic()
+    payload = _analytics({"start_ms": start_ms, "end_ms": end_ms, "align_buckets": "0",
+                          "bucket_origin_ms": _ORIGIN_MS, "charts": "counts"}, timeout=30)
+    elapsed = time.monotonic() - started
+    assert payload.get("charts") == ["counts"], payload
+    assert payload.get("trace_count_source") == "trace_index", payload
+    assert payload.get("duration_quantiles") == [], payload
+    assert elapsed < 10, f"7-day count chart took {elapsed:.1f} s"
+    bucket_ms = int(payload["bucket_ms"])
+    origin = int(payload["bucket_origin_ms"])
+    assert origin == _ORIGIN_MS % bucket_ms, payload
+    chart = {int(bucket): int(count) for bucket, count in payload["trace_count_chart"]}
+    assert chart and sum(chart.values()) > 0, payload
+    assert all((bucket - origin) % bucket_ms == 0 for bucket in chart), sorted(chart)
+    # Ground truth: every trace of the index at its first start in the window.
+    expected = {
+        int(bucket): int(count)
+        for bucket, count in _ch_rows(
+            f"SELECT {origin} + intDiv(toUnixTimestamp64Milli(s) - {origin}, {bucket_ms}) * {bucket_ms}, count() "
+            f"FROM (SELECT min(Start) AS s FROM otel.otel_traces_trace_id_ts WHERE {_index_window(start_ms, end_ms)} "
+            f"GROUP BY TraceId) GROUP BY 1")
+    }
+    assert chart == expected
+
+
+def test_trace_analytics_span_counts_match_ground_truth_per_bucket():
+    # Smaller window: the span aggregation (charts=durations also returns
+    # counts) buckets each trace by its first span start on the origin grid.
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 2 * 3_600_000
+    payload = _analytics({"start_ms": start_ms, "end_ms": end_ms, "align_buckets": "0",
+                          "bucket_origin_ms": _ORIGIN_MS, "charts": "durations"})
+    assert payload.get("charts") == ["counts", "durations"], payload
+    assert payload.get("trace_count_source") == "span_bounds", payload
+    bucket_ms = int(payload["bucket_ms"])
+    q_bucket_ms = int(payload["quantile_bucket_ms"])
+    origin = int(payload["bucket_origin_ms"])
+    chart = {int(bucket): int(count) for bucket, count in payload["trace_count_chart"]}
+    expected = {
+        int(bucket): int(count)
+        for bucket, count in _ch_rows(
+            f"SELECT {origin} + intDiv(toUnixTimestamp64Milli(s) - {origin}, {bucket_ms}) * {bucket_ms}, count() "
+            f"FROM (SELECT min(Timestamp) AS s FROM otel.otel_traces WHERE {_span_window(start_ms, end_ms)} "
+            f"GROUP BY TraceId) GROUP BY 1")
+    }
+    assert chart and chart == expected
+    quantiles = payload["duration_quantiles"]
+    assert quantiles, payload
+    q_origin = _ORIGIN_MS % q_bucket_ms
+    for bucket, p50, p90, p95, p99 in quantiles:
+        assert (int(bucket) - q_origin) % q_bucket_ms == 0, bucket
+        assert 0 <= int(p50) <= int(p90) <= int(p95) <= int(p99), (bucket, p50, p90, p95, p99)
+
+
+def test_trace_analytics_seven_day_duration_percentiles_are_not_empty():
+    _, end_ms = _otel_window_ms()
+    start_ms = end_ms - 7 * 86_400_000 + 1000
+    started = time.monotonic()
+    payload = _analytics({"start_ms": start_ms, "end_ms": end_ms, "align_buckets": "1",
+                          "bucket_origin_ms": _ORIGIN_MS, "charts": "durations"}, timeout=120)
+    elapsed = time.monotonic() - started
+    assert payload.get("charts") == ["counts", "durations"], payload
+    assert payload.get("duration_quantiles"), payload
+    assert sum(int(count) for _, count in payload["trace_count_chart"]) > 0, payload
+    # Aligned ranges cover whole buckets of the origin grid.
+    bucket_ms = int(payload["bucket_ms"])
+    range_start, range_end = (int(v) for v in payload["range"])
+    assert (range_start - payload["bucket_origin_ms"]) % bucket_ms == 0
+    assert (range_end - payload["bucket_origin_ms"]) % bucket_ms == 0
+    assert range_start <= start_ms and range_end >= end_ms
+    assert elapsed < 60, f"7-day duration percentiles took {elapsed:.1f} s"
+
+
+def test_trace_analytics_rejects_an_unknown_chart_list():
+    start_ms, end_ms = _otel_window_ms()
+    response = get("/api/traces/analytics", params={"host_id": "local", "start_ms": start_ms, "end_ms": end_ms, "charts": "nope"})
+    if response.status_code == 404:
+        pytest.skip("trace analytics disabled in this configuration")
+    assert response.status_code == 400, response.text
+    assert response.json().get("error_code") == "invalid_trace_charts"
+
+
 def _ch_rows(sql: str) -> list[list[str]]:
     base = os.environ.get("CLICKHOUSE_URL", "http://clickhouse:8123").rstrip("/")
     auth = (os.environ.get("CLICKHOUSE_USER", "test"), os.environ.get("CLICKHOUSE_PASSWORD", "test"))

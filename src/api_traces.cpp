@@ -1323,9 +1323,35 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   }
   const int64_t bucket_ms = static_cast<int64_t>(bucket_seconds) * 1000;
   const int64_t quantile_bucket_ms = static_cast<int64_t>(quantile_bucket_seconds) * 1000;
+  // Buckets lie on a grid anchored at bucket_origin_ms (the browser sends its
+  // local midnight, so 3 h / 1 d buckets start at local 00:00 rather than UTC
+  // 00:00). Only the origin modulo the bucket size matters, and the quantile
+  // bucket divides the count bucket, so both grids nest.
+  int64_t bucket_origin_ms = 0;
+  parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms);
+  const auto grid_origin = [&](int64_t size_ms) { return ((bucket_origin_ms % size_ms) + size_ms) % size_ms; };
+  const auto grid_floor = [](int64_t t, int64_t size_ms, int64_t origin) {
+    const int64_t offset = t - origin;
+    return origin + (offset >= 0 ? offset / size_ms : -((-offset + size_ms - 1) / size_ms)) * size_ms;
+  };
+  const int64_t count_origin_ms = grid_origin(bucket_ms);
+  const int64_t quantile_origin_ms = grid_origin(quantile_bucket_ms);
+  const auto grid_bucket_sql = [](const std::string& column, int64_t size_ms, int64_t origin) {
+    return "toString(" + std::to_string(origin) + " + intDiv(toUnixTimestamp64Milli(" + column + ") - " +
+           std::to_string(origin) + ", " + std::to_string(size_ms) + ") * " + std::to_string(size_ms) + ")";
+  };
   const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
-  const int64_t analytics_start_ms = align_buckets ? (start_ms / bucket_ms) * bucket_ms : start_ms;
-  const int64_t analytics_end_ms = align_buckets ? ((end_ms + bucket_ms - 1) / bucket_ms) * bucket_ms : end_ms;
+  const int64_t analytics_start_ms = align_buckets ? grid_floor(start_ms, bucket_ms, count_origin_ms) : start_ms;
+  const int64_t analytics_end_ms = align_buckets ? grid_floor(end_ms + bucket_ms - 1, bucket_ms, count_origin_ms) : end_ms;
+
+  // charts=counts asks for the trace count chart alone, charts=durations for
+  // the percentiles alone; both by default.
+  const std::string charts_param = req.has_param("charts") ? req.get_param_value("charts") : std::string{};
+  const bool want_counts = charts_param.empty() || charts_param.find("counts") != std::string::npos;
+  const bool want_durations = charts_param.empty() || charts_param.find("durations") != std::string::npos;
+  if (!want_counts && !want_durations) {
+    return json_error(res, 400, "invalid_trace_charts", "charts must list counts and/or durations.");
+  }
 
   auto read_analytics = [&](const std::string& sql) {
     std::map<int64_t, uint64_t> count_by_bucket;
@@ -1333,7 +1359,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
         const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
-        const int64_t count_bucket_ms = (q_bucket_ms / bucket_ms) * bucket_ms;
+        const int64_t count_bucket_ms = grid_floor(q_bucket_ms, bucket_ms, count_origin_ms);
         count_by_bucket[count_bucket_ms] += count;
         quantiles.push_back(QuantilePoint{
             q_bucket_ms,
@@ -1351,13 +1377,61 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   // End = max(Timestamp), i.e. the *start* of the last span, and one row per
   // insert batch (so any single row may hold partial bounds). Index-based
   // quantiles were therefore systematically wrong (e.g. P50 226 ms instead of
-  // 182 ms on the local fixture). Trace counts come from the same query so
-  // both charts describe exactly the same set of traces.
+  // 182 ms on the local fixture). When both charts are asked for, trace counts
+  // come from the same query, so both describe exactly the same set of traces.
+  //
+  // That span aggregation groups every span of the window by TraceId and grows
+  // linearly with the window (local fixture, 1.6 B spans over 7 days: ~15 s,
+  // most of it decompressing TraceId). A count-only request therefore reads
+  // the trace index when nothing restricts the traces: one small row per
+  // (trace, insert batch) holding its first span start; 7 days take < 1 s.
+  // A trace is bucketed by its earliest indexed start in the window, i.e. its
+  // first span start (rows are per insert batch, so a batch that began before
+  // the window start can only move a trace by one bucket at that edge).
+  // Measured and rejected: hash sampling (cityHash64(TraceId) % N) still
+  // decompresses TraceId and saved < 30 %; root spans (ParentSpanId = '') are
+  // not traces (the fixture has 1.6 roots per trace, 175 ms roots in 14 min
+  // traces); the table has no SAMPLE BY key.
   uint64_t analytics_query_ms = 0;
-  const std::string analytics_path = "span_aggregation";
+  std::string analytics_path = "span_aggregation";
+  std::string trace_count_source = "span_bounds";
   const std::string quantile_source = "span_bounds";
+  const bool index_counts_eligible = want_counts && !want_durations && !index_table.empty() &&
+      !has_candidate_filters && having.empty() && visibility == "1";
+  bool have_counts = false;
+  bool have_durations = false;
 
-  {
+  if (index_counts_eligible) {
+    try {
+      const auto started = std::chrono::steady_clock::now();
+      const std::string index_sql =
+          "SELECT " + grid_bucket_sql("first_start", bucket_ms, count_origin_ms) + " AS bucket_ms, toString(count()) "
+          "FROM (SELECT min(Start) AS first_start FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
+          std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) +
+          ") GROUP BY TraceId) GROUP BY bucket_ms ORDER BY bucket_ms";
+      std::map<int64_t, uint64_t> count_by_bucket;
+      client->Select(index_sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          count_by_bucket[std::stoll(ch_block_text_at(block, 0, row))] +=
+              static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
+        }
+      });
+      for (const auto& [bucket, count] : count_by_bucket) trace_counts.push_back(TraceCountPoint{bucket, count});
+      analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started).count());
+      analytics_path = "trace_index";
+      trace_count_source = "trace_index";
+      have_counts = true;
+    } catch (const std::exception&) {
+      // A missing or unreadable index falls back to the span aggregation, on a
+      // fresh connection (a failed query may leave this one unusable).
+      trace_counts.clear();
+      client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+      if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+    }
+  }
+
+  if (!have_counts) {
     try {
       const auto analytics_started = std::chrono::steady_clock::now();
       // Broad service / operation filters aggregate once with HAVING countIf
@@ -1373,14 +1447,15 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
       const std::string trace_durations_cte = with_candidate +
           "trace_durations AS (SELECT min(Timestamp) AS trace_start, " + duration_expr + " AS duration_ns" + trace_scope + ") ";
       const std::string analytics_sql = trace_durations_cte +
-          "SELECT toString(toUnixTimestamp64Milli(toDateTime64(toStartOfInterval(trace_start, toIntervalSecond(" +
-          std::to_string(quantile_bucket_seconds) + ")), 3))) AS bucket_ms, toString(count()), "
+          "SELECT " + grid_bucket_sql("trace_start", quantile_bucket_ms, quantile_origin_ms) + " AS bucket_ms, toString(count()), "
           "toString(toUInt64(quantileTDigest(0.50)(duration_ns))), toString(toUInt64(quantileTDigest(0.90)(duration_ns))), "
           "toString(toUInt64(quantileTDigest(0.95)(duration_ns))), toString(toUInt64(quantileTDigest(0.99)(duration_ns))) "
           "FROM trace_durations GROUP BY bucket_ms ORDER BY bucket_ms";
       read_analytics(analytics_sql);
       analytics_query_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::steady_clock::now() - analytics_started).count());
+      have_counts = true;
+      have_durations = true;
     } catch (const std::exception& e) {
       return json_error(res, 503, "trace_analytics_failed", e.what());
     }
@@ -1396,6 +1471,11 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   w.Key("source_host_id"); w.String(source_host_id.c_str());
   w.Key("analytics_path"); w.String(analytics_path.c_str());
   w.Key("duration_quantiles_source"); w.String(quantile_source.c_str());
+  w.Key("trace_count_source"); w.String(trace_count_source.c_str());
+  w.Key("charts"); w.StartArray();
+  if (have_counts) w.String("counts");
+  if (have_durations) w.String("durations");
+  w.EndArray();
   w.Key("timing_ms"); w.StartObject();
   w.Key("analytics"); w.Uint64(analytics_query_ms);
   w.Key("total"); w.Uint64(total_ms);
@@ -1403,6 +1483,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   w.Key("range"); w.StartArray(); w.Int64(analytics_start_ms); w.Int64(analytics_end_ms); w.EndArray();
   w.Key("bucket_ms"); w.Int64(bucket_ms);
   w.Key("quantile_bucket_ms"); w.Int64(quantile_bucket_ms);
+  w.Key("bucket_origin_ms"); w.Int64(count_origin_ms);
   w.Key("trace_count_chart"); w.StartArray();
   for (const auto& point : trace_counts) {
     w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.count); w.EndArray();

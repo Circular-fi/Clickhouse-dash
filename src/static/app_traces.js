@@ -15,6 +15,7 @@
     analytics: null,
     analyticsLoading: false,
     analyticsError: "",
+    durationsError: "",
     prefillPairs: [],
     prefillPromise: null,
     activeTrace: null,
@@ -35,32 +36,55 @@
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
 
+  // Up to three significant digits, trailing zeros dropped: 182, 18.2, 1.82, 12.
+  function significant(value) {
+    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    const fixed = value.toFixed(digits);
+    return digits ? fixed.replace(/\.?0+$/, "") : fixed;
+  }
+
+  // One convention everywhere (axis ticks, tooltips, result list, trace
+  // detail): decimal ns / µs / ms / s below a minute, then whole units two at
+  // a time ("8 min 30 s", "2 h 5 min", "3 d 4 h"), never "8.5 min".
   function formatDuration(nsValue) {
     const n = Number(nsValue);
     if (!Number.isFinite(n) || n < 0) return "—";
+    const decimal = [[1e9, "s"], [1e6, "ms"], [1e3, "µs"]];
     if (n < 1e3) return `${Math.round(n)} ns`;
-    if (n < 1e6) return `${(n / 1e3).toFixed(n < 1e5 ? 1 : 0)} µs`;
-    if (n < 1e9) return `${(n / 1e6).toFixed(n < 1e8 ? 2 : 1)} ms`;
-    return `${(n / 1e9).toFixed(n < 1e10 ? 2 : 1)} s`;
+    if (n < 59.95e9) {
+      for (const [factor, unit] of decimal) {
+        if (n < factor) continue;
+        const text = significant(n / factor);
+        // 999.7 ms rounds to "1000 ms": say "1 s" instead.
+        if (Number(text) >= 1000 && unit !== "s") return `${significant(n / (factor * 1000))} ${unit === "ms" ? "s" : "ms"}`;
+        return `${text} ${unit}`;
+      }
+    }
+    const pairs = [[86400, "d", 3600, "h"], [3600, "h", 60, "min"], [60, "min", 1, "s"]];
+    for (const [bigS, big, smallS, small] of pairs) {
+      if (n < bigS * 1e9 && big !== "min") continue;
+      const total = Math.round(n / (smallS * 1e9));
+      const ratio = bigS / smallS;
+      const whole = Math.floor(total / ratio);
+      const rest = total % ratio;
+      // 59 min 59.6 s rounds to "60 min": move up to hours.
+      if (whole >= (big === "min" ? 60 : big === "h" ? 24 : Infinity)) continue;
+      return rest ? `${whole} ${big} ${rest} ${small}` : `${whole} ${big}`;
+    }
+    return `${Math.round(n / 3600e9)} h`;
   }
 
-  function durationScale(maxNsValue) {
-    const maxNs = Math.max(0, Number(maxNsValue || 0));
-    if (maxNs < 1e3) return { factor: 1, unit: "ns" };
-    if (maxNs < 1e6) return { factor: 1e3, unit: "µs" };
-    if (maxNs < 1e9) return { factor: 1e6, unit: "ms" };
-    if (maxNs < 60e9) return { factor: 1e9, unit: "s" };
-    if (maxNs < 3600e9) return { factor: 60e9, unit: "min" };
-    return { factor: 3600e9, unit: "h" };
-  }
-
-  function formatDurationScaled(nsValue, scale) {
-    const value = Number(nsValue || 0) / Math.max(1, Number(scale?.factor || 1));
-    const abs = Math.abs(value);
-    const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
-    const fixed = value.toFixed(digits).replace(/\.0+$|(?<=\.[0-9])0+$/g, "").replace(/\.$/, "");
-    return `${fixed}${scale?.unit || "ns"}`;
-  }
+  // Duration axis steps: 1-2-5 below a second, then clock-friendly steps
+  // (seconds, minutes, hours, days), so minute axes read 2 min, 5 min, 15 min.
+  const DURATION_AXIS_STEPS_NS = (() => {
+    const steps = [];
+    for (let decade = 1; decade < 1e9; decade *= 10) for (const m of [1, 2, 5]) steps.push(m * decade);
+    for (const s of [1, 2, 5, 10, 15, 30]) steps.push(s * 1e9);
+    for (const m of [1, 2, 5, 10, 15, 30]) steps.push(m * 60e9);
+    for (const h of [1, 2, 3, 6, 12]) steps.push(h * 3600e9);
+    for (const d of [1, 2, 5, 10, 30]) steps.push(d * 86400e9);
+    return steps;
+  })();
 
   function niceStep(maxValue, targetIntervals = 6, integerOnly = false) {
     const max = Math.max(0, Number(maxValue || 0));
@@ -84,34 +108,119 @@
   }
 
   function durationAxis(maxNsValue, targetIntervals = 7) {
-    const maxNs = Math.max(0, Number(maxNsValue || 0));
-    const scale = durationScale(maxNs);
-    const maxScaled = maxNs / Math.max(1, scale.factor);
-    const stepScaled = niceStep(maxScaled, targetIntervals, false);
-    const axisMaxScaled = Math.max(stepScaled, Math.ceil(maxScaled / stepScaled) * stepScaled);
-    const axisMax = axisMaxScaled * scale.factor;
+    const maxNs = Math.max(1, Number(maxNsValue || 0));
+    const step = DURATION_AXIS_STEPS_NS.find((candidate) => maxNs / candidate <= targetIntervals) || DURATION_AXIS_STEPS_NS[DURATION_AXIS_STEPS_NS.length - 1];
+    const axisMax = Math.max(step, Math.ceil(maxNs / step) * step);
     const values = [];
-    for (let value = 0; value <= axisMaxScaled + stepScaled * .001; value += stepScaled) {
-      const rounded = Math.abs(value) < 1e-12 ? 0 : value;
-      const digits = stepScaled >= 1 ? 0 : stepScaled >= .1 ? 1 : 2;
-      values.push({ value: rounded * scale.factor, label: `${rounded.toFixed(digits).replace(/\.0+$|(?<=\.[0-9])0+$/g, "").replace(/\.$/, "")}${scale.unit}` });
-    }
-    return { axisMax, scale, values };
+    for (let i = 0; i * step <= axisMax * 1.000001; i += 1) values.push({ value: i * step, label: i ? formatDuration(i * step) : "0" });
+    return { axisMax, values };
   }
 
   function durationTicks(durationNs, count = 5) {
     const duration = Math.max(1, Number(durationNs || 0));
-    const scale = durationScale(duration);
     const n = Math.max(2, Number(count || 5));
     return Array.from({ length: n }, (_, index) => {
       const ratio = index / (n - 1);
-      return { ratio, label: formatDurationScaled(duration * ratio, scale) };
+      return { ratio, label: formatDuration(duration * ratio) };
     });
   }
 
-  function timeTickRatios(count = 7) {
-    const n = Math.max(3, Number(count || 7));
-    return Array.from({ length: n }, (_, index) => index / (n - 1));
+  // --- Chart time axis (browser-local time, like the range picker) ---------
+  const SECOND_MS = 1000, MINUTE_MS = 60000, HOUR_MS = 3600000, DAY_MS = 86400000;
+  const TIME_AXIS_STEPS_MS = [
+    SECOND_MS, 2 * SECOND_MS, 5 * SECOND_MS, 10 * SECOND_MS, 15 * SECOND_MS, 30 * SECOND_MS,
+    MINUTE_MS, 2 * MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS,
+    HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS,
+    DAY_MS, 2 * DAY_MS, 7 * DAY_MS, 14 * DAY_MS,
+  ];
+  const pad2 = (value) => String(value).padStart(2, "0");
+  // Rough width of a 10 px tick label; only used to keep labels apart.
+  const labelWidthPx = (text) => String(text).length * 5.9 + 4;
+
+  function localMidnight(ms) {
+    const d = new Date(Number(ms));
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function clockLabel(ms, withSeconds = false) {
+    const d = new Date(ms);
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}${withSeconds ? `:${pad2(d.getSeconds())}` : ""}`;
+  }
+
+  function dayLabel(ms) {
+    return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+
+  // Midnight ticks name the day ("Sep 13"); within a day ticks read the clock
+  // ("14:30", with seconds for sub-minute steps); a multi-day axis never
+  // shows a bare hour: mid-day ticks read "Sep 13 12:00".
+  function timeTickLabel(ms, stepMs, multiDay) {
+    if (stepMs >= DAY_MS || localMidnight(ms) === ms) return dayLabel(ms);
+    if (multiDay) return `${dayLabel(ms)} ${clockLabel(ms)}`;
+    return clockLabel(ms, stepMs < MINUTE_MS);
+  }
+
+  // Tick instants in [startMs, endMs] on local wall-clock boundaries: day
+  // steps on local midnights (every n-th calendar day), shorter steps restart
+  // at each local midnight so DST days keep round labels.
+  function timeTicksBetween(startMs, endMs, stepMs) {
+    const ticks = [];
+    const day = new Date(localMidnight(startMs));
+    if (stepMs >= DAY_MS) {
+      const everyDays = Math.round(stepMs / DAY_MS);
+      for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1, day.setDate(day.getDate() + 1)) {
+        const t = day.getTime();
+        const dayNumber = Math.round(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / DAY_MS);
+        if (t >= startMs && dayNumber % everyDays === 0) ticks.push(t);
+      }
+      return ticks;
+    }
+    if (stepMs >= HOUR_MS) {
+      // Wall-clock hours (00:00, 06:00, 12:00…) even on 23 h / 25 h DST days.
+      const everyHours = Math.round(stepMs / HOUR_MS);
+      const seen = new Set();
+      for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1, day.setDate(day.getDate() + 1)) {
+        for (let hour = 0; hour < 24; hour += everyHours) {
+          const t = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
+          if (t >= startMs && t <= endMs && !seen.has(t)) { seen.add(t); ticks.push(t); }
+        }
+      }
+      return ticks;
+    }
+    for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1) {
+      const midnight = day.getTime();
+      day.setDate(day.getDate() + 1);
+      const next = day.getTime();
+      const first = midnight + Math.ceil(Math.max(0, startMs - midnight) / stepMs) * stepMs;
+      for (let t = first; t < next && t <= endMs; t += stepMs) ticks.push(t);
+    }
+    return ticks;
+  }
+
+  // The smallest step whose labels keep at least 18 px apart at this width.
+  function timeAxisTicks(startMs, endMs, plotWidthPx) {
+    const span = Math.max(1, Number(endMs) - Number(startMs));
+    const multiDay = span > DAY_MS;
+    const width = Math.max(80, Number(plotWidthPx || 0));
+    let chosen = TIME_AXIS_STEPS_MS[TIME_AXIS_STEPS_MS.length - 1];
+    for (const step of TIME_AXIS_STEPS_MS) {
+      if (span / step > 60) continue;
+      const sample = step >= DAY_MS ? "Sep 30" : multiDay ? "Sep 30 12:00" : step < MINUTE_MS ? "00:00:00" : "00:00";
+      if (width * step / span >= labelWidthPx(sample) + 18) { chosen = step; break; }
+    }
+    return timeTicksBetween(startMs, endMs, chosen).map((t) => ({ t, label: timeTickLabel(t, chosen, multiDay) }));
+  }
+
+  // Tooltip span of a bucket: "Sep 13, 14:00 → 15:00" (or both dates when
+  // it crosses midnight).
+  function bucketRangeLabel(startMs, sizeMs) {
+    const end = startMs + sizeMs;
+    const withSeconds = sizeMs < MINUTE_MS || new Date(startMs).getSeconds() !== 0;
+    const from = `${dayLabel(startMs)}, ${clockLabel(startMs, withSeconds)}`;
+    const sameDay = localMidnight(startMs) === localMidnight(end - 1);
+    const to = sameDay ? clockLabel(end, withSeconds) : `${dayLabel(end)}, ${clockLabel(end, withSeconds)}`;
+    return `${from} → ${to}`;
   }
 
   function timestampToNs(value) {
@@ -564,22 +673,48 @@
     return stats.sort((a, b) => (a.first_span_ns - b.first_span_ns) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0));
   }
 
-  function unpackAnalytics(payload) {
-    model.analytics = {
+  function unpackAnalytics(payload, previous = null) {
+    const charts = Array.isArray(payload?.charts) ? payload.charts.map(String) : ["counts", "durations"];
+    const hasDurations = charts.includes("durations");
+    return {
       range: Array.isArray(payload?.range) ? payload.range.map(Number) : [0, 1],
       bucket_ms: Number(payload?.bucket_ms || 60000),
       quantile_bucket_ms: Number(payload?.quantile_bucket_ms || payload?.bucket_ms || 60000),
       trace_count_chart: Array.isArray(payload?.trace_count_chart) ? payload.trace_count_chart : [],
-      duration_quantiles: Array.isArray(payload?.duration_quantiles) ? payload.duration_quantiles : [],
+      trace_count_source: String(payload?.trace_count_source || "span_bounds"),
+      has_durations: hasDurations,
+      duration_quantiles: hasDurations
+        ? (Array.isArray(payload?.duration_quantiles) ? payload.duration_quantiles : [])
+        : (previous?.duration_quantiles || []),
     };
   }
 
-  function chartTime(ms) {
-    return new Date(Number(ms || 0)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // Chart geometry in CSS pixels: the SVG viewBox is the element's own size,
+  // so text, markers and hit-testing are never stretched.
+  const CHART_HEIGHT = 196;
+  function chartWidth(container) {
+    return Math.max(240, Math.round((container?.clientWidth || 0) - 12) || 640);
   }
 
-  function attachChartTooltips(container, selector, htmlFor, onHover = null) {
+  function timeAxisSvg(startMs, endMs, left, plotW, H, W) {
+    const xOf = (ms) => left + ((ms - startMs) / Math.max(1, endMs - startMs)) * plotW;
+    return timeAxisTicks(startMs, endMs, plotW).map(({ t, label }) => {
+      const x = xOf(t);
+      const half = labelWidthPx(label) / 2;
+      const anchor = x - half < 2 ? "start" : x + half > W - 2 ? "end" : "middle";
+      const tx = anchor === "start" ? Math.max(2, x) : anchor === "end" ? Math.min(W - 2, x) : x;
+      return `<line x1="${x.toFixed(1)}" y1="${H - 26}" x2="${x.toFixed(1)}" y2="${H - 22}" class="traceChart__grid"/><text x="${tx.toFixed(1)}" y="${H - 9}" text-anchor="${anchor}" class="traceChart__tick" data-time-tick="${t}">${esc(label)}</text>`;
+    }).join("");
+  }
+
+  // Grafana-like hover: the whole chart area is one hit surface; the pointer
+  // snaps to the nearest plotted point (points: [{ x, key }] sorted by x, in
+  // SVG units), so there are no dead zones between buckets.
+  function attachChartTooltips(container, points, htmlFor, onHover = null) {
     if (!container) return;
+    const svg = container.querySelector("svg");
+    const surface = container.querySelector(".traceChartHit");
+    if (!svg || !surface || !points.length) return;
     let tooltip = container.querySelector(".traceChartTooltip");
     if (!tooltip) {
       tooltip = document.createElement("div");
@@ -587,131 +722,165 @@
       tooltip.hidden = true;
       container.appendChild(tooltip);
     }
-    // pointermove fires at display rate: rebuild and measure the tooltip only
-    // when the hovered bucket changes, then just reposition it.
+    const viewWidth = Number(svg.viewBox?.baseVal?.width || 0);
+    const xs = points.map((point) => point.x);
+    const nearest = (x) => {
+      let lo = 0, hi = xs.length - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (xs[mid] <= x) lo = mid; else hi = mid;
+      }
+      return Math.abs(xs[hi] - x) < Math.abs(xs[lo] - x) ? points[hi] : points[lo];
+    };
     let current = null;
     let tipWidth = 0;
     let tipHeight = 0;
-    const hide = (target = null) => {
+    const hide = () => {
+      if (current) onHover?.(current, false);
       tooltip.hidden = true;
       current = null;
-      onHover?.(target, false);
     };
-    const move = (event, target) => {
-      if (current !== target) {
-        const html = htmlFor(target);
-        if (!html) return hide(target);
-        onHover?.(target, true);
+    const move = (event) => {
+      const box = svg.getBoundingClientRect();
+      if (!box.width) return;
+      const x = (event.clientX - box.left) * ((viewWidth || box.width) / box.width);
+      const point = nearest(x);
+      if (current !== point) {
+        if (current) onHover?.(current, false);
+        const html = htmlFor(point);
+        if (!html) { current = null; tooltip.hidden = true; return; }
+        onHover?.(point, true);
         tooltip.innerHTML = html;
         tooltip.hidden = false;
         // Measure at the origin so the natural size does not depend on where
-        // the previous bucket left the tooltip.
+        // the previous point left the tooltip.
         tooltip.style.left = "0px";
         tooltip.style.top = "0px";
         const size = tooltip.getBoundingClientRect();
         tipWidth = size.width;
         tipHeight = size.height;
-        current = target;
+        current = point;
       }
       const rect = container.getBoundingClientRect();
-      const tip = { width: tipWidth, height: tipHeight };
-      let x = event.clientX - rect.left + 12;
-      let y = event.clientY - rect.top + 12;
-      if (x + tip.width > rect.width - 4) x = event.clientX - rect.left - tip.width - 12;
-      if (y + tip.height > rect.height - 4) y = event.clientY - rect.top - tip.height - 12;
-      tooltip.style.left = `${Math.max(4, x)}px`;
-      tooltip.style.top = `${Math.max(4, y)}px`;
+      let left = event.clientX - rect.left + 12;
+      let top = event.clientY - rect.top + 12;
+      if (left + tipWidth > rect.width - 4) left = event.clientX - rect.left - tipWidth - 12;
+      if (top + tipHeight > rect.height - 4) top = event.clientY - rect.top - tipHeight - 12;
+      tooltip.style.left = `${Math.max(4, left)}px`;
+      tooltip.style.top = `${Math.max(4, top)}px`;
     };
-    for (const target of container.querySelectorAll(selector)) {
-      target.addEventListener("pointerenter", (event) => move(event, target));
-      target.addEventListener("pointermove", (event) => move(event, target));
-      target.addEventListener("pointerleave", () => hide(target));
-    }
+    surface.addEventListener("pointerenter", move);
+    surface.addEventListener("pointermove", move);
+    surface.addEventListener("pointerleave", hide);
+  }
+
+  function chartMessage(container, text, isError = false) {
+    if (!container) return;
+    container.innerHTML = `<div class="tracesEmpty${isError ? " traceChartError" : ""}"${isError ? ' role="alert"' : ""}>${esc(text)}</div>`;
   }
 
   function renderServiceChart() {
-    if (!dom.traceServiceChart) return;
+    const container = dom.traceServiceChart;
+    if (!container) return;
     const a = model.analytics;
     const points = a?.trace_count_chart || [];
     const range = a?.range || [0, 1];
-    const bucketMs = Math.max(60000, Number(a?.bucket_ms || 60000));
-    const start = Number(range[0] || 0), end = Math.max(start + bucketMs, Number(range[1] || start + bucketMs));
-    const byBucket = new Map(points.map((point) => [Number(point?.[0] || 0), Number(point?.[1] || 0)]));
-    const buckets = [];
-    for (let bucket = start; bucket < end; bucket += bucketMs) buckets.push([bucket, byBucket.get(bucket) || 0]);
-    if (!buckets.length) { dom.traceServiceChart.innerHTML = '<div class="tracesEmpty">No matching traces in this range.</div>'; return; }
-    const W = 1000, H = 220, left = 48, right = 12, top = 12, bottom = 34;
-    const plotW = W - left - right, plotH = H - top - bottom;
-    const maxTotal = Math.max(1, ...buckets.map((bucket) => Number(bucket[1] || 0)));
+    const bucketMs = Math.max(1000, Number(a?.bucket_ms || 60000));
+    const start = Number(range[0] || 0), end = Math.max(start + 1000, Number(range[1] || start + bucketMs));
+    // Buckets are keyed by their start on the server's grid (anchored at the
+    // local midnight sent as bucket_origin_ms) and placed by time, so a range
+    // that does not start on the grid still shows every bucket.
+    const buckets = points
+      .map((point) => [Number(point?.[0] || 0), Number(point?.[1] || 0)])
+      .filter(([bucket, count]) => count > 0 && bucket + bucketMs > start && bucket <= end)
+      .sort((x, y) => x[0] - y[0]);
+    if (!buckets.length) { chartMessage(container, "No matching traces in this range."); return; }
+    const W = chartWidth(container), H = CHART_HEIGHT, top = 10, bottom = 30, right = 10;
+    const maxTotal = Math.max(1, ...buckets.map((bucket) => bucket[1]));
     const countScale = countAxis(maxTotal, 7);
-    const slotW = plotW / Math.max(1, buckets.length);
-    const barW = Math.max(2, slotW * 0.72);
-    const bars = buckets.map((bucket, i) => {
-      const count = Number(bucket[1] || 0);
-      const h = count / countScale.axisMax * plotH;
-      const x = left + i * slotW + (slotW - barW) / 2;
-      const y = top + plotH - h;
-      return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${Math.max(0.8, h).toFixed(2)}" rx="1" class="traceCountBar" data-count-bar="${i}"/><rect x="${(left + i * slotW).toFixed(2)}" y="${top}" width="${slotW.toFixed(2)}" height="${plotH}" class="traceChartHit" data-count-index="${i}" data-count-ts="${bucket[0]}" data-count="${count}"/>`;
+    const tickText = (value) => Number(value).toLocaleString();
+    const left = Math.ceil(10 + Math.max(...countScale.values.map((value) => labelWidthPx(tickText(value)))));
+    const plotW = W - left - right, plotH = H - top - bottom;
+    const xOf = (ms) => left + ((ms - start) / (end - start)) * plotW;
+    const slotW = (bucketMs / (end - start)) * plotW;
+    const inset = slotW > 4 ? slotW * 0.14 : 0;
+    const hover = [];
+    const bars = buckets.map(([bucket, count], i) => {
+      const x1 = Math.max(left, xOf(bucket) + inset);
+      const x2 = Math.min(left + plotW, xOf(bucket + bucketMs) - inset);
+      const w = Math.max(1, x2 - x1);
+      const h = Math.max(1, (count / countScale.axisMax) * plotH);
+      hover.push({ x: x1 + w / 2, key: i, bucket, count });
+      return `<rect x="${x1.toFixed(2)}" y="${(top + plotH - h).toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="1" class="traceCountBar" data-count-bar="${i}" data-count-ts="${bucket}" data-count="${count}"/>`;
     }).join("");
-    const yTicks = countScale.values.map((value) => { const r = value / countScale.axisMax; const y = top + plotH - r * plotH; return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" class="traceChart__grid"/><text x="${left-7}" y="${y+4}" text-anchor="end" class="traceChart__tick">${value}</text>`; }).join("");
-    const xLabels = timeTickRatios(7).map((r) => { const x = left + r * plotW; return `<text x="${x}" y="${H-10}" text-anchor="${r === 0 ? "start" : r === 1 ? "end" : "middle"}" class="traceChart__tick">${esc(chartTime(start + (end-start)*r))}</text>`; }).join("");
-    dom.traceServiceChart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="traceChart__svg">${yTicks}${bars}${xLabels}</svg>`;
-    attachChartTooltips(dom.traceServiceChart, "[data-count-ts]", (target) => {
-      const ts = Number(target.dataset.countTs || 0), count = Number(target.dataset.count || 0);
-      return `<strong>${count} matching trace${count === 1 ? "" : "s"}</strong><span>${esc(formatStart(ts))} → ${esc(formatStart(ts + bucketMs))}</span>`;
-    }, (target, active) => {
-      const index = target?.dataset?.countIndex;
-      if (index == null) return;
-      dom.traceServiceChart.querySelector(`[data-count-bar="${index}"]`)?.classList.toggle("is-hovered", active);
+    const yTicks = countScale.values.map((value) => { const y = top + plotH - (value / countScale.axisMax) * plotH; return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tickText(value))}</text>`; }).join("");
+    const xTicks = timeAxisSvg(start, end, left, plotW, H, W);
+    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg">${yTicks}${bars}${xTicks}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg>`;
+    attachChartTooltips(container, hover, (point) => `<strong>${point.count.toLocaleString()} matching trace${point.count === 1 ? "" : "s"}</strong><span>${esc(bucketRangeLabel(point.bucket, bucketMs))}</span>`, (point, active) => {
+      container.querySelector(`[data-count-bar="${point.key}"]`)?.classList.toggle("is-hovered", active);
     });
-    if (dom.traceServiceChartMeta) dom.traceServiceChartMeta.textContent = `matching traces · bucket ${formatDuration(bucketMs * 1e6)}`;
+    if (dom.traceServiceChartMeta) {
+      const fromIndex = a.trace_count_source === "trace_index";
+      dom.traceServiceChartMeta.textContent = `${formatDuration(bucketMs * 1e6)} buckets · ${fromIndex ? "trace index" : "spans"}`;
+      dom.traceServiceChartMeta.title = fromIndex
+        ? "Counted from the trace index (each trace at its first span start). Exact span counts replace it once the duration percentiles are computed."
+        : "Traces with at least one matching span in the range, each counted at its first span start.";
+    }
   }
 
   function renderDurationChart() {
-    if (!dom.traceDurationChart) return;
+    const container = dom.traceDurationChart;
+    if (!container) return;
     const a = model.analytics;
-    const qs = a?.duration_quantiles || [];
-    if (!qs.length) { dom.traceDurationChart.innerHTML = '<div class="tracesEmpty">No trace durations in this range.</div>'; return; }
-    const range = a?.range || [Number(qs[0]?.[0] || 0), Number(qs[qs.length - 1]?.[0] || 1)];
-    const xMin = Number(range[0] || 0), xMax = Math.max(xMin + 1, Number(range[1] || xMin + 1));
-    const allY = [];
-    for (const q of qs) allY.push(...q.slice(1).map(Number));
-    const yMax = Math.max(1, ...allY);
+    if (a && !a.has_durations) {
+      if (model.durationsError) chartMessage(container, model.durationsError, true);
+      else chartMessage(container, "Computing duration percentiles…");
+      if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = "P50 / P90 / P95 / P99";
+      return;
+    }
+    const qs = (a?.duration_quantiles || []).map((q) => q.map(Number)).sort((x, y) => x[0] - y[0]);
+    if (!qs.length) { chartMessage(container, "No trace durations in this range."); return; }
+    const range = a?.range || [qs[0][0], qs[qs.length - 1][0]];
+    const xMin = Number(range[0] || 0), xMax = Math.max(xMin + 1000, Number(range[1] || xMin + 1000));
+    let yMax = 1;
+    for (const q of qs) for (let i = 1; i <= 4; i += 1) yMax = Math.max(yMax, q[i] || 0);
     const durationScaleAxis = durationAxis(yMax, 7);
-    const W = 1000, H = 220, left = 64, right = 14, top = 12, bottom = 34;
+    const W = chartWidth(container), H = CHART_HEIGHT, top = 10, bottom = 30, right = 12;
+    const left = Math.ceil(10 + Math.max(...durationScaleAxis.values.map((tick) => labelWidthPx(tick.label))));
     const plotW = W - left - right, plotH = H - top - bottom;
-    const xOf = (ms) => left + ((Number(ms) - xMin) / (xMax - xMin)) * plotW;
+    const qBucketMs = Math.max(1000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
+    const xOf = (ms) => Math.min(left + plotW, Math.max(left, left + ((Number(ms) - xMin) / (xMax - xMin)) * plotW));
     const yOf = (ns) => top + plotH - (Number(ns || 0) / durationScaleAxis.axisMax) * plotH;
-    const yScale = durationScaleAxis.scale;
-    const yTicks = durationScaleAxis.values.map((tick) => { const y = top + plotH - (tick.value / durationScaleAxis.axisMax) * plotH; return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" class="traceChart__grid"/><text x="${left-8}" y="${y+4}" text-anchor="end" class="traceChart__tick">${esc(tick.label)}</text>`; }).join("");
-    const xTicks = timeTickRatios(7).map((r) => { const x = left + r * plotW; return `<text x="${x}" y="${H-10}" text-anchor="${r === 0 ? "start" : r === 1 ? "end" : "middle"}" class="traceChart__tick">${esc(chartTime(xMin + (xMax-xMin)*r))}</text>`; }).join("");
-    const qDefs = [[1,"p50"],[2,"p90"],[3,"p95"],[4,"p99"]];
-    const qBucketMs = Math.max(60000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
-    const lines = qDefs.map(([col, cls]) => {
-      const pts = qs.map((q) => `${xOf(Number(q[0]) + qBucketMs/2).toFixed(2)},${yOf(q[col]).toFixed(2)}`).join(" ");
-      return pts ? `<polyline points="${pts}" class="traceDurationLine traceDurationLine--${cls}" fill="none"/>` : "";
+    const yTicks = durationScaleAxis.values.map((tick) => { const y = top + plotH - (tick.value / durationScaleAxis.axisMax) * plotH; return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tick.label)}</text>`; }).join("");
+    const xTicks = timeAxisSvg(xMin, xMax, left, plotW, H, W);
+    const qDefs = [[1, "p50"], [2, "p90"], [3, "p95"], [4, "p99"]];
+    // Lines break where buckets have no traces instead of bridging the gap,
+    // and a lone bucket gets a dot, so every drawn stretch holds real points.
+    const runs = [];
+    for (const q of qs) {
+      const last = runs[runs.length - 1];
+      if (last && q[0] - last[last.length - 1][0] <= qBucketMs * 1.5) last.push(q); else runs.push([q]);
+    }
+    const lines = qDefs.map(([col, cls]) => runs.map((run) => {
+      if (run.length === 1) return `<circle cx="${xOf(run[0][0] + qBucketMs / 2).toFixed(2)}" cy="${yOf(run[0][col]).toFixed(2)}" r="1.8" class="traceDurationDot traceDurationDot--${cls}"/>`;
+      const pts = run.map((q) => `${xOf(q[0] + qBucketMs / 2).toFixed(2)},${yOf(q[col]).toFixed(2)}`).join(" ");
+      return `<polyline points="${pts}" class="traceDurationLine traceDurationLine--${cls}" fill="none"/>`;
+    }).join("")).join("");
+    const hover = [];
+    const hoverPoints = qs.map((q, i) => {
+      const x = xOf(q[0] + qBucketMs / 2);
+      hover.push({ x, key: q[0], q });
+      const xs = x.toFixed(2);
+      return `<g class="traceQuantileHover" data-q-hover="${q[0]}" data-q-ts="${q[0]}"><line x1="${xs}" x2="${xs}" y1="${top}" y2="${top + plotH}"/>${qDefs.map(([col, cls]) => `<circle class="${cls}" cx="${xs}" cy="${yOf(q[col]).toFixed(2)}" r="3.5"/>`).join("")}</g>`;
     }).join("");
-    const hoverPoints = qs.map((q) => {
-      const bucketStart = Number(q[0] || 0);
-      const x = xOf(bucketStart + qBucketMs/2).toFixed(2);
-      return `<g class="traceQuantileHover" data-q-hover="${bucketStart}"><line x1="${x}" x2="${x}" y1="${top}" y2="${top+plotH}"/><circle class="p50" cx="${x}" cy="${yOf(q[1]).toFixed(2)}" r="4"/><circle class="p90" cx="${x}" cy="${yOf(q[2]).toFixed(2)}" r="4"/><circle class="p95" cx="${x}" cy="${yOf(q[3]).toFixed(2)}" r="4"/><circle class="p99" cx="${x}" cy="${yOf(q[4]).toFixed(2)}" r="4"/></g>`;
-    }).join("");
-    const hits = qs.map((q) => {
-      const bucketStart = Number(q[0] || 0);
-      const x1 = Math.max(left, xOf(bucketStart));
-      const x2 = Math.min(W - right, xOf(bucketStart + qBucketMs));
-      return `<rect x="${x1.toFixed(2)}" y="${top}" width="${Math.max(2, x2-x1).toFixed(2)}" height="${plotH}" class="traceChartHit" data-q-ts="${bucketStart}" data-p50="${Number(q[1]||0)}" data-p90="${Number(q[2]||0)}" data-p95="${Number(q[3]||0)}" data-p99="${Number(q[4]||0)}"/>`;
-    }).join("");
-    dom.traceDurationChart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="traceChart__svg">${yTicks}${xTicks}${lines}${hoverPoints}${hits}</svg><div class="traceChartLegend traceChartLegend--quantiles"><span class="p50">P50</span><span class="p90">P90</span><span class="p95">P95</span><span class="p99">P99</span></div>`;
-    attachChartTooltips(dom.traceDurationChart, "[data-q-ts]", (target) => {
-      const ts = Number(target.dataset.qTs || 0);
-      return `<strong>${esc(formatStart(ts))}</strong><span>P50 <b>${esc(formatDurationScaled(Number(target.dataset.p50 || 0), yScale))}</b></span><span>P90 <b>${esc(formatDurationScaled(Number(target.dataset.p90 || 0), yScale))}</b></span><span>P95 <b>${esc(formatDurationScaled(Number(target.dataset.p95 || 0), yScale))}</b></span><span>P99 <b>${esc(formatDurationScaled(Number(target.dataset.p99 || 0), yScale))}</b></span>`;
-    }, (target, active) => {
-      const ts = target?.dataset?.qTs;
-      if (!ts) return;
-      dom.traceDurationChart.querySelector(`[data-q-hover="${ts}"]`)?.classList.toggle("is-active", active);
+    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg">${yTicks}${xTicks}${lines}${hoverPoints}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg><div class="traceChartLegend traceChartLegend--quantiles"><span class="p50">P50</span><span class="p90">P90</span><span class="p95">P95</span><span class="p99">P99</span></div>`;
+    attachChartTooltips(container, hover, (point) => {
+      const [bucket, p50, p90, p95, p99] = point.q;
+      return `<strong>${esc(bucketRangeLabel(bucket, qBucketMs))}</strong><span>P50 <b>${esc(formatDuration(p50))}</b></span><span>P90 <b>${esc(formatDuration(p90))}</b></span><span>P95 <b>${esc(formatDuration(p95))}</b></span><span>P99 <b>${esc(formatDuration(p99))}</b></span>`;
+    }, (point, active) => {
+      container.querySelector(`[data-q-hover="${point.key}"]`)?.classList.toggle("is-active", active);
     });
-    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `percentiles · bucket ${formatDuration(qBucketMs * 1e6)}`;
+    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
   }
 
   // Remembers whether meta enables analytics for the head script of the next
@@ -721,20 +890,46 @@
     document.documentElement.classList.remove("chdash-trace-analytics");
   }
 
+  // Charts are drawn at their pixel width: redraw when a card changes width.
+  let chartResizeObserver = null;
+  let chartResizeFrame = 0;
+  const chartWidths = new WeakMap();
+  function watchChartWidths() {
+    if (chartResizeObserver || typeof ResizeObserver !== "function") return;
+    chartResizeObserver = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const width = Math.round(entry.contentRect.width);
+        if (chartWidths.get(entry.target) !== width) { chartWidths.set(entry.target, width); changed = true; }
+      }
+      if (!changed || chartResizeFrame) return;
+      chartResizeFrame = requestAnimationFrame(() => {
+        chartResizeFrame = 0;
+        if (model.analytics && !dom.traceAnalyticsGrid?.hidden) { renderServiceChart(); renderDurationChart(); }
+      });
+    });
+    for (const chart of [dom.traceServiceChart, dom.traceDurationChart]) if (chart) chartResizeObserver.observe(chart);
+  }
+
   function renderAnalytics() {
     const enabled = model.meta?.analytics_enabled === true;
     if (model.meta) rememberAnalyticsEnabled(enabled);
     if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
     if (!enabled) return;
+    watchChartWidths();
     if (model.analyticsLoading && !model.analytics) {
-      if (dom.traceServiceChart) dom.traceServiceChart.innerHTML = '<div class="tracesEmpty">Loading trace activity…</div>';
-      if (dom.traceDurationChart) dom.traceDurationChart.innerHTML = '<div class="tracesEmpty">Loading duration distribution…</div>';
+      chartMessage(dom.traceServiceChart, "Loading trace activity…");
+      chartMessage(dom.traceDurationChart, "Loading duration distribution…");
       return;
     }
     if (model.analyticsError && !model.analytics) {
-      const message = esc(model.analyticsError);
-      if (dom.traceServiceChart) dom.traceServiceChart.innerHTML = `<div class="tracesEmpty">${message}</div>`;
-      if (dom.traceDurationChart) dom.traceDurationChart.innerHTML = `<div class="tracesEmpty">${message}</div>`;
+      chartMessage(dom.traceServiceChart, model.analyticsError, true);
+      chartMessage(dom.traceDurationChart, model.analyticsError, true);
+      return;
+    }
+    if (!model.analytics) {
+      chartMessage(dom.traceServiceChart, "Search to load matching trace activity.");
+      chartMessage(dom.traceDurationChart, "Search to load duration distribution.");
       return;
     }
     renderServiceChart();
@@ -756,7 +951,10 @@
     if (!dom.tracesResults) return;
     const rows = sortedResults();
     const count = document.getElementById("tracesResultCount");
-    if (count) count.textContent = `${rows.length} Trace${rows.length === 1 ? "" : "s"}`;
+    if (count) {
+      const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
+      count.innerHTML = `${rows.length} Trace${rows.length === 1 ? "" : "s"}${withErrors ? ` <span class="tracesResultCount__errors" title="${withErrors} of the listed traces have error spans">· ${withErrors} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
+    }
     renderAnalytics();
     if (!rows.length) {
       dom.tracesResults.innerHTML = '<div class="tracesEmpty">No traces match these filters.</div>';
@@ -769,13 +967,13 @@
       const stats = services.map((stat) => `<span class="traceServiceStat${stat.errors ? " is-error" : ""}" style="--trace-service-color:${serviceColor(stat.service)}"><i></i><b>${esc(stat.service)}</b><span>${stat.spans}</span>${stat.errors ? `<em class="traceErrorCount" title="${stat.errors} error span${stat.errors === 1 ? "" : "s"}">${stat.errors}</em>` : ""}</span>`).join("");
       return `<div class="traceResult traceResult--wide" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
         <div class="traceResult__line traceResult__line--main">
-          <strong class="traceResult__wideTitle">${esc(title)}</strong>
+          <strong class="traceResult__wideTitle">${esc(title)}</strong>${errors ? `<span class="traceErrorCount traceErrorCount--title" title="${errors} error span${errors === 1 ? "" : "s"}" aria-label="${errors} error span${errors === 1 ? "" : "s"}">${errors}</span>` : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
           <button type="button" class="traceCopyButton" data-copy-trace="${esc(trace.trace_id)}" title="Copy Trace ID" aria-label="Copy Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button>
           <span class="traceResult__right"><span class="traceResult__when"><time>${esc(formatStart(trace.start_ms))}</time><small>${esc(formatAgo(trace.start_ms))}</small></span><b>${esc(formatDuration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
-          <span class="traceResult__count">${trace.span_count}</span>${errors ? `<span class="traceErrorCount traceErrorCount--total" title="${errors} error span${errors === 1 ? "" : "s"}">${errors}</span>` : ""}
+          <span class="traceResult__count">${trace.span_count}</span>
           <div class="traceServiceStats">${stats}</div>
         </div>
       </div>`;
@@ -1631,6 +1829,7 @@
       model.analytics = null;
       model.analyticsLoading = false;
       model.analyticsError = "";
+      model.durationsError = "";
       renderAnalytics();
       return;
     }
@@ -1638,17 +1837,38 @@
     model.analytics = null;
     model.analyticsLoading = true;
     model.analyticsError = "";
+    model.durationsError = "";
     renderAnalytics();
+    // Buckets start at local midnight (3 h buckets at 00:00, 03:00… local).
+    const analyticsFilters = { ...filters, bucket_origin_ms: String(localMidnight(Number(filters.start_ms))) };
+    delete analyticsFilters.limit;
+    const message = (error) => (error instanceof Error ? error.message : String(error));
+    // Counts first: without filters the server reads them from the trace
+    // index (well under a second for 7 days), while the duration percentiles
+    // need the span aggregation, which takes seconds on multi-day windows.
+    // With filters the first answer already carries both charts.
+    let countsError = "";
     try {
-      const analyticsFilters = { ...filters };
-      delete analyticsFilters.limit;
-      const payload = await api.getTraceAnalytics(currentHost(), analyticsFilters);
+      const counted = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "counts" });
       if (seq !== model.analyticsSeq) return;
-      unpackAnalytics(payload);
+      model.analytics = unpackAnalytics(counted);
+      if (!model.analytics.has_durations) renderAnalytics();
     } catch (error) {
       if (seq !== model.analyticsSeq) return;
-      model.analytics = null;
-      model.analyticsError = error instanceof Error ? error.message : String(error);
+      // The durations answer below carries the counts too.
+      countsError = message(error);
+    }
+    try {
+      if (model.analytics?.has_durations) return;
+      const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" });
+      if (seq !== model.analyticsSeq) return;
+      // Span counts replace the index counts: both charts then describe
+      // exactly the same traces.
+      model.analytics = unpackAnalytics(full, model.analytics);
+    } catch (error) {
+      if (seq !== model.analyticsSeq) return;
+      if (model.analytics) model.durationsError = message(error);
+      else model.analyticsError = countsError || message(error);
     } finally {
       if (seq === model.analyticsSeq) {
         model.analyticsLoading = false;
@@ -1667,9 +1887,11 @@
     setView(false);
     setButtonLoading(dom.tracesSearchButton, true);
     showError("");
+    // The charts load right after the list: say so instead of going blank.
     model.analytics = null;
-    model.analyticsLoading = false;
+    model.analyticsLoading = model.meta?.analytics_enabled === true;
     model.analyticsError = "";
+    model.durationsError = "";
     renderAnalytics();
     try {
       const payload = await api.searchTraces(currentHost(), filters);
@@ -1683,6 +1905,7 @@
       if (seq !== model.searchSeq) return;
       model.traces = [];
       model.analytics = null;
+      model.analyticsLoading = false;
       renderResults();
       showError(error instanceof Error ? error.message : String(error));
     } finally {

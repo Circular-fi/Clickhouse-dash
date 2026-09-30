@@ -52,7 +52,7 @@ def test_chart_hover_highlights_and_duration_axis_has_more_uniform_ticks():
     css = read("src/static/style.css")
     assert "durationAxis(yMax, 7)" in js
     assert "countAxis(maxTotal, 7)" in js
-    assert "timeTickRatios(7)" in js
+    assert "timeAxisTicks(startMs, endMs, plotW)" in js
     assert "data-count-bar" in js
     assert "traceQuantileHover" in js
     assert "data-q-hover" in js
