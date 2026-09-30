@@ -2250,10 +2250,7 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
   return out;
 }
 
-// After a join, a single projection (or GROUP BY / ORDER BY item) that became
-// one line moves back onto the keyword line when it fits there, as it would
-// have if the expression formatter had kept it inline:
-// `SELECT greatest(least(x, hi), lo) AS v`.
+// One pass of join_fitting_arguments (below).
 string join_fitting_arguments_once(const string& text, size_t width, bool* changed) {
   const CallScan scan = scan_call_brackets(text);
   vector<size_t> starts{0};
@@ -2361,6 +2358,10 @@ string join_fitting_arguments(string text, size_t width) {
   return text;
 }
 
+// After a join, a single projection (or GROUP BY / ORDER BY item) that became
+// one line moves back onto the keyword line when it fits there, as it would
+// have if the expression formatter had kept it inline:
+// `SELECT greatest(least(x, hi), lo) AS v`.
 string merge_joined_single_select_items(string_view text, const vector<size_t>& joined_rows, size_t width) {
   if (joined_rows.empty()) return string(text);
   vector<string> lines = split_lines_keep(text);
