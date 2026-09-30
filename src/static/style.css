@@ -16369,3 +16369,100 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 .traceMapPanel__edge:focus-visible { outline: none; background: var(--rowHover); }
 .traceMapPanel__edgeName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traceMapPanel__none { margin: 2px 0; color: var(--muted); font-size: 11px; }
+
+/* Trace duration heatmap + box-select comparison (app_trace_heatmap.js).
+   Cells use one-hue sequential steps (low counts recede into the surface:
+   light steps on the light theme, dark steps on the dark one); the selection
+   and its bars are orange, the baseline gray. */
+:root {
+  --trace-heat-1: #0d366b; --trace-heat-2: #104281; --trace-heat-3: #184f95; --trace-heat-4: #256abf;
+  --trace-heat-5: #2a78d6; --trace-heat-6: #5598e7; --trace-heat-7: #86b6ef; --trace-heat-8: #cde2fb;
+  --trace-delta-selection: #f5a454; --trace-delta-baseline: #7d8796;
+}
+html[data-theme="light"] {
+  --trace-heat-1: #cde2fb; --trace-heat-2: #9ec5f4; --trace-heat-3: #6da7ec; --trace-heat-4: #3987e5;
+  --trace-heat-5: #2a78d6; --trace-heat-6: #256abf; --trace-heat-7: #184f95; --trace-heat-8: #0d366b;
+  --trace-delta-selection: #c2570c; --trace-delta-baseline: #8b95a5;
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme="dark"]) {
+    --trace-heat-1: #cde2fb; --trace-heat-2: #9ec5f4; --trace-heat-3: #6da7ec; --trace-heat-4: #3987e5;
+    --trace-heat-5: #2a78d6; --trace-heat-6: #256abf; --trace-heat-7: #184f95; --trace-heat-8: #0d366b;
+    --trace-delta-selection: #c2570c; --trace-delta-baseline: #8b95a5;
+  }
+}
+
+.traceAnalyticsCard > header #traceDurationChartMeta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traceDurationViews { flex: 0 0 auto; display: inline-flex; padding: 1px; gap: 1px; border: 1px solid var(--buttonBorder); border-radius: 5px; }
+.traceDurationViews__button { height: 19px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9.5px; font-weight: 600; line-height: 19px; cursor: pointer; }
+.traceDurationViews__button:hover { color: var(--text); }
+.traceDurationViews__button.is-active { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: var(--text); }
+.traceDurationViews__button:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
+
+.traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
+.traceHeatmap { touch-action: none; user-select: none; }
+.traceHeatCell { shape-rendering: crispEdges; }
+.traceHeatCell.lvl-1, .traceHeatLegend__ramp .lvl-1 { fill: var(--trace-heat-1); background: var(--trace-heat-1); }
+.traceHeatCell.lvl-2, .traceHeatLegend__ramp .lvl-2 { fill: var(--trace-heat-2); background: var(--trace-heat-2); }
+.traceHeatCell.lvl-3, .traceHeatLegend__ramp .lvl-3 { fill: var(--trace-heat-3); background: var(--trace-heat-3); }
+.traceHeatCell.lvl-4, .traceHeatLegend__ramp .lvl-4 { fill: var(--trace-heat-4); background: var(--trace-heat-4); }
+.traceHeatCell.lvl-5, .traceHeatLegend__ramp .lvl-5 { fill: var(--trace-heat-5); background: var(--trace-heat-5); }
+.traceHeatCell.lvl-6, .traceHeatLegend__ramp .lvl-6 { fill: var(--trace-heat-6); background: var(--trace-heat-6); }
+.traceHeatCell.lvl-7, .traceHeatLegend__ramp .lvl-7 { fill: var(--trace-heat-7); background: var(--trace-heat-7); }
+.traceHeatCell.lvl-8, .traceHeatLegend__ramp .lvl-8 { fill: var(--trace-heat-8); background: var(--trace-heat-8); }
+.traceHeatHit { cursor: crosshair; }
+.traceHeatBrush { fill: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); stroke: var(--trace-delta-selection); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+.traceHeatSelection { fill: color-mix(in srgb, var(--trace-delta-selection) 12%, transparent); stroke: var(--trace-delta-selection); stroke-width: 2; pointer-events: none; }
+.traceHeatCursor { fill: none; stroke: var(--text); stroke-width: 1.5; pointer-events: none; }
+.traceHeatBrush[hidden], .traceHeatSelection[hidden], .traceHeatCursor[hidden] { display: none; }
+.traceHeatLegend { justify-content: flex-start; gap: 4px 10px; }
+.traceHeatLegend__scale { display: inline-flex; align-items: center; gap: 4px; }
+.traceHeatLegend__ramp { display: inline-flex; height: 7px; border-radius: 2px; overflow: hidden; }
+.traceHeatLegend__ramp i { width: 10px; height: 7px; border-radius: 0 !important; }
+.traceHeatLegend__hint { margin-left: auto; }
+
+.traceDeltaPanel { margin: 8px 12px 0; border: 1px solid var(--border); border-radius: 4px; background: var(--panelBg); min-width: 0; }
+.traceDeltaPanel__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+.traceDeltaPanel__title { min-width: 0; flex: 1 1 260px; display: grid; gap: 2px; }
+.traceDeltaPanel__title strong { font-size: 11px; }
+.traceDeltaPanel__title span { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.traceDeltaPanel__title b { color: var(--text); font-weight: 650; }
+.traceDeltaPanel__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.traceDeltaPanel__actions .button--small { height: 24px; padding: 0 9px; border-radius: 6px; font-size: 10px; }
+.traceDeltaPanel__baseline { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.traceDeltaPanel__baseline select { height: 24px; max-width: 190px; padding: 0 6px; border: 1px solid var(--buttonBorder); border-radius: 6px; background: var(--inputBg, var(--panelBg)); color: var(--text); font: inherit; font-size: 10px; }
+.traceDeltaPanel__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; padding: 5px 9px 0; color: var(--muted); font-size: 9.5px; }
+.traceDeltaLegend { display: inline-flex; gap: 10px; }
+.traceDeltaLegend > span { display: inline-flex; align-items: center; gap: 4px; }
+.traceDeltaLegend > span::before { content: ""; width: 9px; height: 7px; border-radius: 2px; background: var(--trace-delta-baseline); }
+.traceDeltaLegend > .is-selection::before { background: var(--trace-delta-selection); }
+.traceDeltaPanel__body { padding: 7px 9px 9px; }
+.traceDeltaPanel__state { min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 11px; text-align: center; }
+.traceDeltaSpinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--muted) 35%, transparent); border-top-color: var(--trace-delta-selection); border-radius: 50%; animation: traceDeltaSpin .8s linear infinite; }
+@keyframes traceDeltaSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .traceDeltaSpinner { animation: none; } }
+.traceDeltaGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 7px; }
+.traceDeltaCard { min-width: 0; border: 1px solid var(--border); border-radius: 4px; padding: 6px 7px 5px; }
+.traceDeltaCard > header { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 4px; }
+.traceDeltaCard > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 10.5px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.traceDeltaCard__scope { flex: 0 0 auto; padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); font-size: 8.5px; line-height: 13px; }
+.traceDeltaCard__score { flex: 0 0 auto; margin-left: auto; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.traceDeltaCard__values { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.traceDeltaRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(56px, 34%) auto 18px; align-items: center; gap: 6px; min-height: 20px; }
+.traceDeltaRow__value { min-width: 0; padding: 1px 3px; border: 0; border-radius: 3px; background: transparent; color: var(--text); font: 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.traceDeltaRow__value:hover, .traceDeltaRow__value:focus-visible { background: var(--rowHover, color-mix(in srgb, var(--text) 8%, transparent)); outline: none; text-decoration: underline; }
+.traceDeltaRow__value:focus-visible { box-shadow: 0 0 0 2px var(--accentBorder); }
+.traceDeltaRow__bars { display: grid; gap: 2px; }
+.traceDeltaRow__bars i { display: block; height: 5px; min-width: 1px; border-radius: 0 3px 3px 0; background: var(--trace-delta-baseline); }
+.traceDeltaRow__bars i.is-selection { background: var(--trace-delta-selection); }
+.traceDeltaRow__pct { display: grid; justify-items: end; color: var(--muted); font: 9px/10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; min-width: 30px; }
+.traceDeltaRow__pct b { color: var(--text); font-weight: 650; }
+.traceDeltaRow__exclude { width: 18px; height: 18px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.traceDeltaRow__exclude svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.traceDeltaRow__exclude:hover, .traceDeltaRow__exclude:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); outline: none; }
+.traceDeltaRow__exclude:focus-visible { box-shadow: 0 0 0 2px var(--accentBorder); }
+.traceFilterChip--duration .traceFilterChip__key { margin-right: 4px; }
+@media (max-width: 760px) {
+  .traceDeltaPanel { margin: 8px 8px 0; }
+  .traceHeatLegend__hint { display: none; }
+}

@@ -967,6 +967,8 @@
   function renderDurationChart() {
     const container = dom.traceDurationChart;
     if (!container) return;
+    // Heatmap mode (app_trace_heatmap.js) draws the card itself.
+    if (ns.traceHeatmap?.active?.()) { ns.traceHeatmap.render(); return; }
     const a = model.analytics;
     if (a && !a.has_durations) {
       if (model.durationsError) chartMessage(container, model.durationsError, true);
@@ -1093,19 +1095,21 @@
     if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
     if (!enabled) return;
     watchChartWidths();
+    // The heatmap loads on its own: the count chart states do not apply to it.
+    const heatmap = ns.traceHeatmap?.active?.() === true;
     if (model.analyticsLoading && !model.analytics) {
       chartMessage(dom.traceServiceChart, "Loading trace activity…");
-      chartMessage(dom.traceDurationChart, "Loading duration distribution…");
+      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, "Loading duration distribution…");
       return;
     }
     if (model.analyticsError && !model.analytics) {
       chartMessage(dom.traceServiceChart, model.analyticsError, true);
-      chartMessage(dom.traceDurationChart, model.analyticsError, true);
+      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, model.analyticsError, true);
       return;
     }
     if (!model.analytics) {
       chartMessage(dom.traceServiceChart, "Search to load matching trace activity.");
-      chartMessage(dom.traceDurationChart, "Search to load duration distribution.");
+      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, "Search to load duration distribution.");
       return;
     }
     renderServiceChart();
@@ -3422,6 +3426,9 @@
     // Buckets start at local midnight (3 h buckets at 00:00, 03:00… local).
     const analyticsFilters = { ...filters, bucket_origin_ms: String(localMidnight(Number(filters.start_ms))) };
     delete analyticsFilters.limit;
+    model.analyticsFilters = analyticsFilters;
+    // The heatmap mode loads its own answer instead of the percentiles.
+    ns.traceHeatmap?.onSearch?.(analyticsFilters);
     const message = (error) => (error instanceof Error ? error.message : String(error));
     // Counts first: without filters the server reads them from the trace
     // index (well under a second for 7 days), while the duration percentiles
@@ -3439,7 +3446,7 @@
       countsError = message(error);
     }
     try {
-      if (model.analytics?.has_durations) return;
+      if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) return;
       const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" });
       if (seq !== model.analyticsSeq) return;
       // Span counts replace the index counts: both charts then describe
@@ -3455,6 +3462,25 @@
         renderAnalytics();
       }
     }
+  }
+
+  // The percentiles of the current search, when the heatmap mode skipped
+  // them and the Percentiles mode is shown again.
+  async function loadDurations() {
+    const filters = model.analyticsFilters;
+    if (!filters || model.analytics?.has_durations || model.meta?.analytics_enabled !== true) { renderAnalytics(); return; }
+    const seq = model.analyticsSeq;
+    model.durationsError = "";
+    renderAnalytics();
+    try {
+      const full = await api.getTraceAnalytics(currentHost(), { ...filters, charts: "durations" });
+      if (seq !== model.analyticsSeq) return;
+      model.analytics = unpackAnalytics(full, model.analytics);
+    } catch (error) {
+      if (seq !== model.analyticsSeq) return;
+      model.durationsError = error instanceof Error ? error.message : String(error);
+    }
+    renderAnalytics();
   }
 
   // url: "push" (a new search: its own history entry), "replace" (the
@@ -3658,6 +3684,14 @@
       refreshServiceOperationOptions: () => { updateServiceOptions(); updateOperationOptions(); },
       syncServiceOperationPair,
       setResultsView: (view, options) => setResultsView(view, options),
+      formatDuration,
+    });
+    ns.traceHeatmap?.install?.({
+      model, dom, api, esc, currentHost, formatDuration, durationAxis, labelWidthPx, chartWidth, chartMessage,
+      timeAxisSvg, bucketRangeLabel, dayLabel, clockLabel, CHART_HEIGHT,
+      renderDurationChart: () => renderDurationChart(),
+      loadDurations: () => loadDurations(),
+      applyRange: (raw) => applyCustomRange(raw, "heatmap"),
     });
     ns.traceTabs?.install?.({
       model, dom, api, esc, route, currentHost, serviceColor, registerServiceColors, formatDuration, showError,

@@ -194,7 +194,7 @@
   function traceQuery(hostId, filters = {}) {
     const query = new URLSearchParams();
     if (hostId) query.set("host_id", String(hostId));
-    for (const key of ["start_ms", "end_ms", "service", "operation", "status", "service_not", "operation_not", "status_not", "tag", "tag_not", "tag_exists", "tag_missing", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets", "bucket_origin_ms", "charts", "scope", "key"]) {
+    for (const key of ["start_ms", "end_ms", "service", "operation", "status", "service_not", "operation_not", "status_not", "tag", "tag_not", "tag_exists", "tag_missing", "tag_scope", "tag_key", "tag_value", "min_duration_ms", "max_duration_ms", "limit", "align_buckets", "bucket_origin_ms", "charts", "scope", "key", "rows", "t0", "t1", "d0", "d1", "baseline", "sample"]) {
       const value = filters?.[key];
       if (Array.isArray(value)) {
         for (const item of value) if (item != null && String(item) !== "") query.append(key, String(item));
@@ -220,6 +220,16 @@
 
   async function getTraceAnalytics(hostId, filters = {}) {
     return getJson(`api/traces/analytics?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  // Duration heatmap (traces per time bucket x log duration row) and the
+  // attribute comparison of a box of it (app_trace_heatmap.js).
+  async function getTraceHeatmap(hostId, filters = {}) {
+    return getJson(`api/traces/heatmap?${traceQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTraceDeltas(hostId, filters = {}) {
+    return getJson(`api/traces/deltas?${traceQuery(hostId, filters).toString()}`);
   }
 
   // Attribute keys / one key's values of the spans matching the filters
@@ -405,7 +415,7 @@
   ns.api = { resolveUrl, getJson,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
-    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
+    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,
   };

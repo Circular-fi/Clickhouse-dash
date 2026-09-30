@@ -221,6 +221,8 @@ private:
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
   void handle_traces_analytics(const httplib::Request& req, httplib::Response& res);
   void handle_traces_service_map(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_heatmap(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_deltas(const httplib::Request& req, httplib::Response& res);
   void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
   void handle_traces_facets(const httplib::Request& req, httplib::Response& res);
   void handle_traces_facet_values(const httplib::Request& req, httplib::Response& res);

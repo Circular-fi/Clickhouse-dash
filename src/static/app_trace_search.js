@@ -17,7 +17,8 @@
   // Every URL parameter of the search page (the detail page keeps them as
   // its "back to search" context; span / view are the detail's own).
   const SEARCH_PARAMS = ["from", "to", "status", "service", "operation", "limit", "sort", "results",
-    "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab"];
+    "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
+    "min_duration_ms", "max_duration_ms", "duration_view"];
   const PIN_STORE_KEY = "chdash.traceFacetPins.v1";
   const COLLAPSED_STORE_KEY = "chdash.traceFacetsCollapsed.v1";
   const KEYS_PAGE = 20;
@@ -31,6 +32,9 @@
     chips: [],
     // Tag params of the last prefill, so a chip change refreshes the pickers.
     prefillTagKey: "",
+    // Trace duration range in ms ({ min, max }, 0 = open side) or null: set
+    // by the heatmap's "Search traces in this box", shown as a chip.
+    duration: null,
   };
 
   const facets = {
@@ -81,6 +85,10 @@
   // API / URL parameters of the chips.
   function chipParams({ tagsOnly = false } = {}) {
     const out = {};
+    if (!tagsOnly && search.duration) {
+      if (search.duration.min > 0) out.min_duration_ms = [String(search.duration.min)];
+      if (search.duration.max > 0) out.max_duration_ms = [String(search.duration.max)];
+    }
     for (const chip of search.chips) {
       if (tagsOnly && chip.kind !== "tag") continue;
       const [name, value] = chipParam(chip);
@@ -111,6 +119,29 @@
     return unique;
   }
 
+  function durationFromParams(params) {
+    const read = (name) => { const n = Number(params.get(name) || 0); return Number.isFinite(n) && n > 0 ? n : 0; };
+    const min = read("min_duration_ms"), max = read("max_duration_ms");
+    return min || max ? { min, max: max && max < min ? 0 : max } : null;
+  }
+
+  function durationText(ms) {
+    return ctx?.formatDuration ? ctx.formatDuration(ms * 1e6) : `${ms} ms`;
+  }
+
+  function durationLabel(duration) {
+    if (duration.min && duration.max) return `${durationText(duration.min)} – ${durationText(duration.max)}`;
+    return duration.min ? `≥ ${durationText(duration.min)}` : `≤ ${durationText(duration.max)}`;
+  }
+
+  // Sets (or clears, with null) the trace duration filter; the caller searches.
+  function setDuration(duration) {
+    const min = Math.max(0, Number(duration?.min || 0));
+    const max = Math.max(0, Number(duration?.max || 0));
+    search.duration = min || max ? { min, max } : null;
+    renderChips();
+  }
+
   function addChip(chip) {
     // A value is either included or excluded, never both.
     const opposite = chip.op === "=" ? "!=" : chip.op === "!=" ? "=" : chip.op === "exists" ? "missing" : "exists";
@@ -133,8 +164,12 @@
   function renderChips() {
     const root = byId("tracesFilterChips");
     if (!root) return;
-    root.hidden = !search.chips.length;
-    root.innerHTML = search.chips.map((chip, index) => {
+    const count = search.chips.length + (search.duration ? 1 : 0);
+    root.hidden = !count;
+    const durationChip = search.duration
+      ? `<span class="traceFilterChip traceFilterChip--duration" role="listitem" data-chip-kind="duration" title="${esc(`trace duration ${durationLabel(search.duration)}`)}"><span class="traceFilterChip__key">duration</span><span class="traceFilterChip__value">${esc(durationLabel(search.duration))}</span><button type="button" class="traceFilterChip__remove" data-chip-duration-remove aria-label="Remove filter trace duration ${esc(durationLabel(search.duration))}" title="Remove filter">×</button></span>`
+      : "";
+    root.innerHTML = durationChip + search.chips.map((chip, index) => {
       const negated = chip.op === "!=" || chip.op === "missing";
       const scope = chip.kind === "tag" && chip.scope !== "any" ? `<span class="traceFilterChip__scope">${esc(chip.scope)}</span>` : "";
       const key = chip.kind === "tag" ? chip.key : chip.kind;
@@ -145,7 +180,7 @@
         ? `<button type="button" class="traceFilterChip__op" data-chip-op="${index}" title="Switch to ${esc(OP_LABELS[next])}" aria-label="Switch ${esc(key)} to ${esc(OP_NAMES[next])}">${esc(OP_LABELS[chip.op])}</button>`
         : `<span class="traceFilterChip__op">${esc(OP_LABELS[chip.op])}</span>`;
       return `<span class="traceFilterChip${negated ? " is-negated" : ""}" role="listitem" data-chip-index="${index}" data-chip-kind="${esc(chip.kind)}" data-chip-op-value="${esc(chip.op)}" title="${esc(chipLabel(chip))}">${scope}<span class="traceFilterChip__key">${esc(key)}</span>${op}${valued ? `<span class="traceFilterChip__value">${esc(chip.value === "" ? '""' : chip.value)}</span>` : ""}<button type="button" class="traceFilterChip__remove" data-chip-remove="${index}" aria-label="Remove filter ${esc(chipLabel(chip))}" title="Remove filter">×</button></span>`;
-    }).join("") + (search.chips.length > 1 ? '<button type="button" class="traceFilterChips__clear" data-chips-clear>Clear filters</button>' : "");
+    }).join("") + (count > 1 ? '<button type="button" class="traceFilterChips__clear" data-chips-clear>Clear filters</button>' : "");
   }
 
   function onChipsClick(event) {
@@ -155,6 +190,10 @@
     const toggle = target.closest("[data-chip-op]");
     if (target.closest("[data-chips-clear]")) {
       search.chips = [];
+      search.duration = null;
+      renderChips();
+    } else if (target.closest("[data-chip-duration-remove]")) {
+      search.duration = null;
       renderChips();
     } else if (remove) {
       const chip = search.chips[Number(remove.getAttribute("data-chip-remove"))];
@@ -253,6 +292,7 @@
     if (model.resultsView === "table") params.set("results", "table");
     // The selected tab (app_trace_tabs.js), e.g. tab=map.
     ns.traceTabs?.writeParams?.(params);
+    ns.traceHeatmap?.writeParams?.(params);
     return params;
   }
 
@@ -266,6 +306,7 @@
     params.delete("sort");
     params.delete("results");
     params.delete("tab");
+    params.delete("duration_view");
     return params.toString();
   }
 
@@ -320,7 +361,9 @@
     if (results === "table" || results === "list") ctx.setResultsView(results, { persist: false });
     else if (!initial || hasSearchParams(params)) ctx.setResultsView("list", { persist: false });
     search.chips = chipsFromParams(params);
+    search.duration = durationFromParams(params);
     renderChips();
+    ns.traceHeatmap?.applyParams?.(params, { initial });
   }
 
   function applyLocation({ initial = false } = {}) {
@@ -392,6 +435,7 @@
     const { dom } = ctx;
     if (action === "only") {
       search.chips = [];
+      search.duration = null;
       setSelect(dom.tracesStatus, "");
       wantSelect(dom.tracesService, "");
       wantSelect(dom.tracesOperation, "");
@@ -815,5 +859,10 @@
     prefillTagsChanged,
     notePrefillTags,
     closeMenu,
+    // Click-to-filter from other modules (the heatmap comparison panel):
+    // field is { kind: "tag", scope, key } or { kind: "service" | "operation" | "status" }.
+    filter: (field, value) => applyFilter(field, value, "include"),
+    exclude: (field, value) => applyFilter(field, value, "exclude"),
+    setDuration,
   };
 })();

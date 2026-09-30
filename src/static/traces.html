@@ -230,10 +230,11 @@
             <div id="traceServiceChart" class="traceChart"><div class="tracesEmpty">Search to load matching trace activity.</div></div>
           </article>
           <article class="traceAnalyticsCard">
-            <header><strong>Trace duration</strong><span id="traceDurationChartMeta">points + P50 / P90 / P95 / P99</span></header>
+            <header><strong>Trace duration</strong><span id="traceDurationChartMeta">points + P50 / P90 / P95 / P99</span><span class="traceDurationViews" role="group" aria-label="Duration chart"><button type="button" class="traceDurationViews__button is-active" data-duration-view="percentiles" aria-pressed="true" title="Duration percentiles and listed traces">Percentiles</button><button type="button" class="traceDurationViews__button" data-duration-view="heatmap" aria-pressed="false" title="Trace counts by start time and duration; drag a box to compare its traces">Heatmap</button></span></header>
             <div id="traceDurationChart" class="traceChart"><div class="tracesEmpty">Search to load duration distribution.</div></div>
           </article>
         </section>
+        <section id="traceDeltaPanel" class="traceDeltaPanel" aria-label="Heatmap selection compared with its baseline" hidden></section>
 
         <section class="traceResultsSection" aria-label="Trace search results">
           <div class="traceSearchResults__toolbar">
