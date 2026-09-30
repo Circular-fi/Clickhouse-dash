@@ -103,37 +103,41 @@
           <div class="traceSearchBar__range">
             <div class="traceRangeCompact traceRangeCompact--preset">
               <div class="themeSelect tracePicker tracePicker--range">
-                <select id="tracesRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native">
-                  <option value="5" data-minutes="5">Last 5 minutes</option>
-                  <option value="15" data-minutes="15">Last 15 minutes</option>
-                  <option value="30" data-minutes="30">Last 30 minutes</option>
-                  <option value="60" data-minutes="60" selected>Last 1 hour</option>
-                  <option value="180" data-minutes="180">Last 3 hours</option>
-                  <option value="720" data-minutes="720">Last 12 hours</option>
-                  <option value="1440" data-minutes="1440">Last 24 hours</option>
-                  <option value="2880" data-minutes="2880">Last 48 hours</option>
-                  <option value="10080" data-minutes="10080">Last 7 days</option>
-                  <option value="43200" data-minutes="43200">Last 30 days</option>
-                  <option value="129600" data-minutes="129600">Last 3 months</option>
-                  <option value="259200" data-minutes="259200">Last 6 months</option>
-                  <option value="525600" data-minutes="525600">Last 12 months</option>
-                  <option value="custom">Custom range…</option>
-                </select>
-                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Time range · Last 1 hour</button>
-                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
-              </div>
-            </div>
-            <div id="tracesCustomRange" class="traceCustomRange" hidden>
-              <label class="traceCustomRange__field">
-                <span>From</span>
-                <input id="tracesRangeStart" type="datetime-local" step="1" aria-label="Range start" />
-              </label>
-              <label class="traceCustomRange__field">
-                <span>To</span>
-                <input id="tracesRangeEnd" type="datetime-local" step="1" aria-label="Range end" />
-              </label>
-              <div class="traceCustomRange__actions">
-                <button id="tracesCustomRangeApply" class="button button--primary traceCustomRange__apply" type="button">Apply time range</button>
+                <select id="tracesRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 1 hour</option></select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="tracesTimeRangePanel">Time range · Last 1 hour</button>
+                <div id="tracesTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
+                  <div class="timeRangePanel__body">
+                    <section id="tracesCustomRange" class="timeRangePanel__absolute" aria-labelledby="tracesAbsoluteRangeTitle">
+                      <h3 id="tracesAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
+                      <label class="timeRangeField is-active">
+                        <span class="timeRangeField__label">From</span>
+                        <input id="tracesRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="tracesRangeStartError" />
+                        <span id="tracesRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
+                      </label>
+                      <label class="timeRangeField">
+                        <span class="timeRangeField__label">To</span>
+                        <input id="tracesRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="tracesRangeEndError" />
+                        <span id="tracesRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
+                      </label>
+                      <div id="tracesTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
+                      <div id="tracesTimeCalendar" class="timeCalendar"></div>
+                      <div id="tracesRangeError" class="timeRangePanel__error" role="alert" hidden></div>
+                      <button id="tracesCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
+                    </section>
+                    <section class="timeRangePanel__quick" aria-label="Quick ranges">
+                      <input id="tracesQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
+                      <div id="tracesQuickRanges" class="timeRangeList"></div>
+                    </section>
+                  </div>
+                  <footer class="timeRangePanel__footer">
+                    <span id="tracesTimeZone" class="timeRangePanel__zone">Browser time</span>
+                    <div class="timeRangePanel__nav">
+                      <button id="tracesRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
+                      <button id="tracesRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
+                      <button id="tracesRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
+                    </div>
+                  </footer>
+                </div>
               </div>
             </div>
           </div>

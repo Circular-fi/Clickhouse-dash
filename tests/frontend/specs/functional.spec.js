@@ -1729,3 +1729,326 @@ test('traces: each listed trace shows its services in the order of their first s
   }
   for (const traceId of sample) expect(rendered[traceId], traceId).toEqual(truth[traceId]);
 });
+
+// --- Traces time range panel -------------------------------------------------
+// Playwright runs the browser in UTC, so browser-local dates equal UTC dates.
+const DAY_MS = 86_400_000;
+const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+const utcMidnight = (ms) => Date.UTC(new Date(ms).getUTCFullYear(), new Date(ms).getUTCMonth(), new Date(ms).getUTCDate());
+const searchParams = (request) => Object.fromEntries(new URL(request.url()).searchParams);
+const isSearch = (request) => new URL(request.url()).pathname.endsWith('/api/traces/search');
+
+async function openTracesIdle(page) {
+  const firstSearch = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.goto('/traces');
+  await firstSearch;
+  await page.waitForLoadState('networkidle');
+}
+
+async function openTimeRange(page) {
+  await page.locator('.tracePicker--range .tracePicker__button').click();
+  const panel = page.locator('#tracesTimeRangePanel');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#tracesRangeStart')).toBeFocused();
+  return panel;
+}
+
+// Moves the calendar back month by month until the day is in the shown month.
+async function showCalendarDay(page, key) {
+  const day = page.locator(`#tracesTimeCalendar .timeCalendar__day:not(.is-outside)[data-day="${key}"]`);
+  for (let i = 0; i < 36 && !(await day.count()); i += 1) await page.locator('#tracesTimeCalendar [data-cal-nav="-1"]').click();
+  await expect(day).toHaveCount(1);
+  return day;
+}
+
+test('traces: the calendar takes a start older than the max range, moves on to the end by itself, and Apply searches that window', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
+  const dataEnd = Number(endText);
+  const now = Date.now();
+  // The fixture window when it is older than the 7-day max range (it is
+  // seeded days back), otherwise a window ten days back.
+  const fixtureIsOld = dataEnd > 0 && now - utcMidnight(dataEnd) > 9 * DAY_MS;
+  const startDay = fixtureIsOld ? utcMidnight(dataEnd) - 2 * DAY_MS : utcMidnight(now) - 10 * DAY_MS;
+  const endDay = fixtureIsOld ? utcMidnight(dataEnd) : startDay + 2 * DAY_MS;
+  expect(now - startDay).toBeGreaterThan(7 * DAY_MS);
+
+  await openTracesIdle(page);
+  await openTimeRange(page);
+  await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the start date');
+  const start = await showCalendarDay(page, utcDay(startDay));
+  await start.click();
+  // The start is taken as is (no "End − 7 days" floor) and the end selection opens.
+  await expect(page.locator('#tracesRangeStart')).toHaveValue(`${utcDay(startDay)} 00:00:00`);
+  await expect(page.locator('#tracesRangeEnd')).toBeFocused();
+  await expect(page.locator('#tracesRangeEnd').locator('xpath=ancestor::label[1]')).toHaveClass(/is-active/);
+  await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the end date · max 7 days');
+  await expect(start).toHaveClass(/is-start/);
+  // Days whose start is 7 days or more after the start cannot end the range.
+  const lastEnd = page.locator(`#tracesTimeCalendar [data-day="${utcDay(startDay + 6 * DAY_MS)}"]`).first();
+  const tooFar = page.locator(`#tracesTimeCalendar [data-day="${utcDay(startDay + 7 * DAY_MS)}"]`).first();
+  if (await tooFar.count()) await expect(tooFar).toHaveAttribute('aria-disabled', 'true');
+  if (await lastEnd.count()) await expect(lastEnd).toHaveAttribute('aria-disabled', 'false');
+  // Hovering previews the range.
+  const end = page.locator(`#tracesTimeCalendar [data-day="${utcDay(endDay)}"]`).first();
+  await end.hover();
+  await expect(end).toHaveClass(/is-end/);
+  await expect(page.locator('#tracesTimeCalendar .timeCalendar__day.is-preview')).toHaveCount(2);
+  await end.click();
+  await expect(page.locator('#tracesRangeEnd')).toHaveValue(`${utcDay(endDay)} 23:59:59`);
+  await expect(page.locator('#tracesCustomRangeApply')).toBeFocused();
+  await expect(page.locator('#tracesTimeCalendar .timeCalendar__day.is-inRange')).toHaveCount(1);
+
+  const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  const params = searchParams(await searched);
+  expect(Number(params.start_ms)).toBe(startDay);
+  expect(Number(params.end_ms)).toBe(endDay + DAY_MS - 1000);
+  expect(params.align_buckets).toBe('0');
+  await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} → ${utcDay(endDay)}`);
+  const payload = await (await answered).json();
+  if (fixtureIsOld) {
+    expect(payload.rows.length).toBeGreaterThan(0);
+    await expect(page.locator('#tracesResults .traceResult[data-trace-id]')).toHaveCount(payload.rows.length, { timeout: 30_000 });
+    for (const row of payload.rows) {
+      expect(Number(row[1])).toBeGreaterThanOrEqual(startDay - DAY_MS);
+      expect(Number(row[1])).toBeLessThanOrEqual(endDay + DAY_MS);
+    }
+  }
+});
+
+test('traces: From / To take relative expressions, and invalid or too wide ranges get inline errors without searching', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openTracesIdle(page);
+  let searches = 0;
+  page.on('request', (req) => { if (isSearch(req)) searches += 1; });
+  const panel = await openTimeRange(page);
+  const from = page.locator('#tracesRangeStart');
+  const to = page.locator('#tracesRangeEnd');
+  const apply = page.locator('#tracesCustomRangeApply');
+
+  await from.fill('last tuesday');
+  await to.fill('now');
+  await apply.click();
+  await expect(page.locator('#tracesRangeStartError')).toBeVisible();
+  await expect(page.locator('#tracesRangeStartError')).toContainText('or a relative time like now-6h');
+  await expect(from).toHaveAttribute('aria-invalid', 'true');
+  await from.fill('now');
+  await expect(page.locator('#tracesRangeStartError')).toBeHidden();
+
+  await from.fill('2026-09-10 12:00:00');
+  await to.fill('2026-09-10 08:00');
+  await apply.click();
+  await expect(page.locator('#tracesRangeError')).toHaveText('"From" must be before "To".');
+
+  // Width above traces.max_lookback_minutes (7 days in this config).
+  await from.fill('2026-01-01 00:00:00');
+  await to.fill('2026-01-09');
+  await to.press('Enter');
+  await expect(page.locator('#tracesRangeError')).toHaveText('Max range is 7 days (server setting traces.max_lookback_minutes).');
+  await page.waitForTimeout(500);
+  expect(searches).toBe(0);
+  await expect(panel).toBeVisible();
+
+  // Grafana expressions, applied with Enter in the field.
+  await from.fill('now-6h');
+  await to.fill('now');
+  const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await to.press('Enter');
+  const params = searchParams(await searched);
+  const clock = Date.now();
+  expect(Number(params.end_ms) - Number(params.start_ms)).toBe(6 * 3_600_000);
+  expect(Math.abs(Number(params.end_ms) - clock)).toBeLessThan(15_000);
+  expect(params.align_buckets).toBe('1');
+  await expect(panel).toBeHidden();
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 6 hours');
+
+  // Rounding: "now/d" From / To covers today.
+  await openTimeRange(page);
+  await expect(from).toHaveValue('now-6h');
+  await from.fill('now/d');
+  await to.fill('now/d');
+  const today = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await apply.click();
+  const todayParams = searchParams(await today);
+  expect(Number(todayParams.start_ms)).toBe(utcMidnight(Date.now()));
+  expect(Number(todayParams.end_ms)).toBe(utcMidnight(Date.now()) + DAY_MS - 1);
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Today');
+});
+
+test('traces: quick ranges are searchable and only offer ranges within the max range', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openTracesIdle(page);
+  await openTimeRange(page);
+  const items = page.locator('#tracesQuickRanges [data-group="quick"] .timeRangeList__item');
+  await expect(items.filter({ hasText: /^Last 7 days$/ })).toHaveCount(1);
+  await expect(items.filter({ hasText: /^Last 30 days$/ })).toHaveCount(0);
+  await expect(items.filter({ hasText: /^This month$/ })).toHaveCount(0);
+  await expect(items.filter({ hasText: /^Last 1 hour$/ })).toHaveAttribute('aria-current', 'true');
+
+  const search = page.locator('#tracesQuickRangeSearch');
+  await search.fill('hour');
+  await expect(items).toHaveText(['Last 1 hour', 'Last 3 hours', 'Last 6 hours', 'Last 12 hours', 'Last 24 hours']);
+  await search.fill('week');
+  await expect(items).toHaveText(['This day last week', 'This week so far', 'This week', 'Previous week']);
+  await search.fill('nothing like this');
+  await expect(items).toHaveCount(0);
+  await expect(page.locator('#tracesQuickRanges .timeRangeList__empty')).toBeVisible();
+  // A typed duration becomes a range of its own.
+  await search.fill('45m');
+  await expect(items.first()).toHaveText('Last 45 minutes');
+  const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await search.press('Enter');
+  const params = searchParams(await searched);
+  expect(Number(params.end_ms) - Number(params.start_ms)).toBe(45 * 60_000);
+  await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 45 minutes');
+
+  await openTimeRange(page);
+  const yesterday = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await items.filter({ hasText: /^Yesterday$/ }).click();
+  const y = searchParams(await yesterday);
+  expect(Number(y.start_ms)).toBe(utcMidnight(Date.now()) - DAY_MS);
+  expect(Number(y.end_ms)).toBe(utcMidnight(Date.now()) - 1);
+});
+
+test('traces: recently used ranges persist across reloads and apply in one click', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openTracesIdle(page);
+  await openTimeRange(page);
+  await expect(page.locator('#tracesQuickRanges [data-group="recent"]')).toHaveCount(0);
+  await page.locator('#tracesRangeStart').fill('2026-09-14 06:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-14 18:30');
+  let answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  await answered;
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  await openTimeRange(page);
+  await page.locator('#tracesRangeStart').fill('now-2d');
+  await page.locator('#tracesRangeEnd').fill('now-1d');
+  answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  await answered;
+  await page.waitForLoadState('networkidle');
+
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await openTimeRange(page);
+  const recent = page.locator('#tracesQuickRanges [data-group="recent"] .timeRangeList__item');
+  await expect(recent).toHaveText(['now-2d → now-1d', '2026-09-14 06:00 → 18:30']);
+  const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await recent.nth(1).click();
+  const params = searchParams(await searched);
+  expect(Number(params.start_ms)).toBe(Date.UTC(2026, 8, 14, 6, 0, 0));
+  expect(Number(params.end_ms)).toBe(Date.UTC(2026, 8, 14, 18, 30, 0));
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  // Most recent first.
+  await openTimeRange(page);
+  await expect(recent).toHaveText(['2026-09-14 06:00 → 18:30', 'now-2d → now-1d']);
+});
+
+test('traces: the time range panel works from the keyboard (Escape, calendar arrows, Enter)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openTracesIdle(page);
+  const button = page.locator('.tracePicker--range .tracePicker__button');
+  await button.focus();
+  await page.keyboard.press('Enter');
+  const panel = page.locator('#tracesTimeRangePanel');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#tracesRangeStart')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(button).toBeFocused();
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+
+  // Tabbing out of the panel closes it.
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  await page.locator('#tracesRangeShiftForward').focus();
+  await page.keyboard.press('Tab');
+  await expect(panel).toBeHidden();
+
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  // Tab order: From, To, the four calendar arrows, then the day grid.
+  for (let i = 0; i < 6; i += 1) await page.keyboard.press('Tab');
+  const focusedDay = () => page.evaluate(() => document.activeElement?.dataset?.day || '');
+  // The calendar opens on the day of the applied From (now-1h).
+  const base = utcMidnight(Date.now() - 3_600_000);
+  expect(await focusedDay()).toBe(utcDay(base));
+  await page.keyboard.press('ArrowRight');
+  expect(await focusedDay()).toBe(utcDay(base + DAY_MS));
+  await page.keyboard.press('ArrowUp');
+  expect(await focusedDay()).toBe(utcDay(base - 6 * DAY_MS));
+  await page.keyboard.press('ArrowLeft');
+  const startKey = utcDay(base - 7 * DAY_MS);
+  expect(await focusedDay()).toBe(startKey);
+  // PageUp / PageDown move a month and keep the focus on a day of the grid.
+  await page.keyboard.press('PageUp');
+  const monthBack = await focusedDay();
+  expect(monthBack.slice(0, 7) < startKey.slice(0, 7)).toBe(true);
+  await page.keyboard.press('PageDown');
+  expect(await focusedDay()).toBe(startKey);
+  // Enter picks the start; the grid keeps the focus and now picks the end.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#tracesRangeStart')).toHaveValue(`${startKey} 00:00:00`);
+  await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the end date · max 7 days');
+  expect(await focusedDay()).toBe(startKey);
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#tracesTimeCalendar .timeCalendar__day.is-preview')).toHaveCount(2);
+  await page.keyboard.press('Enter');
+  const endKey = utcDay(base - 5 * DAY_MS);
+  await expect(page.locator('#tracesRangeEnd')).toHaveValue(`${endKey} 23:59:59`);
+  await expect(page.locator('#tracesCustomRangeApply')).toBeFocused();
+  const searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.keyboard.press('Enter');
+  const params = searchParams(await searched);
+  expect(Number(params.start_ms)).toBe(base - 7 * DAY_MS);
+  expect(Number(params.end_ms)).toBe(base - 4 * DAY_MS - 1000);
+  await expect(panel).toBeHidden();
+  await expect(button).toHaveText(`${startKey} → ${endKey}`);
+});
+
+test('traces: shift and zoom out move the applied window like Grafana, within the max range', async ({ page }) => {
+  test.setTimeout(90_000);
+  await openTracesIdle(page);
+  await openTimeRange(page);
+  await page.locator('#tracesRangeStart').fill('2026-09-14 06:00:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-14 10:00:00');
+  let searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  await searched;
+  await openTimeRange(page);
+  await expect(page.locator('#tracesTimeZone')).toHaveText('Browser time · UTC (UTC+00:00)');
+  searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.locator('#tracesRangeShiftBack').click();
+  let params = searchParams(await searched);
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 4), Date.UTC(2026, 8, 14, 8)]);
+  // The panel stays open and follows the applied range.
+  await expect(page.locator('#tracesRangeStart')).toHaveValue('2026-09-14 04:00:00');
+  await page.waitForLoadState('networkidle');
+  searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.locator('#tracesRangeZoomOut').click();
+  params = searchParams(await searched);
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 2), Date.UTC(2026, 8, 14, 10)]);
+  await page.waitForLoadState('networkidle');
+  searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.locator('#tracesRangeShiftForward').click();
+  params = searchParams(await searched);
+  expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 6), Date.UTC(2026, 8, 14, 14)]);
+  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 14:00');
+  await page.waitForLoadState('networkidle');
+  // Zooming out stops at the max range.
+  await page.locator('#tracesRangeStart').fill('2026-09-10 00:00:00');
+  await page.locator('#tracesRangeEnd').fill('2026-09-17 00:00:00');
+  searched = page.waitForRequest(isSearch, { timeout: 60_000 });
+  await page.locator('#tracesCustomRangeApply').click();
+  await searched;
+  await page.waitForLoadState('networkidle');
+  await openTimeRange(page);
+  await expect(page.locator('#tracesRangeZoomOut')).toBeDisabled();
+});

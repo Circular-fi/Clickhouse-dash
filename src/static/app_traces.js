@@ -28,7 +28,8 @@
     analyticsSeq: 0,
     prefillSeq: 0,
     detailSeq: 0,
-    customRangeOpen: false,
+    timeRange: { from: "now-1h", to: "now" },
+    timeRangeTouched: false,
   };
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
@@ -367,79 +368,83 @@
   }
 
   function initTracePickers() {
-    document.querySelectorAll(".traceSearchBar select, .traceResultsSort select").forEach(enhanceTraceSelect);
+    initTimeRangePicker();
+    document.querySelectorAll(".traceSearchBar select, .traceResultsSort select").forEach((select) => {
+      if (select !== dom.tracesRangeUnit || !timePicker) enhanceTraceSelect(select);
+    });
     document.addEventListener("click", (event) => {
-      if (![...tracePickers].some((root) => root.contains(event.target))) closeTracePickers();
+      // The dispatch path, not only contains(): a click can re-render the
+      // element it landed on (calendar days, quick range lists).
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      if (![...tracePickers].some((root) => root.contains(event.target) || path.includes(root))) closeTracePickers();
     });
   }
 
   function maxRangeMinutes() { return Math.max(1, Number(model.meta?.max_lookback_minutes || 10080)); }
 
-  function toLocalDateTime(ms) {
-    const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60000);
-    return d.toISOString().slice(0, 19);
+  let timePicker = null;
+
+  // The Grafana-style time range panel replaces the dropdown list of the
+  // shipped range picker (same root, button and menu, same open/close motion).
+  function initTimeRangePicker() {
+    const select = dom.tracesRangeUnit;
+    const root = select?.parentElement;
+    const button = root?.querySelector(":scope > .tracePicker__button");
+    const menu = root?.querySelector(":scope > .tracePicker__menu");
+    if (!ns.timeRange || !root || !button || !menu || !dom.tracesRangeStart || !dom.tracesRangeEnd) return;
+    select.dataset.tracePickerReady = "1";
+    tracePickers.add(root);
+    timePicker = ns.timeRange.mountPicker({
+      button, menu, select,
+      fromInput: dom.tracesRangeStart,
+      toInput: dom.tracesRangeEnd,
+      fromError: dom.tracesRangeStartError,
+      toError: dom.tracesRangeEndError,
+      rangeError: dom.tracesRangeError,
+      calendar: dom.tracesTimeCalendar,
+      hint: dom.tracesTimeCalendarHint,
+      applyButton: dom.tracesCustomRangeApply,
+      quickSearch: dom.tracesQuickRangeSearch,
+      lists: dom.tracesQuickRanges,
+      timeZone: dom.tracesTimeZone,
+      shiftBack: dom.tracesRangeShiftBack,
+      shiftForward: dom.tracesRangeShiftForward,
+      zoomOut: dom.tracesRangeZoomOut,
+    }, {
+      getValue: () => model.timeRange,
+      getMaxMinutes: maxRangeMinutes,
+      onApply: (raw, source) => { void applyCustomRange(raw, source); },
+      open: () => openTracePicker(root),
+      close: () => closeTracePicker(root),
+    });
   }
 
-  function syncCustomRangeBounds() {
-    const startInput = dom.tracesRangeStart;
-    const endInput = dom.tracesRangeEnd;
-    if (!startInput || !endInput) return;
-    const now = Date.now();
-    const maxMs = maxRangeMinutes() * 60000;
-    const startMs = Date.parse(String(startInput.value || ""));
-    const endMs = Date.parse(String(endInput.value || ""));
-    const stepMs = Math.max(1000, Number(startInput.step || endInput.step || 1) * 1000);
-
-    startInput.max = toLocalDateTime(Number.isFinite(endMs) ? Math.min(now, endMs - stepMs) : now);
-    endInput.min = Number.isFinite(startMs) ? toLocalDateTime(startMs + stepMs) : "";
-    endInput.max = toLocalDateTime(Number.isFinite(startMs) ? Math.min(now, startMs + maxMs) : now);
-    startInput.min = Number.isFinite(endMs) ? toLocalDateTime(Math.max(0, endMs - maxMs)) : "";
-  }
-
+  // Meta decides the default window (until the user picks one) and the widest
+  // one: an applied range wider than the server accepts falls back to the
+  // widest quick range that fits.
   function syncRangeControls() {
-    const value = String(dom.tracesRangeUnit?.value || "60");
-    const custom = value === "custom";
-    if (dom.tracesCustomRange) dom.tracesCustomRange.hidden = !(custom && model.customRangeOpen);
+    const tr = ns.timeRange;
+    if (!tr) return;
     const max = maxRangeMinutes();
-    if (dom.tracesRangeUnit) {
-      let selectedVisible = false;
-      for (const option of dom.tracesRangeUnit.options) {
-        if (option.value === "custom") { option.hidden = false; option.disabled = false; continue; }
-        const minutes = Number(option.dataset.minutes || option.value || 0);
-        option.hidden = minutes > max;
-        option.disabled = option.hidden;
-        if (option.value === dom.tracesRangeUnit.value && !option.hidden) selectedVisible = true;
-      }
-      if (!custom && !selectedVisible) {
-        const allowed = Array.from(dom.tracesRangeUnit.options).filter((option) => option.value !== "custom" && !option.hidden);
-        const fallback = allowed[allowed.length - 1];
-        if (fallback) dom.tracesRangeUnit.value = fallback.value;
-      }
-      dom.tracesRangeUnit.dispatchEvent(new Event("tracepicker-refresh"));
-    }
+    const fallbackMinutes = Math.min(max, Math.max(1, Number(model.meta?.default_lookback_minutes || 60)));
+    if (!model.timeRangeTouched && model.meta) model.timeRange = { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };
     const now = Date.now();
-    if (custom && dom.tracesRangeStart && dom.tracesRangeEnd && (!dom.tracesRangeStart.value || !dom.tracesRangeEnd.value)) {
-      dom.tracesRangeStart.value = toLocalDateTime(now - Math.min(max, 60) * 60000);
-      dom.tracesRangeEnd.value = toLocalDateTime(now);
+    const { startMs, endMs } = tr.resolveRange(model.timeRange, now);
+    if (!(endMs > startMs) || endMs - startMs > max * 60000) {
+      const fitting = tr.QUICK_RANGES.filter((option) => option.to === "now" && /^now-\d+[smhdwMy]$/.test(option.from))
+        .filter((option) => { const r = tr.resolveRange(option, now); return r.endMs - r.startMs <= max * 60000; });
+      model.timeRange = fitting.length ? { from: fitting[fitting.length - 1].from, to: "now" } : { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };
     }
-    syncCustomRangeBounds();
+    refreshCustomRangeLabel();
   }
 
+  // Relative ranges ("now-1h") are resolved again for every request.
   function selectedRange() {
-    const value = String(dom.tracesRangeUnit?.value || "60");
-    const maxMs = maxRangeMinutes() * 60000;
-    let startMs = 0, endMs = 0;
-    if (value === "custom") {
-      startMs = Date.parse(String(dom.tracesRangeStart?.value || ""));
-      endMs = Date.parse(String(dom.tracesRangeEnd?.value || ""));
-    } else {
-      const minutes = Math.max(1, Number(value || 60));
-      endMs = Date.now();
-      startMs = endMs - minutes * 60000;
-    }
+    const tr = ns.timeRange;
+    const { startMs, endMs } = tr.resolveRange(model.timeRange, Date.now());
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) throw new Error("Select a valid time range.");
-    if (endMs - startMs > maxMs + 1000) throw new Error(`Time range exceeds the configured maximum of ${maxRangeMinutes()} minutes.`);
-    return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: value === "custom" ? "0" : "1" };
+    if (endMs - startMs > maxRangeMinutes() * 60000) throw new Error(`Max range is ${tr.formatMinutes(maxRangeMinutes())} (server setting traces.max_lookback_minutes).`);
+    return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: tr.isRelative(model.timeRange) ? "1" : "0" };
   }
 
   function replaceSelectOptions(select, values, allLabel) {
@@ -1590,38 +1595,32 @@
   }
 
   function formatCustomRangeLabel() {
-    const start = Date.parse(String(dom.tracesRangeStart?.value || ""));
-    const end = Date.parse(String(dom.tracesRangeEnd?.value || ""));
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "Custom range…";
-    const fmt = (ms) => new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    return `${fmt(start)} → ${fmt(end)}`;
+    return ns.timeRange ? ns.timeRange.describeRange(model.timeRange).text : "Last 1 hour";
   }
 
+  // The hidden native select mirrors the applied range for assistive tech;
+  // the picker writes the button label.
   function refreshCustomRangeLabel() {
-    if (String(dom.tracesRangeUnit?.value || "") !== "custom") return;
-    const option = Array.from(dom.tracesRangeUnit?.options || []).find((item) => item.value === "custom");
+    const option = dom.tracesRangeUnit?.options?.[0];
     if (option) option.textContent = formatCustomRangeLabel();
-    dom.tracesRangeUnit?.dispatchEvent(new Event("tracepicker-refresh"));
-  }
-
-  function openCustomRangeEditor() {
-    if (String(dom.tracesRangeUnit?.value || "") !== "custom") return;
-    model.customRangeOpen = true;
-    syncRangeControls();
-    requestAnimationFrame(() => dom.tracesRangeStart?.focus?.({ preventScroll: true }));
+    timePicker?.refresh();
   }
 
   function closeCustomRangeEditor() {
-    model.customRangeOpen = false;
-    syncRangeControls();
+    timePicker?.close();
   }
 
-  async function applyCustomRange() {
+  // Applying a range (form, calendar, quick or recent range, shift / zoom)
+  // reloads the service / operation choices, then searches that window.
+  // Shift and zoom keep the panel open so they can be repeated.
+  async function applyCustomRange(raw, source = "form") {
+    model.timeRange = { from: String(raw?.from || ""), to: String(raw?.to || "") };
+    model.timeRangeTouched = true;
+    refreshCustomRangeLabel();
+    if (source !== "shift" && source !== "zoom") closeCustomRangeEditor();
     try {
-      selectedRange();
-      refreshCustomRangeLabel();
-      closeCustomRangeEditor();
       await prefillForSelectedRange();
+      await search();
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
     }
@@ -1777,20 +1776,6 @@
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
     dom.tracesSort?.addEventListener("change", renderResults);
-    dom.tracesRangeUnit?.addEventListener("change", () => {
-      const custom = String(dom.tracesRangeUnit?.value || "") === "custom";
-      model.customRangeOpen = custom;
-      syncRangeControls();
-      refreshCustomRangeLabel();
-      if (custom) openCustomRangeEditor();
-      else void prefillForSelectedRange();
-    });
-    const refreshCustomInputs = () => { syncCustomRangeBounds(); refreshCustomRangeLabel(); };
-    dom.tracesRangeStart?.addEventListener("input", refreshCustomInputs);
-    dom.tracesRangeStart?.addEventListener("change", refreshCustomInputs);
-    dom.tracesRangeEnd?.addEventListener("input", refreshCustomInputs);
-    dom.tracesRangeEnd?.addEventListener("change", refreshCustomInputs);
-    dom.tracesCustomRangeApply?.addEventListener("click", () => { void applyCustomRange(); });
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));

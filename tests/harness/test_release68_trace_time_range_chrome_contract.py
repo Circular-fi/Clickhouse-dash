@@ -5,13 +5,18 @@ ROOT = Path(__file__).resolve().parents[2]
 def read(rel):
     return (ROOT / rel).read_text()
 
-def test_custom_range_cross_bounds_prevent_inverted_dates():
+def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
     js = read("src/static/app_traces.js")
-    assert "function syncCustomRangeBounds()" in js
-    assert "startInput.max = toLocalDateTime" in js
-    assert "endInput.min = Number.isFinite(startMs)" in js
-    assert "endInput.max = toLocalDateTime" in js
-    assert "startInput.min = Number.isFinite(endMs)" in js
+    picker = read("src/static/app_timerange.js")
+    # Validated on Apply with inline errors instead of input min / max, so
+    # the start of an older window is never bounded by the current end.
+    assert ".min = " not in picker and ".max = " not in picker
+    assert "function syncCustomRangeBounds()" not in js
+    assert "if (startMs >= endMs) errors.range = '\"From\" must be before \"To\".';" in picker
+    assert "else if (endMs - startMs > maxMs()) errors.range = `Max range is ${formatMinutes(options.getMaxMinutes())} (server setting traces.max_lookback_minutes).`;" in picker
+    assert "setError(rangeError, null, result.errors.range);" in picker
+    # The calendar disables end days past start + max range, never start days.
+    assert "const disabled = picking && t - startMs >= limit;" in picker
 
 def test_trace_source_badge_and_section_rules_are_removed():
     html = read("src/static/traces.html")

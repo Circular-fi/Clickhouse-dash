@@ -10,8 +10,11 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
     css = read("src/static/style.css")
     assert 'traceIdLookupInput' not in html
     assert 'traceSpanSearch' not in html
-    assert '.traceCustomRange {' in css
-    assert 'position: absolute;' in css
+    # The time range panel is the range picker's dropdown (absolutely
+    # positioned menu), so editing a range never reflows the search bar.
+    assert 'class="themeSelect__menu tracePicker__menu timeRangePanel"' in html
+    assert '.traceSearchBar .tracePicker--range .tracePicker__menu.timeRangePanel {' in css
+    assert '.themeSelect__menu {\n  position: absolute;' in css
 
 def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
     js = read("src/static/app_traces.js")

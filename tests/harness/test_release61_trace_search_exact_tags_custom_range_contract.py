@@ -33,13 +33,20 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     assert 'SpanAttributes[' in cpp and 'ResourceAttributes[' in cpp
     assert '] = ' in cpp
 
-def test_custom_range_keeps_datetime_inputs_visible_and_updates_picker_label():
+def test_custom_range_inputs_take_dates_or_expressions_and_update_picker_label():
     ui = read("src/static/app_traces.js")
+    picker = read("src/static/app_timerange.js")
     html = read("src/static/traces.html")
-    assert 'type="datetime-local"' in html
+    # Free text From / To (absolute dates or Grafana expressions such as
+    # now-6h), no native datetime control with min / max fighting the user.
+    assert 'type="datetime-local"' not in html
+    assert '<input id="tracesRangeStart" class="timeRangeField__input" type="text"' in html
+    assert '<input id="tracesRangeEnd" class="timeRangeField__input" type="text"' in html
+    assert 'function parseTime(text, roundUp, nowMs = Date.now())' in picker
+    assert 'function applyDateMath(source, math, roundUp)' in picker
     assert 'function formatCustomRangeLabel()' in ui
     assert 'function refreshCustomRangeLabel()' in ui
     assert 'option.textContent = formatCustomRangeLabel()' in ui
-    assert 'dom.tracesCustomRange.hidden = !(custom && model.customRangeOpen)' in ui
+    assert 'button.textContent = relative ? `Time range · ${text}` : text;' in picker
     assert 'id="tracesCustomRangeApply"' in html
-    assert 'function applyCustomRange()' in ui
+    assert 'async function applyCustomRange(raw, source = "form")' in ui

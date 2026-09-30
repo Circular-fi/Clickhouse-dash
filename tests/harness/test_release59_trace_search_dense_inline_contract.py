@@ -8,9 +8,14 @@ def read(rel):
 def test_strict_trace_ranges_and_selection_only_prefill_pickers():
     html = read('src/static/traces.html')
     js = read('src/static/app_traces.js')
-    for value in ('5', '15', '30', '60', '180', '720', '1440', '2880', '10080', '43200', '129600', '259200', '525600'):
-        assert f'value="{value}"' in html
-    assert 'value="custom"' in html
+    picker = read('src/static/app_timerange.js')
+    # Quick ranges (Grafana's list) are offered only when their width fits
+    # traces.max_lookback_minutes; any other window goes through From / To.
+    for value in ('now-5m', 'now-15m', 'now-30m', 'now-1h', 'now-3h', 'now-12h', 'now-24h', 'now-2d', 'now-7d', 'now-30d', 'now-90d', 'now-6M', 'now-1y'):
+        assert f'["{value}", "now", ' in picker
+    assert 'QUICK_RANGES.filter((option) => fits(option, now)' in picker
+    assert 'endMs - startMs <= maxMs()' in picker
+    assert 'id="tracesRangeStart"' in html and 'id="tracesRangeEnd"' in html
     assert 'enhanceTraceCombo' not in js
     assert 'traceCombo__menu' not in js
     assert '<select id="tracesService"' in html

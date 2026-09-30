@@ -33,15 +33,17 @@ def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_g
     assert 'id="tracesPrefillButton"' not in html
     assert 'id="tracesTagsButton"' not in html
     assert 'getTraceTags' not in api
+    picker = read("src/static/app_timerange.js")
     assert "prefillForSelectedRange" in js
-    assert 'tracesRangeUnit?.addEventListener("change"' in js
-    assert 'tracesRangeStart?.addEventListener("input", refreshCustomInputs)' in js
-    assert 'tracesRangeStart?.addEventListener("change", refreshCustomInputs)' in js
-    assert 'tracesRangeEnd?.addEventListener("input", refreshCustomInputs)' in js
-    assert 'tracesRangeEnd?.addEventListener("change", refreshCustomInputs)' in js
-    assert 'syncCustomRangeBounds();' in js
-    assert 'tracesCustomRangeApply?.addEventListener("click"' in js
-    assert 'await prefillForSelectedRange();' in js
+    # Every way of applying a range (form, calendar, quick / recent range,
+    # shift, zoom) goes through applyCustomRange, which prefills then searches.
+    assert 'onApply: (raw, source) => { void applyCustomRange(raw, source); },' in js
+    apply = js[js.index('async function applyCustomRange('):js.index('async function loadAnalytics(')]
+    assert 'await prefillForSelectedRange();' in apply
+    assert 'await search();' in apply
+    assert 'applyButton.addEventListener("click", applyForm);' in picker
+    assert 'options.onApply(result.raw, "form");' in picker
+    assert 'options.onApply(raw, item.dataset.kind);' in picker
     assert "getTraceAnalytics" in api
     assert "void loadAnalytics(filters);" in js
 

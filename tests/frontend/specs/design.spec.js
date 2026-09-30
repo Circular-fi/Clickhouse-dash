@@ -341,3 +341,34 @@ test('captures the inline result row details in the light theme', async ({ page 
   await expect(page.locator('#themeSelectButton')).toHaveAttribute('aria-label', 'Theme: light');
   await openRowDetailsForDesign(page, testInfo, '-light');
 });
+
+for (const theme of ['dark', 'light']) {
+  test(`captures the traces time range panel (${theme})`, async ({ page }, testInfo) => {
+    await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
+    await page.goto('/traces');
+    await page.waitForLoadState('networkidle');
+    const button = page.locator('.tracePicker--range .tracePicker__button');
+    await button.click();
+    const panel = page.locator('#tracesTimeRangePanel');
+    await expect(panel).toBeVisible();
+    await captureState(page, testInfo, `traces-time-range-${theme}`);
+    // The panel fits the viewport and hangs from its button.
+    const [panelBox, buttonBox] = await Promise.all([panel.boundingBox(), button.boundingBox()]);
+    const viewport = page.viewportSize();
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(Math.abs(panelBox.x - buttonBox.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(panelBox.y - (buttonBox.y + buttonBox.height))).toBeLessThanOrEqual(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // Mid-selection: a start picked, the end previewed, then a too wide range.
+    const days = page.locator('#tracesTimeCalendar .timeCalendar__day:not(.is-outside)');
+    await days.nth(9).click();
+    await days.nth(12).hover();
+    await captureState(page, testInfo, `traces-time-range-picking-${theme}`);
+    await page.locator('#tracesRangeEnd').fill('now+30d');
+    await page.locator('#tracesCustomRangeApply').click();
+    await expect(page.locator('#tracesRangeError')).toBeVisible();
+    await captureState(page, testInfo, `traces-time-range-error-${theme}`);
+  });
+}
