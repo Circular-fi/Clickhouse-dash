@@ -1185,7 +1185,7 @@ bool line_is_alignable_alias(string_view line) {
   return starts_with_ci(rhs, "`");
 }
 
-void align_alias_groups(vector<string>& lines) {
+void align_alias_groups(vector<string>& lines, size_t max_width) {
   for (size_t i = 0; i < lines.size();) {
     if (!line_is_alignable_alias(lines[i])) { ++i; continue; }
     const size_t indent = leading_space_count(lines[i]);
@@ -1222,7 +1222,7 @@ void align_alias_groups(vector<string>& lines) {
       vector<string> rendered;
       for (size_t k = i; k < j; ++k) {
         string line = align_alias_line(lines[k], target);
-        if (utf8_width(line) > 80) ok = false;
+        if (utf8_width(line) > max_width) ok = false;
         rendered.push_back(std::move(line));
       }
       if (ok) {
@@ -1258,7 +1258,7 @@ bool in_create_schema_block(const vector<string>& lines, size_t line_index, size
   return false;
 }
 
-void align_create_columns(vector<string>& lines) {
+void align_create_columns(vector<string>& lines, size_t max_width) {
   for (size_t i = 0; i < lines.size();) {
     if (!looks_like_create_column_line(lines[i])) { ++i; continue; }
     const size_t indent = leading_space_count(lines[i]);
@@ -1339,7 +1339,7 @@ void align_create_columns(vector<string>& lines) {
         line += string(width - utf8_width(col.lhs) + 1, ' ');
         line += col.rhs;
         if (col.comma) line += ',';
-        if (utf8_width(line) > 80) ok = false;
+        if (utf8_width(line) > max_width) ok = false;
         rendered.push_back(std::move(line));
       }
       if (ok) {
@@ -1576,9 +1576,9 @@ string align_multiline_tuple_closers(string_view source) {
   return out;
 }
 
-void split_long_string_alias_lines(vector<string>& lines) {
+void split_long_string_alias_lines(vector<string>& lines, size_t max_width) {
   for (size_t i = 0; i < lines.size(); ++i) {
-    if (lines[i].size() <= 80) continue;
+    if (utf8_width(lines[i]) <= max_width) continue;
     const int as_pos = find_alias_marker_for_alignment(lines[i]);
     if (as_pos < 0) continue;
     string lhs = rtrim_spaces(lines[i].substr(0, static_cast<size_t>(as_pos)));
@@ -1723,10 +1723,10 @@ string format_long_enum_type_lines(string_view source) {
 string normalize_final_layout(string_view s, size_t width) {
   const string enum_formatted = format_long_enum_type_lines(s);
   vector<string> lines = split_lines_keep(align_multiline_tuple_closers(enum_formatted));
-  split_long_string_alias_lines(lines);
-  align_create_columns(lines);
+  split_long_string_alias_lines(lines, width);
+  align_create_columns(lines, width);
   align_create_index_groups(lines, width);
-  align_alias_groups(lines);
+  align_alias_groups(lines, width);
   split_combined_limit_lines(lines);
   return join_lines(lines);
 }
