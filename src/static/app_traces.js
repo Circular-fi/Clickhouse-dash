@@ -693,7 +693,10 @@
   // so text, markers and hit-testing are never stretched.
   const CHART_HEIGHT = 196;
   function chartWidth(container) {
-    return Math.max(240, Math.round((container?.clientWidth || 0) - 12) || 640);
+    // A hidden card has no width yet: draw at a typical size, the resize
+    // observer redraws once it is laid out.
+    const width = Number(container?.clientWidth || 0);
+    return width > 12 ? Math.max(240, Math.round(width - 12)) : 640;
   }
 
   function timeAxisSvg(startMs, endMs, left, plotW, H, W) {
