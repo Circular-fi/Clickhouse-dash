@@ -2371,6 +2371,32 @@ string join_fitting_arguments(string text, size_t width) {
   return text;
 }
 
+// After an exploded call closes, a following arithmetic operator continues
+// on the `)` line when it fits, as it does after a parenthesized block and as
+// `) AS alias` does: `) / nullIf(sum(duration_ms), 0),`.
+string attach_operators_to_closers(string_view text, size_t width) {
+  vector<string> lines = split_lines_keep(text);
+  vector<string> out;
+  out.reserve(lines.size());
+  for (string& line : lines) {
+    if (!out.empty()) {
+      const string prev = trim_ascii_spaces(out.back());
+      const string cur = trim_ascii_spaces(line);
+      bool op = false;
+      for (const char* lead : {"+ ", "- ", "* ", "/ ", "% "}) op = op || starts_with_ci(cur, lead);
+      if (op && (prev == ")" || prev == "]") && !contains_top_level_comment(cur)) {
+        string merged = rtrim_spaces(out.back()) + " " + cur;
+        if (utf8_width(merged) <= width) {
+          out.back() = std::move(merged);
+          continue;
+        }
+      }
+    }
+    out.push_back(std::move(line));
+  }
+  return join_lines(out);
+}
+
 // After a join, a single projection (or GROUP BY / ORDER BY item) that became
 // one line moves back onto the keyword line when it fits there, as it would
 // have if the expression formatter had kept it inline:
@@ -4365,7 +4391,7 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   vector<size_t> joined_rows;
   string out = collapse_fitting_calls(text, threshold, &joined_rows);
   out = join_fitting_arguments(merge_joined_single_select_items(out, joined_rows, threshold), threshold);
-  if (!allow_explode) return out;
+  if (!allow_explode) return attach_operators_to_closers(out, threshold);
   vector<string> result;
   bool exploded = false;
   for (const string& line : split_lines_keep(out)) {
@@ -4375,7 +4401,8 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   }
   // Splitting a line can leave the rest of its call on later lines with room
   // to join (`name(\n    params\n)(` followed by the argument lines).
-  return exploded ? join_fitting_arguments(collapse_fitting_calls(join_lines(result), threshold), threshold) : join_lines(result);
+  const string settled = exploded ? join_fitting_arguments(collapse_fitting_calls(join_lines(result), threshold), threshold) : join_lines(result);
+  return attach_operators_to_closers(settled, threshold);
 }
 
 // Explodes the widest call, array or IN list that starts on an overflowing
