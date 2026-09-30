@@ -837,10 +837,12 @@ def _assert_trace_summaries_match_spans(payload: dict, start_ms: int, end_ms: in
     services = payload["services"]
     ids = [row[0] for row in rows]
     truth = {}
-    for trace_id, service, spans, errors in _ch_rows(
-            f"SELECT TraceId, ServiceName, count(), countIf(StatusCode = 'Error') FROM otel.otel_traces "
+    firsts = {}
+    for trace_id, service, spans, errors, first_ns in _ch_rows(
+            f"SELECT TraceId, ServiceName, count(), countIf(StatusCode = 'Error'), min(toUnixTimestamp64Nano(Timestamp)) FROM otel.otel_traces "
             f"WHERE {_span_window(start_ms, end_ms)} AND TraceId IN {_sql_list(ids)} GROUP BY TraceId, ServiceName"):
         truth.setdefault(trace_id, {})[service] = (int(spans), int(errors))
+        firsts.setdefault(trace_id, {})[service] = int(first_ns)
     bounds = {r[0]: (int(r[1]), int(r[2])) for r in _ch_rows(
         f"SELECT TraceId, toUnixTimestamp64Milli(min(Timestamp)), "
         f"toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))) "
@@ -850,8 +852,13 @@ def _assert_trace_summaries_match_spans(payload: dict, start_ms: int, end_ms: in
         per_service = truth[trace_id]
         assert span_count == sum(v[0] for v in per_service.values()), row
         assert error_count == sum(v[1] for v in per_service.values()), row
-        assert {services[s]: (n, e) for s, n, e in stats} == {k: v for k, v in per_service.items() if k}, row
-        assert [n for _, n, _ in stats] == sorted((n for _, n, _ in stats), reverse=True), row
+        assert {services[s]: (n, e) for s, n, e, _ in stats} == {k: v for k, v in per_service.items() if k}, row
+        assert [n for _, n, _, _ in stats] == sorted((n for _, n, _, _ in stats), reverse=True), row
+        # Each service carries its earliest window span as an offset from the
+        # trace's earliest window span (the list orders services by it).
+        trace_first_ns = min(firsts[trace_id].values())
+        assert {services[s]: offset for s, _, _, offset in stats} == {
+            k: v - trace_first_ns for k, v in firsts[trace_id].items() if k}, row
         assert (first_ms, duration_ns) == bounds[trace_id], row
     starts = [row[1] for row in rows]
     assert starts == sorted(starts, reverse=True), starts

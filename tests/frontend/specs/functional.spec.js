@@ -1440,4 +1440,71 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
     }
     return window.__chdashTestCopiedText || '';
   })).toBe(traceId);
+
+async function otelRows(request, sql) {
+  const base = (process.env.CLICKHOUSE_URL || 'http://clickhouse:8123').replace(/\/$/, '');
+  const auth = Buffer.from(`${process.env.CLICKHOUSE_USER || 'test'}:${process.env.CLICKHOUSE_PASSWORD || 'test'}`).toString('base64');
+  const response = await request.post(`${base}/`, { data: `${sql} FORMAT TSV`, headers: { Authorization: `Basic ${auth}` }, timeout: 60_000 });
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.text()).split('\n').filter(Boolean).map((line) => line.split('\t'));
+}
+
+const byCodePoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+test('traces: each listed trace shows its services in the order of their first span start', async ({ page, request }) => {
+  // The fixture's services join a trace 1 ms apart in name order, so a window
+  // that starts a few ms into a trace cuts its first services off and the
+  // earliest remaining span belongs to a service late in the alphabet: the
+  // order by first span then differs from both name and span-count order.
+  const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
+  test.skip(!(Number(endText) > 0), 'OTEL fixture is empty');
+  const [[traceStartText]] = await otelRows(request,
+    `SELECT toUnixTimestamp64Milli(min(Timestamp)) FROM otel.otel_traces WHERE Timestamp >= fromUnixTimestamp64Milli(${Number(endText) - 1_800_000})`
+    + ` AND Timestamp < fromUnixTimestamp64Milli(${Number(endText) - 1_790_000}) GROUP BY TraceId ORDER BY 1 LIMIT 1`);
+  const startMs = Number(traceStartText) + 7;
+  const endMs = startMs + 400;
+  // The page asks for "last hour"; pin its trace searches to the cut window
+  // (min_duration_ms makes the search rank traces by their window spans, so
+  // traces whose first spans fall before the window are listed too).
+  await page.route((url) => url.pathname.endsWith('/api/traces/search'), (route) => {
+    const url = new URL(route.request().url());
+    url.searchParams.set('start_ms', String(startMs));
+    url.searchParams.set('end_ms', String(endMs));
+    url.searchParams.set('min_duration_ms', '1');
+    return route.continue({ url: url.toString() });
+  });
+  const searched = page.waitForResponse((response) => response.url().includes('/api/traces/search?'), { timeout: 60_000 });
+  await page.goto('/traces');
+  const payload = await (await searched).json();
+  expect(payload.rows.length).toBeGreaterThan(0);
+
+  const rows = page.locator('#tracesResults .traceResult[data-trace-id]');
+  await expect(rows).toHaveCount(payload.rows.length, { timeout: 30_000 });
+  const rendered = Object.fromEntries(await rows.evaluateAll((items) => items.map((item) => [
+    item.getAttribute('data-trace-id'),
+    [...item.querySelectorAll('.traceServiceStats .traceServiceStat > b')].map((b) => b.textContent),
+  ])));
+
+  const services = payload.services;
+  let reordered = [];
+  for (const [traceId, , , , , , , stats] of payload.rows) {
+    const expected = [...stats].sort((a, b) => (a[3] - b[3]) || byCodePoint(services[a[0]], services[b[0]])).map((stat) => services[stat[0]]);
+    expect(rendered[traceId], traceId).toEqual(expected);
+    const byName = [...expected].sort(byCodePoint);
+    const bySpans = stats.map((stat) => services[stat[0]]);
+    if (JSON.stringify(expected) !== JSON.stringify(byName) && JSON.stringify(expected) !== JSON.stringify(bySpans)) reordered.push(traceId);
+  }
+  // The window does cut traces, so the check discriminates the ordering.
+  expect(reordered.length).toBeGreaterThan(0);
+
+  // Ground truth straight from the span table for a few traces.
+  const sample = [...reordered.slice(0, 2), ...payload.rows.map((row) => row[0]).filter((id) => !reordered.includes(id)).slice(0, 1)];
+  const truth = {};
+  for (const [traceId, service] of await otelRows(request,
+    `SELECT TraceId, ServiceName FROM otel.otel_traces WHERE Timestamp >= fromUnixTimestamp64Milli(${startMs}) AND Timestamp <= fromUnixTimestamp64Milli(${endMs})`
+    + ` AND TraceId IN (${sample.map((id) => `'${id}'`).join(',')}) AND ServiceName != ''`
+    + ' GROUP BY TraceId, ServiceName ORDER BY TraceId, min(Timestamp), ServiceName')) {
+    (truth[traceId] ||= []).push(service);
+  }
+  for (const traceId of sample) expect(rendered[traceId], traceId).toEqual(truth[traceId]);
 });

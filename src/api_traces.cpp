@@ -942,7 +942,9 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     having += (having.empty() ? " HAVING " : " AND ") + duration_expr + " <= " + std::to_string(ns);
   }
 
-  struct ServiceStat { std::string service; uint64_t spans = 0, errors = 0; };
+  // first_span_ns: offset of the service's earliest window span from the
+  // trace's earliest window span (the UI orders services by it).
+  struct ServiceStat { std::string service; uint64_t spans = 0, errors = 0, first_span_ns = 0; };
   struct Row {
     std::string trace_id, operation, service;
     int64_t start_ms = 0;
@@ -962,16 +964,20 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
         out.duration_ns = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
         out.spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
         out.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
-        // One "service RS spans RS errors" item per service (see aggregate_select).
+        // One "service RS spans RS errors RS first_span_ns" item per service
+        // (see aggregate_select).
         for (const auto& item : split_char(ch_block_text_at(block, 7, row), '\x1f')) {
-          const size_t errors_sep = item.rfind('\x1e');
+          const size_t first_sep = item.rfind('\x1e');
+          if (first_sep == std::string::npos || first_sep == 0) continue;
+          const size_t errors_sep = item.rfind('\x1e', first_sep - 1);
           if (errors_sep == std::string::npos || errors_sep == 0) continue;
           const size_t spans_sep = item.rfind('\x1e', errors_sep - 1);
           if (spans_sep == std::string::npos || spans_sep == 0) continue;
           ServiceStat stat;
           stat.service = item.substr(0, spans_sep);
           stat.spans = static_cast<uint64_t>(std::stoull(item.substr(spans_sep + 1, errors_sep - spans_sep - 1)));
-          stat.errors = static_cast<uint64_t>(std::stoull(item.substr(errors_sep + 1)));
+          stat.errors = static_cast<uint64_t>(std::stoull(item.substr(errors_sep + 1, first_sep - errors_sep - 1)));
+          stat.first_span_ns = static_cast<uint64_t>(std::stoull(item.substr(first_sep + 1)));
           out.service_stats.push_back(std::move(stat));
         }
         std::sort(out.service_stats.begin(), out.service_stats.end(), [](const ServiceStat& a, const ServiceStat& b) {
@@ -986,16 +992,21 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   // Per-service span/error counts are aggregated server-side with sumMap, so
   // the per-trace state and the payload are O(services), not O(spans).
   // Spans without a ServiceName are not reported as a service (as before).
+  // minMap keeps each service's earliest span start in the same O(services)
+  // state; both maps sort the same key set, so their arrays zip aligned.
   const std::string service_stats_map =
       "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])";
+  const std::string service_first_span_map = "minMap([toString(ServiceName)], [toUnixTimestamp64Nano(Timestamp)])";
   const std::string aggregate_select =
       "SELECT toString(TraceId), toString(toUnixTimestamp64Milli(min(Timestamp))), "
       "toString(if(empty(argMinIf(SpanName, Timestamp, empty(ParentSpanId))), argMin(SpanName, Timestamp), argMinIf(SpanName, Timestamp, empty(ParentSpanId)))), "
       "toString(if(empty(argMinIf(ServiceName, Timestamp, empty(ParentSpanId))), argMin(ServiceName, Timestamp), argMinIf(ServiceName, Timestamp, empty(ParentSpanId)))), "
       "toString(" + duration_expr + "), toString(count()), toString(countIf(StatusCode = 'Error')), "
-      "arrayStringConcat(arrayMap(stat -> concat(stat.1, char(30), toString(stat.2), char(30), toString(stat.3)), "
+      "arrayStringConcat(arrayMap(stat -> concat(stat.1, char(30), toString(stat.2), char(30), toString(stat.3), char(30), "
+      "toString(stat.4 - toUnixTimestamp64Nano(min(Timestamp)))), "
       "arrayFilter(stat -> notEmpty(stat.1), arrayZip(tupleElement(" + service_stats_map + ", 1), tupleElement(" +
-      service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3)))), char(31)) ";
+      service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3), tupleElement(" + service_first_span_map +
+      ", 2)))), char(31)) ";
 
   // The summary aggregates every window span of <= limit selected traces, so
   // it only needs the time range those spans occupy instead of probing every
@@ -1212,7 +1223,8 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
     w.Uint64(row.duration_ns); w.Uint64(row.spans); w.Uint64(row.errors);
     w.StartArray();
     for (const auto& stat : row.service_stats) {
-      w.StartArray(); w.Uint64(intern_service(stat.service)); w.Uint64(stat.spans); w.Uint64(stat.errors); w.EndArray();
+      w.StartArray(); w.Uint64(intern_service(stat.service)); w.Uint64(stat.spans); w.Uint64(stat.errors); w.Uint64(stat.first_span_ns);
+      w.EndArray();
     }
     w.EndArray();
     w.EndArray();

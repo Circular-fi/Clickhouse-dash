@@ -549,8 +549,14 @@
       duration_ns: Number(row?.[4] || 0),
       span_count: Number(row?.[5] || 0),
       error_count: Number(row?.[6] || 0),
-      service_stats: (Array.isArray(row?.[7]) ? row[7] : []).map((stat) => ({ service: services[Number(stat?.[0] || 0)] || "unknown", spans: Number(stat?.[1] || 0), errors: Number(stat?.[2] || 0) })),
+      service_stats: orderByFirstSpan((Array.isArray(row?.[7]) ? row[7] : []).map((stat) => ({ service: services[Number(stat?.[0] || 0)] || "unknown", spans: Number(stat?.[1] || 0), errors: Number(stat?.[2] || 0), first_span_ns: Number(stat?.[3] || 0) }))),
     }));
+  }
+
+  // A trace's services read in the order they joined it: by their earliest
+  // span start (offset from the trace start), then by name.
+  function orderByFirstSpan(stats) {
+    return stats.sort((a, b) => (a.first_span_ns - b.first_span_ns) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0));
   }
 
   function unpackAnalytics(payload) {
