@@ -59,17 +59,47 @@ string rtrim_spaces(string_view sv) {
   return string(sv.substr(0, b));
 }
 
+// Collapse runs of whitespace to one space in code only. Quoted literals and
+// identifiers keep their exact bytes (collapsing `'a  b'` changed the value,
+// and the literal restorer, which matches decoded values, could not undo it),
+// and a `--` comment keeps the newline that ends it (joining the next line
+// would comment it out).
 string collapse_whitespace(string_view sv) {
   string out;
   bool pending = false;
-  for (char ch : sv) {
+  char quote = '\0';
+  bool line_comment = false;
+  for (size_t i = 0; i < sv.size(); ++i) {
+    const char ch = sv[i];
+    if (quote) {
+      out.push_back(ch);
+      if (ch == '\\' && quote != '`' && i + 1 < sv.size()) {
+        out.push_back(sv[++i]);
+      } else if (ch == quote) {
+        if (i + 1 < sv.size() && sv[i + 1] == quote) out.push_back(sv[++i]);
+        else quote = '\0';
+      }
+      continue;
+    }
+    if (line_comment) {
+      if (ch == '\n' || ch == '\r') {
+        line_comment = false;
+        out.push_back('\n');
+        pending = false;
+        continue;
+      }
+      out.push_back(ch);
+      continue;
+    }
     if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-      pending = !out.empty();
+      pending = !out.empty() && out.back() != '\n';
       continue;
     }
     if (pending) out.push_back(' ');
-    out.push_back(ch);
     pending = false;
+    if (ch == '\'' || ch == '"' || ch == '`') quote = ch;
+    else if (ch == '-' && i + 1 < sv.size() && sv[i + 1] == '-') line_comment = true;
+    out.push_back(ch);
   }
   return out;
 }
@@ -2140,11 +2170,16 @@ string Formatter::format(string_view s) {
   const bool one_line = normalized.find('\n') == string::npos;
   string text = trim_ascii_spaces(repair_split_clause_keywords(one_line ? repair_line_comments(normalized) : normalized));
   if (text.empty()) return text;
-  if (auto values = try_format_insert_values(text); !values.empty()) return values;
-  text = strip_redundant_arith_parentheses(text);
   string leading;
   text = take_leading_comments(text, &leading);
   const string trailing = take_trailing_line_comments(&text);
+  auto with_comments = [&](string body) {
+    if (!leading.empty()) body = leading + "\n" + body;
+    if (!trailing.empty()) body += "\n" + trailing;
+    return body;
+  };
+  if (auto values = try_format_insert_values(text); !values.empty()) return with_comments(values);
+  text = strip_redundant_arith_parentheses(text);
   string out = format_statement(text);
   if (!leading.empty()) out = leading + "\n" + out;
   out = align_multiline_settings(normalize_final_layout(cleanup_surface(out), threshold));
@@ -2298,8 +2333,15 @@ string Formatter::format_select_like(string_view s) {
   }
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
-  const string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
-  const auto items = split_top_level(select_body, ',');
+  string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
+  auto items = split_top_level(select_body, ',');
+  // On the local (comment-preserving) path the user's own line breaks reach
+  // this point (formatQuery would have joined them): a single projection
+  // written over several lines without comments is judged on one line.
+  if (items.size() == 1 && select_body.find('\n') != string::npos && !mask_sql_surface(select_body).has_comments) {
+    select_body = collapse_whitespace(select_body);
+    items = split_top_level(select_body, ',');
+  }
   auto [single_expr_for_alias, single_alias_for_alias] = items.size() == 1 ? split_top_level_as(items.front()) : std::pair<string,string>{string(), string()};
   const bool single_simple_alias = items.size() == 1 && !single_alias_for_alias.empty() &&
                                    single_expr_for_alias.find('\n') == string::npos &&

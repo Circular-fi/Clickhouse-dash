@@ -134,6 +134,14 @@ def check(api, ch, auth, origin, sql):
     # code part of a line counts.
     def code_part(line):
         return re.sub(r"\s*--.*$", "", line) if "'" not in line.split("--", 1)[0][-1:] else line
+    if COMMENTS and origin.endswith("+comments"):
+        # Parity: the comment-preserving path must lay the statement out like
+        # formatQuery does once the (whole-line) comments are removed.
+        plain_sql = "\n".join(l for l in sql.splitlines() if not l.strip().startswith("-- corpus"))
+        plain_out, _, _ = fmt(api, plain_sql)
+        stripped = "\n".join(l for l in out.splitlines() if not l.strip().startswith("-- corpus"))
+        if plain_out is not None and stripped != plain_out:
+            res["issues"].append({"kind": "parity", "detail": plain_out})
     long_lines = [l for l in out.splitlines() if len(code_part(l)) > width and len(code_part(l).strip().split()) > 1
                   and not re.fullmatch(r"\s*('([^'\\]|\\.)*'|`[^`]*`)\s*,?\s*(AS \S+)?", code_part(l))]
     if long_lines:
