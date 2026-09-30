@@ -23,7 +23,14 @@
     prefillPromise: null,
     activeTrace: null,
     activeSpanId: null,
+    // Deep link (?span=): the span to focus once its trace is loaded, and the
+    // highlighted span.
+    pendingSpanId: "",
+    focusedSpanId: "",
     openSpanIds: new Set(),
+    // Inspector sections a span has open (Jaeger's DetailState), so that a
+    // waterfall re-render keeps them: span id -> Set of section keys.
+    spanSections: new Map(),
     waterfallLabelPct: 34,
     traceViewRange: [0, 1],
     disabledServices: new Set(),
@@ -302,9 +309,9 @@
     if (!raw) return NaN;
     const match = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?(?:Z|[+-]\d\d(?::?\d\d)?)?$/);
     if (match) {
-      const millis = (match[3] || "").slice(0, 3).padEnd(3, "0");
-      const parsed = Date.parse(`${match[1]}T${match[2]}.${millis}Z`);
-      if (Number.isFinite(parsed)) return parsed * 1e6;
+      const fraction = (match[3] || "").slice(0, 9).padEnd(9, "0");
+      const parsed = Date.parse(`${match[1]}T${match[2]}.${fraction.slice(0, 3)}Z`);
+      if (Number.isFinite(parsed)) return parsed * 1e6 + Number(fraction.slice(3));
     }
     const parsed = Date.parse(raw.includes("T") ? raw : raw.replace(" ", "T") + "Z");
     return Number.isFinite(parsed) ? parsed * 1e6 : NaN;
@@ -2468,6 +2475,7 @@
     const next = row.nextElementSibling;
     if (next?.classList.contains("traceSpanInspectorRow")) next.remove();
     if (opening) row.insertAdjacentHTML("afterend", spanInspectorRowHtml(node, cache));
+    ns.traceViews?.onSpanToggled?.(id, opening);
   }
 
   function setWaterfallLabelWidth(pct) {
@@ -2830,21 +2838,91 @@
     };
   }
 
+  // Span detail, after Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
+  // AccordionEvents, AccordionLinks): HTML strings, with the inspector's
+  // buttons handled by delegation (initSpanDetailEvents).
+  const JSON_LOOKING = /^\s*[[{]/;
+  const NUMBER_LITERAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+  const OTEL_KEY_TITLE = "otel.* attribute: set by the OpenTelemetry SDK or exporter, not by the instrumented code";
+  const EVENTS_INITIAL_COUNT = 3;
+
   function attributeEntries(raw) {
-    const value = parseStructuredValue(raw);
+    const value = raw && typeof raw === "object" ? raw : parseStructuredValue(raw);
     if (!value || Array.isArray(value) || typeof value !== "object") return [];
     return Object.entries(value).sort(([a], [b]) => String(a).localeCompare(String(b)));
   }
 
-  function renderJaegerAttributes(raw, emptyText = "No attributes") {
-    const entries = attributeEntries(raw);
-    if (!entries.length) {
-      const fallback = String(raw || "").trim();
-      return fallback && fallback !== "{}"
-        ? `<pre class="traceJaegerRaw">${esc(fallback)}</pre>`
-        : `<span class="traceJaegerEmpty">${esc(emptyText)}</span>`;
+  // A string holding a JSON object or array is shown as a tree (Jaeger's
+  // tryParseJson); any other value as a scalar.
+  function attributeJsonValue(value) {
+    if (value && typeof value === "object") return value;
+    if (typeof value !== "string" || !JSON_LOOKING.test(value)) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_) {
+      return null;
     }
-    return `<div class="traceJaegerTags">${entries.map(([key, value]) => `<span class="traceJaegerTag"><b>${esc(key)}</b><i>=</i><code title="${esc(value)}">${esc(value)}</code></span>`).join('<i class="traceJaegerTagSep" aria-hidden="true"></i>')}</div>`;
+  }
+
+  // ClickHouse stores OTel attributes as Map(String, String): a value that
+  // reads as a number or a boolean is coloured as one (the text is unchanged).
+  function scalarKind(value) {
+    if (value == null) return "null";
+    if (typeof value === "number" || typeof value === "bigint") return "number";
+    if (typeof value === "boolean") return "bool";
+    const text = String(value);
+    if (NUMBER_LITERAL.test(text)) return "number";
+    if (text === "true" || text === "false") return "bool";
+    return "string";
+  }
+
+  function scalarHtml(value) {
+    return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(value == null ? "null" : String(value))}</span>`;
+  }
+
+  // Collapsible pretty tree (Jaeger's JsonView): the top level is open, nested
+  // levels too when the value has at most 10 keys.
+  function jsonTreeHtml(value, expandNested, depth = 0) {
+    if (!value || typeof value !== "object") {
+      if (typeof value === "string") return `<span class="traceKv__v traceKv__v--string">"${esc(value)}"</span>`;
+      return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(value == null ? "null" : String(value))}</span>`;
+    }
+    const isArray = Array.isArray(value);
+    const entries = isArray ? value.map((item, index) => [index, item]) : Object.entries(value);
+    const [open, close] = isArray ? ["[", "]"] : ["{", "}"];
+    if (!entries.length) return `<span class="traceJson__brace">${open}${close}</span>`;
+    const noun = isArray ? "item" : "key";
+    const count = `${entries.length} ${noun}${entries.length === 1 ? "" : "s"}`;
+    const body = entries.map(([key, item]) => `<div class="traceJson__entry">${isArray ? "" : `<span class="traceJson__key">${esc(key)}</span><span class="traceJson__colon">:</span>`}${jsonTreeHtml(item, expandNested, depth + 1)}</div>`).join("");
+    const isOpen = depth === 0 || expandNested;
+    return `<details class="traceJson"${isOpen ? " open" : ""}><summary><span class="traceJson__brace">${open}</span><span class="traceJson__fold">…${close}</span><span class="traceJson__count">${count}</span></summary><div class="traceJson__body">${body}</div><span class="traceJson__brace">${close}</span></details>`;
+  }
+
+  function attributeRowHtml(key, value) {
+    const name = String(key);
+    const tree = attributeJsonValue(value);
+    const headerList = Array.isArray(tree) && /^http\.(?:request|response)\.header\./.test(name);
+    const otel = name.startsWith("otel.");
+    const keyHtml = `<span class="traceKv__key${otel ? " is-otel" : ""}"${otel ? ` title="${esc(OTEL_KEY_TITLE)}"` : ""}>${esc(name)}</span>`;
+    let json;
+    try { json = JSON.stringify(value === undefined ? null : value); } catch (_) { json = JSON.stringify(String(value)); }
+    const actions = '<span class="traceKv__actions"><button type="button" class="traceKv__action" data-kv-copy="value" title="Copy value">Copy</button><button type="button" class="traceKv__action" data-kv-copy="json" title="Copy JSON">JSON</button></span>';
+    const attrs = `data-kv-key="${esc(name)}" data-kv-json="${esc(json)}"`;
+    if (tree && !headerList) {
+      const size = Array.isArray(tree) ? tree.length : Object.keys(tree).length;
+      return `<div class="traceKv__row traceKv__row--tree" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}<div class="traceKv__tree">${jsonTreeHtml(tree, size <= 10)}</div></div></div>`;
+    }
+    const valueHtml = headerList
+      ? tree.map((item) => scalarHtml(item)).join('<span class="traceKv__listSep">, </span>')
+      : scalarHtml(value);
+    return `<div class="traceKv__row" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}${valueHtml}</div></div>`;
+  }
+
+  function renderAttributeTable(raw, emptyText = "No attributes") {
+    const entries = attributeEntries(raw);
+    if (!entries.length) return emptyText ? `<span class="traceJaegerEmpty">${esc(emptyText)}</span>` : "";
+    return `<div class="traceKv">${entries.map(([key, value]) => attributeRowHtml(key, value)).join("")}</div>`;
   }
 
   function attributeValueText(value) {
@@ -2854,76 +2932,297 @@
     try { return JSON.stringify(value); } catch (_) { return String(value); }
   }
 
+  // Jaeger's AttributesSummary: the k=v preview beside a collapsed section
+  // (hidden by CSS while the section is open).
   function renderAttributePreview(raw, emptyText = "none") {
     const entries = attributeEntries(raw);
     if (!entries.length) return `<span class="traceJaegerSummaryPreview is-empty">${esc(emptyText)}</span>`;
     return `<span class="traceJaegerSummaryPreview">${entries.map(([key, value]) => `<span><b>${esc(key)}</b>=${esc(attributeValueText(value))}</span>`).join(" ")}</span>`;
   }
 
-  function renderAttributeTable(raw, emptyText = "No attributes") {
-    const entries = attributeEntries(raw);
-    if (!entries.length) return `<span class="traceJaegerEmpty">${esc(emptyText)}</span>`;
-    return `<div class="traceAttributeTable">${entries.map(([key, value]) => `<div class="traceAttributeTable__row"><span>${esc(key)}</span><code>${esc(attributeValueText(value))}</code></div>`).join("")}</div>`;
+  // Jaeger's AccordionAttributes: "Label:" + preview while collapsed, the
+  // attribute table once open.
+  function renderJaegerAttributes(label, raw, { emptyText = "No attributes", open = false } = {}) {
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}<i class="traceJaegerGroup__colon">:</i></b>${renderAttributePreview(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText)}</div></details>`;
   }
 
-  function renderJaegerEvents(span) {
-    const timestamps = parseStructuredValue(span.events_timestamp);
-    const names = parseStructuredValue(span.events_name);
-    const attributes = parseStructuredValue(span.events_attributes);
-    const ts = Array.isArray(timestamps) ? timestamps : [];
-    const ns = Array.isArray(names) ? names : [];
-    const attrs = Array.isArray(attributes) ? attributes : [];
-    const count = Math.max(ts.length, ns.length, attrs.length);
-    if (!count) return "";
-    const rows = Array.from({ length: count }, (_, index) => {
-      const name = ns[index] == null ? `Event ${index + 1}` : String(ns[index]);
-      const time = ts[index] == null ? "" : String(ts[index]);
-      const body = attrs[index] == null ? null : attrs[index];
-      const bodyText = body && typeof body === "object" && !Array.isArray(body)
-        ? `<div class="traceJaegerLogAttrs">${Object.entries(body).map(([key, value]) => `<div><b>${esc(key)}</b><code>${esc(value)}</code></div>`).join("")}</div>`
-        : (body == null ? "" : `<pre class="traceJaegerRaw">${esc(typeof body === "string" ? body : JSON.stringify(body, null, 2))}</pre>`);
-      return `<article class="traceJaegerLog"><header><strong>${esc(name)}</strong>${time ? `<time>${esc(time)}</time>` : ""}</header>${bodyText}</article>`;
-    }).join("");
-    return `<details class="traceJaegerGroup"><summary>Logs / Events <span>${count}</span></summary><div class="traceJaegerLogs">${rows}</div></details>`;
+  function jsonList(raw) {
+    const value = parseStructuredValue(raw);
+    return Array.isArray(value) ? value : [];
   }
 
-  function renderJaegerLinks(span) {
-    const traceIds = parseStructuredValue(span.links_trace_id);
-    const spanIds = parseStructuredValue(span.links_span_id);
-    const attrs = parseStructuredValue(span.links_attributes);
-    const tids = Array.isArray(traceIds) ? traceIds : [];
-    const sids = Array.isArray(spanIds) ? spanIds : [];
-    const aa = Array.isArray(attrs) ? attrs : [];
-    const count = Math.max(tids.length, sids.length, aa.length);
-    if (!count) return "";
-    const rows = Array.from({ length: count }, (_, index) => {
-      const traceId = String(tids[index] || "");
-      const traceCell = traceId ? `<a class="traceJaegerLink__trace" href="${esc(route(`traces/${encodeURIComponent(traceId)}`))}" data-linked-trace="${esc(traceId)}" title="Open linked trace">${esc(traceId)}</a>` : `<code></code>`;
-      return `<div class="traceJaegerLink">${traceCell}<code>${esc(sids[index] || "")}</code>${aa[index] ? renderJaegerAttributes(JSON.stringify(aa[index]), "") : ""}</div>`;
-    }).join("");
-    return `<details class="traceJaegerGroup"><summary>Links <span>${count}</span></summary><div class="traceJaegerLinks">${rows}</div></details>`;
+  // A span's events, ordered by time (then by position in the span).
+  function spanEventList(span) {
+    const times = jsonList(span.events_timestamp);
+    const names = jsonList(span.events_name);
+    const attrs = jsonList(span.events_attributes);
+    const count = Math.max(times.length, names.length, attrs.length);
+    const events = Array.from({ length: count }, (_, index) => ({
+      index,
+      name: names[index] == null ? `Event ${index + 1}` : String(names[index]),
+      time: times[index] == null ? "" : String(times[index]),
+      ns: timestampToNs(times[index]),
+      attributes: attrs[index] == null ? null : attrs[index],
+    }));
+    const key = (event) => (Number.isFinite(event.ns) ? event.ns : Infinity);
+    return events.sort((a, b) => key(a) - key(b) || a.index - b.index);
+  }
+
+  // Local wall time to the millisecond (+ the stored UTC text when given).
+  function absoluteTimeText(ns, raw = "", { withRaw = true } = {}) {
+    const text = String(raw || "");
+    const parts = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
+    // The raw text is exact; an epoch in ns past 2^53 is not.
+    const ms = parts ? Date.parse(`${parts[1]}T${parts[2]}.${(parts[3] || "").slice(0, 3).padEnd(3, "0")}Z`) : Math.floor(Math.round(ns / 1e3) / 1e3);
+    if (!Number.isFinite(ms)) return text;
+    const local = new Date(ms).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
+    return raw && withRaw ? `${local} (${raw} UTC)` : local;
+  }
+
+  function sectionOpen(spanId, key) {
+    return !!model.spanSections.get(String(spanId || ""))?.has(key);
+  }
+
+  function setSectionOpen(spanId, key, open) {
+    const id = String(spanId || "");
+    let keys = model.spanSections.get(id);
+    if (!keys) {
+      if (!open) return;
+      keys = new Set();
+      model.spanSections.set(id, keys);
+    }
+    if (open) keys.add(key); else keys.delete(key);
+  }
+
+  function eventItemHtml(event, traceStartNs, { hidden = false, open = false } = {}) {
+    const offset = Number.isFinite(event.ns) ? formatDuration(Math.max(0, event.ns - traceStartNs)) : "—";
+    const body = event.attributes && typeof event.attributes === "object" && !Array.isArray(event.attributes)
+      ? renderAttributeTable(event.attributes, "No attributes")
+      : (event.attributes == null ? '<span class="traceJaegerEmpty">No attributes</span>' : `<pre class="traceJaegerRaw">${esc(typeof event.attributes === "string" ? event.attributes : JSON.stringify(event.attributes, null, 2))}</pre>`);
+    const preview = event.attributes && typeof event.attributes === "object" ? renderAttributePreview(event.attributes, "") : "";
+    return `<details class="traceSpanEvent" data-event-index="${event.index}"${hidden ? " hidden" : ""}${open ? " open" : ""}><summary><b>${esc(event.name)}</b><time title="${esc(absoluteTimeText(event.ns, event.time))}">(${esc(offset)})</time>${preview}</summary><div class="traceSpanEvent__body">${body}</div></details>`;
+  }
+
+  function renderJaegerEvents(span, bounds) {
+    const events = spanEventList(span);
+    if (!events.length) return "";
+    const id = span.span_id;
+    const all = sectionOpen(id, "events-more");
+    const items = events.map((event, index) => eventItemHtml(event, bounds.start, { hidden: !all && index >= EVENTS_INITIAL_COUNT, open: sectionOpen(id, `event:${event.index}`) })).join("");
+    const more = events.length > EVENTS_INITIAL_COUNT
+      ? `<button type="button" class="traceSpanEvents__more" data-events-more aria-expanded="${all ? "true" : "false"}">${all ? "show less" : "show more..."}</button>`
+      : "";
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanEvents" data-span-section="events"${sectionOpen(id, "events") ? " open" : ""}><summary><b>Events</b><span class="traceJaegerGroup__count">(${events.length})</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanEvents__list">${items}</div>${more}<small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small></div></details>`;
+  }
+
+  function spanLinkList(span) {
+    const traceIds = jsonList(span.links_trace_id);
+    const spanIds = jsonList(span.links_span_id);
+    const attrs = jsonList(span.links_attributes);
+    const count = Math.max(traceIds.length, spanIds.length, attrs.length);
+    return Array.from({ length: count }, (_, index) => ({
+      traceId: String(traceIds[index] || ""),
+      spanId: String(spanIds[index] || ""),
+      attributes: attrs[index] == null ? null : attrs[index],
+    }));
+  }
+
+  // Spans of the loaded trace that link to a span ("linked from"): only what
+  // the trace already holds, computed once per trace.
+  function linkedFromList(cache, span) {
+    if (!cache.linkedFrom) {
+      cache.linkedFrom = new Map();
+      const traceId = String(cache.trace?.trace_id || "");
+      for (const other of cache.spans) {
+        if (!other.links_span_id || other.links_span_id === "[]") continue;
+        for (const link of spanLinkList(other)) {
+          if (link.traceId && link.traceId !== traceId) continue;
+          if (!cache.linkedFrom.has(link.spanId)) cache.linkedFrom.set(link.spanId, []);
+          cache.linkedFrom.get(link.spanId).push({ traceId, spanId: String(other.span_id || ""), attributes: link.attributes });
+        }
+      }
+    }
+    return cache.linkedFrom.get(String(span.span_id || "")) || [];
+  }
+
+  function spanTraceUrl(traceId, spanId = "") {
+    return `${route(`traces/${encodeURIComponent(traceId)}`)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;
+  }
+
+  function referenceItemHtml(kind, ref, cache) {
+    const traceId = String(cache.trace?.trace_id || "");
+    const sameTrace = !ref.traceId || ref.traceId === traceId;
+    const target = sameTrace ? cache.nodeById.get(ref.spanId)?.span : null;
+    const label = target
+      ? `<span class="traceSpanRefs__svc" style="--trace-service-color:${serviceColor(target.service_name)}">${esc(target.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(target.span_name || "span")}</small>`
+      : `<span class="traceSpanRefs__svc is-external">${sameTrace ? "&lt; span not in this trace &gt;" : "&lt; span in another trace &gt;"}</span>`;
+    const ids = `<small class="traceSpanRefs__ids">${sameTrace ? "" : `<span>TraceID: <code>${esc(ref.traceId)}</code></span>`}<span>SpanID: <code>${esc(ref.spanId)}</code></span></small>`;
+    let action = "";
+    if (target) action = `<button type="button" class="traceSpanRefs__open" data-focus-span="${esc(ref.spanId)}">Go to span</button>`;
+    else if (!sameTrace) action = `<a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(spanTraceUrl(ref.traceId, ref.spanId))}" data-linked-trace="${esc(ref.traceId)}" data-linked-span="${esc(ref.spanId)}" title="Open linked trace">Open linked trace</a>`;
+    const attrs = attributeEntries(ref.attributes).length ? `<div class="traceSpanRefs__attrs">${renderAttributeTable(ref.attributes, "")}</div>` : "";
+    const kindClass = kind.replace(/\s+/g, "-");
+    return `<li class="traceSpanRefs__item" data-ref-kind="${esc(kindClass)}"><span class="traceSpanRefs__kind traceSpanRefs__kind--${esc(kindClass)}">${esc(kind)}</span><span class="traceSpanRefs__main">${label}${ids}</span>${action}${attrs}</li>`;
+  }
+
+  // Jaeger's references: the parent (child of) and the span's links (follows
+  // from), plus the spans of this trace that link here (linked from).
+  function renderJaegerLinks(span, cache) {
+    const links = spanLinkList(span);
+    const from = linkedFromList(cache, span);
+    if (!links.length && !from.length) return "";
+    const items = [];
+    const parentId = String(span.parent_span_id || "");
+    if (parentId) items.push(referenceItemHtml("child of", { traceId: "", spanId: parentId }, cache));
+    for (const link of links) items.push(referenceItemHtml("follows from", link, cache));
+    for (const link of from) items.push(referenceItemHtml("linked from", link, cache));
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanRefs" data-span-section="references"${sectionOpen(span.span_id, "references") ? " open" : ""}><summary><b>References</b><span class="traceJaegerGroup__count">(${items.length})</span></summary><div class="traceJaegerGroup__body"><ul class="traceSpanRefs__list">${items.join("")}</ul></div></details>`;
+  }
+
+  function spanKindLabel(kind) {
+    const text = String(kind || "").replace(/^SPAN_KIND_/i, "").trim();
+    if (!text) return "—";
+    return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+  }
+
+  function idCopyHtml(label, value, field) {
+    if (!value) return `<span>${esc(label)}: <code>root</code></span>`;
+    return `<span>${esc(label)}: <code>${esc(value)}</code><button type="button" class="traceCopyButton traceInspectorIdentity__copy" data-copy-span-field="${esc(value)}" aria-label="Copy ${esc(field)}" title="Copy ${esc(field)}"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
   }
 
   function renderSpanInspectorCard(span, spans, knownBounds = null) {
+    const cache = activeTraceCache();
     const status = span.status_code || "Unset";
     const bounds = knownBounds || traceBounds(spans || []);
-    const startOffset = Math.max(0, Number(span.start_ns || 0) - bounds.start);
+    const startNs = Number(span.start_ns || 0);
+    const startOffset = Math.max(0, startNs - bounds.start);
     const statusClass = esc(String(status).toLowerCase());
-    const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}">${esc(status)}</span>`;
+    const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}" title="Span status">${esc(status)}</span>`;
     const statusMessage = String(span.status_message || "").trim();
     const color = serviceColor(span.service_name);
-    return `<section class="traceInspector traceInspector--jaeger traceInspector--inline" style="--trace-service-color:${color}">
+    const absolute = absoluteTimeText(startNs, span.timestamp);
+    const id = String(span.span_id || "");
+    return `<section class="traceInspector traceInspector--jaeger traceInspector--inline" style="--trace-service-color:${color}" data-inspector-span="${esc(id)}">
       <div class="traceInspectorHead traceInspectorHead--jaeger">
         <strong title="${esc(span.span_name || "span")}">${esc(span.span_name || "span")}</strong>
-        <div class="traceInspectorHead__meta"><span>Service: <b>${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span>Start Time: <b>${esc(formatDuration(startOffset))}</b></span>${statusBadge}</div>
+        <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(formatDuration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
       </div>
       ${statusMessage ? `<div class="traceInspectorStatusMessage"><b>Status message</b><span>${esc(statusMessage)}</span></div>` : ""}
-      <details class="traceJaegerGroup traceJaegerGroup--summary"><summary><b>Tags:</b>${renderAttributePreview(span.span_attributes)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(span.span_attributes)}</div></details>
-      <details class="traceJaegerGroup traceJaegerGroup--summary"><summary><b>Process:</b>${renderAttributePreview(span.resource_attributes)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(span.resource_attributes)}</div></details>
-      ${renderJaegerEvents(span)}
-      ${renderJaegerLinks(span)}
-      <div class="traceInspectorIdentity"><span>SpanID: <code>${esc(span.span_id)}</code></span><span>Parent: <code>${esc(span.parent_span_id || "root")}</code></span><span>Kind: <code>${esc(span.span_kind || "—")}</code></span></div>
+      <div class="traceInspectorIdentity">${idCopyHtml("SpanID", id, "Span ID")}${idCopyHtml("Parent", String(span.parent_span_id || ""), "parent Span ID")}<button type="button" class="traceInspectorIdentity__deepLink" data-copy-deep-link="${esc(id)}" title="Copy a link that opens this trace on this span">Copy deep link</button></div>
+      ${renderJaegerAttributes("Tags", span.span_attributes, { open: sectionOpen(id, "tags") })}
+      ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: sectionOpen(id, "process") }) : ""}
+      ${renderJaegerEvents(span, bounds)}
+      ${renderJaegerLinks(span, cache)}
     </section>`;
+  }
+
+  function spanDeepLink(spanId) {
+    const traceId = String(model.activeTrace?.trace_id || "");
+    return new URL(spanTraceUrl(traceId, spanId), window.location.href).toString();
+  }
+
+  // The inspector sits in the waterfall, whose own click handler ignores
+  // clicks outside span rows; these buttons are handled here.
+  function spanDetailClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const linked = target.closest("[data-linked-span]");
+    // The waterfall handler opens the linked trace; say which span to focus.
+    if (linked) { model.pendingSpanId = String(linked.getAttribute("data-linked-span") || ""); return; }
+    const kvCopy = target.closest("[data-kv-copy]");
+    if (kvCopy) {
+      event.preventDefault();
+      event.stopPropagation();
+      const row = kvCopy.closest("[data-kv-json]");
+      let value = null;
+      try { value = JSON.parse(row?.getAttribute("data-kv-json") || "null"); } catch (_) {}
+      const text = kvCopy.getAttribute("data-kv-copy") === "json"
+        ? JSON.stringify({ key: row?.getAttribute("data-kv-key") || "", value }, null, 2)
+        : (typeof value === "string" ? value : attributeValueText(value));
+      copyText(text, kvCopy);
+      return;
+    }
+    const idCopy = target.closest("[data-copy-span-field]");
+    if (idCopy) { event.preventDefault(); event.stopPropagation(); copyText(idCopy.getAttribute("data-copy-span-field") || "", idCopy); return; }
+    const deepLink = target.closest("[data-copy-deep-link]");
+    if (deepLink) {
+      event.preventDefault();
+      event.stopPropagation();
+      util.flashButtonText(deepLink, { copiedText: "Copied" });
+      copyText(spanDeepLink(deepLink.getAttribute("data-copy-deep-link") || ""), deepLink);
+      return;
+    }
+    const more = target.closest("[data-events-more]");
+    if (more) {
+      event.preventDefault();
+      event.stopPropagation();
+      const expanded = more.getAttribute("aria-expanded") !== "true";
+      more.setAttribute("aria-expanded", expanded ? "true" : "false");
+      more.textContent = expanded ? "show less" : "show more...";
+      more.parentElement?.querySelectorAll(".traceSpanEvents__list > .traceSpanEvent").forEach((item, index) => {
+        if (index >= EVENTS_INITIAL_COUNT) item.hidden = !expanded;
+      });
+      setSectionOpen(more.closest("[data-inspector-span]")?.getAttribute("data-inspector-span"), "events-more", expanded);
+      return;
+    }
+    const focus = target.closest("[data-focus-span]");
+    if (focus) {
+      event.preventDefault();
+      event.stopPropagation();
+      focusSpanInTimeline(String(focus.getAttribute("data-focus-span") || ""), { push: true });
+    }
+  }
+
+  // "toggle" does not bubble: listen in the capture phase.
+  function spanSectionToggle(event) {
+    const details = event.target instanceof HTMLDetailsElement ? event.target : null;
+    const spanId = details?.closest("[data-inspector-span]")?.getAttribute("data-inspector-span");
+    if (!details || !spanId) return;
+    const key = details.dataset.spanSection || (details.classList.contains("traceSpanEvent") ? `event:${details.dataset.eventIndex}` : "");
+    if (key) setSectionOpen(spanId, key, details.open);
+  }
+
+  function initSpanDetailEvents() {
+    dom.traceWaterfall?.addEventListener("click", spanDetailClick, true);
+    dom.traceWaterfall?.addEventListener("toggle", spanSectionToggle, true);
+  }
+
+  // Deep link target (?span=): expands the span's ancestors, shows its service
+  // and time window, opens its inspector, scrolls to it and highlights it.
+  function focusSpanInTimeline(spanId, { push = false, replace = true, scroll = true } = {}) {
+    const id = String(spanId || "");
+    const cache = activeTraceCache();
+    const node = cache.nodeById.get(id);
+    if (!node) return false;
+    for (let parent = cache.parentOf.get(node); parent; parent = cache.parentOf.get(parent)) model.collapsed.delete(String(parent.span.span_id || ""));
+    const service = String(node.span.service_name || "unknown");
+    const range = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
+    const total = Math.max(1, cache.extent.end - cache.extent.start);
+    const spanStart = (Number(node.span.start_ns || 0) - cache.extent.start) / total;
+    const spanEnd = spanStart + Number(node.span.duration_ns || 0) / total;
+    const outside = spanEnd < Number(range[0] || 0) || spanStart > Number(range[1] == null ? 1 : range[1]);
+    if (model.disabledServices.has(service) || outside) {
+      model.disabledServices.delete(service);
+      if (outside) model.traceViewRange = [0, 1];
+      renderTraceHeader();
+    }
+    model.openSpanIds.add(id);
+    model.activeSpanId = id;
+    model.focusedSpanId = id;
+    ns.traceViews?.showTimeline?.();
+    renderWaterfall();
+    ns.traceViews?.markFocusedSpan?.();
+    if (push || replace) {
+      const url = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
+      if (push) window.history.pushState({ traceId: model.activeTrace?.trace_id, spanId: id }, "", url);
+      else window.history.replaceState(window.history.state, "", url);
+    }
+    if (scroll) {
+      const row = [...(dom.traceWaterfall?.querySelectorAll(".traceSpanRow[data-span-id]") || [])].find((el) => el.getAttribute("data-span-id") === id);
+      row?.scrollIntoView?.({ block: "center" });
+      row?.focus?.({ preventScroll: true });
+    }
+    return true;
   }
 
   function renderInspector() {
@@ -2936,6 +3235,7 @@
     renderTraceHeader();
     renderWaterfall();
     renderInspector();
+    ns.traceViews?.render?.();
   }
 
   async function loadMeta() {
@@ -3158,6 +3458,8 @@
     const id = String(traceId || "").trim();
     if (!id) return;
     const seq = ++model.detailSeq;
+    const pendingSpanId = model.pendingSpanId;
+    model.pendingSpanId = "";
     showError("");
     setView(true);
     if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace…</div>';
@@ -3167,13 +3469,16 @@
       if (seq !== model.detailSeq) return;
       model.activeTrace = trace;
       model.activeSpanId = null;
+      model.focusedSpanId = "";
       model.openSpanIds.clear();
+      model.spanSections.clear();
       model.traceViewRange = [0, 1];
       model.disabledServices.clear();
       model.collapsed.clear();
       registerServiceColors((trace?.spans || []).map((span) => span.service_name));
-      if (push) window.history.pushState({ traceId: id }, "", route(`traces/${encodeURIComponent(id)}`));
+      if (push) window.history.pushState({ traceId: id }, "", spanTraceUrl(id, pendingSpanId));
       renderTrace();
+      ns.traceViews?.applyLocation?.();
     } catch (error) {
       if (seq !== model.detailSeq) return;
       model.activeTrace = null;
@@ -3190,6 +3495,7 @@
   function backToSearch({ push = true } = {}) {
     model.activeTrace = null;
     model.activeSpanId = null;
+    model.focusedSpanId = "";
     model.openSpanIds.clear();
     model.traceViewRange = [0, 1];
     model.disabledServices.clear();
@@ -3235,6 +3541,12 @@
     model.startDisplay = readStored(START_DISPLAY_KEY, ["absolute", "relative"], "absolute");
     initTracePickers();
     initWaterfallEvents();
+    initSpanDetailEvents();
+    ns.traceViews?.install?.({
+      model, activeTraceCache, renderWaterfall, focusSpanInTimeline, spanTraceUrl, enhanceTraceSelect,
+      serviceColor, formatDuration, esc, copyText, spanEventList, eventItemHtml, parseStructuredValue, spanDetailClick,
+      attributeEntries, spanKindLabel,
+    });
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
@@ -3262,7 +3574,9 @@
     window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", redrawOverview);
     window.addEventListener("popstate", () => {
       const id = traceIdFromPath();
-      if (id) loadTrace(id, { push: false });
+      // Same trace, other ?span= / ?view=: no reload.
+      if (id && id === String(model.activeTrace?.trace_id || "")) ns.traceViews?.applyLocation?.();
+      else if (id) loadTrace(id, { push: false });
       else backToSearch({ push: false });
     });
     window.addEventListener("chdash:host-changed", () => { reloadForHost(); });

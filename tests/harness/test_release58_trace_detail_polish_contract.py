@@ -30,7 +30,7 @@ def test_trace_inspector_formats_tags_process_and_events_like_jaeger_rows():
     ui = read('src/static/app_traces.js')
     css = read('src/static/style.css')
     assert 'renderJaegerAttributes' in ui
-    assert '>Process:</b>' in ui
+    assert 'renderJaegerAttributes("Process", span.resource_attributes, ' in ui
     assert 'renderJaegerEvents' in ui
     assert 'traceInspectorIdentity' in ui
     assert '.traceJaegerTags' in css

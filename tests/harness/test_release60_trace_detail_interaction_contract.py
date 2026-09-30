@@ -38,12 +38,12 @@ def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     css = read("src/static/style.css")
     assert 'renderAttributePreview' in js
     assert 'renderAttributeTable' in js
-    assert '>Tags:</b>' in js
-    assert '>Process:</b>' in js
+    assert 'renderJaegerAttributes("Tags", span.span_attributes, ' in js
+    assert 'renderJaegerAttributes("Process", span.resource_attributes, ' in js
     assert 'data-trace-waterfall-resizer' in js
     assert '--trace-label-width' in css
     assert '.traceWaterfallResizer' in css
-    assert '.traceAttributeTable__row' in css
+    assert '.traceKv__row' in css
     assert '--trace-depth-x' in css
 
 def test_selection_picker_closes_menu():
