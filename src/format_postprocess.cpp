@@ -1951,6 +1951,7 @@ struct CallScan {
   vector<unsigned char> kind;  // per byte: code, literal/quoted name, comment
   vector<size_t> match;        // `(` / `[` in code: position of its closer
   vector<size_t> parent;       // `(` / `[` in code: innermost enclosing opener
+  vector<size_t> opener;       // `)` / `]` in code: position of its opener
 };
 
 CallScan scan_call_brackets(string_view s) {
@@ -1958,6 +1959,7 @@ CallScan scan_call_brackets(string_view s) {
   out.kind.assign(s.size(), kCallCode);
   out.match.assign(s.size(), string::npos);
   out.parent.assign(s.size(), string::npos);
+  out.opener.assign(s.size(), string::npos);
   enum class State { Code, Single, Double, Back, Line, Block };
   State state = State::Code;
   vector<size_t> stack;
@@ -2008,6 +2010,7 @@ CallScan scan_call_brackets(string_view s) {
     } else if (c == ')' || c == ']') {
       if (!stack.empty() && s[stack.back()] == (c == ')' ? '(' : '[')) {
         out.match[stack.back()] = i;
+        out.opener[i] = stack.back();
         stack.pop_back();
       }
     }
@@ -2091,10 +2094,7 @@ CallOpener classify_call_opener(string_view s, const CallScan& scan, size_t pos,
   }
   if (prev == ')' && scan.kind[pos - 1] == kCallCode) {
     // Parametric aggregate: `name(params)(` — find `name(` of the params.
-    size_t open = string::npos;
-    for (size_t k = pos - 1; k-- > 0;) {
-      if (scan.match[k] == pos - 1) { open = k; break; }
-    }
+    const size_t open = scan.opener[pos - 1];
     if (open == string::npos) return CallOpener::None;
     size_t begin = open;
     if (classify_call_opener(s, scan, open, &begin) != CallOpener::Call) return CallOpener::None;
@@ -2250,85 +2250,112 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
   return out;
 }
 
-// After a join, a single projection that became one line moves back onto the
-// SELECT line when it fits there, as it would have if the expression
-// formatter had kept it inline: `SELECT greatest(least(x, hi), lo) AS v`.
+// After a join, a single projection (or GROUP BY / ORDER BY item) that became
+// one line moves back onto the keyword line when it fits there, as it would
+// have if the expression formatter had kept it inline:
+// `SELECT greatest(least(x, hi), lo) AS v`.
+string join_fitting_arguments_once(const string& text, size_t width, bool* changed) {
+  const CallScan scan = scan_call_brackets(text);
+  vector<size_t> starts{0};
+  for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\n') starts.push_back(i + 1);
+  const size_t line_count = starts.size();
+  auto line_of = [&](size_t pos) {
+    return static_cast<size_t>(std::upper_bound(starts.begin(), starts.end(), pos) - starts.begin()) - 1;
+  };
+  auto line_end = [&](size_t l) { return l + 1 < line_count ? starts[l + 1] - 1 : text.size(); };
+  vector<string> rows;
+  rows.reserve(line_count);
+  for (size_t l = 0; l < line_count; ++l) rows.emplace_back(text.substr(starts[l], line_end(l) - starts[l]));
+  vector<bool> removed(line_count, false);
+  vector<bool> touched(line_count, false);
+  // One pass in text order: an outer list's arguments come before the lists
+  // nested in them, and a joined argument takes its nested lists with it.
+  size_t joined_until = 0;
+  for (size_t open = 0; open < text.size(); ++open) {
+    if (scan.kind[open] != kCallCode || (text[open] != '(' && text[open] != '[')) continue;
+    const size_t close = scan.match[open];
+    if (close == string::npos || open < joined_until || line_of(close) == line_of(open)) continue;
+    size_t name_begin = open;
+    const CallOpener kind = classify_call_opener(text, scan, open, &name_begin);
+    if (kind == CallOpener::None) continue;
+    if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
+    vector<std::pair<size_t, size_t>> args;
+    size_t arg_start = open + 1;
+    int depth = 0;
+    for (size_t i = open + 1; i <= close; ++i) {
+      if (scan.kind[i] != kCallCode) continue;
+      const char c = text[i];
+      if (i < close && (c == '(' || c == '[' || c == '{')) ++depth;
+      else if (i < close && (c == ')' || c == ']' || c == '}')) --depth;
+      else if ((c == ',' && depth == 0) || i == close) {
+        args.push_back({arg_start, i});
+        arg_start = i + 1;
+      }
+    }
+    for (const auto& [begin, end] : args) {
+      size_t fa = begin;
+      while (fa < end && std::isspace(static_cast<unsigned char>(text[fa]))) ++fa;
+      size_t la = end;
+      while (la > fa && std::isspace(static_cast<unsigned char>(text[la - 1]))) --la;
+      if (fa >= la || fa < joined_until) continue;
+      const size_t first_line = line_of(fa);
+      const size_t last_line = line_of(la - 1);
+      if (first_line == last_line || touched[first_line] || touched[last_line]) continue;
+      bool blocked = false;
+      for (size_t i = starts[first_line]; i < line_end(last_line) && !blocked; ++i) {
+        if (scan.kind[i] == kCallComment) blocked = true;
+      }
+      const string_view arg = string_view(text).substr(fa, la - fa);
+      if (blocked || arg.find("::") != string_view::npos) continue;
+      const auto masked = mask_sql_surface(arg);
+      const string& code = masked.code_lower;
+      for (size_t i = 0; i + 6 <= code.size() && !blocked; ++i) {
+        if (code.compare(i, 6, "select") == 0 && (i == 0 || !is_call_ident_char(code[i - 1])) &&
+            (i + 6 == code.size() || !is_call_ident_char(code[i + 6]))) blocked = true;
+      }
+      if (blocked || code.find("over (\n") != string::npos) continue;
+      for (size_t i = fa; i < la && !blocked; ++i) {
+        if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
+        for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
+          if (i >= branch_name.size() && string_view(text).substr(i - branch_name.size(), branch_name.size()) == branch_name &&
+              is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
+        }
+      }
+      if (blocked) continue;
+      const string joined_arg = join_code_lines(arg);
+      if (joined_arg.empty()) continue;
+      string line = text.substr(starts[first_line], fa - starts[first_line]) + joined_arg +
+                    text.substr(la, line_end(last_line) - la);
+      if (utf8_width(line) > width) continue;
+      rows[first_line] = std::move(line);
+      for (size_t l = first_line; l <= last_line; ++l) {
+        touched[l] = true;
+        removed[l] = l != first_line;
+      }
+      joined_until = std::max(joined_until, la);
+      *changed = true;
+    }
+  }
+  string out;
+  bool first = true;
+  for (size_t l = 0; l < line_count; ++l) {
+    if (removed[l]) continue;
+    if (!first) out.push_back('\n');
+    first = false;
+    out += rows[l];
+  }
+  return out;
+}
+
 // An argument of an exploded list that still spans several lines (a wrapped
 // arithmetic or boolean chain, a lambda whose body wrapped) is joined back
 // onto its own line when it fits there: every argument is laid out again at
-// the position the explosion gave it. Outer lists are settled first.
+// the position the explosion gave it. Arguments sharing a line with one just
+// joined wait for the next pass.
 string join_fitting_arguments(string text, size_t width) {
-  for (int round = 0; round < 4096; ++round) {
-    const CallScan scan = scan_call_brackets(text);
-    vector<size_t> starts{0};
-    for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\n') starts.push_back(i + 1);
-    auto line_of = [&](size_t pos) {
-      return static_cast<size_t>(std::upper_bound(starts.begin(), starts.end(), pos) - starts.begin()) - 1;
-    };
-    auto line_end = [&](size_t l) { return l + 1 < starts.size() ? starts[l + 1] - 1 : text.size(); };
+  for (int pass = 0; pass < 4; ++pass) {
     bool changed = false;
-    for (size_t open = 0; open < text.size() && !changed; ++open) {
-      if (scan.kind[open] != kCallCode || (text[open] != '(' && text[open] != '[')) continue;
-      const size_t close = scan.match[open];
-      if (close == string::npos || line_of(close) == line_of(open)) continue;
-      size_t name_begin = open;
-      const CallOpener kind = classify_call_opener(text, scan, open, &name_begin);
-      if (kind == CallOpener::None) continue;
-      if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
-      // Argument boundaries at this list's own depth.
-      vector<std::pair<size_t, size_t>> args;
-      size_t arg_start = open + 1;
-      int depth = 0;
-      for (size_t i = open + 1; i <= close; ++i) {
-        if (scan.kind[i] != kCallCode) continue;
-        const char c = text[i];
-        if (i < close && (c == '(' || c == '[' || c == '{')) ++depth;
-        else if (i < close && (c == ')' || c == ']' || c == '}')) --depth;
-        else if ((c == ',' && depth == 0) || i == close) {
-          args.push_back({arg_start, i});
-          arg_start = i + 1;
-        }
-      }
-      for (const auto& [begin, end] : args) {
-        size_t fa = begin;
-        while (fa < end && std::isspace(static_cast<unsigned char>(text[fa]))) ++fa;
-        size_t la = end;
-        while (la > fa && std::isspace(static_cast<unsigned char>(text[la - 1]))) --la;
-        if (fa >= la) continue;
-        const size_t first_line = line_of(fa);
-        const size_t last_line = line_of(la - 1);
-        if (first_line == last_line) continue;
-        bool blocked = false;
-        for (size_t i = starts[first_line]; i < line_end(last_line) && !blocked; ++i) {
-          if (scan.kind[i] == kCallComment) blocked = true;
-        }
-        const string_view arg = string_view(text).substr(fa, la - fa);
-        if (blocked || arg.find("::") != string_view::npos) continue;
-        const auto masked = mask_sql_surface(arg);
-        const string& code = masked.code_lower;
-        for (size_t i = 0; i + 6 <= code.size() && !blocked; ++i) {
-          if (code.compare(i, 6, "select") == 0 && (i == 0 || !is_call_ident_char(code[i - 1])) &&
-              (i + 6 == code.size() || !is_call_ident_char(code[i + 6]))) blocked = true;
-        }
-        if (blocked || code.find("over (\n") != string::npos) continue;
-        for (size_t i = fa; i < la && !blocked; ++i) {
-          if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
-          for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
-            if (i >= branch_name.size() && text.substr(i - branch_name.size(), branch_name.size()) == branch_name &&
-                is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
-          }
-        }
-        if (blocked) continue;
-        const string joined_arg = join_code_lines(arg);
-        if (joined_arg.empty()) continue;
-        const string line = text.substr(starts[first_line], fa - starts[first_line]) + joined_arg +
-                            text.substr(la, line_end(last_line) - la);
-        if (utf8_width(line) > width) continue;
-        text = text.substr(0, starts[first_line]) + line + text.substr(line_end(last_line));
-        changed = true;
-        break;
-      }
-    }
+    text = join_fitting_arguments_once(text, width, &changed);
     if (!changed) break;
   }
   return text;
@@ -2341,10 +2368,12 @@ string merge_joined_single_select_items(string_view text, const vector<size_t>& 
   for (const size_t r : joined_rows) {
     if (r == 0 || r >= lines.size()) continue;
     const size_t head_indent = leading_space_count(lines[r - 1]);
-    if (trim_ascii_spaces(lines[r - 1]) != "SELECT" || leading_space_count(lines[r]) != head_indent + 4) continue;
+    const string head = trim_ascii_spaces(lines[r - 1]);
+    const bool select = head == "SELECT";
+    if ((!select && head != "GROUP BY" && head != "ORDER BY") || leading_space_count(lines[r]) != head_indent + 4) continue;
     if (r + 1 < lines.size() && leading_space_count(lines[r + 1]) > head_indent) continue;
     const string item = trim_ascii_spaces(lines[r]);
-    if (item.empty() || item.back() == ',' || contains_top_level_comment(item) || contains_heavy_structure(item)) continue;
+    if (item.empty() || item.back() == ',' || contains_top_level_comment(item) || (select && contains_heavy_structure(item))) continue;
     string merged = rtrim_spaces(lines[r - 1]) + " " + item;
     if (utf8_width(merged) > width) continue;
     lines[r - 1] = std::move(merged);
@@ -2775,9 +2804,14 @@ string Formatter::format_clause(string_view kw, string_view body) {
     }
     const auto items = split_top_level(base, ',');
     if (items.size() == 1 && trim_ascii_spaces(base).find('\n') == string::npos) {
-      string line = string(kw) + " " + format_expression(items.front());
-      if (!suffix.empty()) line += " " + suffix;
-      return line;
+      const string item = format_expression(items.front());
+      // Like a single projection: only a one-line item shares the keyword
+      // line, a multi-line one goes into the block.
+      if (item.find('\n') == string::npos || iequals_ascii(kw, "WINDOW")) {
+        string line = string(kw) + " " + item;
+        if (!suffix.empty()) line += " " + suffix;
+        return line;
+      }
     }
     string block = format_simple_item_block(items);
     if (!suffix.empty()) block += " " + suffix;

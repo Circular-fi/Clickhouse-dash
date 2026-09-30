@@ -429,8 +429,9 @@ is part of the query.
   `exists` subqueries and long `IN` value lists use the same layout.
 - In a condition list (`AND` / `OR` lines, `JOIN ... ON` lines), a call explodes
   under its own line.
-- A table function in `FROM` or `JOIN` explodes like a `FROM` subquery:
-  `FROM s3(` then the arguments, then `) AS alias`.
+- A table function in `FROM` or `JOIN`, and a single `ARRAY JOIN` expression,
+  explode like a `FROM` subquery: `FROM s3(` then the arguments, then
+  `) AS alias`.
 - `GROUP BY` and `ORDER BY` items follow the same rule as projections.
 - A window function keeps its `OVER (...)` layout (see the window fixtures);
   a call containing a multi-line `OVER` specification is never joined.

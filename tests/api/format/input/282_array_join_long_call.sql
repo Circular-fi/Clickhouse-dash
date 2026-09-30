@@ -1,0 +1,1 @@
+select trace_id, attr from otel.traces array join arrayFilter(x -> x.1 not in ('internal.debug', 'internal.sampling_priority'), arrayZip(mapKeys(span_attributes), mapValues(span_attributes))) as attr

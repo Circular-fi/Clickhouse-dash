@@ -1,0 +1,1 @@
+select if(status_code >= 500, 'server_error', if(status_code >= 400, 'client_error', if(status_code >= 300, 'redirect', 'success'))) as outcome from http.access_log
