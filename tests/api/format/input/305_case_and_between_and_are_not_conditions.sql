@@ -1,0 +1,2 @@
+-- CASE and BETWEEN keep their own AND
+select count() from otel.traces where service_name = 'checkout' and case when status_code = 'Error' and duration_ms > 1000 then 1 else 0 end = 1 and duration_ms between 10 and 20

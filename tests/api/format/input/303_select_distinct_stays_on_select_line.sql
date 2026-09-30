@@ -1,0 +1,1 @@
+select distinct service_name, span_name, toStartOfHour(timestamp) as hour from otel.traces where duration_ms > 1000

@@ -749,9 +749,43 @@ size_t find_matching_paren(string_view s, size_t open_pos) {
   return string::npos;
 }
 
+// `AND` / `OR` inside `CASE ... END` and the `AND` of `BETWEEN a AND b` are
+// not boolean connectives of the enclosing expression: splitting a condition
+// chain there turned `x BETWEEN a AND b` into two conditions on the page.
+struct BoolWordTracker {
+  int case_depth = 0;
+  bool between_pending = false;
+
+  // Called at every top-level position; returns true when a top-level `kw`
+  // starting at `i` must not be treated as a boolean connective.
+  bool skip(string_view s, size_t i, string_view kw) {
+    const bool bool_kw = iequals_ascii(kw, "AND") || iequals_ascii(kw, "OR");
+    if (!bool_kw || (i > 0 && is_ident_char(s[i - 1])) || !is_ident_char(s[i])) return false;
+    size_t end = i;
+    while (end < s.size() && is_ident_char(s[end])) ++end;
+    const string_view word = s.substr(i, end - i);
+    if (iequals_ascii(word, "CASE")) ++case_depth;
+    else if (iequals_ascii(word, "END") && case_depth > 0) --case_depth;
+    else if (iequals_ascii(word, "BETWEEN") && case_depth == 0) between_pending = true;
+    else if (iequals_ascii(word, kw)) {
+      if (case_depth > 0) return true;
+      if (iequals_ascii(kw, "AND") && between_pending) {
+        between_pending = false;
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
 int find_top_level_keyword(string_view s, string_view kw, size_t start = 0) {
   ScanState st;
+  BoolWordTracker words;
   for (size_t i = 0; i < s.size(); ++i) {
+    if (is_top_level(st) && words.skip(s, i, kw)) {
+      step_scan(st, s, i);
+      continue;
+    }
     if (i >= start && is_top_level(st) && i + kw.size() <= s.size() && iequals_ascii(s.substr(i, kw.size()), kw)) {
       const char prev = (i == 0) ? '\0' : s[i - 1];
       const char next = (i + kw.size() < s.size()) ? s[i + kw.size()] : '\0';
@@ -832,7 +866,12 @@ vector<string> split_top_level_keyword(string_view s, string_view kw) {
   size_t start = 0;
   bool found = false;
   ScanState st;
+  BoolWordTracker words;
   for (size_t i = 0; i < s.size(); ++i) {
+    if (is_top_level(st) && words.skip(s, i, kw)) {
+      step_scan(st, s, i);
+      continue;
+    }
     if (is_top_level(st) && i + kw.size() <= s.size() && iequals_ascii(s.substr(i, kw.size()), kw)) {
       const char prev = (i == 0) ? '\0' : s[i - 1];
       const char next = (i + kw.size() < s.size()) ? s[i + kw.size()] : '\0';
@@ -921,6 +960,20 @@ bool contains_top_level_comment(string_view s) {
       if (c == '#' || (c == '-' && n == '-') || (c == '/' && n == '*')) return true;
     }
     step_scan(st, s, i);
+  }
+  return false;
+}
+
+// A subquery anywhere in the expression (`SELECT` as a keyword, not
+// `selected_rows`, and not inside literals or comments).
+bool contains_select_keyword(string_view s) {
+  const string text = trim_ascii_spaces(s);
+  if (looks_like_query(text)) return true;
+  const string code = mask_sql_surface(text).code_lower;
+  for (size_t at = code.find("select"); at != string::npos; at = code.find("select", at + 1)) {
+    const bool left = at == 0 || !is_ident_char(code[at - 1]);
+    const bool right = at + 6 >= code.size() || !is_ident_char(code[at + 6]);
+    if (left && right) return true;
   }
   return false;
 }
@@ -2173,6 +2226,18 @@ bool is_layout_call_name(string_view name) {
   return true;
 }
 
+// `FROM VALUES(...)` written unquoted is the VALUES table function (the
+// INSERT ... VALUES payload never reaches the width pass).
+bool is_values_table_function(string_view s, size_t name_begin, size_t open) {
+  if (!iequals_ascii(s.substr(name_begin, open - name_begin), "VALUES")) return false;
+  size_t e = name_begin;
+  while (e > 0 && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\n')) --e;
+  size_t b = e;
+  while (b > 0 && is_ident_char(s[b - 1])) --b;
+  const string_view prev = s.substr(b, e - b);
+  return iequals_ascii(prev, "FROM") || iequals_ascii(prev, "JOIN");
+}
+
 // What the bracket at `pos` opens, for the width pass: a call's argument
 // list (`name(` or the `(args)` of a parametric `name(params)(`), an array
 // literal, a tuple list after `IN`, or a tuple element of an array literal.
@@ -2192,7 +2257,7 @@ CallOpener classify_call_opener(string_view s, const CallScan& scan, size_t pos,
     size_t b = pos - 1;
     while (b > 0 && is_call_ident_char(s[b - 1]) && scan.kind[b - 1] == kCallCode) --b;
     if (b > 0 && (s[b - 1] == '.' || s[b - 1] == '`')) return CallOpener::None;
-    if (!is_layout_call_name(s.substr(b, pos - b))) return CallOpener::None;
+    if (!is_layout_call_name(s.substr(b, pos - b)) && !is_values_table_function(s, b, pos)) return CallOpener::None;
     if (name_begin) *name_begin = b;
     return CallOpener::Call;
   }
@@ -2508,11 +2573,11 @@ string merge_joined_single_select_items(string_view text, const vector<size_t>& 
     if (r == 0 || r >= lines.size()) continue;
     const size_t head_indent = leading_space_count(lines[r - 1]);
     const string head = trim_ascii_spaces(lines[r - 1]);
-    const bool select = head == "SELECT";
+    const bool select = head == "SELECT" || head == "SELECT DISTINCT" || head == "SELECT ALL";
     if ((!select && head != "GROUP BY" && head != "ORDER BY") || leading_space_count(lines[r]) != head_indent + 4) continue;
     if (r + 1 < lines.size() && leading_space_count(lines[r + 1]) > head_indent) continue;
     const string item = trim_ascii_spaces(lines[r]);
-    if (item.empty() || item.back() == ',' || contains_top_level_comment(item) || (select && contains_heavy_structure(item))) continue;
+    if (item.empty() || item.back() == ',' || contains_top_level_comment(item) || (select && contains_select_keyword(item))) continue;
     string merged = rtrim_spaces(lines[r - 1]) + " " + item;
     if (utf8_width(merged) > width) continue;
     lines[r - 1] = std::move(merged);
@@ -2769,9 +2834,10 @@ string Formatter::format_statement(string_view s) {
     const int pos = find_top_level_keyword(text, "SELECT");
     out = pos < 0 ? cleanup_surface(text) : string("EXPLAIN SYNTAX\n") + format_statement(text.substr(static_cast<size_t>(pos)));
   } else if (starts_with_ci(text, "WITH") || starts_with_ci(text, "SELECT")) out = format_select_like(text);
-  else if (starts_with_ci(text, "CREATE TABLE")) out = format_create_table(text);
+  else if (starts_with_ci(text, "CREATE TABLE") || starts_with_ci(text, "CREATE OR REPLACE TABLE") ||
+           starts_with_ci(text, "CREATE TEMPORARY TABLE") || starts_with_ci(text, "REPLACE TABLE")) out = format_create_table(text);
   else if (starts_with_ci(text, "CREATE MATERIALIZED VIEW")) out = format_create_view(text, true);
-  else if (starts_with_ci(text, "CREATE VIEW")) out = format_create_view(text, false);
+  else if (starts_with_ci(text, "CREATE VIEW") || starts_with_ci(text, "CREATE OR REPLACE VIEW")) out = format_create_view(text, false);
   else if (starts_with_ci(text, "ALTER TABLE")) out = format_alter_table(text);
   else if (starts_with_ci(text, "INSERT INTO")) out = format_insert_select_like(text);
   else if (starts_with_ci(text, "DELETE FROM")) out = format_delete(text);
@@ -2874,6 +2940,27 @@ string Formatter::format_select_like(string_view s) {
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
   string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
+  // `DISTINCT [ON (...)]` and `ALL` qualify the whole projection list: they
+  // stay on the SELECT line instead of heading the first item.
+  string select_head = "SELECT";
+  auto take_word = [&](string_view word) {
+    if (!starts_with_ci(select_body, word) ||
+        (select_body.size() > word.size() && is_ident_char(select_body[word.size()]))) return false;
+    select_head += " " + string(word);
+    select_body = trim_ascii_spaces(select_body.substr(word.size()));
+    return true;
+  };
+  if (take_word("DISTINCT")) {
+    if (take_word("ON") && !select_body.empty() && select_body.front() == '(') {
+      const size_t close = find_matching_paren(select_body, 0);
+      if (close != string::npos) {
+        select_head += " " + collapse_whitespace(select_body.substr(0, close + 1));
+        select_body = trim_ascii_spaces(select_body.substr(close + 1));
+      }
+    }
+  } else {
+    take_word("ALL");
+  }
   auto items = split_top_level(select_body, ',');
   // On the local (comment-preserving) path the user's own line breaks reach
   // this point (formatQuery would have joined them): a single projection
@@ -2885,23 +2972,23 @@ string Formatter::format_select_like(string_view s) {
   auto [single_expr_for_alias, single_alias_for_alias] = items.size() == 1 ? split_top_level_as(items.front()) : std::pair<string,string>{string(), string()};
   const bool single_simple_alias = items.size() == 1 && !single_alias_for_alias.empty() &&
                                    single_expr_for_alias.find('\n') == string::npos &&
-                                   single_expr_for_alias.size() + single_alias_for_alias.size() + 8 <= threshold &&
-                                   !contains_heavy_structure(single_expr_for_alias);
+                                   single_expr_for_alias.size() + single_alias_for_alias.size() + 8 <= threshold;
   // The compact form is measured as the exact line it produces ("SELECT ",
   // the rendered expression and the quoted alias), not the raw body: a body
   // that fits the width on its own could still overflow once prefixed.
   string compact_select;
+  // Width decides, as for calls: only a subquery keeps the block form.
   if (items.size() == 1 && select_body.find('\n') == string::npos && select_body.size() <= threshold &&
-      (!contains_heavy_structure(items.front()) || single_simple_alias)) {
+      !contains_select_keyword(items.front())) {
     compact_select = single_simple_alias
-        ? "SELECT " + format_expression(single_expr_for_alias) + " AS " + format_alias_identifier(single_alias_for_alias)
-        : "SELECT " + format_expression(items.front());
+        ? select_head + " " + format_expression(single_expr_for_alias) + " AS " + format_alias_identifier(single_alias_for_alias)
+        : select_head + " " + format_expression(items.front());
     if (compact_select.find('\n') != string::npos || utf8_width(compact_select) > threshold) compact_select.clear();
   }
   if (!compact_select.empty()) {
     out += compact_select;
   } else {
-    out += "SELECT\n" + indent_block(format_item_block(items, true), 4);
+    out += select_head + "\n" + indent_block(format_item_block(items, true), 4);
   }
 
   for (size_t i = 0; i < poses.size(); ++i) {
@@ -4182,8 +4269,10 @@ string attach_view_as(const string& head) {
   return head + (head.find('\n') == string::npos ? " AS" : "\nAS");
 }
 
+string normalize_create_head(const string& head);
+
 string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
-  string head = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw_head)));
+  string head = normalize_create_head(normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw_head))));
   if (ends_with_ci(head, " AS")) {
     head = rtrim_spaces(head.substr(0, head.size() - 3));
   } else if (ends_with_ci(head, "AS")) {
@@ -4258,6 +4347,57 @@ string backquote_plain_column_name(const string& name) {
   bool plain = !std::isdigit(static_cast<unsigned char>(name.front()));
   for (const char ch : name) plain = plain && is_ident_char(ch);
   return plain ? "`" + name + "`" : name;
+}
+
+// formatQuery prints a column type's Tuple with two or more elements one
+// element per line (4 spaces per Tuple level below the column) and its closer
+// hugging the last element; the schema pass after it puts each Tuple closer on
+// its own line. A one-line type from the local (comment-preserving) path gets
+// the same text so both paths agree.
+string explode_tuple_types_like_format_query(const string& rhs, size_t column_indent) {
+  if (rhs.find('\n') != string::npos || rhs.find("Tuple(") == string::npos) return rhs;
+  const CallScan scan = scan_call_brackets(rhs);
+  // Tuple openers with at least two top-level elements.
+  vector<bool> explode(rhs.size(), false);
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    if (scan.kind[i] != kCallCode || rhs[i] != '(' || scan.match[i] == string::npos || i < 5) continue;
+    if (rhs.compare(i - 5, 5, "Tuple") != 0 || (i > 5 && is_ident_char(rhs[i - 6]))) continue;
+    explode[i] = count_call_arguments(rhs, scan, i, scan.match[i]) >= 2;
+  }
+  string out;
+  vector<size_t> tuple_levels;  // per open bracket: exploded Tuple depth, or npos
+  size_t depth = 0;
+  for (size_t i = 0; i < rhs.size(); ++i) {
+    const char c = rhs[i];
+    if (scan.kind[i] != kCallCode) { out += c; continue; }
+    if (c == '(' || c == '[') {
+      out += c;
+      if (c == '(' && explode[i]) {
+        ++depth;
+        tuple_levels.push_back(depth);
+        out += "\n" + string(column_indent + 4 * depth, ' ');
+        while (i + 1 < rhs.size() && rhs[i + 1] == ' ') ++i;
+      } else {
+        tuple_levels.push_back(string::npos);
+      }
+      continue;
+    }
+    if (c == ')' || c == ']') {
+      if (!tuple_levels.empty()) {
+        if (tuple_levels.back() != string::npos) --depth;
+        tuple_levels.pop_back();
+      }
+      out += c;
+      continue;
+    }
+    if (c == ',' && !tuple_levels.empty() && tuple_levels.back() != string::npos) {
+      out += ",\n" + string(column_indent + 4 * depth, ' ');
+      while (i + 1 < rhs.size() && rhs[i + 1] == ' ') ++i;
+      continue;
+    }
+    out += c;
+  }
+  return out;
 }
 
 // Column lists written with comments (usually one per column) take the local
@@ -4338,7 +4478,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
       lhs = render_name(lhs);
       width = std::max(width, utf8_width(lhs));
     }
-    parsed.emplace_back(structural ? "" : lhs, structural ? col : rhs);
+    parsed.emplace_back(structural ? "" : lhs, structural ? col : explode_tuple_types_like_format_query(rhs, 4));
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
@@ -4352,6 +4492,41 @@ string Formatter::format_commented_column_list(const string& head, const string&
   }
   out += ")";
   if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
+  return out;
+}
+
+// `create or replace table if not exists db.t on cluster c` (or a VIEW /
+// MATERIALIZED VIEW head) → keywords in
+// upper case, as formatQuery prints them; names keep their spelling.
+string normalize_create_head(const string& head) {
+  vector<string> words;
+  for (const auto& w : split_top_level(collapse_whitespace(head), ' ')) {
+    if (!trim_ascii_spaces(w).empty()) words.push_back(trim_ascii_spaces(w));
+  }
+  auto upper = [](string w) {
+    for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    return w;
+  };
+  size_t i = 0;
+  auto take = [&](std::initializer_list<const char*> kws) {
+    size_t k = i;
+    for (const char* kw : kws) {
+      if (k >= words.size() || !iequals_ascii(words[k], kw)) return false;
+      ++k;
+    }
+    for (; i < k; ++i) words[i] = upper(words[i]);
+    return true;
+  };
+  if (!take({"CREATE"}) && !take({"ATTACH"}) && !take({"REPLACE"})) return head;
+  take({"OR", "REPLACE"});
+  take({"TEMPORARY"});
+  if (!take({"TABLE"}) && !take({"MATERIALIZED", "VIEW"}) && !take({"VIEW"})) return head;
+  take({"IF", "NOT", "EXISTS"});
+  if (i < words.size()) ++i;  // the table name
+  if (take({"ON", "CLUSTER"}) && i < words.size()) ++i;
+  take({"TO"});
+  string out;
+  for (size_t k = 0; k < words.size(); ++k) out += (k ? " " : "") + words[k];
   return out;
 }
 
@@ -4399,7 +4574,7 @@ string Formatter::format_create_table(string_view s) {
     }
   }
 
-  const string head = trim_ascii_spaces(text.substr(0, par));
+  const string head = normalize_create_head(trim_ascii_spaces(text.substr(0, par)));
   const string cols = trim_ascii_spaces(text.substr(par + 1, close - par - 1));
   const string tail = trim_ascii_spaces(text.substr(close + 1));
   if (mask_sql_surface(cols).has_comments) {
@@ -4417,7 +4592,8 @@ string Formatter::format_create_table(string_view s) {
     // that took the local (comment-preserving) path looks the same.
     lhs = backquote_plain_column_name(lhs);
     width = std::max(width, utf8_width(lhs));
-    parsed.push_back({lhs, rhs});
+    const bool structural = lhs.front() != '`' && lhs.front() != '"';
+    parsed.push_back({lhs, structural ? rhs : explode_tuple_types_like_format_query(rhs, 4)});
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
@@ -4885,14 +5061,44 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   const size_t indent = leading_space_count(line);
   const string trimmed = line.substr(indent);
   if (starts_with_ci(trimmed, "CREATE ") || find_top_level_keyword(trimmed, "WITH FILL") >= 0) return {line};
-  for (const char* kw : {"SELECT ", "ORDER BY ", "GROUP BY "}) {
-    if (!starts_with_ci(trimmed, kw) || starts_with_ci(trimmed, "SELECT DISTINCT")) continue;
+  for (const char* kw : {"SELECT DISTINCT ", "SELECT ALL ", "SELECT ", "ORDER BY ", "GROUP BY "}) {
+    if (!starts_with_ci(trimmed, kw) || starts_with_ci(trimmed, "SELECT DISTINCT ON")) continue;
+    if (string_view(kw) == "SELECT " && (starts_with_ci(trimmed, "SELECT DISTINCT ") || starts_with_ci(trimmed, "SELECT ALL "))) continue;
     // A single item too long for the clause line goes into the block.
     vector<string> out{string(indent, ' ') + rtrim_spaces(kw)};
     for (string& piece : explode_overlong_line(string(indent + 4, ' ') + trimmed.substr(std::char_traits<char>::length(kw)), depth + 1)) {
       out.push_back(std::move(piece));
     }
     return out;
+  }
+  // A long `x BETWEEN a AND b` condition breaks before BETWEEN (one level
+  // deeper) rather than inside one of its bounds.
+  if (!starts_with_ci(trimmed, "WHERE ") && !starts_with_ci(trimmed, "PREWHERE ") && !starts_with_ci(trimmed, "HAVING ")) {
+    int at = find_top_level_keyword(trimmed, "NOT BETWEEN");
+    if (at < 0) at = find_top_level_keyword(trimmed, "BETWEEN");
+    size_t lead = 0;
+    for (const char* kw : {"AND ", "OR "}) if (starts_with_ci(trimmed, kw)) lead = std::char_traits<char>::length(kw);
+    if (at > static_cast<int>(lead) && scan.kind[indent + static_cast<size_t>(at)] == kCallCode) {
+      vector<string> out;
+      vector<string> pieces{rtrim_spaces(line.substr(0, indent + static_cast<size_t>(at))),
+                            string(indent + 4, ' ') + trimmed.substr(static_cast<size_t>(at))};
+      // Still too long: the upper bound goes on its own `AND` line under
+      // BETWEEN.
+      if (utf8_width(pieces.back()) > threshold) {
+        const string range = pieces.back().substr(indent + 4);
+        const size_t skip = starts_with_ci(range, "NOT BETWEEN") ? 11 : 7;
+        // Searched after the BETWEEN word, whose own AND would be skipped.
+        if (const int and_at = find_top_level_keyword(string_view(range).substr(skip), "AND"); and_at > 0) {
+          const size_t cut = skip + static_cast<size_t>(and_at);
+          pieces.back() = rtrim_spaces(string(indent + 4, ' ') + range.substr(0, cut));
+          pieces.push_back(string(indent + 4, ' ') + range.substr(cut));
+        }
+      }
+      for (const string& piece_line : pieces) {
+        for (string& piece : explode_overlong_line(piece_line, depth + 1)) out.push_back(std::move(piece));
+      }
+      return out;
+    }
   }
   if (const vector<string> operands = split_item_at_binary_operators(line, scan); !operands.empty()) {
     vector<string> out;

@@ -1,0 +1,2 @@
+-- window around the incident
+select count() from otel.traces where service_name = 'checkout' and grid_timestamp_value between start_ts - toIntervalSecond(window_seconds) and end_ts_value_long and x = 1

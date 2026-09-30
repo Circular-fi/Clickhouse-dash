@@ -1,0 +1,1 @@
+create or replace table if_exists_demo on cluster default (id UInt64, point Tuple(x Float64, y Float64)) engine = MergeTree order by id
