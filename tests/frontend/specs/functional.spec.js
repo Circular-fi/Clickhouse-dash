@@ -1429,4 +1429,15 @@ test('traces: the trace header copies the whole trace as JSON with the query edi
     if ('links_trace_id' in source) expect(span.links).toHaveLength(JSON.parse(source.links_trace_id).length);
   }
   await expect(button).not.toHaveClass(/\bis-copied\b/, { timeout: 4_000 });
+
+  // The header's Trace ID copy button also copies outside secure contexts
+  // (shared clipboard helper with the textarea fallback).
+  await page.evaluate(() => { window.__chdashTestCopiedText = ''; });
+  await page.locator('#traceDetailTitle [data-copy-active-trace]').click();
+  await expect.poll(() => page.evaluate(async () => {
+    if (window.isSecureContext && navigator.clipboard) {
+      try { return await navigator.clipboard.readText(); } catch (_) {}
+    }
+    return window.__chdashTestCopiedText || '';
+  })).toBe(traceId);
 });

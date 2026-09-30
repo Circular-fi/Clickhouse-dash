@@ -722,8 +722,11 @@
     renderDurationChart();
   }
 
+  // Through the shared helper: navigator.clipboard alone is missing outside
+  // secure contexts (plain-http deployments), where it falls back to a
+  // hidden textarea copy.
   function copyText(text, button) {
-    navigator.clipboard?.writeText?.(text).then(() => {
+    util.copyTextToClipboard(text).then(() => {
       if (!button) return;
       button.classList.add("is-copied");
       setTimeout(() => { button.classList.remove("is-copied"); }, 900);
