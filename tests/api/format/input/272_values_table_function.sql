@@ -1,0 +1,1 @@
+select k, sum(w) as total from values('k String, w UInt64', ('checkout', 1), ('payments', 1), ('inventory', 5), ('checkout', 1), ('shipping', 10)) group by k

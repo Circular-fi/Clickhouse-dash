@@ -1,0 +1,7 @@
+SELECT
+    [
+        ('checkout', 'payments', 250, 0.999),
+        ('payments', 'fraud-detection', 120, 0.9995),
+        ('frontend', 'checkout', 400, 0.99)
+    ] AS `dependency_slos`,
+    [('p50', 0.5), ('p99', 0.99)] AS `marks`

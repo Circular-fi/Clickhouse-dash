@@ -1,0 +1,1 @@
+select sum(multiIf(status >= 500, 5, status >= 400, 1, 0)) as penalty, multiIf(latency_ms < 100, 'fast', latency_ms < 1000, 'normal', 'slow') as latency_class from http.access_log group by latency_class

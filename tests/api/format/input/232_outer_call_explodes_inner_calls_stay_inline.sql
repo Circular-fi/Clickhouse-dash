@@ -1,0 +1,1 @@
+select coalesce(nullIf(span_attributes['http.route'], ''), nullIf(span_attributes['url.path'], ''), span_name) as route from otel.traces where service_name = 'frontend'

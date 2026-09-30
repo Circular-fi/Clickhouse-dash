@@ -1,0 +1,1 @@
+select * from remote('clickhouse-{01..06}.prod.internal:9000', otel, traces, 'readonly', '') as t inner join url('https://status.example.com/api/v2/incidents.json', 'JSONEachRow', 'id String, service String, status String') as i on t.service_name = i.service where t.timestamp > now() - interval 1 hour settings input_format_skip_unknown_fields = 1

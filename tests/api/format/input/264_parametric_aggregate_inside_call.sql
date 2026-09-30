@@ -1,0 +1,1 @@
+select round(quantileTDigestIf(0.99)(duration_ns / 1000000, status_code = 'STATUS_CODE_ERROR' and service_name = 'checkout'), 2) as p99_error_ms from otel.traces

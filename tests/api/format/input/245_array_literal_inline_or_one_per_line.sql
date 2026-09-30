@@ -1,0 +1,1 @@
+select ['checkout', 'payments'] as tier_one, ['checkout', 'payments', 'inventory', 'shipping', 'recommendations', 'frontend-proxy', 'ad-service'] as critical_services, has(['GET', 'HEAD'], http_method) as is_read from http.access_log

@@ -1,0 +1,1 @@
+select arrayFilter(s -> s.duration_ms > 250 and s.status = 'error' and s.service not in ('healthcheck', 'metrics-scraper'), spans) as slow_error_spans from otel.trace_rollups

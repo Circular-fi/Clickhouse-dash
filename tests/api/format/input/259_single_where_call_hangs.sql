@@ -1,0 +1,1 @@
+select trace_id from otel.trace_rollups where arrayExists(s -> s.status = 'error' and s.duration_ms > 1000 and s.service_name = 'checkout', spans)

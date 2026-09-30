@@ -1,0 +1,1 @@
+select argMax(tuple(status, message, updated_at), updated_at).1 as latest_status, tupleElement(arrayJoin(arrayZip(mapKeys(resource_attributes), mapValues(resource_attributes))), 1) as attr_key from ops.incidents

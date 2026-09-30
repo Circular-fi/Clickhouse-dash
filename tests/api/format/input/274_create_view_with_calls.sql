@@ -1,0 +1,1 @@
+create view otel.error_routes as select coalesce(nullIf(span_attributes['http.route'], ''), nullIf(span_attributes['url.path'], ''), span_name) as route, countIf(status_code = 'STATUS_CODE_ERROR') as errors from otel.traces group by route

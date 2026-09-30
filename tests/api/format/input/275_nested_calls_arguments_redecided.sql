@@ -1,0 +1,1 @@
+select formatDateTime(toStartOfInterval(timestamp, interval 5 minute), '%Y-%m-%d %H:%i') as bucket_label, arrayStringConcat(arrayMap(x -> lower(x), splitByChar(',', tags)), ',') as normalized_tags from otel.logs

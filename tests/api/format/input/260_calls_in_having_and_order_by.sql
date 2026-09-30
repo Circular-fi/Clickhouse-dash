@@ -1,0 +1,1 @@
+select service_name, quantileExact(0.99)(duration_ms) as p99 from otel.traces group by service_name having quantileExact(0.99)(duration_ms) > 2 * quantileExact(0.5)(duration_ms) and count() > 1000 order by quantileExact(0.99)(duration_ms) desc

@@ -1046,7 +1046,8 @@ string align_alias_line(string_view line, size_t target_as) {
 
 bool line_is_alignable_alias(string_view line) {
   const string t = trim_ascii_spaces(line);
-  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "FROM ") ||
+  // A closer line ends a multi-line item: `) AS x` and `] AS x` keep one space.
+  if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "]") || starts_with_ci(t, "FROM ") ||
       starts_with_ci(t, "JOIN ") || starts_with_ci(t, "ARRAY JOIN ") ||
       starts_with_ci(t, "GLOBAL ARRAY JOIN ")) return false;
   const int as_pos = find_alias_marker_for_alignment(line);
@@ -2192,6 +2193,14 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
     if (first != close) continue;
     if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
     bool blocked = false;
+    // A decision table nested anywhere inside keeps the enclosing call open.
+    for (size_t i = open + 1; i < close && !blocked; ++i) {
+      if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
+      for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
+        if (i >= branch_name.size() && text.substr(i - branch_name.size(), branch_name.size()) == branch_name &&
+            is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
+      }
+    }
     for (size_t i = starts[o]; i < line_end(k) && !blocked; ++i) {
       if (scan.kind[i] == kCallComment) blocked = true;
       else if (text[i] == '\n' && scan.kind[i] == kCallLiteral) blocked = true;
@@ -2244,6 +2253,87 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
 // After a join, a single projection that became one line moves back onto the
 // SELECT line when it fits there, as it would have if the expression
 // formatter had kept it inline: `SELECT greatest(least(x, hi), lo) AS v`.
+// An argument of an exploded list that still spans several lines (a wrapped
+// arithmetic or boolean chain, a lambda whose body wrapped) is joined back
+// onto its own line when it fits there: every argument is laid out again at
+// the position the explosion gave it. Outer lists are settled first.
+string join_fitting_arguments(string text, size_t width) {
+  for (int round = 0; round < 4096; ++round) {
+    const CallScan scan = scan_call_brackets(text);
+    vector<size_t> starts{0};
+    for (size_t i = 0; i < text.size(); ++i) if (text[i] == '\n') starts.push_back(i + 1);
+    auto line_of = [&](size_t pos) {
+      return static_cast<size_t>(std::upper_bound(starts.begin(), starts.end(), pos) - starts.begin()) - 1;
+    };
+    auto line_end = [&](size_t l) { return l + 1 < starts.size() ? starts[l + 1] - 1 : text.size(); };
+    bool changed = false;
+    for (size_t open = 0; open < text.size() && !changed; ++open) {
+      if (scan.kind[open] != kCallCode || (text[open] != '(' && text[open] != '[')) continue;
+      const size_t close = scan.match[open];
+      if (close == string::npos || line_of(close) == line_of(open)) continue;
+      size_t name_begin = open;
+      const CallOpener kind = classify_call_opener(text, scan, open, &name_begin);
+      if (kind == CallOpener::None) continue;
+      if (kind == CallOpener::Call && is_vertical_branch_call(text, scan, name_begin, open)) continue;
+      // Argument boundaries at this list's own depth.
+      vector<std::pair<size_t, size_t>> args;
+      size_t arg_start = open + 1;
+      int depth = 0;
+      for (size_t i = open + 1; i <= close; ++i) {
+        if (scan.kind[i] != kCallCode) continue;
+        const char c = text[i];
+        if (i < close && (c == '(' || c == '[' || c == '{')) ++depth;
+        else if (i < close && (c == ')' || c == ']' || c == '}')) --depth;
+        else if ((c == ',' && depth == 0) || i == close) {
+          args.push_back({arg_start, i});
+          arg_start = i + 1;
+        }
+      }
+      for (const auto& [begin, end] : args) {
+        size_t fa = begin;
+        while (fa < end && std::isspace(static_cast<unsigned char>(text[fa]))) ++fa;
+        size_t la = end;
+        while (la > fa && std::isspace(static_cast<unsigned char>(text[la - 1]))) --la;
+        if (fa >= la) continue;
+        const size_t first_line = line_of(fa);
+        const size_t last_line = line_of(la - 1);
+        if (first_line == last_line) continue;
+        bool blocked = false;
+        for (size_t i = starts[first_line]; i < line_end(last_line) && !blocked; ++i) {
+          if (scan.kind[i] == kCallComment) blocked = true;
+        }
+        const string_view arg = string_view(text).substr(fa, la - fa);
+        if (blocked || arg.find("::") != string_view::npos) continue;
+        const auto masked = mask_sql_surface(arg);
+        const string& code = masked.code_lower;
+        for (size_t i = 0; i + 6 <= code.size() && !blocked; ++i) {
+          if (code.compare(i, 6, "select") == 0 && (i == 0 || !is_call_ident_char(code[i - 1])) &&
+              (i + 6 == code.size() || !is_call_ident_char(code[i + 6]))) blocked = true;
+        }
+        if (blocked || code.find("over (\n") != string::npos) continue;
+        for (size_t i = fa; i < la && !blocked; ++i) {
+          if (text[i] != '(' || scan.kind[i] != kCallCode) continue;
+          for (const string_view branch_name : {string_view("multiIf"), string_view("caseWithExpression")}) {
+            if (i >= branch_name.size() && text.substr(i - branch_name.size(), branch_name.size()) == branch_name &&
+                is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
+          }
+        }
+        if (blocked) continue;
+        const string joined_arg = join_code_lines(arg);
+        if (joined_arg.empty()) continue;
+        const string line = text.substr(starts[first_line], fa - starts[first_line]) + joined_arg +
+                            text.substr(la, line_end(last_line) - la);
+        if (utf8_width(line) > width) continue;
+        text = text.substr(0, starts[first_line]) + line + text.substr(line_end(last_line));
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+  }
+  return text;
+}
+
 string merge_joined_single_select_items(string_view text, const vector<size_t>& joined_rows, size_t width) {
   if (joined_rows.empty()) return string(text);
   vector<string> lines = split_lines_keep(text);
@@ -4233,7 +4323,7 @@ string Formatter::try_format_insert_values(string_view s) {
 string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   vector<size_t> joined_rows;
   string out = collapse_fitting_calls(text, threshold, &joined_rows);
-  out = merge_joined_single_select_items(out, joined_rows, threshold);
+  out = join_fitting_arguments(merge_joined_single_select_items(out, joined_rows, threshold), threshold);
   if (!allow_explode) return out;
   vector<string> result;
   bool exploded = false;
@@ -4244,7 +4334,7 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   }
   // Splitting a line can leave the rest of its call on later lines with room
   // to join (`name(\n    params\n)(` followed by the argument lines).
-  return exploded ? collapse_fitting_calls(join_lines(result), threshold) : join_lines(result);
+  return exploded ? join_fitting_arguments(collapse_fitting_calls(join_lines(result), threshold), threshold) : join_lines(result);
 }
 
 // Explodes the widest call, array or IN list that starts on an overflowing
@@ -4328,7 +4418,7 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   produced.push_back(line.substr(0, best_begin) + parts.front());
   for (size_t i = 1; i + 1 < parts.size(); ++i) produced.push_back(string(base, ' ') + parts[i]);
   produced.push_back(string(base, ' ') + parts.back() + line.substr(best_end + 1));
-  const string settled = collapse_fitting_calls(join_lines(produced), threshold);
+  const string settled = join_fitting_arguments(collapse_fitting_calls(join_lines(produced), threshold), threshold);
   vector<string> out;
   for (const string& piece_line : split_lines_keep(settled)) {
     if (piece_line == line) return {line};

@@ -6,9 +6,7 @@ SELECT
         4
     ) AS `rounded_score`,
     toUInt64(
-        (metric_value - baseline_value)
-        * 1000000
-        / greatest(baseline_value, 1)
+        (metric_value - baseline_value) * 1000000 / greatest(baseline_value, 1)
     ) AS `scaled_delta`
 FROM anon.metrics_store
 WHERE

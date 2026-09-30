@@ -1,0 +1,1 @@
+select trace_id from otel.traces where (service_name, span_name) in (('checkout', 'POST /api/checkout'), ('payments', 'Charge'), ('inventory', 'ReserveStock'), ('shipping', 'Quote'))
