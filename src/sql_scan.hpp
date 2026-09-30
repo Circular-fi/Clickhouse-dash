@@ -732,6 +732,45 @@ inline std::vector<SqlIdentifierToken> sql_identifier_tokens(std::string_view sq
   return tokens;
 }
 
+// formatQuery back-quotes keyword-named callables (`FROM VALUES(…)` becomes
+// FROM `VALUES`(…)). When the user wrote that name unquoted as a call, the
+// input already parsed to the same AST, so give the call its original
+// spelling back. Only `` `name`( `` call sites are touched; quoted aliases and
+// column identifiers keep their quotes.
+inline std::string unquote_call_identifiers_written_unquoted(std::string formatted, std::string_view source) {
+  if (formatted.find('`') == std::string::npos) return formatted;
+  // Unquoted names the user wrote as calls (`name(`), lower-cased.
+  std::vector<std::string> unquoted_calls;
+  for (const auto& token : sql_identifier_tokens(source)) {
+    if (token.quoted) continue;
+    size_t after = token.end;
+    while (after < source.size() && (source[after] == ' ' || source[after] == '\n' || source[after] == '\t')) ++after;
+    if (after >= source.size() || source[after] != '(') continue;
+    std::string lower;
+    for (const char ch : token.decoded) lower.push_back(sql_ascii_lower(ch));
+    unquoted_calls.push_back(std::move(lower));
+  }
+  if (unquoted_calls.empty()) return formatted;
+  std::string out;
+  out.reserve(formatted.size());
+  size_t cursor = 0;
+  for (const auto& token : sql_identifier_tokens(formatted)) {
+    if (!token.quoted || token.end >= formatted.size() || formatted[token.end] != '(') continue;
+    const std::string& name = token.decoded;
+    bool plain = !name.empty() && sql_is_ident_start(name[0]);
+    for (const char ch : name) plain = plain && sql_is_ident_continue(ch);
+    if (!plain) continue;
+    std::string lower;
+    for (const char ch : name) lower.push_back(sql_ascii_lower(ch));
+    if (std::find(unquoted_calls.begin(), unquoted_calls.end(), lower) == unquoted_calls.end()) continue;
+    out.append(formatted, cursor, token.begin - cursor);
+    out += name;
+    cursor = token.end;
+  }
+  out.append(formatted, cursor, formatted.size() - cursor);
+  return out;
+}
+
 inline std::string restore_sql_quoted_identifiers(
     std::string formatted,
     std::string_view original

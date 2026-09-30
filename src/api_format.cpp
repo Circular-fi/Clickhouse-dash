@@ -362,6 +362,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     // the exact spelling of identifiers that the user explicitly quoted, as
     // well as the original spelling of string literals.
     pretty = restore_sql_quoted_identifiers(std::move(pretty), source_sql);
+    pretty = unquote_call_identifiers_written_unquoted(std::move(pretty), source_sql);
     pretty = restore_sql_single_quoted_literals(std::move(pretty), source_sql);
     pretty = restore_sql_heredocs(std::move(pretty), heredocs);
 

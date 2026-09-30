@@ -110,8 +110,12 @@ def check(api, ch, auth, origin, sql):
     again, err2, _ = fmt(api, out)
     if again is not None and again != out:
         res["issues"].append({"kind": "idempotent", "detail": again})
-    long_lines = [l for l in out.splitlines() if len(l) > width and len(l.strip().split()) > 1
-                  and not re.fullmatch(r"\s*('([^'\\]|\\.)*'|`[^`]*`)\s*,?\s*(AS \S+)?", l)]
+    # Comments are never re-wrapped (their text is the author's), so only the
+    # code part of a line counts.
+    def code_part(line):
+        return re.sub(r"\s*--.*$", "", line) if "'" not in line.split("--", 1)[0][-1:] else line
+    long_lines = [l for l in out.splitlines() if len(code_part(l)) > width and len(code_part(l).strip().split()) > 1
+                  and not re.fullmatch(r"\s*('([^'\\]|\\.)*'|`[^`]*`)\s*,?\s*(AS \S+)?", code_part(l))]
     if long_lines:
         res["issues"].append({"kind": "width", "detail": long_lines[:3]})
     return res
