@@ -200,6 +200,20 @@ string normalize_code_spacing(string_view s) {
       i = end + 1;
       continue;
     }
+    // A `--` line comment is copied verbatim to the end of its line. Spacing
+    // it as two minus operators produced `- -comment`, turning the comment
+    // into code (a trailing comment after CREATE TABLE no longer parsed).
+    if (c == '-' && n == '-') {
+      const size_t end = s.find('\n', i);
+      if (!out.empty() && out.back() != ' ' && out.back() != '\n') out.push_back(' ');
+      if (end == string_view::npos) {
+        out.append(s.substr(i));
+        break;
+      }
+      out.append(s.substr(i, end - i));
+      i = end - 1;
+      continue;
+    }
     if (c == '\'') {
       in_str = true;
       esc = false;
@@ -2102,6 +2116,8 @@ string align_multiline_settings(string text) {
   return join_lines(lines);
 }
 
+string take_trailing_line_comments(string* text);
+
 string Formatter::format(string_view s) {
   // One-line comment recovery only applies to a buffer pasted as a single
   // line, where a `--` comment visibly swallows the clauses after it. In a
@@ -2116,9 +2132,43 @@ string Formatter::format(string_view s) {
   text = strip_redundant_arith_parentheses(text);
   string leading;
   text = take_leading_comments(text, &leading);
+  const string trailing = take_trailing_line_comments(&text);
   string out = format_statement(text);
   if (!leading.empty()) out = leading + "\n" + out;
-  return align_multiline_settings(normalize_final_layout(cleanup_surface(out), threshold));
+  out = align_multiline_settings(normalize_final_layout(cleanup_surface(out), threshold));
+  if (!trailing.empty()) out += "\n" + trailing;
+  return out;
+}
+
+// Whole-line `--` comments after the last statement line stay on their own
+// lines after the formatted statement. Left inside the statement they were
+// absorbed into the last clause body and re-attached to its line
+// (`FROM t -- end of report`).
+string take_trailing_line_comments(string* text) {
+  const SqlMaskResult masked = mask_sql_surface(*text);
+  vector<string> comments;
+  size_t end = text->size();
+  while (end > 0) {
+    size_t line_end = end;
+    while (line_end > 0 && ((*text)[line_end - 1] == '\n' || (*text)[line_end - 1] == '\r' ||
+                            (*text)[line_end - 1] == ' ' || (*text)[line_end - 1] == '\t')) --line_end;
+    if (line_end == 0) break;
+    const size_t nl = text->rfind('\n', line_end - 1);
+    const size_t line_start = nl == string::npos ? 0 : nl + 1;
+    const string line = trim_ascii_spaces(string_view(*text).substr(line_start, line_end - line_start));
+    const bool blank_code = masked.code_lower.find_first_not_of(" \t\r\n", line_start) >= line_end;
+    if (line_start == 0 || !starts_with_ci(line, "--") || !blank_code) break;
+    comments.insert(comments.begin(), line);
+    end = line_start;
+  }
+  if (comments.empty()) return {};
+  *text = trim_ascii_spaces(string_view(*text).substr(0, end));
+  string out;
+  for (size_t i = 0; i < comments.size(); ++i) {
+    if (i) out += '\n';
+    out += comments[i];
+  }
+  return out;
 }
 
 string Formatter::format_statement(string_view s) {

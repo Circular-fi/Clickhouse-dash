@@ -70,9 +70,22 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
                 for stmt in split_statements(block):
                     if stmt.upper().startswith(("SELECT", "WITH", "CREATE", "INSERT", "ALTER", "EXPLAIN", "SHOW", "DESCRIBE")):
                         items.append((f"{table}:{row[name_col]}", stmt))
+    for path in sorted((ROOT / "tests/clickhouse-init").glob("*.sql")):
+        for stmt in split_statements(path.read_text(encoding="utf-8")):
+            if not stmt.lstrip().startswith("--"):
+                items.append((f"init:{path.name}", stmt))
     for path in sorted((ROOT / "tests/api/format/input").glob("*.sql")):
         for stmt in split_statements(path.read_text(encoding="utf-8")):
             items.append((f"fixture:{path.name}", stmt))
+    if COMMENTS:
+        # Comments route statements through the local formatter instead of
+        # ClickHouse's formatQuery; they never change the AST.
+        commented = []
+        for origin, stmt in items:
+            if "--" in stmt or "/*" in stmt:
+                continue
+            commented.append((origin + "+comments", "-- corpus leading comment\n" + stmt + "\n-- corpus trailing comment"))
+        items = commented
     seen, unique = set(), []
     for origin, stmt in items:
         if stmt not in seen:
@@ -87,6 +100,7 @@ def explain_ast(ch, auth, sql):
 
 
 LINE_WIDTH = None
+COMMENTS = False
 
 
 def fmt(api, sql):
@@ -136,9 +150,13 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--line-width", type=int, default=0,
                     help="format at this width (e.g. 40) to stress wrapping paths")
+    ap.add_argument("--comments", action="store_true",
+                    help="inject comments so every statement takes the local (non-formatQuery) path")
     args = ap.parse_args()
-    global LINE_WIDTH
+    ap_comments = args.comments
+    global LINE_WIDTH, COMMENTS
     LINE_WIDTH = args.line_width or None
+    COMMENTS = ap_comments
     auth = (args.user, args.password)
     items = corpus(args.ch, auth)
     if args.limit: items = items[: args.limit]
