@@ -1,0 +1,5 @@
+SELECT
+    cutToFirstSignificantSubdomainCustomWithWWW(
+        'www.example.org',
+        'public_suffix_list'
+    )

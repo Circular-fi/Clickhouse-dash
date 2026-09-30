@@ -1,0 +1,8 @@
+INSERT INTO ops.release_manifest
+VALUES
+    (
+        42,
+        ['release-stable', 'dev', 'security'],
+        ['2.4.0', '2.6.0-alpha', '2.4.0-sec1'],
+        map('owner', 'platform-team')
+    )

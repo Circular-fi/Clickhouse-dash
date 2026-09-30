@@ -2208,10 +2208,19 @@ string Formatter::format_select_like(string_view s) {
                                    single_expr_for_alias.find('\n') == string::npos &&
                                    single_expr_for_alias.size() + single_alias_for_alias.size() + 8 <= threshold &&
                                    !contains_heavy_structure(single_expr_for_alias);
+  // The compact form is measured as the exact line it produces ("SELECT ",
+  // the rendered expression and the quoted alias), not the raw body: a body
+  // that fits the width on its own could still overflow once prefixed.
+  string compact_select;
   if (items.size() == 1 && select_body.find('\n') == string::npos && select_body.size() <= threshold &&
       (!contains_heavy_structure(items.front()) || single_simple_alias)) {
-    if (single_simple_alias) out += "SELECT " + format_expression(single_expr_for_alias) + " AS " + format_alias_identifier(single_alias_for_alias);
-    else out += "SELECT " + format_expression(items.front());
+    compact_select = single_simple_alias
+        ? "SELECT " + format_expression(single_expr_for_alias) + " AS " + format_alias_identifier(single_alias_for_alias)
+        : "SELECT " + format_expression(items.front());
+    if (compact_select.find('\n') != string::npos || utf8_width(compact_select) > threshold) compact_select.clear();
+  }
+  if (!compact_select.empty()) {
+    out += compact_select;
   } else {
     out += "SELECT\n" + indent_block(format_item_block(items, true), 4);
   }
@@ -3776,6 +3785,13 @@ string Formatter::format_optimize_table(string_view s) {
   return out;
 }
 
+// INSERT ... VALUES keeps every value spelled exactly as written (VALUES
+// payloads are data, not expressions); only the separators and line breaks
+// around them are normalized:
+//   * the whole statement on one line when it fits the width;
+//   * otherwise `INSERT INTO target`, the column list on one indented line
+//     (or one column per line when that does not fit), `VALUES`, then one row
+//     per line (or one value per line for a row that does not fit).
 string Formatter::try_format_insert_values(string_view s) {
   const string text = trim_ascii_spaces(s);
   if (!starts_with_ci(text, "INSERT INTO ")) return {};
@@ -3783,26 +3799,114 @@ string Formatter::try_format_insert_values(string_view s) {
   if (values_pos < 0) return {};
   const string head = trim_ascii_spaces(text.substr(0, static_cast<size_t>(values_pos)));
   const string tail = trim_ascii_spaces(text.substr(static_cast<size_t>(values_pos) + 6));
-  const size_t par = head.find('(');
-  if (par == string::npos) return {};
-  const string cols = unwrap_outer_parens(head.substr(par));
-  const string vals = unwrap_outer_parens(tail);
-  if (cols.empty() || vals.empty()) return {};
-  const auto col_items = split_top_level(cols, ',');
-  const auto val_items = split_top_level(vals, ',');
-  string out = trim_ascii_spaces(head.substr(0, par)) + "\n    (\n";
-  for (size_t i = 0; i < col_items.size(); ++i) {
-    out += "        " + trim_ascii_spaces(col_items[i]);
-    if (i + 1 < col_items.size()) out += ',';
-    out += '\n';
+  if (tail.empty() || tail.front() != '(') return {};
+
+  // Head: `INSERT INTO target` plus an optional column list. Outside
+  // `INSERT INTO FUNCTION …` (left to the generic path) the target cannot be a
+  // call, so its first top-level `(` opens the column list.
+  string target = trim_ascii_spaces(head.substr(12));
+  if (starts_with_ci(target, "FUNCTION ") || starts_with_ci(target, "TABLE FUNCTION ")) return {};
+  string cols;
+  {
+    ScanState st;
+    for (size_t i = 0; i < target.size(); ++i) {
+      if (is_top_level(st) && target[i] == '(') {
+        const string inner = unwrap_outer_parens(target.substr(i));
+        if (inner.empty()) return {};
+        cols = inner;
+        target = trim_ascii_spaces(target.substr(0, i));
+        break;
+      }
+      step_scan(st, target, i);
+    }
   }
-  out += "    )\nVALUES\n    (\n";
-  for (size_t i = 0; i < val_items.size(); ++i) {
-    out += "        " + trim_ascii_spaces(val_items[i]);
-    if (i + 1 < val_items.size()) out += ',';
-    out += '\n';
+  if (target.empty() || target.find_first_of(" \t\n") != string::npos) return {};
+
+  // Rows: `(…), (…), …` at top level; anything else (e.g. trailing clauses)
+  // is left to the generic path.
+  vector<vector<string>> rows;
+  {
+    size_t i = 0;
+    while (i < tail.size()) {
+      while (i < tail.size() && (tail[i] == ' ' || tail[i] == '\n' || tail[i] == '\t' || tail[i] == ',')) ++i;
+      if (i >= tail.size()) break;
+      if (tail[i] != '(') return {};
+      const size_t start = i;
+      // ScanState tracks parentheses (and quotes): the row ends at the `)`
+      // that brings the scan back to top level.
+      ScanState row_state;
+      size_t end = string::npos;
+      for (size_t j = i; j < tail.size(); ++j) {
+        step_scan(row_state, tail, j);
+        if (tail[j] == ')' && is_top_level(row_state)) { end = j; break; }
+      }
+      if (end == string::npos) return {};
+      vector<string> items;
+      for (auto& item : split_top_level(tail.substr(start + 1, end - start - 1), ',')) items.push_back(trim_ascii_spaces(item));
+      rows.push_back(std::move(items));
+      i = end + 1;
+    }
   }
-  out += "    )";
+  if (rows.empty()) return {};
+
+  auto join = [](const vector<string>& items) {
+    string out;
+    for (size_t i = 0; i < items.size(); ++i) {
+      if (i) out += ", ";
+      out += items[i];
+    }
+    return out;
+  };
+  const vector<string> col_items = cols.empty() ? vector<string>{} : [&] {
+    vector<string> v;
+    for (auto& c : split_top_level(cols, ',')) v.push_back(trim_ascii_spaces(c));
+    return v;
+  }();
+  const bool multiline_value = [&] {
+    for (const auto& row : rows) for (const auto& v : row) if (v.find('\n') != string::npos) return true;
+    return false;
+  }();
+
+  string compact = "INSERT INTO " + target;
+  if (!col_items.empty()) compact += " (" + join(col_items) + ")";
+  compact += " VALUES ";
+  for (size_t r = 0; r < rows.size(); ++r) {
+    if (r) compact += ", ";
+    compact += "(" + join(rows[r]) + ")";
+  }
+  if (!multiline_value && utf8_width(compact) <= threshold) return compact;
+
+  string out = "INSERT INTO " + target;
+  if (!col_items.empty()) {
+    const string line = "    (" + join(col_items) + ")";
+    if (utf8_width(line) <= threshold) {
+      out += "\n" + line;
+    } else {
+      out += "\n    (\n";
+      for (size_t i = 0; i < col_items.size(); ++i) {
+        out += "        " + col_items[i];
+        if (i + 1 < col_items.size()) out += ',';
+        out += '\n';
+      }
+      out += "    )";
+    }
+  }
+  out += "\nVALUES";
+  for (size_t r = 0; r < rows.size(); ++r) {
+    const string suffix = r + 1 < rows.size() ? "," : "";
+    const string line = "    (" + join(rows[r]) + ")" + suffix;
+    if (line.find('\n') == string::npos && utf8_width(line) <= threshold) {
+      out += "\n" + line;
+      continue;
+    }
+    out += "\n    (\n";
+    for (size_t i = 0; i < rows[r].size(); ++i) {
+      out += "        " + rows[r][i];
+      if (i + 1 < rows[r].size()) out += ',';
+      out += '\n';
+    }
+    out += "    )" + suffix;
+  }
   return out;
 }
 

@@ -1,0 +1,5 @@
+INSERT INTO ops.deploy_events
+VALUES
+    (1, 'api-gateway', 'deployed', now()),
+    (2, 'auth-service', 'rolled_back', now()),
+    (3, 'billing-worker', 'deployed', now())
