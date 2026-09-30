@@ -46,6 +46,8 @@
       state.features.traces = { enabled: traces.enabled === true };
       const logs = data && data.features && data.features.logs ? data.features.logs : {};
       state.features.logs = { enabled: logs.enabled === true, body_search: String(logs.body_search || "token") };
+      const metrics = data && data.features && data.features.metrics ? data.features.metrics : {};
+      state.features.metrics = { enabled: metrics.enabled === true };
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
@@ -423,12 +425,14 @@
     const explorerEnabled = nav.explorer !== false;
     const tracesEnabled = nav.traces === true;
     const logsEnabled = nav.logs === true;
-    const hidden = !explorerEnabled && !tracesEnabled && !logsEnabled;
+    const metricsEnabled = nav.metrics === true;
+    const hidden = !explorerEnabled && !tracesEnabled && !logsEnabled && !metricsEnabled;
     dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
     if (dom.pageSelect) dom.pageSelect.hidden = hidden;
     if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
     if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
     if (dom.navLogsButton) dom.navLogsButton.hidden = !logsEnabled;
+    if (dom.navMetricsButton) dom.navMetricsButton.hidden = !metricsEnabled;
   }
 
   function applyProductFeatures() {
@@ -436,8 +440,9 @@
     const explorerEnabled = f.enabled !== false;
     const tracesEnabled = state.features?.traces?.enabled === true;
     const logsEnabled = state.features?.logs?.enabled === true;
-    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled });
-    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled });
+    const metricsEnabled = state.features?.metrics?.enabled === true;
+    applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
+    storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
       const next = api.resolveUrl("query");
       window.history.replaceState({ workspace: "query" }, "", next);
@@ -451,11 +456,15 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {}, logs: state.features?.logs || {} } }));
+    if (!metricsEnabled && /\/metrics(?:\/|$)/.test(window.location.pathname)) {
+      window.location.replace(api.resolveUrl("query"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {}, logs: state.features?.logs || {}, metrics: state.features?.metrics || {} } }));
   }
 
   function setPageSelectorValue(value) {
-    const labels = { query: "Query", explorer: "Explorer", traces: "Traces", logs: "Logs" };
+    const labels = { query: "Query", explorer: "Explorer", traces: "Traces", logs: "Logs", metrics: "Metrics" };
     const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
     if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
@@ -1549,6 +1558,14 @@
     });
 
     if (dom.pageSelectButton) dom.pageSelectButton.addEventListener("click", togglePageMenu);
+    // Metrics is its own page: every other shell navigates to it.
+    dom.navMetricsButton?.addEventListener("click", () => {
+      if (document.body?.dataset?.page !== "metrics") window.location.assign(api.resolveUrl("metrics"));
+    });
+    // Same for Logs, whichever shell holds the switcher.
+    dom.navLogsButton?.addEventListener("click", () => {
+      if (document.body?.dataset?.page !== "logs") window.location.assign(api.resolveUrl("logs"));
+    });
     if (dom.pageSelectMenu) {
       for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) b.addEventListener("click", () => closePageMenu());
     }

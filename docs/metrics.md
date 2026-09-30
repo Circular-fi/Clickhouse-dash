@@ -6,8 +6,8 @@ contrib ClickHouse exporter. The exporter writes one table per point kind:
 `<prefix>_exponential_histogram` and `<prefix>_summary`. Metrics follow the
 host selected in the UI and are read through that host's `system_uri`.
 
-This document covers the configuration and the schema-detection endpoint.
-The metrics browser builds on it.
+This document covers the configuration, the schema-detection endpoint, the
+metrics browser page (`/metrics`) and the API behind it.
 
 ## Configuration
 
@@ -90,6 +90,256 @@ exporter's `Exemplars Nested(...)` columns, flattened to `Exemplars.*` arrays;
 summaries have none. `features.trace_correlation` is true when some kind has
 exemplar trace and span ids and traces are enabled. Time bounds are
 table-wide (not narrowed by the service allowlist).
+
+## Metrics browser page (`/metrics`)
+
+The page switcher lists **Metrics** when `/api/version` reports
+`features.metrics.enabled` (the last answer is cached in
+`chdash.pageNav.v1`, like Explorer and Traces, so the switcher is settled at
+first paint). The page has:
+
+- **Catalog** (left): services, each with its metrics and a type badge
+  (`gauge`, `sum`, `hist`, `exp hist`, `summary`) and a unit badge; the
+  search box filters by metric or service name. A range without points offers
+  to jump to the last 24 hours holding data (`/api/metrics/meta` time
+  bounds).
+- **Toolbar**: the Traces time range picker (relative ranges are resolved for
+  each load), *Add panel* (up to 6 charts) and *Refresh*.
+- **Panels**: a click in the catalog charts the metric in the active panel.
+  The header shows the name, type, unit, temporality / monotonicity, service
+  and description. Controls: aggregation (the list the server offers for the
+  type), group-by (multi-select of point attribute keys), filter chips
+  (`=` / `!=`, key and value autocompletion from `/api/metrics/attributes`)
+  and the exemplar toggle.
+- **Chart**: lines per series (top 20 + "Other", dashed), a unit-aware value
+  axis (`s`/`ms`/... -> durations, `By` -> bytes, `{thing}` -> counts,
+  `/s` rates), a crosshair tooltip with every series value, legend toggles
+  (Alt+click shows one series only) and exemplar diamonds. Exemplars sit on
+  the value axis when the plotted aggregation has the metric unit (gauges,
+  quantiles, averages) and on a strip at the bottom otherwise (rates,
+  counts); overlapping diamonds are thinned (largest value kept) and a click
+  opens `/traces/<trace_id>?span=<span_id>`. Series exported less often than
+  the bucket are drawn across their regular empty buckets. Summaries show a
+  note: their quantiles are per series only.
+
+Everything is in the URL: `from` / `to` (raw range, e.g. `now-6h`), then the
+first panel as `service`, `metric`, `kind`, `agg`, `group_by=k1,k2`,
+repeatable `filter=k=v` / `filter_not=k=v`, `exemplars=0`; further panels as
+repeatable `panel=<the same parameters, URL-encoded>`; `active=<index>`.
+
+## Metrics browser API
+
+Four read-only routes back the `/metrics` page. They exist only when
+`metrics.enabled` is true (otherwise `404`, like the traces routes), read the
+exporter tables through the host's `system_uri`, and apply
+`traces.service_allowlist` to every query (`service_allowlist_predicate()` in
+`src/otel_allowlist.hpp`, shared with the traces routes). A service outside
+the allowlist simply has no data.
+
+Common parameters: `host_id` (optional with one host), `start_ms` / `end_ms`
+(required, epoch milliseconds, at most 90 days apart). Errors:
+`400 invalid_metrics_range` (catalog window) / `400 invalid_metrics_request`
+(missing or invalid parameter), `404 unknown_host`, `404 metrics_table_missing`
+(the kind's table does not exist), `503 metrics_source_unavailable`,
+`503 metrics_query_failed` (ClickHouse error text). Every query carries
+`SETTINGS max_execution_time = 30`; every response has
+`timing_ms: {query, total}`.
+
+`kind` is one of `gauge`, `sum`, `histogram`, `exponential_histogram`,
+`summary` (tables `<table_prefix>_<kind>`).
+
+### `GET /api/metrics/catalog`
+
+Every metric with points in the window, per service. One `UNION ALL` branch
+per existing kind table (existence read from `system.tables`, cached 60 s):
+
+```sql
+SELECT kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max, points FROM (
+  SELECT 'histogram' AS kind, toString(ServiceName) AS service, MetricName AS metric,
+         any(MetricUnit) AS unit, any(MetricDescription) AS description,
+         toString(min(AggregationTemporality)) AS tmin, toString(max(AggregationTemporality)) AS tmax,
+         '' AS mono_min, '' AS mono_max, toString(count()) AS points
+  FROM otel.otel_metrics_histogram
+  PREWHERE TimeUnix >= fromUnixTimestamp64Milli(:start) AND TimeUnix <= fromUnixTimestamp64Milli(:end)
+  WHERE <allowlist> GROUP BY ServiceName, MetricName
+  UNION ALL ...)
+ORDER BY service, metric, kind LIMIT 5001
+```
+
+`GROUP BY ServiceName, MetricName` follows the exporter's sorting key prefix.
+At most 5000 entries (`truncated: true` beyond). Answers are cached 60 s per
+host, allowlist and minute-rounded window (`cache: {hit, age_ms, ttl_ms}`;
+`refresh=1` bypasses the cache).
+
+```json
+{"v": 1, "source_host_id": "local", "range": [s, e],
+ "services": [{"name": "api_service", "metrics": [
+   {"name": "http.server.request.duration", "kind": "histogram", "unit": "s",
+    "description": "Duration of HTTP server requests.", "temporality": "delta",
+    "monotonic": null, "points": 8641}]}],
+ "service_count": 12, "metric_count": 72, "truncated": false, "limit": 5000,
+ "kinds": ["gauge", "sum", "histogram", "exponential_histogram", "summary"],
+ "timing_ms": {...}, "cache": {...}}
+```
+
+`temporality` is `delta`, `cumulative`, `mixed` or `null` (gauges, summaries);
+`monotonic` is set for sums only.
+
+### `GET /api/metrics/attributes`
+
+`kind`, `service`, `metric`, window, optional `filter` / `filter_not` (see
+series). Point attributes (`Attributes`) only.
+
+- Without `key`: `SELECT DISTINCT toString(arrayJoin(mapKeys(Attributes)))
+  ... PREWHERE ServiceName = :s AND MetricName = :m AND <TimeUnix window>
+  LIMIT 201` -> `{"keys": [...sorted], "truncated": false}` (200 keys max).
+- With `key`: the top 100 values by point count (`mapContains(Attributes, key)`,
+  `GROUP BY v ORDER BY n DESC, v`) -> `{"key", "values": [{"value", "points"}],
+  "truncated"}`. Filters on the same key are ignored so the list stays usable
+  for autocompletion.
+
+### `GET /api/metrics/series`
+
+Parameters: `kind`, `service`, `metric`, window, `bucket_origin_ms` (the
+browser's local midnight), `agg`, `group_by=k1,k2` (up to 5 point attribute
+keys), repeatable `filter=k=v` / `filter_not=k=v` (split on the first `=`;
+several values of one key become `IN` / `NOT IN`), `limit` (top-K groups,
+default 20, 1..50), optional `step_ms`.
+
+**Buckets.** The smallest of 10 s, 15 s, 30 s, 1, 2, 5, 10, 15, 30 min, 1, 2,
+3, 6, 12 h, 1, 2, 7 d giving at most 120 buckets (60-120 in practice: 1 h ->
+30 s, 24 h -> 15 min, 7 d -> 2 h). They lie on a grid anchored at
+`bucket_origin_ms` like the Traces analytics:
+`origin + intDiv(toUnixTimestamp64Milli(TimeUnix) - origin, size) * size`, so
+day buckets start at local midnight. `timestamps` is the dense grid from the
+bucket holding `start_ms` to the one holding `end_ms`; each series has one
+value (or `null`) per timestamp. Rates (`rate`, `count_rate`) divide by the
+seconds of the bucket inside the window, so the first and last buckets, which
+the window usually cuts, are not under-reported.
+
+**Aggregations** (`aggs` lists what the metric supports, the first is the
+default except summaries, which default to `p50`):
+
+| Kind | Aggregations | Computation |
+| --- | --- | --- |
+| gauge | `avg`, `min`, `max`, `last`, `sum` | avg/min/max over every point of the group in the bucket. Per series (`cityHash64(Attributes, ResourceAttributes)`) the last value in the bucket (`argMax(Value, TimeUnix)`): `last` averages them, `sum` adds them. |
+| sum, monotonic | `rate`, `increase` | Per-point deltas (below), `increase` = their sum per bucket, `rate` = increase / seconds of the bucket inside the window. |
+| sum, not monotonic | `last`, `avg`, `min`, `max` (cumulative) or `sum`, `rate` (delta only) | Cumulative up/down counters are levels: gauge math. |
+| histogram | `p50`, `p90`, `p95`, `p99`, `avg`, `count_rate`, `count` | Bucket counts added per group and bucket, quantiles interpolated; `avg = sum(Sum) / sum(Count)`, `count = sum(Count)`, `count_rate = count / seconds of the bucket inside the window`. |
+| exponential_histogram | same as histogram | Exponential buckets merged, same quantile rule. |
+| summary | `p<q>` for every stored quantile (`p0`, `p50`, `p90`, `p99`, `p100`...), `avg`, `count_rate` | Quantiles per series only; `avg` / `count_rate` from `Count` / `Sum` deltas. |
+
+**Counter deltas and resets.** A delta point (`AggregationTemporality = 1`)
+contributes its value. A cumulative point (`2`) contributes its difference to
+the previous point of the same series, found with
+`lagInFrame(...) OVER (PARTITION BY cityHash64(Attributes, ResourceAttributes)
+ORDER BY TimeUnix)`. When the `StartTimeUnix` changed or the value decreased
+it is a counter reset: the point contributes its whole value (the counter
+restarted from zero, Prometheus `increase()` rule) instead of a negative
+jump. The first point of a series has no predecessor and no delta, so the
+scan starts `max(bucket, 15 min)` before `start_ms` and only points inside the
+window are counted. Deltas land in the bucket of the later point.
+
+**Histogram differences.** Cumulative histogram points are differenced the
+same way, element by element on `BucketCounts` and on `Count` / `Sum`. A reset
+(new `StartTimeUnix`, `Count` decrease, any bucket decrease, different bucket
+count or different `ExplicitBounds`) keeps the point's own counts. Differences
+are then added with `sumForEach` per group, bucket and bounds; groups whose
+series use different bounds are merged in C++ by moving each source bucket to
+the target bucket holding its upper bound. All-delta metrics skip the window
+function entirely.
+
+**Quantiles** follow Prometheus `histogram_quantile`: rank = q x total count;
+the first bucket whose cumulative count reaches the rank holds the quantile,
+linearly interpolated between its bounds; the first bucket starts at 0 when
+its upper bound is positive; a rank in the `+Inf` bucket answers the largest
+finite bound.
+
+**Exponential histograms.** Bucket `i` of `PositiveBucketCounts` with offset
+`o` covers `(base^(o+i), base^(o+i+1)]`, `base = 2^(2^-scale)`; negative
+buckets mirror them and `ZeroCount` is the `[0, 0]` bucket. Rows are
+aggregated per `(Scale, PositiveOffset, NegativeOffset)`, then merged in C++
+at the smallest scale of the group (index `k` at scale `s` becomes
+`floor(k / 2^(s - min_scale))`). Cumulative points are differenced when the
+scale and offsets did not change (otherwise treated as a reset). Quantiles are
+linear inside the exponential bucket.
+
+**Summaries.** Summary quantiles are precomputed by each producer and cannot
+be merged: a quantile aggregation ignores `group_by`, draws one line per
+series (the last value in each bucket) and answers `per_series: true` with a
+`note`. `avg` and `count_rate` aggregate normally.
+
+**Top-K and "other".** Groups are ranked by the sum of `|value|` over the
+buckets (quantiles: by observation count). The first `limit` are returned,
+the rest are folded into one series `{"key": "__other__", "other": true}`:
+additive values are added, averages weighted by point count, min/max kept,
+histogram buckets merged before the quantile. Per-series summaries fold
+nothing (`truncated: true` only). ClickHouse returns at most 300000 (group,
+bucket) rows; beyond that `truncated_rows: true`.
+
+```json
+{"v": 1, "source_host_id": "local", "kind": "histogram", "service": "api_service",
+ "metric": "http.server.request.duration", "unit": "s", "description": "...",
+ "temporality": "delta", "monotonic": null, "points": 8641,
+ "agg": "p95", "default_agg": "p50",
+ "aggs": ["p50", "p90", "p95", "p99", "avg", "count_rate", "count"],
+ "value_unit": "s", "range": [s, e], "bucket_ms": 900000, "bucket_origin_ms": 0,
+ "group_by": ["span.name"], "filters": [{"key": "k", "op": "=", "value": "v"}],
+ "timestamps": [t0, t1, ...],
+ "series": [{"key": "request.validate", "labels": {"span.name": "request.validate"},
+             "values": [0.1994, null, ...], "total": 123.4, "other": false}],
+ "other_series_count": 0, "group_count": 1, "top_k": 20, "truncated": false,
+ "truncated_rows": false, "per_series": false, "note": null, "timing_ms": {...}}
+```
+
+`value_unit` is the metric unit, `<unit>/s` for `rate` (`/s` without a unit),
+`/s` for `count_rate` and empty for `count`. A missing group-by attribute is
+`""` in `labels`; the series `key` joins the label values with `\u001f`.
+
+### `GET /api/metrics/exemplars`
+
+`kind` (not `summary`), `service`, `metric`, window, `bucket_origin_ms`,
+`step_ms`, filters as for series, `per_bucket` (1..20, default 3), `limit`
+(1..2000, default 500). The largest exemplars of each series bucket:
+
+```sql
+SELECT toString(<bucket of e.1>) AS b, toString(toUnixTimestamp64Milli(e.1)), toString(e.2), e.3, e.4, attrs
+FROM (SELECT arrayJoin(arrayZip(`Exemplars.TimeUnix`, `Exemplars.Value`, `Exemplars.TraceId`, `Exemplars.SpanId`)) AS e,
+             toJSONString(Attributes) AS attrs
+      FROM otel.otel_metrics_histogram
+      PREWHERE ServiceName = :s AND MetricName = :m AND <TimeUnix window>
+      WHERE <allowlist> <filters> AND notEmpty(`Exemplars.TraceId`))
+WHERE notEmpty(e.3) AND e.1 >= :start AND e.1 <= :end
+ORDER BY e.2 DESC, e.1 LIMIT :per_bucket BY b LIMIT :limit + 1
+```
+
+```json
+{"v": 1, "kind": "histogram", "service": "api_service", "metric": "...",
+ "bucket_ms": 900000, "exemplars": [{"t": 1789780980214, "value": 0.19,
+ "trace_id": "0000...46fa88", "span_id": "00000000a37d4400",
+ "attributes": {"span.name": "request.validate"}}],
+ "truncated": false, "per_bucket": 3, "traces_enabled": true, "timing_ms": {...}}
+```
+
+Exemplars are sorted by time; `trace_id` / `span_id` open
+`/traces/<trace_id>?span=<span_id>`.
+
+### Measured timings
+
+Local stack (880 thousand metric points, one ClickHouse shared with other
+test clients), full 24-hour fixture window, cold cache, server-side total:
+
+| Request | Time |
+| --- | --- |
+| catalog (12 services, 72 metrics, 5 tables) | 70 ms |
+| series gauge `queue.depth` by `host.name` | 40 ms |
+| series cumulative counter, rate by `status.code` | 35 ms |
+| series cumulative counter, 2 group keys, top 2 + other | 80-130 ms |
+| series delta histogram p95 | 20 ms |
+| series cumulative histogram p95 (window function) | 95 ms |
+| series exponential histogram / summary | 10-15 ms |
+| attributes keys / values | 8 ms |
+| exemplars (97 buckets x 3) | 15 ms |
 
 ## Test fixture
 

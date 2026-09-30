@@ -132,7 +132,6 @@ void write_string_array(rapidjson::Writer<rapidjson::StringBuffer>& w, const std
 
 // The ServiceName allowlist predicate is shared with the other OTel signals.
 using otel::service_allowlist_predicate;
-
 bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& req, std::string* message) {
   struct Check { const char* param; bool enabled; const char* label; };
   const Check checks[] = {

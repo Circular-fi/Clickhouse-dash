@@ -144,11 +144,11 @@
     loadPageNav() {
       const obj = safeReadJson(PAGE_NAV_STORAGE_KEY, null);
       if (!obj || typeof obj !== "object") return null;
-      return { explorer: obj.explorer !== false, traces: obj.traces === true, logs: obj.logs === true };
+      return { explorer: obj.explorer !== false, traces: obj.traces === true, logs: obj.logs === true, metrics: obj.metrics === true };
     },
 
     savePageNav(nav) {
-      safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, traces: nav?.traces === true, logs: nav?.logs === true });
+      safeWriteJson(PAGE_NAV_STORAGE_KEY, { explorer: nav?.explorer !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true });
     },
 
     getStoredHostId() {
@@ -334,6 +334,7 @@
       explorer: { enabled: true, browse: true, graph: { enabled: true, lineage: true, storage_topology: true } },
       traces: { enabled: false },
       logs: { enabled: false },
+      metrics: { enabled: false },
     },
     suppressResultsVisibility: false,
 

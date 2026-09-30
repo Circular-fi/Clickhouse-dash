@@ -170,6 +170,15 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
+  const auto serve_metrics_shell = [&](const auto& req, auto& res) {
+    httplib::Request shell_req = req;
+    shell_req.path = "/metrics.html";
+    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
+      res.status = 404;
+      res.set_content("metrics.html not found", "text/plain");
+    }
+  };
+
   http_.Get("/", serve_query_shell);
   http_.Get("/query", serve_query_shell);
   if (cfg_.explorer.enabled()) {
@@ -182,6 +191,10 @@ Server::Server(AppConfig cfg, bool start_background)
   }
   if (cfg_.logs.enabled) {
     http_.Get("/logs", serve_logs_shell);
+  }
+  if (cfg_.metrics.enabled) {
+    http_.Get("/metrics", serve_metrics_shell);
+    http_.Get(R"(/metrics/.*)", serve_metrics_shell);
   }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
@@ -236,6 +249,12 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
     http_.Get("/api/logs/patterns", [&](const auto& req, auto& res) { handle_logs_patterns(req, res); });
     http_.Get("/api/logs/services", [&](const auto& req, auto& res) { handle_logs_services(req, res); });
+  }
+  if (cfg_.metrics.enabled) {
+    http_.Get("/api/metrics/catalog", [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); });
+    http_.Get("/api/metrics/attributes", [&](const auto& req, auto& res) { handle_metrics_attributes(req, res); });
+    http_.Get("/api/metrics/series", [&](const auto& req, auto& res) { handle_metrics_series(req, res); });
+    http_.Get("/api/metrics/exemplars", [&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); });
   }
 
   if (cfg_.explorer.enabled()) {

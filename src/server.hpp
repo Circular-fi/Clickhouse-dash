@@ -238,6 +238,12 @@ private:
   void handle_logs_services(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_meta(const httplib::Request& req, httplib::Response& res);
 
+  // OTel metrics browser (api_metrics.cpp).
+  void handle_metrics_catalog(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics_attributes(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics_series(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics_exemplars(const httplib::Request& req, httplib::Response& res);
+
   void session_reaper_loop();
   void reap_sessions_once();
 

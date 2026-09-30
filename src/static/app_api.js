@@ -397,7 +397,7 @@
     return getJson(`api/logs/${endpoint}?${query.toString()}`);
   }
 
-  ns.api = { resolveUrl,
+  ns.api = { resolveUrl, getJson,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,

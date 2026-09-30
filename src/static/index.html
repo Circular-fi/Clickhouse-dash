@@ -51,7 +51,7 @@
         // Explorer, Traces nor Logs hides it, before the first paint.
         try {
           var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
-          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true) {
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true) {
             document.documentElement.classList.add("chdash-page-select-hidden");
           }
         } catch (_) {}

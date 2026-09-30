@@ -11,6 +11,7 @@
         var marker = pathname.indexOf("/traces");
         if (marker < 0) marker = pathname.indexOf("/logs");
         if (marker < 0) marker = pathname.indexOf("/explorer");
+        if (marker < 0) marker = pathname.indexOf("/metrics");
         if (marker < 0) marker = pathname.indexOf("/query");
         var prefix = marker >= 0 ? pathname.slice(0, marker) : pathname.replace(/\/+$/g, "");
         if (!prefix || prefix === "/") prefix = "";
@@ -40,7 +41,7 @@
         // Explorer, Traces nor Logs hides it, before the first paint.
         try {
           var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
-          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true) {
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true) {
             document.documentElement.classList.add("chdash-page-select-hidden");
           }
         } catch (_) {}
@@ -91,6 +92,7 @@
           <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="false">Explorer</button>
           <button id="navTracesButton" class="themeSelect__option" type="button" role="option" data-value="traces" aria-selected="true">Traces</button>
           <button id="navLogsButton" class="themeSelect__option" type="button" role="option" data-value="logs" aria-selected="false" hidden>Logs</button>
+          <button id="navMetricsButton" class="themeSelect__option" type="button" role="option" data-value="metrics" aria-selected="false" hidden>Metrics</button>
         </div>
       </div>
       <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">

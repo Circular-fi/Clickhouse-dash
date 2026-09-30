@@ -83,6 +83,7 @@ if (CHDASH_BUILD_APP)
     api_otel_signals.cpp
     api_trace_logs.cpp
     api_logs.cpp
+    api_metrics.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp
