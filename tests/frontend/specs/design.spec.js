@@ -428,3 +428,21 @@ for (const theme of ['dark', 'light']) {
     await captureState(page, testInfo, `traces-results-table-${theme}`);
   });
 }
+
+test('traces search bar fits the viewport: nothing clipped, Search fully visible', async ({ page }) => {
+  await page.goto('/traces');
+  await page.locator('#tracesSearchButton').waitFor();
+  const fit = await page.evaluate(() => {
+    const bar = document.querySelector('.traceSearchBar');
+    const button = document.getElementById('tracesSearchButton').getBoundingClientRect();
+    const barBox = bar.getBoundingClientRect();
+    return {
+      overflow: bar.scrollWidth - bar.clientWidth,
+      buttonInside: button.left >= barBox.left - 1 && button.right <= Math.min(barBox.right, window.innerWidth) + 1,
+      docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(fit.overflow).toBeLessThanOrEqual(1);
+  expect(fit.buttonInside).toBe(true);
+  expect(fit.docOverflow).toBeLessThanOrEqual(1);
+});

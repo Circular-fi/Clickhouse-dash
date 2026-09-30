@@ -14747,3 +14747,20 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   .traceFacets { position: static; flex-basis: auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
   html.chdash-trace-facets-collapsed .traceFacets { width: auto; }
 }
+
+/* Laptop widths (1101–1440 px): the fixed column minimums of the trace search
+   bar added up to more than the viewport at 1280 px, clipping the Search
+   button. Range, service, operation, tag and the button shrink to fit; status
+   and results keep their 120 px. */
+@media (min-width: 1101px) and (max-width: 1440px) {
+  .traceSearchBar {
+    grid-template-columns:
+      minmax(180px, 1.15fr)
+      120px
+      minmax(130px, 1fr)
+      minmax(130px, 1fr)
+      minmax(210px, 1.2fr)
+      120px
+      minmax(96px, 160px);
+  }
+}
