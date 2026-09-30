@@ -251,6 +251,7 @@
   // Spans around a span's start time (surrounding context).
   async function getTraceContext(hostId, params = {}) {
     return getJson(`api/traces/context?${optionalParams(hostId, params).toString()}`);
+  }
 
   // Logs of one trace: the trace bounds (epoch ns) and its services bound
   // the lookup; span_id narrows it to one span.
