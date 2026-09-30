@@ -67,8 +67,12 @@ def test_trace_attribute_map_schema_is_cached_per_source():
     search = cpp[cpp.index("void Server::handle_traces_search"):cpp.index("void Server::handle_traces_analytics")]
     analytics = cpp[cpp.index("void Server::handle_traces_analytics"):cpp.index("void Server::handle_trace_detail")]
     meta = cpp[cpp.index("void Server::handle_traces_meta"):cpp.index("void Server::handle_traces_prefill")]
-    assert "cached_trace_attribute_maps(*client, *host, cfg_.traces" in search
-    assert "cached_trace_attribute_maps(*client, *host, cfg_.traces" in analytics
+    # Both resolve their filters through trace_filters_sql, which reads the
+    # cached attribute schema only when tag filters are present.
+    assert "trace_filters_sql(*client, *host, cfg_.traces" in search
+    assert "trace_filters_sql(*client, *host, cfg_.traces" in analytics
+    assert "cached_trace_attribute_maps(client, host, cfg" in cpp
+    assert "if (!spec.tags.empty()) {" in cpp
     assert "store_trace_attribute_maps(*host, cfg_.traces" in meta
     assert "kAttributeMapCacheTtl" in cpp
 
@@ -107,5 +111,5 @@ def test_trace_filters_never_use_like_or_ilike():
     assert " LIKE " not in trace_code
     assert "service_match" not in trace_code
     assert "operation_match" not in trace_code
-    assert 'exact_values_predicate("ServiceName", services)' in trace_code
-    assert 'exact_values_predicate("SpanName", operations)' in trace_code
+    assert 'exact_values_predicate("ServiceName", spec.services)' in trace_code
+    assert 'exact_values_predicate("SpanName", spec.operations)' in trace_code

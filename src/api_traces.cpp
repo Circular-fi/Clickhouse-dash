@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <iterator>
 #include <memory>
@@ -194,6 +195,9 @@ bool feature_param_rejected(const TraceSettings& cfg, const httplib::Request& re
     {"service", cfg.features.service_filter, "service filter"},
     {"operation", cfg.features.operation_filter, "operation filter"},
     {"status", cfg.features.status_filter, "status filter"},
+    {"service_not", cfg.features.service_filter, "service filter"},
+    {"operation_not", cfg.features.operation_filter, "operation filter"},
+    {"status_not", cfg.features.status_filter, "status filter"},
     {"min_duration_ms", cfg.features.duration_filter, "duration filter"},
     {"max_duration_ms", cfg.features.duration_filter, "duration filter"},
   };
@@ -276,45 +280,213 @@ std::string exact_values_predicate(std::string_view column, const std::vector<st
   return out;
 }
 
-std::string trace_span_filters(const TraceSettings& cfg, const httplib::Request& req, std::string* validation_error = nullptr) {
-  (void)cfg;
-  const auto services = repeated_param_values(req, "service");
-  const auto operations = repeated_param_values(req, "operation");
-  const std::string status = req.has_param("status") ? req.get_param_value("status") : std::string{};
+// --- Span filters -----------------------------------------------------------
+// Every filter describes one span: a trace matches when at least one of its
+// visible spans satisfies all of them (Jaeger's semantics). Values arrive as
+// request parameters and only ever reach SQL through quote_string().
+//
+//   service / operation / status             column equals (repeated: any of)
+//   service_not / operation_not / status_not column differs from every value
+//   tag=[scope:]key=value                    attribute equals
+//   tag_not=[scope:]key=value                attribute absent or different
+//   tag_exists=[scope:]key / tag_missing=... attribute key present / absent
+//
+// scope is "span:" (SpanAttributes), "resource:" (ResourceAttributes) or none
+// (either map). Different keys are ANDed; several `tag` values of one key
+// match any of them (one attribute holds one value, so AND would never
+// match), several `tag_not` values of one key exclude all of them.
+// tag_scope + tag_key + tag_value is the older single-tag form of `tag`.
+enum class TagOp { Eq, Ne, Exists, Missing };
+
+struct TagFilter {
+  std::string scope;  // "span", "resource" or "any"
+  TagOp op = TagOp::Eq;
+  std::string key;
+  std::string value;
+};
+
+struct TraceFilterSpec {
+  std::vector<std::string> services, operations, services_not, operations_not, status_not;
+  std::string status;
+  std::vector<TagFilter> tags;
+  // Primary-key predicates only (ServiceName / SpanName, positive or negated):
+  // these may use the broad HAVING countIf form (see filters_are_broad).
+  bool key_only() const { return status.empty() && status_not.empty() && tags.empty(); }
+};
+
+constexpr size_t kMaxTagFilters = 32;
+constexpr size_t kMaxTagKeyBytes = 512;
+constexpr size_t kMaxTagValueBytes = 4096;
+
+bool valid_status(std::string_view status) { return status == "Error" || status == "Ok" || status == "Unset"; }
+
+// "[span:|resource:]rest": the attribute scope prefix of a tag parameter.
+std::string split_tag_scope(std::string_view text, std::string_view* rest) {
+  for (std::string_view scope : {std::string_view("span"), std::string_view("resource")}) {
+    if (text.size() > scope.size() && text.substr(0, scope.size()) == scope && text[scope.size()] == ':') {
+      *rest = text.substr(scope.size() + 1);
+      return std::string(scope);
+    }
+  }
+  *rest = text;
+  return "any";
+}
+
+bool parse_trace_filters(const httplib::Request& req, TraceFilterSpec* spec, std::string* validation_error) {
+  auto fail = [&](std::string message) {
+    if (validation_error) *validation_error = std::move(message);
+    return false;
+  };
+  spec->services = repeated_param_values(req, "service");
+  spec->operations = repeated_param_values(req, "operation");
+  spec->services_not = repeated_param_values(req, "service_not");
+  spec->operations_not = repeated_param_values(req, "operation_not");
+  spec->status_not = repeated_param_values(req, "status_not");
+  spec->status = req.has_param("status") ? req.get_param_value("status") : std::string{};
+  if (!spec->status.empty() && !valid_status(spec->status)) return fail("status must be Error, Ok, Unset, or empty.");
+  for (const auto& status : spec->status_not) {
+    if (!valid_status(status)) return fail("status_not must be Error, Ok or Unset.");
+  }
+
   const std::string tag_scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
   const std::string tag_key = req.has_param("tag_key") ? req.get_param_value("tag_key") : std::string{};
   const std::string tag_value = req.has_param("tag_value") ? req.get_param_value("tag_value") : std::string{};
-
-  if (!status.empty() && status != "Error" && status != "Ok" && status != "Unset") {
-    if (validation_error) *validation_error = "status must be Error, Ok, Unset, or empty.";
-    return {};
-  }
   if ((!tag_key.empty() || !tag_value.empty()) && (tag_key.empty() || tag_value.empty())) {
-    if (validation_error) *validation_error = "tag_key and tag_value must be provided together.";
-    return {};
+    return fail("tag_key and tag_value must be provided together.");
   }
   if (!tag_key.empty() && tag_scope != "span" && tag_scope != "resource" && tag_scope != "any") {
-    if (validation_error) *validation_error = "tag_scope must be span, resource, or any.";
-    return {};
+    return fail("tag_scope must be span, resource, or any.");
   }
+  if (!tag_key.empty()) spec->tags.push_back(TagFilter{tag_scope, TagOp::Eq, tag_key, tag_value});
 
-  std::vector<std::string> filters;
-  if (!services.empty()) filters.push_back(exact_values_predicate("ServiceName", services));
-  if (!operations.empty()) filters.push_back(exact_values_predicate("SpanName", operations));
-  if (!status.empty()) filters.push_back("StatusCode = " + quote_string(status));
-  if (!tag_key.empty()) {
-    if (tag_scope == "any") {
-      filters.push_back("((mapContains(SpanAttributes, " + quote_string(tag_key) + ") AND SpanAttributes[" + quote_string(tag_key) + "] = " + quote_string(tag_value) + ") OR "
-                        "(mapContains(ResourceAttributes, " + quote_string(tag_key) + ") AND ResourceAttributes[" + quote_string(tag_key) + "] = " + quote_string(tag_value) + "))");
-    } else {
-      const std::string column = tag_scope == "resource" ? "ResourceAttributes" : "SpanAttributes";
-      filters.push_back("mapContains(" + column + ", " + quote_string(tag_key) + ") AND " + column + "[" + quote_string(tag_key) + "] = " + quote_string(tag_value));
+  struct TagParam { const char* name; TagOp op; };
+  for (const TagParam param : {TagParam{"tag", TagOp::Eq}, TagParam{"tag_not", TagOp::Ne},
+                               TagParam{"tag_exists", TagOp::Exists}, TagParam{"tag_missing", TagOp::Missing}}) {
+    for (const auto& raw : repeated_param_values(req, param.name)) {
+      std::string_view rest;
+      TagFilter tag;
+      tag.scope = split_tag_scope(raw, &rest);
+      tag.op = param.op;
+      if (param.op == TagOp::Eq || param.op == TagOp::Ne) {
+        const size_t eq = rest.find('=');
+        if (eq == std::string_view::npos || eq == 0) {
+          return fail(std::string(param.name) + " must be [span:|resource:]key=value.");
+        }
+        tag.key = std::string(rest.substr(0, eq));
+        tag.value = std::string(rest.substr(eq + 1));
+      } else {
+        tag.key = std::string(rest);
+      }
+      if (tag.key.empty()) return fail(std::string(param.name) + " needs an attribute key.");
+      spec->tags.push_back(std::move(tag));
     }
   }
+  for (const auto& tag : spec->tags) {
+    if (tag.key.size() > kMaxTagKeyBytes) return fail("Attribute keys are limited to 512 bytes.");
+    if (tag.value.size() > kMaxTagValueBytes) return fail("Attribute values are limited to 4096 bytes.");
+  }
+  if (spec->tags.size() > kMaxTagFilters) return fail("At most 32 attribute filters are accepted.");
+  return true;
+}
 
+// Which attribute maps tag filters and facets may read: stored as
+// Map(String, String) (JSON columns are not supported) and enabled by
+// traces.features (a hidden attribute scope must not become an oracle).
+struct AttributeColumns {
+  bool span_map = false, resource_map = false;
+  bool span_enabled = true, resource_enabled = true;
+  bool span() const { return span_map && span_enabled; }
+  bool resource() const { return resource_map && resource_enabled; }
+};
+
+// One (scope, key) of the tag filters with all its conditions.
+struct TagGroup {
+  std::string scope, key;
+  std::vector<std::string> eq, ne;
+  bool exists = false, missing = false;
+};
+
+std::vector<TagGroup> group_tag_filters(const std::vector<TagFilter>& tags) {
+  std::vector<TagGroup> groups;
+  for (const auto& tag : tags) {
+    auto it = std::find_if(groups.begin(), groups.end(), [&](const TagGroup& g) { return g.scope == tag.scope && g.key == tag.key; });
+    if (it == groups.end()) it = groups.insert(groups.end(), TagGroup{tag.scope, tag.key, {}, {}, false, false});
+    if (tag.op == TagOp::Eq) it->eq.push_back(tag.value);
+    else if (tag.op == TagOp::Ne) it->ne.push_back(tag.value);
+    else if (tag.op == TagOp::Exists) it->exists = true;
+    else it->missing = true;
+  }
+  for (auto& group : groups) {
+    for (auto* values : {&group.eq, &group.ne}) {
+      std::sort(values->begin(), values->end());
+      values->erase(std::unique(values->begin(), values->end()), values->end());
+    }
+  }
+  return groups;
+}
+
+// (mapContains(C, 'k') AND C['k'] IN (...)): mapContains first, since a
+// missing key reads as '' and must not match an empty value.
+std::string map_values_predicate(const std::string& column, const std::string& key, const std::vector<std::string>& values) {
+  return "(mapContains(" + column + ", " + quote_string(key) + ") AND " +
+         exact_values_predicate(column + "[" + quote_string(key) + "]", values) + ")";
+}
+
+std::string any_of(const std::vector<std::string>& terms) {
+  if (terms.size() == 1) return terms.front();
+  std::string out = "(";
+  for (size_t i = 0; i < terms.size(); ++i) out += (i ? " OR " : "") + terms[i];
+  return out + ")";
+}
+
+// " AND ..." for the tag filters (skipping the group of `skip_scope` /
+// `skip_key` when given: a facet's own values ignore its own filters), or
+// false with an error code when a filter needs an attribute map that is not
+// usable.
+bool tag_filters_sql(const std::vector<TagFilter>& tags, const AttributeColumns& cols, std::string* out,
+                     std::string* error_code, std::string* error, const std::string* skip_scope = nullptr,
+                     const std::string* skip_key = nullptr) {
+  for (const auto& group : group_tag_filters(tags)) {
+    if (skip_key && group.key == *skip_key && (group.scope == "any" || group.scope == *skip_scope)) continue;
+    std::vector<std::string> columns;
+    const bool want_span = group.scope != "resource";
+    const bool want_resource = group.scope != "span";
+    if (want_span && cols.span()) columns.push_back("SpanAttributes");
+    if (want_resource && cols.resource()) columns.push_back("ResourceAttributes");
+    if (columns.empty() || (group.scope == "span" && !cols.span()) || (group.scope == "resource" && !cols.resource())) {
+      const bool disabled = (group.scope == "span" && !cols.span_enabled) || (group.scope == "resource" && !cols.resource_enabled) ||
+                            (group.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
+      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
+      *error = disabled ? "Attribute filters on this scope are disabled by traces.features."
+                        : "Selected attribute scope is not stored as Map(String, String).";
+      return false;
+    }
+    auto per_column = [&](auto make) {
+      std::vector<std::string> terms;
+      for (const auto& column : columns) terms.push_back(make(column));
+      return any_of(terms);
+    };
+    const std::string key = quote_string(group.key);
+    if (!group.eq.empty()) *out += " AND " + per_column([&](const std::string& c) { return map_values_predicate(c, group.key, group.eq); });
+    if (!group.ne.empty()) *out += " AND NOT " + per_column([&](const std::string& c) { return map_values_predicate(c, group.key, group.ne); });
+    if (group.exists) *out += " AND " + per_column([&](const std::string& c) { return "mapContains(" + c + ", " + key + ")"; });
+    if (group.missing) *out += " AND NOT " + per_column([&](const std::string& c) { return "mapContains(" + c + ", " + key + ")"; });
+  }
+  return true;
+}
+
+// " AND ..." for the column filters followed by the tag SQL.
+std::string span_filters_sql(const TraceFilterSpec& spec, const std::string& tags_sql) {
+  std::vector<std::string> filters;
+  if (!spec.services.empty()) filters.push_back(exact_values_predicate("ServiceName", spec.services));
+  if (!spec.operations.empty()) filters.push_back(exact_values_predicate("SpanName", spec.operations));
+  if (!spec.services_not.empty()) filters.push_back("NOT (" + exact_values_predicate("ServiceName", spec.services_not) + ")");
+  if (!spec.operations_not.empty()) filters.push_back("NOT (" + exact_values_predicate("SpanName", spec.operations_not) + ")");
+  if (!spec.status.empty()) filters.push_back("StatusCode = " + quote_string(spec.status));
+  if (!spec.status_not.empty()) filters.push_back("NOT (" + exact_values_predicate("StatusCode", spec.status_not) + ")");
   std::string out;
   for (const auto& filter : filters) out += " AND " + filter;
-  return out;
+  return out + tags_sql;
 }
 
 int choose_trace_bucket_seconds(int64_t range_ms) {
@@ -407,6 +579,105 @@ void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& hos
     store_trace_attribute_maps(host, cfg, *span_map, *resource_map);
   }
 }
+
+AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
+  AttributeColumns cols;
+  cols.span_enabled = cfg.features.span_attributes;
+  cols.resource_enabled = cfg.features.resource_attributes;
+  cached_trace_attribute_maps(client, host, cfg, &cols.span_map, &cols.resource_map);
+  return cols;
+}
+
+// The span filter SQL of a request (" AND ..." or empty), or false with an
+// error code when a tag filter needs an unusable attribute map. The attribute
+// schema is looked up (cached) only when tag filters are present.
+bool trace_filters_sql(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
+                       const TraceFilterSpec& spec, std::string* out, std::string* error_code, std::string* error,
+                       const std::string* skip_scope = nullptr, const std::string* skip_key = nullptr) {
+  std::string tags;
+  if (!spec.tags.empty()) {
+    const AttributeColumns cols = trace_attribute_columns(client, host, cfg);
+    if (!tag_filters_sql(spec.tags, cols, &tags, error_code, error, skip_scope, skip_key)) return false;
+  }
+  *out = span_filters_sql(spec, tags);
+  return true;
+}
+
+// A SELECT whose work is capped by its SETTINGS (read limit / time budget):
+// the progress packets tell whether it read every row it would have read
+// (read_rows == total_rows_to_read) or stopped early (LIMIT, a read_overflow
+// or timeout_overflow break), i.e. whether its answer is only an estimate.
+// Both progress fields are per-packet deltas.
+struct BoundedRead {
+  uint64_t read_rows = 0;
+  uint64_t total_rows = 0;
+  uint64_t elapsed_ms = 0;
+  bool partial() const { return read_rows < total_rows; }
+};
+
+BoundedRead bounded_select(clickhouse::Client& client, const std::string& sql,
+                           const std::function<void(const clickhouse::Block&)>& on_block) {
+  BoundedRead out;
+  const auto started = std::chrono::steady_clock::now();
+  clickhouse::Query query(sql);
+  query.OnData(on_block);
+  query.OnProgress([&](const clickhouse::Progress& progress) {
+    out.read_rows += progress.rows;
+    out.total_rows += progress.total_rows;
+  });
+  client.Execute(query);
+  out.elapsed_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started).count());
+  return out;
+}
+
+// Attribute discovery caps (after HyperDX's metadata queries): an inner LIMIT
+// of sampled spans, a hard cap on the rows read from storage (a selective
+// filter would otherwise scan the whole window looking for enough spans), a
+// GROUP BY size cap for high-cardinality values and a time budget. The read
+// cap breaks like an exhausted source, so the aggregation still answers from
+// what was read; the time budget is a last resort (a timeout break may drop
+// the partial aggregate) and is reported as an estimate as well.
+constexpr uint64_t kFacetSampleRows = 3000000;
+constexpr uint64_t kFacetReadRowsCap = 50000000;
+constexpr uint64_t kFacetGroupByCap = 100000;
+constexpr int kFacetTimeBudgetSeconds = 5;
+constexpr uint64_t kTaggedPrefillReadRowsCap = 100000000;
+
+std::string facet_settings_sql(uint64_t read_rows_cap, bool group_by_cap) {
+  std::string out = " SETTINGS max_execution_time = " + std::to_string(kFacetTimeBudgetSeconds) +
+      ", timeout_overflow_mode = 'break', max_rows_to_read = " + std::to_string(read_rows_cap) +
+      ", read_overflow_mode = 'break'";
+  if (group_by_cap) {
+    out += ", max_rows_to_group_by = " + std::to_string(kFacetGroupByCap) + ", group_by_overflow_mode = 'any'";
+  }
+  return out;
+}
+
+bool timed_out(const BoundedRead& read) {
+  return read.elapsed_ms + 250 >= static_cast<uint64_t>(kFacetTimeBudgetSeconds) * 1000;
+}
+
+struct TraceFacetKeys {
+  struct Key { std::string scope, key; uint64_t count = 0; };
+  std::vector<Key> keys;
+  uint64_t sampled_spans = 0;
+  bool estimated = false;
+  bool timed_out = false;
+  uint64_t query_ms = 0;
+};
+
+struct TraceFacetValues {
+  std::vector<std::pair<std::string, uint64_t>> values;
+  uint64_t spans_with_key = 0;
+  uint64_t distinct_values = 0;
+  bool estimated = false;
+  bool timed_out = false;
+  uint64_t query_ms = 0;
+};
+
+StaleCache<std::string, TraceFacetKeys> g_trace_facet_keys_cache;
+StaleCache<std::string, TraceFacetValues> g_trace_facet_values_cache;
 
 constexpr int64_t kNsPerMs = 1000000;
 
@@ -876,8 +1147,25 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   constexpr uint64_t kPrefillTtlMs = 60 * 1000;
   const int64_t aligned_start_ms = (start_ms / kPrefillAlignMs) * kPrefillAlignMs;
   const int64_t aligned_end_ms = ((end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
+  // Only the tag filters narrow the picker lists (service / operation /
+  // status choices must stay selectable). A tagged prefill reads attribute
+  // maps, so its scan is capped (kTaggedPrefillReadRowsCap) and reported as
+  // an estimate when the cap stopped it.
+  TraceFilterSpec filters;
+  std::string validation_error;
+  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
+  std::string tag_filters;
+  if (!filters.tags.empty()) {
+    std::string error;
+    auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+    if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+    std::string filter_code, filter_error;
+    if (!tag_filters_sql(filters.tags, trace_attribute_columns(*client, *host, cfg_.traces), &tag_filters, &filter_code, &filter_error)) {
+      return json_error(res, 400, filter_code, filter_error);
+    }
+  }
   const std::string cache_key = source_host_id + '\0' + std::to_string(aligned_start_ms) + '\0' +
-      std::to_string(aligned_end_ms);
+      std::to_string(aligned_end_ms) + '\0' + tag_filters;
   const size_t hard_limit = 20000;
 
   auto cached = trace_prefill_cache_.get_or_refresh(
@@ -898,13 +1186,15 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
           // turns a cheap dictionary prefill into a large aggregation on busy trace tables.
           const std::string sql =
               "SELECT toString(ServiceName), toString(SpanName) FROM " + table +
-              " PREWHERE " + time_predicate + " WHERE " + visibility +
-              " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1);
-          client->Select(sql, [&](const clickhouse::Block& block) {
+              " PREWHERE " + time_predicate + " WHERE " + visibility + tag_filters +
+              " LIMIT 1 BY ServiceName, SpanName LIMIT " + std::to_string(hard_limit + 1) +
+              (tag_filters.empty() ? std::string{} : facet_settings_sql(kTaggedPrefillReadRowsCap, false));
+          const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) {
               value.pairs.emplace_back(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
             }
           });
+          value.estimated = !tag_filters.empty() && (read.partial() || timed_out(read));
         } catch (const std::exception& e) {
           if (client_pool_) client_pool_->invalidate(client);
           code = "trace_prefill_failed";
@@ -930,10 +1220,268 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   w.StartObject();
   w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
   w.Key("truncated"); w.Bool(truncated);
+  w.Key("tag_filtered"); w.Bool(!tag_filters.empty());
+  w.Key("estimated"); w.Bool(cached.value->estimated);
   w.Key("pairs"); w.StartArray();
   for (const auto& [service, operation] : pairs) {
     // The count column is kept for payload compatibility (existence only).
     w.StartArray(); w.String(service.c_str()); w.String(operation.c_str()); w.Uint64(1); w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+namespace {
+
+// Shared front half of /api/traces/facets and /api/traces/facet_values: the
+// window (minute-aligned like prefill, so requests made within the same minute
+// share one cached scan), the filters and the usable attribute maps.
+struct FacetScope {
+  std::string source_host_id;
+  const HostSpec* host = nullptr;
+  int64_t start_ms = 0, end_ms = 0;
+  int64_t aligned_start_ms = 0, aligned_end_ms = 0;
+  TraceFilterSpec filters;
+  AttributeColumns columns;
+};
+
+constexpr uint64_t kFacetTtlMs = 60 * 1000;
+constexpr size_t kFacetMaxKeys = 500;
+constexpr int kFacetMaxValues = 500;
+
+bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
+                 httplib::Response& res, FacetScope* scope, std::shared_ptr<clickhouse::Client>* client) {
+  if (!cfg.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled."); return false; }
+  std::string disabled_message;
+  if (feature_param_rejected(cfg.traces, req, &disabled_message)) {
+    json_error(res, 400, "trace_filter_disabled", disabled_message);
+    return false;
+  }
+  scope->host = trace_host(cfg, req, &scope->source_host_id);
+  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  std::string error;
+  if (!trace_time_range(cfg.traces, req, &scope->start_ms, &scope->end_ms, &error)) {
+    json_error(res, 400, "invalid_trace_range", error);
+    return false;
+  }
+  constexpr int64_t kAlignMs = 60 * 1000;
+  scope->aligned_start_ms = (scope->start_ms / kAlignMs) * kAlignMs;
+  scope->aligned_end_ms = ((scope->end_ms + kAlignMs - 1) / kAlignMs) * kAlignMs;
+  if (!parse_trace_filters(req, &scope->filters, &error)) {
+    json_error(res, 400, "invalid_trace_filter", error);
+    return false;
+  }
+  *client = acquire_trace_client(cfg, *scope->host, pool, &error);
+  if (!*client) {
+    json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+    return false;
+  }
+  scope->columns = trace_attribute_columns(**client, *scope->host, cfg.traces);
+  return true;
+}
+
+void write_facet_common(rapidjson::Writer<rapidjson::StringBuffer>& w, const FacetScope& scope, bool estimated,
+                        bool timed_out_flag, uint64_t query_ms, bool cached) {
+  w.Key("range"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
+  w.Key("scanned_range"); w.StartArray(); w.Int64(scope.aligned_start_ms); w.Int64(scope.aligned_end_ms); w.EndArray();
+  w.Key("estimated"); w.Bool(estimated);
+  w.Key("timed_out"); w.Bool(timed_out_flag);
+  w.Key("sample_limit"); w.Uint64(kFacetSampleRows);
+  w.Key("read_rows_limit"); w.Uint64(kFacetReadRowsCap);
+  w.Key("cached"); w.Bool(cached);
+  w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(query_ms); w.EndObject();
+}
+
+} // namespace
+
+// Top attribute keys (span + resource) of the spans matching the filters, by
+// the number of sampled spans carrying them. One capped pass reads only the
+// maps' key subcolumns.
+void Server::handle_traces_facets(const httplib::Request& req, httplib::Response& res) {
+  FacetScope scope;
+  std::shared_ptr<clickhouse::Client> client;
+  if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  std::string span_filters, filter_code, filter_error;
+  if (!trace_filters_sql(*client, *scope.host, cfg_.traces, scope.filters, &span_filters, &filter_code, &filter_error)) {
+    return json_error(res, 400, filter_code, filter_error);
+  }
+  const bool span = scope.columns.span();
+  const bool resource = scope.columns.resource();
+  const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
+      std::to_string(scope.aligned_end_ms) + '\0' + (span ? "s" : "") + (resource ? "r" : "") + '\0' + span_filters;
+  bool fetched = false;
+  auto cached = g_trace_facet_keys_cache.get_or_refresh(
+      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      [&](TraceFacetKeys& value, std::string& code, std::string& message) {
+        fetched = true;
+        if (!span && !resource) return true;
+        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+        const std::string ones = "arrayResize([toUInt64(1)], length(%), toUInt64(1))";
+        auto sum_map = [&](const std::string& column) {
+          std::string counts = ones;
+          counts.replace(counts.find('%'), 1, column);
+          return "sumMap(" + column + ", " + counts + ")";
+        };
+        std::vector<std::string> inner_columns, aggregates, tuples;
+        if (span) {
+          inner_columns.push_back("SpanAttributes.keys AS sk");
+          aggregates.push_back(sum_map("sk") + " AS sm");
+          tuples.push_back("arrayMap((k, c) -> tuple('span', toString(k), c), sm.1, sm.2)");
+        }
+        if (resource) {
+          inner_columns.push_back("ResourceAttributes.keys AS rk");
+          aggregates.push_back(sum_map("rk") + " AS rm");
+          tuples.push_back("arrayMap((k, c) -> tuple('resource', toString(k), c), rm.1, rm.2)");
+        }
+        auto join = [](const std::vector<std::string>& parts) {
+          std::string out;
+          for (size_t i = 0; i < parts.size(); ++i) out += (i ? ", " : "") + parts[i];
+          return out;
+        };
+        const std::string sql =
+            "SELECT toString(sampled), toString(t.1), toString(t.2), toString(t.3) FROM ("
+            "SELECT count() AS sampled, " + join(aggregates) + " FROM ("
+            "SELECT " + join(inner_columns) + " FROM " + table +
+            " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
+            " WHERE " + service_allowlist_predicate(cfg_.traces) + span_filters +
+            " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
+            facet_settings_sql(kFacetReadRowsCap, false);
+        try {
+          const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              value.sampled_spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, row)));
+              const std::string key_scope = ch_block_text_at(block, 1, row);
+              if (key_scope.empty()) continue;
+              value.keys.push_back(TraceFacetKeys::Key{key_scope, ch_block_text_at(block, 2, row),
+                                                       static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)))});
+            }
+          });
+          value.timed_out = timed_out(read);
+          value.estimated = read.partial() || value.timed_out;
+          value.query_ms = read.elapsed_ms;
+        } catch (const std::exception& e) {
+          if (client_pool_) client_pool_->invalidate(client);
+          code = "trace_facets_failed";
+          message = e.what();
+          return false;
+        }
+        std::sort(value.keys.begin(), value.keys.end(), [](const TraceFacetKeys::Key& a, const TraceFacetKeys::Key& b) {
+          if (a.count != b.count) return a.count > b.count;
+          if (a.key != b.key) return a.key < b.key;
+          return a.scope > b.scope;  // span before resource
+        });
+        return true;
+      });
+  if (!cached.has_value || !cached.value) {
+    return json_error(res, 503, cached.error_code.empty() ? "trace_facets_failed" : cached.error_code,
+                      cached.error_message.empty() ? "Trace attribute discovery failed." : cached.error_message);
+  }
+  const auto& value = *cached.value;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("supported"); w.Bool(span || resource);
+  w.Key("scopes"); w.StartArray(); if (span) w.String("span"); if (resource) w.String("resource"); w.EndArray();
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched);
+  w.Key("sampled_spans"); w.Uint64(value.sampled_spans);
+  w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
+  w.Key("keys"); w.StartArray();
+  for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
+    const auto& key = value.keys[i];
+    w.StartArray(); w.String(key.scope.c_str()); w.String(key.key.c_str()); w.Uint64(key.count); w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// Top values of one attribute key with their sampled span counts. The key's
+// own filters are left out, so its other values stay visible (and can be
+// added: several values of one key match any of them).
+void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Response& res) {
+  FacetScope scope;
+  std::shared_ptr<clickhouse::Client> client;
+  const std::string key_scope = req.has_param("scope") ? req.get_param_value("scope") : std::string{};
+  const std::string key = req.has_param("key") ? req.get_param_value("key") : std::string{};
+  if (key_scope != "span" && key_scope != "resource") return json_error(res, 400, "invalid_trace_facet", "scope must be span or resource.");
+  if (key.empty() || key.size() > kMaxTagKeyBytes) return json_error(res, 400, "invalid_trace_facet", "key must be 1 to 512 bytes.");
+  const int limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
+  if (!facet_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  if (key_scope == "span" ? !scope.columns.span() : !scope.columns.resource()) {
+    const bool disabled = key_scope == "span" ? !scope.columns.span_enabled : !scope.columns.resource_enabled;
+    return json_error(res, 400, disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported",
+                      disabled ? "Attribute filters on this scope are disabled by traces.features."
+                               : "Selected attribute scope is not stored as Map(String, String).");
+  }
+  std::string span_filters, filter_code, filter_error;
+  if (!trace_filters_sql(*client, *scope.host, cfg_.traces, scope.filters, &span_filters, &filter_code, &filter_error,
+                         &key_scope, &key)) {
+    return json_error(res, 400, filter_code, filter_error);
+  }
+  const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
+      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + key + '\0' + std::to_string(limit) + '\0' + span_filters;
+  bool fetched = false;
+  auto cached = g_trace_facet_values_cache.get_or_refresh(
+      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      [&](TraceFacetValues& value, std::string& code, std::string& message) {
+        fetched = true;
+        const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+        const std::string column = key_scope == "span" ? "SpanAttributes" : "ResourceAttributes";
+        const std::string sql =
+            "SELECT toString(v), toString(c), toString(sum(c) OVER ()), toString(count() OVER ()) FROM ("
+            "SELECT v, count() AS c FROM ("
+            "SELECT " + column + "[" + quote_string(key) + "] AS v FROM " + table +
+            " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
+            " WHERE " + service_allowlist_predicate(cfg_.traces) + " AND mapContains(" + column + ", " + quote_string(key) + ")" +
+            span_filters + " LIMIT " + std::to_string(kFacetSampleRows) + ") GROUP BY v) "
+            "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(kFacetReadRowsCap, true);
+        try {
+          const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              value.values.emplace_back(ch_block_text_at(block, 0, row),
+                                        static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row))));
+              value.spans_with_key = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)));
+              value.distinct_values = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)));
+            }
+          });
+          value.timed_out = timed_out(read);
+          value.estimated = read.partial() || value.timed_out || value.distinct_values >= kFacetGroupByCap;
+          value.query_ms = read.elapsed_ms;
+        } catch (const std::exception& e) {
+          if (client_pool_) client_pool_->invalidate(client);
+          code = "trace_facet_values_failed";
+          message = e.what();
+          return false;
+        }
+        return true;
+      });
+  if (!cached.has_value || !cached.value) {
+    return json_error(res, 503, cached.error_code.empty() ? "trace_facet_values_failed" : cached.error_code,
+                      cached.error_message.empty() ? "Trace attribute values failed." : cached.error_message);
+  }
+  const auto& value = *cached.value;
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("scope"); w.String(key_scope.c_str());
+  w.Key("key"); w.String(key.c_str());
+  w.Key("limit"); w.Int(limit);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched);
+  w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
+  w.Key("distinct_values"); w.Uint64(value.distinct_values);
+  w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
+  w.Key("values"); w.StartArray();
+  for (const auto& [text, count] : value.values) {
+    w.StartArray(); w.String(text.c_str(), static_cast<rapidjson::SizeType>(text.size())); w.Uint64(count); w.EndArray();
   }
   w.EndArray();
   w.EndObject();
@@ -968,20 +1516,18 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   }
 
   std::string validation_error;
-  const std::string span_filters = trace_span_filters(cfg_.traces, req, &validation_error);
-  if (!validation_error.empty()) return json_error(res, 400, "invalid_trace_filter", validation_error);
+  TraceFilterSpec filters;
+  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
 
   std::string error;
   auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
-  if (req.has_param("tag_key") && !req.get_param_value("tag_key").empty()) {
-    bool span_map = false, resource_map = false;
-    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
-    const std::string scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
-    if ((scope == "span" && !span_map) || (scope == "resource" && !resource_map) ||
-        (scope == "any" && !span_map && !resource_map)) {
-      return json_error(res, 400, "trace_tag_search_unsupported", "Selected attribute scope is not stored as Map(String, String).");
+  std::string span_filters;
+  {
+    std::string filter_code, filter_error;
+    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+      return json_error(res, 400, filter_code, filter_error);
     }
   }
 
@@ -990,9 +1536,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
-  const bool key_only_filters = has_candidate_filters &&
-      (!req.has_param("status") || req.get_param_value("status").empty()) &&
-      (!req.has_param("tag_key") || req.get_param_value("tag_key").empty());
+  const bool key_only_filters = has_candidate_filters && filters.key_only();
   const bool has_duration_filters = min_duration_ms > 0.0 || max_duration_ms > 0.0;
   const bool needs_span_match = has_candidate_filters || visibility != "1";
   const bool has_index = !cfg_.traces.trace_index_table.empty();
@@ -1341,20 +1885,18 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   }
 
   std::string validation_error;
-  const std::string span_filters = trace_span_filters(cfg_.traces, req, &validation_error);
-  if (!validation_error.empty()) return json_error(res, 400, "invalid_trace_filter", validation_error);
+  TraceFilterSpec filters;
+  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
 
   std::string error;
   auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
   if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
 
-  if (req.has_param("tag_key") && !req.get_param_value("tag_key").empty()) {
-    bool span_map = false, resource_map = false;
-    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
-    const std::string scope = req.has_param("tag_scope") ? req.get_param_value("tag_scope") : std::string{};
-    if ((scope == "span" && !span_map) || (scope == "resource" && !resource_map) ||
-        (scope == "any" && !span_map && !resource_map)) {
-      return json_error(res, 400, "trace_tag_search_unsupported", "Selected attribute scope is not stored as Map(String, String).");
+  std::string span_filters;
+  {
+    std::string filter_code, filter_error;
+    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+      return json_error(res, 400, filter_code, filter_error);
     }
   }
 
@@ -1366,9 +1908,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   const std::string visibility = service_allowlist_predicate(cfg_.traces);
   const bool has_candidate_filters = !span_filters.empty();
   // Only service / operation filters (primary-key columns) may use the broad form.
-  const bool key_only_filters = has_candidate_filters &&
-      (!req.has_param("status") || req.get_param_value("status").empty()) &&
-      (!req.has_param("tag_key") || req.get_param_value("tag_key").empty());
+  const bool key_only_filters = has_candidate_filters && filters.key_only();
 
   const std::string candidate_cte = has_candidate_filters
       ? "candidate_ids AS (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +

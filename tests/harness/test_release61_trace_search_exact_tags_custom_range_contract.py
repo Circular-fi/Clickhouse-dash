@@ -29,8 +29,11 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     assert 'id="tracesTagKey"' in html and 'type="text"' in html
     assert 'id="tracesTagValue"' in html and 'type="text"' in html
     assert 'scope: "any"' in ui
-    assert 'tag_scope == "any"' in cpp
-    assert 'SpanAttributes[' in cpp and 'ResourceAttributes[' in cpp
+    # No scope prefix (and the legacy tag_scope=any) searches both maps.
+    assert 'tag_scope != "any"' in cpp and 'return "any";' in cpp
+    assert 'group.scope != "resource"' in cpp and 'group.scope != "span"' in cpp
+    assert '"SpanAttributes"' in cpp and '"ResourceAttributes"' in cpp
+    assert 'exact_values_predicate(column + "[" + quote_string(key) + "]", values)' in cpp
     assert '] = ' in cpp
 
 def test_custom_range_inputs_take_dates_or_expressions_and_update_picker_label():

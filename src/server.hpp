@@ -215,6 +215,8 @@ private:
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
   void handle_traces_analytics(const httplib::Request& req, httplib::Response& res);
   void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_facets(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_facet_values(const httplib::Request& req, httplib::Response& res);
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
   void handle_traces_linked_from(const httplib::Request& req, httplib::Response& res);
   void handle_traces_context(const httplib::Request& req, httplib::Response& res);
@@ -284,6 +286,8 @@ private:
   struct TracePrefill {
     std::vector<std::pair<std::string, std::string>> pairs;
     bool truncated = false;
+    // Tag-filtered prefills stop at a read cap: the pairs are then a subset.
+    bool estimated = false;
     int64_t start_ms = 0;
     int64_t end_ms = 0;
   };
