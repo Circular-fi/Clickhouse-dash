@@ -5172,9 +5172,11 @@ string Formatter::try_format_insert_values(string_view s) {
     }
     out += "\n    (\n";
     for (size_t i = 0; i < rows[r].size(); ++i) {
-      out += "        " + rows[r][i];
-      if (i + 1 < rows[r].size()) out += ',';
-      out += '\n';
+      string value = "        " + rows[r][i] + (i + 1 < rows[r].size() ? "," : "");
+      // A value still too long on its own line (a call such as
+      // `encrypt(...)`) is split by the width rule like a query argument.
+      if (utf8_width(value) > threshold && value.find('\n') == string::npos) value = join_lines(explode_overlong_line(value, 0));
+      out += value + '\n';
     }
     out += "    )" + suffix;
   }
@@ -5182,9 +5184,6 @@ string Formatter::try_format_insert_values(string_view s) {
 }
 
 
-// Width rule on the final text (see collapse_fitting_calls): join what fits,
-// then explode one-line calls that overflow. Exploding is limited to query
-// statements; DDL keeps its column, index and type lines.
 // `CASE [operand] WHEN c THEN v ... [ELSE e] END` written on one line (the
 // local path; formatQuery turns CASE into multiIf): like multiIf, vertical
 // with two or more WHEN branches or when the line is too long, one branch per
@@ -5253,6 +5252,9 @@ vector<string> explode_case_expression(const string& line, size_t threshold) {
   return out;
 }
 
+// Width rule on the final text (see collapse_fitting_calls): join what fits,
+// then explode one-line calls that overflow. Exploding is limited to query
+// statements; DDL keeps its column, index and type lines.
 string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   vector<size_t> joined_rows;
   string out = collapse_fitting_calls(text, threshold, &joined_rows);
