@@ -556,6 +556,21 @@ grammar is not a plain `name = value` list.
 Keep short `VALUES` inserts compact.
 Use multiline formatting for structured `SELECT`-based inserts.
 
+`VALUES` payloads are data: every value keeps its exact spelling. The
+statement stays on one line when it fits; otherwise `INSERT INTO target`, the
+column list (one line, or one column per line), an optional `SETTINGS` line,
+`VALUES`, then one row per line, and one value per line for a row that does
+not fit:
+
+```sql
+INSERT INTO ops.deploy_events
+    (id, service, status)
+SETTINGS async_insert = 1, wait_for_async_insert = 0
+VALUES
+    (1, 'api-gateway', 'deployed'),
+    (2, 'auth-service', 'rolled_back')
+```
+
 ```sql
 INSERT INTO anon.metrics_store
 SELECT

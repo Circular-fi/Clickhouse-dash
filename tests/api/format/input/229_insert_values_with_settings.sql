@@ -1,0 +1,1 @@
+INSERT INTO ops.deploy_events (id, service, status) SETTINGS async_insert = 1, wait_for_async_insert = 0 VALUES (1, 'api-gateway', 'deployed'), (2, 'auth-service', 'rolled_back')

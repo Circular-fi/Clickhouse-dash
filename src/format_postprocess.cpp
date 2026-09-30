@@ -3841,6 +3841,14 @@ string Formatter::try_format_insert_values(string_view s) {
   // call, so its first top-level `(` opens the column list.
   string target = trim_ascii_spaces(head.substr(12));
   if (starts_with_ci(target, "FUNCTION ") || starts_with_ci(target, "TABLE FUNCTION ")) return {};
+  // `INSERT INTO t [(cols)] SETTINGS k = v, … VALUES …`: split the settings
+  // off first; they are rendered between the column list and VALUES.
+  string settings;
+  if (const int settings_pos = find_top_level_keyword(target, "SETTINGS"); settings_pos > 0) {
+    settings = collapse_whitespace(trim_ascii_spaces(target.substr(static_cast<size_t>(settings_pos) + 8)));
+    target = trim_ascii_spaces(target.substr(0, static_cast<size_t>(settings_pos)));
+    if (settings.empty()) return {};
+  }
   string cols;
   {
     ScanState st;
@@ -3904,6 +3912,7 @@ string Formatter::try_format_insert_values(string_view s) {
 
   string compact = "INSERT INTO " + target;
   if (!col_items.empty()) compact += " (" + join(col_items) + ")";
+  if (!settings.empty()) compact += " SETTINGS " + settings;
   compact += " VALUES ";
   for (size_t r = 0; r < rows.size(); ++r) {
     if (r) compact += ", ";
@@ -3926,6 +3935,7 @@ string Formatter::try_format_insert_values(string_view s) {
       out += "    )";
     }
   }
+  if (!settings.empty()) out += "\nSETTINGS " + settings;
   out += "\nVALUES";
   for (size_t r = 0; r < rows.size(); ++r) {
     const string suffix = r + 1 < rows.size() ? "," : "";
