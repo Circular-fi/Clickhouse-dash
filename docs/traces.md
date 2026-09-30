@@ -16,6 +16,8 @@ traces {
   max_lookback_minutes     = 10080
   search_limit             = 100
   max_spans_per_trace      = 10000
+  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+  linked_from_margin_minutes = 60
 
   features {
     service_filter      = true
@@ -37,6 +39,18 @@ service_allowlist = ["api", "test_*", "*_worker", "payments-*-consumer"]
 ```
 
 `test_*` means every `ServiceName` starting with `test_`. An empty list denies every service. If a trace crosses allowed and denied services, only allowed spans are returned and hidden parent IDs are removed from the response.
+
+`highlighted_attributes` (optional, at most 32 distinct keys of 1 to 256 bytes) lists the attributes shown as `key: value` chips in the trace header. Each value comes from the root span (span attributes, then resource attributes), else from the first span in tree order that carries the key; keys no span carries are left out. Clicking a chip copies its value. The list is served by `/api/traces/meta`.
+
+`linked_from_margin_minutes` (1 to 1440, default 60) bounds the "Linked from (other traces)" lookup described below.
+
+## Span insights
+
+The span inspector adds, on top of Jaeger's sections:
+
+- **Exceptions.** Events named `exception` (OpenTelemetry semantic conventions: `exception.type`, `exception.message`, `exception.stacktrace`, `exception.escaped`) and `exception.*` span attributes are shown first, type and message in red. Stack traces of Java/Kotlin, Python, Go, JavaScript (V8, Firefox/Safari), .NET and Ruby are parsed into frames (library and runtime frames dimmed); the five frames nearest the throw are shown, with "Show all", a raw view and "Copy stack". A stack without any recognised frame is shown as text. A span can carry several exceptions. Waterfall rows of such spans carry a marker, and the trace header counts the exceptions (the button opens the first span).
+- **Linked from (other traces).** Opening the References section asks `GET /api/traces/linked_from?trace_id=&span_id=&start_ms=&end_ms=` for spans of other traces whose `Links` point to this span. The scan covers the trace's own window (`start_ms`/`end_ms`, or the trace index bounds when omitted) widened by `linked_from_margin_minutes` on each side, never more: `PREWHERE has(Links.TraceId, trace)` then `arrayExists` over the zipped `Links.TraceId`/`Links.SpanId` when a span is given, the service allowlist, `ORDER BY Timestamp DESC LIMIT 101` (100 shown) and `max_execution_time = 15`. It is refused when `features.links` is off. "Open linked trace" opens the linking span (`?span=`).
+- **Surrounding context.** The inspector's "Context" button opens a side panel listing spans of any trace around the span's start time: ±1 s, ±10 s, ±1 min or ±5 min; Anything, Same service, Same host (`host.name`), Same pod (`k8s.pod.name`) or a custom attribute of the span. `GET /api/traces/context?timestamp_ns=&window_ms=&filter=any|service|host|pod|attribute&service=&value=&attr_scope=&attr_key=&attr_value=&direction=around|older|newer&cursor_ns=&cursor_span_id=&limit=` reads only the window (`Timestamp` bounds, the `ServiceName` primary-key prefix for "Same service"), with the service allowlist, `max_execution_time = 10` and at most 200 rows. `around` returns the spans nearest the anchor on each side, newest first; `older`/`newer` continue with a keyset cursor on `(Timestamp, SpanId)`. Host, pod and attribute filters need Map attribute columns and the matching `features` flag. A row opens its span in its trace.
 
 ## Recommended ClickHouse projection indexes
 

@@ -65,6 +65,12 @@ struct TraceSettings {
   int max_lookback_minutes = 7 * 24 * 60;
   size_t search_limit = 100;
   size_t max_spans_per_trace = 10000;
+  // Attributes shown as key: value chips in the trace header (root span
+  // first, then the first span carrying the key).
+  std::vector<std::string> highlighted_attributes{
+      "service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"};
+  // "Linked from" lookups scan the trace's own window widened by this margin.
+  int linked_from_margin_minutes = 60;
   TraceFeatureSettings features;
 };
 
@@ -210,6 +216,8 @@ private:
   void handle_traces_analytics(const httplib::Request& req, httplib::Response& res);
   void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_linked_from(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_context(const httplib::Request& req, httplib::Response& res);
 
   // OTel logs / metrics schema detection (api_otel_signals.cpp).
   void handle_logs_meta(const httplib::Request& req, httplib::Response& res);

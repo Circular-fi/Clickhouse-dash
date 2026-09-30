@@ -14113,3 +14113,323 @@ html[data-theme="light"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- Span insights (app_trace_insights.js) -------------------------------- */
+
+/* Exceptions: type and message in red, then the parsed stack trace. */
+.traceException {
+  margin: 4px 10px 6px 24px;
+  padding: 6px 10px 8px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--trace-error) 45%, var(--border));
+  border-left: 3px solid var(--trace-error);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--trace-error) 7%, transparent);
+  font-size: 11px;
+}
+.traceException__head { display: flex; align-items: baseline; gap: 4px; color: var(--trace-error); font-size: 11px; }
+.traceException__item { min-width: 0; display: grid; gap: 4px; }
+.traceException__item + .traceException__item { padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--trace-error) 35%, var(--border)); }
+.traceException__title { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.traceException__title > svg,
+.traceSpanRow__exception > svg,
+.tracePageHeader__exceptions > svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: currentColor;
+  stroke: none;
+}
+.traceException__title > svg { color: var(--trace-error); }
+.traceException__type { color: var(--trace-error); font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+.traceException__message { margin: 0; color: var(--text); font-size: 12px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.traceException__badge {
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--trace-error) 55%, transparent);
+  border-radius: 999px;
+  color: var(--trace-error);
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 16px;
+}
+.traceException__badge.is-muted { border-color: var(--border); color: var(--muted); }
+.traceException__time { color: var(--muted); font-size: 10px; }
+
+.traceStack {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panelBg) 85%, transparent);
+}
+.traceStack__bar {
+  padding: 3px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.traceStack__meta { margin-right: auto; color: var(--muted); font-size: 10px; }
+.traceStack__button {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  font: 600 10px Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.traceStack__button:hover,
+.traceStack__button:focus-visible,
+.traceStack__button.is-copied { border-color: var(--accentBorder); color: var(--text); outline: none; }
+.traceStack__rows {
+  max-height: 360px;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  list-style: none;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.traceStack__row { padding: 0 8px; overflow-wrap: anywhere; }
+.traceStack__row[hidden] { display: none; }
+.traceStack__frame { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.traceStack__frame:hover { background: var(--rowHover); }
+.traceStack__fn { color: var(--text); font: inherit; font-weight: 600; }
+.traceStack__loc { color: color-mix(in srgb, var(--accentBorder) 70%, var(--muted)); }
+.traceStack__code { flex-basis: 100%; padding-left: 14px; color: var(--muted); font: inherit; white-space: pre-wrap; }
+.traceStack__frame.is-library .traceStack__fn,
+.traceStack__frame.is-library .traceStack__loc { color: var(--muted); font-weight: 400; }
+.traceStack__row--text { color: var(--muted); }
+.traceStack__row--cause { margin-top: 3px; color: var(--trace-error); font-weight: 600; }
+.traceStack__row--omitted { color: var(--muted); font-style: italic; }
+.traceStack__hidden { display: block; padding: 0 8px 4px; color: var(--muted); font-size: 10px; font-style: italic; }
+.traceStack__raw {
+  max-height: 360px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  color: var(--text);
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+}
+
+/* Waterfall row and trace header exception markers. */
+.traceSpanRow__exception {
+  width: 14px;
+  height: 14px;
+  margin-right: 2px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--trace-error);
+}
+.tracePageHeader__exceptions {
+  height: 20px;
+  margin: 0 4px 0 8px;
+  padding: 0 7px;
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--trace-error) 55%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--trace-error) 12%, transparent);
+  color: var(--trace-error);
+  font: 700 9.5px/1 Arial, Helvetica, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tracePageHeader__exceptions small { max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; font-size: 9.5px; }
+.tracePageHeader__exceptions:hover,
+.tracePageHeader__exceptions:focus-visible { background: color-mix(in srgb, var(--trace-error) 20%, transparent); outline: none; }
+
+/* Highlighted attributes: key: value chips under the trace title. */
+.traceHighlights {
+  min-width: 0;
+  padding: 0 10px 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.traceHighlights[hidden] { display: none; }
+.traceHighlight {
+  max-width: min(480px, 100%);
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: 11px Arial, Helvetica, sans-serif;
+  cursor: copy;
+}
+.traceHighlight__key {
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 80%, transparent);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.traceHighlight__value { min-width: 0; padding: 0 7px; display: inline-flex; align-items: center; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.traceHighlight:hover,
+.traceHighlight:focus-visible,
+.traceHighlight.is-copied { border-color: var(--accentBorder); outline: none; }
+
+/* Linked from other traces (References section). */
+.traceLinkedFrom { margin-top: 6px; display: grid; gap: 4px; }
+.traceSpanRefs__list + .traceLinkedFrom { padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent); }
+.traceLinkedFrom__head { display: flex; align-items: baseline; gap: 6px; font-size: 11px; }
+.traceLinkedFrom__status { color: var(--muted); font-size: 10.5px; font-style: italic; }
+.traceLinkedFrom__note { margin: 0; color: var(--muted); font-size: 10.5px; }
+.traceLinkedFrom__note.is-error { color: var(--trace-error); }
+.traceLinkedFrom__load {
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  font: 600 10px Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.traceLinkedFrom__load:hover { border-color: var(--accentBorder); color: var(--text); }
+.traceLinkedFrom__item {
+  min-width: 0;
+  padding: 4px 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panelBg) 70%, transparent);
+  font-size: 11px;
+}
+.traceInspectorIdentity__context { margin-left: 0; }
+
+/* Surrounding context: a side panel over the trace page. */
+.traceContextPanel {
+  position: fixed;
+  z-index: 60;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(720px, 100vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--borderStrong, var(--border));
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  outline: none;
+}
+.traceContextPanel[hidden] { display: none; }
+.traceContextPanel__head {
+  padding: 10px 12px 8px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.traceContextPanel__title { min-width: 0; flex: 1 1 auto; display: grid; gap: 2px; }
+.traceContextPanel__title > strong { font-size: 14px; }
+.traceContextPanel__title > span { min-width: 0; overflow: hidden; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.traceContextPanel__title b { color: var(--text); }
+.traceContextPanel__title b::before,
+.traceContextRow__service > span::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 1px;
+  background: var(--trace-service-color, var(--muted));
+}
+.traceContextPanel__close {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.traceContextPanel__close:hover,
+.traceContextPanel__close:focus-visible { color: var(--text); border-color: var(--accentBorder); outline: none; }
+.traceContextPanel__controls { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); }
+.traceContextSeg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.traceContextSeg__button {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.traceContextSeg__button:last-child { border-right: 0; }
+.traceContextSeg__button:hover:not(:disabled),
+.traceContextSeg__button:focus-visible { color: var(--text); background: var(--rowHover); outline: none; }
+.traceContextSeg__button.is-active { background: color-mix(in srgb, var(--accentBorder) 22%, transparent); color: var(--text); }
+.traceContextSeg__button:disabled { opacity: 0.45; cursor: not-allowed; }
+.traceContextPanel__attr { min-width: 0; flex: 1 1 260px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.traceContextPanel__attr select {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--inputBg, transparent);
+  color: var(--text);
+  font: 11px Arial, Helvetica, sans-serif;
+}
+.traceContextPanel__status,
+.traceContextPanel__error { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 11px; }
+.traceContextPanel__error { color: var(--trace-error); }
+.traceContextPanel__body { min-height: 0; flex: 1 1 auto; padding: 0 8px 12px; overflow: auto; }
+.traceContextPanel__more { margin: 6px 8px; }
+.traceContextTable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.traceContextTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.traceContextRow { cursor: pointer; }
+.traceContextRow td { padding: 3px 8px; border-bottom: 1px solid var(--rowDivider, color-mix(in srgb, var(--border) 60%, transparent)); vertical-align: baseline; }
+.traceContextRow:hover td,
+.traceContextRow:focus-visible td { background: var(--rowHover); }
+.traceContextRow:focus-visible { outline: none; }
+.traceContextRow.is-anchor td { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); font-weight: 650; }
+.traceContextRow.is-error .traceContextRow__op { color: var(--trace-error); }
+.traceContextRow__offset,
+.traceContextRow__time,
+.traceContextRow__duration { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.traceContextRow__offset { color: var(--muted); text-align: right; }
+.traceContextRow__time { color: var(--muted); }
+.traceContextRow__service { white-space: nowrap; }
+.traceContextRow__op { overflow-wrap: anywhere; }
+.traceContextRow__same { margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 9.5px; font-weight: 500; }
+.traceContextRow__unset { color: var(--muted); }

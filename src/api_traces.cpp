@@ -704,6 +704,71 @@ std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const 
   }
 }
 
+// Surrounding-context windows (± around the anchor span) offered by the span
+// inspector; /api/traces/context accepts only these.
+constexpr int64_t kContextWindowsMs[] = {1000, 10000, 60000, 300000};
+constexpr size_t kLinkedFromLimit = 100;
+
+// One span row of the linked-from and context answers.
+struct SpanListRow {
+  std::string timestamp, start_ns, trace_id, span_id, parent_span_id, name, kind, service, duration_ns, status;
+  std::string link_span_ids, link_attributes;
+};
+
+const char* kSpanListColumns =
+    "toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
+    "toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), "
+    "toString(StatusCode)";
+
+void select_span_rows(clickhouse::Client& client, const std::string& sql, std::vector<SpanListRow>* rows, bool with_links) {
+  client.Select(sql, [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      SpanListRow out;
+      out.timestamp = ch_block_text_at(block, 0, row);
+      out.start_ns = ch_block_text_at(block, 1, row);
+      out.trace_id = ch_block_text_at(block, 2, row);
+      out.span_id = ch_block_text_at(block, 3, row);
+      out.parent_span_id = ch_block_text_at(block, 4, row);
+      out.name = ch_block_text_at(block, 5, row);
+      out.kind = ch_block_text_at(block, 6, row);
+      out.service = ch_block_text_at(block, 7, row);
+      out.duration_ns = ch_block_text_at(block, 8, row);
+      out.status = ch_block_text_at(block, 9, row);
+      if (with_links) {
+        out.link_span_ids = ch_block_text_at(block, 10, row);
+        out.link_attributes = ch_block_text_at(block, 11, row);
+      }
+      rows->push_back(std::move(out));
+    }
+  });
+}
+
+// start_ns is also sent as text: epoch nanoseconds pass 2^53, and the context
+// keyset cursor must be exact.
+void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links) {
+  w.StartObject();
+  w.Key("timestamp"); w.String(row.timestamp.c_str());
+  w.Key("start_ns"); w.Int64(std::stoll(row.start_ns));
+  w.Key("start_ns_text"); w.String(row.start_ns.c_str());
+  w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
+  w.Key("trace_id"); w.String(row.trace_id.c_str());
+  w.Key("span_id"); w.String(row.span_id.c_str());
+  w.Key("parent_span_id"); w.String(row.parent_span_id.c_str());
+  w.Key("span_name"); w.String(row.name.c_str());
+  w.Key("span_kind"); w.String(row.kind.c_str());
+  w.Key("service_name"); w.String(row.service.c_str());
+  w.Key("status_code"); w.String(row.status.c_str());
+  if (with_links) {
+    w.Key("link_span_ids"); w.String(row.link_span_ids.c_str());
+    w.Key("link_attributes"); w.String(row.link_attributes.c_str());
+  }
+  w.EndObject();
+}
+
+double elapsed_ms_since(std::chrono::steady_clock::time_point started) {
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
 } // namespace
 
 void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& res) {
@@ -769,6 +834,11 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   w.Key("tag_search_supported"); w.Bool(span_attribute_map || resource_attribute_map);
   w.Key("span_attribute_map"); w.Bool(span_attribute_map);
   w.Key("resource_attribute_map"); w.Bool(resource_attribute_map);
+  w.Key("highlighted_attributes"); write_string_array(w, cfg_.traces.highlighted_attributes);
+  w.Key("linked_from_margin_minutes"); w.Int(cfg_.traces.linked_from_margin_minutes);
+  w.Key("context_windows_ms"); w.StartArray();
+  for (int64_t window : kContextWindowsMs) w.Int64(window);
+  w.EndArray();
   w.Key("features");
   w.StartObject();
   w.Key("service_filter"); w.Bool(cfg_.traces.features.service_filter);
@@ -1501,6 +1571,266 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   for (const auto& point : quantiles) {
     w.StartArray(); w.Int64(point.bucket_ms); w.Uint64(point.p50); w.Uint64(point.p90); w.Uint64(point.p95); w.Uint64(point.p99); w.EndArray();
   }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// Spans of OTHER traces whose Links point to this trace (or to one of its
+// spans). Links are stored on the linking span only, so the lookup scans
+// otel_traces: always inside the trace's own window widened by
+// traces.linked_from_margin_minutes on each side, never unbounded.
+void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Response& res) {
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+  if (!cfg_.traces.features.links) return json_error(res, 404, "trace_links_disabled", "Span links are disabled by traces.features.");
+  const std::string trace_id = req.has_param("trace_id") ? req.get_param_value("trace_id") : std::string{};
+  const std::string span_id = req.has_param("span_id") ? req.get_param_value("span_id") : std::string{};
+  if (trace_id.empty()) return json_error(res, 400, "missing_trace_id", "trace_id is required.");
+  if (trace_id.size() > 256) return json_error(res, 400, "invalid_trace_id", "trace_id is too long.");
+  if (span_id.size() > 256) return json_error(res, 400, "invalid_span_id", "span_id is too long.");
+
+  int64_t start_ms = 0, end_ms = 0;
+  const bool has_lo = parse_i64_param(req, "start_ms", &start_ms);
+  const bool has_hi = parse_i64_param(req, "end_ms", &end_ms);
+  if (has_lo != has_hi) return json_error(res, 400, "invalid_trace_range", "start_ms and end_ms must be provided together.");
+
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  std::string error;
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  const std::string trace_literal = quote_string(trace_id);
+  std::string range_source = "request";
+  if (!has_lo) {
+    // No window from the caller: the trace index gives the trace's bounds.
+    if (cfg_.traces.trace_index_table.empty()) {
+      return json_error(res, 503, "trace_index_unavailable", "Linked-from lookups without start_ms/end_ms require traces.trace_index_table.");
+    }
+    uint64_t count = 0;
+    try {
+      client->Select(
+          "SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM " +
+              qualified(cfg_.traces.database, cfg_.traces.trace_index_table) + " WHERE TraceId = " + trace_literal,
+          [&](const clickhouse::Block& block) {
+            if (!block.GetRowCount()) return;
+            count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
+            if (count) {
+              start_ms = std::stoll(ch_block_text_at(block, 1, 0));
+              end_ms = std::stoll(ch_block_text_at(block, 2, 0)) + 1;
+            }
+          });
+    } catch (const std::exception& e) {
+      return json_error(res, 503, "trace_index_lookup_failed", e.what());
+    }
+    if (!count) return json_error(res, 404, "trace_not_found", "Trace was not found in the trace index.");
+    range_source = "trace_index";
+  }
+  constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
+  const int64_t margin_ms = static_cast<int64_t>(cfg_.traces.linked_from_margin_minutes) * 60 * 1000;
+  if (start_ms < 0 || end_ms < start_ms || end_ms > kMaxTraceTimeMs - margin_ms) {
+    return json_error(res, 400, "invalid_trace_range", "Invalid trace time range.");
+  }
+  if (end_ms - start_ms > static_cast<int64_t>(cfg_.traces.max_lookback_minutes) * 60 * 1000) {
+    return json_error(res, 400, "invalid_trace_range", "Trace time range exceeds traces.max_lookback_minutes.");
+  }
+  const int64_t lo_ms = std::max<int64_t>(0, start_ms - margin_ms);
+  const int64_t hi_ms = end_ms + margin_ms;
+
+  // has() reads Links.TraceId alone (PREWHERE); a span id also needs the pair
+  // to match, so the zipped arrays are checked for the remaining rows.
+  const std::string link_match = span_id.empty()
+      ? "t = trace"
+      : "t = trace AND s = " + quote_string(span_id);
+  const std::string sql =
+      "WITH " + trace_literal + " AS trace SELECT " + kSpanListColumns +
+      ", toJSONString(arrayFilter((s, t) -> " + link_match + ", Links.SpanId, Links.TraceId))"
+      ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
+      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " PREWHERE has(Links.TraceId, trace)"
+      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + service_allowlist_predicate(cfg_.traces) +
+      (span_id.empty() ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
+      " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
+      " SETTINGS max_execution_time = 15";
+
+  std::vector<SpanListRow> rows;
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    select_span_rows(*client, sql, &rows, true);
+  } catch (const std::exception& e) {
+    return json_error(res, 503, "trace_linked_from_failed", e.what());
+  }
+  const double elapsed = elapsed_ms_since(started);
+  const bool truncated = rows.size() > kLinkedFromLimit;
+  if (truncated) rows.resize(kLinkedFromLimit);
+
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("trace_id"); w.String(trace_id.c_str());
+  w.Key("span_id"); w.String(span_id.c_str());
+  w.Key("range_source"); w.String(range_source.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(lo_ms); w.Int64(hi_ms); w.EndArray();
+  w.Key("margin_minutes"); w.Int(cfg_.traces.linked_from_margin_minutes);
+  w.Key("limit"); w.Uint64(kLinkedFromLimit);
+  w.Key("truncated"); w.Bool(truncated);
+  w.Key("elapsed_ms"); w.Double(elapsed);
+  w.Key("rows"); w.StartArray();
+  for (const auto& row : rows) write_span_row(w, row, true);
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// Spans around an anchor timestamp (±window_ms), newest first, with a keyset
+// cursor on (Timestamp, SpanId) in both directions. "around" returns the
+// spans nearest the anchor on each side. Every read is bounded by the window;
+// "service" hits the ServiceName primary-key prefix, the others rely on the
+// time bound (and the attribute bloom filters).
+void Server::handle_traces_context(const httplib::Request& req, httplib::Response& res) {
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+  int64_t anchor_ns = 0;
+  if (!parse_i64_param(req, "timestamp_ns", &anchor_ns)) return json_error(res, 400, "missing_timestamp", "timestamp_ns is required.");
+  int64_t window_ms = 60000;
+  if (req.has_param("window_ms") && !parse_i64_param(req, "window_ms", &window_ms)) window_ms = -1;
+  if (std::find(std::begin(kContextWindowsMs), std::end(kContextWindowsMs), window_ms) == std::end(kContextWindowsMs)) {
+    return json_error(res, 400, "invalid_context_window", "window_ms must be 1000, 10000, 60000 or 300000.");
+  }
+  const int64_t window_ns = window_ms * kNsPerMs;
+  if (anchor_ns < window_ns || anchor_ns > INT64_MAX - window_ns) return json_error(res, 400, "invalid_timestamp", "timestamp_ns is out of range.");
+
+  const std::string filter = req.has_param("filter") && !req.get_param_value("filter").empty() ? req.get_param_value("filter") : "any";
+  const std::string direction = req.has_param("direction") && !req.get_param_value("direction").empty() ? req.get_param_value("direction") : "around";
+  if (direction != "around" && direction != "older" && direction != "newer") {
+    return json_error(res, 400, "invalid_direction", "direction must be around, older or newer.");
+  }
+  const int limit = int_param(req, "limit", 50, 1, 200);
+  int64_t cursor_ns = 0;
+  const std::string cursor_span = req.has_param("cursor_span_id") ? req.get_param_value("cursor_span_id") : std::string{};
+  if (direction != "around") {
+    if (!parse_i64_param(req, "cursor_ns", &cursor_ns)) return json_error(res, 400, "missing_cursor", "cursor_ns is required to page older or newer.");
+    if (cursor_span.size() > 256) return json_error(res, 400, "invalid_cursor", "cursor_span_id is too long.");
+  }
+
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  std::string error;
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
+  std::string filter_sql;
+  if (filter == "service") {
+    const std::string service = param("service");
+    if (service.empty() || service.size() > 1024) return json_error(res, 400, "invalid_context_filter", "service is required for the service filter.");
+    filter_sql = "ServiceName = " + quote_string(service);
+  } else if (filter == "host" || filter == "pod" || filter == "attribute") {
+    std::string scope = "resource", key, value;
+    if (filter == "attribute") {
+      scope = param("attr_scope");
+      key = param("attr_key");
+      value = param("attr_value");
+      if (scope != "span" && scope != "resource") return json_error(res, 400, "invalid_context_filter", "attr_scope must be span or resource.");
+      if (key.empty() || key.size() > 256) return json_error(res, 400, "invalid_context_filter", "attr_key must be 1 to 256 bytes.");
+    } else {
+      key = filter == "host" ? "host.name" : "k8s.pod.name";
+      value = param("value");
+      if (value.empty()) return json_error(res, 400, "invalid_context_filter", "value is required for the " + filter + " filter.");
+    }
+    if (value.size() > 4096) return json_error(res, 400, "invalid_context_filter", "The attribute value is too long.");
+    const bool resource = scope == "resource";
+    if (!(resource ? cfg_.traces.features.resource_attributes : cfg_.traces.features.span_attributes)) {
+      return json_error(res, 400, "context_filter_disabled", std::string(resource ? "resource" : "span") + " attributes are disabled by traces.features.");
+    }
+    bool span_map = false, resource_map = false;
+    cached_trace_attribute_maps(*client, *host, cfg_.traces, &span_map, &resource_map);
+    if (!(resource ? resource_map : span_map)) {
+      return json_error(res, 400, "context_filter_unavailable", "Attribute filters need Map attribute columns.");
+    }
+    const std::string column = resource ? "ResourceAttributes" : "SpanAttributes";
+    filter_sql = "mapContains(" + column + ", " + quote_string(key) + ") AND " + column + "[" + quote_string(key) + "] = " + quote_string(value);
+  } else if (filter != "any") {
+    return json_error(res, 400, "invalid_context_filter", "filter must be any, service, host, pod or attribute.");
+  }
+
+  const int64_t lo_ns = anchor_ns - window_ns;
+  const int64_t hi_ns = anchor_ns + window_ns;
+  const std::string base =
+      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " WHERE Timestamp >= " + ns_time(lo_ns) + " AND Timestamp <= " + ns_time(hi_ns) +
+      " AND " + service_allowlist_predicate(cfg_.traces) + (filter_sql.empty() ? std::string{} : " AND " + filter_sql);
+  const std::string settings = " SETTINGS max_execution_time = 10";
+  const auto older_sql = [&](const std::string& keyset, int n) {
+    return std::string("SELECT ") + kSpanListColumns + base + " AND " + keyset +
+           " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(n + 1) + settings;
+  };
+  const auto newer_sql = [&](const std::string& keyset, int n) {
+    return std::string("SELECT ") + kSpanListColumns + base + " AND " + keyset +
+           " ORDER BY Timestamp ASC, SpanId ASC LIMIT " + std::to_string(n + 1) + settings;
+  };
+  const std::string cursor_time = ns_time(cursor_ns);
+  const std::string cursor_id = quote_string(cursor_span);
+
+  std::vector<SpanListRow> older, newer;
+  bool query_older = false, query_newer = false, more_older = false, more_newer = false;
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    if (direction == "around") {
+      const int newer_limit = limit / 2;
+      const int older_limit = limit - newer_limit;
+      query_older = true;
+      select_span_rows(*client, older_sql("Timestamp <= " + ns_time(anchor_ns), older_limit), &older, false);
+      more_older = older.size() > static_cast<size_t>(older_limit);
+      if (more_older) older.resize(older_limit);
+      query_newer = true;
+      if (newer_limit > 0) {
+        select_span_rows(*client, newer_sql("Timestamp > " + ns_time(anchor_ns), newer_limit), &newer, false);
+        more_newer = newer.size() > static_cast<size_t>(newer_limit);
+        if (more_newer) newer.resize(newer_limit);
+      } else {
+        std::vector<SpanListRow> probe;
+        select_span_rows(*client, newer_sql("Timestamp > " + ns_time(anchor_ns), 0), &probe, false);
+        more_newer = !probe.empty();
+      }
+    } else if (direction == "older") {
+      query_older = true;
+      select_span_rows(*client, older_sql("(Timestamp < " + cursor_time + " OR (Timestamp = " + cursor_time + " AND SpanId < " + cursor_id + "))", limit), &older, false);
+      more_older = older.size() > static_cast<size_t>(limit);
+      if (more_older) older.resize(limit);
+    } else {
+      query_newer = true;
+      select_span_rows(*client, newer_sql("(Timestamp > " + cursor_time + " OR (Timestamp = " + cursor_time + " AND SpanId > " + cursor_id + "))", limit), &newer, false);
+      more_newer = newer.size() > static_cast<size_t>(limit);
+      if (more_newer) newer.resize(limit);
+    }
+  } catch (const std::exception& e) {
+    return json_error(res, 503, "trace_context_failed", e.what());
+  }
+  const double elapsed = elapsed_ms_since(started);
+
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("timestamp_ns"); w.String(std::to_string(anchor_ns).c_str());
+  w.Key("window_ms"); w.Int64(window_ms);
+  w.Key("range_ns"); w.StartArray(); w.String(std::to_string(lo_ns).c_str()); w.String(std::to_string(hi_ns).c_str()); w.EndArray();
+  w.Key("filter"); w.String(filter.c_str());
+  w.Key("direction"); w.String(direction.c_str());
+  w.Key("limit"); w.Int(limit);
+  if (query_newer) { w.Key("has_newer"); w.Bool(more_newer); }
+  if (query_older) { w.Key("has_older"); w.Bool(more_older); }
+  w.Key("elapsed_ms"); w.Double(elapsed);
+  w.Key("rows"); w.StartArray();
+  for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_span_row(w, *it, false);
+  for (const auto& row : older) write_span_row(w, row, false);
   w.EndArray();
   w.EndObject();
   res.status = 200;

@@ -224,6 +224,25 @@
     return getJson(`api/traces/trace?${query.toString()}`);
   }
 
+  function optionalParams(hostId, params) {
+    const query = new URLSearchParams();
+    if (hostId) query.set("host_id", String(hostId));
+    for (const [key, value] of Object.entries(params || {})) {
+      if (value != null && String(value) !== "") query.set(key, String(value));
+    }
+    return query;
+  }
+
+  // Spans of other traces whose links point to this trace (or span).
+  async function getTraceLinkedFrom(hostId, params = {}) {
+    return getJson(`api/traces/linked_from?${optionalParams(hostId, params).toString()}`);
+  }
+
+  // Spans around a span's start time (surrounding context).
+  async function getTraceContext(hostId, params = {}) {
+    return getJson(`api/traces/context?${optionalParams(hostId, params).toString()}`);
+  }
+
   // Server-wide storage distribution (runner-visible databases -> tables) for
   // the Explorer System section treemap.
   async function getExplorerStorage(hostId, refresh = false) {
@@ -354,5 +373,6 @@
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTrace,
+    getTraceLinkedFrom, getTraceContext,
   };
 })();

@@ -89,6 +89,17 @@ void normalize_config(AppConfig& cfg) {
     if (pattern.empty()) throw std::runtime_error("traces.service_allowlist cannot contain an empty pattern");
     if (pattern.size() > 256) throw std::runtime_error("traces.service_allowlist patterns must be at most 256 bytes");
   }
+  if (cfg.traces.highlighted_attributes.size() > 32) throw std::runtime_error("traces.highlighted_attributes accepts at most 32 keys");
+  for (size_t i = 0; i < cfg.traces.highlighted_attributes.size(); ++i) {
+    const auto& key = cfg.traces.highlighted_attributes[i];
+    if (key.empty() || key.size() > 256) throw std::runtime_error("traces.highlighted_attributes keys must be 1 to 256 bytes");
+    for (size_t j = 0; j < i; ++j) {
+      if (cfg.traces.highlighted_attributes[j] == key) throw std::runtime_error("traces.highlighted_attributes lists " + key + " twice");
+    }
+  }
+  if (cfg.traces.linked_from_margin_minutes < 1 || cfg.traces.linked_from_margin_minutes > 24 * 60) {
+    throw std::runtime_error("traces.linked_from_margin_minutes must be between 1 and 1440");
+  }
   if (cfg.traces.enabled) {
     if (cfg.traces.database.empty() || cfg.traces.table.empty()) throw std::runtime_error("traces.database and traces.table cannot be empty");
   }
@@ -371,7 +382,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   if (const auto* traces = optional_block(root, "traces", source)) {
     validate_object(*traces, "traces", {
         "enabled", "analytics", "database", "table", "trace_index_table",
-        "service_allowlist", "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace"}, {"features"});
+        "service_allowlist", "default_lookback_minutes", "max_lookback_minutes", "search_limit", "max_spans_per_trace",
+        "highlighted_attributes", "linked_from_margin_minutes"}, {"features"});
     if (auto v = bool_attr(*traces, "enabled", "traces")) cfg.traces.enabled = *v;
     if (auto v = bool_attr(*traces, "analytics", "traces")) cfg.traces.analytics = *v;
     if (auto v = string_attr(*traces, "database", "traces")) cfg.traces.database = *v;
@@ -382,6 +394,8 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*traces, "max_lookback_minutes", "traces")) cfg.traces.max_lookback_minutes = int_value(*v, "traces.max_lookback_minutes");
     if (auto v = int_attr(*traces, "search_limit", "traces")) cfg.traces.search_limit = size_value(*v, "traces.search_limit");
     if (auto v = int_attr(*traces, "max_spans_per_trace", "traces")) cfg.traces.max_spans_per_trace = size_value(*v, "traces.max_spans_per_trace");
+    if (auto v = string_list_attr(*traces, "highlighted_attributes", "traces")) cfg.traces.highlighted_attributes = std::move(*v);
+    if (auto v = int_attr(*traces, "linked_from_margin_minutes", "traces")) cfg.traces.linked_from_margin_minutes = int_value(*v, "traces.linked_from_margin_minutes");
     if (const auto* features = optional_block(*traces, "features", "traces")) {
       validate_object(*features, "traces.features", {
           "service_filter", "operation_filter", "status_filter", "duration_filter",

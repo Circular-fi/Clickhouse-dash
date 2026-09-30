@@ -2026,6 +2026,7 @@
       if (dom.traceDetailStats) dom.traceDetailStats.innerHTML = "";
       if (dom.traceServiceFilters) dom.traceServiceFilters.innerHTML = "";
       if (dom.traceOverview) dom.traceOverview.innerHTML = "";
+      ns.traceInsights?.renderHighlights(null);
       document.title = TRACES_PAGE_TITLE;
       return;
     }
@@ -2055,8 +2056,9 @@
       const incomplete = orphans
         ? `<span class="tracePageHeader__incomplete" data-trace-incomplete title="${esc(`${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`)}">${WARNING_ICON}Incomplete</span>`
         : "";
-      dom.traceDetailStats.innerHTML = itemsHtml + incomplete;
+      dom.traceDetailStats.innerHTML = itemsHtml + incomplete + (ns.traceInsights?.traceExceptionTagHtml(cache) || "");
     }
+    ns.traceInsights?.renderHighlights(cache);
     renderTraceServiceFilters(spans);
     renderTraceOverview(spans, bounds);
   }
@@ -2337,9 +2339,10 @@
     const bar = inView ? `<i class="traceSpanBar${error ? " traceSpanBar--error" : ""}${labelLeft ? " traceSpanBar--labelLeft" : ""}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;--trace-service-color:${color}">${barLabel}</i>` : "";
     const critical = inView ? criticalPathHtml(cache, node, collapsed, ctx) : "";
     const decorations = spanDecorations(cache, span);
-    const errorIcon = error
+    const errorIcon = (error
       ? '<span class="traceSpanRow__errorBadge" title="Span status: Error" aria-label="Error span">!</span>'
-      : childError ? '<span class="traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow" title="An error span is inside this collapsed branch" aria-label="Error span in this collapsed branch">!</span>' : "";
+      : childError ? '<span class="traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow" title="An error span is inside this collapsed branch" aria-label="Error span in this collapsed branch">!</span>' : "")
+      + (ns.traceInsights?.exceptionBadgeHtml(span) || "");
     return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="button" tabindex="0" aria-expanded="${active ? "true" : "false"}">
         <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}</div></div>
         <div class="traceSpanRow__timeline">${bar}${critical}${eventMarkers}</div>
@@ -3066,17 +3069,21 @@
   }
 
   // Jaeger's references: the parent (child of) and the span's links (follows
-  // from), plus the spans of this trace that link here (linked from).
+  // from), plus the spans of this trace that link here (linked from), and a
+  // lazily loaded group of the spans of other traces that link here.
   function renderJaegerLinks(span, cache) {
     const links = spanLinkList(span);
     const from = linkedFromList(cache, span);
-    if (!links.length && !from.length) return "";
+    const remote = ns.traceInsights?.linkedFromRemoteHtml(span, cache) || "";
+    if (!links.length && !from.length && !remote) return "";
     const items = [];
     const parentId = String(span.parent_span_id || "");
     if (parentId) items.push(referenceItemHtml("child of", { traceId: "", spanId: parentId }, cache));
     for (const link of links) items.push(referenceItemHtml("follows from", link, cache));
     for (const link of from) items.push(referenceItemHtml("linked from", link, cache));
-    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanRefs" data-span-section="references"${sectionOpen(span.span_id, "references") ? " open" : ""}><summary><b>References</b><span class="traceJaegerGroup__count">(${items.length})</span></summary><div class="traceJaegerGroup__body"><ul class="traceSpanRefs__list">${items.join("")}</ul></div></details>`;
+    const count = items.length ? `<span class="traceJaegerGroup__count">(${items.length})</span>` : "";
+    const list = items.length ? `<ul class="traceSpanRefs__list">${items.join("")}</ul>` : "";
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanRefs" data-span-section="references"${sectionOpen(span.span_id, "references") ? " open" : ""}><summary><b>References</b>${count}</summary><div class="traceJaegerGroup__body">${list}${remote}</div></details>`;
   }
 
   function spanKindLabel(kind) {
@@ -3107,8 +3114,9 @@
         <strong title="${esc(span.span_name || "span")}">${esc(span.span_name || "span")}</strong>
         <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(formatDuration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
       </div>
+      ${ns.traceInsights?.exceptionSectionHtml(span, bounds) || ""}
       ${statusMessage ? `<div class="traceInspectorStatusMessage"><b>Status message</b><span>${esc(statusMessage)}</span></div>` : ""}
-      <div class="traceInspectorIdentity">${idCopyHtml("SpanID", id, "Span ID")}${idCopyHtml("Parent", String(span.parent_span_id || ""), "parent Span ID")}<button type="button" class="traceInspectorIdentity__deepLink" data-copy-deep-link="${esc(id)}" title="Copy a link that opens this trace on this span">Copy deep link</button></div>
+      <div class="traceInspectorIdentity">${idCopyHtml("SpanID", id, "Span ID")}${idCopyHtml("Parent", String(span.parent_span_id || ""), "parent Span ID")}<button type="button" class="traceInspectorIdentity__deepLink" data-copy-deep-link="${esc(id)}" title="Copy a link that opens this trace on this span">Copy deep link</button>${ns.traceInsights ? `<button type="button" class="traceInspectorIdentity__deepLink traceInspectorIdentity__context" data-span-context="${esc(id)}" title="Spans of any trace around this span's start time">Context</button>` : ""}</div>
       ${renderJaegerAttributes("Tags", span.span_attributes, { open: sectionOpen(id, "tags") })}
       ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: sectionOpen(id, "process") }) : ""}
       ${renderJaegerEvents(span, bounds)}
@@ -3129,6 +3137,7 @@
     const linked = target.closest("[data-linked-span]");
     // The waterfall handler opens the linked trace; say which span to focus.
     if (linked) { model.pendingSpanId = String(linked.getAttribute("data-linked-span") || ""); return; }
+    if (ns.traceInsights?.handleInspectorClick(event, target)) return;
     const kvCopy = target.closest("[data-kv-copy]");
     if (kvCopy) {
       event.preventDefault();
@@ -3180,6 +3189,7 @@
     if (!details || !spanId) return;
     const key = details.dataset.spanSection || (details.classList.contains("traceSpanEvent") ? `event:${details.dataset.eventIndex}` : "");
     if (key) setSectionOpen(spanId, key, details.open);
+    if (key) ns.traceInsights?.onSectionToggle(spanId, key, details.open);
   }
 
   function initSpanDetailEvents() {
@@ -3501,6 +3511,7 @@
     model.disabledServices.clear();
     model.collapsed.clear();
     if (push) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    ns.traceInsights?.onTraceChanged(null);
     setView(false);
     if (!model.traces.length) search();
   }
@@ -3546,6 +3557,11 @@
       model, activeTraceCache, renderWaterfall, focusSpanInTimeline, spanTraceUrl, enhanceTraceSelect,
       serviceColor, formatDuration, esc, copyText, spanEventList, eventItemHtml, parseStructuredValue, spanDetailClick,
       attributeEntries, spanKindLabel,
+    });
+    ns.traceInsights?.install?.({
+      model, activeTraceCache, focusSpanInTimeline, loadTrace, spanTraceUrl, serviceColor, formatDuration, esc, copyText,
+      spanEventList, parseStructuredValue, attributeEntries, renderAttributeTable, sectionOpen, setSectionOpen, currentHost,
+      exactStartNs: (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0))),
     });
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));

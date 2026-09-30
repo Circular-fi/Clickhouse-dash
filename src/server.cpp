@@ -206,6 +206,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
     http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
     http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
+    http_.Get("/api/traces/linked_from", [&](const auto& req, auto& res) { handle_traces_linked_from(req, res); });
+    http_.Get("/api/traces/context", [&](const auto& req, auto& res) { handle_traces_context(req, res); });
   }
 
   // Always registered: when logs/metrics are disabled the meta routes answer

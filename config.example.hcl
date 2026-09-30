@@ -77,6 +77,12 @@ traces {
   max_lookback_minutes     = 10080
   search_limit             = 100
   max_spans_per_trace      = 10000
+  # Attributes shown as "key: value" chips in the trace header: from the root
+  # span (span, then resource attributes), else the first span that has them.
+  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+  # "Linked from (other traces)" scans the trace's window widened by this
+  # many minutes on each side (1..1440).
+  linked_from_margin_minutes = 60
 
   features {
     service_filter      = true

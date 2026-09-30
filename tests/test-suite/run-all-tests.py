@@ -220,6 +220,7 @@ def main() -> int:
             str(ROOT / 'api' / 'format' / 'check_format.py'),
             str(ROOT / 'api' / 'query_types' / 'check_query_types.py'),
             str(ROOT / 'backend-functional' / 'test_routes.py'),
+            str(ROOT / 'backend-functional' / 'test_trace_span_insights.py'),
             '/repo/tests/harness',
             '--junitxml', str(backend_dir / 'junit.xml'),
         ],
@@ -233,7 +234,7 @@ def main() -> int:
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/trace-insights.spec.js', '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,

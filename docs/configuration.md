@@ -69,6 +69,9 @@ traces {
   max_lookback_minutes     = 10080
   search_limit             = 100
   max_spans_per_trace      = 10000
+  # Optional; see docs/traces.md.
+  highlighted_attributes   = ["service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"]
+  linked_from_margin_minutes = 60
 
   features {
     service_filter      = true
