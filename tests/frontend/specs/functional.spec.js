@@ -124,6 +124,23 @@ test('format and clear buttons follow actual editor and result state', async ({ 
   await expect(clear).toBeDisabled();
 });
 
+test('numeric gauges fill from the column baseline: most negative value empty, largest full', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p ORDER BY v');
+  const fills = (col) => page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').evaluateAll((trs, c) =>
+    trs.map((tr) => parseFloat(tr.cells[c].style.getPropertyValue('--gaugeFill'))), col);
+  // v: range [-10, 12] -> -10 has no fill, 12 fills the cell, 0 sits at 10/22.
+  const v = await fills(1);
+  expect(v[0]).toBe(0);
+  expect(v[4]).toBe(100);
+  expect(v[2]).toBeCloseTo(100 * 10 / 22, 3);
+  expect(v[1]).toBeCloseTo(100 * 7 / 22, 3);
+  // p has no negatives: bars stay proportional to the values (baseline 0).
+  const p = await fills(2);
+  expect(p[0]).toBeCloseTo(100 * 10 / 32, 3);
+  expect(p[4]).toBe(100);
+});
+
 test('normal query cannot expose analysis', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT sum(number) AS total FROM numbers(100000)');

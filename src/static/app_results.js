@@ -128,8 +128,8 @@
   let virtualScrollAttached = false;
 
   let gaugeNumericCols = [];
-  let gaugeMaxPos = [];
-  let gaugeMaxAbs = [];
+  let gaugeMax = [];
+  let gaugeMin = [];
   let gaugeDirty = false;
   let numericMaxScale = [];
   let numericDirty = false;
@@ -250,8 +250,8 @@
     resultTypeAsts = [];
     resultTupleFlattenPlan = null;
     gaugeNumericCols = [];
-    gaugeMaxPos = [];
-    gaugeMaxAbs = [];
+    gaugeMax = [];
+    gaugeMin = [];
     gaugeDirty = false;
     numericMaxScale = [];
     numericDirty = false;
@@ -1163,10 +1163,15 @@
     return Number.isFinite(n) ? n : null;
   }
 
-  function computeGaugeScale(n, maxPos, maxAbs) {
-    const base = maxPos > 0 ? maxPos : maxAbs;
-    if (!(base > 0) || n === null || n === undefined) return 0;
-    let ratio = Math.abs(n) / base;
+  // The bar spans the column's range from its baseline: 0 for a column
+  // without negatives (bars stay proportional to the values), else its most
+  // negative value. With -10, -3, 0, 5, 12 the -10 cell is empty and the 12
+  // cell full. `max` / `min` are the column's max(0, largest) and
+  // min(0, smallest).
+  function computeGaugeScale(n, max, min) {
+    const range = max - min;
+    if (!(range > 0) || n === null || n === undefined) return 0;
+    let ratio = (n - min) / range;
     if (!Number.isFinite(ratio) || ratio <= 0) return 0;
     if (ratio > 1) ratio = 1;
     if (ratio < 0.001) ratio = 0.001;
@@ -1175,8 +1180,8 @@
 
   function resetLiveGaugeState() {
     gaugeNumericCols = resultTypeAsts.map(isScalarNumericType);
-    gaugeMaxPos = new Array(gaugeNumericCols.length).fill(0);
-    gaugeMaxAbs = new Array(gaugeNumericCols.length).fill(0);
+    gaugeMax = new Array(gaugeNumericCols.length).fill(0);
+    gaugeMin = new Array(gaugeNumericCols.length).fill(0);
     gaugeDirty = false;
     numericMaxScale = new Array(gaugeNumericCols.length).fill(0);
     numericDirty = false;
@@ -1245,13 +1250,12 @@
 
       const n = extractFiniteNumber(row[i]);
       if (n === null) continue;
-      const abs = Math.abs(n);
-      if (abs > gaugeMaxAbs[i]) {
-        gaugeMaxAbs[i] = abs;
+      if (n < gaugeMin[i]) {
+        gaugeMin[i] = n;
         changed = true;
       }
-      if (n > gaugeMaxPos[i]) {
-        gaugeMaxPos[i] = n;
+      if (n > gaugeMax[i]) {
+        gaugeMax[i] = n;
         changed = true;
       }
     }
@@ -1259,11 +1263,11 @@
     if (scaleChanged) numericDirty = true;
   }
 
-  function setGaugeCell(td, raw, colIndex, text, maxPosArr, maxAbsArr) {
+  function setGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
     td.classList.add("resultTable__gaugeCell");
     td.classList.add("resultTable__numeric");
     const n = extractFiniteNumber(raw);
-    const scale = computeGaugeScale(n, maxPosArr[colIndex] || 0, maxAbsArr[colIndex] || 0);
+    const scale = computeGaugeScale(n, maxArr[colIndex] || 0, minArr[colIndex] || 0);
     const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
     td.style.setProperty("--gaugeFill", fill);
     setCellTextFlat(td, text);
@@ -1424,7 +1428,7 @@
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex] && allResultRows.length > 1) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
-          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMaxPos, gaugeMaxAbs);
+          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);
           else {
             td.classList.add("resultTable__numeric");
             setCellTextFlat(td, text);
@@ -2504,8 +2508,8 @@
       wrap: wrapClone,
       errorBanner: ensureLocalErrorBanner(body),
       gaugeNumericCols: [],
-      gaugeMaxPos: [],
-      gaugeMaxAbs: [],
+      gaugeMax: [],
+      gaugeMin: [],
       gaugeDirty: false,
       numericMaxScale: [],
       numericDirty: false,
@@ -2554,8 +2558,8 @@
 
     function resetLocalGaugeState() {
       local.gaugeNumericCols = local.typeAsts.map(isScalarNumericType);
-      local.gaugeMaxPos = new Array(local.gaugeNumericCols.length).fill(0);
-      local.gaugeMaxAbs = new Array(local.gaugeNumericCols.length).fill(0);
+      local.gaugeMax = new Array(local.gaugeNumericCols.length).fill(0);
+      local.gaugeMin = new Array(local.gaugeNumericCols.length).fill(0);
       local.gaugeDirty = false;
       local.numericMaxScale = new Array(local.gaugeNumericCols.length).fill(0);
       local.numericDirty = false;
@@ -2578,13 +2582,12 @@
 
         const n = extractFiniteNumber(row[i]);
         if (n === null) continue;
-        const abs = Math.abs(n);
-        if (abs > local.gaugeMaxAbs[i]) {
-          local.gaugeMaxAbs[i] = abs;
+        if (n < local.gaugeMin[i]) {
+          local.gaugeMin[i] = n;
           changed = true;
         }
-        if (n > local.gaugeMaxPos[i]) {
-          local.gaugeMaxPos[i] = n;
+        if (n > local.gaugeMax[i]) {
+          local.gaugeMax[i] = n;
           changed = true;
         }
       }
@@ -2665,7 +2668,7 @@
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i] && local.allRows.length > 1) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
-            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMaxPos, local.gaugeMaxAbs);
+            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);
             else {
               td.classList.add("resultTable__numeric");
               setCellTextFlat(td, text);
@@ -3190,8 +3193,8 @@
     const safeRows = Array.isArray(rows) ? rows.slice() : [];
     const typeAsts = safeColumns.map((_, index) => parseChType(safeTypes[index] || ""));
     const staticNumericCols = typeAsts.map(isScalarNumericType);
-    const staticMaxPos = new Array(staticNumericCols.length).fill(0);
-    const staticMaxAbs = new Array(staticNumericCols.length).fill(0);
+    const staticMax = new Array(staticNumericCols.length).fill(0);
+    const staticMin = new Array(staticNumericCols.length).fill(0);
     const staticMaxScale = new Array(staticNumericCols.length).fill(0);
     if (safeRows.length > 1 && staticNumericCols.some(Boolean)) {
       for (const row of safeRows) {
@@ -3202,9 +3205,8 @@
           if (scale > staticMaxScale[index]) staticMaxScale[index] = scale;
           const n = extractFiniteNumber(row[index]);
           if (n == null) continue;
-          const abs = Math.abs(n);
-          if (abs > staticMaxAbs[index]) staticMaxAbs[index] = abs;
-          if (n > staticMaxPos[index]) staticMaxPos[index] = n;
+          if (n < staticMin[index]) staticMin[index] = n;
+          if (n > staticMax[index]) staticMax[index] = n;
         }
       }
     }
@@ -3355,7 +3357,7 @@
             if (!handled) {
               if (staticNumericCols[index] && safeRows.length > 1) {
                 const text = formatNumericCellText(entry.row[index], index, staticMaxScale);
-                setGaugeCell(td, entry.row[index], index, text, staticMaxPos, staticMaxAbs);
+                setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin);
               } else {
                 setCellTextFlat(td, formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
               }

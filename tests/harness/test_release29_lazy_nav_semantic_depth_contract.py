@@ -31,7 +31,7 @@ def test_explorer_data_static_numeric_columns_get_gauges() -> None:
     results = read("src/static/app_results.js")
     explorer = read("src/static/app_explorer.js")
     assert "const staticNumericCols = typeAsts.map(isScalarNumericType);" in results
-    assert "setGaugeCell(td, entry.row[index], index, text, staticMaxPos, staticMaxAbs);" in results
+    assert "setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin);" in results
     assert "createStaticResultTable" in explorer
     assert "explorerResultTable--preview" in explorer
 
