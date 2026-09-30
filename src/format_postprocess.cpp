@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -2079,6 +2080,14 @@ CallOpener classify_call_opener(string_view s, const CallScan& scan, size_t pos,
     if (name_begin) *name_begin = b;
     return CallOpener::Call;
   }
+  if (prev == '`' && scan.kind[pos - 1] == kCallLiteral && pos >= 2) {
+    // A quoted function name, as formatQuery prints the VALUES table
+    // function: `VALUES`('k String', ('a', 1), ...).
+    const size_t b = s.rfind('`', pos - 2);
+    if (b == string_view::npos || (b > 0 && (scan.kind[b - 1] != kCallCode || s[b - 1] == '.'))) return CallOpener::None;
+    if (name_begin) *name_begin = b;
+    return CallOpener::Call;
+  }
   if (prev == ')' && scan.kind[pos - 1] == kCallCode) {
     // Parametric aggregate: `name(params)(` — find `name(` of the params.
     size_t open = string::npos;
@@ -2101,6 +2110,12 @@ CallOpener classify_call_opener(string_view s, const CallScan& scan, size_t pos,
   const size_t parent = scan.parent[pos];
   if (parent != string::npos && s[parent] == '[') return CallOpener::ArrayTuple;
   return CallOpener::None;
+}
+
+// `[1, 2]::Array(UInt8)` casts the literal's source text: the bytes between
+// the brackets end up in the AST, so their whitespace must stay as written.
+bool closer_starts_text_cast(string_view s, size_t close) {
+  return close + 2 < s.size() && s[close + 1] == ':' && s[close + 2] == ':';
 }
 
 // Number of top-level arguments between an opener and its closer.
@@ -2171,7 +2186,7 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
     const size_t close = scan.match[open];
     if (close == string::npos) continue;
     const size_t k = line_of(close);
-    if (k <= o) continue;
+    if (k <= o || closer_starts_text_cast(text, close)) continue;
     size_t first = starts[k];
     while (first < close && (text[first] == ' ' || text[first] == '\t')) ++first;
     if (first != close) continue;
@@ -3241,8 +3256,19 @@ string Formatter::format_function_call(string_view expr, bool force) {
     if (!multiline) multiline = rendered.front().find('\n') != string::npos || (compact.size() + 8 > wrap_threshold && heavy_one);
   }
 
-  if (!multiline && args.size() <= 1 && !iequals_ascii(name, "arrayJoin")) return {};
-  if (!multiline) return {};
+  if (!multiline) {
+    // An inline call still carries its formatted arguments, so a condition
+    // nested in it (`nullIf(countIf((a = 1) AND (b = 2)), 0)`) loses the
+    // operand parentheses formatQuery added, as it would in an exploded call.
+    string inline_call = name + "(";
+    for (size_t i = 0; i < rendered.size(); ++i) {
+      if (rendered[i].find('\n') != string::npos || (i < comments_after.size() && !comments_after[i].empty())) return {};
+      if (i) inline_call += ", ";
+      inline_call += rendered[i];
+    }
+    inline_call += ")";
+    return inline_call == s ? string() : inline_call;
+  }
 
   string out = name + "(\n";
   if (iequals_ascii(name, "multiIf") && rendered.size() >= 3) {
@@ -3395,7 +3421,25 @@ string Formatter::format_arith_operand(string_view operand, size_t block_width, 
 string Formatter::format_expression(string_view expr) {
   string s = trim_ascii_spaces(expr);
   if (s.empty()) return s;
-  if (contains_top_level_comment(s)) return cleanup_surface(s);
+  if (contains_top_level_comment(s)) {
+    // A comment that trails the previous list item arrives at the head of
+    // this one (`-- note\n    f(\n        x\n    )`). The code after it is
+    // formatted normally: kept verbatim, its input indentation would be
+    // indented again on every pass.
+    string lead;
+    string rest;
+    if (starts_with_ci(s, "/*")) {
+      if (const size_t end = s.find("*/"); end != string::npos && s.find('\n', end) != string::npos &&
+          trim_ascii_spaces(string_view(s).substr(end + 2, s.find('\n', end) - end - 2)).empty()) {
+        lead = s.substr(0, end + 2);
+        rest = trim_ascii_spaces(string_view(s).substr(end + 2));
+      }
+    } else {
+      std::tie(lead, rest) = split_leading_line_comment(s);
+    }
+    if (!lead.empty() && !rest.empty()) return lead + "\n" + format_expression(rest);
+    return cleanup_surface(s);
+  }
   if (!s.empty() && s.front() == '(') {
     const size_t close = find_matching_paren(s, 0);
     if (close != string::npos && close + 1 < s.size() && s[close + 1] == '.') {
@@ -4192,10 +4236,15 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   out = merge_joined_single_select_items(out, joined_rows, threshold);
   if (!allow_explode) return out;
   vector<string> result;
+  bool exploded = false;
   for (const string& line : split_lines_keep(out)) {
-    for (string& piece : explode_overlong_line(line, 0)) result.push_back(std::move(piece));
+    vector<string> pieces = explode_overlong_line(line, 0);
+    exploded = exploded || pieces.size() > 1;
+    for (string& piece : pieces) result.push_back(std::move(piece));
   }
-  return join_lines(result);
+  // Splitting a line can leave the rest of its call on later lines with room
+  // to join (`name(\n    params\n)(` followed by the argument lines).
+  return exploded ? collapse_fitting_calls(join_lines(result), threshold) : join_lines(result);
 }
 
 // Explodes the widest call, array or IN list that starts on an overflowing
@@ -4220,9 +4269,12 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
     }
     return out;
   }
+  // The widest candidate at the shallowest nesting level: the outermost call
+  // on an item line, or the call inside a tuple row `('k', encrypt(...)),`.
   size_t best_begin = string::npos;
   size_t best_open = string::npos;
   size_t best_end = string::npos;
+  int best_level = 0;
   CallOpener best_kind = CallOpener::None;
   int level = 0;
   for (size_t i = 0; i < line.size(); ++i) {
@@ -4230,38 +4282,42 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
     const char c = line[i];
     if (c == ')' || c == ']') { if (level > 0) --level; continue; }
     if (c != '(' && c != '[') continue;
-    if (level++ != 0 || scan.match[i] == string::npos) continue;
+    const int here = level++;
+    if (scan.match[i] == string::npos || (best_begin != string::npos && here > best_level)) continue;
     size_t begin = i;
     const CallOpener kind = classify_call_opener(line, scan, i, &begin);
     if (kind != CallOpener::Call && kind != CallOpener::Array && kind != CallOpener::InList) continue;
-    if (count_call_arguments(line, scan, i, scan.match[i]) == 0) continue;
+    if (count_call_arguments(line, scan, i, scan.match[i]) == 0 || closer_starts_text_cast(line, scan.match[i])) continue;
     size_t end = scan.match[i];
     if (kind == CallOpener::Call && end + 1 < line.size() && line[end + 1] == '(' && scan.match[end + 1] != string::npos) {
       end = scan.match[end + 1];
     }
     if (utf8_width(string_view(line).substr(0, i + 1)) > threshold) continue;
-    if (best_begin == string::npos || end - begin > best_end - best_begin) {
+    if (best_begin == string::npos || here < best_level || end - begin > best_end - best_begin) {
       best_begin = begin;
       best_open = i;
       best_end = end;
+      best_level = here;
       best_kind = kind;
     }
   }
   if (best_begin == string::npos) return {line};
   const string call = line.substr(best_begin, best_end + 1 - best_begin);
   string rendered;
-  if (best_kind == CallOpener::Call) {
-    rendered = format_function_call(call, true);
-  } else {
-    const auto items = split_top_level(string_view(call).substr(1, call.size() - 2), ',');
-    rendered = string(1, call.front()) + "\n";
+  if (best_kind == CallOpener::Call) rendered = format_function_call(call, true);
+  if (rendered.empty()) {
+    // Arrays, IN lists and calls the expression formatter does not take
+    // (a quoted name): one item per line.
+    const size_t open_rel = best_open - best_begin;
+    const size_t close_rel = best_kind == CallOpener::Call ? scan.match[best_open] - best_begin : call.size() - 1;
+    const auto items = split_top_level(string_view(call).substr(open_rel + 1, close_rel - open_rel - 1), ',');
+    rendered = call.substr(0, open_rel + 1) + "\n";
     for (size_t i = 0; i < items.size(); ++i) {
       rendered += indent_block(hang_operator_continuations(format_expression(items[i])), 4);
       rendered += i + 1 < items.size() ? ",\n" : "\n";
     }
-    rendered.push_back(call.back());
+    rendered += call.substr(close_rel);
   }
-  (void)best_open;
   if (rendered.find('\n') == string::npos) return {line};
   size_t base = indent;
   for (const char* kw : {"WHERE ", "PREWHERE ", "HAVING ", "QUALIFY "}) {
