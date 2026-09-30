@@ -208,6 +208,11 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
   }
 
+  // Always registered: when logs/metrics are disabled the meta routes answer
+  // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
+  http_.Get("/api/logs/meta", [&](const auto& req, auto& res) { handle_logs_meta(req, res); });
+  http_.Get("/api/metrics/meta", [&](const auto& req, auto& res) { handle_metrics_meta(req, res); });
+
   if (cfg_.explorer.enabled()) {
     http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
     http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
@@ -376,6 +381,15 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("traces");
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.traces.enabled);
+  w.EndObject();
+  w.Key("logs");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.logs.enabled);
+  w.Key("body_search"); w.String(cfg_.logs.body_search.c_str());
+  w.EndObject();
+  w.Key("metrics");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.metrics.enabled);
   w.EndObject();
   w.EndObject();
   w.EndObject();

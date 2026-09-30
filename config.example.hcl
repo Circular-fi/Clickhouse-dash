@@ -90,6 +90,29 @@ traces {
   }
 }
 
+# OpenTelemetry logs written by the OTel Collector ClickHouse exporter
+# (otel_logs). Optional; disabled by default. ServiceName access control
+# reuses traces.service_allowlist. See docs/logs.md.
+logs {
+  enabled              = false
+  database             = "otel"
+  table                = "otel_logs"
+  max_lookback_minutes = 10080
+  search_limit         = 200
+  # Body search: "token" (hasToken, served by the exporter's tokenbf_v1/text
+  # Body index), "substring" (case-insensitive scan) or "off".
+  body_search          = "token"
+}
+
+# OpenTelemetry metrics written by the OTel Collector ClickHouse exporter
+# (<table_prefix>_gauge, _sum, _histogram, _exponential_histogram, _summary).
+# Optional; disabled by default. See docs/metrics.md.
+metrics {
+  enabled      = false
+  database     = "otel"
+  table_prefix = "otel_metrics"
+}
+
 analysis {
   registry_ttl_ms      = 3600000
   registry_max_entries = 10000

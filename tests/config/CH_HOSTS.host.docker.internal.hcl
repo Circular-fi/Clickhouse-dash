@@ -28,6 +28,23 @@ traces {
   }
 }
 
+logs {
+  enabled              = true
+  database             = "otel"
+  table                = "otel_logs"
+  max_lookback_minutes = 10080
+  search_limit         = 200
+  # token: hasToken() on Body (index-backed by the exporter's tokenbf_v1
+  # idx_body); substring: case-insensitive scan; off: no Body search.
+  body_search          = "token"
+}
+
+metrics {
+  enabled      = true
+  database     = "otel"
+  table_prefix = "otel_metrics"
+}
+
 clickhouse {
   host {
     name       = "local"

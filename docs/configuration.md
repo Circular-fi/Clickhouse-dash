@@ -25,6 +25,7 @@ types are startup errors.
 - `format_cache`: bounded SQL formatter cache.
 - `health`: host health polling.
 - `traces`: optional OpenTelemetry trace explorer backed by an OTel Collector ClickHouse traces table.
+- `logs` / `metrics`: optional OpenTelemetry logs and metrics sources (OTel Collector ClickHouse exporter tables).
 - `clickhouse`: one or more named hosts, each with `runner_uri` and `system_uri`.
 
 ## Authorization model
@@ -113,6 +114,27 @@ The nested feature switches remove both the UI control and the corresponding pay
 For large trace datasets, `docs/traces.md` documents the recommended ClickHouse 26.1+ projection indexes (`prj_traceid` and `prj_start`). They are storage/query optimizations and are not ChDash configuration fields; ChDash continues to query the standard `otel_traces` and `otel_traces_trace_id_ts` table names.
 
 For local/demo data, `examples/generate_otel_traces.py` creates synthetic multi-service traces compatible with the standard OTel ClickHouse trace columns. Its defaults generate roughly 60–90 spans per trace, with Kafka/RPC/ClickHouse-style branches, events, links, and occasional errors. It also emits optional `otel_traces_trace_id_ts` rows for installations where the standard materialized view is not populating the auxiliary table.
+
+The optional `logs {}` and `metrics {}` blocks point ChDash at the OTel Collector ClickHouse exporter logs table (`otel_logs`) and metrics tables (`otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary`). Both are disabled by default, read through the selected host's `system_uri`, and reuse `traces.service_allowlist` for `ServiceName` filtering (there is no per-signal allowlist).
+
+```hcl
+logs {
+  enabled              = false
+  database             = "otel"
+  table                = "otel_logs"
+  max_lookback_minutes = 10080
+  search_limit         = 200
+  body_search          = "token" # token | substring | off
+}
+
+metrics {
+  enabled      = false
+  database     = "otel"
+  table_prefix = "otel_metrics"
+}
+```
+
+`logs.max_lookback_minutes` is clamped to 1 minute..365 days and `logs.search_limit` to 1..10000; `logs.body_search` must be `token`, `substring`, or `off`. `/api/version` reports `features.logs.enabled`, `features.logs.body_search`, and `features.metrics.enabled`; `/api/logs/meta` and `/api/metrics/meta` describe the detected schema (see `docs/logs.md` and `docs/metrics.md`).
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory host-scoped query registry independently of SSE session lifetime. The registry contains no query results or user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget for the exact original SQL retained only so Deep Analyze can replay the statement through `runner_uri` without trusting a technical-account query-log copy.
 

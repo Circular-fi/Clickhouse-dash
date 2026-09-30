@@ -92,6 +92,17 @@ void normalize_config(AppConfig& cfg) {
   if (cfg.traces.enabled) {
     if (cfg.traces.database.empty() || cfg.traces.table.empty()) throw std::runtime_error("traces.database and traces.table cannot be empty");
   }
+  cfg.logs.max_lookback_minutes = std::max(1, std::min(365 * 24 * 60, cfg.logs.max_lookback_minutes));
+  cfg.logs.search_limit = std::max<size_t>(1, std::min<size_t>(10000, cfg.logs.search_limit));
+  if (cfg.logs.body_search != "token" && cfg.logs.body_search != "substring" && cfg.logs.body_search != "off") {
+    throw std::runtime_error("logs.body_search must be token, substring, or off");
+  }
+  if (cfg.logs.enabled && (cfg.logs.database.empty() || cfg.logs.table.empty())) {
+    throw std::runtime_error("logs.database and logs.table cannot be empty");
+  }
+  if (cfg.metrics.enabled && (cfg.metrics.database.empty() || cfg.metrics.table_prefix.empty())) {
+    throw std::runtime_error("metrics.database and metrics.table_prefix cannot be empty");
+  }
   cfg.export_settings.max_concurrent = std::max<size_t>(1, std::min<size_t>(64, cfg.export_settings.max_concurrent));
   cfg.export_settings.output_buffer_bytes = std::max<size_t>(16 * 1024, std::min<size_t>(16 * 1024 * 1024, cfg.export_settings.output_buffer_bytes));
   cfg.export_settings.token_ttl_ms = std::max(5000, std::min(10 * 60 * 1000, cfg.export_settings.token_ttl_ms));
@@ -281,7 +292,7 @@ void load_hosts(AppConfig& cfg, const HclObject& root, std::string_view source) 
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "format_cache", "health",
-      "traces", "explorer", "analysis", "export", "clickhouse"});
+      "traces", "logs", "metrics", "explorer", "analysis", "export", "clickhouse"});
 
   if (const auto* server = optional_block(root, "server", source)) {
     validate_object(*server, "server", {"listen_host", "listen_port"}, {});
@@ -384,6 +395,26 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
       if (auto v = bool_attr(*features, "events", "traces.features")) cfg.traces.features.events = *v;
       if (auto v = bool_attr(*features, "links", "traces.features")) cfg.traces.features.links = *v;
     }
+  }
+
+  // OTel logs/metrics sources. ServiceName filtering reuses
+  // traces.service_allowlist, so there is no per-signal allowlist key.
+  if (const auto* logs = optional_block(root, "logs", source)) {
+    validate_object(*logs, "logs", {
+        "enabled", "database", "table", "max_lookback_minutes", "search_limit", "body_search"}, {});
+    if (auto v = bool_attr(*logs, "enabled", "logs")) cfg.logs.enabled = *v;
+    if (auto v = string_attr(*logs, "database", "logs")) cfg.logs.database = *v;
+    if (auto v = string_attr(*logs, "table", "logs")) cfg.logs.table = *v;
+    if (auto v = int_attr(*logs, "max_lookback_minutes", "logs")) cfg.logs.max_lookback_minutes = int_value(*v, "logs.max_lookback_minutes");
+    if (auto v = int_attr(*logs, "search_limit", "logs")) cfg.logs.search_limit = size_value(*v, "logs.search_limit");
+    if (auto v = string_attr(*logs, "body_search", "logs")) cfg.logs.body_search = *v;
+  }
+
+  if (const auto* metrics = optional_block(root, "metrics", source)) {
+    validate_object(*metrics, "metrics", {"enabled", "database", "table_prefix"}, {});
+    if (auto v = bool_attr(*metrics, "enabled", "metrics")) cfg.metrics.enabled = *v;
+    if (auto v = string_attr(*metrics, "database", "metrics")) cfg.metrics.database = *v;
+    if (auto v = string_attr(*metrics, "table_prefix", "metrics")) cfg.metrics.table_prefix = *v;
   }
 
   if (const auto* analysis = optional_block(root, "analysis", source)) {

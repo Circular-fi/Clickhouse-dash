@@ -68,6 +68,27 @@ struct TraceSettings {
   TraceFeatureSettings features;
 };
 
+// OpenTelemetry logs (ClickHouse exporter otel_logs table). ServiceName
+// access control reuses traces.service_allowlist.
+struct LogSettings {
+  bool enabled = false;
+  std::string database = "otel";
+  std::string table = "otel_logs";
+  int max_lookback_minutes = 7 * 24 * 60;
+  size_t search_limit = 200;
+  // "token" (hasToken, index-backed by a tokenbf_v1/text Body index),
+  // "substring" (ILIKE-style scan) or "off" (no Body search).
+  std::string body_search = "token";
+};
+
+// OpenTelemetry metrics (ClickHouse exporter <table_prefix>_{gauge,sum,
+// histogram,exponential_histogram,summary} tables).
+struct MetricSettings {
+  bool enabled = false;
+  std::string database = "otel";
+  std::string table_prefix = "otel_metrics";
+};
+
 struct AnalysisSettings {
   int registry_ttl_ms = 60 * 60 * 1000;
   size_t registry_max_entries = 10000;
@@ -136,6 +157,8 @@ struct AppConfig {
   ExplorerSettings explorer;
   AnalysisSettings analysis;
   TraceSettings traces;
+  LogSettings logs;
+  MetricSettings metrics;
   ExportSettings export_settings;
 
   // /api/version
@@ -187,6 +210,10 @@ private:
   void handle_traces_analytics(const httplib::Request& req, httplib::Response& res);
   void handle_traces_prefill(const httplib::Request& req, httplib::Response& res);
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
+
+  // OTel logs / metrics schema detection (api_otel_signals.cpp).
+  void handle_logs_meta(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics_meta(const httplib::Request& req, httplib::Response& res);
 
   void session_reaper_loop();
   void reap_sessions_once();

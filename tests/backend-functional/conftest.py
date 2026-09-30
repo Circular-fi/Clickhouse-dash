@@ -114,3 +114,6 @@ def reset_clickhouse_integration_fixture() -> None:
         _execute_script(session, base_url.rstrip("/"), user, password, init_root / "02-frontend-fixtures.sql")
         # ReplicatedMergeTree fixtures on chdash_cluster (clickhouse + clickhouse_replica).
         _execute_script(session, base_url.rstrip("/"), user, password, init_root / "04-replicated-fixtures.sql")
+        # OTel logs/metrics exporter tables (CREATE ... IF NOT EXISTS only): a
+        # persistent volume created before they existed still gets them.
+        _execute_script(session, base_url.rstrip("/"), user, password, init_root / "05-otel-logs-metrics.sql")

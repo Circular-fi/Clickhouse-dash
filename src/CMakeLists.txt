@@ -80,6 +80,7 @@ if (CHDASH_BUILD_APP)
     explorer_graph.cpp
     api_explorer.cpp
     api_traces.cpp
+    api_otel_signals.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp
