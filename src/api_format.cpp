@@ -71,6 +71,51 @@ bool has_top_level_values_insert(std::string_view sql) {
   return false;
 }
 
+// `INSERT ... FORMAT <name>` may carry its payload inline after the format
+// name. formatQuery drops that payload, so the statement is formatted without
+// it and the payload is appended verbatim. Returns the offset just past the
+// format name, or npos when the statement has no top-level INSERT ... FORMAT.
+size_t insert_format_name_end(std::string_view sql) {
+  const auto masked = mask_sql_surface(sql);
+  const std::string_view s(masked.code_lower);
+
+  auto match_keyword = [&](size_t pos, std::string_view keyword) {
+    if (pos + keyword.size() > s.size() || s.substr(pos, keyword.size()) != keyword) return false;
+    const char prev = (pos == 0) ? '\0' : s[pos - 1];
+    const char next = (pos + keyword.size() < s.size()) ? s[pos + keyword.size()] : '\0';
+    return !sql_is_ident_continue(prev) && !sql_is_ident_continue(next);
+  };
+
+  int depth = 0;
+  bool seen_insert = false;
+  for (size_t i = 0; i < s.size(); ++i) {
+    const char ch = s[i];
+    if (ch == '(' || ch == '[' || ch == '{') { ++depth; continue; }
+    if (ch == ')' || ch == ']' || ch == '}') { if (depth > 0) --depth; continue; }
+    if (depth != 0 || !sql_is_ident_start(ch)) continue;
+    if (i > 0 && sql_is_ident_continue(s[i - 1])) continue;
+
+    if (!seen_insert) {
+      if (!match_keyword(i, "insert")) return std::string_view::npos;
+      seen_insert = true;
+      i += 5;
+      continue;
+    }
+    if (match_keyword(i, "values") || match_keyword(i, "select") || match_keyword(i, "with")) {
+      return std::string_view::npos;
+    }
+    if (match_keyword(i, "format")) {
+      size_t j = i + 6;
+      while (j < s.size() && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r')) ++j;
+      if (j >= s.size() || !sql_is_ident_start(s[j])) return std::string_view::npos;
+      while (j < s.size() && sql_is_ident_continue(s[j])) ++j;
+      return j;
+    }
+    while (i + 1 < s.size() && sql_is_ident_continue(s[i + 1])) ++i;
+  }
+  return std::string_view::npos;
+}
+
 int requested_line_width(const rapidjson::Document& doc) {
   int width = 80;
   if (doc.HasMember("line_width") && doc["line_width"].IsInt()) width = doc["line_width"].GetInt();
@@ -302,6 +347,25 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     }
     ++cache_misses;
 
+    // Inline INSERT payloads are data, not SQL: keep them byte-for-byte after
+    // the formatted statement, on their own line when they started on one.
+    std::string insert_payload;
+    if (const size_t name_end = insert_format_name_end(sql); name_end != std::string::npos) {
+      size_t data = name_end;
+      while (data < sql.size() && (sql[data] == ' ' || sql[data] == '\t' ||
+                                   sql[data] == '\n' || sql[data] == '\r')) {
+        ++data;
+      }
+      if (data < sql.size()) {
+        const bool own_line =
+            sql.find_first_of("\r\n", name_end) < data;
+        size_t end = sql.size();
+        while (end > data && (sql[end - 1] == '\n' || sql[end - 1] == '\r')) --end;
+        insert_payload = (own_line ? "\n" : " ") + sql.substr(data, end - data);
+        sql.resize(name_end);
+      }
+    }
+
     // Heredoc literals ($$...$$) are swapped for same-width placeholders so
     // neither formatQuery (which re-quotes them) nor the local scanners (which
     // do not know heredocs) see their bodies; the exact spelling is put back
@@ -365,6 +429,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     pretty = unquote_call_identifiers_written_unquoted(std::move(pretty), source_sql);
     pretty = restore_sql_single_quoted_literals(std::move(pretty), source_sql);
     pretty = restore_sql_heredocs(std::move(pretty), heredocs);
+    pretty += insert_payload;
 
     auto value = std::make_shared<const std::string>(std::move(pretty));
     request_results.emplace(key, value);
