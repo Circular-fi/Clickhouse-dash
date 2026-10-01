@@ -507,7 +507,7 @@
   function enhanceTraceSelect(select) {
     if (!select || select.dataset.tracePickerReady === "1") return;
     select.dataset.tracePickerReady = "1";
-    // traces.html ships every picker already built (root, native select,
+    // observability.html ships every picker already built (root, native select,
     // button, menu) so the first paint has the final look; adopt that markup
     // and only build the picker for a select that arrives without it.
     const shipped = select.parentElement?.classList.contains("tracePicker") ? select.parentElement : null;
@@ -1068,7 +1068,7 @@
   }
 
   // Remembers whether meta enables analytics for the head script of the next
-  // page load (see traces.html), and drops the early class once meta is known.
+  // page load (see observability.html), and drops the early class once meta is known.
   function rememberAnalyticsEnabled(enabled) {
     try { localStorage.setItem("chdash.traceAnalytics.v1", enabled ? "1" : "0"); } catch { /* storage may be unavailable */ }
     document.documentElement.classList.remove("chdash-trace-analytics");

@@ -267,7 +267,7 @@
     nextYear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5 8 8l-4.5 4.5M7.5 3.5 12 8l-4.5 4.5"/></svg>',
   };
 
-  // Mounts the picker on the shipped markup of traces.html. options:
+  // Mounts the picker on the shipped markup of observability.html. options:
   //   getValue()            -> applied raw range { from, to }
   //   getMaxMinutes()       -> widest range the server accepts
   //   onApply(raw, source)  -> the user applied a range ("form", "quick", "recent", "shift", "zoom")
