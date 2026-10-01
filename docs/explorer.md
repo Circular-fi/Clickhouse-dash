@@ -440,6 +440,16 @@ tables/replicas can point to the same disk. Distributed tables use
 `system.clusters` to expose shard → replica membership. The neighborhood depth
 can be increased or decreased down to focus-only.
 
+On top of that global depth, a focused Lineage request can carry per-node
+expansions: repeated `expand=up:<node id>` / `expand=down:<node id>` parameters
+(at most 64). Each one adds one semantic hop in one direction from its anchor,
+with the same zero-cost rule for hidden View/MV/Buffer intermediates as the
+depth; expansions are applied to a fixed point, and an anchor that is not shown
+expands nothing, so unknown or unauthorized ids are no-ops. Every logical node
+of a focused payload carries `hidden_upstream` / `hidden_downstream`, the number
+of semantic neighbours in that direction left outside the shipped scope; the
+browser draws its `+N` controls from them without fetching the next ring.
+
 Table TTL is represented as ordered metadata on the logical table (`ttl_rules`),
 not as backend topology edges. Storage mode projects that metadata onto the
 physical lifecycle instead of drawing a second TTL timeline beside the table.
@@ -506,6 +516,9 @@ Graph dependency types are distinct:
 - `view`: logical read dependency;
 - `buffer`: Buffer forwarding;
 - `distributed_route`: Distributed routing to its local table definition;
+- `dictionary_source`: the table a dictionary loads from, read from
+  `system.tables.loading_dependencies_*` (structured metadata, best effort: a
+  server without those columns only loses these edges);
 - `contains`: physical topology membership.
 
 `system.tables.dependencies_database/dependencies_table` is preferred for MV
@@ -571,9 +584,41 @@ whose dependency graph is not acyclic. The UI supports:
 - logical-node selection synchronized with Browse and the browser route;
 - node focus and neighbor dimming;
 - search-to-focus;
-- minimap, shown as soon as any rendered graph card is even partially outside the viewport;
-- click from a logical node into the Browse table detail;
+- minimap, shown as soon as any rendered graph card is even partially outside
+  the viewport or the zoom is below the readable scale;
+- a side panel on node click (summary, direct upstream/downstream objects,
+  definition, columns, **Open card** to the Browse table card) and on edge click
+  (see Graph object definitions);
+- per-node `+N` / `−` controls per direction on focused Lineage cards;
+- short edge labels (`MV`, `MV output`, `view`, `flush`, `route`, `dictionary`,
+  `×N` between collapsed databases) and a hover highlight of the hovered edge
+  or of every edge of the hovered object;
+- a **Graph | List** switch: the list is the impact analysis of the shown
+  neighbourhood (object, type, direction, depth, database);
 - level-of-detail rendering, including database groups at very low zoom.
+
+Readability rules:
+
+- Fit never zooms below the scale at which the smallest canvas font (12px in
+  Lineage, 11px in Storage) is drawn at 11 CSS pixels. When the graph is larger
+  than that, Fit shows the focused object (else the top-left of the graph) at
+  that scale and the minimap gives the rest. Zooming out further is still
+  possible down to the whole-graph overview; cards then keep only a larger
+  title, then become plain blocks.
+- Cards carry the object's short name as title and `database · engine` as
+  subtitle, so long database prefixes never truncate the distinctive part.
+- Without a focus (all databases, or one database), Lineage collapses each
+  database into one card with its object count; a click expands it in place and
+  its band header (`▾ db · N of M objects`) collapses it again. Objects without
+  any dependency are hidden, as are databases made only of them, until
+  **Show objects without dependencies** is checked. Edges between collapsed
+  databases are aggregated with their count. A single database is always shown
+  expanded.
+- Canvas colours come from the `--graph*` tokens of style.css, defined for
+  both themes: the shared `--accent` is a translucent tint in the light theme
+  and is not used for canvas text, edges or the focus halo.
+- On phones (width ≤ 720px) the List is the default Lineage view, the toolbar
+  wraps instead of being cut and the side panel is a bottom sheet.
 
 Changing the system/non-storing visibility projection always recomputes the
 canonical layout from scratch. Only the camera anchor is preserved; old node
@@ -589,12 +634,45 @@ This keeps schemas with hundreds of objects out of the DOM rendering hot path.
 Explorer uses three visual edge families:
 
 - **Data flow** — insert-time movement such as Buffer forwarding and ordinary Materialized View trigger/output paths. A single round marker moves at a constant screen-space speed while the path is active/selected.
-- **Logical dependency** — query-time dependencies such as ordinary Views. These dashed edges do not animate. Selecting either endpoint adds a subtle blue halo to the dashes.
+- **Logical dependency** — query-time dependencies such as ordinary Views, and the table a dictionary loads from (dash-dot). These dashed edges do not animate. Selecting either endpoint adds a subtle blue halo to the dashes.
 - **Routing / topology** — structural routing/containment rather than row flow, for example a `Distributed` engine route or physical storage topology/containment.
 
 Lineage routing avoids drawing an edge through an unrelated node card: when the normal Bezier would intersect another card, the renderer selects a clear orthogonal detour.
 
 In **Storage** mode, ordinary non-storing objects remain excluded from the canvas, with one deliberate exception: a `Buffer` is shown as a write-routing stage together with the persistent table it flushes into. Selecting a Buffer therefore expands automatically to `Buffer → destination table → storage tiers`.
+
+## Graph object definitions
+
+`GET /api/explorer/graph/definition?host_id=<id>&database=<db>&table=<name>`
+explains one logical graph object for the side panel:
+
+```json
+{
+  "id": "table:chdash_ui.weather_daily_summary_mv", "kind": "materialized_view",
+  "select_sql": "SELECT …", "select_sql_truncated": false,
+  "target_visible": true, "target": { "database": "chdash_ui", "table": "weather_daily_summary" },
+  "dictionary": null,
+  "distributed": null
+}
+```
+
+- Views and (refreshable) MVs: their `AS SELECT` text (capped at 32 KB) and,
+  for MVs, the `TO` table;
+- Buffer: the flush destination (thresholds are already on the graph node);
+- Dictionary: the source table (from `loading_dependencies_*`), the `SOURCE`
+  kind, `LAYOUT` and `LIFETIME`; host, user, port and the masked password of
+  `SOURCE(...)` are never extracted;
+- Distributed: cluster, local table, sharding key and shard × replica counts.
+
+The route goes through the same snapshot as `/api/explorer/graph` (runner ACL
+discovery, then system-context enrichment of only those objects) and answers
+from the cached graph: no SQL is executed for the request, an object outside
+`AllowedObjectSet` is `404 unknown_object`, and a destination outside it is
+reported only as `target_visible: false`, never by name. The texts are the
+object's own DDL, the same exposure as the Browse DDL tab. An edge panel shows
+the definition of the object that defines the edge: the MV for trigger/output
+edges, the View it feeds, the Buffer or Distributed table that forwards, the
+dictionary that loads, or every hidden object of a contracted edge.
 
 ## Replication metadata and Keeper load
 

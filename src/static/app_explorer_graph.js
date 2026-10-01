@@ -4935,7 +4935,9 @@
     if (!model.active || !model.graph) return;
     const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
     if (!query) return;
-    const match = visibleNodes().find((node) => node.layer === "logical" && `${node.database}.${node.name} ${node.engine || ""}`.toLowerCase().includes(query));
+    // Search every shown object, including those inside collapsed databases.
+    const candidates = model.detailMode === "logical" ? logicalProjection().nodes : visibleNodes();
+    const match = candidates.find((node) => node.layer === "logical" && !node.synthetic && `${node.database}.${node.name} ${node.engine || ""}`.toLowerCase().includes(query));
     if (match) setFocus(match.id, true);
   }
 
@@ -4943,6 +4945,10 @@
     if (!dom.explorerGraphStatus) return;
     if (model.loading) {
       dom.explorerGraphStatus.textContent = "Loading graph\u2026";
+      return;
+    }
+    if (model.lastError && !model.graph) {
+      dom.explorerGraphStatus.textContent = model.lastError;
       return;
     }
     const visible = visibleNodes();
@@ -4995,9 +5001,16 @@
         || serial !== model.refreshSerial
         || String(state.selectedHostId || "") !== hostId
         || graphRequestKey(graphRequestOptions(false)) !== requestKey;
-      if (stale) return;
+      if (stale) {
+        // The scope changed while this request was in flight (for example the
+        // route's table was resolved after an unscoped request started).
+        // Fetch the current scope instead of dropping both answers.
+        if (model.active && String(state.selectedHostId || "") === hostId) model.refreshQueued = true;
+        return;
+      }
 
       model.graph = payload;
+      model.lastError = "";
       model.graphRequestKey = requestKey;
       let ensurePendingFocus = false;
       if (model.pendingFocusId && (payload.nodes || []).some((node) => node.id === model.pendingFocusId)) {
@@ -5049,6 +5062,7 @@
         || graphRequestKey(graphRequestOptions(false)) !== requestKey;
       if (!stale) {
         model.graph = null;
+        model.lastError = e instanceof Error ? e.message : String(e);
         model.layout.clear();
         if (dom.explorerGraphStatus) dom.explorerGraphStatus.textContent = e instanceof Error ? e.message : String(e);
         scheduleDraw();
