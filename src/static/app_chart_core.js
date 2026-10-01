@@ -1248,10 +1248,13 @@
         root.dataset.cursorIndex = String(i);
         root.dataset.cursorX = xText;
         root.dataset.cursorPx = String(Math.round(x * 100) / 100);
+        // The pointer position this cursor was computed from (plot css px).
+        root.dataset.pointerPx = String(Math.round(cursor.px * 100) / 100);
       } else {
         delete root.dataset.cursorIndex;
         delete root.dataset.cursorX;
         delete root.dataset.cursorPx;
+        delete root.dataset.pointerPx;
       }
       for (let k = used; k < cursorDots.length; k++) show(cursorDots[k], false);
     }
@@ -1366,7 +1369,16 @@
     overCanvas.addEventListener("pointermove", (ev) => {
       pendingMove = localPoint(ev);
       trackDrag(pendingMove);
-      if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; if (pendingMove) moveCursor(pendingMove); });
+      if (!moveRaf) {
+        moveRaf = requestAnimationFrame(() => {
+          moveRaf = 0;
+          if (!pendingMove) return;
+          moveCursor(pendingMove);
+          // Already in a frame: the crosshair and readouts move with the
+          // tooltip now, not one frame behind it.
+          if (overRaf) { cancelAnimationFrame(overRaf); overRaf = 0; drawOverlay(); }
+        });
+      }
     });
     overCanvas.addEventListener("pointerleave", () => {
       if (drag) return;

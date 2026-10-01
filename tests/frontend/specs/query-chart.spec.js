@@ -64,11 +64,16 @@ async function plotBox(chart) {
 async function hoverPlot(page, chart, fraction, yFraction = 0.5) {
   const box = await plotBox(chart);
   const x = box.x + box.width * fraction;
+  const overlay = await chart.locator('.chartCore__overlay').boundingBox();
   await page.mouse.move(x, box.y + box.height * yFraction);
   const tooltip = chart.locator('.chartCore__tooltip');
   await expect(tooltip).toBeVisible();
-  await expect(core(chart)).toHaveAttribute('data-cursor-x', /./);
-  const overlay = await chart.locator('.chartCore__overlay').boundingBox();
+  // The cursor follows the pointer on the next frame: until the chart reports
+  // this pointer position, the tooltip and readouts are the previous hover's.
+  await expect.poll(async () => {
+    const at = await core(chart).getAttribute('data-pointer-px');
+    return at === null ? Infinity : Math.abs(Number(at) - (x - overlay.x));
+  }).toBeLessThanOrEqual(1);
   return {
     index: Number(await tooltip.getAttribute('data-index')),
     readout: await core(chart).getAttribute('data-cursor-x'),
