@@ -135,6 +135,12 @@ int main(int argc, char** argv) {
                 << " runner_uri=" << chdash::redact_clickhouse_uri(host.runner_uri)
                 << " system_uri=" << chdash::redact_clickhouse_uri(host.system_uri) << "\n";
     }
+    if (cfg.query_library.enabled) {
+      std::cerr << "query_library file=" << cfg.query_library.file
+                << " writable=" << (cfg.query_library.writable ? "true" : "false")
+                << " history_store=" << cfg.query_library.history_store
+                << " history_max_entries=" << cfg.query_library.history_max_entries << "\n";
+    }
     return server.run();
   } catch (const std::exception& error) {
     std::cerr << "fatal: " << error.what() << "\n";

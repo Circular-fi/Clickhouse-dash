@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(CHDASH_EMBED_STATIC "Embed src/static into the chdash binary" ON)
 option(CHDASH_BUILD_APP "Build chdash executable" ON)
 option(CHDASH_BUILD_CODEC_TESTS "Build the processor JSON codec test driver" OFF)
+option(CHDASH_BUILD_QUERY_LIBRARY_TESTS "Build the query library store unit tests" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -44,6 +45,15 @@ if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
   target_include_directories(chdash_processor_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_processor_codec_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+endif()
+
+if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
+  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp)
+  target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  if (NOT MSVC)
+    target_compile_options(chdash_query_library_test PRIVATE -Wall -Wextra)
+  endif()
 endif()
 
 if (CHDASH_BUILD_APP)
@@ -86,6 +96,8 @@ if (CHDASH_BUILD_APP)
     api_trace_logs.cpp
     api_logs.cpp
     api_metrics.cpp
+    query_library.cpp
+    api_query_library.cpp
     ch_uri.cpp
     ch_client_pool.cpp
     health_runner.cpp

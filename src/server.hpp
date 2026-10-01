@@ -9,6 +9,7 @@
 #include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
+#include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
 #include "stale_cache.hpp"
@@ -109,6 +110,24 @@ struct MetricSettings {
   std::string table_prefix = "otel_metrics";
 };
 
+// Server-side query library (folders + saved queries) and optional query
+// history, persisted in one JSON file. Disabled by default: the browser keeps
+// its localStorage library and history. See docs/query-library.md.
+struct QueryLibrarySettings {
+  bool enabled = false;
+  std::string file;
+  // false: GET only; folder/query create, edit, move, delete and import, and
+  // history deletion answer 403 read_only. History append stays allowed.
+  bool writable = false;
+  // "server" (history ring buffer in the JSON file) or "browser".
+  std::string history_store = "server";
+  size_t history_max_entries = 500;
+  size_t max_file_bytes = 8 * 1024 * 1024;
+  size_t max_query_bytes = 256 * 1024;
+
+  bool history_on_server() const { return enabled && history_store == "server"; }
+};
+
 struct AnalysisSettings {
   int registry_ttl_ms = 60 * 60 * 1000;
   size_t registry_max_entries = 10000;
@@ -180,11 +199,28 @@ struct AppConfig {
   LogSettings logs;
   MetricSettings metrics;
   ExportSettings export_settings;
+  QueryLibrarySettings query_library;
 
   // /api/version
   std::string version_semver = "dev";
   std::string version_git_sha = "unknown";
   std::string version_build_time = "unknown";
+};
+
+// Query library routes (api_query_library.cpp).
+enum class QueryLibraryRoute {
+  Get,
+  HistoryList,
+  HistoryAppend,
+  HistoryClear,
+  HistoryDelete,
+  FolderCreate,
+  FolderUpdate,
+  FolderDelete,
+  QueryCreate,
+  QueryUpdate,
+  QueryDelete,
+  Import,
 };
 
 class Server {
@@ -265,6 +301,9 @@ private:
   void handle_metrics_attributes(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_series(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_exemplars(const httplib::Request& req, httplib::Response& res);
+
+  // Server-side query library + history (api_query_library.cpp). Never runs SQL.
+  void handle_query_library(const httplib::Request& req, httplib::Response& res, QueryLibraryRoute route);
 
   void session_reaper_loop();
   void reap_sessions_once();
@@ -348,6 +387,8 @@ private:
   std::atomic<size_t> active_exports_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
+  // Only constructed when query_library.enabled = true.
+  std::unique_ptr<QueryLibraryStore> query_library_;
 
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;

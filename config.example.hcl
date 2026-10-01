@@ -130,6 +130,28 @@ metrics {
   table_prefix = "otel_metrics"
 }
 
+# Server-side query library (folders, saved queries with descriptions) and
+# query history, stored in one JSON file. Optional; disabled by default: the
+# browser then keeps saved queries and history in localStorage. See
+# docs/query-library.md.
+query_library {
+  enabled  = false
+  # Required when enabled. The parent directory must exist; the file is
+  # created (mode 0600) on the first write.
+  file     = "/var/lib/chdash/query_library.json"
+  # false: read-only library (no create/edit/move/delete/import, no history
+  # deletion). Recording history is still allowed.
+  writable = false
+
+  history {
+    store       = "server" # "server" (ring buffer in the file) | "browser"
+    max_entries = 500
+  }
+
+  max_file_bytes  = 8388608 # writes beyond this answer 413
+  max_query_bytes = 262144  # per saved query / history entry SQL
+}
+
 analysis {
   registry_ttl_ms      = 3600000
   registry_max_entries = 10000
