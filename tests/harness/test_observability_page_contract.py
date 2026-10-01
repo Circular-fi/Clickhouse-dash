@@ -38,8 +38,21 @@ def test_shell_holds_every_view_marked_and_shows_one_from_the_first_paint():
     assert 'window.__chdashUrl("static/app_observability.js")' in html
     css = read("src/static/style.css")
     assert 'html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],' in css
-    assert 'html[data-obs-view="metrics"] .obsTabs__tab[data-obs-tab="metrics"] {' in css
-    assert 'html:not([data-obs-enabled~="traces"]) .obsTabs__tab[data-obs-tab="traces"],' in css
+    # The view tabs are a row under the header (not in it), the Explorer view
+    # tab component, with the Traces sub-tabs after them on the same row.
+    header = html[html.index('<header class="appHeader"'):html.index("</header>")]
+    assert "data-obs-tab" not in header and "data-trace-tab" not in header
+    nav = html[html.index('<nav id="obsNav" class="obsNav"'):html.index("</nav>")]
+    assert html.index("</header>") < html.index('<nav id="obsNav"') < html.index("<!-- observability:traces -->")
+    assert '<div id="obsTabs" class="explorerViewTabs obsNav__views" role="tablist"' in nav
+    assert '<div id="tracesTabs" class="explorerViewTabs obsNav__sub" role="tablist"' in nav
+    assert nav.index('id="obsTabs"') < nav.index('class="obsNav__sep"') < nav.index('id="tracesTabs"')
+    # The inline script marks the view's tab and hides the disabled ones before the first paint.
+    assert 'tabs[i].hidden = enabled.indexOf(name) < 0;' in nav
+    assert 'tabs[i].classList.toggle("is-active", selected);' in nav
+    assert 'html:not([data-obs-view="traces"]) .obsNav__sub,' in css
+    assert ".obsNav__sep:has(+ .obsNav__sub[hidden])" in css
+    assert 'class="explorerViewTab${selected ? " is-active" : ""}"' in read("src/static/app_trace_tabs.js")
 
 
 def test_views_load_lazily_once_with_their_stylesheet():

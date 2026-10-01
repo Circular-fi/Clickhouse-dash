@@ -75,13 +75,124 @@ test('observability: the view tabs switch views in place, each a history entry',
   await expectView(page, 'logs');
   expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
 
-  // Arrow keys move between the tabs.
+  // Arrow keys move between the tabs (wrapping), Home / End go to the ends.
   await tab(page, 'logs').focus();
   await page.keyboard.press('ArrowRight');
   await expectView(page, 'metrics');
   await expect(tab(page, 'metrics')).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expectView(page, 'logs');
+  await page.keyboard.press('Home');
+  await expectView(page, 'traces');
+  await expect(tab(page, 'traces')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expectView(page, 'metrics');
+  await expect(tab(page, 'metrics')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expectView(page, 'traces');
+  await page.keyboard.press('End');
+  await expectView(page, 'metrics');
+  await expect(tab(page, 'metrics')).toBeFocused();
+  // Roving tab stop: only the selected tab is in the Tab order.
+  await expect(page.locator('#obsTabs [data-obs-tab][tabindex="0"]')).toHaveCount(1);
+  await expect(tab(page, 'metrics')).toHaveAttribute('tabindex', '0');
+});
+
+const centerY = (box) => box.y + box.height / 2;
+
+test('observability: the view tabs are a row under the header, the Traces tabs on the same row', async ({ page, request }) => {
+  await features(request);
+  await page.goto('/observability/traces');
+  await expectView(page, 'traces');
+  // The header is the other pages' header: brand, host, page switcher, theme.
+  const header = page.locator('header.appHeader');
+  await expect(header.locator('[role="tab"], [role="tablist"]')).toHaveCount(0);
+  await expect(header.locator('#hostPicker, #pageSelect, #themeSelect')).toHaveCount(3);
+  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  // The row, in the body under the header, with the Explorer view tab component.
+  const nav = page.locator('body > nav#obsNav');
+  await expect(nav).toBeVisible();
+  await expect(page.locator('#obsTabs')).toHaveClass(/\bexplorerViewTabs\b/);
+  await expect(page.locator('#obsTabs')).toHaveAttribute('role', 'tablist');
+  await expect(page.locator('#obsTabs [role="tab"]')).toHaveText(['Traces', 'Logs', 'Metrics']);
+  for (const view of VIEWS) await expect(tab(page, view)).toHaveClass(/\bexplorerViewTab\b/);
+  await expect(tab(page, 'traces')).toHaveClass(/\bis-active\b/);
+  const headerBox = await header.boundingBox();
+  const navBox = await nav.boundingBox();
+  expect(navBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 0.5);
+  expect(navBox.y).toBeLessThanOrEqual(headerBox.y + headerBox.height + 0.5);
+  // The Explorer's tab look.
+  const style = await tab(page, 'traces').evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { fontSize: s.fontSize, fontWeight: s.fontWeight, height: el.getBoundingClientRect().height };
+  });
+  expect(style).toEqual({ fontSize: '13px', fontWeight: '600', height: 28 });
+
+  // Traces: its sub-tabs after a separator, on the same row (no extra row height).
+  const sub = page.locator('#tracesTabs');
+  await expect(sub).toBeVisible();
+  await expect(sub).toHaveClass(/\bexplorerViewTabs\b/);
+  await expect(sub.locator('[data-trace-tab]').first()).toHaveText('Search');
+  await expect(sub.locator('[data-trace-tab="search"]')).toHaveClass(/\bexplorerViewTab\b/);
+  await expect(page.locator('#obsNav .obsNav__sep')).toBeVisible();
+  const mainBox = await page.locator('#obsTabs').boundingBox();
+  const subBox = await sub.boundingBox();
+  const sepBox = await page.locator('#obsNav .obsNav__sep').boundingBox();
+  expect(Math.abs(centerY(mainBox) - centerY(subBox))).toBeLessThanOrEqual(1);
+  expect(mainBox.x + mainBox.width).toBeLessThanOrEqual(sepBox.x);
+  expect(sepBox.x + sepBox.width).toBeLessThanOrEqual(subBox.x);
+  // One row: the tab lists and the row padding, nothing stacked.
+  expect(navBox.height).toBeLessThanOrEqual(mainBox.height + 14);
+  // The search bar starts right under the row.
+  const formBox = await page.locator('#tracesForm').boundingBox();
+  expect(formBox.y).toBeGreaterThanOrEqual(navBox.y + navBox.height - 0.5);
+  expect(formBox.y).toBeLessThanOrEqual(navBox.y + navBox.height + 12);
+
+  // Logs and Metrics: no sub-tabs, their toolbar right under the same row.
+  for (const [view, toolbar] of [['logs', '#logsForm'], ['metrics', '#metricsWorkspace']]) {
+    await tab(page, view).click();
+    await expectView(page, view);
+    await expect(sub).toBeHidden();
+    await expect(page.locator('#obsNav .obsNav__sep')).toBeHidden();
+    const box = await nav.boundingBox();
+    expect(box).toEqual(navBox);
+    const top = (await page.locator(toolbar).boundingBox()).y;
+    expect(top, view).toBeGreaterThanOrEqual(box.y + box.height - 0.5);
+    expect(top, view).toBeLessThanOrEqual(box.y + box.height + 12);
+  }
+  await tab(page, 'traces').click();
+  await expectView(page, 'traces');
+  await expect(sub).toBeVisible();
+});
+
+test('observability: the Traces tabs on the row switch with the keyboard', async ({ page, request }) => {
+  await features(request);
+  await page.goto('/observability/traces');
+  await expectView(page, 'traces');
+  const subTabs = page.locator('#tracesTabs [data-trace-tab]');
+  await expect(subTabs.first()).toHaveAttribute('aria-selected', 'true');
+  const ids = await subTabs.evaluateAll((els) => els.map((el) => el.getAttribute('data-trace-tab')));
+  test.skip(ids.length < 2, 'needs a second Traces tab');
+  const last = ids[ids.length - 1];
+  await page.locator('#tracesTab-search').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator(`#tracesTab-${ids[1]}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator(`#tracesTab-${ids[1]}`)).toBeFocused();
+  await expect.poll(() => param(page, 'tab')).toEqual([ids[1]]);
+  await page.keyboard.press('End');
+  await expect(page.locator(`#tracesTab-${last}`)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator(`#tracesTab-${last}`)).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#tracesTab-search')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#tracesTab-search')).toBeFocused();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Home');
+  await expect(page.locator('#tracesTab-search')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#tracesTab-search')).toBeFocused();
+  await expect.poll(() => param(page, 'tab')).toEqual([]);
+  // The keys of one list never move to the other.
+  await expectView(page, 'traces');
+  await expect(page.locator('#tracesTabs [tabindex="0"]')).toHaveCount(1);
 });
 
 test('observability: the time range and the service follow across views, other filters stay with their view', async ({ page, request }) => {
@@ -271,12 +382,38 @@ test('observability: a view the server turns off has no tab and its URLs fall ba
   await expectView(page, 'logs');
   await expect(tab(page, 'traces')).toBeHidden();
   await expect(tab(page, 'metrics')).toBeVisible();
+  await expect(page.locator('#obsTabs [role="tab"]:visible')).toHaveText(['Logs', 'Metrics']);
+  await expect(page.locator('#tracesTabs')).toBeHidden();
   // The cached availability settles the next first paint.
   await page.goto('/observability/traces/0123456789abcdef0123456789abcdef');
   await expect.poll(() => pathOf(page)).toBe('/observability/logs');
   await expect(tab(page, 'traces')).toBeHidden();
   const nav = await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.pageNav.v1')));
   expect(nav.traces).toBe(false);
+});
+
+test('observability: with one view the row keeps only what it has to show', async ({ page }) => {
+  let only = 'traces';
+  await page.route('**/api/version', async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.features = { ...json.features, ...Object.fromEntries(VIEWS.map((view) => [view, { ...(json.features?.[view] || {}), enabled: view === only }])) };
+    await route.fulfill({ response, json });
+  });
+  await page.goto('/observability/traces');
+  await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
+  await expect.poll(() => page.evaluate(() => window.ChDash?.observability?.featuresKnown === true)).toBe(true);
+  // Traces alone: no view tabs, no separator, its own tabs on the row.
+  await expect(page.locator('#obsTabs')).toBeHidden();
+  await expect(page.locator('#obsNav .obsNav__sep')).toBeHidden();
+  await expect(page.locator('#tracesTabs')).toBeVisible();
+  // Logs alone: nothing to show, no row.
+  only = 'logs';
+  await page.goto('/observability/logs');
+  await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'logs');
+  await expect.poll(() => page.evaluate(() => window.ChDash?.observability?.featuresKnown === true)).toBe(true);
+  await expect(page.locator('#obsNav')).toBeHidden();
+  await expect(page.locator('#logsForm')).toBeVisible();
 });
 
 for (const path of ['/query', '/explorer']) {
@@ -304,11 +441,56 @@ test('observability: no horizontal page overflow on any view, narrow windows inc
       await tab(page, view).click();
       await expectView(page, view);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), `${view} @ ${width}`).toBeLessThanOrEqual(0);
-      // The tabs and the switcher stay inside the window.
-      for (const selector of ['#obsTabs', '#pageSelect', '#themeSelect']) {
+      // The tab row and the switcher stay inside the window.
+      for (const selector of ['#obsNav', '#pageSelect', '#themeSelect']) {
         const box = await page.locator(selector).boundingBox();
         expect(box.x + box.width, `${selector} @ ${width}`).toBeLessThanOrEqual(width + 0.5);
       }
     }
   }
+});
+
+test('observability: on a phone the tab row scrolls sideways and keeps one row', async ({ page, request }) => {
+  await features(request);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/observability/traces');
+  await expectView(page, 'traces');
+  const nav = page.locator('#obsNav');
+  const sub = page.locator('#tracesTabs');
+  await expect(sub).toBeVisible();
+  const metrics = await nav.evaluate((el) => ({
+    scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, overflowX: getComputedStyle(el).overflowX,
+  }));
+  expect(metrics.overflowX).toBe('auto');
+  // View tabs and Traces tabs do not fit 390 px: the row scrolls, the page does not.
+  expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  // Still one row: both tab lists share a centre line, each keeps its width.
+  const mainBox = await page.locator('#obsTabs').boundingBox();
+  const subBox = await sub.boundingBox();
+  expect(Math.abs(centerY(mainBox) - centerY(subBox))).toBeLessThanOrEqual(1);
+  expect((await nav.boundingBox()).height).toBeLessThanOrEqual(mainBox.height + 14);
+  for (const name of ['Traces', 'Logs', 'Metrics']) {
+    const clipped = await page.locator('#obsTabs [role="tab"]', { hasText: name }).evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(clipped, name).toBe(false);
+  }
+  // The last Traces tab is reachable: a click scrolls it into view and selects it.
+  const lastTab = sub.locator('[data-trace-tab]').last();
+  await lastTab.click();
+  await expect(lastTab).toHaveAttribute('aria-selected', 'true');
+  const box = await lastTab.boundingBox();
+  expect(box.x + box.width).toBeLessThanOrEqual(390.5);
+  expect(await nav.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+  // A deep link to the last Traces tab scrolls the row to it.
+  const lastId = await lastTab.getAttribute('data-trace-tab');
+  await page.goto(`/observability/traces?tab=${lastId}`);
+  await expect(page.locator(`#tracesTab-${lastId}`)).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(async () => {
+    const b = await page.locator(`#tracesTab-${lastId}`).boundingBox();
+    return b.x >= -0.5 && b.x + b.width <= 390.5;
+  }).toBe(true);
+  // The header holds the brand, then host / page / theme, like the Explorer.
+  const brand = await page.locator('.appBrand').boundingBox();
+  const host = await page.locator('#hostPicker').boundingBox();
+  expect(host.y).toBeGreaterThan(brand.y + brand.height - 1);
 });

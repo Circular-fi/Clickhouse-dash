@@ -93,11 +93,6 @@
         <span class="appBrand__name">ClickHouse Dash</span>
         <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
       </div>
-      <div id="obsTabs" class="obsTabs" role="tablist" aria-label="Observability views">
-        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
-        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
-        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
-      </div>
     </div>
     <div class="appHeader__right">
       <div id="hostPicker" class="picker" aria-label="Target host">
@@ -128,17 +123,47 @@
     </div>
   </header>
 
+  <!-- The view tabs (the Explorer's view tab component) and, on the Traces
+       view, its Search / Services / Service map tabs on the same row. -->
+  <nav id="obsNav" class="obsNav" aria-label="Observability">
+    <div id="obsTabs" class="explorerViewTabs obsNav__views" role="tablist" aria-label="Observability views">
+      <button type="button" class="explorerViewTab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
+      <button type="button" class="explorerViewTab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
+      <button type="button" class="explorerViewTab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
+    </div>
+    <span class="obsNav__sep" aria-hidden="true"></span>
+    <div id="tracesTabs" class="explorerViewTabs obsNav__sub" role="tablist" aria-label="Trace views">
+      <button type="button" class="explorerViewTab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
+      <button type="button" class="explorerViewTab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1">Services</button>
+      <button type="button" class="explorerViewTab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1">Service map</button>
+    </div>
+    <script>
+      // The head script picked the view and the enabled ones: the row shows
+      // them from the first paint (app_observability.js renderTabs keeps it).
+      (function () {
+        var root = document.documentElement;
+        var view = root.dataset.obsView || "";
+        var enabled = String(root.dataset.obsEnabled || "").split(" ");
+        document.getElementById("obsTabs").hidden = enabled.length < 2;
+        var tabs = document.querySelectorAll("#obsTabs [data-obs-tab]");
+        for (var i = 0; i < tabs.length; i++) {
+          var name = tabs[i].getAttribute("data-obs-tab");
+          var selected = name === view;
+          tabs[i].hidden = enabled.indexOf(name) < 0;
+          tabs[i].classList.toggle("is-active", selected);
+          tabs[i].setAttribute("aria-selected", String(selected));
+          tabs[i].tabIndex = selected ? 0 : -1;
+        }
+      })();
+    </script>
+  </nav>
+
   <!-- observability:traces -->
   <main id="tracesWorkspace" data-obs-panel="traces" class="obsView tracesWorkspace tracesWorkspace--jaeger" role="main">
     <section class="tracesShell tracesShell--jaeger">
       <div id="tracesError" class="tracesError" hidden></div>
 
       <section id="tracesSearchView" class="traceSearchView">
-        <div id="tracesTabs" class="traceTabs" role="tablist" aria-label="Trace views">
-          <button type="button" class="traceTabs__tab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
-          <button type="button" class="traceTabs__tab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1" aria-controls="traceServicesView">Services</button>
-          <button type="button" class="traceTabs__tab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1" aria-controls="traceMapView">Service map</button>
-        </div>
         <form id="tracesForm" class="traceSearchBar" autocomplete="off">
           <div class="traceSearchBar__range">
             <div class="traceRangeCompact traceRangeCompact--preset">

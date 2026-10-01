@@ -4,7 +4,7 @@ ChDash can read OpenTelemetry traces stored by the OpenTelemetry Collector contr
 
 ## The Observability page
 
-Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three views of one page, `/observability`, listed as **Observability** in the page switcher of every page. Its header holds a tab per enabled view; the Traces view keeps its own *Search* / *Services* / *Service map* tabs under it.
+Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three views of one page, `/observability`, listed as **Observability** in the page switcher of every page. Its header is the header of the other pages; the row under it holds a tab per enabled view (the Explorer's view tabs: Left / Right, Home / End), and, while the Traces search is shown, the Traces view's own *Search* / *Services* / *Service map* tabs after a separator on the same row. On a narrow window the row scrolls sideways.
 
 | URL | View |
 | --- | --- |
@@ -134,7 +134,7 @@ The search page URL holds the whole search: `from` / `to` (relative expressions 
 
 ## Service map
 
-The Traces view has tabs above the search bar: *Search* (the result list) and *Service map* (`?tab=map` in the URL, next to the search parameters; other modules add tabs through `ChDash.traceTabs.register`). Every tab shares the time range, the filters and the chips; the Search button runs the selected tab's search.
+The Traces view has tabs in the tab row above the search bar, after the view tabs: *Search* (the result list) and *Service map* (`?tab=map` in the URL, next to the search parameters; other modules add tabs through `ChDash.traceTabs.register`). Every tab shares the time range, the filters and the chips; the Search button runs the selected tab's search.
 
 `GET /api/traces/service_map` (same parameters as search, plus an optional `sample_factor`) returns the services of the traces matching the filters (a trace is on the map when one of its visible spans matches, as in the result list) and the calls between them:
 

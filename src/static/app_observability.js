@@ -1,7 +1,8 @@
 (() => {
   "use strict";
   // Observability page (observability.html): the Traces, Logs and Metrics
-  // views of the OpenTelemetry data under one shell, one top-level tab each.
+  // views of the OpenTelemetry data under one shell, one tab each in the row
+  // under the header (#obsNav, which also holds the Traces sub-tabs).
   //
   //   /observability/traces[?search]            trace search (tab=services, tab=map: its sub-tabs)
   //   /observability/traces/<traceId>[?span=...] one trace, with its search context
@@ -352,13 +353,15 @@
     if (ctl.active && !enabled.includes(ctl.active)) void show(enabled[0], { history: "replace", url: viewRoute(enabled[0]) });
   }
 
+  // The Explorer view tabs' keys: Left / Right wrap, Home / End go to the ends.
   function onTabKeydown(event) {
     const target = event.target instanceof Element ? event.target.closest("[data-obs-tab]") : null;
-    if (!target || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
+    if (!target || !["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const shown = enabledViews();
     const at = shown.indexOf(target.getAttribute("data-obs-tab"));
-    const next = shown[(at + (event.key === "ArrowRight" ? 1 : -1) + shown.length) % shown.length];
+    const next = event.key === "Home" ? shown[0] : event.key === "End" ? shown[shown.length - 1]
+      : shown[(at + (event.key === "ArrowRight" ? 1 : -1) + shown.length) % shown.length];
     void show(next).then(() => document.getElementById(`obsTab-${next}`)?.focus());
   }
 

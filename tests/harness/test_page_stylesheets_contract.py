@@ -75,9 +75,9 @@ def test_observability_view_sheets_hold_their_view_and_the_shell():
     assert 'id="logsForm"' in builder.observability_html("logs")
     rules = {view: read(f"src/static/style.observability.{view}.css") for view in VIEWS}
     every = read("src/static/style.observability.css")
-    # Each sheet styles the shell (header tabs, view switching) and its own view only.
+    # Each sheet styles the shell (the view tab row, view switching) and its own view only.
     for view, css in rules.items():
-        assert ".obsTabs__tab {" in css, view
+        assert ".obsNav {" in css and ".explorerViewTab {" in css, view
         assert 'html:not([data-obs-view="traces"]) .obsView[data-obs-panel="traces"]' in css, view
         assert len(css) < len(every), view
     assert ".logsTable__viewport" in rules["logs"] and ".logsTable__viewport" not in rules["traces"]

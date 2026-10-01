@@ -1813,13 +1813,15 @@ button.button:not(:disabled):hover {
   color: var(--muted);
   white-space: nowrap;
 }
-@media (max-width: 760px) {
-  body[data-page="observability"] .appHeader { flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
-  body[data-page="observability"] .appHeader__left { flex: 1 1 100%; justify-content: space-between; gap: 10px; }
-  body[data-page="observability"] .appHeader__right { flex: 1 1 100%; min-width: 0; }
-  body[data-page="observability"] .appHeader .versionBadge { display: none; }
-  body[data-page="observability"] .appHeader .picker { flex: 1 1 auto; min-width: 0; }
-  body[data-page="observability"] .appHeader .picker__button { width: 100%; min-width: 0; max-width: 100%; grid-template-columns: 0.6rem minmax(0, 1fr) auto auto; }
+html body[data-page="observability"] > .appHeader {
+  border-bottom: 1px solid var(--border) !important;
+}
+@media (max-width: 820px) {
+  body[data-page="observability"] .appHeader { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
+  body[data-page="observability"] .appHeader__left { flex: 1 1 auto; }
+  body[data-page="observability"] .appHeader__right { flex: 1 1 100%; min-width: 0; justify-content: flex-end; gap: 6px; }
+  body[data-page="observability"] .appHeader__right .picker { flex: 1 1 auto; min-width: 0; }
+  body[data-page="observability"] .appHeader__right .picker__button { width: 100%; min-width: 0; max-width: none; grid-template-columns: 0.6rem minmax(3rem, 1fr) auto auto; }
 }
 .layout {
   padding-top: 10px;
