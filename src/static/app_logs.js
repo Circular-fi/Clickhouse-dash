@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  // Logs explorer (/logs), modelled on HyperDX's search page: a search bar
+  // Logs explorer (the Logs view of /observability), modelled on HyperDX's search page: a search bar
   // (time range, services, level, Body text, attribute filters), the volume
   // histogram stacked by severity (drag to zoom), a virtualised newest-first
   // table paged by keyset cursors, a side panel with click-to-filter actions
@@ -13,6 +13,9 @@
   const $ = (id) => document.getElementById(id);
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
+  // The Logs view of the Observability page (app_observability.js) writes the
+  // location only while it is the shown view.
+  const ownsUrl = () => !ns.observability || ns.observability.isActive("logs");
 
   const SEV_CLASSES = ["error", "warn", "info", "debug"];
   const SEV_LABELS = { error: "Error", warn: "Warn", info: "Info", debug: "Debug" };
@@ -205,7 +208,8 @@
   }
 
   function writeUrl(push) {
-    const next = `${route("logs")}?${urlParams().toString()}`;
+    if (!ownsUrl()) return;
+    const next = `${route("observability/logs")}?${urlParams().toString()}`;
     const current = `${window.location.pathname}${window.location.search}`;
     if (next === current) return;
     if (push) window.history.pushState({ workspace: "logs" }, "", next);
@@ -1263,7 +1267,7 @@
     if (openTrace) {
       const traced = !!row.trace_id && state.features?.traces?.enabled !== false;
       openTrace.hidden = !traced;
-      if (traced) openTrace.href = route(`traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
+      if (traced) openTrace.href = route(`observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
     }
     for (const button of document.querySelectorAll(".logsSideTabs [data-side-tab]")) {
       const on = button.dataset.sideTab === model.side.tab;
@@ -1479,7 +1483,7 @@
 
   async function pollLive() {
     if (!model.live) return;
-    if (document.hidden || model.searching) { scheduleLive(); return; }
+    if (document.hidden || model.searching || !ownsUrl()) { scheduleLive(); return; }
     let range;
     try { range = resolvedRange(); } catch (_) { scheduleLive(); return; }
     const newest = model.rows[0];
@@ -1577,8 +1581,51 @@
     await search({ push: false });
   }
 
+  // Back / Forward, or the Observability page showing this view again. The
+  // view shown again on the URL it left keeps its results, scroll and side
+  // panel (a live tail resumes polling).
+  function onLocation() {
+    const before = urlParams().toString();
+    readUrl();
+    syncControls();
+    setTab(model.tab, { push: false });
+    if (urlParams().toString() === before && model.lastSearch && !model.metaError) return;
+    void search({ push: false });
+  }
+
+  // A host change while another view is shown reloads when this one comes back.
+  let reloadWhenShown = false;
+
+  function onShow() {
+    if (reloadWhenShown) {
+      reloadWhenShown = false;
+      void reloadForHost();
+    }
+  }
+
+  function onHide() {
+    closePickers();
+  }
+
+  // Shared with the other Observability views: the time range, and the
+  // service when one is picked (several picked: nothing to share).
+  function getContext() {
+    const service = model.services.length === 1 ? model.services[0] : model.services.length ? null : "";
+    return { range: { ...model.timeRange }, service };
+  }
+
+  function applyContext(params, context) {
+    if (context.range) {
+      params.set("from", context.range.from);
+      params.set("to", context.range.to);
+    }
+    if (context.service != null) {
+      params.delete("service");
+      if (context.service) params.append("service", context.service);
+    }
+  }
+
   function init() {
-    ui?.setPageSelectorValue?.("logs");
     readUrl();
     initTimePicker();
     initServicePicker();
@@ -1599,10 +1646,6 @@
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
       if (![...pickers].some((root) => root.contains(event.target) || path.includes(root))) closePickers();
     });
-    dom().navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom().navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
-    dom().navTracesButton?.addEventListener("click", () => window.location.assign(route("traces")));
-    dom().navLogsButton?.addEventListener("click", () => ui?.closePageMenu?.());
 
     $("logsForm")?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1644,21 +1687,16 @@
       button.addEventListener("click", () => setTab(button.dataset.tab, { push: true }));
     }
     $("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
-    window.addEventListener("popstate", () => {
-      readUrl();
-      syncControls();
-      setTab(model.tab, { push: false });
-      void search({ push: false });
+    window.addEventListener("chdash:host-changed", () => {
+      if (ownsUrl()) void reloadForHost();
+      else reloadWhenShown = true;
     });
-    window.addEventListener("chdash:host-changed", () => { void reloadForHost(); });
     window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.logs?.enabled === false) return;
+      if (event?.detail?.logs?.enabled === false || !ownsUrl()) return;
       if (!booted && currentHost()) { booted = true; void reloadForHost(); }
     });
     if (currentHost()) { booted = true; void reloadForHost(); }
   }
 
-  function dom() { return ns.dom || {}; }
-
-  ns.logs = { init, search, model };
+  ns.logs = { init, onLocation, onShow, onHide, getContext, applyContext, search, model };
 })();

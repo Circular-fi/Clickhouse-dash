@@ -8,12 +8,14 @@ def read(rel):
 
 
 def test_time_range_picker_is_loaded_before_the_traces_page():
-    bootstrap = read("src/static/app_traces_bootstrap.js")
-    assert '"app_ui.js", "app_timerange.js", "app_traces.js"' in bootstrap
+    bootstrap = read("src/static/app_observability.js")
+    # Common modules (the picker included) load before any view's modules.
+    assert 'const COMMON_MODULES = ["app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];' in bootstrap
+    assert '    traces: ["app_traces.js", ' in bootstrap
 
 
 def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     menu = html[html.index('<div id="tracesTimeRangePanel"'):html.index('<div class="traceSearchField traceSearchField--status">')]
     for token in (
         'id="tracesRangeStart"', 'id="tracesRangeEnd"', 'id="tracesTimeCalendar"', 'id="tracesCustomRangeApply"',

@@ -3,15 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ClickHouse Dash · Traces</title>
+  <title>ClickHouse Dash · Observability</title>
   <script>
     (function () {
       try {
         var pathname = String(window.location.pathname || "/");
-        var marker = pathname.indexOf("/traces");
-        if (marker < 0) marker = pathname.indexOf("/logs");
+        var marker = pathname.indexOf("/observability");
         if (marker < 0) marker = pathname.indexOf("/explorer");
-        if (marker < 0) marker = pathname.indexOf("/metrics");
         if (marker < 0) marker = pathname.indexOf("/query");
         var prefix = marker >= 0 ? pathname.slice(0, marker) : pathname.replace(/\/+$/g, "");
         if (!prefix || prefix === "/") prefix = "";
@@ -22,10 +20,32 @@
           if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("//")) return raw;
           return appBase + raw.replace(/^\/+/, "");
         };
+        // The page switcher is part of the page shell and never waits on
+        // /api/version. Only a server that last reported no other page hides it,
+        // before the first paint. The same last answer says which views
+        // (Traces, Logs, Metrics) have a tab.
+        var pageNav = null;
+        try {
+          pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
+          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true) {
+            document.documentElement.classList.add("chdash-page-select-hidden");
+          }
+        } catch (_) {}
+        // The view: /observability/<view>[/...], else the first enabled one.
+        var views = ["traces", "logs", "metrics"];
+        var enabled = views.filter(function (name) { return !pageNav || pageNav[name] === true; });
+        if (!enabled.length) enabled = views;
+        var match = /^\/observability\/(traces|logs|metrics)(?:\/|$)/.exec(marker >= 0 ? pathname.slice(marker) : "");
+        var view = match && enabled.indexOf(match[1]) >= 0 ? match[1] : enabled[0];
+        document.documentElement.dataset.obsView = view;
+        document.documentElement.dataset.obsEnabled = enabled.join(" ");
+        document.title = "ClickHouse Dash · " + view.charAt(0).toUpperCase() + view.slice(1);
         // Written by the parser, not appended: a script-appended <link> does not
         // block rendering, so the shell would first paint unstyled (native
-        // selects, plain buttons) and restyle once style.css lands.
-        var cssHref = window.__chdashUrl("static/style.traces.css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        // selects, plain buttons) and restyle once the stylesheet lands. Each
+        // view has its own sheet; app_observability.js swaps in the sheet of
+        // every view once a second one is shown.
+        var cssHref = window.__chdashUrl("static/style.observability." + view + ".css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
         document.write('<link rel="stylesheet" href="' + cssHref + '">');
         var favicon = document.createElement("link");
         favicon.rel = "icon"; favicon.type = "image/svg+xml";
@@ -36,49 +56,47 @@
         if (mode === "dark" || mode === "light") document.documentElement.dataset.theme = mode;
         else delete document.documentElement.dataset.theme;
         document.documentElement.dataset.themeMode = mode;
-        // The Query / Explorer / Traces / Logs switcher is part of the page shell and
-        // never waits on /api/version. Only a server that last reported neither
-        // Explorer, Traces nor Logs hides it, before the first paint.
-        try {
-          var pageNav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
-          if (pageNav && pageNav.explorer === false && pageNav.traces !== true && pageNav.logs !== true && pageNav.metrics !== true) {
-            document.documentElement.classList.add("chdash-page-select-hidden");
-          }
-        } catch (_) {}
-        // Trace analytics (the two charts above the results) are shown only
-        // when /api/traces/meta enables them. The last answer is cached so the
-        // charts' space is there from the first paint instead of pushing the
-        // results down once meta arrives.
-        try {
-          if (localStorage.getItem("chdash.traceAnalytics.v1") === "1") {
-            document.documentElement.classList.add("chdash-trace-analytics");
-          }
-        } catch (_) {}
-        // The attribute facets sidebar keeps its open / hidden state (hidden
-        // by default on narrow windows) from the first paint.
-        try {
-          var facets = localStorage.getItem("chdash.traceFacetsCollapsed.v1");
-          if (facets === "1" || (facets !== "0" && window.innerWidth < 1100)) {
-            document.documentElement.classList.add("chdash-trace-facets-collapsed");
-          }
-        } catch (_) {}
-        // The selected tab (?tab=, app_trace_tabs.js) shows its panel from
-        // the first paint.
-        try {
-          var tab = new URLSearchParams(window.location.search).get("tab");
-          if (tab && /^[a-z]+$/.test(tab) && tab !== "search") document.documentElement.classList.add("chdash-trace-tab-" + tab);
-        } catch (_) {}
-        window.__chdashEarlyState = { themeMode: mode };
+        if (view === "traces") {
+          // Trace analytics (the two charts above the results) are shown only
+          // when /api/traces/meta enables them. The last answer is cached so the
+          // charts' space is there from the first paint instead of pushing the
+          // results down once meta arrives.
+          try {
+            if (localStorage.getItem("chdash.traceAnalytics.v1") === "1") {
+              document.documentElement.classList.add("chdash-trace-analytics");
+            }
+          } catch (_) {}
+          // The attribute facets sidebar keeps its open / hidden state (hidden
+          // by default on narrow windows) from the first paint.
+          try {
+            var facets = localStorage.getItem("chdash.traceFacetsCollapsed.v1");
+            if (facets === "1" || (facets !== "0" && window.innerWidth < 1100)) {
+              document.documentElement.classList.add("chdash-trace-facets-collapsed");
+            }
+          } catch (_) {}
+          // The selected tab (?tab=, app_trace_tabs.js) shows its panel from
+          // the first paint.
+          try {
+            var tab = new URLSearchParams(window.location.search).get("tab");
+            if (tab && /^[a-z]+$/.test(tab) && tab !== "search") document.documentElement.classList.add("chdash-trace-tab-" + tab);
+          } catch (_) {}
+        }
+        window.__chdashEarlyState = { themeMode: mode, obsView: view };
       } catch (_) {}
     })();
   </script>
 </head>
-<body data-page="traces">
+<body data-page="observability">
   <header class="appHeader" role="banner">
     <div class="appHeader__left">
       <div class="appBrand">
         <span class="appBrand__name">ClickHouse Dash</span>
         <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
+      </div>
+      <div id="obsTabs" class="obsTabs" role="tablist" aria-label="Observability views">
+        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
+        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
+        <button type="button" class="obsTabs__tab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
       </div>
     </div>
     <div class="appHeader__right">
@@ -92,13 +110,11 @@
         <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
       </div>
       <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">
-        <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Traces</button>
+        <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Observability</button>
         <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
           <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="false">Query</button>
           <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="false">Explorer</button>
-          <button id="navTracesButton" class="themeSelect__option" type="button" role="option" data-value="traces" aria-selected="true">Traces</button>
-          <button id="navLogsButton" class="themeSelect__option" type="button" role="option" data-value="logs" aria-selected="false" hidden>Logs</button>
-          <button id="navMetricsButton" class="themeSelect__option" type="button" role="option" data-value="metrics" aria-selected="false" hidden>Metrics</button>
+          <button id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="true">Observability</button>
         </div>
       </div>
       <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">
@@ -112,7 +128,8 @@
     </div>
   </header>
 
-  <main id="tracesWorkspace" class="tracesWorkspace tracesWorkspace--jaeger" role="main">
+  <!-- observability:traces -->
+  <main id="tracesWorkspace" data-obs-panel="traces" class="obsView tracesWorkspace tracesWorkspace--jaeger" role="main">
     <section class="tracesShell tracesShell--jaeger">
       <div id="tracesError" class="tracesError" hidden></div>
 
@@ -320,11 +337,240 @@
       </section>
     </section>
   </main>
+  <!-- /observability:traces -->
+
+  <!-- observability:logs -->
+  <main id="logsWorkspace" data-obs-panel="logs" class="obsView tracesWorkspace tracesWorkspace--jaeger logsWorkspace" role="main">
+    <section class="tracesShell tracesShell--jaeger logsShell">
+      <form id="logsForm" class="traceSearchBar logsSearchBar" autocomplete="off">
+        <div class="traceSearchBar__range logsSearchBar__range">
+          <div class="traceRangeCompact traceRangeCompact--preset">
+            <div class="themeSelect tracePicker tracePicker--range">
+              <select id="logsRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 15 minutes</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="logsTimeRangePanel">Time range · Last 15 minutes</button>
+              <div id="logsTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
+                <div class="timeRangePanel__body">
+                  <section id="logsCustomRange" class="timeRangePanel__absolute" aria-labelledby="logsAbsoluteRangeTitle">
+                    <h3 id="logsAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
+                    <label class="timeRangeField is-active">
+                      <span class="timeRangeField__label">From</span>
+                      <input id="logsRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="logsRangeStartError" />
+                      <span id="logsRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
+                    </label>
+                    <label class="timeRangeField">
+                      <span class="timeRangeField__label">To</span>
+                      <input id="logsRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="logsRangeEndError" />
+                      <span id="logsRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
+                    </label>
+                    <div id="logsTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
+                    <div id="logsTimeCalendar" class="timeCalendar"></div>
+                    <div id="logsRangeError" class="timeRangePanel__error" role="alert" hidden></div>
+                    <button id="logsCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
+                  </section>
+                  <section class="timeRangePanel__quick" aria-label="Quick ranges">
+                    <input id="logsQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
+                    <div id="logsQuickRanges" class="timeRangeList"></div>
+                  </section>
+                </div>
+                <footer class="timeRangePanel__footer">
+                  <span id="logsTimeZone" class="timeRangePanel__zone">Browser time</span>
+                  <div class="timeRangePanel__nav">
+                    <button id="logsRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
+                    <button id="logsRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
+                    <button id="logsRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
+                  </div>
+                </footer>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="traceSearchField logsSearchField--service">
+          <div id="logsServicePicker" class="themeSelect tracePicker logsMultiPicker">
+            <button id="logsServiceButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Service · ALL</button>
+            <div id="logsServiceMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
+          </div>
+        </div>
+
+        <div class="traceSearchField logsSearchField--level">
+          <div class="themeSelect tracePicker">
+            <select id="logsLevel" data-field-label="Level" aria-label="Minimum severity" class="tracePicker__native"><option value="" selected>ALL</option><option value="5">≥ DEBUG</option><option value="9">≥ INFO</option><option value="13">≥ WARN</option><option value="17">≥ ERROR</option><option value="21">≥ FATAL</option></select>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Level · ALL</button>
+            <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+          </div>
+        </div>
+
+        <label class="logsQueryField">
+          <svg class="logsQueryField__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
+          <input id="logsQuery" type="search" placeholder="Search Body: words, &quot;exact phrase&quot;, -exclude" aria-label="Search log bodies" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label class="logsFilterField">
+          <input id="logsFilterInput" type="text" placeholder="Filter key=value, key!=value, TraceId=…" aria-label="Add a filter" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <button id="logsSearchButton" class="button button--primary traceSearchSubmit logsSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
+      </form>
+
+      <div id="logsChips" class="logsChips" aria-label="Active filters" hidden></div>
+      <div id="logsError" class="tracesError logsError" role="alert" hidden></div>
+
+      <section id="logsHistogramCard" class="logsHistogram" aria-label="Log volume">
+        <header class="logsHistogram__header">
+          <strong id="logsTotal" class="logsHistogram__total">–</strong>
+          <span id="logsHistogramMeta" class="logsHistogram__meta">logs over time</span>
+          <div id="logsLegend" class="logsLegend" role="group" aria-label="Severity classes">
+            <button type="button" class="logsLegend__item" data-sev="error" aria-pressed="false"><i class="logsSevSwatch logsSev--error"></i><span>Error</span><b data-sev-count="error"></b></button>
+            <button type="button" class="logsLegend__item" data-sev="warn" aria-pressed="false"><i class="logsSevSwatch logsSev--warn"></i><span>Warn</span><b data-sev-count="warn"></b></button>
+            <button type="button" class="logsLegend__item" data-sev="info" aria-pressed="false"><i class="logsSevSwatch logsSev--info"></i><span>Info</span><b data-sev-count="info"></b></button>
+            <button type="button" class="logsLegend__item" data-sev="debug" aria-pressed="false"><i class="logsSevSwatch logsSev--debug"></i><span>Debug</span><b data-sev-count="debug"></b></button>
+          </div>
+        </header>
+        <div id="logsHistogram" class="logsHistogram__chart"><div class="tracesEmpty">Search to load the log volume.</div></div>
+      </section>
+
+      <div class="logsToolbar" role="toolbar" aria-label="Results">
+        <div class="logsTabs" role="tablist" aria-label="Logs view">
+          <button id="logsTabResults" class="logsTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsResultsPane" data-tab="results">Results</button>
+          <button id="logsTabPatterns" class="logsTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsPatternsPane" data-tab="patterns">Patterns</button>
+        </div>
+        <span id="logsStatus" class="logsStatus" aria-live="polite"></span>
+        <div class="logsToolbar__actions">
+          <label id="logsDenoiseToggle" class="logsSwitch" hidden><input id="logsDenoise" type="checkbox" /><span>Denoise</span></label>
+          <div id="logsColumnsPicker" class="themeSelect tracePicker logsColumnsPicker">
+            <button id="logsColumnsButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Columns</button>
+            <div id="logsColumnsMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
+          </div>
+          <button id="logsLiveButton" class="button logsLiveButton" type="button" aria-pressed="false" title="Live tail: poll for new logs"><span class="logsLiveDot" aria-hidden="true"></span><span>Live</span></button>
+        </div>
+      </div>
+
+      <div class="logsBody">
+        <section id="logsResultsPane" class="logsPane" role="tabpanel" aria-labelledby="logsTabResults">
+          <div id="logsTable" class="logsTable" tabindex="0" aria-label="Log records">
+            <div id="logsTableHead" class="logsTable__head" role="row"></div>
+            <div id="logsTableViewport" class="logsTable__viewport">
+              <div id="logsTableSpacer" class="logsTable__spacer"></div>
+              <div id="logsTableRows" class="logsTable__rows" role="rowgroup"></div>
+            </div>
+            <div id="logsTableMessage" class="logsTable__message"><div class="tracesEmpty">Search to load logs.</div></div>
+          </div>
+        </section>
+        <section id="logsPatternsPane" class="logsPane logsPatterns" role="tabpanel" aria-labelledby="logsTabPatterns" hidden>
+          <div id="logsPatterns" class="logsPatterns__body"><div class="tracesEmpty">Open this tab to mine the patterns of the current search.</div></div>
+        </section>
+        <aside id="logsSidePanel" class="logsSidePanel" aria-label="Log record" hidden>
+          <header class="logsSidePanel__header">
+            <div id="logsSideTitle" class="logsSidePanel__title"></div>
+            <div class="logsSidePanel__headerActions">
+              <a id="logsOpenTrace" class="button button--small logsOpenTrace" href="#" hidden>Open trace</a>
+              <button id="logsCopyJson" class="button button--small" type="button">Copy JSON</button>
+              <button id="logsSideClose" class="logsSidePanel__close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+            </div>
+          </header>
+          <div class="logsSideTabs" role="tablist" aria-label="Log record view">
+            <button id="logsSideTabDetails" class="logsTabs__tab is-active" type="button" role="tab" aria-selected="true" data-side-tab="details">Details</button>
+            <button id="logsSideTabContext" class="logsTabs__tab" type="button" role="tab" aria-selected="false" data-side-tab="context">Surrounding context</button>
+          </div>
+          <div id="logsSideDetails" class="logsSidePanel__body"></div>
+          <div id="logsSideContext" class="logsSidePanel__body logsContext" hidden>
+            <div class="logsContext__bar">
+              <div class="logsSegmented" role="group" aria-label="Context scope">
+                <button type="button" data-context-preset="anything" aria-pressed="true">Anything</button>
+                <button type="button" data-context-preset="service" aria-pressed="false">Same service</button>
+                <button type="button" data-context-preset="host" aria-pressed="false">Same host</button>
+                <button type="button" data-context-preset="trace" aria-pressed="false">Same trace</button>
+              </div>
+              <div class="logsSegmented" role="group" aria-label="Context window">
+                <button type="button" data-context-window="60000" aria-pressed="false">±1m</button>
+                <button type="button" data-context-window="300000" aria-pressed="true">±5m</button>
+                <button type="button" data-context-window="900000" aria-pressed="false">±15m</button>
+                <button type="button" data-context-window="3600000" aria-pressed="false">±1h</button>
+              </div>
+            </div>
+            <div id="logsContextRows" class="logsContext__rows"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+  <!-- /observability:logs -->
+
+  <!-- observability:metrics -->
+  <main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">
+    <aside id="metricsSidebar" class="metricsSidebar" aria-label="Metrics catalog">
+      <div class="metricsSidebar__head">
+        <input id="metricsSearch" class="metricsSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
+        <div id="metricsCatalogSummary" class="metricsSidebar__summary" aria-live="polite">Loading metrics…</div>
+      </div>
+      <div id="metricsCatalog" class="metricsCatalog" role="tree" aria-label="Services and metrics">
+        <div class="metricsEmpty metricsEmpty--loading">Loading the metrics catalog…</div>
+      </div>
+    </aside>
+
+    <section class="metricsMain" aria-label="Metric charts">
+      <form id="metricsToolbar" class="traceSearchBar metricsToolbar" autocomplete="off">
+        <div class="traceSearchBar__range metricsToolbar__range">
+          <div class="traceRangeCompact traceRangeCompact--preset">
+            <div class="themeSelect tracePicker tracePicker--range">
+              <select id="metricsRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 1 hour</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="metricsTimeRangePanel">Time range · Last 1 hour</button>
+              <div id="metricsTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
+                <div class="timeRangePanel__body">
+                  <section id="metricsCustomRange" class="timeRangePanel__absolute" aria-labelledby="metricsAbsoluteRangeTitle">
+                    <h3 id="metricsAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
+                    <label class="timeRangeField is-active">
+                      <span class="timeRangeField__label">From</span>
+                      <input id="metricsRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="metricsRangeStartError" />
+                      <span id="metricsRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
+                    </label>
+                    <label class="timeRangeField">
+                      <span class="timeRangeField__label">To</span>
+                      <input id="metricsRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="metricsRangeEndError" />
+                      <span id="metricsRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
+                    </label>
+                    <div id="metricsTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
+                    <div id="metricsTimeCalendar" class="timeCalendar"></div>
+                    <div id="metricsRangeError" class="timeRangePanel__error" role="alert" hidden></div>
+                    <button id="metricsCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
+                  </section>
+                  <section class="timeRangePanel__quick" aria-label="Quick ranges">
+                    <input id="metricsQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
+                    <div id="metricsQuickRanges" class="timeRangeList"></div>
+                  </section>
+                </div>
+                <footer class="timeRangePanel__footer">
+                  <span id="metricsTimeZone" class="timeRangePanel__zone">Browser time</span>
+                  <div class="timeRangePanel__nav">
+                    <button id="metricsRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
+                    <button id="metricsRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
+                    <button id="metricsRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
+                  </div>
+                </footer>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span id="metricsRangeInfo" class="metricsToolbar__info" aria-live="polite"></span>
+        <div class="metricsToolbar__actions">
+          <button id="metricsAddPanelButton" class="button metricsToolbar__button" type="button" title="Add a chart panel">Add panel</button>
+          <button id="metricsRefreshButton" class="button button--primary metricsToolbar__button" type="submit" title="Reload the catalog and charts">Refresh</button>
+        </div>
+      </form>
+      <div id="metricsError" class="tracesError metricsError" role="alert" hidden></div>
+      <div id="metricsPanels" class="metricsPanels">
+        <article class="metricsPanel is-active is-empty">
+          <div class="metricsEmpty metricsEmpty--panel">Pick a metric in the catalog to chart it.</div>
+        </article>
+      </div>
+    </section>
+  </main>
+  <!-- /observability:metrics -->
 
   <script>
     (function () {
       var script = document.createElement("script");
-      script.src = (window.__chdashUrl ? window.__chdashUrl("static/app_traces_bootstrap.js") : "/static/app_traces_bootstrap.js");
+      script.src = (window.__chdashUrl ? window.__chdashUrl("static/app_observability.js") : "/static/app_observability.js");
       document.body.appendChild(script);
     })();
   </script>

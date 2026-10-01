@@ -417,22 +417,18 @@
     }
   }
 
-  // The page switcher ships visible in every page shell. Only a server with
-  // neither Explorer, Traces nor Logs hides it; the head script of each page
-  // applies the last known availability (chdash-page-select-hidden) before
-  // first paint.
+  // The page switcher (Query, Explorer, Observability) ships visible in every
+  // page shell. Only a server with neither Explorer nor any Observability view
+  // (Traces, Logs, Metrics) hides it; the head script of each page applies the
+  // last known availability (chdash-page-select-hidden) before first paint.
   function applyPageNavigation(nav) {
     const explorerEnabled = nav.explorer !== false;
-    const tracesEnabled = nav.traces === true;
-    const logsEnabled = nav.logs === true;
-    const metricsEnabled = nav.metrics === true;
-    const hidden = !explorerEnabled && !tracesEnabled && !logsEnabled && !metricsEnabled;
+    const observabilityEnabled = nav.traces === true || nav.logs === true || nav.metrics === true;
+    const hidden = !explorerEnabled && !observabilityEnabled;
     dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
     if (dom.pageSelect) dom.pageSelect.hidden = hidden;
     if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
-    if (dom.navTracesButton) dom.navTracesButton.hidden = !tracesEnabled;
-    if (dom.navLogsButton) dom.navLogsButton.hidden = !logsEnabled;
-    if (dom.navMetricsButton) dom.navMetricsButton.hidden = !metricsEnabled;
+    if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;
   }
 
   function applyProductFeatures() {
@@ -448,15 +444,9 @@
       window.history.replaceState({ workspace: "query" }, "", next);
       if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { historyMode: "none" });
     }
-    if (!tracesEnabled && /\/traces(?:\/|$)/.test(window.location.pathname)) {
-      window.location.replace(api.resolveUrl("query"));
-      return;
-    }
-    if (!logsEnabled && /\/logs(?:\/|$)/.test(window.location.pathname)) {
-      window.location.replace(api.resolveUrl("query"));
-      return;
-    }
-    if (!metricsEnabled && /\/metrics(?:\/|$)/.test(window.location.pathname)) {
+    // A turned-off view falls back to another (app_observability.js); with no
+    // view left the page itself is gone.
+    if (!tracesEnabled && !logsEnabled && !metricsEnabled && document.body?.dataset?.page === "observability") {
       window.location.replace(api.resolveUrl("query"));
       return;
     }
@@ -464,7 +454,7 @@
   }
 
   function setPageSelectorValue(value) {
-    const labels = { query: "Query", explorer: "Explorer", traces: "Traces", logs: "Logs", metrics: "Metrics" };
+    const labels = { query: "Query", explorer: "Explorer", observability: "Observability" };
     const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
     if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
@@ -1558,13 +1548,10 @@
     });
 
     if (dom.pageSelectButton) dom.pageSelectButton.addEventListener("click", togglePageMenu);
-    // Metrics is its own page: every other shell navigates to it.
-    dom.navMetricsButton?.addEventListener("click", () => {
-      if (document.body?.dataset?.page !== "metrics") window.location.assign(api.resolveUrl("metrics"));
-    });
-    // Same for Logs, whichever shell holds the switcher.
-    dom.navLogsButton?.addEventListener("click", () => {
-      if (document.body?.dataset?.page !== "logs") window.location.assign(api.resolveUrl("logs"));
+    // Observability (Traces, Logs, Metrics) is its own page: the Query and
+    // Explorer shells navigate to it, on its first enabled view.
+    dom.navObservabilityButton?.addEventListener("click", () => {
+      if (document.body?.dataset?.page !== "observability") window.location.assign(api.resolveUrl("observability"));
     });
     if (dom.pageSelectMenu) {
       for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) b.addEventListener("click", () => closePageMenu());

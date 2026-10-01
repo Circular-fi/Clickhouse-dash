@@ -74,11 +74,12 @@ def window(meta) -> tuple[int, int]:
     return end_ms - 30 * 60 * 1000, end_ms
 
 
-def test_logs_page_shell_is_served(meta):
-    response = requests.get(f"{BASE_URL}/logs", timeout=30)
+def test_logs_view_shell_is_served(meta):
+    response = requests.get(f"{BASE_URL}/observability/logs", timeout=30)
     assert response.status_code == 200
     assert 'id="logsWorkspace"' in response.text
-    assert 'data-page="logs"' in response.text
+    assert 'data-page="observability"' in response.text
+    assert requests.get(f"{BASE_URL}/logs", timeout=30).status_code == 404
 
 
 def test_search_rows_are_newest_first_like_clickhouse(window):

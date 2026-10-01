@@ -20,14 +20,14 @@ def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
     assert "const disabled = picking && t - startMs >= limit;" in picker
 
 def test_trace_source_badge_and_section_rules_are_removed():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     css = read("src/static/style.css")
     assert 'id="tracesSourceMeta"' not in html
     tail = css[css.rfind("/* Trace polish:"):]
-    assert 'body[data-page="traces"] .appHeader' in tail
+    assert 'html[data-obs-view="traces"] .appHeader' in tail
     assert 'border-bottom: 0 !important;' in tail
-    assert 'body[data-page="traces"] .traceSearchResults__toolbar' in tail
-    assert 'body[data-page="traces"] .tracesResults--wide' in tail
+    assert 'html[data-obs-view="traces"] .traceSearchResults__toolbar' in tail
+    assert 'html[data-obs-view="traces"] .tracesResults--wide' in tail
 
 def test_range_picker_has_no_internal_scrollbar_and_theme_focus_is_neutral():
     css = read("src/static/style.css")

@@ -1754,6 +1754,14 @@ button.button:not(:disabled):hover {
   color: var(--muted);
   white-space: nowrap;
 }
+@media (max-width: 760px) {
+  body[data-page="observability"] .appHeader { flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
+  body[data-page="observability"] .appHeader__left { flex: 1 1 100%; justify-content: space-between; gap: 10px; }
+  body[data-page="observability"] .appHeader__right { flex: 1 1 100%; min-width: 0; }
+  body[data-page="observability"] .appHeader .versionBadge { display: none; }
+  body[data-page="observability"] .appHeader .picker { flex: 1 1 auto; min-width: 0; }
+  body[data-page="observability"] .appHeader .picker__button { width: 100%; min-width: 0; max-width: 100%; grid-template-columns: 0.6rem minmax(0, 1fr) auto auto; }
+}
 .layout {
   padding-top: 10px;
 }
@@ -3583,13 +3591,13 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   scrollbar-gutter: stable;
 }
 .pageSelect .pageSelect__button {
-  width: 6.4rem;
-  min-width: 6.4rem;
+  width: 9rem;
+  min-width: 9rem;
   text-align: left;
 }
 .pageSelect__menu {
-  width: 6.4rem;
-  min-width: 6.4rem;
+  width: 9rem;
+  min-width: 9rem;
 }
 .pageSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
 .pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
@@ -4665,7 +4673,7 @@ html.chdash-page-select-hidden .pageSelect {
   .pipelineViewer__summaryNote { text-align: left; }
 }
 @keyframes traceSpin { to { transform: rotate(360deg); } }
-body[data-page="traces"] .appHeader {
+html[data-obs-view="traces"] .appHeader {
   border-bottom: 0 !important;
 }
 .themeSelect--icons .themeSelect__button--icon:hover,
@@ -5041,7 +5049,7 @@ html[data-theme="light"] {
   --log-sev-info: #2563eb;
   --log-sev-debug: #64748b;
 }
-body[data-page="logs"] .appHeader { border-bottom: 0 !important; }
+html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 @keyframes logsPulse { 50% { opacity: .45; } }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
 @keyframes metricsSpin { to { transform: rotate(360deg); } }

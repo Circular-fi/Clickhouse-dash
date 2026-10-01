@@ -44,11 +44,11 @@ def test_deltas_compare_two_stable_bounded_samples():
 
 
 def test_heatmap_module_is_wired_to_the_duration_chart_and_the_search():
-    boot = read("src/static/app_traces_bootstrap.js")
+    boot = read("src/static/app_observability.js")
     js = read("src/static/app_trace_heatmap.js")
     traces = read("src/static/app_traces.js")
     search = read("src/static/app_trace_search.js")
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     assert boot.index('"app_trace_search.js"') < boot.index('"app_trace_heatmap.js"')
     assert 'data-duration-view="heatmap"' in html and 'id="traceDeltaPanel"' in html
     assert "if (ns.traceHeatmap?.active?.()) { ns.traceHeatmap.render(); return; }" in traces

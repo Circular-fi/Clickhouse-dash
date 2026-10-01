@@ -21,8 +21,9 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
     ]:
         assert f'http_.Get("{route}"' in block, route
         assert f"void {handler}(const httplib::Request& req, httplib::Response& res);" in header, handler
-    assert 'http_.Get("/metrics", serve_metrics_shell);' in server
-    assert 'shell_req.path = "/metrics.html";' in server
+    # The page is the Observability shell; /metrics is gone.
+    assert 'http_.Get(R"(/observability/.*)", serve_observability_shell);' in server
+    assert 'http_.Get("/metrics"' not in server
     assert "api_metrics.cpp" in read("src/CMakeLists.txt")
 
 
@@ -79,23 +80,24 @@ def test_docs_describe_the_browser_api():
         assert text in docs, text
 
 
-def test_metrics_page_shell_and_switcher():
-    html = read("src/static/metrics.html")
-    assert '<body data-page="metrics">' in html
-    assert 'window.__chdashUrl("static/app_metrics_bootstrap.js")' in html
-    assert '<button id="navMetricsButton" class="themeSelect__option" type="button" role="option" data-value="metrics" aria-selected="true">Metrics</button>' in html
-    assert '<form id="metricsToolbar" class="traceSearchBar metricsToolbar" autocomplete="off">' in html
-    bootstrap = read("src/static/app_metrics_bootstrap.js")
-    assert '"app_timerange.js", "app_query_chart.js", "app_metrics.js"' in bootstrap
-    # Other shells: the entry ships hidden and /api/version reveals it.
-    for page in ["query.html", "explorer.html", "traces.html"]:
+def test_metrics_view_shell_and_switcher():
+    html = read("src/static/observability.html")
+    section = html[html.index("<!-- observability:metrics -->"):html.index("<!-- /observability:metrics -->")]
+    assert '<main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">' in section
+    assert '<form id="metricsToolbar" class="traceSearchBar metricsToolbar" autocomplete="off">' in section
+    assert 'id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace"' in html
+    assert not (ROOT / "src/static/metrics.html").exists()
+    controller = read("src/static/app_observability.js")
+    assert '    metrics: ["app_query_chart.js", "app_metrics.js"],' in controller
+    # Query and Explorer: one Observability entry, hidden until /api/version reveals it.
+    for page in ["query.html", "explorer.html"]:
         shell = read(f"src/static/{page}")
-        assert 'data-value="metrics" aria-selected="false" hidden>Metrics</button>' in shell, page
+        assert 'data-value="observability" aria-selected="false" hidden>Observability</button>' in shell, page
         # The shell hides the switcher only when no other page is enabled.
         assert "pageNav.traces !== true" in shell and "pageNav.metrics !== true" in shell, page
     ui = read("src/static/app_ui.js")
-    assert "if (dom.navMetricsButton) dom.navMetricsButton.hidden = !metricsEnabled;" in ui
-    assert 'window.location.assign(api.resolveUrl("metrics"))' in ui
+    assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui
+    assert 'window.location.assign(api.resolveUrl("observability"))' in ui
     assert "metrics: nav?.metrics === true" in read("src/static/app_state.js")
 
 
@@ -105,6 +107,7 @@ def test_metrics_page_keeps_its_state_in_the_url_and_links_exemplars_to_spans():
                   'params.set("exemplars", "0")']:
         assert param in js, param
     assert "bucket_origin_ms: localMidnight(range.start_ms)" in js
-    assert '`${route(`traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
+    assert 'const url = `${route("observability/metrics")}?${urlQuery()}`;' in js
+    assert '`${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
     for route in ["api/metrics/catalog?", "api/metrics/series?", "api/metrics/exemplars?", "api/metrics/attributes?"]:
         assert route in js, route

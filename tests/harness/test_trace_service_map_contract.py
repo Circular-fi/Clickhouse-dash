@@ -46,12 +46,12 @@ def test_service_map_sql_is_bounded_sampled_and_allowlisted():
 
 
 def test_service_map_tab_is_registered_and_lives_in_the_url():
-    boot = read("src/static/app_traces_bootstrap.js")
+    boot = read("src/static/app_observability.js")
     tabs = read("src/static/app_trace_tabs.js")
     mapjs = read("src/static/app_trace_map.js")
     search = read("src/static/app_trace_search.js")
     traces = read("src/static/app_traces.js")
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     api = read("src/static/app_api.js")
     assert boot.index('"app_trace_search.js"') < boot.index('"app_trace_tabs.js"') < boot.index('"app_trace_map.js"')
     assert "ns.traceTabs = {" in tabs and "register," in tabs

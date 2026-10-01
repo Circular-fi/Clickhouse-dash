@@ -12,7 +12,7 @@ def test_duration_ticks_helper_exists_for_trace_overview_and_waterfall():
     assert "durationTicks(total, TIMELINE_TICKS, offset)" in ui
 
 def test_service_operation_are_selection_only_and_status_labels_uppercase():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     assert '<select id="tracesService" data-field-label="Service"' in html
     assert '<select id="tracesOperation" data-field-label="Operation"' in html
     assert '<input id="tracesService"' not in html
@@ -23,7 +23,7 @@ def test_service_operation_are_selection_only_and_status_labels_uppercase():
     assert '<option value="Unset">UNSET</option>' in html
 
 def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     ui = read("src/static/app_traces.js")
     cpp = read("src/api_traces.cpp")
     assert 'id="tracesTagKey"' in html and 'type="text"' in html
@@ -41,7 +41,7 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
 def test_custom_range_inputs_take_dates_or_expressions_and_update_picker_label():
     ui = read("src/static/app_traces.js")
     picker = read("src/static/app_timerange.js")
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     # Free text From / To (absolute dates or Grafana expressions such as
     # now-6h), no native datetime control with min / max fighting the user.
     assert 'type="datetime-local"' not in html

@@ -728,6 +728,7 @@
   // on the page, not in a field or a menu).
   function onDocumentKeydown(event) {
     if (!active() || !state.panelOpen || ctx.dom.tracesSearchView?.hidden || shownPanel() === null) return;
+    if (ns.observability && !ns.observability.isActive("traces")) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target === byId("traceSpanTable") || editable(target)) return;

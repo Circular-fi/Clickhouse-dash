@@ -6,7 +6,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_trace_service_filters_and_time_window_hide_irrelevant_spans():
-    html = read('src/static/traces.html')
+    html = read('src/static/observability.html')
     ui = read('src/static/app_traces.js')
     assert 'traceServiceFilters' in html
     assert 'disabledServices' in ui

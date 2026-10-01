@@ -62,10 +62,10 @@ def test_trace_insight_settings_are_configured_validated_and_documented():
 
 
 def test_trace_page_loads_the_insights_module():
-    bootstrap = read("src/static/app_traces_bootstrap.js")
+    bootstrap = read("src/static/app_observability.js")
     traces = read("src/static/app_traces.js")
     insights = read("src/static/app_trace_insights.js")
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     assert '"app_trace_views.js", "app_trace_insights.js"' in bootstrap
     assert 'id="traceHighlights"' in html
     for hook in ("exceptionBadgeHtml(span)", "exceptionSectionHtml(span, bounds)", "traceExceptionTagHtml(cache)",

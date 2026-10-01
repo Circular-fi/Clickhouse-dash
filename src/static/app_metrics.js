@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  // Metrics browser (/metrics): a catalog of the OpenTelemetry metrics stored
+  // Metrics browser (the Metrics view of /observability): a catalog of the OpenTelemetry metrics stored
   // by the ClickHouse exporter (service -> metric), and chart panels drawn from
   // the server-side aggregations of /api/metrics/series, with exemplar dots
   // linking to the trace and span that produced them. Everything the user
@@ -29,6 +29,9 @@
   const esc = (value) => String(value == null ? "" : value)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
+  // The Metrics view of the Observability page (app_observability.js) writes
+  // the location only while it is the shown view.
+  const ownsUrl = () => !ns.observability || ns.observability.isActive("metrics");
   const pad2 = (value) => String(value).padStart(2, "0");
 
   function localMidnight(ms) {
@@ -204,6 +207,7 @@
     meta: null,
     search: "",
     collapsed: new Set(),
+    focusService: "",
     panels: [newPanel()],
     active: 0,
     resolved: null,
@@ -254,7 +258,7 @@
     model.active = Number.isInteger(active) && active >= 0 && active < panels.length ? active : 0;
   }
 
-  function writeUrl({ push = false } = {}) {
+  function urlQuery() {
     const params = new URLSearchParams();
     params.set("from", model.range.from);
     params.set("to", model.range.to);
@@ -262,7 +266,12 @@
     if (first) panelParams(first, params);
     for (const panel of rest) params.append("panel", panelParams(panel, new URLSearchParams()).toString());
     if (model.active > 0) params.set("active", String(model.active));
-    const url = `${route("metrics")}?${params.toString()}`;
+    return params.toString();
+  }
+
+  function writeUrl({ push = false } = {}) {
+    if (!ownsUrl()) return;
+    const url = `${route("observability/metrics")}?${urlQuery()}`;
     if (url === `${window.location.pathname}${window.location.search}`) return;
     if (push) window.history.pushState({ metrics: true }, "", url);
     else window.history.replaceState({ metrics: true }, "", url);
@@ -401,6 +410,11 @@
       return;
     }
     const services = model.catalog?.services || [];
+    // A service picked in another Observability view (applyContext): its
+    // group opens and scrolls into view, the others fold.
+    const focus = model.catalog && services.some((svc) => svc.name === model.focusService) ? model.focusService : "";
+    if (model.catalog) model.focusService = "";
+    if (focus) model.collapsed = new Set(services.map((svc) => svc.name).filter((name) => name !== focus));
     const needle = model.search.trim().toLowerCase();
     const active = model.panels[model.active] || null;
     let shown = 0;
@@ -435,6 +449,7 @@
       root.innerHTML = `<div class="metricsEmpty">No metric matches \u201c${esc(model.search.trim())}\u201d.</div>`;
     } else {
       root.innerHTML = groups.join("");
+      if (focus) root.querySelector(`[data-service-toggle="${CSS.escape(focus)}"]`)?.scrollIntoView?.({ block: "nearest" });
     }
     if (summary) {
       const total = Number(model.catalog?.metric_count || 0);
@@ -1149,7 +1164,7 @@
         const cx = xOf(t);
         if (placed.some(([px, py]) => Math.abs(px - cx) < 9 && Math.abs(py - cy) < 9)) continue;
         placed.push([cx, cy]);
-        const href = `${route(`traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
+        const href = `${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
         const link = svg("a", { class: "metricsExemplar", href, "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "", "aria-label": `Exemplar ${formatValue(value, metricInfo)} at ${formatInstant(t)}: open trace ${ex.trace_id}` });
         link.appendChild(svg("rect", { class: "metricsExemplar__mark", x: xOf(t) - 3.5, y: cy - 3.5, width: 7, height: 7, rx: 1.5, transform: `rotate(45 ${xOf(t)} ${cy})` }));
         link.addEventListener("pointerenter", (event) => showExemplarTip(panel, ex, metricInfo, event));
@@ -1343,17 +1358,58 @@
     reloadAll();
   }
 
+  // Back / Forward, or the Observability page showing this view again: a URL
+  // that changed while the view was away (or another entry) reloads.
+  function onLocation() {
+    const before = urlQuery();
+    readUrl();
+    timePicker?.refresh?.();
+    if (urlQuery() === before && model.catalog) {
+      if (model.focusService) renderCatalog();
+      return;
+    }
+    dom.metricsPanels?.replaceChildren();
+    renderPanels();
+    reloadAll();
+  }
+
+  // A host change while another view is shown reloads when this one comes back.
+  let reloadWhenShown = false;
+
+  function onShow() {
+    if (reloadWhenShown) {
+      reloadWhenShown = false;
+      model.catalog = null;
+      loadMeta().then(reloadAll);
+    }
+  }
+
+  function onHide() {
+    closePickers();
+  }
+
+  // Shared with the other Observability views: the time range, and the
+  // service of the active panel.
+  function getContext() {
+    const service = model.panels[model.active]?.service || "";
+    return { range: { ...model.range }, service: service || null };
+  }
+
+  // The range goes to the URL; a service opens its group of the catalog.
+  function applyContext(params, context) {
+    if (context.range) {
+      params.set("from", context.range.from);
+      params.set("to", context.range.to);
+    }
+    if (context.service) model.focusService = context.service;
+  }
+
   function init() {
     dom.metricsCatalog = document.getElementById("metricsCatalog");
     dom.metricsCatalogSummary = document.getElementById("metricsCatalogSummary");
     dom.metricsPanels = document.getElementById("metricsPanels");
     dom.metricsError = document.getElementById("metricsError");
     dom.metricsAddPanelButton = document.getElementById("metricsAddPanelButton");
-    ui?.setPageSelectorValue?.("metrics");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
-    dom.navTracesButton?.addEventListener("click", () => window.location.assign(route("traces")));
-    dom.navMetricsButton?.addEventListener("click", () => ui?.closePageMenu?.());
 
     readUrl();
     initTimeRangePicker();
@@ -1378,27 +1434,21 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePickers(); });
     if (typeof ResizeObserver === "function" && dom.metricsPanels) new ResizeObserver(onResize).observe(dom.metricsPanels);
     else window.addEventListener("resize", onResize);
-    window.addEventListener("popstate", () => {
-      readUrl();
-      timePicker?.refresh?.();
-      dom.metricsPanels?.replaceChildren();
-      renderPanels();
-      reloadAll();
-    });
     window.addEventListener("chdash:host-changed", () => {
       started = true;
+      if (!ownsUrl()) { reloadWhenShown = true; return; }
       model.catalog = null;
       loadMeta().then(reloadAll);
     });
     window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.metrics?.enabled === false) return;
+      if (event?.detail?.metrics?.enabled === false || !ownsUrl()) return;
       start();
     });
     start();
   }
 
   ns.metrics = {
-    init,
+    init, onLocation, onShow, onHide, getContext, applyContext,
     // Exposed for tests.
     parseUnit, formatValue, axisFormatter, formatTick,
   };

@@ -1,4 +1,4 @@
-"""Source contract of the Logs explorer (/logs page and /api/logs/* routes)."""
+"""Source contract of the Logs explorer (the Logs view of /observability and /api/logs/* routes)."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,8 +16,10 @@ def test_logs_routes_are_registered_only_when_logs_are_enabled():
     for route in ("search", "histogram", "context", "patterns", "services"):
         assert f'http_.Get("/api/logs/{route}"' in block, route
         assert f"void handle_logs_{route}(const httplib::Request& req, httplib::Response& res);" in header, route
-    assert 'http_.Get("/logs", serve_logs_shell);' in server
-    assert 'shell_req.path = "/logs.html";' in server
+    # The page is the Observability shell; /logs is gone.
+    assert "if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {" in server
+    assert 'http_.Get("/observability", serve_observability_shell);' in server
+    assert 'http_.Get("/logs"' not in server
     assert "api_logs.cpp" in read("src/CMakeLists.txt")
 
 
@@ -72,21 +74,18 @@ def test_histogram_context_and_patterns():
     assert "std::string mask_body(std::string_view body)" in logs
 
 
-def test_logs_page_shell_follows_the_page_conventions():
-    html = read("src/static/logs.html")
-    assert '<body data-page="logs">' in html
-    assert "document.write('<link rel=\"stylesheet\" href=\"' + cssHref + '\">');" in html
-    assert 'localStorage.getItem("chdash.pageNav.v1")' in html
+def test_logs_view_follows_the_page_conventions():
+    html = read("src/static/observability.html")
+    section = html[html.index("<!-- observability:logs -->"):html.index("<!-- /observability:logs -->")]
+    assert '<main id="logsWorkspace" data-obs-panel="logs" class="obsView ' in section
+    assert '<div class="themeSelect tracePicker tracePicker--range">' in section
+    assert 'id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace"' in html
     assert 'pageNav.traces !== true && pageNav.logs !== true' in html
-    assert 'aria-expanded="false">Logs</button>' in html
-    assert 'data-value="logs" aria-selected="true">Logs</button>' in html
-    assert 'static/app_logs_bootstrap.js' in html
-    assert '<div class="themeSelect tracePicker tracePicker--range">' in html
-    for page in ("query.html", "explorer.html", "traces.html"):
-        shell = read(f"src/static/{page}")
-        assert '<button id="navLogsButton" class="themeSelect__option" type="button" role="option" data-value="logs" aria-selected="false" hidden>Logs</button>' in shell, page
-    bootstrap = read("src/static/app_logs_bootstrap.js")
-    assert '"app_timerange.js", "app_logs.js"' in bootstrap
+    assert not (ROOT / "src/static/logs.html").exists()
+    assert not (ROOT / "src/static/app_logs_bootstrap.js").exists()
+    # Loaded the first time the Logs tab is shown.
+    controller = read("src/static/app_observability.js")
+    assert '    logs: ["app_logs.js"],' in controller
 
 
 def test_logs_page_script_reuses_shared_pieces():
@@ -98,8 +97,9 @@ def test_logs_page_script_reuses_shared_pieces():
     assert 'const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";' in js
     assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js
     assert "window.history.pushState({ workspace: \"logs\" }, \"\", next);" in js
-    assert 'traces/${encodeURIComponent(row.trace_id)}' in js
-    assert "if (dom.navLogsButton) dom.navLogsButton.hidden = !logsEnabled;" in ui
+    assert 'const next = `${route("observability/logs")}?${urlParams().toString()}`;' in js
+    assert 'observability/traces/${encodeURIComponent(row.trace_id)}' in js
+    assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui
     assert "logs: nav?.logs === true" in state
     assert "getLogs," in read("src/static/app_api.js")
 

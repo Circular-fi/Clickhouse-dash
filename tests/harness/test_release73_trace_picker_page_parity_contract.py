@@ -30,7 +30,8 @@ def test_trace_picker_hover_and_close_motion_follow_page_selector():
 
 
 def test_custom_range_exposes_date_and_time_inputs():
-    html = read("src/static/traces.html")
+    page = read("src/static/observability.html")
+    html = page[page.index("<!-- observability:traces -->"):page.index("<!-- /observability:traces -->")]
     js = read("src/static/app_traces.js")
     picker = read("src/static/app_timerange.js")
     # Date and time of day (hh:mm:ss) in From / To, plus a range calendar.

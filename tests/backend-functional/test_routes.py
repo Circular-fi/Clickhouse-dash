@@ -203,6 +203,27 @@ def test_cancel_route_rejects_invalid_capability_without_touching_other_queries(
 
 
 
+def test_observability_page_serves_every_view_and_the_old_pages_are_gone():
+    # Traces, Logs and Metrics are the views of one page.
+    for path in [
+        "/observability",
+        "/observability/traces",
+        "/observability/traces/0123456789abcdef0123456789abcdef",
+        "/observability/logs",
+        "/observability/metrics",
+    ]:
+        response = get(path)
+        assert response.status_code == 200, (path, response.text[:500])
+        assert "text/html" in response.headers.get("Content-Type", ""), (path, response.headers)
+        assert '<body data-page="observability">' in response.text, path
+        for workspace in ("tracesWorkspace", "logsWorkspace", "metricsWorkspace"):
+            assert f'id="{workspace}"' in response.text, (path, workspace)
+    # The former pages answer like any unknown path.
+    for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics", "/metrics/x",
+                 "/static/traces.html", "/static/logs.html", "/static/metrics.html", "/no-such-page"]:
+        assert get(path).status_code == 404, path
+
+
 def test_nested_explorer_routes_serve_the_same_application_shell():
     for path in [
         "/explorer/chdash_ui",

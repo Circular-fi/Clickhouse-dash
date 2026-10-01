@@ -7,7 +7,7 @@ contrib ClickHouse exporter. The exporter writes one table per point kind:
 host selected in the UI and are read through that host's `system_uri`.
 
 This document covers the configuration, the schema-detection endpoint, the
-metrics browser page (`/metrics`) and the API behind it.
+metrics browser (the Metrics view of `/observability`) and the API behind it.
 
 ## Configuration
 
@@ -91,12 +91,14 @@ summaries have none. `features.trace_correlation` is true when some kind has
 exemplar trace and span ids and traces are enabled. Time bounds are
 table-wide (not narrowed by the service allowlist).
 
-## Metrics browser page (`/metrics`)
+## Metrics browser: the Metrics view (`/observability/metrics`)
 
-The page switcher lists **Metrics** when `/api/version` reports
-`features.metrics.enabled` (the last answer is cached in
-`chdash.pageNav.v1`, like Explorer and Traces, so the switcher is settled at
-first paint). The page has:
+The Observability page (`/observability`, see `docs/traces.md`) has a
+**Metrics** tab when `/api/version` reports `features.metrics.enabled` (the
+last answer is cached in `chdash.pageNav.v1`, like Explorer and Traces, so
+the tabs are settled at first paint). Its time range is shared with the
+Traces and Logs views; a service picked there opens its group of the
+catalog. The view has:
 
 - **Catalog** (left): services, each with its metrics and a type badge
   (`gauge`, `sum`, `hist`, `exp hist`, `summary`) and a unit badge; the
@@ -118,7 +120,8 @@ first paint). The page has:
   the value axis when the plotted aggregation has the metric unit (gauges,
   quantiles, averages) and on a strip at the bottom otherwise (rates,
   counts); overlapping diamonds are thinned (largest value kept) and a click
-  opens `/traces/<trace_id>?span=<span_id>`. Series exported less often than
+  opens `/observability/traces/<trace_id>?span=<span_id>` (the Traces view, in
+  place). Series exported less often than
   the bucket are drawn across their regular empty buckets. Summaries show a
   note: their quantiles are per series only.
 
@@ -129,7 +132,7 @@ repeatable `panel=<the same parameters, URL-encoded>`; `active=<index>`.
 
 ## Metrics browser API
 
-Four read-only routes back the `/metrics` page. They exist only when
+Four read-only routes back the Metrics view. They exist only when
 `metrics.enabled` is true (otherwise `404`, like the traces routes), read the
 exporter tables through the host's `system_uri`, and apply
 `traces.service_allowlist` to every query (`service_allowlist_predicate()` in
@@ -322,7 +325,7 @@ ORDER BY e.2 DESC, e.1 LIMIT :per_bucket BY b LIMIT :limit + 1
 ```
 
 Exemplars are sorted by time; `trace_id` / `span_id` open
-`/traces/<trace_id>?span=<span_id>`.
+`/observability/traces/<trace_id>?span=<span_id>`.
 
 ### Measured timings
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PAGES = ["index.html", "query.html", "explorer.html", "traces.html", "logs.html", "metrics.html"]
+PAGES = ["index.html", "query.html", "explorer.html", "observability.html"]
 
 
 def read(rel):
@@ -21,6 +21,11 @@ def test_page_switcher_ships_visible_in_every_shell():
     assert "function applyPageNavigation(nav)" in ui
     assert 'dom.root?.classList.toggle("chdash-page-select-hidden", hidden);' in ui
     assert "storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });" in ui
+    # The Observability shell picks its view, and the tabs of the enabled views, from the same cache.
+    html = read("src/static/observability.html")
+    assert 'var enabled = views.filter(function (name) { return !pageNav || pageNav[name] === true; });' in html
+    assert "document.documentElement.dataset.obsView = view;" in html
+    assert 'document.documentElement.dataset.obsEnabled = enabled.join(" ");' in html
     assert 'const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";' in state
     assert "html.chdash-page-select-hidden .pageSelect {" in css
 
@@ -33,7 +38,7 @@ def test_stylesheet_is_parser_inserted_so_it_blocks_first_paint():
 
 
 def test_trace_pickers_ship_in_their_final_markup():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     js = read("src/static/app_traces.js")
     for select_id in ["tracesRangeUnit", "tracesStatus", "tracesService", "tracesOperation", "tracesLimit", "tracesSort"]:
         start = html.index(f'<select id="{select_id}"')

@@ -6,7 +6,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_strict_trace_ranges_and_selection_only_prefill_pickers():
-    html = read('src/static/traces.html')
+    html = read('src/static/observability.html')
     js = read('src/static/app_traces.js')
     picker = read('src/static/app_timerange.js')
     # Quick ranges (Grafana's list) are offered only when their width fits

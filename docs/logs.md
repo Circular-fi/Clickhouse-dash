@@ -5,7 +5,7 @@ contrib ClickHouse exporter (`otel_logs`). Like traces, logs follow the host
 selected in the UI and are read through that host's `system_uri`.
 
 This document covers the configuration, the schema-detection endpoint and
-the Logs explorer (the `/logs` page and its `/api/logs/*` routes).
+the Logs explorer (the Logs view of `/observability` and its `/api/logs/*` routes).
 
 ## Configuration
 
@@ -225,11 +225,13 @@ unique (the same span stored twice at different times): a log then belongs
 to the span whose interval holds it, else to the nearest one. Logs without a
 span of the trace are listed in the panel only.
 
-## Logs explorer: the `/logs` page
+## Logs explorer: the Logs view (`/observability/logs`)
 
-When `logs.enabled = true` the page switcher gains a **Logs** entry (hidden
-otherwise; the availability is cached in `chdash.pageNav.v1` for the first
-paint like the other pages). The page is modelled on HyperDX's search page:
+When `logs.enabled = true` the Observability page (`/observability`, see
+`docs/traces.md`) has a **Logs** tab (hidden otherwise; the availability is
+cached in `chdash.pageNav.v1` for the first paint like the page switcher). Its
+time range and service are shared with the Traces and Metrics views. The view
+is modelled on HyperDX's search page:
 
 - **Search bar**: the Traces time range picker (quick ranges, absolute
   range, calendar), services (multi-select, with record counts for the
@@ -245,10 +247,11 @@ paint like the other pages). The page is modelled on HyperDX's search page:
 - **Results**: a virtualised newest-first table (time, level, service, body;
   host, TraceId, SpanId, scope and any attribute can be added from
   **Columns**). Scrolling loads older pages through keyset cursors.
-  Service colours are the Traces page colours (same session assignment).
+  Service colours are the Traces view colours (same session assignment).
 - **Record panel**: click a row (or use the arrow keys) for every field and
   attribute. Each value has *filter*, *exclude*, *search only this* and *copy*
-  actions; **Open trace** goes to `/traces/<TraceId>?span=<SpanId>`.
+  actions; **Open trace** opens `/observability/traces/<TraceId>?span=<SpanId>`
+  (the Traces view, in place).
   **Surrounding context** lists the records around it: anything, same
   service, same host (`ResourceAttributes['host.name']`) or same trace,
   within ±1 min to ±1 h.

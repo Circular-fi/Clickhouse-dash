@@ -66,10 +66,10 @@ def test_single_span_lookup_is_bounded_by_its_row_key():
 
 
 def test_spans_mode_page_wiring():
-    html = read("src/static/traces.html")
+    html = read("src/static/observability.html")
     assert 'data-results-mode="traces"' in html and 'data-results-mode="spans"' in html
     assert 'id="traceSpanTools"' in html and 'id="traceSpanKind"' in html and 'id="traceSpanColumnsButton"' in html
-    bootstrap = read("src/static/app_traces_bootstrap.js")
+    bootstrap = read("src/static/app_observability.js")
     assert bootstrap.index('"app_trace_search.js"') < bootstrap.index('"app_trace_spans.js"') < bootstrap.index('"app_trace_logs.js"')
     search = read("src/static/app_trace_search.js")
     params = search[search.index("const SEARCH_PARAMS"):search.index("const PIN_STORE_KEY")]

@@ -2,6 +2,26 @@
 
 ChDash can read OpenTelemetry traces stored by the OpenTelemetry Collector contrib ClickHouse exporter. The viewer follows the ClickHouse host selected in the UI and uses that host's `system_uri`.
 
+## The Observability page
+
+Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three views of one page, `/observability`, listed as **Observability** in the page switcher of every page. Its header holds a tab per enabled view; the Traces view keeps its own *Search* / *Services* / *Service map* tabs under it.
+
+| URL | View |
+| --- | --- |
+| `/observability` | the first enabled view (Traces, Logs, Metrics), its query parameters kept |
+| `/observability/traces?…` | trace search; `tab=services` / `tab=map` for the other Traces tabs |
+| `/observability/traces/<trace-id>?span=…&view=…` | one trace, with the search context it was opened from |
+| `/observability/logs?…` | the Logs explorer |
+| `/observability/metrics?…` | the metrics browser |
+
+Each view keeps its own URL parameters (listed in its section); switching views is a history entry, so Back / Forward return to the previous view as it was, and a deep link opens the view and sub-tab it names. A view's filters stay with it for the session: switching away and back restores them (its last URL) and keeps its results.
+
+The **time range** and the **selected service** follow the user across views: when a view is left, its range and service (the Traces service picker, the Logs service when exactly one is picked, the service of the active Metrics panel) become the shared context, and the next view adopts whatever changed since it last showed them (Metrics opens that service's group of its catalog). A link from one view to another (*Open trace* in a log record, a metrics exemplar) switches view in place and carries the shared context.
+
+`traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on; the page exists while at least one is on (otherwise `/observability` is `404`, like any unknown path), the tabs of the others are hidden and their URLs fall back to the first enabled view. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
+
+Only the shown view is loaded: the page starts with the modules and stylesheet of its first view (`style.observability.<view>.css`), and a view's modules (`VIEW_MODULES` in `app_observability.js`) load the first time its tab is shown, once. Showing a second view swaps in `style.observability.css` (every view's rules, in `style.css` order) once it has loaded. `tools/build_page_css.py` writes these sheets.
+
 ## Configuration
 
 ```hcl
@@ -110,11 +130,11 @@ In the UI the Tag / Value inputs (with an `=` / `!=` / `exists` / `missing` oper
 
 ### Search state in the URL
 
-The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `min_duration_ms` / `max_duration_ms` (the trace duration chip, see the heatmap below), `limit`, `sort`, `results=table` and `duration_view=heatmap`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
+The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `min_duration_ms` / `max_duration_ms` (the trace duration chip, see the heatmap below), `limit`, `sort`, `results=table` and `duration_view=heatmap`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/observability/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
 
 ## Service map
 
-The Traces page has tabs above the search bar: *Search* (the result list) and *Service map* (`?tab=map` in the URL, next to the search parameters; other modules add tabs through `ChDash.traceTabs.register`). Every tab shares the time range, the filters and the chips; the Search button runs the selected tab's search.
+The Traces view has tabs above the search bar: *Search* (the result list) and *Service map* (`?tab=map` in the URL, next to the search parameters; other modules add tabs through `ChDash.traceTabs.register`). Every tab shares the time range, the filters and the chips; the Search button runs the selected tab's search.
 
 `GET /api/traces/service_map` (same parameters as search, plus an optional `sample_factor`) returns the services of the traces matching the filters (a trace is on the map when one of its visible spans matches, as in the result list) and the calls between them:
 
@@ -267,7 +287,7 @@ On the densest day the sampled span counts were within 1.5 % of the exact ones (
 
 The search page's *Traces | Spans* toggle (`mode=spans` in the URL) lists matching **spans** instead of traces (after HyperDX's row search). The range, filters, chips and facets are the same, but they apply per span: every listed span matches all of them. Spans mode adds a span kind picker (`kind`) and a span duration range (`span_min_duration_ms` / `span_max_duration_ms` in the URL; `min_duration_ms` / `max_duration_ms` there stay trace durations).
 
-The table is virtualised (only the rows in view are rendered) and loads the next page by cursor when its end scrolls into view. Columns: time (local, exact UTC nanoseconds on hover), service (with its colour), operation, duration with a bar relative to the longest listed span, status, kind, and attribute columns chosen in the *Columns* picker (`span:key`, `resource:key` or `key` for either map; kept in the browser). Service, operation, status and attribute values open the click-to-filter menu. A row (or Enter) opens the span side panel: identity, status message, exceptions, Tags / Process attributes with filter actions, events and links, and *Open in trace* (`/traces/<id>?span=<span id>` with the search context, so Back returns to the same rows, selection and panel). Up / Down move through the rows (also with the panel open), Escape closes the panel.
+The table is virtualised (only the rows in view are rendered) and loads the next page by cursor when its end scrolls into view. Columns: time (local, exact UTC nanoseconds on hover), service (with its colour), operation, duration with a bar relative to the longest listed span, status, kind, and attribute columns chosen in the *Columns* picker (`span:key`, `resource:key` or `key` for either map; kept in the browser). Service, operation, status and attribute values open the click-to-filter menu. A row (or Enter) opens the span side panel: identity, status message, exceptions, Tags / Process attributes with filter actions, events and links, and *Open in trace* (`/observability/traces/<id>?span=<span id>` with the search context, so Back returns to the same rows, selection and panel). Up / Down move through the rows (also with the panel open), Escape closes the panel.
 
 `GET /api/traces/spans` takes the search filters (`start_ms` / `end_ms` or `lookback_minutes`, `service`, `operation`, `status`, the `*_not` and `tag*` parameters), plus `kind` (repeatable), `min_duration_ms` / `max_duration_ms` (the span's own `Duration`), `limit` (default 100, at most 500), `columns=span:http.route,resource:host.name` (at most 20) and `cursor`. Rows are newest first: `timestamp`, `start_ns` (exact nanoseconds as text), `trace_id`, `span_id`, `parent_span_id` (empty with a restricted service allowlist, as in trace detail), `service_name`, `span_name`, `span_kind`, `duration_ns`, `status_code`, `status_message` and `attributes` (one value or `null` per requested column).
 
@@ -309,7 +329,7 @@ The detail page derives the span tree, trace bounds, per-service counts, start-o
 A trace can be opened directly at:
 
 ```text
-/traces/<trace-id>
+/observability/traces/<trace-id>
 ```
 
 Direct TraceId lookup is not limited by `max_lookback_minutes`. ChDash requires `trace_index_table` to resolve the timestamp window (one index pass yields both bounds) and then reads `otel_traces` only inside that bounded window. There is no all-history TraceId fallback. If the auxiliary table is unavailable or its lookup fails, the API returns an error instead of scanning `otel_traces`.

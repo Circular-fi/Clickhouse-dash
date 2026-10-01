@@ -152,30 +152,15 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   };
 
-  const auto serve_logs_shell = [&](const auto& req, auto& res) {
+  // Traces, Logs and Metrics are the views of one page (observability.html):
+  // /observability/traces[/<trace id>], /observability/logs,
+  // /observability/metrics, and /observability for the first enabled view.
+  const auto serve_observability_shell = [&](const auto& req, auto& res) {
     httplib::Request shell_req = req;
-    shell_req.path = "/logs.html";
+    shell_req.path = "/observability.html";
     if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
       res.status = 404;
-      res.set_content("logs.html not found", "text/plain");
-    }
-  };
-
-  const auto serve_traces_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/traces.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
-      res.status = 404;
-      res.set_content("traces.html not found", "text/plain");
-    }
-  };
-
-  const auto serve_metrics_shell = [&](const auto& req, auto& res) {
-    httplib::Request shell_req = req;
-    shell_req.path = "/metrics.html";
-    if (!try_serve_embedded(shell_req, res) && !try_serve_fs(shell_req, res)) {
-      res.status = 404;
-      res.set_content("metrics.html not found", "text/plain");
+      res.set_content("observability.html not found", "text/plain");
     }
   };
 
@@ -185,16 +170,9 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/explorer", serve_explorer_shell);
     http_.Get(R"(/explorer/.*)", serve_explorer_shell);
   }
-  if (cfg_.traces.enabled) {
-    http_.Get("/traces", serve_traces_shell);
-    http_.Get(R"(/traces/.*)", serve_traces_shell);
-  }
-  if (cfg_.logs.enabled) {
-    http_.Get("/logs", serve_logs_shell);
-  }
-  if (cfg_.metrics.enabled) {
-    http_.Get("/metrics", serve_metrics_shell);
-    http_.Get(R"(/metrics/.*)", serve_metrics_shell);
+  if (cfg_.traces.enabled || cfg_.logs.enabled || cfg_.metrics.enabled) {
+    http_.Get("/observability", serve_observability_shell);
+    http_.Get(R"(/observability/.*)", serve_observability_shell);
   }
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {

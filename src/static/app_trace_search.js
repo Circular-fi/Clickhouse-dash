@@ -316,13 +316,15 @@
 
   function searchUrl() {
     const query = currentParams().toString();
-    return `${ctx.route("traces")}${query ? `?${query}` : ""}`;
+    return `${ctx.route("observability/traces")}${query ? `?${query}` : ""}`;
   }
 
   // mode: "push" (a new search), "replace" (same entry, e.g. the page-load
   // search or a view toggle) or "none" (restored from history).
   function writeUrl(mode = "push") {
     if (mode === "none" || !ctx) return;
+    // Another Observability view owns the location (app_observability.js).
+    if (ns.observability && !ns.observability.isActive("traces")) return;
     const next = searchUrl();
     const current = `${window.location.pathname}${window.location.search}`;
     if (next === current) return;

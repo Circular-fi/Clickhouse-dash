@@ -10,7 +10,7 @@
   // --trace-span-color-1..18 custom properties of style.css.
   const SPAN_COLOR_COUNT = 18;
   const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";
-  const TRACES_PAGE_TITLE = document.title;
+  const TRACES_PAGE_TITLE = "ClickHouse Dash \u00b7 Traces";
 
   const model = {
     meta: null,
@@ -52,6 +52,11 @@
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
+  // The Traces view of the Observability page (app_observability.js): its
+  // URLs are /observability/traces[/<traceId>], and it writes the location
+  // only while it is the shown view.
+  const SEARCH_ROUTE = "observability/traces";
+  const ownsUrl = () => !ns.observability || ns.observability.isActive("traces");
 
   // Up to three significant digits, trailing zeros dropped: 182, 18.2, 1.82, 12.
   function significant(value) {
@@ -368,7 +373,7 @@
 
   function traceIdFromPath() {
     const pathname = decodeURIComponent(String(window.location.pathname || ""));
-    const match = pathname.match(/\/traces\/([^/]+)\/?$/);
+    const match = pathname.match(/\/observability\/traces\/([^/]+)\/?$/);
     return match ? match[1] : "";
   }
 
@@ -595,7 +600,8 @@
 
   function initTracePickers() {
     initTimeRangePicker();
-    document.querySelectorAll(".traceSearchBar select, .traceResultsSort select").forEach((select) => {
+    // The Logs and Metrics views share the search bar look: only this view's selects.
+    document.querySelectorAll("#tracesWorkspace .traceSearchBar select, #tracesWorkspace .traceResultsSort select").forEach((select) => {
       if (select !== dom.tracesRangeUnit || !timePicker) enhanceTraceSelect(select);
     });
     document.addEventListener("click", (event) => {
@@ -2549,7 +2555,7 @@
   // Jaeger's keyboard-mappings.ts: [ ] expand / collapse all, o / p one
   // level, a d or arrows pan, up / down zoom, shift for large steps.
   function onTraceKeydown(event) {
-    if (!model.activeTrace || dom.traceDetail?.hidden) return;
+    if (!model.activeTrace || dom.traceDetail?.hidden || !ownsUrl()) return;
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="menu"], [role="listbox"], [role="tab"], [data-trace-waterfall-resizer]')) return;
@@ -3090,7 +3096,7 @@
   function spanTraceUrl(traceId, spanId = "") {
     const params = new URLSearchParams(ns.traceSearch?.contextQuery?.() || "");
     const query = `${spanId ? `span=${encodeURIComponent(spanId)}` : ""}${spanId && params.toString() ? "&" : ""}${params.toString()}`;
-    return `${route(`traces/${encodeURIComponent(traceId)}`)}${query ? `?${query}` : ""}`;
+    return `${route(`${SEARCH_ROUTE}/${encodeURIComponent(traceId)}`)}${query ? `?${query}` : ""}`;
   }
 
   function referenceItemHtml(kind, ref, cache) {
@@ -3264,7 +3270,7 @@
     ns.traceViews?.showTimeline?.();
     renderWaterfall();
     ns.traceViews?.markFocusedSpan?.();
-    if (push || replace) {
+    if ((push || replace) && ownsUrl()) {
       const url = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
       if (push) window.history.pushState({ traceId: model.activeTrace?.trace_id, spanId: id }, "", url);
       else window.history.replaceState(window.history.state, "", url);
@@ -3519,7 +3525,7 @@
       return;
     }
     if (searchState) searchState.writeUrl(url);
-    else if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    else if (ownsUrl() && traceIdFromPath()) window.history.pushState({ workspace: "traces" }, "", route(SEARCH_ROUTE));
     // Another tab (app_trace_tabs.js, e.g. the service map) runs its own
     // search; the result list searches again when its tab comes back.
     const tabSearch = ns.traceTabs?.activeSearch?.();
@@ -3600,7 +3606,7 @@
       model.disabledServices.clear();
       model.collapsed.clear();
       registerServiceColors((trace?.spans || []).map((span) => span.service_name));
-      if (push) window.history.pushState({ traceId: id }, "", spanTraceUrl(id, pendingSpanId));
+      if (push && ownsUrl()) window.history.pushState({ traceId: id }, "", spanTraceUrl(id, pendingSpanId));
       renderTrace();
       ns.traceViews?.applyLocation?.();
       // Logs load after the trace is on screen, never before.
@@ -3627,9 +3633,9 @@
     model.disabledServices.clear();
     model.collapsed.clear();
     ns.traceSearch?.closeMenu?.();
-    if (push) {
+    if (push && ownsUrl()) {
       if (ns.traceSearch) ns.traceSearch.writeUrl("push");
-      else window.history.pushState({ workspace: "traces" }, "", route("traces"));
+      else window.history.pushState({ workspace: "traces" }, "", route(SEARCH_ROUTE));
     }
     ns.traceInsights?.onTraceChanged(null);
     setView(false);
@@ -3672,8 +3678,52 @@
     } catch (_) {}
   }
 
+  // Back / Forward, or the Observability page showing this view again: the
+  // URL is the state. Same trace, other ?span= / ?view=: no reload. Every
+  // entry carries its search state: restore it first.
+  function onLocation() {
+    const id = traceIdFromPath();
+    ns.traceSearch?.applyLocation?.();
+    if (id && id === String(model.activeTrace?.trace_id || "")) ns.traceViews?.applyLocation?.();
+    else if (id) loadTrace(id, { push: false });
+    else backToSearch({ push: false });
+  }
+
+  // A host change while another view is shown reloads when this one comes back.
+  let reloadWhenShown = false;
+
+  function onShow() {
+    if (model.activeTrace && !dom.traceDetail?.hidden) renderTraceHeader();
+    if (reloadWhenShown) {
+      reloadWhenShown = false;
+      reloadForHost();
+    }
+  }
+
+  function onHide() {
+    ns.traceSearch?.closeMenu?.();
+    closeTracePickers(null, { immediate: true });
+  }
+
+  // Shared with the other Observability views: the time range and the service.
+  function getContext() {
+    return { range: { ...model.timeRange }, service: String(dom.tracesService?.value || "") };
+  }
+
+  function applyContext(params, context) {
+    if (context.range) {
+      params.set("from", context.range.from);
+      params.set("to", context.range.to);
+    }
+    if (context.service != null && context.service !== (params.get("service") || "")) {
+      // An operation belongs to the service it was picked for.
+      params.delete("operation");
+      if (context.service) params.set("service", context.service);
+      else params.delete("service");
+    }
+  }
+
   function init() {
-    ui?.setPageSelectorValue?.("traces");
     model.resultsView = readStored(RESULTS_VIEW_KEY, ["list", "table"], "list");
     model.startDisplay = readStored(START_DISPLAY_KEY, ["absolute", "relative"], "absolute");
     initTracePickers();
@@ -3694,9 +3744,6 @@
       spanEventList, parseStructuredValue, attributeEntries, renderAttributeTable, sectionOpen, setSectionOpen, currentHost,
       exactStartNs: (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0))),
     });
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
-    dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
     ns.traceSpans?.install?.({
       model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl, serviceColor, registerServiceColors,
       formatDuration, spanKindLabel, absoluteTimeText, renderJaegerAttributes, renderAttributeTable, attributeEntries,
@@ -3760,18 +3807,12 @@
     };
     new MutationObserver(redrawOverview).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", redrawOverview);
-    window.addEventListener("popstate", () => {
-      const id = traceIdFromPath();
-      // Same trace, other ?span= / ?view=: no reload.
-      // Every entry carries its search state: restore it first.
-      ns.traceSearch?.applyLocation?.();
-      if (id && id === String(model.activeTrace?.trace_id || "")) ns.traceViews?.applyLocation?.();
-      else if (id) loadTrace(id, { push: false });
-      else backToSearch({ push: false });
+    window.addEventListener("chdash:host-changed", () => {
+      if (ownsUrl()) reloadForHost();
+      else reloadWhenShown = true;
     });
-    window.addEventListener("chdash:host-changed", () => { reloadForHost(); });
     window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.traces?.enabled === false) return;
+      if (event?.detail?.traces?.enabled === false || !ownsUrl()) return;
       if (!model.meta && currentHost()) reloadForHost();
     });
     const id = traceIdFromPath();
@@ -3779,5 +3820,5 @@
     if (currentHost()) reloadForHost();
   }
 
-  ns.traces = { init, search, loadTrace };
+  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace };
 })();

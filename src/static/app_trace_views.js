@@ -55,6 +55,7 @@
   }
 
   function updateParams(mutate, { push = false } = {}) {
+    if (ns.observability && !ns.observability.isActive("traces")) return;
     const url = new URL(window.location.href);
     mutate(url.searchParams);
     const next = `${url.pathname}${url.search}${url.hash}`;

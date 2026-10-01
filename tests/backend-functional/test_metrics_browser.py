@@ -693,12 +693,14 @@ def test_unknown_host_is_404(meta):
     assert response.json()["error_code"] == "unknown_host"
 
 
-def test_metrics_page_route(meta):
-    if not (REPO / "src" / "static" / "metrics.html").exists():
-        pytest.skip("metrics.html is not in this tree")
-    response = requests.get(f"{BASE_URL}/metrics", timeout=30)
+def test_metrics_view_route(meta):
+    if not (REPO / "src" / "static" / "observability.html").exists():
+        pytest.skip("observability.html is not in this tree")
+    response = requests.get(f"{BASE_URL}/observability/metrics", timeout=30)
     assert response.status_code == 200
     assert "text/html" in response.headers.get("Content-Type", "")
+    assert 'id="metricsWorkspace"' in response.text
+    assert requests.get(f"{BASE_URL}/metrics", timeout=30).status_code == 404
 
 
 def test_timing_budgets_on_the_whole_window(meta):

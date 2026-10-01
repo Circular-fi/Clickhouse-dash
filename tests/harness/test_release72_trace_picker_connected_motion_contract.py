@@ -4,7 +4,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_trace_filter_cleanup_and_connected_tag_pair():
-    html = (ROOT / "src/static/traces.html").read_text()
+    html = (ROOT / "src/static/observability.html").read_text()
     css = (ROOT / "src/static/style.css").read_text()
 
     assert 'traceInfoButton--inline' not in html
