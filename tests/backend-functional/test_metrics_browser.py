@@ -27,6 +27,11 @@ MINUTE = 60_000
 LOOKBACK_MS = 15 * MINUTE
 HIST = "http.server.request.duration"
 CALLS = "traces.span.metrics.calls"
+# The span-derived metrics cover the 24 hours ending at the newest span; the
+# rich dataset (2026-09-12, tests/README.md) adds an older day of its own, so
+# per-kind windows are taken from the newest day only (plus a minute: max_ms
+# ends its second).
+NEWEST_DAY_MS = 24 * 3_600_000 + 60_000
 
 
 def api(path: str, **params) -> requests.Response:
@@ -64,7 +69,7 @@ def kind_bounds(meta: dict, kind: str) -> tuple[int, int]:
     bounds = (meta["kinds"].get(kind) or {}).get("time_bounds")
     if not bounds:
         pytest.skip(f"no {kind} points in the fixture")
-    return bounds["min_ms"], bounds["max_ms"]
+    return max(bounds["min_ms"], bounds["max_ms"] - NEWEST_DAY_MS), bounds["max_ms"]
 
 
 def table(meta: dict, kind: str) -> str:
@@ -139,6 +144,7 @@ def service_with_temporality(meta: dict, kind: str, metric: str, temporality: in
     lo, hi = kind_bounds(meta, kind)
     rows = ch_rows(
         f"SELECT ServiceName AS s FROM {table(meta, kind)} WHERE MetricName = {q(metric)} "
+        f"AND TimeUnix >= fromUnixTimestamp64Milli({lo}) AND TimeUnix <= fromUnixTimestamp64Milli({hi}) "
         f"GROUP BY s HAVING min(AggregationTemporality) = {temporality} AND max(AggregationTemporality) = {temporality} "
         f"ORDER BY s LIMIT 1")
     if not rows:

@@ -123,6 +123,17 @@ services:
       OTEL_FIXTURE_LOGS_DENSE_MINUTES: "${OTEL_FIXTURE_LOGS_DENSE_MINUTES:-60}"
       OTEL_FIXTURE_LOGS_TRACE_SAMPLE: "${OTEL_FIXTURE_LOGS_TRACE_SAMPLE:-16}"
       OTEL_FIXTURE_LOGS_SPAN_SAMPLE: "${OTEL_FIXTURE_LOGS_SPAN_SAMPLE:-4}"
+      # Rich dataset on 2026-09-12 UTC (tests/README.md, "Rich OTel dataset"):
+      # nested traces, errors, exceptions, links, semantic-convention
+      # attributes, correlated logs and metrics. Idempotent per part (table
+      # comment marker); OTEL_FIXTURE_RICH_FORCE=1 deletes and rebuilds that
+      # day only.
+      OTEL_FIXTURE_RICH: "${OTEL_FIXTURE_RICH:-1}"
+      OTEL_FIXTURE_RICH_TRACES: "${OTEL_FIXTURE_RICH_TRACES:-40000}"
+      OTEL_FIXTURE_RICH_SEED: "${OTEL_FIXTURE_RICH_SEED:-20260912}"
+      OTEL_FIXTURE_RICH_LOGS: "${OTEL_FIXTURE_RICH_LOGS:-1}"
+      OTEL_FIXTURE_RICH_METRICS: "${OTEL_FIXTURE_RICH_METRICS:-1}"
+      OTEL_FIXTURE_RICH_FORCE: "${OTEL_FIXTURE_RICH_FORCE:-0}"
       OTEL_FIXTURE_KEEPALIVE: "1"
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/fixture-ready"]

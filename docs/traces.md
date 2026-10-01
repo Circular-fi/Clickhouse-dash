@@ -296,6 +296,10 @@ The generated services include `test_ingest`, `test_worker`, and `test_enrichmen
 service_allowlist = ["test_*"]
 ```
 
+### Rich fixture day (2026-09-12)
+
+The bulk test fixture is flat (one level of spans, two attributes, no links or events). Next to it, `tests/otel-fixture/rich_fixture.py` (`OTEL_FIXTURE_RICH=1`, on in the test compose file) loads a deterministic e-commerce workload on **2026-09-12 UTC** only, a day the bulk fixture never uses: ~40,700 traces / ~545 k spans through `api-gateway`, `frontend`, `checkout`, `payments`, `inventory`, `auth`, `search`, `recommendation` and `notification`, with HTTP client/server pairs, gRPC, PostgreSQL / Redis / ClickHouse and Kafka spans (semantic-convention attributes), producer → consumer links across traces, errors deep in branches with `exception` events in Java, Python, Go, JavaScript and .NET formats, `cache.miss` / `retry` events, orphan spans, batch traces of 2 k to 12 k spans, `service.version` releases at known times, hosts and pods, a slow cohort (14:00–16:00, `feature.flag=new_pricing`) for the heatmap comparison, and correlated logs and metrics (exemplars pointing at these spans). Its index rows follow the exporter's view: one row per 5 s export batch, `End` = the newest span *start* of the batch. Shape, knobs and idempotency: `tests/README.md` ("Rich OTel dataset"); `tests/backend-functional/test_rich_fixture.py` checks trace detail, search filters and orphans, linked-from, context presets, the service map, facets, the heatmap and deltas, trace logs and metrics exemplars on it.
+
 ### Service/operation prefill cache
 
 `/api/traces/prefill` scans every span of the window (existence only, `LIMIT 1 BY ServiceName, SpanName`). The browser requests it on every time-range change and page load, so the server answers from a 60 s cache keyed by the minute-aligned superset of the requested range: requests made within the same minute share one scan, and the picker lists may include pairs seen up to one minute outside the exact range.

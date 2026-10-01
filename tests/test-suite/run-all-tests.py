@@ -224,6 +224,7 @@ def main() -> int:
             str(ROOT / 'backend-functional' / 'test_logs_explorer.py'),
             str(ROOT / 'backend-functional' / 'test_metrics_browser.py'),
             str(ROOT / 'backend-functional' / 'test_trace_heatmap.py'),
+            str(ROOT / 'backend-functional' / 'test_rich_fixture.py'),
             '/repo/tests/harness',
             '--junitxml', str(backend_dir / 'junit.xml'),
         ],

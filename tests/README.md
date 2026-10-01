@@ -31,6 +31,43 @@ The fixture size can be overridden through `OTEL_FIXTURE_TRACES`, `OTEL_FIXTURE_
 
 **Logs and metrics.** `tests/clickhouse-init/05-otel-logs-metrics.sql` holds the exporter DDL for `otel.otel_logs` and the five `otel.otel_metrics_*` tables. Because init scripts never re-run on the persistent `clickhouse_data` volume, the fixture also applies this file itself (every statement is `CREATE ... IF NOT EXISTS`). With `OTEL_FIXTURE_LOGS=1` / `OTEL_FIXTURE_METRICS=1` (both on in compose) it then derives logs and metrics from the stored spans with server-side `INSERT ... SELECT` over the last `OTEL_FIXTURE_SIGNALS_WINDOW_MINUTES` (1440) of the trace fixture, reading `otel_traces` without ever modifying it. Logs cover every trace of the last `OTEL_FIXTURE_LOGS_DENSE_MINUTES` (60) minutes and 1 trace in `OTEL_FIXTURE_LOGS_TRACE_SAMPLE` (16) of the rest (`OTEL_FIXTURE_LOGS_SPAN_SAMPLE`, default 4, thins the spans); on the 2-billion-span volume that is ~17 M log records in ~25 s and ~880 k metric points in ~16 s. A complete load is marked in the table comment and kept on later runs; an interrupted one is rebuilt; `OTEL_FIXTURE_SIGNALS_FORCE=1` rebuilds logs/metrics only, and `OTEL_FIXTURE_FORCE=1` (which rebuilds traces) rebuilds them too. Details: `docs/logs.md`, `docs/metrics.md`.
 
+### Rich OTel dataset
+
+The bulk fixture is large but flat (depth 1, two attributes, no links). `tests/otel-fixture/rich_fixture.py` (`OTEL_FIXTURE_RICH=1`, on in compose) adds a small, deterministic e-commerce workload so features can be tested on real rows instead of `page.route` mocks. Everything lies on **2026-09-12 UTC** (traffic 00:05–23:01), a day the bulk fixture never uses, so tests that derive their window from the newest data or from 2026-09-13..20 are unaffected.
+
+| Part | Volume (defaults) | Where |
+| --- | --- | --- |
+| traces | 40,693 traces, ~545 k spans, ~42 k index rows | `otel.otel_traces`, `otel.otel_traces_trace_id_ts` |
+| logs | ~217 k records (~6 k without trace context) | `otel.otel_logs` |
+| metrics | ~21 k histogram, ~100 k counter, ~29 k gauge points | `otel_metrics_{histogram,sum,gauge}` of `OTEL_FIXTURE_RICH_METRICS_DATABASE` (`otel`) |
+
+The whole load takes about 10 s (4 generator processes, JSONEachRow inserts; metrics are `INSERT ... SELECT` over that day's spans).
+
+Shape:
+
+- **Services** `api-gateway` (envoy) → `frontend` (Node.js) → `checkout` (Java), `payments` (Go), `inventory` (Python), `auth` (Go), `search` (Python), `recommendation` (Python), `notification` (.NET). Flows: `GET /healthz` (one span), `GET /api/v1/home`, `GET /api/v1/search`, `GET /api/v1/products/{id}`, `POST /api/v1/cart/items`, `POST /api/v1/login`, `POST /api/v1/checkout` (depth 9: gateway → frontend → checkout → `CheckoutService.placeOrder` → payments → `fees.compute` / PSP call, plus `publish orders` → notification `process orders`).
+- **Protocols** HTTP client/server pairs (`http.request.method`, `http.route`, `url.full`, `http.response.status_code` incl. 401/402/409/500/502/504), gRPC (`rpc.system=grpc`, `rpc.service`, `rpc.method`, `rpc.grpc.status_code`), PostgreSQL / Redis / ClickHouse client spans (`db.system`, `db.query.text` or `db.statement`, `db.name`, `db.operation.name`), Kafka (`messaging.system=kafka`, `messaging.destination.name=orders`).
+- **Links** every 2 minutes an `inventory` `receive orders` batch trace links to the `publish orders` span of each checkout of the previous 2 minutes, and each per-message `process orders` child links to its producer (`link.kind=follows_from`).
+- **Errors** deep in branches with `exception` events (`exception.type`, `exception.message`, `exception.stacktrace`, `exception.escaped`): `java.lang.NullPointerException` and a Spring `HttpServerErrorException$GatewayTimeout` (checkout), Go `*url.Error` deadline (payments → PSP, 5 s), Python `KeyError`, `redis.exceptions.TimeoutError` and a ClickHouse `DatabaseError` (inventory, search), JavaScript `TypeError` and gRPC `Error` (frontend), .NET `System.Net.Mail.SmtpException` (notification, also as `exception.*` span attributes; the request itself succeeds). Other events: `cache.miss`, `retry`.
+- **Incomplete traces** ~1.5 % of the requests lost their frontend server span and ~0.5 % their root span (dangling `ParentSpanId`).
+- **Large traces** `search` `catalog.reindex` jobs at 03:00, 06:30, 09:15, 18:00 and 21:00 with ~2 k, 4 k, 8 k, 10 k and 12 k spans (10–40 s, several index rows each); the last one exceeds `max_spans_per_trace` (10,000).
+- **Resources** `service.version` switches (release annotations): api-gateway 1.32.0 at 04:00, auth 5.2.1 at 06:00, frontend 3.9.0 at 08:00, checkout 1.15.0 at 10:00, recommendation 0.22.0 at 11:00, inventory 0.10.0 at 12:00, payments 2.4.0 at 14:00 and 2.4.1 at 16:00, notification 2.8.0 at 17:00, search 4.1.0 at 19:00; one ReplicaSet of 2–3 pods per version (`k8s.pod.name`, `k8s.namespace.name`) spread over six nodes (`host.name` = `k8s.node.name`), `deployment.environment.name=production`, `telemetry.sdk.*`, `process.runtime.*`.
+- **Slow cohort** from 14:00 to 16:00 checkouts with `feature.flag=new_pricing` (half of them; the others carry `control`) spend 2–7 s in payments' `fees.compute`. From 13:30 to 16:30 no other trace takes 1.5 s or more, so a heatmap box over that band ranks `feature.flag` first.
+- **Logs** per span: request received / completed, gateway access logs, cache misses, retries, order steps, an `ERROR` record with the `exception.*` attributes of every exception event; trace-less pod start/stop records at each release and connection-pool stats every 5 minutes per pod.
+- **Metrics** `http.server.request.duration` (delta histogram per minute and HTTP server span name, one exemplar = the slowest span of the minute), `traces.span.metrics.calls` (cumulative counter per minute, reset at each release of the service), `process.cpu.utilization` (gauge per pod with `host.name` / `k8s.pod.name`; payments runs hot during the incident).
+
+TraceIds are `blake2b(seed:trace:n)`, SpanIds come from a per-trace `random.Random(f"{seed}:trace:{n}")`, so the same seed and trace count always produce the same rows. Knobs: `OTEL_FIXTURE_RICH_TRACES` (40000 request traces), `OTEL_FIXTURE_RICH_SEED` (20260912), `OTEL_FIXTURE_RICH_LOGS` / `OTEL_FIXTURE_RICH_METRICS` (1), `OTEL_FIXTURE_RICH_METRICS_DATABASE` (`otel`), `OTEL_FIXTURE_RICH_PROCESSES` (4), `OTEL_FIXTURE_RICH_CHUNK_TRACES` (1500).
+
+Idempotency: each part (traces with their index rows, logs, metrics) is complete when its table comment carries `chdash-rich-fixture=v2/seed-<seed>/traces-<n>` (appended to the logs/metrics completion marker, never replacing it) and the 2026-09-12 partition holds rows. Complete parts are kept; empty parts are generated; a part holding rows without the marker (an interrupted load) or with another seed is left untouched with a message. `OTEL_FIXTURE_RICH_FORCE=1` rebuilds: it drops the 2026-09-12 partition of the rich tables and deletes the index rows whose `Start` lies in that day, and refuses when that day holds rows of any other service. The bulk fixture leaves the rich day out of its own counts, and `OTEL_FIXTURE_FORCE=1` / `OTEL_FIXTURE_SIGNALS_FORCE=1` (which truncate) are followed by a rich reload. `backend-functional/test_rich_fixture.py` exercises the Trace Explorer, trace logs and metrics exemplars on this day and skips when it is absent (the metrics check also skips when the configured metrics database has no rich points). Tests of the span-derived logs and metrics that aggregate whole tables or derive windows from the oldest point restrict themselves to the newest day (`test_metrics_browser.py` `kind_bounds`, `test_otel_signals.py` log mix): the rich day has its own releases, severity mix and services.
+
+To load it into a running stack without touching the other parts:
+
+```bash
+docker build -t chdash-otel-fixture -f tests/otel-fixture/Dockerfile .
+docker run --rm --network chdash-tests_default -e OTEL_FIXTURE_LOGS=0 -e OTEL_FIXTURE_METRICS=0 \
+  -e OTEL_FIXTURE_RICH=1 chdash-otel-fixture
+```
+
 ### Production-scale trace benchmark
 
 

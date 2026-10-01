@@ -12,6 +12,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 from generate_otel_traces import NS, generate_trace
+import rich_fixture
 
 BASE_URL = os.environ.get("CLICKHOUSE_HTTP_URL", "http://clickhouse:8123").rstrip("/")
 USER = os.environ.get("CLICKHOUSE_USER", "test")
@@ -65,6 +66,12 @@ LOGS_TRACE_SAMPLE = int(os.environ.get("OTEL_FIXTURE_LOGS_TRACE_SAMPLE", "16"))
 LOGS_SPAN_SAMPLE = int(os.environ.get("OTEL_FIXTURE_LOGS_SPAN_SAMPLE", "4"))
 SIGNALS_SLICE_MINUTES = int(os.environ.get("OTEL_FIXTURE_SIGNALS_SLICE_MINUTES", "60"))
 SIGNALS_COMPLETE_MARKER = "chdash-fixture-complete"
+# Rich dataset (rich_fixture.py): nested e-commerce traces with errors,
+# exceptions, events, links, semantic-convention attributes, correlated logs
+# and metrics, all on 2026-09-12 UTC, a day the bulk fixture never uses.
+# It is the only part allowed to insert into otel_traces outside the bulk
+# generators, and only inside that day.
+RICH = _env_flag("OTEL_FIXTURE_RICH")
 LOG_TABLE = "otel_logs"
 METRIC_TABLES = (
     "otel_metrics_gauge",
@@ -91,6 +98,11 @@ def request(query: str, body: bytes = b"", timeout: int = 60) -> bytes:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")
         raise RuntimeError(f"ClickHouse HTTP {exc.code}: {detail}") from exc
+
+
+def connection() -> dict:
+    """ClickHouse HTTP settings for rich_fixture (its worker processes post themselves)."""
+    return {"url": BASE_URL, "user": USER, "password": PASSWORD}
 
 
 def wait_ready() -> None:
@@ -125,7 +137,13 @@ def existing_fixture_counts() -> tuple[int, int]:
         ).decode().strip()
         if value != "2":
             return 0, 0
-        return active_rows("otel_traces"), active_rows("otel_traces_trace_id_ts")
+        # The rich day is not part of the bulk fixture: leave its rows out.
+        try:
+            rich_spans, rich_index = rich_fixture.window_counts(connection())
+        except Exception:
+            rich_spans, rich_index = 0, 0
+        return (max(0, active_rows("otel_traces") - rich_spans),
+                max(0, active_rows("otel_traces_trace_id_ts") - rich_index))
     except Exception:
         return 0, 0
 
@@ -269,13 +287,14 @@ def populate_traces_python() -> tuple[int, str]:
 def populate_trace_index_from_spans() -> None:
     print("OTEL fixture: building trace-id time index", flush=True)
     request(
-        """
+        f"""
 INSERT INTO otel.otel_traces_trace_id_ts
 SELECT
     TraceId,
     min(Timestamp) AS Start,
     max(Timestamp + toIntervalNanosecond(toInt64(Duration))) AS End
 FROM otel.otel_traces
+WHERE NOT ({rich_fixture.window_literal('Timestamp')})
 GROUP BY TraceId
 """.strip(),
         timeout=INSERT_TIMEOUT,
@@ -608,7 +627,7 @@ def reset_signal_tables(tables) -> None:
         set_signal_comment(table, "")
 
 
-def signal_ddl_statements() -> list[str]:
+def signal_ddl_statements(database: str = "") -> list[str]:
     """Statements of tests/clickhouse-init/05-otel-logs-metrics.sql.
 
     docker-entrypoint-initdb.d only runs on an empty ClickHouse volume, so a
@@ -619,17 +638,18 @@ def signal_ddl_statements() -> list[str]:
         text = handle.read()
     lines = [line for line in text.splitlines() if not line.lstrip().startswith("--")]
     statements = [part.strip() for part in "\n".join(lines).split(";") if part.strip()]
-    if SIGNALS_DATABASE != "otel":
+    database = database or SIGNALS_DATABASE
+    if database != "otel":
         statements = [
-            s.replace("DATABASE IF NOT EXISTS otel", f"DATABASE IF NOT EXISTS {SIGNALS_DATABASE}")
-            .replace("otel.", f"{SIGNALS_DATABASE}.")
+            s.replace("DATABASE IF NOT EXISTS otel", f"DATABASE IF NOT EXISTS {database}")
+            .replace("otel.", f"{database}.")
             for s in statements
         ]
     return statements
 
 
-def ensure_signal_tables() -> None:
-    for statement in signal_ddl_statements():
+def ensure_signal_tables(database: str = "") -> None:
+    for statement in signal_ddl_statements(database):
         try:
             request(statement)
         except RuntimeError as exc:
@@ -1275,6 +1295,12 @@ def populate_signals(*, traces_changed: bool = False) -> None:
             populate_metrics(start_ns, end_ns)
 
 
+def populate_rich() -> None:
+    """Idempotently add the rich dataset of 2026-09-12 (OTEL_FIXTURE_RICH=1)."""
+    if RICH:
+        rich_fixture.populate(connection(), ensure_signal_tables)
+
+
 def main() -> int:
     started = time.monotonic()
     validate_fixture_options()
@@ -1292,6 +1318,7 @@ def main() -> int:
             flush=True,
         )
         populate_signals()
+        populate_rich()
         return mark_ready_and_maybe_wait()
 
     generator = selected_generator()
@@ -1336,6 +1363,7 @@ def main() -> int:
     # New spans move the fixture window: logs/metrics derived from the previous
     # spans no longer match it.
     populate_signals(traces_changed=True)
+    populate_rich()
     return mark_ready_and_maybe_wait()
 
 

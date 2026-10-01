@@ -322,9 +322,12 @@ def test_every_error_span_of_the_window_has_an_error_log_with_its_status_message
 
 
 def test_fixture_log_severity_mix_trace_context_and_attributes():
-    _logs_fixture()
+    end_ms, _ = _logs_fixture()
+    # The span-derived logs cover the day ending at the newest span; the rich
+    # dataset (2026-09-12, tests/README.md) has its own mix and releases.
+    window = f"TimestampTime >= toDateTime({end_ms // 1000 - 86400 - 60})"
     stats = ch_rows(
-        "SELECT SeverityText AS sev, count() AS n FROM otel.otel_logs GROUP BY sev")
+        f"SELECT SeverityText AS sev, count() AS n FROM otel.otel_logs WHERE {window} GROUP BY sev")
     total = sum(int(r["n"]) for r in stats)
     share = {r["sev"]: int(r["n"]) / total for r in stats}
     assert set(share) == {"DEBUG", "INFO", "WARN", "ERROR"}, share
@@ -340,7 +343,7 @@ def test_fixture_log_severity_mix_trace_context_and_attributes():
         "uniqExact(ServiceName, ResourceAttributes['service.version']) = uniqExact(ServiceName) AS stable_versions, "
         "countIf(LogAttributes['http.route'] != '') AS http_rows, "
         "countIf(TimestampTime != toDateTime(Timestamp)) AS bad_timestamp_time "
-        "FROM otel.otel_logs")[0]
+        f"FROM otel.otel_logs WHERE {window}")[0]
     assert 0.03 <= float(row["orphan"]) <= 0.07, row
     assert 0.03 <= float(row["late"]) <= 0.07, row
     assert int(row["bad_errors"]) == 0 and int(row["no_function"]) == 0 and int(row["bad_resource"]) == 0, row
