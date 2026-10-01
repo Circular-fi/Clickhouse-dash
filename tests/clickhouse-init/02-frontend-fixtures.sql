@@ -27,10 +27,10 @@ CREATE TABLE chdash_ui.weather_observations
     station_id LowCardinality(String),
     city LowCardinality(String),
     quality_ok Bool,
-    temperature_c Float64,
+    temperature_c Float64 COMMENT 'Air temperature in degrees Celsius',
     humidity_pct UInt8,
     precipitation_mm Float64,
-    notes Nullable(String),
+    notes Nullable(String) COMMENT 'Free-text observer remark; NULL when the station sent none, so an empty string and a missing note stay distinct in every report built on this table',
     random_token String,
     sensor_packet Tuple(
         station Tuple(

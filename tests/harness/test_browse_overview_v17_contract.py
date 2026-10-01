@@ -19,13 +19,13 @@ def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
 
 
 def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'th.className = "resultTable__thSortable";' in results
-    assert 'renderStorageMetricTable(container, "Columns", "columns"' in ui
-    assert 'renderStorageMetricTable(container, "Indexes", "indexes"' in ui
-    assert 'renderStorageMetricTable(container, "Projections", "projections"' in ui
+    assert 'className: "explorerStorageResultTable--columns explorerColumnsTable"' in ui
+    assert 'renderStructures(body, indexes, "indexes")' in ui
+    assert 'renderStructures(body, projections, "projections")' in ui
     assert 'explorerStorageTableTitle' not in ui
 
 
@@ -33,7 +33,7 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     assert 'return `${sign}${v.toFixed(2)}${units[unit]}`;' in ui
-    assert 'fmtStorageBytes(ctx.value)' in ui
+    assert 'fmtStorageBytes(item.compressed)' in ui
     assert 'min-width: 9.5ch;' in css
     assert 'font-variant-numeric: tabular-nums;' in css
     assert 'Upstream objects feed this object; downstream objects consume or are populated by it.' not in ui

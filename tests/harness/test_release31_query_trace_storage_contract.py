@@ -26,14 +26,14 @@ def test_trace_initial_expansion_uses_visible_span_budget_and_gutter_is_only_on_
 
 
 def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -> None:
-    src = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    src = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     assert "tuple_root:" in src and "tuple_parent:" in src
     assert "explorerStorageTupleToggle" in src
-    assert "tr.hidden = !(tupleExpanded?.has(item.tuple_parent));" in src
-    assert 'className: "explorerResultTable explorerStorageResultTable explorerStorageResultTable--merges"' in src
-    assert 'explorerStorageResultTable--parts' in src
-    assert 'explorerStorageResultTable--partitions' in src
+    assert "tr.hidden = !tupleExpanded.has(item.tuple_parent);" in src
+    assert 'className: "explorerStorageResultTable--merges"' in src
+    assert 'className: "explorerTable--parts"' in src
+    assert 'className: "explorerTable--partitions"' in src
     assert "decorateRow = null" in results
 
 

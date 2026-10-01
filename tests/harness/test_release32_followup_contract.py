@@ -47,7 +47,7 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
     assert "discover_visible_databases(runner)" in catalog
     assert "out.database_footprint_bytes = summary_row.bytes;" in catalog
     assert "fmtStorageBytes(databaseSummary.bytes)" in ui
-    assert '${fmtStorageBytes(part)} / ${fmtStorageBytes(total)}' in ui
+    assert "const dbShare = percentValue(footprint, dbBytes);" in ui
 
 
 def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> None:

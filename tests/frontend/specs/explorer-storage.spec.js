@@ -73,7 +73,7 @@ test('database page keeps storage compact: a share strip when one table dominate
   expect((await page.locator('#explorerDatabaseObjects').boundingBox()).y).toBeLessThan(420);
 
   await weather.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
 });
@@ -109,7 +109,7 @@ test('database page draws a bounded treemap band when three tables hold 1% or mo
   await expect(tooltip).toBeHidden();
 
   await weather.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
   await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
 });
 
@@ -181,7 +181,7 @@ test('Storage section lists databases by size and zooms into a database and a ta
 
   // "Open table" leaves for the table card.
   await page.locator('.explorerStorageView__open').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
 });
 
@@ -277,7 +277,7 @@ test('Operations section reports replica health and Keeper, and lists problems f
 
   // Object names open the table card.
   await page.locator('#explorerOpsMutations .explorerOpsTable__link', { hasText: 'wide_types' }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns\?view=browse$/);
 });
 
 test('Functions start from an overview, with merged counted categories and one line per function', async ({ page }) => {

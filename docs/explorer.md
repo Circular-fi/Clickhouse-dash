@@ -236,46 +236,121 @@ keeper }` (see configuration.md).
 `GET /api/explorer/table?...` can return, when the corresponding system table is
 available:
 
-- columns, compression metadata, and per-column compressed-byte weight;
+- columns from `system.columns`: type, `default_kind` / `default_expression`,
+  `comment`, key membership (`is_in_partition_key`, `is_in_sorting_key`,
+  `is_in_primary_key`, `is_in_sampling_key`), codec and per-column
+  compressed / uncompressed bytes;
+- the table keys and storage policy from `system.tables` (`sorting_key`,
+  `primary_key`, `partition_key`, `sampling_key`, `storage_policy`,
+  `metadata_modification_time`), and `table_ttl`: the top-level TTL clause of
+  `create_table_query` (column TTLs, inside the column list, are not part of it);
 - storage policy plus local storage by disk and capacity for disks used by that table;
 - active/inactive parts, including the ClickHouse 26.7 `files` count;
 - partitions;
 - skipping indexes and projections;
 - mutations and active merges;
-- local replication state and replication queue;
+- local replication state: replica counts, queue size and its insert / merge
+  split, delay, log entries left to fetch, leader / read-only / Keeper session
+  flags and `replicas` (every replica registered for the table and whether it is
+  active, from `replica_is_active`), plus the replication queue;
 - Distributed cluster members resolved from the engine's cluster argument and
-  `system.clusters`, plus the local `system.distribution_queue` backlog/error state;
-- security-filtered structured dependencies;
+  `system.clusters`, the local `system.distribution_queue` backlog/error state,
+  and `distributed: {cluster, database, table}` (the engine arguments, already
+  part of `engine_full`);
+- security-filtered structured dependencies, each with `kind`
+  (`materialized_view`, `view`, `buffer`, `distributed_route` or `dependency`)
+  and the related object's `engine`;
 - DDL.
+
+The additions only read the opened object (`database = ... AND table = ...`):
+`system.columns` gains five columns in the existing query, `replica_is_active`
+costs the same Keeper reads as `total_replicas` / `active_replicas` that the
+detail already pays, and dependency engines come from one `system.tables` read
+filtered on the already-visible dependency names. If a server lacks one of the
+extra replica columns, the base replica row is read instead.
 
 Missing optional system metadata is represented through
 `unavailable_sections`; the page degrades rather than failing globally.
 
-The Browse **Overview** keeps storage accounting intentionally dense rather than
-using dashboard-style key/value cards. For MergeTree tables it starts with a
-single stacked composition bar that always reconciles to the table's local
-`bytes_on_disk` footprint when the required metadata is available. Projection
-parts use their own `bytes_on_disk`; skipping indexes use the explicit secondary
-index compressed bytes exposed by `system.parts`; every remaining parent-part
-byte is assigned to the Wide or Compact base footprint using the exact
-`bytes_on_disk` ratio of those active part formats. This makes Wide + Compact +
-Projections + Indexes a disjoint 100% decomposition instead of mixing compressed
-data counters with an on-disk denominator. If any required counter is
-unavailable, the composition is rendered as `unknown` rather than as a partial
-bar.
+The lazy per-database catalog (`/api/explorer/catalog?database=<name>`) marks
+replicated tables with `replicated: true` and their local `health` (read-only or
+expired Keeper session: error; queue above 1000 or delay above 60 s: warning),
+read from the in-memory `system.replicas` columns only, so the 5 s navigation
+refresh never waits on Keeper. The tree draws it as a dot next to the name.
 
-Columns, skipping indexes and projections are shown in three separate sortable
-tables. Column rows contain name, codec, compressed bytes, uncompressed bytes and
-compressed share. Named Tuple leaf subcolumns are exposed as dot paths such as
-`<sensor_packet.station.code>` when ClickHouse provides `subcolumns.*` counters;
-intermediate Tuple containers and implementation-only size streams are omitted.
-The Overview also shows the table's local on-disk share of its database and of
-the full authorized ClickHouse catalog using compact percentage bars.
+### Table card
+
+The detail is a card (`app_explorer_detail.js`, created by `app_explorer.js`
+with its model and shared helpers):
+
+- **Header**: the object name, then chips: engine, health (dot), rows, size
+  (`on disk` or `RAM`) and parts. A size of 0 B is not shown. A replicated table
+  gets a banner right under the header (`Replicated · 2/2 replicas active ·
+  queue 0 · delay 0 s`, coloured by state) with a link to its Operations tab.
+- **Tabs**, in this order and only when they have content:
+  `Columns · Preview · Storage · Operations · Lineage · DDL`. Old routes keep
+  working: `/overview` and `/schema` open Columns, `/data` opens Preview, and
+  the address bar is rewritten to the new slug.
+- **About** panel beside the tab body (above it, collapsed to its first tiles,
+  when the pane is narrower than 960 px): value + context tiles for engine,
+  MV target / Buffer destination, size and rows, compression ratio, parts and
+  partitions, sorting / partition / sampling keys, TTL rules
+  (`observed_at + 30 d → RECOMPRESS ZSTD(3)`), storage policy and disks,
+  replicas, the Distributed local table and cluster, share of the database and
+  of all databases, last modification, lineage counts, and "Idle" when there is
+  no operation to show.
+
+**Columns** is one shared result table: name (comment below it, two lines at
+most, full text as tooltip), type (DEFAULT / MATERIALIZED / ALIAS expression
+below it), key badges (`ORDER BY`, `PK` when the primary key differs from the
+sorting key, `PARTITION`, `SAMPLE`), codec (only when a column declares its own;
+the part default is stated once in About), compressed bytes with a bar
+normalised to the largest column, compression ratio and share of the table's
+bytes on disk. Byte columns are hidden for objects without bytes (Views,
+Distributed). Named Tuple leaf subcolumns are exposed as dot paths such as
+`sensor_packet.station.code` when ClickHouse provides `subcolumns.*` counters,
+behind a disclosure on the Tuple column; intermediate Tuple containers and
+implementation-only size streams are omitted, and Array offset streams are
+accounted as one `[offsets]` child so children add up to their parent.
+
+**Storage** (MergeTree and Log families) starts with a single stacked
+composition bar that always reconciles to the table's local `bytes_on_disk`
+footprint when the required metadata is available. Projection parts use their
+own `bytes_on_disk`; skipping indexes use the explicit secondary index
+compressed bytes exposed by `system.parts`; every remaining parent-part byte is
+assigned to the Wide or Compact base footprint using the exact `bytes_on_disk`
+ratio of those active part formats. This makes Wide + Compact + Projections +
+Indexes a disjoint 100% decomposition instead of mixing compressed data counters
+with an on-disk denominator. If any required counter is unavailable, the
+composition is rendered as `unknown` rather than as a partial bar. Then come
+collapsible sections, those with data first: Disks, Parts (Part, Partition,
+Disk, Rows, Bytes, Marks, Files, Level, Age, State), Partitions, Skipping
+indexes, Projections. Empty sections are listed on one muted line
+("No projections").
+
+**Operations** holds Replication (key / value list and replica list),
+Replication queue, Active merges, Mutations (pending first), Ingestion and, for
+Distributed, Distribution queue and Cluster. Ingestion is a 2 x 3 grid: client
+(finished INSERTs in `system.query_log`) and persisted (new parts in
+`system.part_log`) rows/s and bytes/s over 1 min, 5 min and 1 h, plus the 1 h
+totals; when every rate is zero it is the line "No writes in the last 1 h". The
+tab is hidden when none of its sections has data.
+
+**Lineage** lists upstream and downstream objects as wrapping chips: object-type
+icon, short name for objects of the same database (`db.table` otherwise, full
+name and link kind in the tooltip) and the link kind (MV, View, Buffer, or
+`on <cluster>` for a Distributed route).
+
+Every table numbers its rows from 1; missing values are one dash.
 
 ## Data preview
 
 `POST /api/explorer/table/data` defaults to `LIMIT 100` and clamps the request to
-1–500 rows. The backend first enumerates columns readable by the runner and
+1–500 rows. The Preview tab offers 50 / 100 / 500 (the choice is remembered per
+browser), shows "<n> rows (LIMIT <limit>)", each column's type under its name,
+compact rows and short UTC timestamps (`2026-09-01 00:00:02`; a non-zero
+fraction is kept). A single returned row is shown transposed (column, type,
+value). The backend first enumerates columns readable by the runner and
 selects only those columns. It never performs an automatic `SELECT count()`.
 Row policies and ClickHouse-side restrictions therefore remain in effect.
 

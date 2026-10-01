@@ -7675,3 +7675,26 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 }
 .traceSpanColumns__add input:focus { outline: none; border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceSpanColumns__note { display: block; margin-top: 6px; color: var(--muted); font-size: 10.5px; }
+:root {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+  --exd-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --exd-ok: #15803d;
+    --exd-warn: #b45309;
+    --exd-err: #dc2626;
+  }
+}
+html[data-theme="dark"] {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+}
+html[data-theme="light"] {
+  --exd-ok: #15803d;
+  --exd-warn: #b45309;
+  --exd-err: #dc2626;
+}

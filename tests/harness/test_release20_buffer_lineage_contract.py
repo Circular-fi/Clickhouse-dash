@@ -22,40 +22,37 @@ def test_buffer_rows_use_one_system_tables_snapshot_before_parts_override() -> N
 
 def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary")' in catalog
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
     assert "db.bytes += table.logical_bytes.value_or(0);" in catalog
-    assert "renderResidentRuntime(container, detail);" not in ui
-    overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
-    assert "if (!empty && !resident && !viewLike)" in overview
-    assert "if (viewLike || resident || empty)" in overview
-    assert '"Resident memory"' not in ui
+    ui = read("src/static/app_explorer_detail.js")
+    assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
+    assert '"Resident memory"' not in ui
+    # One size label: RAM for resident engines, disk otherwise; 0 B is hidden.
+    assert '`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
+    assert 'if (!viewLike && footprint != null && footprint > 0) {' in ui
     assert 'node("span", "explorerBufferRuntime__label", "Flush target")' not in ui
-    assert '`${fmtBytes(footprint)} RAM`' in ui
 
 
-def test_storage_metric_unknown_values_render_as_dash_only_inside_tables() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    row = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
-    assert 'item.codec && item.codec !== "unknown" ? item.codec : "-"' in row
-    assert 'ctx.value == null ? "-" : fmtStorageBytes(ctx.value)' in row
-    assert 'ctx.value == null ? "-" : fmtPercent(ctx.value)' in row
-    assert 'applyGauge(td, ctx.value, 100' in row
-    assert 'ns.results?.createStaticResultTable?.({' in row
-    # Non-table percentage components still retain an explicit unknown state.
-    assert 'function percentBar(value, { title = "", variant = "default", unknownText = "unknown" } = {})' in ui
+def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    assert 'const DASH = "\\u2014";' in ui
+    assert 'item.compressed == null ? DASH : fmtStorageBytes(item.compressed)' in ui
+    assert 'item.percent == null ? DASH : fmtPercent(item.percent)' in ui
+    assert 'ns.results?.createStaticResultTable?.({' in ui
+    # The composition bar keeps an explicit unknown state.
+    assert '"explorerStorageStackedBar__unknown", "unknown"' in ui
 
 
-def test_overview_lineage_has_one_normalized_two_direction_layout() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_lineage_has_one_normalized_two_direction_layout() -> None:
+    ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
-    deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
-    assert 'const matrix = node("div", "explorerDependencyMatrix");' in deps
+    deps = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
+    assert 'const matrix = node("div", "explorerDependencyMatrix explorerLineage");' in deps
     assert 'for (const relation of ["upstream", "downstream"])' in deps
-    assert 'list.appendChild(node("div", "explorerDependencyEmpty", "\\u2014"));' in deps
+    assert 'if (!items.length) list.appendChild(emptyNote(' in deps
     assert ".explorerDependencyMatrix" in css
     assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
 

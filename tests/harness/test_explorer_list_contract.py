@@ -114,9 +114,8 @@ def test_list_detail_exposes_storage_parts_topology_and_replication_without_cros
     assert 'w.Key("replication_queue")' in api
     assert 'w.Key("files")' in api
     assert "disk.free_space" in explorer and "disk.total_space" in explorer
-    assert 'variant: "storage"' in explorer
-    assert "explorerMetricBars--${variant}" in explorer
-    assert '"Files", "Level"' in explorer
+    assert 'className: "explorerTable--disks"' in explorer
+    assert 'label: "Files"' in explorer and 'label: "Level"' in explorer
 
 
 def test_table_detail_is_lazy_targeted_and_cached_per_object() -> None:

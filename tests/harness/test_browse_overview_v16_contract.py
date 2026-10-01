@@ -7,33 +7,33 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_overview_is_storage_first_without_key_value_metadata_list() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    overview = ui[ui.index("function renderOverview") : ui.index("function isImplementationSubcolumn")]
-    assert "simpleRows(" not in overview
-    assert "renderTableFootprint(container, detail);" in overview
-    assert "renderTableFootprint(container, detail);" in overview
-    footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
-    assert "buildStorageComposition(detail, { embedded: true })" in footprint
-    assert 'sectionTitle("Storage breakdown")' not in overview
+def test_storage_tab_starts_with_the_composition_card_without_key_value_lists() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    storage = ui[ui.index("function renderStorageTab") : ui.index("function ingestionState")]
+    assert "simpleRows(" not in ui
+    assert "renderStorageCompositionCard(container, detail);" in storage
+    card = ui[ui.index("function renderStorageCompositionCard") : ui.index("function renderDisks")]
+    assert "buildStorageComposition(detail, { embedded: true })" in card
+    assert 'sectionTitle("Storage breakdown")' not in ui
 
 
 def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     assert "if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return null;" in ui
-    assert 'unknownText = "unknown"' in ui
-    assert 'wrap.appendChild(node("span", "explorerPercentBar__text", unknownText));' in ui
-    assert 'explorerShareList explorerShareList--footprint' in ui
+    assert 'bar.appendChild(node("span", "explorerStorageStackedBar__unknown", "unknown"));' in ui
+    # The Share tile exists only when both byte totals are known and non-zero.
+    assert "footprint > 0 && dbBytes != null && dbBytes > 0" in ui
     for label in ["Wide", "Compact", "Projections", "Indexes"]:
         assert f'["{label}",' in ui
 
 
 def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     css = read("src/static/style.css")
     assert 'ns.results?.createStaticResultTable?.({' in ui
-    assert 'className: `explorerResultTable explorerStorageResultTable explorerStorageResultTable--${group}`' in ui
+    assert 'className: `explorerTable ${className}`' in ui
+    assert 'className: `explorerStorageResultTable--${kind}`' in ui
     assert 'th.className = "resultTable__thSortable";' in results
     assert 'display.sort((a, b) =>' in results
     assert 'explorerStoragePercentCell' in ui
@@ -51,15 +51,22 @@ def test_buffer_rows_are_normalized_to_resident_rows() -> None:
     assert 'return isBufferSummary(summary) ? `${value} buffered rows` : `${value} rows`;' in ui
 
 
-def test_storage_and_operations_are_combined_for_storage_backed_tables() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    tabs = ui[ui.index("function availableTabs") : ui.index("function summaryCard(")]
-    assert 'if (hasStorage) tabs.push("Storage");' in tabs
-    assert 'else if (!isDictionarySummary(summary)) tabs.push("Operations");' in tabs
-    storage = ui[ui.index("function renderStorageCombined") : ui.index("function renderOperations")]
-    assert 'sectionTitle("Ingestion activity")' in storage
-    assert 'sectionTitle("Merge activity")' in storage
-    assert 'renderMergeProgress(container, detail);' in storage
+def test_storage_and_operations_are_separate_tabs_of_collapsible_sections() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    tabs = ui[ui.index("function availableTabs") : ui.index("function openTab")]
+    assert 'if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");' in tabs
+    assert 'if (!empty && hasOperations(detail)) tabs.push("Operations");' in tabs
+    storage = ui[ui.index("function renderStorageTab") : ui.index("function ingestionState")]
+    for section in ["disks", "parts", "partitions", "indexes", "projections"]:
+        assert f'id: "{section}"' in storage
+    assert "renderMerges" not in storage
+    operations = ui[ui.index("function operationSections") : ui.index("function renderLineageTab")]
+    for section in ["replication", "replication_queue", "merges", "mutations", "ingestion", "distribution_queue", "cluster"]:
+        assert f'id: "{section}"' in operations
+    # Sections with data first, then one muted line naming the empty ones.
+    render = ui[ui.index("function renderSections") : ui.index("function objectType")]
+    assert "const shown = sections.filter((item) => item && item.hasData);" in render
+    assert 'node("div", "explorerIdleLine")' in render
 
 
 def test_structure_zero_is_known_only_after_successful_metadata_queries() -> None:

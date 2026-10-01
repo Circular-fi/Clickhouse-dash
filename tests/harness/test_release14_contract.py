@@ -70,14 +70,14 @@ def test_graph_refresh_discards_stale_scope_and_replays_latest_request() -> None
     assert "queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));" in graph
 
 
-def test_legacy_schema_route_is_canonicalized_to_overview() -> None:
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_legacy_tab_routes_are_canonicalized_to_their_new_tab() -> None:
+    explorer = read("src/static/app_explorer.js")
     functional = read("tests/frontend/specs/functional.spec.js")
-    assert 'const legacySchema = requestedTab === "schema";' in explorer
-    assert 'const tab = legacySchema ? "Overview"' in explorer
+    assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"]' in explorer
+    assert "const legacySchema = TAB_BY_SLUG.has(requestedTab) && !TABS.some((label) => label.toLowerCase() === requestedTab);" in explorer
     assert "route.legacySchema && route.database && route.table" in explorer
     assert '/weather_observations/schema' in functional
-    assert '/weather_observations\\/overview' in functional
+    assert '/weather_observations\\/columns' in functional
 
 
 def test_weather_fixture_stresses_merge_tree_storage_and_schema_features() -> None:

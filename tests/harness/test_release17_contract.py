@@ -42,11 +42,11 @@ def test_trace_viewer_is_borderless_and_scrolls_only_the_body() -> None:
     assert 'table.appendChild(scroll);' in js
 
 
-def test_explorer_overview_and_fixtures_cover_projection_index_and_complex_types() -> None:
+def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types() -> None:
     api = read("src/api_explorer.cpp")
     catalog_h = read("src/explorer_catalog.hpp")
     catalog_cpp = read("src/explorer_catalog.cpp")
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = read("src/static/app_explorer_detail.js")
     fixtures = read("tests/clickhouse-init/02-frontend-fixtures.sql")
     formatted = read("tests/api/format/output/092_create_table_wide_types.sql")
 
@@ -56,10 +56,9 @@ def test_explorer_overview_and_fixtures_cover_projection_index_and_complex_types
     assert "projection_bytes" in catalog_h
     assert "system.projection_parts" in catalog_cpp
     assert "secondary_indices_compressed_bytes" in catalog_cpp
-    assert 'renderStorageMetricTable(container, "Indexes", "indexes"' in explorer
-    assert 'renderStorageMetricTable(container, "Projections", "projections"' in explorer
-    assert 'kind.startsWith("index:")' in explorer
-    assert 'kind.startsWith("projection:")' in explorer
+    assert 'const indexes = structureItems(detail, "index:");' in explorer
+    assert 'const projections = structureItems(detail, "projection:");' in explorer
+    assert '.filter((item) => String(item.kind || "").startsWith(prefix))' in explorer
     assert 'ns.results?.createStaticResultTable?.({' in explorer
     assert "PROJECTION prj_wide_types_state" in fixtures
     assert "INDEX idx_wide_types_state" in fixtures

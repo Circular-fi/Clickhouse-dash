@@ -60,7 +60,7 @@ def test_table_summary_queries_are_scoped_to_requested_object() -> None:
     assert '"FROM system.tables WHERE database = " + db + " AND name = " + tbl + " LIMIT 1"' in summary
     assert '"FROM system.parts WHERE active AND database = " + db + " AND `table` = " + tbl' in summary
     assert '"AND database = " + db + " AND `table` = " + tbl' in summary
-    assert '"WHERE database = " + db + " AND `table` = " + tbl + " LIMIT 1"' in summary
+    assert '" FROM system.replicas WHERE database = " + db + " AND `table` = " + tbl + " LIMIT 1"' in summary
     assert '"AND has(tables, " + object + ")"' in summary
 
 
@@ -90,9 +90,9 @@ def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> No
 def test_selected_table_keeps_lazy_scope_totals_for_percentages() -> None:
     header = read("src/explorer_catalog.hpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     assert "database_footprint_bytes" in header
     assert "clickhouse_footprint_bytes" in header
     assert 'w.Key("footprint_scope")' in api
-    assert "detail?.footprint_scope?.database_bytes" in ui
-    assert "detail?.footprint_scope?.clickhouse_bytes" in ui
+    assert "detail.footprint_scope?.database_bytes" in ui
+    assert "detail.footprint_scope?.clickhouse_bytes" in ui

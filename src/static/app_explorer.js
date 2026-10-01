@@ -19,7 +19,7 @@
     detail: null,
     detailLoading: false,
     detailSerial: 0,
-    tab: "Overview",
+    tab: "Columns",
     preview: null,
     previewLoading: false,
     loadingFunctions: false,
@@ -49,9 +49,15 @@
   // Route slug of the Server operations section (app_explorer_ops.js).
   const OPERATIONS_ROUTE_SEGMENT = "_operations";
 
-  const TABS = ["Overview", "Schema", "Data", "Lineage", "Storage", "Operations"];
+  // Table detail tabs (app_explorer_detail.js hides the ones without content).
+  const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];
+  const DEFAULT_TAB = TABS[0];
 
-  const TAB_BY_SLUG = new Map(TABS.map((label) => [label.toLowerCase(), label]));
+  // Former tab slugs open the tab that took their content over.
+  const TAB_BY_SLUG = new Map([
+    ...TABS.map((label) => [label.toLowerCase(), label]),
+    ["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],
+  ]);
 
   function decodeRouteSegment(value) {
     try { return decodeURIComponent(String(value || "")); } catch { return String(value || ""); }
@@ -100,9 +106,10 @@
     }
     const database = parts[0] || "";
     const table = parts[1] || "";
-    const requestedTab = String(parts[2] || "overview").toLowerCase();
-    const legacySchema = requestedTab === "schema";
-    const tab = legacySchema ? "Overview" : (TAB_BY_SLUG.get(requestedTab) || "Overview");
+    const requestedTab = String(parts[2] || DEFAULT_TAB).toLowerCase();
+    // Old tab slugs are rewritten to the tab that replaced them.
+    const legacySchema = TAB_BY_SLUG.has(requestedTab) && !TABS.some((label) => label.toLowerCase() === requestedTab);
+    const tab = TAB_BY_SLUG.get(requestedTab) || DEFAULT_TAB;
     return { workspace: "explorer", section: "tables", database, table, tab, legacySchema, viewMode, graphType, graphDepth };
   }
 
@@ -1267,7 +1274,7 @@
   function openStorageRoute(database, table = "") {
     if (!database) return;
     const path = table
-      ? `/explorer/${encodeRouteSegment(database)}/${encodeRouteSegment(table)}/overview`
+      ? `/explorer/${encodeRouteSegment(database)}/${encodeRouteSegment(table)}/columns`
       : `/explorer/${encodeRouteSegment(database)}`;
     window.history.pushState({ workspace: "explorer" }, "", `${appRoute(path)}?view=browse`);
     void applyRouteFromLocation();
@@ -1609,8 +1616,11 @@
               summaryRowsLabel(table, { compact: true }),
               footprint == null ? null : util.formatBytes(footprint),
             ].filter(Boolean).join(" · ");
+            const objectName = node("span", "explorerTreeObject__name", table.name);
+            const replicaDot = detailView?.replicaHealthDot?.(table);
+            if (replicaDot) objectName.appendChild(replicaDot);
             labels.append(
-              node("span", "explorerTreeObject__name", table.name),
+              objectName,
               node("span", "explorerTreeObject__meta", [humanEngine(table.engine), stats].filter(Boolean).join(" · ")),
             );
             button.append(icon, labels);
@@ -1668,7 +1678,7 @@
           if (!catalogContainsTable(model.catalog, route.database, route.table)) {
             throw new Error(`Explorer route object is not visible: ${route.database}.${route.table}`);
           }
-          model.tab = route.tab || "Overview";
+          model.tab = route.tab || DEFAULT_TAB;
           await selectTable(route.database, route.table, false, { historyMode: "none" });
         } else if (route.database) {
           selectDatabase(route.database, { historyMode: "none" });
@@ -1808,7 +1818,7 @@
           if (!Array.isArray(formatted) || !formatted[0]) return;
           if (serial !== model.detailSerial || String(state.selectedHostId || "") !== hostId || model.selectedKey !== key || model.detail !== detail) return;
           detail.formatted_ddl = formatted[0];
-          if (model.tab === "Overview") renderTabContent();
+          if (model.tab === "DDL") renderTabContent();
         }).catch((formatError) => {
           detail.ddl_format_error = formatError instanceof Error ? formatError.message : String(formatError || "format failed");
         });
@@ -1828,7 +1838,7 @@
   async function applyRouteFromLocation() {
     const route = parseExplorerRoute();
     if (route.workspace === "explorer" && route.legacySchema && route.database && route.table) {
-      const canonicalPath = appRoute(`/explorer/${encodeRouteSegment(route.database)}/${encodeRouteSegment(route.table)}/overview`);
+      const canonicalPath = appRoute(`/explorer/${encodeRouteSegment(route.database)}/${encodeRouteSegment(route.table)}/${String(route.tab || DEFAULT_TAB).toLowerCase()}`);
       const canonicalParams = new URLSearchParams(window.location.search || "");
       if (!canonicalParams.has("view")) canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse");
       if (route.viewMode === "graph") {
@@ -1885,7 +1895,7 @@
     if (route.database) {
       model.expandedDatabases.add(route.database);
     }
-    model.tab = route.tab || "Overview";
+    model.tab = route.tab || DEFAULT_TAB;
     if (route.database && route.table && model.catalog) {
       // A route only needs the addressed database branch. Never refresh/enumerate
       // every database just because the selected table is not in the lightweight
@@ -1934,7 +1944,7 @@
     model.detail = null;
     model.detailLoading = false;
     model.preview = null;
-    model.tab = "Overview";
+    model.tab = DEFAULT_TAB;
     model.storageScope = { database: "", table: "" };
     destroyDatabaseTreemap();
     if (dom.explorerEmptyState) {

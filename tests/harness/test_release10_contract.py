@@ -53,11 +53,14 @@ def test_graph_click_then_browse_sync_preserves_canvas_camera_but_offscreen_side
     assert 'setFocus(node.id, true' not in pointer
 
 
-def test_zero_row_table_has_no_data_or_storage_tab() -> None:
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = explorer[explorer.index("function isEmptyRowSummary"):explorer.index("function summaryCard(")]
-    assert 'return optionalNumber(summary?.rows) === 0;' in block
-    assert 'if (isEmptyRowSummary(summary)) return ["Overview"];' in block
+def test_zero_row_table_has_no_preview_storage_or_operations_tab() -> None:
+    explorer = read("src/static/app_explorer_detail.js")
+    assert 'return optionalNumber(summary?.rows) === 0;' in explorer
+    block = explorer[explorer.index("function availableTabs"):explorer.index("function openTab")]
+    assert 'const empty = isEmptyRowSummary(summary);' in block
+    assert 'if (!viewLike && !empty) tabs.push("Preview");' in block
+    assert 'if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");' in block
+    assert 'if (!empty && hasOperations(detail)) tabs.push("Operations");' in block
 
 
 def test_run_settings_cog_is_after_queries_and_reuses_editor_gear() -> None:

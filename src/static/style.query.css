@@ -5064,3 +5064,27 @@ html[data-theme="light"] {
 }
 @keyframes traceDeltaSpin { to { transform: rotate(360deg); } }
 @keyframes traceSpanSpin { to { transform: rotate(360deg); } }
+:root {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+  --exd-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --exd-ok: #15803d;
+    --exd-warn: #b45309;
+    --exd-err: #dc2626;
+  }
+}
+html[data-theme="dark"] {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+}
+html[data-theme="light"] {
+  --exd-ok: #15803d;
+  --exd-warn: #b45309;
+  --exd-err: #dc2626;
+}
+.explorerSection + .explorerSection { margin-top: 16px; }

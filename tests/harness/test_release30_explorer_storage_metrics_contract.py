@@ -35,40 +35,42 @@ def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> 
 
 
 def test_storage_metric_columns_share_query_style_background_gauges() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
-    assert 'classList.add("resultTable__gaugeCell", "resultTable__numeric", "explorerStorageGaugeCell")' in block
-    assert "applyGauge(td, ctx.value, compressedMax" in block
-    assert "applyGauge(td, ctx.value, uncompressedMax" in block
-    assert "applyGauge(td, ctx.value, 100" in block
+    ui = read("src/static/app_explorer_detail.js")
+    gauge = ui[ui.index("function gaugeCell"):ui.index("function numericCell")]
+    assert 'td.classList.add("resultTable__gaugeCell", "resultTable__numeric");' in gauge
+    assert 'td.style.setProperty("--gaugeFill", `${fill}%`);' in gauge
+    # Bars are normalised to the column maximum.
+    assert "gaugeCell(td, item.compressed, compressedMax" in ui
+    assert "gaugeCell(td, part.bytes, max" in ui
+    assert "gaugeCell(td, value, 100" in ui
 
 
-def test_storage_shares_database_and_clickhouse_use_readable_scope_meters() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_storage_shares_of_database_and_server_are_one_about_tile() -> None:
+    ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
-    footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
-    assert "explorerShareList--footprint" in footprint
-    assert 'scopeMeter("Table / Database"' in footprint
-    assert 'scopeMeter("Table / ClickHouse"' in footprint
-    assert "explorerScopeMeter__track" in footprint
-    assert ".explorerScopeMeter__track" in css
+    about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
+    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
+    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert "explorerScopeMeter" not in ui
+    assert ".explorerAboutTile__context" in css
 
 
-def test_columns_indexes_projections_live_in_storage_not_overview() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
-    storage = ui[ui.index("function renderStorageCombined"):ui.index("function renderOperations")]
-    assert "renderColumns(container, detail);" not in overview
-    assert 'renderColumns(container, detail);' in storage
-    assert 'sectionTitle("Columns, indexes & projections")' not in storage
-    assert "renderColumns(container, detail);" in storage
+def test_columns_tab_comes_first_and_indexes_projections_live_in_storage() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    tabs = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    assert 'const tabs = ["Columns"];' in tabs
+    content = ui[ui.index("function renderTabContent"):]
+    assert "default: renderColumnsTab(main, detail); break;" in content
+    storage = ui[ui.index("function renderStorageTab"):ui.index("function ingestionState")]
+    assert "renderColumnsTab" not in storage
+    assert 'id: "indexes"' in storage and 'id: "projections"' in storage
     assert "Compact parts share one physical data stream" not in ui
 
 
 
 def test_tuple_storage_accounts_for_hidden_array_offsets_and_array_tuple_roots() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = ui[ui.index("function renderColumns"):ui.index("function renderMergeProgress")]
+    ui = read("src/static/app_explorer_detail.js")
+    block = ui[ui.index("function columnRows"):ui.index("function renderColumnsTab")]
     assert '/Tuple\\s*\\(/i.test(String(column?.type || ""))' in block
     assert "const implementationByRoot = new Map();" in block
     assert 'name: `${tupleRoot}.[offsets]`' in block

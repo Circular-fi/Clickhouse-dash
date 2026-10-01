@@ -58,8 +58,9 @@ def test_ops_keeper_status_is_allowlisted_and_never_browses_zookeeper_paths() ->
 
 def test_ops_and_storage_modules_load_on_explorer_only() -> None:
     app = read("src/static/app.js")
-    assert '"app_explorer_treemap.js",\n      "app_explorer_storage.js",\n      "app_explorer_ops.js",\n      "app_explorer.js",' in app
-    assert 'query: ["app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js"],' in app
+    assert '"app_explorer_treemap.js",\n      "app_explorer_storage.js",\n      "app_explorer_ops.js",\n      "app_explorer_detail.js",\n      "app_explorer.js",' in app
+    assert 'query: ["app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"],' in app
+    assert 'explorerDetail: "app_explorer_detail.js", explorer: "app_explorer.js",' in app
     assert 'explorerStorage: "app_explorer_storage.js", explorerOps: "app_explorer_ops.js",' in app
     ops = read("src/static/app_explorer_ops.js")
     assert "ns.explorerOps = { show, hide," in ops

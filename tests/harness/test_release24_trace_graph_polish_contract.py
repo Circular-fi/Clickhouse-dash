@@ -46,9 +46,9 @@ def test_offscreen_graph_sidebar_selection_performs_a_real_focused_fit() -> None
 
 
 def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
-    info = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function renderData(container", ui.index("function appendFinalizePreviewInfo"))]
+    info = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple", ui.index("function appendFinalizePreviewInfo"))]
     assert 'th.classList.add("has-finalize-info")' in info
     assert 'event.stopPropagation()' in info
     release = css[css.rindex("/* Release 24: trace geometry"):]
@@ -59,16 +59,16 @@ def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
     assert 'width: 9px;' in release and 'height: 9px;' in release
 
 
-def test_overview_has_no_redundant_lineage_title() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
-    assert 'sectionTitle("Lineage")' not in overview
-    assert 'if (deps.length) renderDependencies(container, detail);' in overview
+def test_lineage_tab_has_one_title_per_direction() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    lineage = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
+    assert 'sectionTitle("Lineage")' not in ui
+    assert 'node("h4", "explorerLineage__title", relation === "upstream" ? "Upstream" : "Downstream")' in lineage
 
 
 def test_storage_composition_legend_omits_zero_or_nonexistent_categories() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = ui[ui.index("function buildStorageComposition"):ui.index("function renderOverview")]
+    ui = read("src/static/app_explorer_detail.js")
+    block = ui[ui.index("function buildStorageComposition"):ui.index("function renderStorageCompositionCard")]
     assert 'composition.items.filter((item) => Number(item.bytes) > 0)' in block
     assert 'if (legendItems.length) wrap.appendChild(legend);' in block
     assert '{ label: "Wide", variant: "wide", percent: null, bytes: null }' not in block

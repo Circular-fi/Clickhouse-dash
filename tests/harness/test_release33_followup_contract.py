@@ -48,12 +48,11 @@ def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() ->
     assert '{ x, y: to.y }' in route
 
 
-def test_footprint_scope_uses_two_readable_share_meters() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_footprint_scope_is_one_readable_share_tile() -> None:
+    ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
-    footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
-    assert 'explorerScopeMeter__track' in footprint
-    assert 'Table / Database' in footprint
-    assert 'Table / ClickHouse' in footprint
-    assert 'explorerScopeMeter--${variant}' in footprint
-    assert '.explorerScopeMeter__track' in css
+    about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
+    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
+    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert "explorerScopeMeter" not in ui
+    assert ".explorerAboutTile__context" in css

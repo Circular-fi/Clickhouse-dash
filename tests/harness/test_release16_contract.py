@@ -80,14 +80,15 @@ def test_terminal_single_query_failure_never_reopens_result_table() -> None:
     assert 'dom.liveResultsWrap.hidden = true' in catch_block
 
 
-def test_compact_overview_does_not_repeat_engine_rows_or_bytes() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = ui[ui.index('function renderOverview'):ui.index('function renderColumns')]
-    assert '["Engine"' not in block
-    assert '["Rows"' not in block
-    assert '["Logical size"' not in block
-    assert 'if (deps.length) renderDependencies(container, detail);' in block
-    assert 'sectionTitle("Lineage")' not in block
+def test_header_is_chips_and_about_is_value_context_tiles() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    chips = ui[ui.index("function headerChips"):ui.index("function replicationStatus")]
+    assert 'metaChip(humanEngine(s.engine)' in chips
+    assert 'metaChip(summaryRowsLabel(s)' in chips
+    assert 'metaChip(plural(parts, "part")' in chips
+    # The former "0.00 rows/s in" ingress rate is not part of the header.
+    assert "rows_per_second_1m" not in chips
+    assert '["Engine"' not in ui and '["Rows"' not in ui and '["Logical size"' not in ui
 
 
 def test_analysis_modal_has_large_desktop_inset() -> None:

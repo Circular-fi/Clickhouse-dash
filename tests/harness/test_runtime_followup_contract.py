@@ -137,16 +137,14 @@ def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> N
 
 
 def test_table_header_owns_state_and_codec_empty_value_uses_observed_part_default() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-
-    detail = read("src/static/app_explorer_detail.js")
-    header = detail[detail.index("function renderDetailHeader()") : detail.index("function renderTabs()")]
+    ui = read("src/static/app_explorer_detail.js")
+    header = ui[ui.index("function metaChip(") : ui.index("// ---- About panel")]
     assert 'detail.metric_scope || "local-replica"' in header
-    assert "healthLabel(s).toLowerCase()" in header
+    assert "healthLabel(s)" in header
     assert "active_parts" in header
     assert "partitions" in header
     assert 'dom.explorerHealthBadge.hidden = true' in header
-    assert 'dom.explorerSummaryCards.hidden = true' in header
+    assert 'host.hidden = true;' in header
     assert 'detail.default_compression_codecs' in ui
     assert '`${observedDefaults[0]} (default)`' in ui
 
@@ -160,28 +158,26 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     assert "rows_total_1h" in header and "bytes_total_1h" in header
     assert "toString(sum(written_rows)), toString(sum(written_bytes))" in catalog
     assert 'w.Key("rows_total_1h")' in api
-    assert 'Client ingress · total · 1h' in ui
-    assert 'Physical writes · total · 1h' in ui
+    assert '`1 h client total ${fmtInt(client.rows_total_1h)} rows' in ui
+    assert '`1 h persisted total ${fmtInt(physical.rows_total_1h)} rows' in ui
     assert "api.formatSqls(hostId" in ui
     assert "detail.formatted_ddl" in ui
     assert "renderHighlightedCode(pre, ddl)" in ui
 
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     graph = read("src/static/app_explorer_graph.js")
     graph_backend = read("src/explorer_graph.cpp")
 
     assert '!/^_?row$/i.test(String(d.table || ""))' in ui
-    lineage = ui[ui.index("function renderLineage") : ui.index("function renderStorageCombined")]
-    assert "renderTopology" not in lineage
-    storage = ui[ui.index("function renderStorageCombined") : ui.index("function renderOperations")]
-    assert 'sectionTitle("Ingestion activity")' in storage
-    assert 'sectionTitle("Merge activity")' in storage
-    assert 'sectionTitle("Topology")' in storage
-    assert 'sectionTitle("Replication")' in storage
-    assert "renderTopology(container, detail)" in storage
-    assert "renderReplication(container, detail)" in storage
+    lineage = ui[ui.index("function renderLineageTab") : ui.index("function previewLimit")]
+    assert "renderCluster" not in lineage
+    operations = ui[ui.index("function operationSections") : ui.index("function renderLineageTab")]
+    assert "renderReplication(body, detail)" in operations
+    assert "renderCluster(body, detail)" in operations
+    assert "renderIngestion(body, detail)" in operations
+    assert "renderMerges(body, detail)" in operations
     assert 'if (model.detailMode === "physical")' in graph
     assert 'target.layer !== "physical"' in graph
     assert "model.focusDepth -= 1" in graph
@@ -238,7 +234,7 @@ def test_preview_ignores_empty_callback_blocks_before_validating_selected_column
 def test_column_metadata_uses_technical_account_and_reports_compact_storage_without_fake_per_column_bytes() -> None:
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     start = catalog.index("bool load_explorer_table_detail(")
     detail = catalog[start:catalog.index("bool load_explorer_functions", start)]
     assert 'bool columns_loaded = load_columns(system,' in detail
@@ -253,8 +249,8 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'column_sizes_mixed_shared' in detail
     assert 'w.Key("column_storage")' in api
     assert 'compact_compressed_bytes' in api and 'wide_compressed_bytes' in api
-    render = ui[ui.index("function renderColumns("):ui.index("function renderStorage", ui.index("function renderColumns("))]
-    composition = ui[ui.index("function storageComposition("):ui.index("function renderOverview", ui.index("function storageComposition("))]
+    render = ui[ui.index("function columnRows("):ui.index("function structureCompressedBytes(")]
+    composition = ui[ui.index("function storageComposition("):ui.index("function buildStorageComposition", ui.index("function storageComposition("))]
     assert 'const compactParts = Number(storage.compact_parts || 0);' in composition
     assert 'const wideParts = Number(storage.wide_parts || 0);' in composition
     assert '["Wide", wideBytes, "wide"]' in composition
@@ -262,9 +258,8 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'detail.default_compression_codecs' in render
     assert '`${observedDefaults[0]} (default)`' in render
-    assert 'ctx.value == null ? "-" : fmtStorageBytes(ctx.value)' in ui
-    assert 'ctx.value == null ? "-" : fmtPercent(ctx.value)' in ui
-    assert 'applyGauge(td, ctx.value, 100' in ui
+    assert 'item.compressed == null ? DASH : fmtStorageBytes(item.compressed)' in render
+    assert 'item.percent == null ? DASH : fmtPercent(item.percent)' in render
     assert 'percentValue(compressed, tableFootprint)' in render
     assert 'Compact parts share one physical data stream' not in render
     assert 'Wide ratio' not in render and 'Wide weight' not in render
@@ -355,14 +350,13 @@ def test_graph_uses_full_object_names_hides_view_storage_metrics_and_enriches_di
     assert 'w.Key("disk_free_space")' in api
 
 
-def test_view_like_details_are_single_overview_and_lineage_tab_is_conditional() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    assert 'if (isViewLikeSummary(detail?.summary)) return ["Overview"];' in ui
-    assert 'if (visibleDependencies(detail).length) tabs.push("Lineage");' not in ui
+def test_view_like_details_have_no_preview_and_lineage_tab_is_conditional() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    tabs = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    assert 'if (!viewLike && !empty) tabs.push("Preview");' in tabs
+    assert 'if (loading || visibleDependencies(detail).length) tabs.push("Lineage");' in tabs
     assert 'container.appendChild(sectionTitle("CREATE statement"));' not in ui
-    overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
-    assert 'if (deps.length) renderDependencies(container, detail);' in overview
-    assert 'sectionTitle("Lineage")' not in overview
+    assert 'sectionTitle("Lineage")' not in ui
 
 
 def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:

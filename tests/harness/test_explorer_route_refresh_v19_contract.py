@@ -6,9 +6,9 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 def test_direct_route_loads_only_target_database_branch_then_retries_that_branch() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer.js")
     assert "function catalogContainsTable(payload, database, table)" in ui
-    refresh = ui[ui.index("async function refreshCatalog(force)"):ui.index("function summaryCard", ui.index("async function refreshCatalog(force)"))]
+    refresh = ui[ui.index("async function refreshCatalog(force)"):ui.index("const detailView = ", ui.index("async function refreshCatalog(force)"))]
     assert "await loadDatabaseTables(route.database, !!force);" in refresh
     assert "await loadDatabaseTables(route.database, true);" in refresh
     assert 'api.getExplorerCatalog(hostId, "", true)' not in refresh

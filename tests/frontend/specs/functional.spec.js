@@ -243,66 +243,132 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await page.getByText('weather_observations', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations');
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
 
-  // Overview merges footprint, lineage and schema/DDL. Schema and Lineage are
-  // not separate tabs; MergeTree operations are folded into Storage.
+  // Header: chips (engine, health, rows, size, parts) instead of a dotted
+  // sentence; no ingress rate.
+  const chips = page.locator('#explorerDetailMeta .explorerMetaChip');
+  await expect(chips.first()).toHaveText('Merge Tree');
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--health .explorerHealthDot--healthy')).toBeVisible();
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--rows')).toHaveText(/^[\d,]+ rows$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--size')).toHaveText(/on disk$/);
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--parts')).toHaveText(/^\d+ parts?$/);
+  await expect(page.locator('#explorerDetailMeta')).not.toContainText('rows/s');
+
+  // Columns first; tabs without content are hidden. Operations appears only
+  // when merges, mutations or writes exist, otherwise About says "Idle".
   const detailTabs = page.locator('#explorerDetailTabs').getByRole('tab');
-  await expect(detailTabs).toHaveText(['Overview', 'Data', 'Storage']);
-  await expect(page.locator('#explorerDetailContent .explorerScopeMeter--database .explorerScopeMeter__fill')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerScopeMeter--clickhouse')).toBeVisible();
-  const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
-  await expect(composition).toBeVisible();
-  await expect(composition).toContainText('Table storage');
-  await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
+  const tabNames = await detailTabs.allTextContents();
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
+  if (!tabNames.includes('Operations')) await expect(page.locator('.explorerAboutTile[data-tile="activity"]')).toContainText('Idle');
+  const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
+  await expect(columns).toBeVisible();
+  for (const header of ['Column', 'Type', 'Keys', 'Compressed', 'Ratio', '% table']) {
+    await expect(columns.locator('thead th', { hasText: header }).first()).toBeVisible();
+  }
+  const observationDate = columns.locator('tbody tr').filter({ hasText: 'observation_date' }).first();
+  await expect(observationDate.locator('.explorerBadge--order-by')).toBeVisible();
+  await expect(observationDate.locator('.explorerBadge--partition')).toBeVisible();
+  await expect(observationDate).toContainText(/MATERIALIZED\s*toDate\(observed_at\)/);
+  const temperature = columns.locator('tbody tr').filter({ hasText: 'temperature_c' }).first();
+  await expect(temperature).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B/);
+  await expect(columns.locator('.explorerStoragePercentCell').first()).toBeVisible();
+  // Numbering starts at 1 for every table.
+  await expect(columns.locator('tbody tr').first().locator('td').first()).toHaveText('1');
+
+  // About: value + context tiles beside the tab body.
+  const about = page.locator('#explorerDetailContent .explorerAbout');
+  await expect(about).toBeVisible();
+  await expect(about.locator('[data-tile="engine"]')).toContainText('Merge Tree');
+  await expect(about.locator('[data-tile="size"]')).toContainText(/rows/);
+  await expect(about.locator('[data-tile="sorting_key"]')).toContainText('station_id');
+  await expect(about.locator('[data-tile="ttl"]')).toContainText(/3 rules/);
+  await expect(about.locator('[data-tile="ttl"] li').nth(1)).toContainText(/60 d .*TO VOLUME/);
+  await expect(about.locator('[data-tile="storage_policy"]')).toContainText('fixture_tiered');
+  await expect(about.locator('[data-tile="share"]')).toContainText(/% of chdash_ui/);
+
+  const lineageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true });
+  await lineageTab.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/lineage\?view=browse$/);
   const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
   await expect(lineage).toBeVisible();
-  await expect(lineage.locator('.explorerDependencyGroup').filter({ hasText: 'Upstream' })).toContainText('chdash_ui.weather_buffer');
-  await expect(lineage.locator('.explorerDependencyGroup').filter({ hasText: 'Downstream' })).toContainText('chdash_ui.weather_daily_summary_mv');
+  // Same-database objects use their short name; the tooltip keeps the full one.
+  const upstream = lineage.locator('.explorerDependencyGroup[data-relation="upstream"] .explorerLineageChip').first();
+  await expect(upstream.locator('.explorerLineageChip__name')).toHaveText('weather_buffer');
+  await expect(upstream).toHaveAttribute('title', /^chdash_ui\.weather_buffer/);
+  await expect(upstream.locator('.explorerObjIcon--buffer')).toBeVisible();
+  await expect(lineage.locator('.explorerDependencyGroup[data-relation="downstream"]')).toContainText('weather_daily_summary_mv');
 
-  const dataTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true });
-  await dataTab.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/data\?view=browse$/);
+  const ddlTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true });
+  await ddlTab.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/ddl\?view=browse$/);
+  await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
+
+  const previewTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true });
+  await previewTab.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/preview\?view=browse$/);
   const explorerResults = page.locator('#explorerDetailContent .tableWrap .resultTable');
   await expect(explorerResults).toBeVisible({ timeout: 12_000 });
   await expect(explorerResults).toContainText('WX-');
   await expect(explorerResults).toContainText(/Paris|Reykjavik|Lisbon/);
   await expect(explorerResults).toContainText('synthetic-weather');
+  // Row count + limit, column type sub-header, short timestamps.
+  await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)');
+  await expect(explorerResults.locator('thead th[data-type="DateTime64(3)"]')).toHaveText('observed_at');
+  await expect(explorerResults.locator('tbody tr').first().locator('td').nth(1)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/);
+  await page.locator('.explorerSegmented__option', { hasText: /^50$/ }).click();
+  await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('50 rows (LIMIT 50)', { timeout: 12_000 });
+  await expect(explorerResults.locator('tbody tr')).toHaveCount(50);
+  await page.locator('.explorerSegmented__option', { hasText: /^100$/ }).click();
+  await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)', { timeout: 12_000 });
 
   const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true });
   await storageTab.click();
   await expect(storageTab).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/storage\?view=browse$/);
-  // Per-column storage accounting lives in the Storage tab's shared result table.
-  const columnStorage = page.locator('#explorerDetailContent .explorerStorageResultTable--columns');
-  await expect(columnStorage).toBeVisible();
-  await expect(columnStorage.locator('tbody tr').filter({ hasText: 'temperature_c' }).first()).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B/);
-  await expect(columnStorage.locator('.explorerStoragePercentCell').first()).toBeVisible();
-  // The former Operations surface is merged into Storage for MergeTree tables.
-  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
-  await expect(page.locator('#explorerDetailContent')).toContainText('Merge activity');
-  // An old /operations deep link for a MergeTree table falls back to Overview.
-  await page.goto('/explorer/chdash_ui/weather_observations/operations');
+  const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
+  await expect(composition).toBeVisible();
+  await expect(composition).toContainText('Table storage');
+  await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
+  // Storage: disks, parts, partitions, indexes, projections (no merges/ingestion).
+  for (const section of ['disks', 'parts', 'partitions', 'indexes', 'projections']) {
+    await expect(page.locator(`#explorerDetailContent .explorerSection[data-section="${section}"]`)).toBeVisible();
+  }
+  await expect(page.locator('#explorerDetailContent .explorerSection[data-section="merges"]')).toHaveCount(0);
+  const parts = page.locator('#explorerDetailContent .explorerTable--parts');
+  const partHeaders = (await parts.locator('thead th').allTextContents()).map((text) => text.trim());
+  expect(partHeaders).toEqual(['#', 'Part', 'Partition', 'Disk', 'Rows', 'Bytes', 'Marks', 'Files', 'Level', 'Age', 'State']);
+  // Headers are fully readable, never ellipsized.
+  const clipped = await parts.locator('thead th').evaluateAll((cells) => cells.filter((th) => th.scrollWidth > th.clientWidth + 1).length);
+  expect(clipped).toBe(0);
+  const indexes = page.locator('#explorerDetailContent .explorerStorageResultTable--indexes');
+  await expect(indexes.locator('tbody tr').first().locator('td').first()).toHaveText('1');
+  // Collapsible sections.
+  const partsSummary = page.locator('#explorerDetailContent .explorerSection[data-section="parts"] > summary');
+  await partsSummary.click();
+  await expect(parts).toBeHidden();
+  await partsSummary.click();
+  await expect(parts).toBeVisible();
+
+  // An old /data deep link opens Preview; an old /schema one opens Columns.
+  await page.goto('/explorer/chdash_ui/weather_observations/data');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/preview\?view=browse$/);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true })).toHaveAttribute('aria-selected', 'true');
 
   await page.goto('/explorer/chdash_ui/weather_observations/schema');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
-  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
+  await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toBeVisible();
 
-  const reloadedData = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true });
-  await reloadedData.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/data\?view=browse$/);
+  const reloadedDdl = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true });
+  await reloadedDdl.click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/ddl\?view=browse$/);
   await page.goBack();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Columns', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toContainText('temperature_c');
   await page.locator('#explorerSectionSelectButton').click();
   await page.locator('#explorerFunctionsSectionButton').click();
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
@@ -311,63 +377,131 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   expect(String(firstFunctionName || '').toLowerCase().startsWith('array')).toBeTruthy();
 });
 
-test('explorer renders MV lineage, engine-specific tables, TTL and merged schema/DDL', async ({ page }) => {
+test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);
 
   await page.getByText('weather_daily_summary_mv', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Materialized View');
-  await expect(page.locator('#explorerDetailContent')).toContainText('Upstream');
-  await expect(page.locator('#explorerDetailContent')).toContainText('weather_observations');
-  await expect(page.locator('#explorerDetailContent')).toContainText('Downstream');
-  await expect(page.locator('#explorerDetailContent')).toContainText('weather_daily_summary');
-  await expect(page.locator('#explorerDetailTabs')).toBeHidden();
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Columns', 'Lineage', 'DDL']);
+  // About names the MV target as a lineage chip.
+  await expect(page.locator('.explorerAboutTile[data-tile="target"] .explorerLineageChip')).toContainText('weather_daily_summary');
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true }).click();
+  await expect(page.locator('#explorerDetailContent .explorerDependencyGroup[data-relation="upstream"]')).toContainText('weather_observations');
+  await expect(page.locator('#explorerDetailContent .explorerDependencyGroup[data-relation="downstream"]')).toContainText('weather_daily_summary');
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerDdlGutter')).toBeVisible();
   await expect(page.locator('#explorerDetailContent .explorerDdlCopy')).toBeVisible();
 
   await page.getByText('weather_observations', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText(/(?:INTERVAL\s+60\s+DAY|toIntervalDay\(60\)).*TO VOLUME/i);
   await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
-  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toBeVisible();
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Schema', exact: true })).toHaveCount(0);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true })).toHaveCount(0);
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
-  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns tbody tr').filter({ hasText: 'temperature_c' }).first()).toBeVisible();
+  await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true })).toHaveCount(0);
   // TTL moves parts to the cold volume, so the storage policy is tiered.
-  await expect(page.locator('#explorerDetailContent .explorerStorageMetaLine')).toContainText('fixture_tiered');
+  await expect(page.locator('.explorerAboutTile[data-tile="storage_policy"]')).toContainText('fixture_tiered');
 
   await page.getByText('memory_weather', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Memory');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/RAM/);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Operations']);
-  await expect(page.locator('#explorerDetailContent .explorerScopeMeters')).toHaveCount(0);
+  const memoryTabs = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
+  expect(memoryTabs.filter((name) => !['Operations', 'Lineage'].includes(name))).toEqual(['Columns', 'Preview', 'DDL']);
+  expect(memoryTabs).not.toContain('Storage');
+  await expect(page.locator('.explorerAboutTile[data-tile="share"]')).toHaveCount(0);
 
   await page.getByText('weather_buffer', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Buffer');
-  await expect(page.locator('#explorerDetailContent .explorerDependencyGroup').filter({ hasText: 'Downstream' })).toContainText('chdash_ui.weather_observations');
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Operations']);
+  await expect(page.locator('.explorerAboutTile[data-tile="target"]')).toContainText('Flushes to');
+  await expect(page.locator('.explorerAboutTile[data-tile="target"] .explorerLineageChip')).toContainText('weather_observations');
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true }).click();
+  await expect(page.locator('#explorerDetailContent .explorerDependencyGroup[data-relation="downstream"]')).toContainText('weather_observations');
 
-  // Log-family tables are disk-backed: they now get a Storage tab limited to
-  // real storage + ingestion surfaces (no MergeTree merges/parts sections).
+  // Log-family tables are disk-backed: a Storage tab with their disks only
+  // (no parts, partitions, merges or composition bar).
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Tiny Log');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/on disk/);
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Storage']);
-  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
-  await expect(page.locator('#explorerDetailContent .explorerStorageMetaLine')).toContainText(/Storage medium\s*Disk/);
-  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
-  await expect(page.locator('#explorerDetailContent')).not.toContainText('Merge activity');
-  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerSection[data-section="disks"]')).toContainText('storage medium');
+  await expect(page.locator('#explorerDetailContent .explorerSection[data-section="parts"]')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerTable--disks thead')).not.toContainText('Parts');
 
   await page.getByText('station_dictionary', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('Dictionary');
-  // Dictionary memory footprint is reported in the header meta ("<bytes> RAM").
+  // Dictionary memory footprint is reported in the header ("<bytes> RAM").
   await expect(page.locator('#explorerDetailMeta')).toContainText(/\d+(?:\.\d+)?\s*[KMG]?B RAM/);
-  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('CREATE DICTIONARY');
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true })).toHaveCount(0);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true })).toHaveCount(0);
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true }).click();
+  await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('CREATE DICTIONARY');
 });
+
+test('replicated and Distributed tables show replication first and their local table', async ({ page }) => {
+  await openApp(page);
+  await page.goto('/explorer/chdash_repl/replicated_events/columns?view=browse');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events', { timeout: 15_000 });
+  // Replication banner at the top of the card.
+  const banner = page.locator('#explorerSummaryCards .explorerReplicaBanner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(/Replicated\s*2\/2 replicas active · queue \d+ · delay \d+ s/);
+  await expect(page.locator('.explorerAboutTile[data-tile="replicas"]')).toContainText('2/2 active');
+  await expect(page.locator('.explorerAboutTile[data-tile="replicas"] .explorerReplicaChip')).toHaveCount(2);
+  // The tree marks replicated tables with a health dot.
+  await expect(page.locator('.explorerTreeObject[data-table="replicated_events"] .explorerTreeHealthDot')).toBeVisible();
+  await banner.getByRole('button', { name: 'Details' }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_repl\/replicated_events\/operations\?view=browse$/);
+  const replication = page.locator('#explorerDetailContent .explorerSection[data-section="replication"]');
+  await expect(replication).toBeVisible();
+  await expect(replication).toContainText('Keeper path');
+  // Empty sections collapse into one muted line.
+  await expect(page.locator('#explorerDetailContent .explorerIdleLine')).toContainText('Replication queue empty');
+
+  await page.goto('/explorer/chdash_repl/replicated_events_all/columns?view=browse');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events_all', { timeout: 15_000 });
+  await expect(page.locator('#explorerSummaryCards')).toBeHidden();
+  // No meaningless 0 B size for a Distributed table, no byte columns.
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip--size')).toHaveCount(0);
+  await expect(page.locator('#explorerDetailContent .explorerColumnsTable thead')).not.toContainText('Compressed');
+  const local = page.locator('.explorerAboutTile[data-tile="local_table"]');
+  await expect(local).toContainText('replicated_events');
+  await expect(local).toContainText('chdash_cluster');
+  await expect(page.locator('.explorerAboutTile[data-tile="cluster"]')).toContainText(/1 shard · 2 replicas/);
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true }).click();
+  const route = page.locator('#explorerDetailContent .explorerLineage .explorerLineageChip[data-kind="distributed_route"]');
+  await expect(route).toContainText('replicated_events');
+  await expect(route).toContainText('on chdash_cluster');
+  await route.click();
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events');
+});
+
+for (const scheme of ['dark', 'light']) {
+  test(`table card on a phone (${scheme}): About above the tabs body, no page overflow, scrollable tables`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.addInitScript((theme) => { try { localStorage.setItem('chdash.theme', theme); } catch (_) {} }, scheme);
+    await openApp(page);
+    await page.goto('/explorer/chdash_ui/weather_observations/columns?view=browse');
+    await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
+    const about = page.locator('#explorerDetailContent .explorerAbout');
+    const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
+    await expect(columns).toBeVisible();
+    // Narrow pane: About sits above the tab body, collapsed to its first tiles.
+    expect((await about.boundingBox()).y).toBeLessThan((await columns.boundingBox()).y);
+    await expect(about).toHaveClass(/is-collapsed/);
+    await expect(about.locator('.explorerAboutTile').nth(4)).toBeHidden();
+    await about.getByRole('button', { name: /Show all/ }).click();
+    await expect(about.locator('.explorerAboutTile').nth(4)).toBeVisible();
+    // Wide tables scroll inside their own wrapper, never the page.
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    const chipsFit = await page.locator('#explorerDetailMeta .explorerMetaChip').evaluateAll((chips) => chips.every((chip) => chip.getBoundingClientRect().right <= window.innerWidth));
+    expect(chipsFit).toBe(true);
+    // Health dot uses the theme's status colour.
+    const dot = await page.locator('#explorerDetailMeta .explorerHealthDot').evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(dot).toBe(scheme === 'light' ? 'rgb(21, 128, 61)' : 'rgb(52, 211, 153)');
+  });
+}
 
 test('graph table click keeps graph focus, browser selection and URL on the same table', async ({ page }) => {
   await openApp(page);
@@ -379,7 +513,7 @@ test('graph table click keeps graph focus, browser selection and URL on the same
   // The graph is a canvas, so use the exported selection bridge to exercise the
   // same path as a logical-node click without relying on fragile pixel positions.
   await page.evaluate(() => window.ChDash.explorer.selectTable('chdash_ui', 'wide_types'));
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/overview\?view=graph&graph=lineage&depth=1$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns\?view=graph&graph=lineage&depth=1$/);
   await page.locator('#explorerModeSelectButton').click();
   await page.locator('#explorerListModeButton').click();
   await expect(page.locator('.explorerTreeObject.is-selected')).toContainText('wide_types');
@@ -479,7 +613,7 @@ test('database detail lists every object under the storage band, sorts each colu
   }
 
   await objects.locator('.explorerDatabaseObjectsTable__open', { hasText: /^weather_observations$/ }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/overview\?view=browse$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
   await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
 });
@@ -598,7 +732,9 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   await page.getByText('wide_types', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 
-  // Overview: flat part-format / projection / index composition of the table footprint.
+  // Storage: flat part-format / projection / index composition of the table footprint.
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/storage\?view=browse$/);
   const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
   await expect(composition).toBeVisible();
   await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
@@ -606,26 +742,27 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
   expect(legendLabels).toEqual(expect.arrayContaining(['Projections', 'Indexes']));
   expect(legendLabels.some((label) => label === 'Wide' || label === 'Compact')).toBeTruthy();
 
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--indexes')).toContainText('idx_wide_types_state');
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections')).toContainText('prj_wide_types_state');
+  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections .explorerStoragePercentCell').first()).toHaveText(/%/);
+
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true }).click();
   const keywordTexts = await page.locator('#explorerDetailContent .explorerDdl .tok-kw').allTextContents();
   for (const keyword of ['INDEX', 'PROJECTION', 'TYPE', 'GRANULARITY']) {
     expect(keywordTexts.map((value) => value.toUpperCase())).toContain(keyword);
   }
 
-  // Storage: per-column table with collapsible Tuple children, plus separate
-  // index and projection accounting tables.
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/storage\?view=browse$/);
+  // Columns: per-column table with collapsible Tuple children.
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Columns', exact: true }).click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns\?view=browse$/);
   const columnStorage = page.locator('#explorerDetailContent .explorerStorageResultTable--columns');
   await expect(columnStorage).toBeVisible();
   const tupleChild = columnStorage.locator('tbody tr').filter({ hasText: 'tuple_value.code' }).first();
   await expect(tupleChild).toBeHidden();
   await columnStorage.getByRole('button', { name: 'Expand tuple_value', exact: true }).click();
   await expect(tupleChild).toBeVisible();
-  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--indexes')).toContainText('idx_wide_types_state');
-  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections')).toContainText('prj_wide_types_state');
-  await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--projections .explorerStoragePercentCell').first()).toHaveText(/%/);
 
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true }).click();
   const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
   await expect(previewTable).toBeVisible({ timeout: 12_000 });
   const previewHeaders = await previewTable.locator('thead th').allTextContents();
@@ -1173,7 +1310,7 @@ test('inline row details open from the Explorer data preview', async ({ page }) 
   await openExplorerDatabase(page);
   await page.getByText('wide_types', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Data', exact: true }).click();
+  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true }).click();
   const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
   await expect(previewTable).toBeVisible({ timeout: 12_000 });
   const rows = previewTable.locator(`tbody ${dataRowsSelector}`);

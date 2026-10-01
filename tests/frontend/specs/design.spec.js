@@ -174,39 +174,37 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations');
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
 
-  // MergeTree tables expose Overview (footprint + lineage + DDL), Data and
-  // Storage (storage + former Operations sections).
-  await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Overview', 'Data', 'Storage']);
+  // MergeTree tables open on Columns; Preview, Storage, Lineage and DDL are
+  // their own tabs, and the About panel sits beside (or above) every tab.
+  const tabNames = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
+  expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
   for (const [name, capture] of [
-    ['Overview', 'explorer-table-overview-schema'],
-    ['Data', 'explorer-table-data'],
+    ['Columns', 'explorer-table-columns'],
+    ['Preview', 'explorer-table-preview'],
     ['Storage', 'explorer-table-storage'],
+    ['Lineage', 'explorer-table-lineage'],
+    ['DDL', 'explorer-table-ddl'],
   ]) {
     const tab = page.locator('#explorerDetailTabs').getByRole('tab', { name, exact: true });
     await tab.click();
     await expect(tab).toHaveAttribute('aria-selected', 'true');
-    if (name === 'Overview') await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
-    if (name === 'Data') await expect(page.locator('#explorerDetailContent .resultTable tbody tr').first()).toBeVisible({ timeout: 12_000 });
-    if (name === 'Storage') await expect(page.locator('#explorerDetailContent .explorerStorageResultTable--columns')).toBeVisible();
+    await expect(page.locator('#explorerDetailContent .explorerAbout')).toBeVisible();
+    if (name === 'Columns') await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toBeVisible();
+    if (name === 'Preview') await expect(page.locator('#explorerDetailContent .resultTable tbody tr').first()).toBeVisible({ timeout: 12_000 });
+    if (name === 'Storage') await expect(page.locator('#explorerDetailContent .explorerTable--parts')).toBeVisible();
+    if (name === 'Lineage') await expect(page.locator('#explorerDetailContent .explorerDependencyMatrix')).toContainText('weather_daily_summary_mv');
+    if (name === 'DDL') await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
     await captureState(page, testInfo, capture);
   }
 
-  // Lineage is rendered inside Overview rather than as its own tab.
-  await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Overview', exact: true }).click();
-  const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
-  await expect(lineage).toBeVisible();
-  await expect(lineage).toContainText('chdash_ui.weather_daily_summary_mv');
-  await lineage.scrollIntoViewIfNeeded();
-  await captureState(page, testInfo, 'explorer-table-lineage');
-
-  // Operations remains a tab for non-disk engines such as Buffer.
-  await page.getByText('weather_buffer', { exact: true }).first().click();
-  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_buffer');
-  const operations = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Operations', exact: true });
-  await operations.click();
-  await expect(operations).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#explorerDetailContent')).toContainText('Ingestion activity');
+  // Replicated table: replication banner first, Operations tab with sections.
+  await page.goto('/explorer/chdash_repl/replicated_events/operations?view=browse');
+  await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events', { timeout: 15_000 });
+  await expect(page.locator('#explorerSummaryCards .explorerReplicaBanner')).toBeVisible();
+  await expect(page.locator('#explorerDetailContent .explorerSection[data-section="replication"]')).toBeVisible();
   await captureState(page, testInfo, 'explorer-table-operations');
+  await page.goto('/explorer/chdash_ui/weather_observations/columns?view=browse');
+  await expect(fixture).toBeVisible({ timeout: 15_000 });
 
   await fixture.click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');

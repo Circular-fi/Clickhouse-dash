@@ -274,6 +274,19 @@ void write_replication(rapidjson::Writer<rapidjson::StringBuffer>& w, const Expl
   w.Key("session_expired"); w.Bool(replication.session_expired);
   w.Key("replica_name"); w.String(replication.replica_name.c_str());
   w.Key("zookeeper_path"); w.String(replication.zookeeper_path.c_str());
+  w.Key("is_leader"); w.Bool(replication.is_leader);
+  w.Key("inserts_in_queue"); w.Uint64(replication.inserts_in_queue);
+  w.Key("merges_in_queue"); w.Uint64(replication.merges_in_queue);
+  w.Key("log_lag"); w.Uint64(replication.log_lag);
+  w.Key("last_queue_update"); w.String(replication.last_queue_update.c_str());
+  w.Key("replicas"); w.StartArray();
+  for (const auto& [name, active] : replication.replicas) {
+    w.StartObject();
+    w.Key("name"); w.String(name.c_str());
+    w.Key("active"); w.Bool(active);
+    w.EndObject();
+  }
+  w.EndArray();
   w.EndObject();
 }
 
@@ -482,6 +495,12 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
     w.Key("uncompressed_bytes"); write_optional_u64(w, table.uncompressed_bytes);
     w.Key("active_parts"); w.Uint64(table.active_parts);
     w.Key("last_part_time"); w.String(table.last_part_time.c_str());
+    if (table.replication.available) {
+      // Local replica state only (no Keeper read): read-only / expired session
+      // is an error, a long queue or delay a warning.
+      w.Key("replicated"); w.Bool(true);
+      w.Key("health"); w.String(table.health.c_str());
+    }
     w.EndObject();
   }
   w.EndArray();
@@ -719,6 +738,11 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
     w.Key("default_expression"); w.String(column.default_expression.c_str());
     w.Key("codec"); w.String(column.codec_expression.c_str());
     w.Key("ttl_expression"); w.String(column.ttl_expression.c_str());
+    w.Key("comment"); w.String(column.comment.c_str());
+    w.Key("is_in_partition_key"); w.Bool(column.in_partition_key);
+    w.Key("is_in_sorting_key"); w.Bool(column.in_sorting_key);
+    w.Key("is_in_primary_key"); w.Bool(column.in_primary_key);
+    w.Key("is_in_sampling_key"); w.Bool(column.in_sampling_key);
     w.Key("is_subcolumn"); w.Bool(column.is_subcolumn);
     w.Key("parent_name"); w.String(column.parent_name.c_str());
     w.Key("compressed_bytes"); write_optional_u64(w, column.compressed_bytes);
@@ -877,11 +901,21 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
     w.Key("database"); w.String(item.database.c_str());
     w.Key("table"); w.String(item.table.c_str());
     w.Key("relation"); w.String(item.relation.c_str());
+    w.Key("kind"); w.String(item.kind.c_str());
+    w.Key("engine"); w.String(item.engine.c_str());
     w.EndObject();
   }
   w.EndArray();
 
   w.Key("ddl"); w.String(detail.create_table_query.c_str());
+  w.Key("table_ttl"); w.String(detail.table_ttl.c_str());
+  if (!detail.distributed_cluster.empty()) {
+    w.Key("distributed"); w.StartObject();
+    w.Key("cluster"); w.String(detail.distributed_cluster.c_str());
+    w.Key("database"); w.String(detail.distributed_database.c_str());
+    w.Key("table"); w.String(detail.distributed_table.c_str());
+    w.EndObject();
+  }
   w.Key("unavailable_sections"); w.StartArray();
   for (const auto& section : detail.unavailable_sections) w.String(section.c_str());
   w.EndArray();

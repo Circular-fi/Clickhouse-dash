@@ -487,7 +487,7 @@
       return;
     }
     const base = String(window.__CHDASH_BASE_PATH__ || "/").replace(/\/+$/, "");
-    window.location.assign(`${base}/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}/overview`);
+    window.location.assign(`${base}/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}/columns`);
   }
 
   function setScope(scope, { notify = true } = {}) {

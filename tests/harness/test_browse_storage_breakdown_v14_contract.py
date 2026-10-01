@@ -7,7 +7,7 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_browse_uses_flat_storage_breakdown_and_share_bars() -> None:
+def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     assert "explorerKvGrid" not in ui
@@ -15,15 +15,12 @@ def test_browse_uses_flat_storage_breakdown_and_share_bars() -> None:
     assert "explorerKvGrid" not in css
     assert "explorerSchemaList" not in css
     assert 'ns.results?.createStaticResultTable?.({' in ui
-    assert 'const displayName = String(item.name || "\\u2014");' in ui
-    assert 'renderStorageMetricTable(container, "Indexes", "indexes"' in ui
-    assert 'renderStorageMetricTable(container, "Projections", "projections"' in ui
-    assert 'renderTableFootprint(container, detail);' in ui
-    assert 'explorerScopeMeters' in ui
-    assert 'Table / Database' in ui and 'Table / ClickHouse' in ui
-    assert 'className = "explorerPercentBar"' not in ui  # built through the shared node() helper
-    assert 'explorerPercentBar explorerPercentBar--${variant}' in ui
-    assert '.explorerPercentBar__fill' in css
+    assert 'renderStructures(body, indexes, "indexes")' in ui
+    assert 'renderStructures(body, projections, "projections")' in ui
+    # Table / database and table / server shares are one About tile.
+    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in ui
+    assert "of all databases" in ui
+    assert ".explorerAboutTile" in css
 
 
 def test_tuple_subcolumns_and_structure_sizes_are_loaded_from_clickhouse_metadata() -> None:

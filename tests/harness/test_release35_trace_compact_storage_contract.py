@@ -15,18 +15,19 @@ def test_non_storing_toggle_is_required_for_non_storing_focus() -> None:
 
 
 def test_storage_copy_and_extra_heading_are_removed() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     assert "Storage values are local-replica values. Capacity and paths are only exposed for disks used by this visible table." not in ui
-    storage = ui[ui.index("function renderStorageCombined"):ui.index("function renderOperations")]
+    storage = ui[ui.index("function renderStorageTab"):ui.index("function ingestionState")]
     assert 'sectionTitle("Columns, indexes & projections")' not in storage
 
 
 def test_tuple_subcolumns_do_not_consume_row_numbers() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
     assert "let topLevelColumnPosition = 0;" in ui
-    assert "const displayPosition = c.is_subcolumn ? null : ++topLevelColumnPosition;" in ui
-    assert 'rowIndexValue: (row) => row?.__explorerStorageItem?.position ?? ""' in ui
+    assert "position: c.is_subcolumn ? null : ++topLevelColumnPosition," in ui
+    assert 'rowIndexValue: (item) => item?.position ?? ""' in ui
+    assert "rowIndexValue: rowIndexValue ? (row) => rowIndexValue(row?.__explorerItem) : null," in ui
     assert "rowIndexValue = null" in results
 
 

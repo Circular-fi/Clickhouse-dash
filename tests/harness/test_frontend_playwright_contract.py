@@ -30,7 +30,7 @@ def test_frontend_functional_and_design_are_separate_playwright_suites():
     assert "explorer opens fixture" in functional
     assert "captureState" in design
     assert "query-results" in design
-    assert "explorer-table-overview" in design
+    assert "explorer-table-columns" in design
     for popup_state in [
         "query-run-menu",
         "editor-options-menu",
@@ -40,9 +40,9 @@ def test_frontend_functional_and_design_are_separate_playwright_suites():
         "query-library",
         "analysis-pipeline",
         "analysis-trace",
-        "explorer-table-overview",
-        "explorer-table-overview-schema",
-        "explorer-table-data",
+        "explorer-table-columns",
+        "explorer-table-preview",
+        "explorer-table-ddl",
         "explorer-table-lineage",
         "explorer-table-storage",
         "explorer-table-operations",

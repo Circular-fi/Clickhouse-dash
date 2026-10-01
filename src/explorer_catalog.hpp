@@ -5,6 +5,7 @@
 #include <clickhouse/client.h>
 
 #include <cstdint>
+#include <utility>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -36,6 +37,14 @@ struct ExplorerReplication {
   bool session_expired = false;
   std::string replica_name;
   std::string zookeeper_path;
+  // Table detail only (one system.replicas row of the opened table).
+  bool is_leader = false;
+  uint64_t inserts_in_queue = 0;
+  uint64_t merges_in_queue = 0;
+  uint64_t log_lag = 0;  // log_max_index - log_pointer, entries not yet fetched
+  std::string last_queue_update;
+  // replica_is_active: every replica registered in Keeper and whether it is up.
+  std::vector<std::pair<std::string, bool>> replicas;
 };
 
 struct ExplorerTableSummary {
@@ -149,6 +158,11 @@ struct ExplorerColumnInfo {
   std::string default_expression;
   std::string codec_expression;
   std::string ttl_expression;
+  std::string comment;
+  bool in_partition_key = false;
+  bool in_sorting_key = false;
+  bool in_primary_key = false;
+  bool in_sampling_key = false;
   bool is_subcolumn = false;
   std::string parent_name;
   std::optional<uint64_t> compressed_bytes;
@@ -239,6 +253,12 @@ struct ExplorerDependencyInfo {
   std::string database;
   std::string table;
   std::string relation;
+  // What links the two objects: materialized_view, view, buffer,
+  // distributed_route or dependency (system.tables.dependencies_*).
+  std::string kind = "dependency";
+  // Engine of the related object, read from system.tables once its name has
+  // passed the runner visibility check (empty when it cannot be resolved).
+  std::string engine;
 };
 
 struct ExplorerTopologyNode {
@@ -284,6 +304,13 @@ struct ExplorerTableDetail {
   std::optional<uint64_t> database_footprint_bytes;
   std::optional<uint64_t> clickhouse_footprint_bytes;
   std::string create_table_query;
+  // Top-level TTL clause of create_table_query (rules separated by top-level
+  // commas), without the column-level TTLs inside the column list.
+  std::string table_ttl;
+  // Distributed only: the engine's cluster / local database / local table.
+  std::string distributed_cluster;
+  std::string distributed_database;
+  std::string distributed_table;
   // Actual default codecs observed on active MergeTree parts. A column with no
   // explicit CODEC() uses one of these part defaults; keeping the set avoids the
   // misleading browser label "server default" when ClickHouse can tell us what

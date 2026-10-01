@@ -17580,3 +17580,649 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 }
 .traceSpanColumns__add input:focus { outline: none; border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceSpanColumns__note { display: block; margin-top: 6px; color: var(--muted); font-size: 10.5px; }
+
+/* ==========================================================================
+   Explorer detail: the table card of app_explorer_detail.js (header chips,
+   replication banner, tab body + About panel, Columns / Preview / Storage /
+   Operations / Lineage tabs). Typography follows the Explorer scale: tables
+   13px, section titles 13px semibold above their table, monospace only for
+   types, expressions and identifiers.
+   ========================================================================== */
+:root {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+  --exd-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --exd-ok: #15803d;
+    --exd-warn: #b45309;
+    --exd-err: #dc2626;
+  }
+}
+html[data-theme="dark"] {
+  --exd-ok: #34d399;
+  --exd-warn: #fbbf24;
+  --exd-err: #f87171;
+}
+html[data-theme="light"] {
+  --exd-ok: #15803d;
+  --exd-warn: #b45309;
+  --exd-err: #dc2626;
+}
+
+/* Header: name, then one row of chips instead of a dotted sentence. */
+#explorerDetail .explorerDetailMeta {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.explorerMetaChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.explorerMetaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 1px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radiusPill);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.explorerMetaChip--engine {
+  border-color: color-mix(in srgb, var(--accentBorder) 42%, var(--border));
+}
+.explorerHealthDot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.explorerHealthDot--healthy { background: var(--exd-ok); }
+.explorerHealthDot--warning { background: var(--exd-warn); }
+.explorerHealthDot--error { background: var(--exd-err); }
+.explorerTreeHealthDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* Replication banner: first thing under the header of a replicated table. */
+.explorerSummaryCards.explorerSummaryCards--banner {
+  display: block;
+  margin-top: 10px;
+}
+.explorerReplicaBanner {
+  --exd-state: var(--exd-ok);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--exd-state) 38%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--exd-state) 8%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.explorerReplicaBanner--warning { --exd-state: var(--exd-warn); }
+.explorerReplicaBanner--error { --exd-state: var(--exd-err); }
+.explorerReplicaBanner__title { font-weight: 700; }
+.explorerReplicaBanner__replica { color: var(--muted); }
+.explorerReplicaBanner__open {
+  margin-left: auto;
+  appearance: none;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.explorerReplicaBanner__open:hover { border-color: var(--accentBorder); }
+
+#explorerDetailTabs .explorerDetailTab { font-size: 13px; }
+
+/* Tab body + About panel; the panel moves above the body on narrow panes. */
+.explorerDetailContent { container: explorerCard / inline-size; }
+.explorerCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 248px;
+  gap: 16px;
+  align-items: start;
+}
+.explorerCard__main { min-width: 0; }
+.explorerAbout {
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+}
+.explorerAbout__title {
+  margin: 0 0 6px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+}
+.explorerAbout__tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.explorerAboutTile {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.explorerAboutTile__label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.explorerAboutTile__value {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.explorerAboutTile__value.is-code {
+  font-family: var(--exd-mono);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.explorerAboutTile__context {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.explorerAboutTile__rules {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font: 12px/1.45 var(--exd-mono);
+  overflow-wrap: anywhere;
+}
+.explorerAboutTile__rules li::marker { color: var(--muted); }
+.explorerAboutTile__replicas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+.explorerReplicaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.explorerAboutTile__link,
+.explorerAbout__toggle {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-top: 3px;
+  color: var(--accentBorder);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.explorerAboutTile__link:hover,
+.explorerAbout__toggle:hover { text-decoration: underline; }
+.explorerAboutTile .explorerLineageChip { margin-top: 4px; }
+.explorerAboutTile__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+.explorerAbout__toggle { display: none; margin-top: 8px; }
+
+@container explorerCard (max-width: 960px) {
+  .explorerCard {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .explorerAbout { order: -1; }
+  .explorerAbout__tiles {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px 14px;
+  }
+  .explorerAboutTile--wide { grid-column: 1 / -1; }
+  .explorerAbout.is-collapsed .explorerAboutTile:nth-child(n+5) { display: none; }
+  .explorerAbout__toggle { display: inline-flex; }
+}
+
+/* One empty style for the whole card: a muted line. */
+.explorerEmptyNote,
+.explorerIdleLine {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 4px 0;
+}
+.explorerIdleLine {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.explorerCard__main > .explorerIdleLine:first-child,
+.explorerStorageCompositionCard + .explorerIdleLine {
+  margin-top: 0;
+  padding-top: 4px;
+  border-top: 0;
+}
+
+/* Collapsible sections (Storage, Operations): title + count above the table. */
+.explorerSection + .explorerSection { margin-top: 16px; }
+.explorerSection__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.explorerSection__summary::-webkit-details-marker { display: none; }
+.explorerSection__summary::before {
+  content: "\203a";
+  display: inline-block;
+  width: 10px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+.explorerSection[open] > .explorerSection__summary::before { transform: rotate(90deg); }
+.explorerSection:not([open]) > .explorerSection__summary { margin-bottom: 0; }
+.explorerSection__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.explorerSection__note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.explorerSection__facts {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Shared result tables of the card: 13px, readable headers, natural widths. */
+.explorerCard .explorerTable { margin-top: 0; }
+.explorerCard .explorerTable .resultTable {
+  font-size: var(--explorer-table-font, 13px);
+  font-weight: 450;
+}
+.explorerCard .explorerTable .resultTable thead th {
+  padding: 7px 8px;
+  padding-right: 1.35rem;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.explorerCard .explorerTable .resultTable thead th.resultTable__rowIndex {
+  padding-right: 0.5rem;
+}
+.explorerCard .explorerTable .resultTable thead th.explorerTable__numHead { text-align: right; }
+.explorerCard .explorerTable .resultTable tbody td { padding: 5px 8px; }
+.explorerCard .explorerTable .resultTable tbody td.resultTable__rowIndex {
+  padding: 5px 6px;
+  color: var(--muted);
+}
+.explorerCard .explorerTable .resultTable tbody td.resultTable__gaugeCell {
+  min-width: 6.5rem;
+}
+.explorerCell--code,
+.explorerColumns__type,
+.explorerColumns__codec,
+.explorerColumns__expr {
+  font-family: var(--exd-mono);
+  font-size: 12px;
+}
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__type {
+  max-width: 13rem;
+  color: color-mix(in srgb, var(--text) 86%, var(--muted));
+}
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__codec { max-width: 12rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__name {
+  min-width: 9rem;
+  max-width: 19rem;
+  font-weight: 600;
+  white-space: normal;
+}
+.explorerColumns__typeName,
+.explorerColumns__default {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerColumns__default { margin-top: 2px; }
+.explorerColumns__comment {
+  display: -webkit-box;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.explorerColumns__expr { margin-left: 6px; }
+.explorerCard .explorerTable .resultTable tbody td.explorerColumns__keys { white-space: nowrap; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--part { max-width: 14rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--partition { max-width: 10rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--disk { max-width: 9rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--path { max-width: 18rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--expr { max-width: 22rem; }
+.explorerCard .explorerTable .resultTable tbody td.explorerCell--message { max-width: 26rem; }
+
+.explorerBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.explorerBadge + .explorerBadge { margin-left: 4px; }
+.explorerBadge--key {
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
+  background: color-mix(in srgb, var(--accentBorder) 11%, transparent);
+  color: var(--text);
+}
+.explorerBadge--partition {
+  border-color: color-mix(in srgb, #8b5cf6 50%, var(--border));
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+}
+.explorerBadge--sample {
+  border-color: color-mix(in srgb, #14b8a6 50%, var(--border));
+  background: color-mix(in srgb, #14b8a6 12%, transparent);
+}
+.explorerBadge--active,
+.explorerBadge--pending {
+  --exd-state: var(--exd-ok);
+  border-color: color-mix(in srgb, var(--exd-state) 45%, var(--border));
+  color: var(--exd-state);
+}
+.explorerBadge--pending { --exd-state: var(--exd-warn); }
+
+/* Storage tab: composition card above the sections. */
+.explorerCard .explorerStorageCompositionCard {
+  margin-bottom: 14px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+}
+.explorerCard .explorerStorageCompositionCard__label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+.explorerCard .explorerStorageCompositionCard__bytes { font-size: 13px; }
+.explorerCard .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
+  font-size: 12px;
+}
+
+/* Operations: ingestion as a 2 x 3 grid, replication as a key / value list. */
+.explorerIngestionTable {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.explorerIngestionTable th,
+.explorerIngestionTable td {
+  padding: 5px 18px 5px 0;
+  text-align: right;
+  vertical-align: top;
+}
+.explorerIngestionTable thead th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.explorerIngestionTable tbody th {
+  text-align: left;
+  font-weight: 650;
+  text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.explorerIngestionTable__bytes {
+  color: var(--muted);
+  font-size: 12px;
+}
+.explorerKeyValues {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 18px;
+  margin: 0;
+  font-size: 13px;
+}
+.explorerKeyValues dt { color: var(--muted); }
+.explorerKeyValues dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.explorerKeyValues dd.is-code {
+  font-family: var(--exd-mono);
+  font-size: 12px;
+}
+.explorerReplicaList { margin-top: 10px; }
+
+/* Lineage: wrapping chips with an object-type icon; short name in-database. */
+.explorerLineageToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.explorerLineageToolbar__note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.explorerCard .explorerLineage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.explorerCard .explorerLineage { align-items: start; }
+.explorerCard .explorerLineage__group {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.explorerLineage__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: var(--explorer-section-title-weight, 650);
+}
+.explorerLineage__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+.explorerLineageChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.explorerLineageChip:hover,
+.explorerLineageChip:focus-visible {
+  border-color: var(--accentBorder);
+  background: var(--rowHover);
+  outline: none;
+}
+.explorerLineageChip__name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--exd-mono);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorerLineageChip__meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.explorerObjIcon {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+.explorerObjIcon--table { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
+.explorerObjIcon--mv { color: color-mix(in srgb, #8b5cf6 78%, var(--text)); }
+.explorerObjIcon--view { color: color-mix(in srgb, #0ea5e9 75%, var(--text)); }
+.explorerObjIcon--dictionary { color: color-mix(in srgb, #d97706 78%, var(--text)); }
+.explorerObjIcon--buffer { color: color-mix(in srgb, #14b8a6 75%, var(--text)); }
+.explorerObjIcon--distributed { color: color-mix(in srgb, #22c55e 70%, var(--text)); }
+@container explorerCard (max-width: 560px) {
+  .explorerCard .explorerLineage { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Preview: row count + limit selector, type sub-header, compact rows. */
+.explorerPreviewToolbar { flex-wrap: wrap; }
+.explorerPreviewToolbar__info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.explorerPreviewToolbar__count {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.explorerPreviewToolbar__total {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.explorerSegmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+}
+.explorerSegmented__option {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--buttonBorder);
+  background: var(--buttonBg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.explorerSegmented__option:first-child { border-left: 0; }
+.explorerSegmented__option:hover { color: var(--text); }
+.explorerSegmented__option.is-active {
+  background: color-mix(in srgb, var(--accentBorder) 18%, var(--buttonBg));
+  color: var(--text);
+}
+.explorerCard .explorerPreviewTable .resultTable { font-size: 12.5px; }
+.explorerCard .explorerPreviewTable .resultTable thead th {
+  padding: 4px 8px 18px;
+  padding-right: 1.5rem;
+  vertical-align: top;
+}
+.explorerCard .explorerPreviewTable .resultTable thead th.resultTable__rowIndex { padding-bottom: 18px; }
+.explorerCard .explorerPreviewTable .resultTable tbody td { padding: 2px 8px; }
+.explorerCard .explorerPreviewTable .resultTable thead th[data-type]::before {
+  content: attr(data-type);
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font: 500 10.5px/1.2 var(--exd-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.explorerCard .explorerPreviewTable--transposed .resultTable tbody td.explorerPreviewTable__value {
+  max-width: 48rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.explorerCard .explorerPreviewTable .resultTable tbody td.is-null {
+  color: var(--muted);
+  font-style: italic;
+}

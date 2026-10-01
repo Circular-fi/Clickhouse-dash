@@ -23,15 +23,15 @@ def test_trace_initial_expansion_is_whole_depths_under_50_visible_spans() -> Non
     assert "for (const key of beforeDepth) collapsed.add(key);" in js
 
 def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
-    footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
-    assert "explorerScopeMeters" in footprint
-    assert "explorerScopeMeter__bytes" in footprint
-    assert "explorerFootprintScopeBar" not in footprint
-    assert 'const displayName = String(item.name || "\\u2014");' in ui
+    about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
+    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
+    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert "explorerScopeMeter" not in ui
+    assert ".explorerAboutTile__context" in css
+    assert '"explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", item.name' in ui
     assert "`<${item.name}>`" not in ui
-    assert ".explorerScopeMeter__track" in css
 
 def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))

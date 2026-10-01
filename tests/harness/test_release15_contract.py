@@ -20,21 +20,17 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
     assert "summaryFootprintBytes" in ui
 
 
-def test_overview_embeds_lineage_and_uses_compact_rows_without_duplicate_engine_metrics() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    overview = ui[ui.index('function renderOverview'):ui.index('function renderColumns')]
-    assert 'simpleRows(' not in overview
-    assert '["Primary key"' not in overview
-    assert '["Partition key"' not in overview
-    assert '["TTL"' not in overview
-    assert 'renderTableFootprint(container, detail);' in overview
-    footprint = ui[ui.index('function renderTableFootprint'):ui.index('function structureCompressedBytes')]
-    assert 'buildStorageComposition(detail, { embedded: true })' in footprint
-    assert 'if (deps.length) renderDependencies(container, detail);' in overview
-    assert 'sectionTitle("Lineage")' not in overview
+def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    assert 'simpleRows(' not in ui
     assert 'explorerKvGrid' not in ui
-    available = ui[ui.index("function availableTabs"):ui.index("function visibleFunctions")]
-    assert 'tabs.push("Lineage")' not in available
+    available = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    assert 'if (loading || visibleDependencies(detail).length) tabs.push("Lineage");' in available
+    about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
+    assert 'aboutTile("Sorting key"' in about
+    assert 'aboutTile("Partition key"' in about
+    assert 'aboutTile("TTL"' in about
+    assert 'aboutTile("Lineage"' in about
 
 
 def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> None:
@@ -52,12 +48,13 @@ def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> 
 
 
 def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer.js")
     graph = read("src/static/app_explorer_graph.js")
     assert 'params.set("view", model.mode === "graph" ? "graph" : "browse")' in ui
     assert 'params.set("graph", route.mode === "physical" ? "storage" : "lineage")' in ui
     assert 'params.set("depth", String(route.depth ?? 1))' in ui
-    assert 'const requestedTab = String(parts[2] || "overview")' in ui
+    assert 'const requestedTab = String(parts[2] || DEFAULT_TAB).toLowerCase();' in ui
+    assert 'const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];' in ui
     assert "function getRouteState()" in graph
     assert "function applyRouteState(route = {})" in graph
 

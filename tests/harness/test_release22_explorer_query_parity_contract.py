@@ -7,24 +7,26 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_overview_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
+    assert '`${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
+    ui = read("src/static/app_explorer_detail.js")
+    assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
-    assert "renderResidentRuntime" not in ui
-    assert '`${fmtBytes(footprint)} RAM`' in ui
-    assert '`${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
-    assert 'sectionTitle("Storage breakdown")' not in overview
-    assert 'sectionTitle("CREATE statement")' not in overview
+    # One size label: RAM for resident engines, disk otherwise; 0 B is hidden.
+    assert '`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
+    assert 'if (!viewLike && footprint != null && footprint > 0) {' in ui
+    assert 'sectionTitle("Storage breakdown")' not in ui
+    assert 'sectionTitle("CREATE statement")' not in ui
 
 
-def test_lineage_cards_show_plain_database_dot_table_names() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
-    assert 'const qualified = `${dep.database || "\\u2014"}.${dep.table || "\\u2014"}`;' in deps
-    assert 'const qualified = `<${dep.database' not in deps
+def test_lineage_chips_keep_the_plain_qualified_name_as_tooltip() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    chip = ui[ui.index("function dependencyChip"):ui.index("// ---- tabs")]
+    assert 'const qualified = `${dep.database || DASH}.${dep.table || DASH}`;' in chip
+    assert 'button.title = [qualified,' in chip
+    assert 'const qualified = `<${dep.database' not in chip
 
 
 def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equivalent_sql() -> None:
@@ -51,14 +53,14 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     assert '.explorerModeIcon--browse' in css and '.explorerModeIcon--graph' in css
 
 
-def test_storage_metric_tables_reuse_query_result_component_and_keep_only_percent_custom() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+def test_storage_metric_tables_reuse_query_result_component() -> None:
+    ui = read("src/static/app_explorer_detail.js")
     results = read("src/static/app_results.js")
-    block = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
+    block = ui[ui.index("function staticTable"):ui.index("function section(")]
     assert 'ns.results?.createStaticResultTable?.({' in block
     assert 'explorerStorageTableTitle' not in ui
-    assert 'renderCell: (td, ctx) =>' in block
-    assert 'td.classList.add("explorerStoragePercentCell")' in block
+    assert 'renderCell: (td, cellCtx) =>' in block
+    assert 'td.classList.add("explorerStoragePercentCell")' in ui
     assert 'th.className = "resultTable__thSortable";' in results
     assert 'decorateHeader = null' in results and 'renderCell = null' in results
 
@@ -98,8 +100,8 @@ def test_storage_layout_places_buffers_before_downstream_targets() -> None:
 
 def test_log_family_keeps_clickhouse_uncompressed_total_when_clickhouse_exposes_it() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = read("src/static/app_explorer_detail.js")
     assert "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)" in catalog
     assert "summary.uncompressed_bytes = total_uncompressed_bytes;" in catalog
     assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog
-    assert '["Data uncompressed", s.uncompressed_bytes == null ? "unknown" : fmtBytes(s.uncompressed_bytes)]' in ui
+    assert 'aboutTile("Uncompressed", fmtBytes(s.uncompressed_bytes), "data before compression"' in ui

@@ -27,9 +27,9 @@ def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> Non
 def test_materialized_view_target_is_added_as_downstream_and_select_sources_remain_upstream() -> None:
     catalog = read('src/explorer_catalog.cpp')
     assert 'parse_materialized_view_target' in catalog
-    assert 'append_dependency(target->database, target->table, "downstream")' in catalog
-    assert 'append_dependency(source.database, source.table, "upstream")' in catalog
-    assert 'append_dependency(view_db, view_table, "downstream")' in catalog
+    assert 'append_dependency(target->database, target->table, "downstream", "materialized_view")' in catalog
+    assert 'append_dependency(source.database, source.table, "upstream", view_kind)' in catalog
+    assert 'append_dependency(view_db, view_table, "downstream", view_kind)' in catalog
 
 
 def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> None:
@@ -45,15 +45,14 @@ def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> Non
 
 
 def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:
-    ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     catalog = read('src/explorer_catalog.cpp')
     assert 'isDictionarySummary' in ui
     assert 'isMemorySummary' in ui
     assert 'isBufferSummary' in ui
     assert 'isLogFamilySummary' in ui
-    assert 'const hasStorage = isMergeTreeSummary(summary) || isDistributedSummary(summary) || isLogFamilySummary(summary);' in ui
-    assert 'if (hasStorage) tabs.push("Storage")' in ui
-    assert 'else if (!isDictionarySummary(summary)) tabs.push("Operations")' in ui
+    assert 'if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");' in ui
+    assert 'if (isViewLikeSummary(summary) || isDictionarySummary(summary)) return false;' in ui
     assert 'bufferTarget' not in ui
     assert '["Target", buffer ? bufferTarget(s) || null : null]' not in ui
     assert "normalize_buffer_runtime_rows" in read("src/explorer_catalog.cpp")
@@ -109,16 +108,16 @@ def test_function_navigation_is_grouped_by_merged_category_with_counts_and_one_l
     assert 'renderFunctionOverview();' in detail
 
 
-def test_overview_and_column_storage_are_compact_one_line_lists() -> None:
-    ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
-    overview = ui[ui.index('function renderOverview('):ui.index('function renderColumns(', ui.index('function renderOverview('))]
-    columns = ui[ui.index('function renderColumns('):ui.index('function renderStorage', ui.index('function renderColumns('))]
-    assert 'sectionTitle("Storage breakdown")' not in overview
-    assert 'sectionTitle("CREATE statement")' not in overview
+def test_columns_tab_is_one_compact_shared_table() -> None:
+    ui = read("src/static/app_explorer_detail.js")
+    columns = ui[ui.index('function columnRows('):ui.index('function structureCompressedBytes(')]
+    assert 'sectionTitle("Storage breakdown")' not in ui
+    assert 'sectionTitle("CREATE statement")' not in ui
     assert 'explorerSchemaColumn' not in columns
     assert 'ns.results?.createStaticResultTable?.({' in ui
-    assert 'columns: [firstLabel, group === "columns" ? "Codec" : "Type", "Compressed", "Uncompressed", "% table"]' in ui
-    assert 'explorerStoragePercentCell' in ui
+    for label in ["Column", "Type", "Keys", "Codec", "Compressed", "Ratio", "% table"]:
+        assert f'label: "{label}"' in columns
+    assert 'explorerStoragePercentCell' in columns
     assert 'percentValue(compressed, tableFootprint)' in columns
     assert 'relative_weight' not in columns
 

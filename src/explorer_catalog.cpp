@@ -364,6 +364,26 @@ std::optional<ParsedQualifiedName> parse_materialized_view_target(
   return parse_relation_name(create_sql, pos, default_database);
 }
 
+// Top-level TTL clause of a server-generated CREATE TABLE: the text between the
+// `TTL` keyword that follows `ENGINE` and the next SETTINGS / COMMENT clause.
+// Column TTLs live inside the column list (paren depth > 0) and are skipped by
+// the depth- and quote-aware keyword search.
+std::string extract_table_ttl(std::string_view create_sql) {
+  const auto engine = find_relation_keyword_ci(create_sql, "ENGINE");
+  if (!engine) return {};
+  const auto ttl = find_relation_keyword_ci(create_sql, "TTL", *engine);
+  if (!ttl) return {};
+  const size_t start = *ttl + 3;
+  size_t end = create_sql.size();
+  for (std::string_view terminal : {std::string_view("SETTINGS"), std::string_view("COMMENT")}) {
+    if (const auto at = find_relation_keyword_ci(create_sql, terminal, start)) end = std::min(end, *at);
+  }
+  std::string_view clause = create_sql.substr(start, end - start);
+  while (!clause.empty() && std::isspace(static_cast<unsigned char>(clause.front()))) clause.remove_prefix(1);
+  while (!clause.empty() && (std::isspace(static_cast<unsigned char>(clause.back())) || clause.back() == ';')) clause.remove_suffix(1);
+  return std::string(clause);
+}
+
 std::string block_string_at(const clickhouse::Block& block, size_t column, size_t row) {
   return ch_block_text_at(block, column, row);
 }
@@ -1213,6 +1233,28 @@ bool load_explorer_catalog_index(
           it->second->last_part_time = block_string_at(block, 6, row);
         }
       }, &ignored);
+
+    // Replica health for the tree dot. Only the columns system.replicas serves
+    // from memory: total/active_replicas would cost one Keeper read per table
+    // on every 5 s navigation refresh (the table detail reads them fresh).
+    ignored.clear();
+    (void)try_select(system,
+      "SELECT toString(`table`), toString(is_readonly), toString(is_session_expired), "
+      "toString(queue_size), toString(absolute_delay) FROM system.replicas WHERE database = " +
+      quote_string(out.databases.front()),
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          const auto it = by_name.find(block_string_at(block, 0, row));
+          if (it == by_name.end() || !it->second) continue;
+          auto& replica = it->second->replication;
+          replica.available = true;
+          replica.readonly = truthy(block_string_at(block, 1, row));
+          replica.session_expired = truthy(block_string_at(block, 2, row));
+          replica.queue_size = parse_u64(block_string_at(block, 3, row)).value_or(0);
+          replica.absolute_delay_seconds = parse_u64(block_string_at(block, 4, row)).value_or(0);
+          classify_health(*it->second);
+        }
+      }, &ignored);
   }
 
   // The lightweight catalog intentionally asks only for identity + small
@@ -1660,25 +1702,51 @@ bool load_explorer_table_summary(
       rate.last_event_time = block_string_at(block, 9, 0);
     }, &ignored);
 
-  ignored.clear();
-  (void)try_select(system,
-    "SELECT toString(total_replicas), toString(active_replicas), toString(queue_size), "
+  // The replica set (replica_is_active) costs the same Keeper reads as
+  // total/active_replicas, which the opened table already pays for. Builds
+  // without one of the extra columns fall back to the base row.
+  const std::string replica_base_columns =
+    "toString(total_replicas), toString(active_replicas), toString(queue_size), "
     "toString(absolute_delay), toString(is_readonly), toString(is_session_expired), "
-    "toString(replica_name), toString(zookeeper_path) FROM system.replicas "
-    "WHERE database = " + db + " AND `table` = " + tbl + " LIMIT 1",
-    [&](const clickhouse::Block& block) {
-      if (!block.GetRowCount()) return;
-      auto& replica = out.replication;
-      replica.available = true;
-      replica.total_replicas = parse_u64(block_string_at(block, 0, 0)).value_or(0);
-      replica.active_replicas = parse_u64(block_string_at(block, 1, 0)).value_or(0);
-      replica.queue_size = parse_u64(block_string_at(block, 2, 0)).value_or(0);
-      replica.absolute_delay_seconds = parse_u64(block_string_at(block, 3, 0)).value_or(0);
-      replica.readonly = truthy(block_string_at(block, 4, 0));
-      replica.session_expired = truthy(block_string_at(block, 5, 0));
-      replica.replica_name = block_string_at(block, 6, 0);
-      replica.zookeeper_path = block_string_at(block, 7, 0);
-    }, &ignored);
+    "toString(replica_name), toString(zookeeper_path)";
+  const std::string replica_where = " FROM system.replicas WHERE database = " + db + " AND `table` = " + tbl + " LIMIT 1";
+  auto read_replica = [&](const clickhouse::Block& block) {
+    if (!block.GetRowCount()) return;
+    auto& replica = out.replication;
+    replica = ExplorerReplication{};
+    replica.available = true;
+    replica.total_replicas = parse_u64(block_string_at(block, 0, 0)).value_or(0);
+    replica.active_replicas = parse_u64(block_string_at(block, 1, 0)).value_or(0);
+    replica.queue_size = parse_u64(block_string_at(block, 2, 0)).value_or(0);
+    replica.absolute_delay_seconds = parse_u64(block_string_at(block, 3, 0)).value_or(0);
+    replica.readonly = truthy(block_string_at(block, 4, 0));
+    replica.session_expired = truthy(block_string_at(block, 5, 0));
+    replica.replica_name = block_string_at(block, 6, 0);
+    replica.zookeeper_path = block_string_at(block, 7, 0);
+    if (block.GetColumnCount() < 14) return;
+    replica.is_leader = truthy(block_string_at(block, 8, 0));
+    replica.inserts_in_queue = parse_u64(block_string_at(block, 9, 0)).value_or(0);
+    replica.merges_in_queue = parse_u64(block_string_at(block, 10, 0)).value_or(0);
+    replica.log_lag = parse_u64(block_string_at(block, 11, 0)).value_or(0);
+    replica.last_queue_update = block_string_at(block, 12, 0);
+    // "<0|1><replica name>" per registered replica (Keeper order is arbitrary).
+    for (const auto& entry : split_unit_separator(block_string_at(block, 13, 0))) {
+      if (entry.size() < 2) continue;
+      replica.replicas.emplace_back(entry.substr(1), entry[0] == '1');
+    }
+    std::sort(replica.replicas.begin(), replica.replicas.end());
+  };
+  ignored.clear();
+  const bool replica_detail_loaded = try_select(system,
+    "SELECT " + replica_base_columns + ", toString(is_leader), toString(inserts_in_queue), "
+    "toString(merges_in_queue), toString(log_max_index - least(log_pointer, log_max_index)), toString(last_queue_update), "
+    "arrayStringConcat(arrayMap((name, active) -> concat(toString(active), name), "
+    "mapKeys(replica_is_active), mapValues(replica_is_active)), char(31))" + replica_where,
+    read_replica, &ignored);
+  if (!replica_detail_loaded) {
+    ignored.clear();
+    (void)try_select(system, "SELECT " + replica_base_columns + replica_where, read_replica, &ignored);
+  }
 
   classify_health(out);
   return true;
@@ -1797,6 +1865,15 @@ bool load_explorer_table_detail(
       return false;
     }
   }
+  out.table_ttl = extract_table_ttl(out.create_table_query);
+  if (summary.engine == "Distributed") {
+    const auto args = parse_engine_arguments_local(summary.engine_full, "Distributed");
+    if (!args.empty()) out.distributed_cluster = args[0];
+    if (args.size() >= 3) {
+      out.distributed_database = resolve_buffer_database_arg(args[1], database);
+      out.distributed_table = args[2];
+    }
+  }
 
   section_error.clear();
   // system.columns does not expose ttl_expression on every supported ClickHouse
@@ -1804,12 +1881,13 @@ bool load_explorer_table_detail(
   // from DESCRIBE TABLE below, whose schema contains ttl_expression.
   const std::string columns_sql =
     "SELECT toString(name), toString(type), toString(default_kind), toString(default_expression), toString(compression_codec), "
-    "toString(data_compressed_bytes), toString(data_uncompressed_bytes) "
+    "toString(data_compressed_bytes), toString(data_uncompressed_bytes), toString(comment), "
+    "toString(is_in_partition_key), toString(is_in_sorting_key), toString(is_in_primary_key), toString(is_in_sampling_key) "
     "FROM system.columns WHERE database = " + db + " AND `table` = " + tbl + " ORDER BY position";
   auto load_columns = [&](clickhouse::Client& client, std::string* load_error) {
     return try_select(client, columns_sql,
       [&](const clickhouse::Block& block) {
-        constexpr size_t kExpectedColumns = 7;
+        constexpr size_t kExpectedColumns = 12;
         if (block.GetRowCount() > 0 && block.GetColumnCount() < kExpectedColumns) {
           throw std::runtime_error(
               "system.columns metadata block has " + std::to_string(block.GetColumnCount()) +
@@ -1826,6 +1904,11 @@ bool load_explorer_table_detail(
           column.codec_expression = block_string_at(block, 4, row);
           column.compressed_bytes = parse_u64(block_string_at(block, 5, row));
           column.uncompressed_bytes = parse_u64(block_string_at(block, 6, row));
+          column.comment = block_string_at(block, 7, row);
+          column.in_partition_key = truthy(block_string_at(block, 8, row));
+          column.in_sorting_key = truthy(block_string_at(block, 9, row));
+          column.in_primary_key = truthy(block_string_at(block, 10, row));
+          column.in_sampling_key = truthy(block_string_at(block, 11, row));
           out.columns.push_back(std::move(column));
         }
       }, load_error);
@@ -1866,6 +1949,7 @@ bool load_explorer_table_detail(
             column.type = block_string_at(block, 1, row);
             if (block.GetColumnCount() > 2) column.default_kind = block_string_at(block, 2, row);
             if (block.GetColumnCount() > 3) column.default_expression = block_string_at(block, 3, row);
+            if (block.GetColumnCount() > 4) column.comment = block_string_at(block, 4, row);
             if (block.GetColumnCount() > 5) column.codec_expression = block_string_at(block, 5, row);
             if (block.GetColumnCount() > 6) column.ttl_expression = block_string_at(block, 6, row);
             out.columns.push_back(std::move(column));
@@ -2519,16 +2603,24 @@ bool load_explorer_table_detail(
     }
     return std::binary_search(it->second.begin(), it->second.end(), dep_table);
   };
-  std::set<std::tuple<std::string, std::string, std::string>> dependency_seen;
-  auto append_dependency = [&](const std::string& dep_db, const std::string& dep_table, const char* relation) {
+  std::map<std::tuple<std::string, std::string, std::string>, size_t> dependency_seen;
+  auto append_dependency = [&](const std::string& dep_db, const std::string& dep_table, const char* relation,
+                               const char* kind = "dependency") {
     // ClickHouse may expose an internal `row`/`_row` pseudo dependency for
     // view-like objects. It is implementation metadata, not a navigable
     // ClickHouse object, so never expose it as Lineage.
     if (is_row_pseudo_object(dep_table)) return;
     if (!lineage_visible(dep_db, dep_table)) return;
     auto key = std::make_tuple(dep_db, dep_table, std::string(relation));
-    if (!dependency_seen.insert(key).second) return;
-    out.dependencies.push_back({dep_db, dep_table, relation});
+    const auto [seen, inserted] = dependency_seen.emplace(key, out.dependencies.size());
+    if (!inserted) {
+      // dependencies_* only says that a link exists; a later source that knows
+      // what kind of link it is (MV, View, Buffer) refines it.
+      auto& existing = out.dependencies[seen->second];
+      if (existing.kind == "dependency") existing.kind = kind;
+      return;
+    }
+    out.dependencies.push_back({dep_db, dep_table, relation, kind, {}});
   };
 
   // A MATERIALIZED VIEW ... TO db.table has an explicit sink which is not
@@ -2537,7 +2629,13 @@ bool load_explorer_table_detail(
   // MV detail always exposes both its SELECT inputs and its target when the
   // runner can read them.
   if (auto target = parse_materialized_view_target(out.create_table_query, database)) {
-    append_dependency(target->database, target->table, "downstream");
+    append_dependency(target->database, target->table, "downstream", "materialized_view");
+  }
+
+  // Distributed(cluster, database, table, ...) routes reads and writes to the
+  // local table on every shard; it is the object's only data source.
+  if (!out.distributed_database.empty() && !out.distributed_table.empty()) {
+    append_dependency(out.distributed_database, out.distributed_table, "downstream", "distributed_route");
   }
 
   // Buffer(database, table, ...) owns a routing edge to its flush destination.
@@ -2547,7 +2645,7 @@ bool load_explorer_table_detail(
   if (summary.engine == "Buffer") {
     const auto args = parse_engine_arguments_local(summary.engine_full, "Buffer");
     if (args.size() >= 2 && !args[0].empty() && !args[1].empty()) {
-      append_dependency(args[0], args[1], "downstream");
+      append_dependency(args[0], args[1], "downstream", "buffer");
     }
   }
 
@@ -2597,7 +2695,7 @@ bool load_explorer_table_detail(
           const std::string buffer_table = object_table;
           const auto args = parse_engine_arguments_local(block_string_at(block, 3, row), "Buffer");
           if (args.size() >= 2 && args[0] == database && args[1] == table) {
-            append_dependency(buffer_db, buffer_table, "upstream");
+            append_dependency(buffer_db, buffer_table, "upstream", "buffer");
           }
         }
         const std::string as_select = block_string_at(block, 4, row);
@@ -2606,11 +2704,12 @@ bool load_explorer_table_detail(
         const std::string& view_table = object_table;
         const bool is_selected_view = view_db == database && view_table == table;
         for (const auto& source : parse_relation_sources(as_select, view_db)) {
+          const char* view_kind = object_engine == "MaterializedView" ? "materialized_view" : "view";
           if (is_selected_view) {
-            append_dependency(source.database, source.table, "upstream");
+            append_dependency(source.database, source.table, "upstream", view_kind);
           }
           if (source.database == database && source.table == table) {
-            append_dependency(view_db, view_table, "downstream");
+            append_dependency(view_db, view_table, "downstream", view_kind);
           }
         }
       }
@@ -2634,6 +2733,36 @@ bool load_explorer_table_detail(
   if (!upstream_loaded) {
     if (error) *error = "Upstream lineage query failed: " + section_error;
     return false;
+  }
+
+  // Engines of the related objects (for their type icon). Every name here has
+  // already passed the runner visibility check above; the lookup is one
+  // database/name-filtered system.tables read and is best-effort.
+  if (!out.dependencies.empty()) {
+    std::vector<std::string> dep_databases;
+    std::vector<std::string> dep_tables;
+    for (const auto& dep : out.dependencies) {
+      dep_databases.push_back(dep.database);
+      dep_tables.push_back(dep.table);
+    }
+    std::sort(dep_databases.begin(), dep_databases.end());
+    dep_databases.erase(std::unique(dep_databases.begin(), dep_databases.end()), dep_databases.end());
+    std::sort(dep_tables.begin(), dep_tables.end());
+    dep_tables.erase(std::unique(dep_tables.begin(), dep_tables.end()), dep_tables.end());
+    std::map<std::pair<std::string, std::string>, std::string> engines;
+    std::string engine_error;
+    (void)try_select(system,
+      "SELECT toString(database), toString(name), toString(engine) FROM system.tables "
+      "WHERE database IN (" + sql_string_list(dep_databases) + ") AND name IN (" + sql_string_list(dep_tables) + ")",
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          engines[{block_string_at(block, 0, row), block_string_at(block, 1, row)}] = block_string_at(block, 2, row);
+        }
+      }, &engine_error);
+    for (auto& dep : out.dependencies) {
+      const auto it = engines.find({dep.database, dep.table});
+      if (it != engines.end()) dep.engine = it->second;
+    }
   }
 
   // Scope totals must be larger than the selected table. The per-table ACL
