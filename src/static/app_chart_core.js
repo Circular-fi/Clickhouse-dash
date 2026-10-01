@@ -350,6 +350,32 @@
     try { window.localStorage.setItem(LEGEND_STORE_KEY, mode); } catch { /* the chart keeps its mode */ }
   }
 
+  // --- Gap bridging (Metrics) --------------------------------------------------
+
+  // A series reported less often than the bucket has regular empty buckets:
+  // NaN gaps up to `factor` times its median spacing are bridged, longer ones
+  // (missing data) break the line. Returns the `nulls` flags of the series.
+  function bridgeGaps(values, factor = 2) {
+    const n = values.length;
+    const nulls = new Uint8Array(n);
+    const gaps = [];
+    let prev = -1;
+    for (let i = 0; i < n; i++) {
+      if (values[i] !== values[i]) continue;
+      if (prev >= 0) gaps.push(i - prev);
+      prev = i;
+    }
+    gaps.sort((a, b) => a - b);
+    const bridge = Math.max(1, factor * (gaps.length ? gaps[gaps.length >> 1] : 1));
+    prev = -1;
+    for (let i = 0; i < n; i++) {
+      if (values[i] !== values[i]) continue;
+      if (prev >= 0 && i - prev > bridge) nulls[prev + 1] = 1;
+      prev = i;
+    }
+    return nulls;
+  }
+
   // --- Chart ------------------------------------------------------------------
 
   function create(host, initial = {}) {
@@ -428,6 +454,7 @@
     let tooltipKey = "";
     let tooltipSize = { w: 0, h: 0 };
     let stats = { points: 0, series: 0, ms: 0 };
+    let observedWidth = 0;
 
     plotEl.style.height = `${opts.height}px`;
 
@@ -505,6 +532,8 @@
     }
 
     function fullDomain() {
+      const fixed = fixedDomain();
+      if (fixed) return fixed;
       const xs = opts.xs;
       const n = xs.length;
       if (opts.xKind === "category") return [-0.5, Math.max(0.5, n - 0.5)];
@@ -589,6 +618,8 @@
           if (e.max > yMax) yMax = e.max;
         }
       }
+      const included = includedY();
+      if (included) { yMin = Math.min(yMin, included[0]); yMax = Math.max(yMax, included[1]); }
       if (!(yMin <= yMax)) { yMin = 0; yMax = 1; }
       const pinned = isStacked() || opts.type === "bar";
       if (pinned) { yMin = Math.min(0, yMin); yMax = Math.max(0, yMax); }
@@ -607,7 +638,7 @@
       const bottom = xTwoLines ? 34 : 22;
       const plotH = Math.max(40, opts.height - PAD_TOP - bottom);
       const yt = linearTicks(yMin, yMax, Math.max(2, Math.floor(plotH / Y_TICK_SPACE)));
-      const yUnit = compactUnitFor(Math.max(Math.abs(yMin), Math.abs(yMax)));
+      const yUnit = yUnitFor(Math.max(Math.abs(yMin), Math.abs(yMax)));
       const yLabels = yt.values.map((v) => formatTick(v, yt.step, yUnit));
       let labelW = 0;
       for (const l of yLabels) labelW = Math.max(labelW, measure(l));
@@ -674,7 +705,9 @@
     function draw() {
       drawRaf = 0;
       if (destroyed) return;
-      const width = Math.floor(plotEl.clientWidth);
+      // The width the resize observer saw last: reading clientWidth would
+      // force a layout per chart (several charts redraw in one frame).
+      const width = observedWidth || Math.floor(plotEl.clientWidth);
       if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
       pendingDraw = false;
       const t0 = performance.now();
@@ -708,6 +741,7 @@
       publish();
       drawOverlay();
       renderLegend();
+      placeMarkers();
     }
 
     function publish() {
@@ -957,7 +991,7 @@
         // vertical strokes, which rasterise much cheaper with bevels.
         ctx.lineJoin = decimated ? "bevel" : "round";
         ctx.lineCap = decimated ? "butt" : "round";
-        ctx.stroke();
+        strokeDashed(ctx, s);
         // Isolated values (a run of one point between NULLs) still show.
         if (!showPoints) {
           ctx.beginPath();
@@ -1032,7 +1066,7 @@
         if (best >= 0) picks.push(best);
         slotPx = Math.min(slotPx, bucketW);
       }
-      const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * 0.72));
+      const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * barRatio()));
       const clusterW = barW / groups.length;
       const drawW = groups.length > 1 ? Math.max(1, clusterW - Math.min(2, clusterW * 0.15)) : barW;
       let drawnMax = 0;
@@ -1097,12 +1131,42 @@
     let lastBadgeX = "";
     let lastBadgeY = "";
 
-    function placeBadge(el, x, y, align, lo, hi) {
-      if (el.dataset.w === undefined || el.dataset.text !== el.textContent) {
-        el.dataset.text = el.textContent;
-        el.dataset.w = String(el.offsetWidth);
+    // Badge and tooltip sizes come from a ResizeObserver (after the browser's
+    // own layout), so a moving cursor never forces a synchronous layout; a
+    // changed size re-places them on the next frame. Only the first sight of
+    // an element measures it directly.
+    const sizes = new WeakMap();
+    const sizeObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver((entries) => {
+        let changed = false;
+        for (const entry of entries) {
+          const box = entry.borderBoxSize && entry.borderBoxSize[0];
+          const w = box ? box.inlineSize : entry.target.offsetWidth;
+          const h = box ? box.blockSize : entry.target.offsetHeight;
+          if (!w && !h) continue; // hidden: keep the last size
+          const old = sizes.get(entry.target);
+          if (old && old.w === w && old.h === h) continue;
+          sizes.set(entry.target, { w, h });
+          changed = true;
+        }
+        if (!changed || destroyed) return;
+        if (cursor && !tooltipEl.hidden && tooltipKey && tooltipKey !== "marker") renderTooltip();
+        scheduleOverlay();
+      })
+      : null;
+    if (sizeObserver) for (const el of [tooltipEl, xBadge, yBadge, selectBadge]) sizeObserver.observe(el);
+
+    function measured(el) {
+      let size = sizeObserver ? sizes.get(el) : null;
+      if (!size) {
+        size = { w: el.offsetWidth, h: el.offsetHeight };
+        if (sizeObserver && (size.w || size.h)) sizes.set(el, size);
       }
-      const w = Number(el.dataset.w);
+      return size;
+    }
+
+    function placeBadge(el, x, y, align, lo, hi) {
+      const w = measured(el).w;
       let bx = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
       bx = Math.max(lo, Math.min(hi - w, bx));
       place(el, bx, y);
@@ -1159,7 +1223,7 @@
         yLine.style.width = `${L.plotW}px`;
         place(yLine, L.left, py);
         // Points on every visible series at that x.
-        for (const s of visibleSeries()) {
+        for (const s of opts.cursorPoints === false ? [] : visibleSeries()) {
           const st = stacks && stacks.get(s.id);
           const v = st ? st.top[i] : s.values[i];
           if (!(v === v) || !(s.values[i] === s.values[i])) continue;
@@ -1167,7 +1231,8 @@
           const y = L.yOf(v);
           if (y < L.top - 1 || y > L.top + L.plotH + 1) continue;
           const dot = dotFor(used++);
-          dot.style.background = rgba(seriesColor(s), 1);
+          const bg = rgba(seriesColor(s), 1);
+          if (dot._bg !== bg) { dot.style.background = bg; dot._bg = bg; }
           dot.classList.toggle("is-nearest", s.id === cursor.nearest);
           place(dot, x + dx, y);
           show(dot, true);
@@ -1177,7 +1242,7 @@
         if (xText !== lastBadgeX) { xBadge.textContent = xText; lastBadgeX = xText; }
         placeBadge(xBadge, x, L.top + L.plotH + 2, "center", 0, L.width);
         const yd = Math.min(10, decimalsFor(L.yStep) + 2);
-        const yText = formatExact(Number(L.yAt(py).toFixed(yd)));
+        const yText = typeof opts.formatY === "function" ? opts.formatY(L.yAt(py)) : formatExact(Number(L.yAt(py).toFixed(yd)));
         if (yText !== lastBadgeY) { yBadge.textContent = yText; lastBadgeY = yText; }
         placeBadge(yBadge, L.left - 3, py - 8.5, "right", 0, L.left - 2);
         root.dataset.cursorIndex = String(i);
@@ -1213,12 +1278,12 @@
         tooltipKey = key;
         const rows = [];
         let total = 0, any = false;
-        for (const s of visibleSeries()) {
+        for (const s of tooltipSeries(i)) {
           if (opts.tooltip === "single" && s.id !== cursor.nearest) continue;
           const v = s.values[i];
           const has = v === v;
           const isNull = !has && (s.nulls === null || s.nulls === undefined || s.nulls[i]);
-          if (!has && !isNull) continue; // no row for this series at this x
+          if (!has && (!isNull || opts.tooltipNulls === false)) continue; // no row for this series at this x
           if (has) { total += v; any = true; }
           const c = seriesColor(s);
           const text = has ? (typeof opts.formatValue === "function" ? opts.formatValue(v, s) : formatValue(v)) : "NULL";
@@ -1228,12 +1293,14 @@
           rows.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(formatValue(total))}</b></span>`);
         }
         if (!rows.length) rows.push(`<span class="chartCore__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
+        capTooltipRows(rows);
         const footer = typeof opts.tooltipFooter === "function" ? opts.tooltipFooter(i) : "";
-        tooltipEl.innerHTML = `<strong>${esc(xReadout(i))}</strong>${rows.join("")}${footer ? `<small>${esc(footer)}</small>` : ""}`;
+        const title = typeof opts.tooltipTitle === "function" ? opts.tooltipTitle(i) : xReadout(i);
+        tooltipEl.innerHTML = `<strong>${esc(title)}</strong>${rows.join("")}${footer ? `<small>${esc(footer)}</small>` : ""}`;
         tooltipEl.dataset.index = String(i);
         tooltipEl.hidden = false;
-        tooltipSize = { w: tooltipEl.offsetWidth, h: tooltipEl.offsetHeight };
       }
+      tooltipSize = measured(tooltipEl);
       tooltipEl.hidden = false;
       const L = layout;
       const x = L.xOf(opts.xKind === "category" ? i : opts.xs[i]);
@@ -1401,12 +1468,21 @@
     function legendItemHtml(s, index) {
       const on = !hidden.has(s.id);
       const c = rgba(seriesColor(s));
-      const title = `${s.label}\nClick: show only this series (again: show all)\nCtrl / Cmd+click: show or hide it`;
-      return `<button type="button" class="chartCore__legendItem" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span></button>`;
+      const title = `${s.label}\n${legendHint()}`;
+      return `<button type="button" class="chartCore__legendItem${s.dash ? " is-dashed" : ""}" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span></button>`;
+    }
+
+    // The legend markup is rebuilt only when it changes (a resize or a theme
+    // change redraws the plot, not the legend).
+    let legendHtml = null;
+    function setLegendHtml(html) {
+      if (html === legendHtml) return;
+      legendHtml = html;
+      legendEl.innerHTML = html;
     }
 
     function renderLegend() {
-      if (!opts.legend || !opts.series.length) { legendEl.innerHTML = ""; legendEl.hidden = true; return; }
+      if (!opts.legend || !opts.series.length) { setLegendHtml(""); legendEl.hidden = true; return; }
       legendEl.hidden = false;
       legendEl.dataset.mode = legendMode;
       const modeBtn = `<button type="button" class="chartCore__legendMode" aria-pressed="${legendMode === "table"}" title="${legendMode === "table" ? "Show the legend as a list" : "Show min / max / mean / last per series"}">${legendMode === "table" ? "List" : "Values"}</button>`;
@@ -1416,9 +1492,9 @@
           const c = calcs(s);
           return `<tr><th scope="row">${legendItemHtml(s, index)}</th><td>${esc(fmt(c.min))}</td><td>${esc(fmt(c.max))}</td><td>${esc(fmt(c.mean))}</td><td>${esc(fmt(c.last))}</td></tr>`;
         }).join("");
-        legendEl.innerHTML = `<div class="chartCore__legendTableWrap"><table class="chartCore__legendTable"><thead><tr><th scope="col">Series</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Mean</th><th scope="col">Last</th></tr></thead><tbody>${rows}</tbody></table></div>${modeBtn}`;
+        setLegendHtml(`<div class="chartCore__legendTableWrap"><table class="chartCore__legendTable"><thead><tr><th scope="col">Series</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Mean</th><th scope="col">Last</th></tr></thead><tbody>${rows}</tbody></table></div>${modeBtn}`);
       } else {
-        legendEl.innerHTML = `<div class="chartCore__legendList">${opts.series.map(legendItemHtml).join("")}</div>${modeBtn}`;
+        setLegendHtml(`<div class="chartCore__legendList">${opts.series.map(legendItemHtml).join("")}</div>${modeBtn}`);
       }
     }
 
@@ -1451,7 +1527,7 @@
       if (!s) return;
       const ids = opts.series.map((x) => x.id);
       const next = new Set(hidden);
-      if (ev.ctrlKey || ev.metaKey) {
+      if (legendToggles(ev)) {
         if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
         if (next.size === ids.length) next.delete(s.id);
       } else {
@@ -1494,6 +1570,234 @@
       if (typeof opts.onZoom === "function") opts.onZoom(null, fromUser);
     }
 
+    // --- Options for the Logs histogram and the Metrics panels ------------------------------
+    //
+    //   xDomain: [lo, hi]          the full x domain (the requested time range), not the data's
+    //   yInclude: [v, ...]         values the y domain always covers (0, exemplar values)
+    //   yUnit(maxAbs)              -> { factor, suffix }: the y tick unit (default K / M / B / T)
+    //   formatY(v)                 the y readout of the cursor
+    //   barWidthRatio              bar width / slot width (default 0.72)
+    //   series[].dash: [6, 3]      dashed line (and legend swatch)
+    //   tooltipTitle(i)            the tooltip heading (default: the x readout)
+    //   tooltipSort: "desc" | "reverse"   rows by value, or bottom-of-stack last
+    //   tooltipMaxRows             rows past it fold into "+N more"
+    //   tooltipNulls: false        no "NULL" rows (gap flags from bridgeGaps are not values)
+    //   legendClick: "toggle"      click shows / hides, Alt / Ctrl / Cmd+click isolates
+    //   cursorPoints: false        no points on the series under the cursor (stacked bars)
+    //   markers: [{ x, y, href, className, label, attrs, tooltip() }]
+    //                              DOM links over the plot (exemplars): y not finite sits on a
+    //                              strip along the bottom; a marker overlapping one placed
+    //                              before it (markerSpacing px, default 9) is skipped.
+
+    function fixedDomain() {
+      const d = opts.xDomain;
+      return d && Number.isFinite(d[0]) && Number.isFinite(d[1]) && d[1] > d[0] ? [d[0], d[1]] : null;
+    }
+
+    function includedY() {
+      const list = opts.yInclude;
+      if (!list || !list.length) return null;
+      let lo = Infinity, hi = -Infinity;
+      for (const v of list) {
+        if (!Number.isFinite(v)) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      return lo <= hi ? [lo, hi] : null;
+    }
+
+    function yUnitFor(maxAbs) {
+      const unit = typeof opts.yUnit === "function" ? opts.yUnit(maxAbs) : null;
+      return unit && unit.factor > 0 ? { factor: unit.factor, suffix: String(unit.suffix || "") } : compactUnitFor(maxAbs);
+    }
+
+    function strokeDashed(ctx, s) {
+      const dash = Array.isArray(s.dash) && s.dash.length ? s.dash : null;
+      if (dash) ctx.setLineDash(dash);
+      ctx.stroke();
+      if (dash) ctx.setLineDash([]);
+    }
+
+    const barRatio = () => (opts.barWidthRatio > 0 && opts.barWidthRatio <= 1 ? opts.barWidthRatio : 0.72);
+
+    function tooltipSeries(i) {
+      const list = visibleSeries();
+      if (opts.tooltipSort === "reverse") return list.reverse();
+      if (opts.tooltipSort === "desc") {
+        const value = (s) => (s.values[i] === s.values[i] ? s.values[i] : -Infinity);
+        return list.sort((a, b) => value(b) - value(a));
+      }
+      return list;
+    }
+
+    function capTooltipRows(rows) {
+      const max = opts.tooltipMaxRows;
+      if (!(max > 0)) return;
+      const total = rows.length && rows[rows.length - 1].includes("chartCore__tipRow--total") ? rows.pop() : null;
+      if (rows.length > max) {
+        const more = rows.length - max;
+        rows.length = max;
+        rows.push(`<span class="chartCore__tipRow chartCore__tipRow--more"><i></i><em>+${more} more</em><b></b></span>`);
+      }
+      if (total) rows.push(total);
+    }
+
+    const legendHint = () => (opts.legendClick === "toggle"
+      ? "Click: show or hide it\nAlt / Ctrl / Cmd+click: show only this series (again: show all)"
+      : "Click: show only this series (again: show all)\nCtrl / Cmd+click: show or hide it");
+
+    function legendToggles(ev) {
+      const modified = ev.ctrlKey || ev.metaKey || (opts.legendClick === "toggle" && ev.altKey);
+      return opts.legendClick === "toggle" ? !modified : modified;
+    }
+
+    // Markers: diamonds drawn on the plot canvas, under a pool of transparent
+    // links (moved, never rebuilt, on redraws) that take the pointer and the
+    // keyboard. The links paint nothing until hovered or focused, and sit at
+    // left / top (no transform), so hundreds of them add no compositing work.
+    let markerLayer = null;
+    const markerNodes = [];
+
+    function markerNode(k) {
+      while (markerNodes.length <= k) {
+        const node = document.createElement("a");
+        node.className = "chartCore__marker";
+        node.hidden = true;
+        node.appendChild(document.createElement("i"));
+        markerLayer.appendChild(node);
+        markerNodes.push(node);
+      }
+      return markerNodes[k];
+    }
+
+    function configureMarker(node, m) {
+      if (node._marker === m) return;
+      if (node._marker && node._marker.attrs) for (const name of Object.keys(node._marker.attrs)) node.removeAttribute(name);
+      node._marker = m;
+      node.className = `chartCore__marker${m.className ? ` ${m.className}` : ""}`;
+      if (m.href) node.setAttribute("href", m.href); else node.removeAttribute("href");
+      if (m.label) node.setAttribute("aria-label", m.label); else node.removeAttribute("aria-label");
+      if (m.attrs) for (const [name, value] of Object.entries(m.attrs)) node.setAttribute(name, String(value == null ? "" : value));
+    }
+
+    function placeMarkers() {
+      const list = Array.isArray(opts.markers) ? opts.markers : [];
+      if (!markerLayer) {
+        if (!list.length) return;
+        markerLayer = document.createElement("div");
+        markerLayer.className = "chartCore__markers";
+        plotEl.appendChild(markerLayer);
+        bindMarkers();
+      }
+      const L = layout;
+      let used = 0;
+      if (L) {
+        const spacing = opts.markerSpacing > 0 ? opts.markerSpacing : 9;
+        // Placed markers by grid cell: an overlap test looks at 9 cells only.
+        const placed = new Map();
+        const free = (x, y) => {
+          const cx = Math.floor(x / spacing), cy = Math.floor(y / spacing);
+          for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+            for (const p of placed.get(`${cx + dx},${cy + dy}`) || []) {
+              if (Math.abs(p[0] - x) < spacing && Math.abs(p[1] - y) < spacing) return false;
+            }
+          }
+          return true;
+        };
+        const bottom = L.top + L.plotH - 5;
+        for (const m of list) {
+          const x = L.xOf(Number(m.x));
+          if (!(x >= L.left - 0.5 && x <= L.left + L.plotW + 0.5)) continue;
+          const yv = m.y == null ? NaN : Number(m.y);
+          const y = Number.isFinite(yv) ? L.yOf(yv) : bottom;
+          if (y < L.top - 1 || y > L.top + L.plotH + 1 || !free(x, y)) continue;
+          const key = `${Math.floor(x / spacing)},${Math.floor(y / spacing)}`;
+          if (!placed.has(key)) placed.set(key, []);
+          placed.get(key).push([x, y]);
+          const node = markerNode(used++);
+          configureMarker(node, m);
+          const left = `${Math.round(x * dpr) / dpr}px`, top = `${Math.round(y * dpr) / dpr}px`;
+          if (node.style.left !== left) node.style.left = left;
+          if (node.style.top !== top) node.style.top = top;
+          if (node.hidden) node.hidden = false;
+        }
+        if (used) drawMarkerMarks(L, used);
+      }
+      for (let k = used; k < markerNodes.length; k++) if (!markerNodes[k].hidden) markerNodes[k].hidden = true;
+      root.dataset.markers = String(used);
+    }
+
+    // One path for every diamond: 3.5px half-diagonal, a panel-coloured rim.
+    function drawMarkerMarks(L, count) {
+      if (released || !theme) return;
+      if (!theme.markerFill) theme.markerFill = rgba(color("color-mix(in srgb, var(--text) 82%, transparent)"));
+      const ctx = baseCtx;
+      const r = 4.2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(L.left - r, L.top - r, L.plotW + 2 * r, L.plotH + 2 * r);
+      ctx.clip();
+      ctx.beginPath();
+      for (let k = 0; k < count; k++) {
+        const node = markerNodes[k];
+        const x = parseFloat(node.style.left), y = parseFloat(node.style.top);
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r, y);
+        ctx.closePath();
+      }
+      ctx.fillStyle = theme.markerFill;
+      ctx.strokeStyle = rgba(theme.panel);
+      ctx.lineWidth = 1.25;
+      ctx.lineJoin = "miter";
+      ctx.stroke();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function showMarkerTip(node) {
+      const m = node._marker;
+      if (!m || !layout) return;
+      leaveCursor();
+      const html = typeof m.tooltip === "function" ? m.tooltip() : esc(m.label || "");
+      if (!html) return;
+      tooltipEl.innerHTML = html;
+      tooltipEl.hidden = false;
+      tooltipKey = "marker";
+      const w = tooltipEl.offsetWidth, h = tooltipEl.offsetHeight;
+      const L = layout;
+      const x = L.xOf(Number(m.x));
+      const yv = m.y == null ? NaN : Number(m.y);
+      const y = Number.isFinite(yv) ? L.yOf(yv) : L.top + L.plotH - 5;
+      let lx = x + 14;
+      if (lx + w > L.width - 4) lx = x - 14 - w;
+      lx = Math.max(4, lx);
+      const ty = Math.max(0, Math.min(L.height - h, y - h / 2));
+      tooltipEl.style.transform = `translate(${Math.round(lx)}px, ${Math.round(ty)}px)`;
+    }
+
+    function hideMarkerTip() {
+      if (tooltipKey !== "marker") return;
+      tooltipEl.hidden = true;
+      tooltipKey = "";
+    }
+
+    function bindMarkers() {
+      const target = (ev) => (ev.target instanceof Element ? ev.target.closest(".chartCore__marker") : null);
+      markerLayer.addEventListener("pointerover", (ev) => { const node = target(ev); if (node) showMarkerTip(node); });
+      markerLayer.addEventListener("pointerout", (ev) => {
+        const node = target(ev);
+        if (node && !(ev.relatedTarget instanceof Node && node.contains(ev.relatedTarget))) hideMarkerTip();
+      });
+      markerLayer.addEventListener("focusin", (ev) => { const node = target(ev); if (node) showMarkerTip(node); });
+      markerLayer.addEventListener("focusout", hideMarkerTip);
+      markerLayer.addEventListener("click", (ev) => {
+        const node = target(ev);
+        if (node && typeof opts.onMarkerClick === "function") opts.onMarkerClick(node._marker, ev);
+      });
+    }
+
     // --- lifecycle -------------------------------------------------------------------------
 
     function scheduleDraw() {
@@ -1505,6 +1809,7 @@
     const resizeObserver = typeof ResizeObserver === "function"
       ? new ResizeObserver((entries) => {
         const width = Math.floor(entries[entries.length - 1].contentRect.width);
+        observedWidth = width;
         if (!width) { release(); return; }
         if (width !== sizeW || released || pendingDraw) scheduleDraw();
       })
@@ -1559,6 +1864,7 @@
       live.delete(api);
       if (opts.syncKey && syncGroups.has(opts.syncKey)) syncGroups.get(opts.syncKey).delete(api);
       if (resizeObserver) resizeObserver.disconnect();
+      if (sizeObserver) sizeObserver.disconnect();
       if (dprQuery) dprQuery.removeEventListener("change", onDpr);
       document.removeEventListener("keydown", onKey, true);
       if (drawRaf) cancelAnimationFrame(drawRaf);
@@ -1590,6 +1896,8 @@
       },
       stats: () => ({ ...stats }),
       layout: () => layout,
+      // Markers move with the plot; replacing them needs no plot redraw.
+      setMarkers(list) { opts.markers = list; scheduleDraw(); },
     };
     live.add(api);
     watchTheme();
@@ -1617,5 +1925,6 @@
     decimalsFor,
     lowerBound,
     upperBound,
+    bridgeGaps,
   };
 })();

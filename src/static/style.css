@@ -1388,6 +1388,14 @@ html[data-theme="light"] {
 .chartCore__legendMode[aria-pressed="true"] { color: var(--text); }
 .chartCore__legendItem:focus-visible,
 .chartCore__legendMode:focus-visible { outline: none; box-shadow: var(--ring); }
+/* Chart extensions: dashed series, folded tooltip rows, markers (exemplar links). */
+.chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panelBg) 3px 5px); }
+.chartCore__tipRow--more em { color: var(--muted); font-size: 10px; }
+.chartCore__markers { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; contain: strict; }
+.chartCore__marker { position: absolute; display: grid; place-items: center; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; outline: none; cursor: pointer; pointer-events: auto; }
+.chartCore__marker > i { display: none; width: 7px; height: 7px; border-radius: 1.5px; background: #f59e0b; box-shadow: 0 0 0 1.25px var(--panelBg); transform: rotate(45deg); }
+.chartCore__marker:hover > i,
+.chartCore__marker:focus-visible > i { display: block; }
 
 .button {
   padding: 0.56rem 0.8rem;
