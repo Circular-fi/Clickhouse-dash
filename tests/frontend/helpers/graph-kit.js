@@ -114,14 +114,52 @@ export async function expectKitChrome(page, { pane, zoomOut, fit, zoomIn, legend
   const order = await Promise.all([zoomOut, fit, zoomIn].map(async (s) => (await page.locator(s).boundingBox()).x));
   expect(order[0]).toBeLessThan(order[1]);
   expect(order[1]).toBeLessThan(order[2]);
-  const legendBox = await page.locator(legend).boundingBox();
   const statusBox = await page.locator(status).boundingBox();
-  // Bottom-left: the legend above the status line, both at the left edge.
-  expect(legendBox.x - paneBox.x).toBeLessThan(20);
-  expect(paneBox.y + paneBox.height - (legendBox.y + legendBox.height)).toBeLessThan(60);
-  expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(statusBox.y + 1);
+  // The legend folds from a button at the start of the status line (a fit
+  // folds it when the graph is only readable without it).
+  const toggle = page.locator(`${status} .graphKitLegendToggle`);
+  await expect(toggle).toBeVisible();
+  const folded = (await toggle.getAttribute('aria-expanded')) === 'false';
+  await expect(toggle).toHaveAttribute('aria-label', folded ? /show the legend/i : /hide the legend/i);
+  if (folded) {
+    await expect(page.locator(legend)).toBeHidden();
+  } else {
+    const legendBox = await page.locator(legend).boundingBox();
+    // Bottom-left: the legend above the status line, both at the left edge.
+    expect(legendBox.x - paneBox.x).toBeLessThan(20);
+    expect(paneBox.y + paneBox.height - (legendBox.y + legendBox.height)).toBeLessThan(60);
+    expect(legendBox.y + legendBox.height).toBeLessThanOrEqual(statusBox.y + 1);
+  }
   expect(statusBox.x - paneBox.x).toBeLessThan(20);
   expect(paneBox.y + paneBox.height - (statusBox.y + statusBox.height)).toBeLessThan(16);
+}
+
+// The kit's safe area of a graph canvas (graphKit.safeArea: below the
+// toolbar, above the legend / status dock, beside an open panel) in client
+// coordinates.
+export async function freeArea(page, canvasSelector, panelSelector = null) {
+  return page.evaluate(({ canvasSelector, panelSelector }) => {
+    const canvas = document.querySelector(canvasSelector);
+    const panel = panelSelector ? document.querySelector(panelSelector) : null;
+    const rect = canvas.getBoundingClientRect();
+    const area = window.ChDash.graphKit.safeArea(canvas, { panel: panel && !panel.hidden ? panel.getBoundingClientRect() : null });
+    return { x: rect.left + area.x, y: rect.top + area.y, width: area.width, height: area.height };
+  }, { canvasSelector, panelSelector });
+}
+
+// No card and no edge label on screen under the toolbar groups or the
+// legend / status dock (the fit and the recentring aim at the safe area).
+export async function expectClearOfChrome(page, pane, state) {
+  const chrome = await page.evaluate((selector) => {
+    const root = document.querySelector(selector);
+    return [...root.querySelectorAll(':scope > .graphKitBar > *, :scope > .graphKitDock > *')]
+      .filter((el) => !el.hidden && el.getClientRects().length)
+      .map((el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height, name: el.className || el.id }; });
+  }, pane);
+  expect(chrome.length, 'toolbar and dock boxes').toBeGreaterThan(1);
+  for (const rect of [...state.nodes, ...(state.edgeLabels || [])]) {
+    for (const box of chrome) expect(overlaps(rect, box), `${rect.id} ${rect.text || ''} under ${box.name}`).toBe(false);
+  }
 }
 
 // Labels of every edge, none on top of another label or a card.

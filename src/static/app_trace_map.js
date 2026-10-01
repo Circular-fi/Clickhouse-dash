@@ -460,8 +460,9 @@
 
   // ---------------------------------------------------------- view / camera
 
+  // The whole map in the part of the canvas its chrome leaves free.
   function overviewScale() {
-    const box = canvas()?.getBoundingClientRect();
+    const box = kit.safeArea(canvas());
     const bounds = map.layout?.bounds;
     if (!bounds || !box?.width || !box?.height) return 1;
     return Math.max(0.05, Math.min(FIT_MAX, Math.min(box.width / bounds.width, box.height / bounds.height) * 0.92));
@@ -474,6 +475,7 @@
     const box = canvas()?.getBoundingClientRect();
     const layout = map.layout;
     if (!layout || !box?.width || !box?.height) return;
+    kit.foldLegendToFit(canvas(), layout.bounds, { readableScale: READABLE_SCALE });
     const overview = overviewScale();
     const scale = Math.max(overview, READABLE_SCALE);
     const bounds = layout.bounds;
@@ -486,9 +488,10 @@
       map.view.offsetX = 24 - bounds.x * scale;
       map.view.offsetY = 64 - bounds.y * scale;
     } else {
-      map.view.offsetX = box.width / 2 - (bounds.x + bounds.width / 2) * scale;
-      // Below the toolbar, above the legend: a little higher than the middle.
-      map.view.offsetY = box.height / 2 - (bounds.y + bounds.height / 2) * scale;
+      // Below the toolbar, above the legend and the status line.
+      const area = kit.safeArea(canvas());
+      map.view.offsetX = area.x + area.width / 2 - (bounds.x + bounds.width / 2) * scale;
+      map.view.offsetY = area.y + area.height / 2 - (bounds.y + bounds.height / 2) * scale;
     }
     kit.clampView(map.view, bounds, box.width, box.height);
     map.fitScale = scale;
@@ -743,6 +746,9 @@
       ctx.registerServiceColors?.(map.data.nodes.map((node) => node.service));
       map.loading = false;
       renderGraph();
+      // The legend and the status line first: the fit leaves room for them.
+      renderMeta();
+      renderLegend();
       // A selection that still exists stays open.
       map.selected = null;
       if (previous && map.layout && (previous.kind === "node" ? map.layout.items.has(previous.id) : map.layout.edgeById.has(previous.id))) {

@@ -5663,6 +5663,7 @@ html[data-theme="light"] {
   --graph-label-bg: var(--panelBg);
   --graph-warn: #f0a33a;
   --graph-error: #f87171;
+  --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-bg: var(--panelBg);
   --graph-minimap-view: var(--graph-halo);
@@ -5682,6 +5683,7 @@ html[data-theme="light"] {
     --graph-group-bg: #eef3ff;
     --graph-warn: #b45309;
     --graph-error: #b91c1c;
+    --graph-heat: #f97316;
     --graph-surface: rgba(255, 255, 255, 0.94);
     --graph-minimap-view: rgba(15, 23, 42, 0.92);
     --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
@@ -5699,6 +5701,7 @@ html[data-theme="dark"] {
   --graph-group-bg: #172033;
   --graph-warn: #f0a33a;
   --graph-error: #f87171;
+  --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
@@ -5715,6 +5718,7 @@ html[data-theme="light"] {
   --graph-group-bg: #eef3ff;
   --graph-warn: #b45309;
   --graph-error: #b91c1c;
+  --graph-heat: #f97316;
   --graph-surface: rgba(255, 255, 255, 0.94);
   --graph-minimap-view: rgba(15, 23, 42, 0.92);
   --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
@@ -5902,6 +5906,35 @@ html[data-theme="light"] {
   pointer-events: auto;
 }
 .graphKitStatus__badge[hidden] { display: none; }
+.graphKitLegendToggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  margin: -2px 0 -2px -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--graph-muted);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.graphKitLegendToggle:hover,
+.graphKitLegendToggle:focus-visible { background: var(--rowHover); color: var(--graph-text); }
+.graphKitLegendToggle[aria-expanded="true"] { color: var(--graph-accent-text); }
+.graphKitLegendToggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.graphKitDock.is-legend-collapsed .graphKitLegend,
+.graphKitDock:has(> .graphKitLegend[hidden]) .graphKitLegendToggle { display: none; }
 .graphKitMinimap {
   position: absolute;
   z-index: 5;
@@ -6143,7 +6176,8 @@ html[data-theme="light"] {
     right: 8px;
     gap: 6px;
   }
-  .graphKitLegend { display: none; }
+  .graphKitLegend,
+  .graphKitLegendToggle { display: none; }
   .graphKitDock {
     left: 8px;
     bottom: 8px;

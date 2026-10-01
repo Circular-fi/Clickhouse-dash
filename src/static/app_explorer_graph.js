@@ -1565,9 +1565,10 @@
       : { x: 0, y: 0, width: 1, height: 1 };
   }
 
-  // Scale at which the whole graph fits the canvas (may be unreadable).
+  // Scale at which the whole graph fits the part of the canvas its chrome
+  // leaves free (may be unreadable).
   function overviewScale() {
-    const { width, height } = canvasSize();
+    const { width, height } = kit.safeArea(dom.explorerGraphCanvas);
     const bounds = model.worldBounds;
     if (!bounds || !width || !height) return 1;
     const cap = model.detailMode === "physical" ? 1.5 : 1.15;
@@ -1578,6 +1579,7 @@
     const { width, height } = canvasSize();
     const bounds = model.worldBounds;
     if (!bounds || !width || !height) return;
+    kit.foldLegendToFit(dom.explorerGraphCanvas, bounds, { readableScale: readableScale() });
     const overview = overviewScale();
     // Fit never shrinks text below READABLE_TEXT_PX. When the whole graph is
     // larger than that, Fit shows the focused object (or the requested anchor,
@@ -1597,8 +1599,9 @@
       model.offsetX = 24 - bounds.x * model.scale;
       model.offsetY = 64 - bounds.y * model.scale;
     } else {
-      model.offsetX = width / 2 - (bounds.x + bounds.width / 2) * model.scale;
-      model.offsetY = height / 2 - (bounds.y + bounds.height / 2) * model.scale;
+      const area = kit.safeArea(dom.explorerGraphCanvas);
+      model.offsetX = area.x + area.width / 2 - (bounds.x + bounds.width / 2) * model.scale;
+      model.offsetY = area.y + area.height / 2 - (bounds.y + bounds.height / 2) * model.scale;
     }
     clampViewportToGraph();
     model.fitOffsetX = model.offsetX;

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome,
 } from '../helpers/graph-kit.js';
 
 // Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
@@ -158,6 +158,8 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   await expect(page.locator('#traceMapLegend')).toContainText('synchronous call');
   await expect(page.locator('#traceMapLegend')).toContainText('asynchronous message');
   await expect(page.locator('#traceMapLegend')).toContainText('Health dot');
+  // The fit leaves the toolbar, legend and status line free of cards and labels.
+  await expectClearOfChrome(page, '#traceMapPane', state);
 
   // Callers left of their callees: one column per call depth.
   const at = Object.fromEntries(state.nodes.map((n) => [n.service, n]));
@@ -219,6 +221,8 @@ test('zoom tools, + - 0 keys, wheel and drag pan, and the minimap once a card is
   const fitted = await inspect(page);
   await page.locator('#traceMapZoomIn').click();
   await page.locator('#traceMapZoomIn').click();
+  // The fit leaves room for the chrome: a wide screen may need a third step.
+  if (!(await inspect(page)).minimapVisible) await page.locator('#traceMapZoomIn').click();
   let state = await inspect(page);
   expect(state.scale).toBeGreaterThan(fitted.scale);
   expect(state.minimapVisible).toBe(true);
@@ -305,12 +309,14 @@ test('a click recentres on the service and opens its panel; "Search this service
   await cameraIdle(page, 'ChDash.traceMap');
   let state = await inspect(page);
   expect(state.selected).toEqual({ kind: 'node', id: 'checkout' });
-  // Recentred in the area the panel leaves free.
+  // Recentred in the area the panel and the chrome leave free (the kit's
+  // safe area: below the toolbar, above the legend and status line).
   const canvas = await page.locator('#traceMapCanvas').boundingBox();
   const panelBox = await panel.boundingBox();
+  const free = await freeArea(page, '#traceMapCanvas', '#traceMapPanel');
   const moved = state.nodes.find((n) => n.service === 'checkout');
   expect(Math.abs(center(moved).x - (canvas.x + (panelBox.x - canvas.x) / 2))).toBeLessThan(3);
-  expect(Math.abs(center(moved).y - (canvas.y + canvas.height / 2))).toBeLessThan(3);
+  expect(Math.abs(center(moved).y - (free.y + free.height / 2))).toBeLessThan(3);
   // An outbound edge row selects that edge.
   await panel.locator('.traceMapPanel__edge', { hasText: 'payment' }).click();
   await expect(panel).toContainText('Search calls checkout → payment');

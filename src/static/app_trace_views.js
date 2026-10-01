@@ -600,7 +600,8 @@
   // ---------------------------------------------------------------- graph
 
   // Jaeger's trace DAG: one node per (parent node, service, operation) path;
-  // count / errors, total time (% of the trace), average and self time.
+  // count / errors, total time (% of the trace), average and self time, and
+  // the spans of the path (the panel jumps to them in the timeline).
   function graphTree() {
     const entry = derived();
     if (entry.graph) return entry.graph;
@@ -611,7 +612,7 @@
       key: `${parent ? parent.key : ""}\u0001${span.service_name || "unknown"}\u0000${span.span_name || "span"}`,
       service: String(span.service_name || "unknown"),
       operation: String(span.span_name || "span"),
-      parent, children: [], childByName: new Map(), count: 0, errors: 0, time: 0, selfTime: 0,
+      parent, children: [], childByName: new Map(), count: 0, errors: 0, time: 0, selfTime: 0, spans: [],
     });
     const visit = (treeNode, parent) => {
       const name = `${treeNode.span.service_name || "unknown"}\u0000${treeNode.span.span_name || "span"}`;
@@ -625,6 +626,7 @@
         else roots.push(node);
       }
       node.count += 1;
+      node.spans.push(treeNode.span);
       node.errors += isError(treeNode.span) ? 1 : 0;
       node.time += spanDuration(treeNode.span);
       node.selfTime += self.get(treeNode) || 0;
@@ -641,66 +643,817 @@
     return entry.graph;
   }
 
-  const GRAPH_NODE_W = 260;
-  const GRAPH_NODE_H = 48;
-  const GRAPH_GAP_X = 22;
-  const GRAPH_GAP_Y = 46;
+  function round2(value) { return Math.round(value * 100) / 100; }
 
-  function graphLayout(graph) {
-    let slot = 0;
+  // Drawn with the shared canvas graph kit (app_graph_kit.js), like the
+  // Explorer graph and the Service map: one card per call path (the service
+  // as title, the operation under it, "count / errors · avg" and "time % ·
+  // self %"; a left strip in the service's waterfall colour; a red dot and
+  // border on errors), orthogonal edges from a call path to its callees whose
+  // dash pattern is the call kind and whose always visible label is the
+  // callee's span count, hover outlines a card, a click recentres on it and
+  // opens its side panel (a button jumps to its spans in the timeline). The
+  // Time / Self time colour modes fill the cards with a heat mixed in JS
+  // between --graph-node-bg and --graph-heat. A List view (the phone default)
+  // tabulates the call paths.
+  //
+  // Layout: the tree slot layout turned left to right. Graph nodes form a
+  // tree (one node per path), so the leaves take consecutive rows in call
+  // order and a parent sits on the row of its first callee: no edge can cross
+  // another, the first call of every path is a straight line and the rest
+  // drop down the gap to their rows. The slot is the kit's lineage row, and
+  // the kit's orthogonal router draws the edges on that row grid, one fan at
+  // a time (routeGraphEdges). (The kit's
+  // layered layout would sort callees by crossings and centre parents between
+  // them: every edge then bends, and the call order is lost.)
+  const GRAPH_CARD_W = 264;
+  const GRAPH_CARD_H = 82;
+  const GRAPH_X_GAP = 104;
+  const GRAPH_Y_GAP = 26;
+  const GRAPH_FIT_MAX = 1.35;
+  // The smallest card font is 12 px: Fit keeps it at 11 px or more.
+  const GRAPH_READABLE_SCALE = 11 / 12;
+  // Heat: up to 45 % of --graph-heat over the card (text keeps 4.5:1).
+  const GRAPH_HEAT_MAX = 0.45;
+  // Time mode: a call path taking 20 % of the trace or more is fully hot.
+  const GRAPH_TIME_HEAT_FULL = 20;
+  const GRAPH_PANEL_SPANS = 8;
+  const GRAPH_MODES = [["service", "Service"], ["time", "Time"], ["selftime", "Self time"]];
+  const GRAPH_KIND_LABELS = { sync: "call", async: "message", db: "database" };
+
+  const graphUi = {
+    pane: null,
+    ctl: null,
+    switch: null,
+    // The graphTree() the layout was built for.
+    graph: null,
+    layout: null,
+    view: { scale: 1, offsetX: 0, offsetY: 0 },
+    fitScale: 1,
+    fitted: true,
+    // Node id | null.
+    selected: null,
+    // { type: "node" | "edge", id, key } | null
+    hovered: null,
+    // "canvas" | "list"; null until the user picks one (phones default to list).
+    viewMode: null,
+    labelHits: [],
+    fills: new Map(),
+    timing: null,
+  };
+
+  const graphKit = () => ns.graphKit;
+  const compactCount = (() => {
+    const format = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+    return (value) => {
+      const n = Number(value) || 0;
+      return n < 1000 ? String(Math.round(n)) : format.format(n);
+    };
+  })();
+
+  function graphEdgeKind(node) {
+    const span = node.spans?.[0];
+    const kind = String(span?.span_kind || "").toLowerCase();
+    if (kind.includes("producer") || kind.includes("consumer")) return "async";
+    if (span) {
+      const attrs = spanAttributes(span);
+      if (attrs["db.system"] || attrs["db.system.name"]) return "db";
+    }
+    return "sync";
+  }
+
+  function graphCountText(node) { return `${node.count} / ${node.errors} · avg ${fmt(node.time / Math.max(1, node.count))}`; }
+  function graphTimeText(node) { return `${fmt(node.time)} (${round2(node.percent)}%) · self ${fmt(node.selfTime)} (${round2(node.percentSelf)}%)`; }
+  function graphLabelText(node) { return `×${compactCount(node.count)}`; }
+  function graphPathText(node) { return `${node.service} ${node.operation}`; }
+
+  // The heat of a node in the current colour mode, 0..1 (null in Service mode).
+  function graphHeat(node) {
+    if (view.graph.mode === "time") return Math.min(1, Math.max(0, node.percent / GRAPH_TIME_HEAT_FULL));
+    if (view.graph.mode === "selftime") return Math.min(1, Math.max(0, node.percentSelf / 100));
+    return null;
+  }
+
+  function graphFill(node) {
+    const kit = graphKit();
+    const heat = graphHeat(node);
+    if (heat == null || heat <= 0) return kit.color("nodeBg");
+    const weight = Math.round(heat * GRAPH_HEAT_MAX * 100) / 100;
+    let fill = graphUi.fills.get(weight);
+    if (!fill) {
+      fill = kit.mixColor(kit.color("nodeBg"), kit.theme.cssVar("--graph-heat"), weight);
+      graphUi.fills.set(weight, fill);
+    }
+    return fill;
+  }
+
+  // ---------------------------------------------------------- graph layout
+
+  function computeGraphLayout(graph, measure) {
+    const kit = graphKit();
+    const started = performance.now();
+    graph.nodes.forEach((node, index) => { node.id = `n${index}`; });
+    let row = 0;
     const place = (node, depth) => {
       node.depth = depth;
       if (!node.children.length) {
-        node.slot = slot;
-        slot += 1;
+        node.row = row;
+        row += 1;
         return;
       }
       for (const child of node.children) place(child, depth + 1);
-      node.slot = (node.children[0].slot + node.children[node.children.length - 1].slot) / 2;
+      node.row = node.children[0].row;
     };
     for (const root of graph.roots) place(root, 0);
-    const depth = graph.nodes.reduce((max, node) => Math.max(max, node.depth), 0);
+    const pitch = GRAPH_CARD_H + GRAPH_Y_GAP;
+    const items = new Map();
+    for (const node of graph.nodes) {
+      items.set(node.id, {
+        x: node.depth * (GRAPH_CARD_W + GRAPH_X_GAP),
+        y: node.row * pitch,
+        width: GRAPH_CARD_W,
+        height: GRAPH_CARD_H,
+        lineageRow: node.row,
+        node,
+      });
+    }
+    const edges = [];
+    for (const node of graph.nodes) {
+      if (node.parent) edges.push({ id: node.id, from: node.parent.id, to: node.id, node, kind: graphEdgeKind(node) });
+    }
+    const laidOut = performance.now();
+    const routes = routeGraphEdges(items, edges);
+    const routed = performance.now();
+    const maxCount = Math.max(1, ...graph.nodes.map((node) => node.count));
+    const edgeItems = edges.map((edge) => ({
+      ...edge,
+      points: routes.get(edge.id)?.points || [],
+      error: edge.node.errors > 0,
+      width: 1.25 + 1.75 * Math.sqrt(edge.node.count / maxCount),
+    }));
+
+    // Every edge label, busiest call paths first (they get the best spots).
+    const textWidth = measure || ((text) => text.length * 7);
+    const requests = edgeItems.filter((item) => item.points.length >= 2)
+      .sort((a, b) => b.node.count - a.node.count || a.node.row - b.node.row)
+      .map((item) => {
+        const text = graphLabelText(item.node);
+        return { key: item.id, text, width: textWidth(text) + 12, height: 18, points: item.points };
+      });
+    const { placed, dropped } = kit.placeLabels(requests, [...items.values()]);
+    const labels = new Map(requests.filter((request) => placed.has(request.key)).map((request) => [request.key, { text: request.text, rect: placed.get(request.key) }]));
+
+    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+    const grow = (x, y, width = 0, height = 0) => {
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + width); maxY = Math.max(maxY, y + height);
+    };
+    for (const item of items.values()) grow(item.x, item.y, item.width, item.height);
+    for (const label of labels.values()) grow(label.rect.x, label.rect.y, label.rect.width, label.rect.height);
+    for (const item of edgeItems) for (const point of item.points) grow(point.x, point.y);
+    const bounds = Number.isFinite(minX)
+      ? { x: minX - 40, y: minY - 40, width: maxX - minX + 80, height: maxY - minY + 80 }
+      : { x: 0, y: 0, width: 1, height: 1 };
+    const done = performance.now();
+    graphUi.timing = { layoutMs: laidOut - started, routeMs: routed - laidOut, labelMs: done - routed, totalMs: done - started };
     return {
-      width: Math.max(1, slot) * (GRAPH_NODE_W + GRAPH_GAP_X) + GRAPH_GAP_X,
-      height: (depth + 1) * (GRAPH_NODE_H + GRAPH_GAP_Y) + GRAPH_GAP_Y,
-      x: (node) => GRAPH_GAP_X + node.slot * (GRAPH_NODE_W + GRAPH_GAP_X),
-      y: (node) => GRAPH_GAP_Y / 2 + node.depth * (GRAPH_NODE_H + GRAPH_GAP_Y),
+      items,
+      edges: edgeItems,
+      edgeById: new Map(edgeItems.map((item) => [item.id, item])),
+      labels,
+      dropped,
+      bounds,
+      depth: graph.nodes.reduce((max, node) => Math.max(max, node.depth), 0),
     };
   }
 
-  function round2(value) { return Math.round(value * 100) / 100; }
+  // The routes of a call path to its callees stay inside its own rows of the
+  // gap between two columns (no card sits in a gap, and the rows of two call
+  // paths of one column never interleave), so each fan is routed on its own:
+  // the kit router compares every pair of routes it places, which a single
+  // run over 1,500 edges made take seconds. The router gives every route of a
+  // fan its own vertical lane; a gap has room for GRAPH_ROUTED_FAN of them, a
+  // wider fan shares one trunk (H-V-H, like the kit's fallback past its grid
+  // budget) instead of piling lanes on top of each other.
+  const GRAPH_ROUTED_FAN = 8;
+  function routeGraphEdges(items, edges) {
+    const kit = graphKit();
+    const fans = new Map();
+    for (const edge of edges) {
+      if (!fans.has(edge.from)) fans.set(edge.from, []);
+      fans.get(edge.from).push(edge);
+    }
+    const routes = new Map();
+    for (const [from, fan] of fans) {
+      const source = items.get(from);
+      if (fan.length > GRAPH_ROUTED_FAN) {
+        const a = kit.nodePort(source, "right");
+        const trunk = a.x + 18;
+        for (const edge of fan) {
+          const b = kit.nodePort(items.get(edge.to), "left");
+          const points = Math.abs(a.y - b.y) < 0.01 ? [a, b] : [a, { x: trunk, y: a.y }, { x: trunk, y: b.y }, b];
+          routes.set(edge.id, { points, a, b });
+        }
+        continue;
+      }
+      const local = new Map([[from, source]]);
+      for (const edge of fan) local.set(edge.to, items.get(edge.to));
+      for (const [id, route] of kit.routeEdges(local, fan)) routes.set(id, route);
+    }
+    return routes;
+  }
+
+  // ---------------------------------------------------------- graph chrome
+
+  const GRAPH_FIT_ICON = '<svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg>';
+
+  // The pane is built once and kept across views (the kit controller is
+  // bound to its canvas); the other views replace it in #traceAltView and
+  // the Graph view puts it back.
+  function graphPane() {
+    if (graphUi.pane) return graphUi.pane;
+    const kit = graphKit();
+    const pane = document.createElement("div");
+    pane.id = "traceGraphPane";
+    pane.className = "graphKitPane traceGraph";
+    pane.innerHTML = '<canvas id="traceGraphCanvas" class="graphKit__canvas" tabindex="0" aria-label="Trace graph: one card per call path. Arrow keys move between call paths, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>'
+      + '<div id="traceGraphBar" class="graphKitBar" aria-label="Trace graph controls">'
+      + '<div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">'
+      + '<button id="traceGraphZoomOut" class="graphKitTool" type="button" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>'
+      + `<button id="traceGraphFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the graph to the view" title="Fit the graph to the view (0)">${GRAPH_FIT_ICON}</button>`
+      + '<button id="traceGraphZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>'
+      + "</div>"
+      + `<div class="graphKitGroup traceGraph__colour">${pickerHtml("traceGraphMode", "Colour", GRAPH_MODES, view.graph.mode)}</div>`
+      + "</div>"
+      + '<div class="graphKitDock"><div id="traceGraphLegend" class="graphKitLegend" aria-label="Legend"></div>'
+      + '<div class="graphKitStatus"><span id="traceGraphMeta" class="graphKitStatus__text" role="status"></span></div></div>'
+      + '<canvas id="traceGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>'
+      + '<section id="traceGraphList" class="graphKitList" aria-label="Call paths" hidden></section>'
+      + '<aside id="traceGraphPanel" class="graphKitPanel" aria-label="Call path details" hidden></aside>';
+    graphUi.pane = pane;
+    const bar = pane.querySelector("#traceGraphBar");
+    graphUi.switch = kit.viewSwitch({ idPrefix: "traceGraph", label: "Graph view", onChange: setGraphViewMode });
+    bar.insertBefore(graphUi.switch.element, bar.querySelector(".traceGraph__colour"));
+    const select = pane.querySelector("#traceGraphMode");
+    ctx.enhanceTraceSelect(select);
+    select.addEventListener("change", () => {
+      view.graph.mode = GRAPH_MODES.some(([value]) => value === select.value) ? select.value : "service";
+      renderGraphLegend();
+      graphUi.ctl?.scheduleDraw();
+    });
+    const canvas = pane.querySelector("#traceGraphCanvas");
+    graphUi.ctl = kit.mount({
+      canvas,
+      view: graphUi.view,
+      active: graphShown,
+      draw: drawGraph,
+      bounds: () => graphUi.layout?.bounds || null,
+      minScale: graphMinimumScale,
+      fit: fitGraph,
+      hit: graphHitTest,
+      onHover: (target) => { graphUi.hovered = target; },
+      onClick: (target) => {
+        if (target?.type === "node" || target?.type === "edge") selectGraphNode(target.id);
+        else closeGraphPanel();
+      },
+      nodes: () => (graphUi.layout ? [...graphUi.layout.items.values()].map((item) => ({ id: item.node.id, x: item.x, y: item.y, width: item.width, height: item.height })) : []),
+      selectedId: () => graphUi.selected,
+      target: (id) => (graphUi.layout?.items.has(id) ? { type: "node", key: `node\u0000${id}`, id } : null),
+      describe: describeGraphNode,
+      onActivate: (id) => {
+        selectGraphNode(id);
+        graphPanel()?.querySelector("button[data-graph-span]")?.focus?.({ preventScroll: true });
+      },
+      onEscape: () => {
+        if (!graphUi.selected) return false;
+        closeGraphPanel();
+        return true;
+      },
+      onViewChange: () => { graphUi.fitted = false; },
+      onResize: () => { if (graphUi.layout && graphUi.fitted) fitGraph(); },
+      panelRect: () => {
+        const panel = graphPanel();
+        return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
+      },
+      toolbar: { zoomIn: pane.querySelector("#traceGraphZoomIn"), zoomOut: pane.querySelector("#traceGraphZoomOut"), fit: pane.querySelector("#traceGraphFit") },
+    });
+    kit.theme.onChange(() => {
+      graphUi.fills.clear();
+      if (graphShown()) graphUi.ctl.drawNow();
+    });
+    pane.addEventListener("click", onGraphActionClick);
+    // Escape in the panel or the list, or after the focused panel button was
+    // re-rendered away, closes the panel (the canvas has its own).
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !graphUi.selected || event.defaultPrevented || event.target === canvas || !graphShown()) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && target !== document.body && !pane.contains(target)) return;
+      event.preventDefault();
+      closeGraphPanel();
+      if (currentGraphViewMode() === "canvas") canvas.focus({ preventScroll: true });
+    });
+    window.matchMedia?.(kit.MOBILE_QUERY)?.addEventListener?.("change", () => { if (graphUi.pane?.isConnected) renderGraphChrome(); });
+    return pane;
+  }
+
+  const graphCanvas = () => graphUi.pane?.querySelector("#traceGraphCanvas") || null;
+  const graphPanel = () => graphUi.pane?.querySelector("#traceGraphPanel") || null;
+
+  function graphShown() {
+    const alt = byId("traceAltView");
+    return view.current === "graph" && !!graphUi.pane?.isConnected && !!alt && !alt.hidden;
+  }
+
+  function currentGraphViewMode() {
+    if (graphUi.viewMode) return graphUi.viewMode;
+    return graphKit()?.mobileLayout() ? "list" : "canvas";
+  }
+
+  function setGraphViewMode(mode) {
+    graphUi.viewMode = mode === "list" ? "list" : "canvas";
+    renderGraphChrome();
+    if (graphUi.viewMode === "canvas") {
+      graphUi.ctl?.size();
+      if (graphUi.fitted) fitGraph();
+      else graphUi.ctl?.scheduleDraw();
+    }
+  }
+
+  function renderGraphChrome() {
+    const pane = graphUi.pane;
+    if (!pane) return;
+    const list = currentGraphViewMode() === "list";
+    pane.classList.toggle("graphKitPane--list", list);
+    graphUi.switch?.set(list ? "list" : "canvas");
+    const section = pane.querySelector("#traceGraphList");
+    section.hidden = !list;
+    if (list) renderGraphList();
+  }
+
+  function renderGraphMeta() {
+    const meta = graphUi.pane?.querySelector("#traceGraphMeta");
+    const graph = graphUi.graph;
+    if (!meta || !graph) return;
+    const spans = graph.roots.reduce((sum, root) => sum + subtreeCount(root), 0);
+    const paths = graph.nodes.length;
+    meta.textContent = `${paths} call path${paths === 1 ? "" : "s"} · ${spans} span${spans === 1 ? "" : "s"} · depth ${(graphUi.layout?.depth ?? 0) + 1}`;
+  }
+
+  function subtreeCount(node) {
+    let total = node.count;
+    for (const child of node.children) total += subtreeCount(child);
+    return total;
+  }
+
+  function renderGraphLegend() {
+    const legend = graphUi.pane?.querySelector("#traceGraphLegend");
+    if (!legend) return;
+    const kinds = new Set((graphUi.layout?.edges || []).map((edge) => edge.kind));
+    const row = (marks, text) => `<span class="graphKitLegend__row">${marks}<span>${text}</span></span>`;
+    const lines = [["sync", ""], ["async", " graphKitLegend__line--dashed"], ["db", " graphKitLegend__line--dotted"]]
+      .filter(([kind]) => kind === "sync" || kinds.has(kind))
+      .map(([kind, cls]) => `<i class="graphKitLegend__line graphKitLegend__line--thin graphKitLegend__line--muted${cls}"></i><span>${GRAPH_KIND_LABELS[kind]}</span>`).join("");
+    const mode = view.graph.mode;
+    const heat = mode === "time"
+      ? row('<i class="traceGraphLegend__heat"></i>', `time: 0 \u2192 \u2265 ${GRAPH_TIME_HEAT_FULL}% of the trace`)
+      : mode === "selftime" ? row('<i class="traceGraphLegend__heat"></i>', "self time: 0 \u2192 100% of its time") : "";
+    legend.innerHTML = '<span class="traceGraphLegend__anatomy" aria-label="Card: service, operation, count / errors · average, time (% of the trace) · self time (% of its time)">'
+      + '<b>service</b><span>operation</span><span>count / errors · avg</span><span>time (% of trace) · self (% of it)</span></span>'
+      + row('<i class="graphKitLegend__dot"></i>', "errors on this call path")
+      + `<span class="graphKitLegend__row traceGraphLegend__kinds">${lines}</span>`
+      + row('<i class="traceGraphLegend__label">×N</i>', "spans of the callee")
+      + heat;
+  }
+
+  // ---------------------------------------------------------- graph camera
+
+  function graphOverviewScale() {
+    const kit = graphKit();
+    const area = kit.safeArea(graphCanvas());
+    const bounds = graphUi.layout?.bounds;
+    if (!bounds || !area.width || !area.height) return 1;
+    return Math.max(0.02, Math.min(GRAPH_FIT_MAX, Math.min(area.width / bounds.width, area.height / bounds.height) * 0.92));
+  }
+
+  // Fit shows the whole graph in the area the chrome leaves free, never with
+  // text below 11 px: a larger graph opens at the readable scale on the
+  // selected call path, else on the root (top-left), and the minimap gives
+  // the rest.
+  function fitGraph() {
+    const kit = graphKit();
+    const canvas = graphCanvas();
+    const layout = graphUi.layout;
+    const box = canvas?.getBoundingClientRect();
+    if (!kit || !layout || !box?.width || !box?.height) return;
+    kit.foldLegendToFit(canvas, layout.bounds, { readableScale: GRAPH_READABLE_SCALE });
+    const area = kit.safeArea(canvas);
+    const overview = graphOverviewScale();
+    const scale = Math.max(overview, GRAPH_READABLE_SCALE);
+    const bounds = layout.bounds;
+    const anchor = graphUi.selected ? layout.items.get(graphUi.selected) : null;
+    const v = graphUi.view;
+    v.scale = scale;
+    if (scale > overview + 1e-9 && anchor) {
+      v.offsetX = area.x + area.width / 2 - (anchor.x + anchor.width / 2) * scale;
+      v.offsetY = area.y + area.height / 2 - (anchor.y + anchor.height / 2) * scale;
+    } else if (scale > overview + 1e-9) {
+      v.offsetX = area.x + 24 - bounds.x * scale;
+      v.offsetY = area.y + 4 - bounds.y * scale;
+    } else {
+      const fitted = kit.fitTransform(bounds, box.width, box.height, { maxScale: GRAPH_FIT_MAX, minScale: scale, area });
+      v.offsetX = fitted.offsetX;
+      v.offsetY = fitted.offsetY;
+    }
+    kit.clampView(v, bounds, box.width, box.height);
+    graphUi.fitScale = scale;
+    graphUi.fitted = true;
+    graphUi.ctl?.scheduleDraw();
+  }
+
+  function graphMinimumScale() {
+    return Math.min(graphUi.fitScale || 0.06, graphOverviewScale());
+  }
+
+  // ---------------------------------------------------------- graph drawing
+
+  function graphNodeHovered(id) {
+    return graphUi.hovered?.type === "node" && graphUi.hovered.id === id;
+  }
+
+  function graphEdgeHighlighted(item) {
+    if (graphUi.selected && item.to === graphUi.selected) return true;
+    const hover = graphUi.hovered;
+    if (!hover) return false;
+    if (hover.type === "edge") return hover.id === item.id;
+    return hover.type === "node" && (item.from === hover.id || item.to === hover.id);
+  }
+
+  function graphEdgeColor(item, highlighted) {
+    const kit = graphKit();
+    if (item.error) return kit.color("error");
+    return highlighted ? kit.color("halo") : kit.color("edgeMuted");
+  }
+
+  function drawGraphCard(context, item, compact) {
+    const kit = graphKit();
+    const node = item.node;
+    const selected = graphUi.selected === node.id;
+    const hovered = graphNodeHovered(node.id);
+    const heat = graphHeat(node) != null;
+    const card = {
+      radius: 10,
+      halo: selected,
+      fill: graphFill(node),
+      border: selected || hovered ? kit.color("halo") : node.errors ? kit.color("error") : kit.color("border"),
+      borderWidth: selected ? 2.4 : hovered || node.errors ? 1.8 : 1.2,
+      strip: kit.theme.resolveColor(ctx.serviceColor(node.service)),
+      status: node.errors ? "error" : null,
+      rows: [],
+    };
+    if (compact) {
+      const size = kit.compactTitleSize(graphUi.view.scale);
+      if (size) card.rows.push({ text: node.service, size, weight: 600, y: Math.min(item.height - 10, 12 + size), fit: "full" });
+    } else {
+      card.rows.push(
+        { text: node.service, size: 13, weight: 600, y: 21 },
+        { text: node.operation, size: 12, weight: 400, y: 39, color: kit.color("text") },
+        // On a heat fill the error red would not keep its contrast: the dot
+        // and the border carry the errors there.
+        { text: graphCountText(node), y: 57, color: node.errors && !heat ? kit.color("error") : kit.color("muted") },
+        { text: graphTimeText(node), y: 74 },
+      );
+    }
+    kit.drawCard(context, item, card);
+  }
+
+  function drawGraph(context, frame) {
+    const kit = graphKit();
+    const layout = graphUi.layout;
+    const minimap = graphUi.pane?.querySelector("#traceGraphMinimap");
+    if (!layout) {
+      if (minimap) minimap.hidden = true;
+      return false;
+    }
+    const v = graphUi.view;
+    const compact = v.scale < GRAPH_READABLE_SCALE - 1e-6;
+    // The world rectangle on screen (plus a margin): cards, edges and labels
+    // outside it are skipped (a 1,500-node graph redraws on every pan frame).
+    const margin = 40 / v.scale;
+    const left = -v.offsetX / v.scale - margin;
+    const top = -v.offsetY / v.scale - margin;
+    const right = left + frame.width / v.scale + margin * 2;
+    const bottom = top + frame.height / v.scale + margin * 2;
+    const onScreen = (x, y, width, height) => !(x > right || x + width < left || y > bottom || y + height < top);
+    context.save();
+    context.translate(v.offsetX, v.offsetY);
+    context.scale(v.scale, v.scale);
+    for (const item of layout.edges) {
+      const points = item.points;
+      if (points.length < 2) continue;
+      const from = layout.items.get(item.from);
+      const to = layout.items.get(item.to);
+      const x0 = Math.min(from.x, to.x);
+      const y0 = Math.min(from.y, to.y);
+      if (!onScreen(x0, y0, Math.max(from.x, to.x) + to.width - x0, Math.max(from.y, to.y) + to.height - y0)) continue;
+      const highlighted = graphEdgeHighlighted(item);
+      context.save();
+      context.globalAlpha = highlighted ? 1 : 0.88;
+      context.strokeStyle = graphEdgeColor(item, highlighted);
+      context.lineWidth = item.width + (highlighted ? 1.2 : 0);
+      context.lineJoin = "round";
+      context.setLineDash(graphKindDash(item.kind));
+      kit.strokePolyline(context, points);
+      kit.drawArrowHead(context, points, 7 + item.width);
+      context.restore();
+    }
+    for (const item of layout.items.values()) {
+      if (onScreen(item.x, item.y, item.width, item.height)) drawGraphCard(context, item, compact);
+    }
+    graphUi.labelHits = [];
+    if (!compact) {
+      context.font = `600 12px ${kit.FONT}`;
+      for (const item of layout.edges) {
+        const label = layout.labels.get(item.id);
+        if (!label) continue;
+        const rect = label.rect;
+        if (!onScreen(rect.x, rect.y, rect.width, rect.height)) continue;
+        kit.drawLabel(context, rect, label.text, { highlighted: graphEdgeHighlighted(item), textColor: item.error ? kit.color("error") : null });
+        graphUi.labelHits.push({ id: item.id, ...rect });
+      }
+    }
+    context.restore();
+
+    if (minimap) {
+      const visible = kit.anyClipped(layout.items.values(), v, frame.width, frame.height) || compact;
+      minimap.hidden = !visible || currentGraphViewMode() === "list";
+      if (!minimap.hidden) {
+        kit.drawMinimap(minimap, {
+          bounds: layout.bounds,
+          nodes: [...layout.items.values()].map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height, alpha: item.node.id === graphUi.selected ? 1 : 0.62 })),
+          edges: layout.edges.map((item) => ({ points: item.points, dash: graphKindDash(item.kind), width: 1, color: graphEdgeColor(item, false) })),
+          view: v,
+          width: frame.width,
+          height: frame.height,
+        });
+      }
+    }
+    return false;
+  }
+
+  function graphKindDash(kind) {
+    const dash = graphKit().DASH;
+    return kind === "async" ? dash.message : kind === "db" ? dash.dotted : dash.solid;
+  }
+
+  function graphHitTest(clientX, clientY) {
+    const kit = graphKit();
+    const layout = graphUi.layout;
+    const box = graphCanvas()?.getBoundingClientRect();
+    if (!layout || !box) return null;
+    const v = graphUi.view;
+    const point = { x: (clientX - box.left - v.offsetX) / v.scale, y: (clientY - box.top - v.offsetY) / v.scale };
+    for (const item of layout.items.values()) {
+      if (kit.pointInRect(point, item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
+    }
+    for (const hit of graphUi.labelHits) {
+      if (kit.pointInRect(point, hit, 2 / v.scale)) return { type: "edge", key: `edge\u0000${hit.id}`, id: hit.id };
+    }
+    const tolerance = 6 / v.scale;
+    let best = null;
+    for (const item of layout.edges) {
+      if (item.points.length < 2) continue;
+      const distance = kit.distanceToPolyline(point, item.points);
+      if (distance <= tolerance && (!best || distance < best.distance)) best = { item, distance };
+    }
+    return best ? { type: "edge", key: `edge\u0000${best.item.id}`, id: best.item.id } : null;
+  }
+
+  function describeGraphNode(id) {
+    const node = graphUi.layout?.items.get(id)?.node;
+    if (!node) return "";
+    return `${node.service} ${node.operation}: ${node.count} span${node.count === 1 ? "" : "s"}, ${node.errors} error${node.errors === 1 ? "" : "s"}, ${fmt(node.time)} (${round2(node.percent)}% of the trace), self time ${round2(node.percentSelf)}%. Enter selects it.`;
+  }
+
+  // ---------------------------------------------------------- graph panel
+
+  // A click on a call path (or on the edge into it) recentres on it and
+  // opens its panel; on the background, closes the panel.
+  function selectGraphNode(id, { center = true } = {}) {
+    const item = graphUi.layout?.items.get(id);
+    if (!item) return;
+    graphUi.selected = id;
+    renderGraphPanel();
+    renderGraphList();
+    if (center && currentGraphViewMode() === "canvas") graphUi.ctl?.centerOn(item);
+    graphUi.ctl?.scheduleDraw();
+  }
+
+  function closeGraphPanel() {
+    graphUi.selected = null;
+    const panel = graphPanel();
+    if (panel) { panel.hidden = true; panel.replaceChildren(); }
+    graphUi.pane?.classList.remove("graphKitPane--panel");
+    renderGraphList();
+    graphUi.ctl?.scheduleDraw();
+  }
+
+  function graphFragment(html) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    return template.content;
+  }
+
+  function graphNodeButton(node, extra = "") {
+    return `<button type="button" class="graphKitPanel__link traceGraphPanel__path" data-graph-select="${esc(node.id)}" title="${esc(graphPathText(node))}"><span class="traceGraph__dot" style="background:${ctx.serviceColor(node.service)}"></span>${esc(node.service)} <span>${esc(node.operation)}</span>${extra}</button>`;
+  }
+
+  function renderGraphPanel() {
+    const kit = graphKit();
+    const panel = graphPanel();
+    const node = graphUi.layout?.items.get(graphUi.selected)?.node;
+    if (!panel || !node) { closeGraphPanel(); return; }
+    const traceStart = derived().cache.bounds.start;
+    const body = kit.el("div", "graphKitPanel__body");
+    body.append(kit.panelHeader({
+      eyebrow: "Call path",
+      title: node.service,
+      dot: ctx.serviceColor(node.service),
+      subtitle: node.operation,
+      onClose: () => { closeGraphPanel(); graphCanvas()?.focus?.({ preventScroll: true }); },
+    }));
+    const stat = (label, value, note = "", cls = "") => `<div><dt>${esc(label)}</dt><dd${cls ? ` class="${cls}"` : ""}>${esc(value)}${note ? `<small>${esc(note)}</small>` : ""}</dd></div>`;
+    const errorSpan = node.spans.find((span) => isError(span));
+    const spans = node.spans.slice().sort((a, b) => spanStart(a) - spanStart(b));
+    const spanRows = spans.slice(0, GRAPH_PANEL_SPANS).map((span) => `<li><button type="button" class="traceGraphPanel__span${isError(span) ? " is-err" : ""}" data-graph-span="${esc(span.span_id)}" title="Show this span in the timeline"><span>+${esc(fmt(Math.max(0, spanStart(span) - traceStart)))}</span><span>${esc(fmt(spanDuration(span)))}</span><code>${esc(span.span_id)}</code></button></li>`).join("");
+    const more = spans.length > GRAPH_PANEL_SPANS ? `<p class="graphKitPanel__note">+${spans.length - GRAPH_PANEL_SPANS} more in the timeline</p>` : "";
+    const ancestors = [];
+    for (let parent = node.parent; parent; parent = parent.parent) ancestors.unshift(parent);
+    const children = node.children.slice().sort((a, b) => b.time - a.time);
+    body.append(graphFragment('<dl class="graphKitPanel__stats">'
+      + stat("Spans", String(node.count))
+      + stat("Errors", String(node.errors), node.count ? `${round2((node.errors / node.count) * 100)}%` : "", node.errors ? "is-err" : "")
+      + stat("Avg", fmt(node.time / Math.max(1, node.count)))
+      + stat("Time", fmt(node.time), `${round2(node.percent)}% of the trace`)
+      + stat("Self time", fmt(node.selfTime), `${round2(node.percentSelf)}% of its time`)
+      + "</dl>"
+      + '<div class="graphKitPanel__actions">'
+      + `<button type="button" class="button button--primary button--small" data-graph-span="${esc(spans[0]?.span_id || "")}">${node.count > 1 ? "Show the first span in the timeline" : "Show in the timeline"}</button>`
+      + (errorSpan && errorSpan !== spans[0] ? `<button type="button" class="button button--small" data-graph-span="${esc(errorSpan.span_id)}">Show the first error</button>` : "")
+      + "</div>"
+      + (node.count > 1 ? `<section class="graphKitPanel__section"><h3 class="graphKitPanel__sectionTitle">Spans <small>start · duration · span ID</small></h3><ul class="traceGraphPanel__spans">${spanRows}</ul>${more}</section>` : "")
+      + (ancestors.length ? `<section class="graphKitPanel__section"><h3 class="graphKitPanel__sectionTitle">Called from</h3><ol class="traceGraphPanel__list">${ancestors.map((parent) => `<li>${graphNodeButton(parent)}</li>`).join("")}</ol></section>` : "")
+      + `<section class="graphKitPanel__section"><h3 class="graphKitPanel__sectionTitle">Calls <small>spans · time</small></h3>`
+      + (children.length
+        ? `<ul class="traceGraphPanel__list">${children.map((child) => `<li>${graphNodeButton(child, `<small>×${esc(compactCount(child.count))} · ${esc(fmt(child.time))}</small>`)}</li>`).join("")}</ul>`
+        : '<p class="graphKitPanel__note">None</p>')
+      + "</section>"));
+    panel.replaceChildren(body);
+    panel.hidden = false;
+    graphUi.pane.classList.add("graphKitPane--panel");
+  }
+
+  function onGraphActionClick(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const span = target.closest("[data-graph-span]");
+    if (span) {
+      const id = String(span.getAttribute("data-graph-span") || "");
+      if (id) ctx.focusSpanInTimeline(id, { push: true });
+      return;
+    }
+    const select = target.closest("[data-graph-select]");
+    if (select) selectGraphNode(String(select.getAttribute("data-graph-select") || ""));
+  }
+
+  // ---------------------------------------------------------- graph list
+
+  function renderGraphList() {
+    const section = graphUi.pane?.querySelector("#traceGraphList");
+    const graph = graphUi.graph;
+    if (!section || section.hidden || !graph) return;
+    const rows = [];
+    const visit = (node) => {
+      rows.push(`<tr data-graph-row="${esc(node.id)}"${node.id === graphUi.selected ? ' class="is-selected"' : ""}>`
+        + `<td class="graphKitList__name traceGraphList__name" style="padding-left:${12 + Math.min(node.depth, 24) * 14}px"><button type="button" class="graphKitList__open" data-graph-select="${esc(node.id)}" title="${esc(graphPathText(node))}"><span class="traceGraph__dot" style="background:${ctx.serviceColor(node.service)}"></span>${esc(node.service)}<span class="traceGraphList__op">${esc(node.operation)}</span></button></td>`
+        + `<td class="graphKitList__num">${node.count}</td>`
+        + `<td class="graphKitList__num${node.errors ? " is-err" : ""}">${node.errors}</td>`
+        + `<td class="graphKitList__num graphKitList__secondary">${esc(fmt(node.time / Math.max(1, node.count)))}</td>`
+        + `<td class="graphKitList__num">${esc(fmt(node.time))} <small class="graphKitList__secondary">${round2(node.percent)}%</small></td>`
+        + `<td class="graphKitList__num graphKitList__secondary">${esc(fmt(node.selfTime))} <small>${round2(node.percentSelf)}%</small></td></tr>`);
+      for (const child of node.children) visit(child);
+    };
+    for (const root of graph.roots) visit(root);
+    section.innerHTML = '<div class="graphKitList__header"><h3 class="graphKitList__title">Call paths</h3>'
+      + `<span class="graphKitList__meta">${graph.nodes.length} call path${graph.nodes.length === 1 ? "" : "s"} in call order, callees indented</span></div>`
+      + '<div class="graphKitList__wrap"><table class="graphKitList__table" data-graph-list="paths"><thead><tr><th>Call path</th><th class="graphKitList__num">Spans</th><th class="graphKitList__num">Errors</th><th class="graphKitList__num graphKitList__secondary">Avg</th><th class="graphKitList__num">Time</th><th class="graphKitList__num graphKitList__secondary">Self time</th></tr></thead>'
+      + `<tbody>${rows.join("")}</tbody></table></div>`;
+  }
+
+  // ---------------------------------------------------------- graph view
+
+  function graphMeasure() {
+    const context = graphCanvas()?.getContext?.("2d");
+    if (!context) return null;
+    context.font = `600 12px ${graphKit().FONT}`;
+    return (text) => context.measureText(text).width;
+  }
 
   function renderGraph(alt) {
-    toolsFor("graph", () => [
-      pickerHtml("traceGraphMode", "Colour", [["service", "Service"], ["time", "Time"], ["selftime", "Self time"]], view.graph.mode),
-      '<span class="traceGraph__legend" aria-label="Node legend"><span>Count / Errors</span><b>Service</b><span>Avg</span><span>Duration (%)</span><b>Operation</b><span>Self time (%)</span></span>',
-    ].join(""));
+    const kit = graphKit();
     const graph = graphTree();
+    if (!kit) {
+      alt.innerHTML = '<div class="tracesEmpty">The trace graph could not load.</div>';
+      return;
+    }
     if (graph.nodes.length > GRAPH_NODE_LIMIT) {
       alt.innerHTML = `<div class="tracesEmpty">This trace has ${graph.nodes.length} distinct call paths: too many to draw (limit ${GRAPH_NODE_LIMIT}).</div>`;
       return;
     }
-    const layout = graphLayout(graph);
-    const edges = [];
-    const boxes = [];
-    for (const node of graph.nodes) {
-      const x = layout.x(node);
-      const y = layout.y(node);
-      if (node.parent) {
-        const px = layout.x(node.parent) + GRAPH_NODE_W / 2;
-        const py = layout.y(node.parent) + GRAPH_NODE_H;
-        const cx = x + GRAPH_NODE_W / 2;
-        const mid = (py + y) / 2;
-        edges.push(`<path class="traceGraph__edge" d="M${px},${py} C${px},${mid} ${cx},${mid} ${cx},${y}"></path>`);
-      }
-      let background = "";
-      if (view.graph.mode === "time") background = `--trace-graph-heat:${round2(Math.min(node.percent / 20, 1) * 100)}%`;
-      else if (view.graph.mode === "selftime") background = `--trace-graph-heat:${round2(node.percentSelf)}%`;
-      const style = `left:${x}px;top:${y}px;width:${GRAPH_NODE_W}px;height:${GRAPH_NODE_H}px;--trace-service-color:${ctx.serviceColor(node.service)}${background ? `;${background}` : ""}`;
-      boxes.push(`<div class="traceGraph__node traceGraph__node--${view.graph.mode}${node.errors ? " has-error" : ""}" style="${style}" data-graph-node="${esc(`${node.service} ${node.operation}`)}" title="${esc(`${node.service} ${node.operation}`)}"><span class="traceGraph__count">${node.count} / ${node.errors}</span><b class="traceGraph__service">${esc(node.service)}</b><span class="traceGraph__avg">${esc(fmt(node.time / Math.max(1, node.count)))}</span><span class="traceGraph__time">${esc(fmt(node.time))} (${round2(node.percent)}%)</span><span class="traceGraph__op">${esc(node.operation)}</span><span class="traceGraph__self">${esc(fmt(node.selfTime))} (${round2(node.percentSelf)}%)</span></div>`);
+    const pane = graphPane();
+    if (alt.firstElementChild !== pane || alt.childElementCount !== 1) alt.replaceChildren(pane);
+    const select = pane.querySelector("#traceGraphMode");
+    if (select && select.value !== view.graph.mode) {
+      select.value = view.graph.mode;
+      select.dispatchEvent(new Event("tracepicker-refresh"));
     }
-    alt.innerHTML = `<div class="traceGraph"><div class="traceGraph__canvas" style="width:${layout.width}px;height:${layout.height}px"><svg class="traceGraph__edges" width="${layout.width}" height="${layout.height}" aria-hidden="true">${edges.join("")}</svg>${boxes.join("")}</div></div>`;
+    if (graphUi.graph !== graph) {
+      // Another trace: a new layout, no selection, fitted.
+      graphUi.graph = graph;
+      graphUi.layout = computeGraphLayout(graph, graphMeasure());
+      graphUi.hovered = null;
+      graphUi.fitted = true;
+      closeGraphPanel();
+      renderGraphMeta();
+    }
+    renderGraphLegend();
+    renderGraphChrome();
+    graphUi.ctl.size();
+    if (graphUi.fitted) fitGraph();
+    else graphUi.ctl.scheduleDraw();
   }
+
+  // Turns of a route (its collinear fan anchors are not bends).
+  function graphBends(points) {
+    let bends = 0;
+    for (let i = 1; i + 1 < points.length; i += 1) {
+      const vertical = (a, b) => Math.abs(a.x - b.x) < 0.01;
+      if (vertical(points[i - 1], points[i]) !== vertical(points[i], points[i + 1])) bends += 1;
+    }
+    return bends;
+  }
+
+  // Read-only geometry of the last drawn frame in client (CSS pixel)
+  // coordinates: lets browser tests hover and click real call paths.
+  function inspectGraph() {
+    const box = graphCanvas()?.getBoundingClientRect();
+    const v = graphUi.view;
+    const toClient = (rect) => ({
+      x: (box?.left || 0) + rect.x * v.scale + v.offsetX,
+      y: (box?.top || 0) + rect.y * v.scale + v.offsetY,
+      width: rect.width * v.scale,
+      height: rect.height * v.scale,
+    });
+    const layout = graphShown() || currentGraphViewMode() === "list" ? graphUi.layout : null;
+    const minimap = graphUi.pane?.querySelector("#traceGraphMinimap");
+    return {
+      kit: true,
+      scale: v.scale,
+      offsetX: v.offsetX,
+      offsetY: v.offsetY,
+      fitScale: graphUi.fitScale,
+      readableScale: GRAPH_READABLE_SCALE,
+      gridSpacing: graphKit()?.GRID_SPACING,
+      fitted: graphUi.fitted,
+      viewMode: currentGraphViewMode(),
+      mode: view.graph.mode,
+      selected: graphUi.selected,
+      hovered: graphUi.hovered ? { type: graphUi.hovered.type, id: graphUi.hovered.id } : null,
+      keyboardId: graphUi.ctl?.keyboardId() || null,
+      animating: !!graphUi.ctl?.animating(),
+      minimapVisible: !!minimap && !minimap.hidden,
+      timing: graphUi.timing ? { ...graphUi.timing } : null,
+      nodes: layout ? [...layout.items.values()].map((item) => {
+        const node = item.node;
+        return {
+          id: node.id, label: graphPathText(node), service: node.service, operation: node.operation, depth: node.depth, row: node.row,
+          parent: node.parent?.id || null, count: node.count, errors: node.errors, status: node.errors ? "error" : null,
+          countText: graphCountText(node), timeText: graphTimeText(node), heat: graphHeat(node),
+          fill: graphFill(node), strip: graphKit().theme.resolveColor(ctx.serviceColor(node.service)), ...toClient(item),
+        };
+      }) : [],
+      edges: layout ? layout.edges.map((item) => ({
+        id: item.id, source: item.from, target: item.to, kind: item.kind, error: item.error, width: item.width,
+        dash: graphKindDash(item.kind).slice(), bends: graphBends(item.points),
+        orthogonal: item.points.every((point, i) => i === 0 || Math.abs(point.x - item.points[i - 1].x) < 0.01 || Math.abs(point.y - item.points[i - 1].y) < 0.01),
+        points: item.points.map((point) => toClient({ x: point.x, y: point.y, width: 0, height: 0 })),
+      })) : [],
+      edgeLabels: (graphUi.labelHits || []).map((hit) => ({ id: hit.id, text: layout?.labels.get(hit.id)?.text || "", ...toClient(hit) })),
+      edgeLabelsPlaced: layout ? layout.labels.size : 0,
+      edgeLabelsDropped: layout ? layout.dropped.slice() : [],
+    };
+  }
+
+  ns.traceGraph = { inspect: inspectGraph, state: () => graphUi };
 
   // ---------------------------------------------------------------- event markers
 
@@ -852,7 +1605,6 @@
       else if (target.id === "traceStatsColorBy") view.stats.colorBy = target.value;
       else if (target.id === "traceSpansService") view.spans.service = target.value;
       else if (target.id === "traceSpansStatus") view.spans.status = target.value;
-      else if (target.id === "traceGraphMode") view.graph.mode = target.value;
       else return;
       render();
     });

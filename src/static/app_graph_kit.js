@@ -2,14 +2,15 @@
   "use strict";
   // Shared canvas graph kit (ns.graphKit): one look and one interaction model
   // for every node / edge graph (Explorer lineage and storage graph, Traces
-  // service map). It owns the view transform (pan, zoom, fit, one wheel factor
+  // service map, trace detail Trace Graph). It owns the view transform (pan,
+  // zoom, fit into the area the chrome leaves free, one wheel factor
   // and zoom range), the DPR-correct canvas and its rAF-coalesced redraws, the
   // dot-grid background, card / halo / edge / label drawing, the orthogonal
   // edge router and the layered layout it routes, collision-free edge labels,
   // the minimap, keyboard access (focusable canvas, arrows between nodes,
   // Enter, + - 0, Escape) and the DOM helpers of the shared chrome (Graph /
-  // List switch, side-panel shell). Colours come from the --graph-* tokens of
-  // style.css ("Graph kit" block), never from literals.
+  // List switch, foldable legend, side-panel shell). Colours come from the
+  // --graph-* tokens of style.css ("Graph kit" block), never from literals.
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -108,6 +109,44 @@
     const text = String(value || "");
     const match = /^var\((--[A-Za-z0-9_-]+)\)$/.exec(text);
     return match ? cssVar(match[1]) : text;
+  }
+
+  // Any CSS colour as [r, g, b, a] (0..255, alpha 0..1): a 1x1 canvas
+  // normalises the syntax ("#abc", "rgba(...)", names) to "#rrggbb" or
+  // "rgba(r, g, b, a)". Cached per text.
+  const parsedColors = new Map();
+  let colorProbe = null;
+  function parseColor(value) {
+    const text = String(value || "").trim();
+    let rgba = parsedColors.get(text);
+    if (rgba) return rgba;
+    if (!colorProbe && typeof document.createElement === "function") colorProbe = document.createElement("canvas").getContext?.("2d") || null;
+    let normal = text;
+    if (colorProbe) {
+      colorProbe.fillStyle = "#000000";
+      colorProbe.fillStyle = text;
+      normal = String(colorProbe.fillStyle);
+    }
+    const hex = /^#([0-9a-f]{6})$/i.exec(normal);
+    if (hex) {
+      const n = parseInt(hex[1], 16);
+      rgba = [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
+    } else {
+      const parts = (normal.match(/[\d.]+/g) || []).map(Number);
+      rgba = parts.length >= 3 ? [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1] : [0, 0, 0, 1];
+    }
+    if (parsedColors.size > 500) parsedColors.clear();
+    parsedColors.set(text, rgba);
+    return rgba;
+  }
+
+  // Canvas twin of color-mix(in srgb, b t, a): `t` of colour `b` over `a`.
+  function mixColor(a, b, t) {
+    const x = parseColor(a);
+    const y = parseColor(b);
+    const k = Math.max(0, Math.min(1, Number(t) || 0));
+    const channel = (i) => Math.round(x[i] + (y[i] - x[i]) * k);
+    return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
   }
 
   // Alpha of objects outside the focused neighbourhood: faint but legible.
@@ -1917,14 +1956,53 @@
 
   // ------------------------------------------------------------- the view
 
-  // Fit transform of a world box into a width x height viewport.
-  function fitTransform(bounds, width, height, { maxScale = 1.35, minScale = MIN_SCALE, margin = 0.92 } = {}) {
+  // The part of a graph canvas its own chrome leaves free, in CSS pixels from
+  // the canvas' top-left corner: below the toolbar groups, above the legend /
+  // status dock, and beside an open side panel (left of it on desktop, above
+  // the bottom sheet on phones). Fit and recentring aim at this area, so
+  // cards and edge labels do not land under the chrome. The bands span the
+  // whole width: the dock sits in a corner, where a centred graph would
+  // otherwise reach it, and its band also clears the minimap's corner (the
+  // minimap only shows once the graph is clipped, so a fit never needs it).
+  const SAFE_GAP = 8;
+  function safeArea(canvas, { panel = null } = {}) {
+    const rect = canvas?.getBoundingClientRect?.();
+    if (!rect || !rect.width || !rect.height) return { x: 0, y: 0, width: rect?.width || 0, height: rect?.height || 0 };
+    const pane = canvas.parentElement;
+    const shown = (node) => !!node && !node.hidden && node.getClientRects().length > 0;
+    let top = 0;
+    let bottom = rect.height;
+    let right = rect.width;
+    const bar = pane?.querySelector(":scope > .graphKitBar");
+    for (const group of bar?.children || []) {
+      if (shown(group)) top = Math.max(top, group.getBoundingClientRect().bottom - rect.top + SAFE_GAP);
+    }
+    const dock = pane?.querySelector(":scope > .graphKitDock");
+    if (shown(dock)) {
+      const box = dock.getBoundingClientRect();
+      if (box.height > 0) bottom = Math.min(bottom, box.top - rect.top - SAFE_GAP);
+    }
+    if (panel && panel.width && panel.height) {
+      if (mobileLayout()) bottom = Math.min(bottom, panel.top - rect.top);
+      else right = Math.min(right, panel.left - rect.left);
+    }
+    // A tiny canvas keeps a usable area (the chrome then overlaps).
+    top = Math.min(Math.max(0, top), rect.height * 0.4);
+    bottom = Math.max(bottom, top + Math.min(80, rect.height - top));
+    right = Math.max(right, Math.min(rect.width, 120));
+    return { x: 0, y: top, width: right, height: bottom - top };
+  }
+
+  // Fit transform of a world box into a width x height viewport, or into
+  // `area` (a safeArea() rectangle) when given.
+  function fitTransform(bounds, width, height, { maxScale = 1.35, minScale = MIN_SCALE, margin = 0.92, area = null } = {}) {
     if (!bounds || !width || !height) return null;
-    const scale = Math.max(minScale, Math.min(maxScale, Math.min(width / bounds.width, height / bounds.height) * margin));
+    const box = area && area.width > 0 && area.height > 0 ? area : { x: 0, y: 0, width, height };
+    const scale = Math.max(minScale, Math.min(maxScale, Math.min(box.width / bounds.width, box.height / bounds.height) * margin));
     return {
       scale,
-      offsetX: width / 2 - (bounds.x + bounds.width / 2) * scale,
-      offsetY: height / 2 - (bounds.y + bounds.height / 2) * scale,
+      offsetX: box.x + box.width / 2 - (bounds.x + bounds.width / 2) * scale,
+      offsetY: box.y + box.height / 2 - (bounds.y + bounds.height / 2) * scale,
     };
   }
 
@@ -2031,18 +2109,14 @@
     }
 
     // Pans so that a world box sits in the middle of the free area: the canvas
-    // minus an open side panel (on the right on desktop, a bottom sheet on
-    // phones). Eased over 220 ms unless reduced motion is preferred.
+    // minus its chrome (toolbar, legend / status dock; see safeArea) and an open
+    // side panel (on the right on desktop, a bottom sheet on phones). Eased
+    // over 220 ms unless reduced motion is preferred.
     function centerOn(box, { animate = true } = {}) {
       if (!box) return;
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      let free = { x: 0, y: 0, width: rect.width, height: rect.height };
-      const panel = options.panelRect?.();
-      if (panel && panel.width && panel.height) {
-        if (mobileLayout()) free.height = Math.max(80, Math.min(rect.height, panel.top - rect.top));
-        else free.width = Math.max(120, Math.min(rect.width, panel.left - rect.left));
-      }
+      const free = safeArea(canvas, { panel: options.panelRect?.() || null });
       const target = {
         offsetX: free.x + free.width / 2 - (box.x + box.width / 2) * view.scale,
         offsetY: free.y + free.height / 2 - (box.y + box.height / 2) * view.scale,
@@ -2219,6 +2293,13 @@
       setHover(null);
     });
 
+    // The legend folds away from its button in the status line: the fit and
+    // the recentring then reclaim its corner.
+    legendToggle(canvas.parentElement, () => {
+      options.onResize?.();
+      scheduleDraw();
+    });
+
     const toolbar = options.toolbar || {};
     toolbar.zoomIn?.addEventListener("click", () => zoomBy(ZOOM_STEP));
     toolbar.zoomOut?.addEventListener("click", () => zoomBy(1 / ZOOM_STEP));
@@ -2260,6 +2341,75 @@
     if (className) node.className = className;
     if (text != null) node.textContent = String(text);
     return node;
+  }
+
+  // Show / hide button of a pane's legend, at the start of its status line.
+  // One preference for every graph, kept per viewer (storage is optional):
+  // "hidden" folds every legend, "shown" keeps them open; without one, a fit
+  // folds the legend when the graph does not fit beside it (see
+  // foldLegendToFit) and opens it again once the room is back.
+  const LEGEND_STORAGE_KEY = "chdash.graphLegend";
+  let legendSerial = 0;
+  const legendControls = new WeakMap();
+  function legendPreference() {
+    try { return localStorage.getItem(LEGEND_STORAGE_KEY) || ""; } catch (_) { return ""; }
+  }
+  function legendToggle(pane, onToggle) {
+    const dock = pane?.querySelector?.(":scope > .graphKitDock");
+    const legend = dock?.querySelector(".graphKitLegend");
+    const status = dock?.querySelector(".graphKitStatus");
+    if (!legend || !status || status.querySelector(".graphKitLegendToggle")) return null;
+    if (!legend.id) legend.id = `graphKitLegend${(legendSerial += 1)}`;
+    const button = el("button", "graphKitLegendToggle");
+    button.type = "button";
+    button.setAttribute("aria-controls", legend.id);
+    button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h2M6.5 4h7M2.5 8h2M6.5 8h7M2.5 12h2M6.5 12h4"/></svg>';
+    const preference = legendPreference();
+    const control = {
+      // The viewer chose (this session or a stored preference): no auto fold.
+      chosen: !!preference,
+      auto: false,
+      collapsed: () => dock.classList.contains("is-legend-collapsed"),
+      apply(collapsed) {
+        dock.classList.toggle("is-legend-collapsed", collapsed);
+        button.setAttribute("aria-expanded", String(!collapsed));
+        const label = collapsed ? "Show the legend" : "Hide the legend";
+        button.setAttribute("aria-label", label);
+        button.title = label;
+      },
+    };
+    control.apply(preference === "hidden");
+    button.addEventListener("click", () => {
+      const collapsed = !control.collapsed();
+      control.apply(collapsed);
+      control.chosen = true;
+      control.auto = false;
+      try { localStorage.setItem(LEGEND_STORAGE_KEY, collapsed ? "hidden" : "shown"); } catch (_) { /* storage is optional */ }
+      onToggle?.();
+    });
+    status.prepend(button);
+    legendControls.set(dock, control);
+    return button;
+  }
+
+  // Called by a fit before it measures safeArea(): without a viewer's
+  // choice, the legend stays open while the whole graph fits the free area
+  // at `readableScale` with it, and folds otherwise (the graph needs the
+  // room, or is larger than the view and the minimap takes over); it opens
+  // again once the graph fits with it. Returns whether the legend is folded.
+  function foldLegendToFit(canvas, bounds, { readableScale = 1, margin = 0.92 } = {}) {
+    const dock = canvas?.parentElement?.querySelector(":scope > .graphKitDock");
+    const control = dock ? legendControls.get(dock) : null;
+    if (!control || !bounds || control.chosen) return !!control?.collapsed();
+    const fits = () => {
+      const area = safeArea(canvas);
+      return area.width > 0 && area.height > 0
+        && Math.min(area.width / bounds.width, area.height / bounds.height) * margin >= readableScale - 1e-9;
+    };
+    control.apply(false);
+    control.auto = !fits();
+    control.apply(control.auto);
+    return control.auto;
   }
 
   // Graph / List switch: role=tablist, aria-selected on the active option.
@@ -2339,6 +2489,8 @@
     ROUTE_GRID_POINT_BUDGET,
     theme: { cssVar, color, resolveColor, isLight, invalidate: invalidateTheme, onChange: (fn) => themeListeners.add(fn) },
     color,
+    parseColor,
+    mixColor,
     dimAlpha,
     reducedMotion,
     mobileLayout,
@@ -2366,11 +2518,14 @@
     drawLabel,
     anyClipped,
     drawMinimap,
+    safeArea,
     fitTransform,
     clampView,
     mount,
     el,
     viewSwitch,
+    legendToggle,
+    foldLegendToFit,
     panelHeader,
     panelSection,
     panelFacts,

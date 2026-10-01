@@ -1,10 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
+import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
+import {
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames,
+} from '../helpers/graph-kit.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
 // (Trace Graph / Statistics / Spans Table / Flamegraph) on a mocked trace:
 // the OTel fixture only holds flat traces without events, links or JSON
-// attributes.
+// attributes. The Trace Graph runs on the shared canvas graph kit and is
+// checked with the graph-kit helpers, like the Explorer graph and the
+// Service map.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -514,27 +520,419 @@ test('trace flamegraph: widths follow durations, a click zooms into a frame, res
   await expect(page.locator('#traceFlameReset')).toBeDisabled();
 });
 
-test('trace graph: one node per call path with counts and times, edges between them', async ({ page }) => {
+// ---------------------------------------------------------------- trace graph
+// The Trace Graph is drawn with the shared canvas graph kit (app_graph_kit.js)
+// like the Explorer graph and the Service map; ChDash.traceGraph.inspect()
+// reports the drawn frame in client coordinates.
+
+const inspectGraph = (page) => page.evaluate(() => window.ChDash.traceGraph.inspect());
+
+async function openGraph(page, count = 8) {
   await openTrace(page, '?view=graph');
-  const graph = page.locator('#traceAltView .traceGraph');
-  await expect(graph).toBeVisible();
-  // SELECT orders twice under POST /cart/checkout: one node, count 2.
-  await expect(graph.locator('.traceGraph__node')).toHaveCount(8);
-  await expect(graph.locator('.traceGraph__edge')).toHaveCount(7);
-  const node = (key) => graph.locator(`.traceGraph__node[data-graph-node="${key}"]`);
-  await expect(node('checkout SELECT orders').locator('.traceGraph__count')).toHaveText('2 / 0');
-  await expect(node('checkout SELECT orders').locator('.traceGraph__time')).toHaveText('25 ms (23.81%)');
-  await expect(node('checkout SELECT orders').locator('.traceGraph__avg')).toHaveText('12.5 ms');
-  await expect(node('payments charge').locator('.traceGraph__count')).toHaveText('1 / 1');
-  await expect(node('payments charge').locator('.traceGraph__self')).toHaveText('22 ms (73.33%)');
-  await expect(node('frontend GET /checkout').locator('.traceGraph__time')).toHaveText('100 ms (95.24%)');
-  // Parents above their children.
-  const top = (key) => node(key).evaluate((el) => parseFloat(el.style.top));
-  expect(await top('frontend GET /checkout')).toBeLessThan(await top('checkout POST /cart/checkout'));
-  expect(await top('checkout POST /cart/checkout')).toBeLessThan(await top('payments charge'));
-  await pickTool(page, 'traceGraphMode', 'Self time');
-  await expect(node('payments charge')).toHaveClass(/traceGraph__node--selftime/);
-  expect(await node('payments charge').evaluate((el) => el.style.getPropertyValue('--trace-graph-heat'))).toBe('73.33%');
+  await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(count);
+  await settle(page);
+}
+
+async function graphNode(page, label) {
+  const found = (await inspectGraph(page)).nodes.find((candidate) => candidate.label === label);
+  expect(found, `${label} is drawn`).toBeTruthy();
+  return found;
+}
+
+async function pickGraphColour(page, label) {
+  const root = page.locator('#traceGraphBar .tracePicker:has(#traceGraphMode)');
+  await root.locator('.tracePicker__button').click();
+  await root.locator('.tracePicker__menu').getByRole('option', { name: label, exact: true }).click();
+  await settle(page);
+}
+
+const centre = (box) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+const inside = (rect, area) => rect.x >= area.x - 1 && rect.y >= area.y - 1 && rect.x + rect.width <= area.x + area.width + 1 && rect.y + rect.height <= area.y + area.height + 1;
+const mix = (a, b, t) => a.slice(0, 3).map((value, i) => Math.round(value + (b[i] - value) * t));
+const legendToggle = (page) => page.locator('#traceGraphPane .graphKitStatus .graphKitLegendToggle');
+
+test('trace graph: the graph kit canvas, one card per call path with counts and times, a left-to-right tree, orthogonal edges labelled with the span count', async ({ page }) => {
+  await openGraph(page);
+  const state = await inspectGraph(page);
+  expect(state.kit).toBe(true);
+  // SELECT orders twice under POST /cart/checkout: one call path, count 2.
+  expect(state.nodes).toHaveLength(8);
+  expect(state.edges).toHaveLength(7);
+  await expect(page.locator('#traceAltView .traceGraph__node, #traceAltView svg.traceGraph__edges')).toHaveCount(0);
+  const at = Object.fromEntries(state.nodes.map((n) => [n.label, n]));
+  // Card rows: service (title), operation, "count / errors · avg", "time % · self %".
+  expect(at['checkout SELECT orders'].countText).toBe('2 / 0 · avg 12.5 ms');
+  expect(at['checkout SELECT orders'].timeText).toBe('25 ms (23.81%) · self 25 ms (100%)');
+  expect(at['payments charge'].countText).toBe('1 / 1 · avg 30 ms');
+  expect(at['payments charge'].timeText).toBe('30 ms (28.57%) · self 22 ms (73.33%)');
+  expect(at['payments charge'].status).toBe('error');
+  expect(at['checkout SELECT orders'].status).toBe(null);
+  expect(at['frontend GET /checkout'].timeText).toMatch(/^100 ms \(95\.24%\) · self 20 ms/);
+  // Rectangular cards of one size.
+  expect(new Set(state.nodes.map((n) => `${Math.round(n.width)}x${Math.round(n.height)}`)).size).toBe(1);
+  // Left to right in call order: a callee right of its caller, the first one
+  // on the caller's row, the next ones below.
+  const A = at['frontend GET /checkout'];
+  const B = at['checkout POST /cart/checkout'];
+  const S = at['checkout SELECT orders'];
+  const D = at['payments charge'];
+  const G = at['frontend render'];
+  expect(B.x).toBeGreaterThan(A.x + A.width);
+  expect(S.x).toBeGreaterThan(B.x + B.width);
+  expect(Math.abs(B.y - A.y)).toBeLessThan(0.5);
+  expect(Math.abs(S.y - B.y)).toBeLessThan(0.5);
+  expect(D.y).toBeGreaterThan(S.y + S.height);
+  expect(G.y).toBeGreaterThan(D.y);
+  expect(Math.abs(G.x - B.x)).toBeLessThan(0.5);
+  // Orthogonal edges; the first call of a path is a straight line; the dash
+  // pattern is the call kind (SELECT orders is a database call); an edge into
+  // an erroring call path is red.
+  const edge = (from, to) => state.edges.find((e) => e.source === from.id && e.target === to.id);
+  for (const e of state.edges) expect(e.orthogonal, e.id).toBe(true);
+  expect(edge(A, B).bends).toBe(0);
+  expect(edge(B, S).bends).toBe(0);
+  expect(edge(B, D).bends).toBeGreaterThan(0);
+  expect(edge(B, S).kind).toBe('db');
+  expect(edge(B, S).dash.length).toBeGreaterThan(0);
+  expect(edge(A, B).kind).toBe('sync');
+  expect(edge(A, B).dash).toEqual([]);
+  expect(edge(B, D).error).toBe(true);
+  expect(edge(A, B).error).toBe(false);
+  // Every edge carries its "×count" label, none on another label or a card.
+  expect(state.edgeLabelsPlaced).toBe(7);
+  expect(state.edgeLabelsDropped).toEqual([]);
+  expect(state.edgeLabels.find((l) => l.id === S.id)?.text).toBe('×2');
+  for (const l of state.edgeLabels) expect(l.text).toMatch(/^×\d+$/);
+  expectLabelsClear(state);
+  // The strip is the service colour of the waterfall.
+  const strip = await pixel(page, '#traceGraphCanvas', S.x + 2, S.y + S.height / 2);
+  const serviceRgb = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    document.body.append(probe);
+    probe.style.color = window.ChDash.traceTabs.context().serviceColor('checkout');
+    const rgb = getComputedStyle(probe).color.match(/[\d.]+/g).slice(0, 3).map(Number);
+    probe.remove();
+    return rgb;
+  });
+  expect(colorDistance(strip, serviceRgb)).toBeLessThan(12);
+  // The kit chrome: icon toolbar with the Colour picker, legend and status
+  // line bottom-left, the dot grid, nothing under the chrome after the fit.
+  await expectKitChrome(page, {
+    pane: '#traceGraphPane', zoomOut: '#traceGraphZoomOut', fit: '#traceGraphFit', zoomIn: '#traceGraphZoomIn',
+    legend: '#traceGraphLegend', status: '#traceGraphPane .graphKitStatus',
+  });
+  await expectClearOfChrome(page, '#traceGraphPane', state);
+  await expect(page.locator('#traceGraphBar.graphKitBar #traceGraphMode')).toHaveCount(1);
+  await expect(page.locator('#traceViewTools [data-view-tools="graph"]')).toHaveCount(0);
+  await expect(page.locator('#traceGraphPane .graphKitStatus')).toContainText('8 call paths · 9 spans · depth 5');
+  await expect(page.locator('#traceGraphLegend')).toContainText('count / errors · avg');
+  await expect(page.locator('#traceGraphLegend')).toContainText('database');
+  await expect(page.locator('#traceGraphLegend')).toContainText('spans of the callee');
+  const colors = await tokenColors(page, ['--graph-bg', '--bg']);
+  expect(colors['--graph-bg']).toEqual(colors['--bg']);
+  await expectDotGrid(page, '#traceGraphCanvas', state, colors['--graph-bg']);
+  // The canvas takes the keyboard and the global focus ring.
+  await page.locator('#traceGraphCanvas').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#traceGraphCanvas')).toBeFocused();
+  expect(await page.locator('#traceGraphCanvas').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('solid');
+});
+
+test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped; the legend folds when the graph needs its room', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openGraph(page);
+  let state = await inspectGraph(page);
+  const fitted = state;
+  // It fits beside the legend: everything in the free area, no minimap.
+  await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#traceGraphLegend')).toBeVisible();
+  expect(state.minimapVisible).toBe(false);
+  expect(state.scale).toBeGreaterThanOrEqual(state.readableScale - 1e-6);
+  const free = await freeArea(page, '#traceGraphCanvas');
+  for (const n of state.nodes) expect(inside(n, free), n.label).toBe(true);
+  for (let i = 0; i < 5 && !(await inspectGraph(page)).minimapVisible; i += 1) await page.locator('#traceGraphZoomIn').click();
+  state = await inspectGraph(page);
+  expect(state.scale).toBeGreaterThan(fitted.scale);
+  expect(state.minimapVisible).toBe(true);
+  await expect(page.locator('#traceGraphMinimap')).toBeVisible();
+  await page.locator('#traceGraphFit').click();
+  state = await inspectGraph(page);
+  expect(state.scale).toBeCloseTo(fitted.scale, 6);
+  expect(state.offsetX).toBeCloseTo(fitted.offsetX, 3);
+  expect(state.offsetY).toBeCloseTo(fitted.offsetY, 3);
+  const canvas = page.locator('#traceGraphCanvas');
+  await canvas.focus();
+  await page.keyboard.press('+');
+  const zoomed = (await inspectGraph(page)).scale;
+  expect(zoomed).toBeGreaterThan(fitted.scale);
+  await page.keyboard.press('-');
+  expect((await inspectGraph(page)).scale).toBeLessThan(zoomed);
+  await page.keyboard.press('0');
+  expect((await inspectGraph(page)).scale).toBeCloseTo(fitted.scale, 6);
+  // Wheel zoom and drag pan.
+  const box = await canvas.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 40);
+  await page.mouse.wheel(0, -200);
+  expect((await inspectGraph(page)).scale).not.toBeCloseTo(fitted.scale, 3);
+  const before = await inspectGraph(page);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height - 80, { steps: 5 });
+  await page.mouse.up();
+  expect((await inspectGraph(page)).offsetX).not.toBeCloseTo(before.offsetX, 0);
+  await page.keyboard.press('0');
+
+  // Narrower: the graph no longer fits beside the legend, which folds; the
+  // graph opens at the readable scale from its root and the minimap shows.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#traceGraphLegend')).toBeHidden();
+  await expect.poll(async () => (await inspectGraph(page)).minimapVisible).toBe(true);
+  state = await inspectGraph(page);
+  expect(state.scale).toBeCloseTo(state.readableScale, 6);
+  const root = state.nodes.find((n) => n.label === 'frontend GET /checkout');
+  const narrow = await freeArea(page, '#traceGraphCanvas');
+  expect(inside(root, narrow)).toBe(true);
+  await expectClearOfChrome(page, '#traceGraphPane', state);
+  // The viewer opens it: a choice the next fits keep (they leave room for it).
+  await legendToggle(page).click();
+  await expect(page.locator('#traceGraphLegend')).toBeVisible();
+  await expect(legendToggle(page)).toHaveAttribute('aria-label', 'Hide the legend');
+  expect(await page.evaluate(() => localStorage.getItem('chdash.graphLegend'))).toBe('shown');
+  await page.locator('#traceGraphFit').click();
+  await expect(page.locator('#traceGraphLegend')).toBeVisible();
+  await expectClearOfChrome(page, '#traceGraphPane', { nodes: [root], edgeLabels: [] });
+  // Folded by the viewer, it stays folded, also on a wide screen and after a reload.
+  await legendToggle(page).click();
+  expect(await page.evaluate(() => localStorage.getItem('chdash.graphLegend'))).toBe('hidden');
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.reload();
+  await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(8);
+  await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#traceGraphLegend')).toBeHidden();
+});
+
+test('trace graph: hover outlines the card; a click recentres on it and opens its panel; the panel jumps to its spans in the timeline', async ({ page }) => {
+  await openGraph(page);
+  const D = await graphNode(page, 'payments charge');
+  const other = await graphNode(page, 'checkout SELECT orders');
+  const halo = (await tokenColors(page, ['--graph-halo']))['--graph-halo'];
+  const top = (n) => pixel(page, '#traceGraphCanvas', n.x + n.width / 2, n.y + 0.5);
+  const beforeD = await top(D);
+  const beforeOther = await top(other);
+  await page.mouse.move(D.x + D.width / 2, D.y + D.height / 2);
+  await settle(page);
+  expect((await inspectGraph(page)).hovered).toEqual({ type: 'node', id: D.id });
+  await expect(page.locator('#traceGraphCanvas')).toHaveClass(/is-clickable/);
+  expect(colorDistance(await top(D), halo)).toBeLessThan(colorDistance(beforeD, halo));
+  expect(colorDistance(await top(other), beforeOther)).toBeLessThan(2);
+  await expect(page.locator('#traceGraphPane [role="tooltip"]')).toHaveCount(0);
+
+  await page.mouse.click(D.x + D.width / 2, D.y + D.height / 2);
+  const panel = page.locator('#traceGraphPanel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveClass(/graphKitPanel/);
+  await expect(panel.locator('.graphKitPanel__eyebrow')).toHaveText('Call path');
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('payments');
+  await expect(panel.locator('.graphKitPanel__subtitle')).toHaveText('charge');
+  await expect(panel.locator('.graphKitPanel__stats')).toContainText('73.33%');
+  await expect(panel).toContainText('Called from');
+  await expect(panel.locator('[data-graph-select]')).toHaveText([/frontend\s*GET \/checkout/, /checkout\s*POST \/cart\/checkout/, /payments\s*fraud\.check/]);
+  await cameraIdle(page, 'ChDash.traceGraph');
+  let state = await inspectGraph(page);
+  expect(state.selected).toBe(D.id);
+  // Recentred in the area the panel and the chrome leave free.
+  const free = await freeArea(page, '#traceGraphCanvas', '#traceGraphPanel');
+  const moved = state.nodes.find((n) => n.id === D.id);
+  expect(Math.abs(centre(moved).x - (free.x + free.width / 2))).toBeLessThan(3);
+  expect(Math.abs(centre(moved).y - (free.y + free.height / 2))).toBeLessThan(3);
+  expect(moved.x + moved.width).toBeLessThan((await panel.boundingBox()).x);
+  // A caller in the panel selects it.
+  await panel.locator('[data-graph-select]').first().click();
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('frontend');
+  // Escape closes; the keyboard opens the call path it lands on.
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await page.locator('#traceGraphCanvas').focus();
+  await page.keyboard.press('ArrowRight');
+  state = await inspectGraph(page);
+  expect(state.keyboardId).toBeTruthy();
+  const chosen = state.nodes.find((n) => n.id === state.keyboardId);
+  await page.keyboard.press('Enter');
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText(chosen.service);
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+
+  // The panel's button focuses the span in the timeline; Back returns to the graph.
+  await cameraIdle(page, 'ChDash.traceGraph');
+  const again = await graphNode(page, 'payments charge');
+  await page.mouse.click(again.x + again.width / 2, again.y + again.height / 2);
+  await panel.getByRole('button', { name: 'Show in the timeline' }).click();
+  await expect(page.locator('.traceTimelineFrame')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`\\?span=${ID.D}$`));
+  await expect(inspector(page, ID.D)).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
+  await expect(page).toHaveURL(/\?view=graph$/);
+  // A call path of two spans lists both: the second one jumps to C2.
+  await expect.poll(async () => (await inspectGraph(page)).nodes.length).toBe(8);
+  await cameraIdle(page, 'ChDash.traceGraph');
+  const S = await graphNode(page, 'checkout SELECT orders');
+  await page.mouse.click(S.x + S.width / 2, S.y + S.height / 2);
+  await expect(panel.locator('.traceGraphPanel__spans [data-graph-span]')).toHaveCount(2);
+  await panel.locator(`.traceGraphPanel__spans [data-graph-span="${ID.C2}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`\\?span=${ID.C2}$`));
+  await expect(inspector(page, ID.C2)).toBeVisible();
+});
+
+test('trace graph: Time and Self time fill the cards with a heat between --graph-node-bg and --graph-heat, readable in both themes', async ({ page }) => {
+  for (const theme of ['dark', 'light']) {
+    await mockTraces(page);
+    await page.goto('/observability/traces');
+    await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
+    await openGraph(page);
+    const tokens = await tokenColors(page, ['--graph-node-bg', '--graph-heat', '--graph-text', '--graph-muted']);
+    const bg = tokens['--graph-node-bg'];
+    const heat = tokens['--graph-heat'];
+    // Inside the card's bottom-right corner, clear of the text rows.
+    const fillAt = (n) => pixel(page, '#traceGraphCanvas', n.x + n.width - 8 * (n.width / 264), n.y + n.height - 6 * (n.height / 82));
+    let D = await graphNode(page, 'payments charge');
+    expect(D.heat).toBe(null);
+    expect(colorDistance(await fillAt(D), bg)).toBeLessThan(4);
+
+    await pickGraphColour(page, 'Time');
+    await expect(page.locator('#traceGraphLegend')).toContainText('time: 0');
+    expect((await inspectGraph(page)).mode).toBe('time');
+    D = await graphNode(page, 'payments charge');
+    const H = await graphNode(page, 'frontend hydrate');
+    // 28.57 % of the trace: past 20 %, the full heat (45 % of --graph-heat).
+    expect(D.heat).toBe(1);
+    expect(colorDistance(await fillAt(D), mix(bg, heat, 0.45)), `${theme} hot fill`).toBeLessThan(6);
+    // 14.29 % of the trace: 71 % of the heat.
+    expect(H.heat).toBeCloseTo(15 / 105 / 0.2, 3);
+    expect(colorDistance(await fillAt(H), mix(bg, heat, 0.32)), `${theme} warm fill`).toBeLessThan(6);
+    // Text keeps its contrast on the hottest fill.
+    const hot = mix(bg, heat, 0.45);
+    expect(contrast(tokens['--graph-text'], hot), `${theme} text on heat`).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tokens['--graph-muted'], hot), `${theme} muted on heat`).toBeGreaterThanOrEqual(4.5);
+
+    await pickGraphColour(page, 'Self time');
+    await expect(page.locator('#traceGraphLegend')).toContainText('self time: 0');
+    D = await graphNode(page, 'payments charge');
+    expect(D.heat).toBeCloseTo(22 / 30, 3);
+    expect(colorDistance(await fillAt(D), mix(bg, heat, 0.33)), `${theme} self-time fill`).toBeLessThan(6);
+    await pickGraphColour(page, 'Service');
+    expect(colorDistance(await fillAt(await graphNode(page, 'payments charge')), bg)).toBeLessThan(4);
+  }
+  await page.evaluate(() => localStorage.removeItem('chdash.theme'));
+});
+
+test('trace graph: the List view tabulates the call paths; phones open it by default with a bottom-sheet panel', async ({ page }) => {
+  await openGraph(page);
+  await page.locator('#traceGraphListViewButton').click();
+  const list = page.locator('#traceGraphList');
+  await expect(list).toBeVisible();
+  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'hidden');
+  await expect(page.locator('#traceGraphBar .traceGraph__colour')).toBeHidden();
+  const rows = list.locator('[data-graph-list="paths"] tbody tr');
+  await expect(rows).toHaveCount(8);
+  // Call order, callees under their caller.
+  await expect(rows.locator('.graphKitList__open')).toHaveText([
+    /frontend\s*GET \/checkout/, /checkout\s*POST \/cart\/checkout/, /checkout\s*SELECT orders/, /payments\s*charge/,
+    /payments\s*fraud\.check/, /fraud\s*score/, /frontend\s*render/, /frontend\s*hydrate/,
+  ]);
+  await expect(rows.nth(2).locator('td').nth(1)).toHaveText('2');
+  await expect(rows.nth(3).locator('td').nth(2)).toHaveClass(/is-err/);
+  await page.locator('#traceGraphCanvasViewButton').click();
+  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'visible');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(8);
+  await expect(list).toBeVisible();
+  await expect(page.locator('#traceGraphListViewButton')).toHaveAttribute('aria-selected', 'true');
+  expect((await inspectGraph(page)).viewMode).toBe('list');
+  await list.locator('[data-graph-select]').nth(3).click();
+  const panel = page.locator('#traceGraphPanel');
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('payments');
+  const pane = await page.locator('#traceGraphPane').boundingBox();
+  const sheet = await panel.boundingBox();
+  expect(sheet.width).toBeGreaterThan(390 - 40);
+  expect(sheet.y + sheet.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+  await expect(list.locator('tr.is-selected')).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  await panel.getByRole('button', { name: 'Show in the timeline' }).click();
+  await expect(page.locator('.traceTimelineFrame')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`\\?span=${ID.D}$`));
+  await page.goBack();
+  await expect(list).toBeVisible();
+  // The canvas is one tap away.
+  await page.locator('#traceGraphCanvasViewButton').click();
+  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'visible');
+  await expect(page.locator('#traceGraphZoomIn')).toBeVisible();
+  expect((await inspectGraph(page)).viewMode).toBe('canvas');
+});
+
+// 10,000 spans whose call paths stay under the graph's limit: per level the
+// operation comes from a 4-letter alphabet (at most 4 + 16 + ... + 4^5 paths).
+function pathTrace(count = 10_000, fanout = 4, depth = 5, traceId = 'beef0000000000000000000000010000') {
+  const services = ['gateway', 'orders', 'billing', 'stock', 'search', 'users', 'mailer', 'ledger'];
+  const hex = (v) => v.toString(16).padStart(16, '0');
+  const spans = [{ span_id: hex(1), name: 'GET /bulk', service: 'gateway', kind: 'Server', start_ms: 0, duration_ms: 4000, level: 0 }];
+  let seed = 11;
+  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let i = 2; i <= count; i += 1) {
+    let parent = spans[Math.floor(rand() * spans.length)];
+    if (parent.level >= depth) parent = spans[Math.floor(rand() * Math.min(spans.length, 50))];
+    if (parent.level >= depth) parent = spans[0];
+    const pick = Math.floor(rand() * fanout);
+    const start = parent.start_ms + rand() * parent.duration_ms * 0.8;
+    spans.push({
+      span_id: hex(i), parent_span_id: parent.span_id, name: `op-${parent.level + 1}-${pick}`,
+      service: services[(parent.level + 1 + pick) % services.length], start_ms: start,
+      duration_ms: Math.max(0.01, (parent.start_ms + parent.duration_ms - start) * rand() * 0.9),
+      level: parent.level + 1, error: i % 97 === 0, attributes: pick === 3 ? { 'db.system': 'postgresql' } : {},
+    });
+  }
+  return { trace_id: traceId, spans };
+}
+
+test('performance budget: the graph of a 10,000-span trace builds, routes and draws within budget; past the call-path limit the view says so', async ({ page }) => {
+  test.setTimeout(120_000);
+  const big = pathTrace();
+  await routeTrace(page, big);
+  await page.goto(`/observability/traces/${big.trace_id}`);
+  await expect(page.locator(`#traceWaterfall .traceWaterfallBody[data-virtual-rows="${big.spans.length}"]`)).toHaveCount(1, { timeout: 30_000 });
+  // Graph build (call paths, layout, routes, labels) and the first frame.
+  const ms = await page.evaluate(() => new Promise((resolve) => {
+    const started = performance.now();
+    window.ChDash.traceViews.setView('graph', { url: null, persist: false });
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - started)));
+  }));
+  console.log(`trace graph of ${big.spans.length} spans: built and drawn in ${Math.round(ms)} ms`);
+  expect(ms, 'graph build + first draw (ms)').toBeLessThan(2500);
+  const state = await inspectGraph(page);
+  expect(state.nodes.length).toBeGreaterThan(500);
+  expect(state.nodes.length).toBeLessThanOrEqual(1500);
+  expect(state.timing.routeMs, 'routing (ms)').toBeLessThan(1500);
+  for (const e of state.edges) expect(e.orthogonal, e.id).toBe(true);
+  expect(state.edgeLabelsDropped.length, 'labels without a free spot').toBeLessThan(state.edges.length * 0.05);
+  expectLabelsClear({ ...state, edgeLabelsDropped: [] });
+  // Pan frames stay cheap (cards, edges and labels off screen are skipped).
+  const box = await page.locator('#traceGraphCanvas').boundingBox();
+  const pan = await measureFrames(page, async () => {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 0; i < 20; i += 1) { await page.mouse.move(box.x + box.width / 2 - i * 9, box.y + box.height / 2 - i * 14); await settle(page); }
+    await page.mouse.up();
+  });
+  expect(pan.p95, 'pan frame p95 (ms)').toBeLessThan(25);
+  // The 10,000-span fixture trace has 8,612 call paths: over the limit.
+  const fixture = largeTrace(10_000, 'bead0000000000000000000000010000', 8);
+  await routeTrace(page, fixture);
+  await page.goto(`/observability/traces/${fixture.trace_id}?view=graph`);
+  await expect(page.locator('#traceAltView')).toContainText('distinct call paths: too many to draw (limit 1500)', { timeout: 30_000 });
 });
 
 test('trace view persists in the URL and in localStorage; timeline by default', async ({ page }) => {

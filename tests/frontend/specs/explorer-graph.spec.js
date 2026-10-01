@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import {
-  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames,
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome,
 } from '../helpers/graph-kit.js';
 
 // Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
@@ -125,6 +125,8 @@ test('the kit look: dot grid, icon toolbar, legend and status bottom-left, ortho
     legend: '#explorerGraphPane .graphKitLegend', status: '#explorerGraphPane .graphKitStatus',
   });
   await expect(page.locator('#explorerGraphPane .graphKitLegend')).toContainText('data flow');
+  // The fit leaves the toolbar, legend and status line free of cards and labels.
+  await expectClearOfChrome(page, '#explorerGraphPane', state);
   // Every Lineage edge is orthogonal (axis-aligned segments) and labelled.
   expect(state.edges.length).toBeGreaterThan(3);
   for (const edge of state.edges) {
@@ -187,12 +189,14 @@ test('hover outlines the hovered card only and click recentres on the card and s
   state = await inspect(page);
   expect(state.focusedId).toBe(target.id);
   expect(state.panel).toEqual({ type: 'node', id: target.id });
-  // Recentred in the area the panel leaves free.
+  // Recentred in the area the panel and the chrome leave free (the kit's
+  // safe area: below the toolbar, above the legend and status line).
   const canvas = await page.locator('#explorerGraphCanvas').boundingBox();
   const panelBox = await panel.boundingBox();
+  const free = await freeArea(page, '#explorerGraphCanvas', '#explorerGraphPanel');
   const node = state.nodes.find((candidate) => candidate.id === target.id);
   expect(Math.abs(node.x + node.width / 2 - (canvas.x + (panelBox.x - canvas.x) / 2))).toBeLessThan(3);
-  expect(Math.abs(node.y + node.height / 2 - (canvas.y + canvas.height / 2))).toBeLessThan(3);
+  expect(Math.abs(node.y + node.height / 2 - (free.y + free.height / 2))).toBeLessThan(3);
   expect(node.x + node.width).toBeLessThan(panelBox.x);
 });
 
@@ -390,6 +394,10 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
     expect(state.scale * 11).toBeGreaterThanOrEqual(11 - 1e-6);
     expect(state.nodes.some((node) => node.kind === 'storage_tier')).toBe(true);
     await expectDotGrid(page, '#explorerGraphCanvas', state, tokens['--graph-bg']);
+    // A graph larger than the view folds the legend (the kit leaves the room
+    // to the cards): its button in the status line opens it.
+    const legendToggle = page.locator('#explorerGraphPane .graphKitStatus .graphKitLegendToggle');
+    if ((await legendToggle.getAttribute('aria-expanded')) === 'false') await legendToggle.click();
     await expect(page.locator('#explorerGraphLegendTtl')).toBeVisible();
   }
 });

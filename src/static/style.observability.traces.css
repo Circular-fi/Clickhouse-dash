@@ -5830,52 +5830,130 @@ html[data-theme="light"] {
 }
 .traceFlame__tip > span { color: var(--muted); }
 .traceFlame__tip strong { color: var(--text); }
-.traceGraph { min-width: 0; padding: 10px; overflow: auto; }
-.traceGraph__canvas { position: relative; margin: 0 auto; }
-.traceGraph__edges { position: absolute; inset: 0; overflow: visible; }
-.traceGraph__edge { fill: none; stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 1.2; }
-.traceGraph__node {
-  position: absolute;
-  box-sizing: border-box;
-  padding: 4px 8px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: 1fr 1fr;
-  align-items: center;
-  gap: 0 8px;
+.traceDetailPane[data-trace-view="graph"] .traceAltView {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--trace-service-color) 60%, var(--border));
+  scrollbar-gutter: auto;
+}
+.traceGraph {
+  flex: 1 1 auto;
+  min-height: 420px;
+}
+.traceGraph__colour { gap: 4px; padding: 4px 4px 4px 9px; }
+.traceGraph__colour .traceViewBar__label { color: var(--graph-muted); font-size: 12px; font-weight: 600; }
+.graphKitGroup.traceGraph__colour .tracePicker__button {
+  height: 24px;
+  min-width: 104px;
+  padding: 0 8px;
+  border: 0;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--trace-service-color) 16%, var(--panelBg));
-  box-shadow: inset 3px 0 0 var(--trace-service-color);
-  font-size: 10.5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--graph-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.graphKitGroup.traceGraph__colour .tracePicker__button:hover { background: var(--rowHover); }
+.graphKitPane--list .traceGraph__colour { display: none; }
+.traceGraph__dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.traceGraphLegend__anatomy {
+  display: grid;
+  justify-self: start;
+  gap: 1px;
+  padding: 4px 9px 5px 9px;
+  border: 1px solid var(--graph-node-border);
+  border-left: 4px solid var(--graph-muted);
+  border-radius: 6px;
+  background: var(--graph-node-bg);
+  color: var(--graph-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.traceGraphLegend__anatomy b { color: var(--graph-text); font-weight: 600; }
+.traceGraphLegend__anatomy b + span { color: var(--graph-text); }
+.traceGraphLegend__kinds > span + i { margin-left: 6px; }
+.traceGraphLegend__label {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid var(--graph-node-border);
+  border-radius: var(--radiusPill);
+  background: var(--graph-label-bg);
+  color: var(--graph-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 15px;
+}
+.traceGraphLegend__heat {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 10px;
+  border: 1px solid var(--graph-node-border);
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--graph-node-bg), color-mix(in srgb, var(--graph-heat) 45%, var(--graph-node-bg)));
+}
+.traceGraphPanel__list,
+.traceGraphPanel__spans {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.traceGraphPanel__path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 0;
+}
+.traceGraphPanel__path > span:not(.traceGraph__dot) {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--graph-muted);
+  text-overflow: ellipsis;
+}
+.traceGraphPanel__path small {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--graph-muted);
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.traceGraph__node--time,
-.traceGraph__node--selftime { background: color-mix(in srgb, #e45756 var(--trace-graph-heat, 0%), var(--panelBg)); }
-.traceGraph__node.has-error { border-color: #ef4444; }
-.traceGraph__node > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.traceGraph__service,
-.traceGraph__op { text-align: center; }
-.traceGraph__service { font-weight: 700; }
-.traceGraph__count,
-.traceGraph__time,
-.traceGraph__avg,
-.traceGraph__self { color: var(--muted); }
-.traceGraph__avg,
-.traceGraph__self { text-align: right; }
-.traceGraph__legend {
-  display: inline-grid;
-  grid-template-columns: auto auto auto;
-  gap: 0 8px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 9.5px;
-  line-height: 1.25;
+.traceGraphPanel__span {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) auto auto;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
 }
-.traceGraph__legend b { color: var(--text); text-align: center; }
+.traceGraphPanel__span code { color: var(--graph-muted); font-size: 11px; }
+.traceGraphPanel__span:hover,
+.traceGraphPanel__span:focus-visible { background: var(--rowHover); }
+.traceGraphList__op { margin-left: 6px; color: var(--graph-muted); font-weight: 400; }
+.traceGraph .graphKitList__table small { color: var(--graph-muted); font-size: 11px; }
+@media (max-width: 720px) {
+  .traceGraph .graphKitList__table th,
+  .traceGraph .graphKitList__table td { padding-right: 8px; }
+  .traceGraph .graphKitList__name { max-width: 170px; }
+}
 #traceDetailHeader .tracePageHeader__traceId {
   flex: 0 0 auto;
   max-width: none;
@@ -7638,6 +7716,7 @@ html[data-theme="light"] {
   --graph-label-bg: var(--panelBg);
   --graph-warn: #f0a33a;
   --graph-error: #f87171;
+  --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-bg: var(--panelBg);
   --graph-minimap-view: var(--graph-halo);
@@ -7657,6 +7736,7 @@ html[data-theme="light"] {
     --graph-group-bg: #eef3ff;
     --graph-warn: #b45309;
     --graph-error: #b91c1c;
+    --graph-heat: #f97316;
     --graph-surface: rgba(255, 255, 255, 0.94);
     --graph-minimap-view: rgba(15, 23, 42, 0.92);
     --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
@@ -7674,6 +7754,7 @@ html[data-theme="dark"] {
   --graph-group-bg: #172033;
   --graph-warn: #f0a33a;
   --graph-error: #f87171;
+  --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
@@ -7690,6 +7771,7 @@ html[data-theme="light"] {
   --graph-group-bg: #eef3ff;
   --graph-warn: #b45309;
   --graph-error: #b91c1c;
+  --graph-heat: #f97316;
   --graph-surface: rgba(255, 255, 255, 0.94);
   --graph-minimap-view: rgba(15, 23, 42, 0.92);
   --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
@@ -7877,6 +7959,35 @@ html[data-theme="light"] {
   pointer-events: auto;
 }
 .graphKitStatus__badge[hidden] { display: none; }
+.graphKitLegendToggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  margin: -2px 0 -2px -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--graph-muted);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.graphKitLegendToggle:hover,
+.graphKitLegendToggle:focus-visible { background: var(--rowHover); color: var(--graph-text); }
+.graphKitLegendToggle[aria-expanded="true"] { color: var(--graph-accent-text); }
+.graphKitLegendToggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.graphKitDock.is-legend-collapsed .graphKitLegend,
+.graphKitDock:has(> .graphKitLegend[hidden]) .graphKitLegendToggle { display: none; }
 .graphKitMinimap {
   position: absolute;
   z-index: 5;
@@ -8147,7 +8258,8 @@ html[data-theme="light"] {
     right: 8px;
     gap: 6px;
   }
-  .graphKitLegend { display: none; }
+  .graphKitLegend,
+  .graphKitLegendToggle { display: none; }
   .graphKitDock {
     left: 8px;
     bottom: 8px;
