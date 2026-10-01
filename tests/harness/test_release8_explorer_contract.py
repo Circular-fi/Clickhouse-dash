@@ -76,7 +76,7 @@ def test_ttl_uses_version_stable_describe_metadata_and_table_ddl() -> None:
 
 
 def test_graph_click_updates_browser_selection_and_reset_focus_is_gone() -> None:
-    html = read('src/static/index.html')
+    html = read('src/static/query.html')
     graph = read('src/static/app_explorer_graph.js')
     explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
     assert 'explorerGraphClearFocusButton' not in html

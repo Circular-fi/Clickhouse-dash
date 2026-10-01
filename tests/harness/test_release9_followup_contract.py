@@ -51,7 +51,7 @@ def test_results_wait_for_shape_before_committing_horizontal_layout_globally_and
 
 
 def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
     css = read("src/static/style.css")

@@ -22,7 +22,7 @@ def test_result_payload_and_clickhouse_writes_are_distinct() -> None:
     assert 'writer.Key("result_bytes_emitted")' in stream
 
 def test_frontend_exposes_write_cards_only_when_applicable() -> None:
-    index = read("src/static/index.html")
+    index = read("src/static/query.html")
     run = read("src/static/app_run.js")
 
     assert 'id="writtenRowsCard" class="metricCompact is-hidden"' in index

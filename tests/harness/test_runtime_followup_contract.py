@@ -8,14 +8,14 @@ def read(path: str) -> str:
 
 
 def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fail_closed() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     loader = read("src/static/app.js")
     api = read("src/static/app_api.js")
     server = read("src/server.cpp")
 
     assert "window.__CHDASH_BASE_PATH__" in html
     assert "window.__chdashUrl" in html
-    assert 'window.__chdashUrl("static/style.css")' in html
+    assert 'window.__chdashUrl("static/style.query.css")' in html
     assert 'window.__chdashUrl("static/app.js")' in html
     assert 'const bootstrapBaseUrl = (() =>' in loader
     assert 'new URL(window.__chdashUrl("static/"), window.location.href).toString()' in loader
@@ -30,7 +30,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
 
 
 def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     css = read("src/static/style.css")
     ui = read("src/static/app_ui.js")
 
@@ -51,7 +51,7 @@ def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle()
     assert 'storage.saveEditorHeight' in ui
 
 def test_run_button_becomes_cancel_in_place_and_no_duplicate_cancel_control_exists() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     run = read("src/static/app_run.js")
     dom = read("src/static/app_dom.js")
 
@@ -64,7 +64,7 @@ def test_run_button_becomes_cancel_in_place_and_no_duplicate_cancel_control_exis
 
 
 def test_current_analysis_ui_has_no_raw_or_deep_and_uses_honest_processor_duration_profile() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     ui = read("src/static/app_analysis.js")
     dom = read("src/static/app_dom.js")
     api = read("src/static/app_api.js")

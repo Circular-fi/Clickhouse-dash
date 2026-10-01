@@ -94,7 +94,7 @@ def test_optional_distributed_lookup_failure_is_preserved_in_payload() -> None:
 
 
 def test_analysis_ui_supports_single_multi_and_pipeline_degradation() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     api = read("src/static/app_api.js")
     run = read("src/static/app_run.js")
     results = read("src/static/app_results.js")
@@ -190,7 +190,7 @@ def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
     assert 'ns.traceViewer.render(root' in analysis
 
 def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_viewport() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     ui = read("src/static/app_analysis.js")
     css = read("src/static/style.css")
 

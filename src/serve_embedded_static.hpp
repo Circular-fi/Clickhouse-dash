@@ -36,7 +36,7 @@ inline const char* mime_from_path(std::string_view p) {
 
 // Serve embedded assets.
 // URL mapping:
-//   GET /            -> index.html
+//   GET /            -> query.html (the Query page shell)
 //   GET /static/...  -> (strip "/static/") and look up in embedded files
 //   GET /<anything>  -> tries "<anything>" as embedded path (useful if your frontend uses root paths)
 inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& res) {
@@ -47,7 +47,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   std::string path = req.path;
 
   // normalize
-  if (path.empty() || path == "/") path = "/index.html";
+  if (path.empty() || path == "/") path = "/query.html";
 
   std::string rel;
   if (path.rfind("/static/", 0) == 0) {

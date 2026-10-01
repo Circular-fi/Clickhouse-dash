@@ -103,7 +103,7 @@ def test_production_frontend_has_no_fixture_specific_routing_or_focus_defaults()
 
 def test_query_telemetry_restores_right_rail_and_analysis_has_stable_geometry() -> None:
     css = read("src/static/style.css")
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     assert "grid-template-columns: minmax(0, 1fr) 15rem;" in css
     assert ".metricColumn" in css
     assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
@@ -257,7 +257,7 @@ def test_function_markdown_links_are_disabled_by_default_and_configurable() -> N
 
 def test_elapsed_restores_metric_card_and_system_is_small_terminal_footer() -> None:
     css = read("src/static/style.css")
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     run = read("src/static/app_run.js")
 
     assert 'metricCompact metricCompact--elapsed' in html

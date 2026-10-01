@@ -1,7 +1,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PAGES = ["index.html", "query.html", "explorer.html", "observability.html"]
+PAGES = ["query.html", "explorer.html", "observability.html"]
 
 
 def read(rel):
@@ -51,3 +51,16 @@ def test_trace_pickers_ship_in_their_final_markup():
     assert 'Status · ALL</button>' in html
     assert 'Results · 50</button>' in html
     assert 'const shipped = select.parentElement?.classList.contains("tracePicker") ? select.parentElement : null;' in js
+
+
+def test_every_shell_header_lists_every_page_and_no_legacy_shell_remains():
+    # "/" is served by the Query shell (serve_query_shell): the former
+    # index.html copy of query.html drifted (no Observability entry) and is gone.
+    assert not (ROOT / "src/static/index.html").exists()
+    server = read("src/server.cpp")
+    assert 'http_.Get("/", serve_query_shell);' in server
+    assert 'path = "/index.html"' not in server + read("src/serve_embedded_static.hpp")
+    for page in PAGES:
+        html = read(f"src/static/{page}")
+        for button in ("navQueryButton", "navExplorerButton", "navObservabilityButton"):
+            assert f'id="{button}"' in html, (page, button)

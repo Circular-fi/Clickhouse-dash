@@ -64,7 +64,7 @@ def test_zero_row_table_has_no_preview_storage_or_operations_tab() -> None:
 
 
 def test_run_settings_cog_is_after_queries_and_reuses_editor_gear() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     css = read("src/static/style.css")
     assert html.index('id="queryLibrary"') < html.index('id="runSettings"')
     run_block = html[html.index('id="runSettings"'):html.index('</div>\n        </div>\n      </div>', html.index('id="runSettings"'))]

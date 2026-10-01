@@ -23,11 +23,9 @@ def test_trace_truncation_preserves_shallow_depths_and_autofit_opens_whole_depth
 
 
 def test_profiling_label_and_function_description_centering() -> None:
-    index = read("src/static/index.html")
     query = read("src/static/query.html")
     results = read("src/static/app_results.js")
     css = read("src/static/style.css")
-    assert '>Profiling</button>' in index
     assert '>Profiling</button>' in query
     assert 'analyzeBtn.textContent = "Profiling";' in results
     assert "#explorerFunctionDetail {" in css

@@ -49,7 +49,7 @@ def test_autocomplete_surfaces_types_without_enter_stealing_newline() -> None:
 
 
 def test_page_and_run_settings_use_connected_dropdowns() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     ui = read("src/static/app_ui.js")
     dom = read("src/static/app_dom.js")
 
@@ -107,7 +107,7 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
 
 
 def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     run = read("src/static/app_run.js")
     download = read("src/static/app_download.js")
     results = read("src/static/app_results.js")

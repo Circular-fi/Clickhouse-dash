@@ -91,7 +91,7 @@ def test_massive_export_metadata_is_required_before_download_and_during_archive(
 
 
 def test_run_menu_direct_download_does_not_use_interactive_run_path() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     frontend = read("src/static/app_export.js")
     api = read("src/static/app_api.js")
     run = read("src/static/app_run.js")

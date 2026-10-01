@@ -10,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_profiling_modal_opens_pipeline_first_and_tracing_second() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     dom = read("src/static/app_dom.js")
     analysis = read("src/static/app_analysis.js")
 

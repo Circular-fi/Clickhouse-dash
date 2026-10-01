@@ -161,7 +161,7 @@
     const hideCopy = !isCopyButtonEnabled();
     const hideLines = !isLineNumbersEnabled();
 
-    // Keep the early pre-paint classes from index.html in sync after the app is running.
+    // Keep the early pre-paint classes from the page head script in sync after the app is running.
     // Those root classes prevent a flash of the copy button / line numbers during reload.
     if (root && root.classList) {
       root.classList.toggle("chdash-copy-button-hidden", hideCopy);

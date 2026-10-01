@@ -56,7 +56,7 @@ static std::unordered_map<std::string, std::shared_ptr<FsStaticAsset>> g_fs_stat
 
 static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
   std::string path = req.path;
-  if (path.empty() || path == "/") path = "/index.html";
+  if (path.empty() || path == "/") path = "/query.html";
 
   std::string rel;
   if (path.rfind("/static/", 0) == 0) rel = path.substr(std::string("/static/").size());

@@ -63,7 +63,7 @@ def test_deep_analysis_uses_runner_and_discards_result_rows() -> None:
 
 
 def test_deep_analysis_and_raw_are_removed_from_the_current_ui_and_disabled_by_default() -> None:
-    html = read("src/static/index.html")
+    html = read("src/static/query.html")
     ui = read("src/static/app_analysis.js")
     header = read("src/server.hpp")
     example = read("config.example.hcl")

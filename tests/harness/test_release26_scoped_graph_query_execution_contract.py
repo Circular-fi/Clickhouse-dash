@@ -93,7 +93,6 @@ def test_query_execution_stats_are_opt_in_and_disabled_by_default() -> None:
     run = read("src/static/app_run.js")
     dom = read("src/static/app_dom.js")
     html = read("src/static/query.html")
-    index = read("src/static/index.html")
 
     assert "executionStats: false" in state
     assert "executionStats: obj.executionStats === true" in state
@@ -104,7 +103,7 @@ def test_query_execution_stats_are_opt_in_and_disabled_by_default() -> None:
     assert "executionStats: state.runOptExecutionStats" in ui
     assert "if (!state.runOptExecutionStats)" in run
     assert "if (out && out.queryId && state.runOptExecutionStats)" in run
-    for document in (html, index):
+    for document in (html,):
         assert 'id="runOptExecutionStats"' in document
         assert "Load execution stats" in document
         assert 'aria-checked="false"' in document
