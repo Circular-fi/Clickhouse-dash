@@ -3651,7 +3651,6 @@
     // Search state from the URL (a shared link, a reload, a trace detail URL
     // carrying its search context).
     ns.traceSearch?.applyLocation?.({ initial: true });
-    dom.navLogsButton?.addEventListener("click", () => window.location.assign(route("logs")));
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
     dom.tracesSort?.addEventListener("change", () => {
       renderResults();

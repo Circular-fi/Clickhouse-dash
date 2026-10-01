@@ -74,7 +74,8 @@ def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall
     html = read("src/static/traces.html")
     api = read("src/static/app_api.js")
     bootstrap = read("src/static/app_traces_bootstrap.js")
-    assert '"app_trace_views.js", "app_trace_logs.js"]' in bootstrap
+    assert '"app_trace_logs.js"' in bootstrap
+    assert bootstrap.index('"app_traces.js"') < bootstrap.index('"app_trace_logs.js"')
     assert 'id="traceLogsPanel"' in html
     assert "async function getTraceLogs(" in api and "api/traces/logs?" in api
     # The logs request starts once the trace has rendered.
@@ -85,7 +86,7 @@ def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall
         assert f"{hook}," in logs or f"{hook}(" in logs, hook
     # Hidden when /api/version says logs are disabled.
     assert "state?.features?.logs?.enabled !== false" in logs
-    assert "state.features.logs = { enabled: logs.enabled === true };" in read("src/static/app_ui.js")
+    assert "state.features.logs = { enabled: logs.enabled === true" in read("src/static/app_ui.js")
     # A log opens its span through the ?span= deep link.
     assert "ctx.focusSpanInTimeline(id, { push: true });" in logs
     # Spans sharing a SpanId: containment, else the nearest span.

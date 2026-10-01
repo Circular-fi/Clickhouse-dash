@@ -91,7 +91,8 @@ def test_metrics_page_shell_and_switcher():
     for page in ["query.html", "explorer.html", "traces.html"]:
         shell = read(f"src/static/{page}")
         assert 'data-value="metrics" aria-selected="false" hidden>Metrics</button>' in shell, page
-        assert "pageNav.traces !== true && pageNav.metrics !== true" in shell, page
+        # The shell hides the switcher only when no other page is enabled.
+        assert "pageNav.traces !== true" in shell and "pageNav.metrics !== true" in shell, page
     ui = read("src/static/app_ui.js")
     assert "if (dom.navMetricsButton) dom.navMetricsButton.hidden = !metricsEnabled;" in ui
     assert 'window.location.assign(api.resolveUrl("metrics"))' in ui

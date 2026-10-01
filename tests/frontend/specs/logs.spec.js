@@ -320,7 +320,9 @@ test('logs: the page switcher reaches the logs page and back', async ({ page, re
   await expect(page).toHaveURL(/\/logs(\?|$)/);
   await expect(page.locator('#pageSelectButton')).toHaveText('Logs');
   await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'Traces']);
+  // Every other enabled page (Metrics too when metrics are enabled).
+  const metricsOn = (await (await page.request.get('/api/version')).json()).features?.metrics?.enabled === true;
+  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'Traces', ...(metricsOn ? ['Metrics'] : [])]);
   await page.locator('#navTracesButton').click();
   await expect(page).toHaveURL(/\/traces$/);
   await page.locator('#pageSelectButton').click();
