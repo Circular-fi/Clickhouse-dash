@@ -74,8 +74,9 @@ def test_legacy_tab_routes_are_canonicalized_to_their_new_tab() -> None:
     explorer = read("src/static/app_explorer.js")
     functional = read("tests/frontend/specs/functional.spec.js")
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"]' in explorer
-    assert "const legacySchema = TAB_BY_SLUG.has(requestedTab) && !TABS.some((label) => label.toLowerCase() === requestedTab);" in explorer
-    assert "route.legacySchema && route.database && route.table" in explorer
+    # A former slug resolves to its tab; the address takes the canonical form.
+    assert "const tab = TAB_BY_SLUG.get(String(parts[2] || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;" in explorer
+    assert 'window.history.replaceState({ workspace: "explorer" }, "", canonical);' in explorer
     assert '/weather_observations/schema' in functional
     assert '/weather_observations\\/columns' in functional
 

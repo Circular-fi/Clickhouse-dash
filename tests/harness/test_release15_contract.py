@@ -50,10 +50,11 @@ def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> 
 def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
     ui = read("src/static/app_explorer.js")
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    assert 'params.set("view", model.mode === "graph" ? "graph" : "browse")' in ui
+    # Browse is the default Catalog mode; Graph and Storage are ?mode=.
+    assert 'if (mode !== "browse") params.set("mode", mode);' in ui
     assert 'params.set("graph", route.mode === "physical" ? "storage" : "lineage")' in ui
     assert 'params.set("depth", String(route.depth ?? 1))' in ui
-    assert 'const requestedTab = String(parts[2] || DEFAULT_TAB).toLowerCase();' in ui
+    assert 'if (mode === "browse") path += `/${String(tab || DEFAULT_TAB).toLowerCase()}`;' in ui
     assert 'const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];' in ui
     assert "function getRouteState()" in graph
     assert "function applyRouteState(route = {})" in graph
@@ -127,7 +128,8 @@ def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:
 
 def test_legacy_schema_canonicalization_preserves_explorer_query_state() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    assert 'const canonicalParams = new URLSearchParams(window.location.search || "");' in ui
-    assert 'canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse")' in ui
+    # Canonical rewrites keep the mode and the graph type / depth.
+    assert "graphRoute: { mode: route.graphType, depth: route.graphDepth }," in ui
+    assert 'const mode = MODES.includes(modeParam) ? modeParam : (params.get("view") === "graph" ? "graph" : "browse");' in ui
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "model.onStateChange?.();" in graph

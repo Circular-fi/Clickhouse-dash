@@ -9182,6 +9182,9 @@ html[data-theme="light"] {
     padding: 0 8px;
   }
 }
+:root {
+  --explorer-mode-bar-height: 40px;
+}
 .queryLibrary {
   position: relative;
   display: inline-flex;

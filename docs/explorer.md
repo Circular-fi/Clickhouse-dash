@@ -21,28 +21,58 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 ## Shell and navigation
 
 The Explorer shell is a row of segmented view tabs above the content,
-`Catalog | Graph | Storage | Functions | Operations`, followed by a breadcrumb
-`host › database › table` (each crumb but the last navigates). Routes keep their
-existing form, so deep links and history are unchanged:
+`Catalog | Functions`. There is no breadcrumb: in the Catalog the tree selection
+carries the location and the card header names the object.
 
-| View | Route | Container |
-| --- | --- | --- |
-| Catalog | `/explorer[/<db>[/<table>/<tab>]]?view=browse` | tree + `#explorerCatalogView` (`#explorerDetailPane`) |
-| Graph | same path, `?view=graph&graph=lineage\|storage&depth=N` | tree + `#explorerGraphPane` |
-| Storage | `/explorer/_system[?database=<db>[&table=<t>]]` | `#explorerSystemPane` |
-| Functions | `/explorer/functions[/<name>]` | `#explorerFunctionsPane` |
-| Operations | `/explorer/_operations` | `#explorerOpsPane` |
+The **Catalog** is one view: the object tree on the left, and a mode bar above
+the content with three modes of the same scope, the tree selection (nothing, a
+database or an object):
+
+| Mode | Nothing selected | A database | An object | Container |
+| --- | --- | --- | --- | --- |
+| Browse | "Select a table" | the database page | the table card | `#explorerCatalogView` (`#explorerDetailPane`) |
+| Graph | all databases | the database topology | the object's neighbourhood | `#explorerGraphPane` |
+| Storage | the server | the database's tables | the table's partitions | `#explorerSystemPane` |
+
+Switching mode keeps the selection. Picking in the tree, a node click in the
+graph and a zoom in Storage (a row or a treemap rectangle) all move the tree
+selection, so the other modes follow. In Graph and Storage an **Up** button next
+to the mode tabs selects the parent scope (`↑ chdash_ui`, `↑ All databases`).
+Graph's **Open card** and Storage's **Open card** / row *open* buttons switch to
+Browse on that object. Graph and Storage never fetch the card; Browse loads it
+when it is shown.
+
+One URL scheme covers the Catalog, and Back / forward walk modes and scopes:
+
+| Address | Opens |
+| --- | --- |
+| `/explorer[/<db>[/<table>/<tab>]]` | Browse (the default mode) |
+| `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph |
+| `/explorer[/<db>[/<table>]]?mode=storage` | Storage |
+| `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
+
+Former addresses stay aliases and are rewritten to that form: `?view=browse` and
+`?view=graph` (the former Browse / Graph views), `/explorer/_system[?database=
+<db>[&table=<t>]]` (the former Storage view), the former card tab slugs
+(`/overview`, `/schema`, `/data`), `/explorer/functions` and
+`/explorer/databases`.
 
 Storage calls `ns.explorerStorage.show(container, { scope, includeSystem,
-onScopeChange, onIncludeSystemChange, onOpenTable })`; the tab reopens the last
-storage scope (the server at first) and the database page's storage band links to
-the database scope. Operations calls
-`ns.explorerOps.show(container, { onOpenTable })`; its tab is hidden while the
-module is absent or `explorer.operations.enabled = false` (a deep link then falls
-back to Catalog). Leaving a view calls its `hide()`; a host change calls the
-Operations `refresh()` and re-shows Storage. `ns.explorer.setView(view)` switches
-views programmatically. Tabs disabled by `explorer.browse` / `explorer.graph` are
-hidden.
+fetchTable, onScopeChange, onOpenTable })`: the scope is the tree selection,
+`includeSystem` the tree's **System** chip (Storage has no option of its own),
+`fetchTable` shares the card's table detail cache and `onScopeChange` moves the
+tree selection. `ns.explorer.setView(view)` switches views programmatically and
+also accepts a mode (`"browse"`, `"graph"`, `"storage"`). Modes disabled by
+`explorer.browse` / `explorer.graph` are hidden, and a disabled mode falls back
+to the first available one.
+
+**Server operations** (`/explorer/_operations`, `#explorerOpsPane`) is hidden
+for now: its code is kept, but `app.js` does not load `app_explorer_ops.js` on
+the Explorer (`PAGE_SKIPPED_MODULES.explorer`), so the tab stays hidden and the
+deep link falls back to the Catalog. To bring it back, drop
+`"app_explorer_ops.js"` from that list and rerun `tools/build_page_css.py`; the
+tab then shows unless `explorer.operations.enabled = false`, and the view calls
+`ns.explorerOps.show(container, { onOpenTable })`.
 
 The object tree shows one line per object: a type icon (table, Distributed,
 Buffer, Memory, view, materialized view, dictionary), the name, a health dot for
@@ -58,7 +88,13 @@ never hidden by a filter. The graph's non-storing projection follows the chips
 `chdash.explorer.typeFilters.v1` and `chdash.explorer.includeSystem`.
 
 On narrow screens (820 px and below) the tree is a drawer opened with the
-Objects button of the navigation bar; picking an object closes it.
+Objects button of the navigation bar, in every Catalog mode; it opens under the
+mode bar, which stays in reach, and picking an object closes it. The Functions
+list is a drawer too.
+
+The Functions list pane mirrors the tree pane: the same width, a search box with
+the refresh button, and chips under it (Functions, Aggregate, Table, UDF: one
+kind at a time, pressing the pressed chip again lists every function).
 
 ### Number formats and shared tokens
 
@@ -130,27 +166,26 @@ instead of an empty storage section and an empty table.
 
 ## Storage
 
-The **Storage** Explorer section (route `/explorer/_system`, next to Tables and
-Functions) is one ncdu-style view of where the bytes are, with a breadcrumb
-`server / database / table`:
+The **Storage** mode of the Catalog is one ncdu-style view of where the bytes
+of the tree selection are:
 
 | Scope | URL | Rows of the list | Treemap rectangles |
 | --- | --- | --- | --- |
-| server | `/explorer/_system` | databases | databases, with their tables nested under a header band |
-| database | `/explorer/_system?database=<db>` | storing tables (+ one "N smaller tables" row beyond the 128 bound) | tables |
-| table | `/explorer/_system?database=<db>&table=<t>` | partitions | partitions |
+| server | `/explorer?mode=storage` | databases | databases, with their tables nested under a header band |
+| database | `/explorer/<db>?mode=storage` | storing tables (+ one "N smaller tables" row beyond the 128 bound) | tables |
+| table | `/explorer/<db>/<t>?mode=storage` | partitions | partitions |
 
 The sorted list is the main surface: name, size, a share bar (normalized to the
 largest row) with the percentage of the scope, rows, and parts (tables per
 database at server scope, as `storing / objects`). Every header sorts; size is
 the default. Clicking a database or table row, or its treemap rectangle, zooms
-into it; the breadcrumb, Back and a reload keep and restore the scope. A table
-row also has an *open* button, and the table scope an **Open table** button,
-which leave for the table card. `/explorer/system` keeps addressing the
-ClickHouse `system` database, so the section uses the reserved `_system`
-segment. The *System databases* option is shared with the Tables sidebar
-(*Include system database*) and decides whether `system` is part of the server
-scope; opening `?database=system` includes it.
+into it by selecting it in the tree; Up, Back and a reload keep and restore the
+scope. There is no in-view breadcrumb. A table row also has an *open* button,
+and the table scope an **Open card** button, which switch to the card in Browse.
+The former `/explorer/_system[?database=&table=]` route is an alias
+(`/explorer/system` addresses the ClickHouse `system` database). The tree's
+**System** chip decides whether the system databases are part of the server
+scope; a selected system database locks it on.
 
 The treemap is secondary: it sits under the list with a bounded height
 (`clamp(150px, 26vh, 240px)`) and is drawn only when at least three rectangles
@@ -162,8 +197,8 @@ table detail endpoint (most recent 1000 partitions).
 The database page (click a database in the sidebar) embeds a compact variant
 above its object list: the same bounded treemap band when at least three tables
 hold >= 1% of the database, otherwise a single share strip (each table >= 1%
-plus one Others segment, with a one-line legend), and a **Storage view** link to
-the database scope of the Storage section.
+plus one Others segment, with a one-line legend), and a **Storage view** link
+that switches the Catalog to its Storage mode on that database.
 
 Byte accounting is the same local on-disk accounting as the database header and
 sidebar summaries (`metric_scope = local-replica`): `bytes_on_disk` of active
@@ -199,9 +234,9 @@ that the sidebar already loaded, so one implementation
 (legend under the map); databases use a pale per-database tint.
 
 The view is `app_explorer_storage.js`: `ns.explorerStorage.show(container,
-{ scope, includeSystem, onScopeChange, onIncludeSystemChange, onOpenTable })`
-mounts it in any container (the Explorer shell passes its URL/visibility
-callbacks), and `renderCompact(container, { root, residentBytes, name, onOpen,
+{ scope, includeSystem, fetchTable, onScopeChange, onOpenTable })` mounts it in
+any container (the Explorer shell passes the tree selection and its callbacks),
+and `renderCompact(container, { root, residentBytes, name, onOpen,
 onShowStorage })` draws the database-page variant.
 
 `GET /api/explorer/storage?host_id=<id>[&refresh=1]` backs the section.
@@ -238,8 +273,10 @@ listed + omitted bytes.
 
 ## Server operations
 
-The **Operations** Explorer section (route `/explorer/_operations`,
-`app_explorer_ops.js`, `ns.explorerOps.show(container, { onOpenTable })`) shows
+Hidden for now (see *Shell and navigation*: `app.js` does not load the module
+on the Explorer). The **Operations** Explorer section (route
+`/explorer/_operations`, `app_explorer_ops.js`,
+`ns.explorerOps.show(container, { onOpenTable })`) shows
 what the selected server is doing in the background, in the spirit of
 clickhouse-monitoring:
 

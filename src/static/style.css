@@ -6079,7 +6079,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   gap: 10px;
 }
 
-.explorerStorageView__option,
 .explorerOpsView__option {
   display: inline-flex;
   align-items: center;
@@ -6090,56 +6089,8 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   cursor: pointer;
 }
 
-.explorerStorageView__option[hidden] {
-  display: none;
-}
-
-.explorerStorageView__option input,
 .explorerOpsView__option input {
   margin: 0;
-}
-
-.explorerStorageCrumbs__list {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--explorer-section-title-size, 14px);
-  font-weight: 650;
-}
-
-.explorerStorageCrumbs__item {
-  display: inline-flex;
-  min-width: 0;
-  align-items: baseline;
-}
-
-.explorerStorageCrumbs__item + .explorerStorageCrumbs__item::before {
-  content: "/";
-  margin: 0 6px;
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.explorerStorageCrumbs__link {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
-  font: inherit;
-  cursor: pointer;
-}
-
-.explorerStorageCrumbs__link:hover,
-.explorerStorageCrumbs__link:focus-visible {
-  text-decoration: underline;
-}
-
-.explorerStorageCrumbs__current {
-  overflow-wrap: anywhere;
 }
 
 .explorerStorageView__notice {
@@ -7084,11 +7035,8 @@ button.explorerStorageStrip__segment:focus-visible {
   padding: 0 2px;
 }
 
-/* Browse remains the first grid column in Graph mode. */
-.explorerGrid > .explorerGraphPane {
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
+/* The graph pane is a mode of the Catalog, under its mode bar. */
+.explorerCatalogMain > .explorerGraphPane {
   border-left: 0;
 }
 
@@ -7149,9 +7097,6 @@ button.explorerStorageStrip__segment:focus-visible {
     margin-left: 0;
     padding-left: 0;
     border-left: 0;
-  }
-  .explorerGrid > .explorerGraphPane {
-    min-height: 68vh;
   }
 }
 
@@ -18947,59 +18892,6 @@ html[data-theme="light"] {
   box-shadow: inset 0 0 0 1px var(--buttonBorder), 0 1px 2px rgba(2, 6, 23, 0.18);
 }
 
-.explorerBreadcrumb {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.explorerBreadcrumb__item {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 3px 5px;
-  border-radius: 5px;
-}
-
-.explorerBreadcrumb__item--host {
-  flex-shrink: 0;
-  max-width: 34%;
-}
-
-button.explorerBreadcrumb__item {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-button.explorerBreadcrumb__item:hover,
-button.explorerBreadcrumb__item:focus-visible {
-  color: var(--text);
-  background: var(--rowHover);
-  text-decoration: underline;
-}
-
-.explorerBreadcrumb__item[aria-current] {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.explorerBreadcrumb__sep {
-  flex: 0 0 auto;
-  color: var(--muted);
-  opacity: 0.7;
-}
-
 .explorerTreeToggle {
   display: none;
 }
@@ -19322,11 +19214,6 @@ button.explorerBreadcrumb__item:focus-visible {
     padding: 0 8px;
   }
 
-  .explorerBreadcrumb {
-    flex: 1 1 100%;
-    order: 3;
-  }
-
   .explorerShell > .explorerGrid {
     position: relative;
     display: block;
@@ -19362,19 +19249,137 @@ button.explorerBreadcrumb__item:focus-visible {
     background: rgba(2, 6, 23, 0.38);
   }
 
-  /* The wrapped app header (two rows) and the navigation bar take ~230 px:
-     the graph and the detail fill the rest of the phone screen, no more, so
-     bottom sheets anchored to the pane stay on screen. */
-  .explorerShell > .explorerGrid > .explorerCatalogView,
-  .explorerShell > .explorerGrid > .explorerGraphPane {
-    min-height: max(360px, calc(100dvh - 240px));
-  }
 }
 
 @media (max-width: 820px) and (prefers-reduced-motion: reduce) {
   .explorerShell > .explorerGrid > .explorerListPane,
   .explorerShell.is-tree-open > .explorerGrid > .explorerListPane {
     transition: none;
+  }
+}
+
+/* ==== Explorer Catalog modes (2026-10) =======================================
+   The Catalog is one view: the object tree and #explorerCatalogMain, whose
+   mode bar (Browse | Graph | Storage in the compact view-tab pill, and the
+   way up to the parent scope) sits above the card, the graph or the storage
+   of the tree selection. The Functions list mirrors the tree pane. */
+:root {
+  --explorer-mode-bar-height: 40px;
+}
+
+.explorerCatalogMain {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorerModeBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--explorer-mode-bar-height);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+
+.explorerViewTabs--compact {
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.explorerViewTabs--compact > .explorerViewTab {
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.explorerModeTabs[hidden],
+.explorerScopeUp[hidden] {
+  display: none;
+}
+
+.explorerScopeUp {
+  appearance: none;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explorerScopeUp:hover {
+  border-color: var(--buttonBorder);
+  color: var(--text);
+}
+
+.explorerScopeUp:focus-visible {
+  box-shadow: var(--ring);
+}
+
+.explorerScopeUp__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorerCatalogMain > .explorerCatalogView,
+.explorerCatalogMain > .explorerGraphPane,
+.explorerCatalogMain > .explorerSystemPane {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Functions list: the tree pane's toolbar (search + refresh) and chips. */
+#explorerFunctionListPane > .explorerSidebarToolbar {
+  grid-template-columns: minmax(0, 1fr) 32px;
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+
+/* Storage mode: one summary line next to its actions. */
+.explorerSystemPane .explorerStorageView__header {
+  align-items: center;
+}
+
+@media (max-width: 820px) {
+  /* The wrapped app header (two rows), the navigation bar and the mode bar
+     take ~270 px: the card, the graph and the storage fill the rest of the
+     phone screen, no more, so bottom sheets anchored to the pane stay on
+     screen. */
+  .explorerCatalogMain > .explorerCatalogView,
+  .explorerCatalogMain > .explorerGraphPane,
+  .explorerCatalogMain > .explorerSystemPane {
+    min-height: max(330px, calc(100dvh - 280px));
+  }
+
+  /* The tree drawer opens under the mode bar, which stays in reach. */
+  .explorerShell > #explorerListView > .explorerListPane,
+  #explorerTreeBackdrop {
+    top: var(--explorer-mode-bar-height);
+  }
+
+  /* The mode tabs keep their width; the way up takes what is left. */
+  .explorerModeBar > .explorerViewTabs {
+    flex: 0 0 auto;
+  }
+
+  .explorerModeBar {
+    padding: 0 8px;
   }
 }
 

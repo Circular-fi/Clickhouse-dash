@@ -67,14 +67,14 @@ def test_table_summary_queries_are_scoped_to_requested_object() -> None:
 def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     select = ui[ui.index("async function selectTable"):ui.index("async function applyRouteFromLocation")]
-    set_mode = ui[ui.index("function setMode(mode)"):ui.index("function setWorkspace")]
+    show_mode = ui[ui.index("function showMode()"):ui.index("function openCard(")]
 
-    graph_return = select.index('if (model.mode === "graph") {')
+    # Graph and Storage keep the selection only; Browse loads the card.
+    graph_return = select.index('if (model.mode !== "browse") {')
     detail_fetch = select.index("api.getExplorerTable")
     assert graph_return < detail_fetch
     assert "return;" in select[graph_return:detail_fetch]
-    assert "if (table && !model.detailLoading && !model.detail)" in set_mode
-    assert "void selectTable(table.database, table.name" in set_mode
+    assert "if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table" in show_mode
 
 
 def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> None:

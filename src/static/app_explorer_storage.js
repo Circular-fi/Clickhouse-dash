@@ -1,8 +1,8 @@
 (() => {
   "use strict";
 
-  // Explorer Storage view: one ncdu-style view of where the bytes are, with a
-  // breadcrumb server > database > table. The sorted list (name, size, share
+  // Explorer Storage view: one ncdu-style view of where the bytes are, at
+  // the server, database or table scope. The sorted list (name, size, share
   // bar, rows, parts) is the main surface; the treemap is secondary, kept to a
   // limited height and drawn only when it can show a distribution (at least
   // three rectangles of >= 1% of the scope). Clicking a row or a rectangle
@@ -16,7 +16,11 @@
   // (bytes_on_disk of active parts, total_bytes of Log-family engines).
   // Memory / Buffer / Dictionary RAM is reported, never drawn as disk area.
   //
-  // ns.explorerStorage.show(container, { scope, ... }) mounts the full view;
+  // ns.explorerStorage.show(container, { scope, includeSystem, fetchTable,
+  // onScopeChange, onOpenTable }) mounts the full view. In the Explorer it is
+  // the Catalog's Storage mode: the scope is the tree selection, a zoom asks
+  // the shell to move that selection (onScopeChange), the tree's System chip
+  // is includeSystem and fetchTable shares the card's table detail cache.
   // renderCompact() is the small variant embedded in the database page.
 
   const ns = window.ChDash;
@@ -153,9 +157,12 @@
     if (!force && entry?.detail && Date.now() - entry.fetchedAtMs < TABLE_CLIENT_TTL_MS) return Promise.resolve(entry.detail);
     if (entry?.promise) return entry.promise;
     const next = { detail: entry?.detail || null, fetchedAtMs: entry?.fetchedAtMs || 0, error: null, promise: null };
+    const fetchTable = view?.options?.fetchTable;
     next.promise = (async () => {
       try {
-        const detail = await ns.api.getExplorerTable(host, database, table, !!force);
+        const detail = typeof fetchTable === "function"
+          ? await fetchTable(database, table, !!force)
+          : await ns.api.getExplorerTable(host, database, table, !!force);
         if (hostId() !== host) return null;
         next.detail = detail;
         next.fetchedAtMs = Date.now();
@@ -394,6 +401,8 @@
     ],
   };
 
+  // The shell passes the tree's System chip; a standalone view reads the
+  // stored chip state.
   function includeSystemOption() {
     if (typeof view?.options?.includeSystem === "boolean") return view.options.includeSystem;
     try { return localStorage.getItem(INCLUDE_SYSTEM_KEY) === "1"; } catch { return false; }
@@ -408,18 +417,15 @@
     const root = node("section", "explorerStorageView");
     root.setAttribute("aria-label", "Storage");
 
+    // No breadcrumb: the tree selection is the location. The meta line sums
+    // the scope up.
     const header = node("header", "explorerStorageView__header");
     const heading = node("div", "explorerStorageView__heading");
-    const crumbs = node("nav", "explorerStorageCrumbs");
-    crumbs.setAttribute("aria-label", "Storage scope");
     const meta = node("div", "explorerStorageView__meta");
-    heading.append(crumbs, meta);
+    heading.append(meta);
     const actions = node("div", "explorerStorageView__actions");
-    const option = node("label", "explorerStorageView__option");
-    const includeSystem = node("input");
-    includeSystem.type = "checkbox";
-    option.append(includeSystem, node("span", "", "System databases"));
-    const openTable = node("button", "button button--small explorerStorageView__open", "Open table");
+    const openTable = node("button", "button button--small explorerStorageView__open", "Open card");
+    openTable.title = "Open the table card";
     openTable.type = "button";
     openTable.hidden = true;
     const refresh = node("button", "button button--small explorerRefreshButton explorerStorageView__refresh");
@@ -427,7 +433,7 @@
     refresh.title = "Refresh storage";
     refresh.setAttribute("aria-label", "Refresh storage");
     refresh.innerHTML = '<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>';
-    actions.append(openTable, option, refresh);
+    actions.append(openTable, refresh);
     header.append(heading, actions);
 
     const notice = node("div", "explorerStorageView__notice");
@@ -447,9 +453,7 @@
     view = {
       container,
       root,
-      crumbs,
       meta,
-      includeSystem,
       openTable,
       refresh,
       notice,
@@ -464,17 +468,6 @@
       sort: { server: { key: "bytes", dir: "desc" }, database: { key: "bytes", dir: "desc" }, table: { key: "bytes", dir: "desc" } },
     };
 
-    includeSystem.addEventListener("change", () => {
-      if (includeSystem.disabled) return;
-      const value = !!includeSystem.checked;
-      if (typeof view.options.onIncludeSystemChange === "function") {
-        view.options.includeSystem = value;
-        view.options.onIncludeSystemChange(value);
-      } else {
-        try { localStorage.setItem(INCLUDE_SYSTEM_KEY, value ? "1" : "0"); } catch {}
-      }
-      render();
-    });
     refresh.addEventListener("click", () => void refreshView(true));
     openTable.addEventListener("click", () => {
       if (view.scope.table) openTableRoute(view.scope.database, view.scope.table);
@@ -499,32 +492,6 @@
     void ensureViewData(false);
     if (notify) view.options.onScopeChange?.({ ...next });
     view.root.querySelector(".explorerStorageView__list")?.scrollIntoView?.({ block: "nearest" });
-  }
-
-  function renderCrumbs() {
-    const { database, table } = view.scope;
-    const items = [{ label: hostId() || "Server", title: "Whole server", scope: {} }];
-    if (database) items.push({ label: database, title: `Database ${database}`, scope: { database } });
-    if (table) items.push({ label: table, title: `Table ${database}.${table}`, scope: { database, table } });
-    const list = node("ol", "explorerStorageCrumbs__list");
-    items.forEach((item, index) => {
-      const li = node("li", "explorerStorageCrumbs__item");
-      const last = index === items.length - 1;
-      if (last) {
-        const current = node("span", "explorerStorageCrumbs__current", item.label);
-        current.setAttribute("aria-current", "page");
-        current.title = item.title;
-        li.appendChild(current);
-      } else {
-        const button = node("button", "explorerStorageCrumbs__link", item.label);
-        button.type = "button";
-        button.title = item.title;
-        button.addEventListener("click", () => setScope(item.scope));
-        li.appendChild(button);
-      }
-      list.appendChild(li);
-    });
-    view.crumbs.replaceChildren(list);
   }
 
   function sortedRows(level, rows, total) {
@@ -693,12 +660,8 @@
     if (!view) return;
     const { database, table } = view.scope;
     const includeSystem = effectiveIncludeSystem();
-    view.includeSystem.checked = includeSystem;
-    view.includeSystem.disabled = isSystemDatabaseName(database);
-    view.includeSystem.closest("label").hidden = !!database;
     view.openTable.hidden = !table;
     view.refresh.disabled = !!data.promise;
-    renderCrumbs();
     view.root.dataset.level = table ? "table" : database ? "database" : "server";
 
     if (!data.storage) {

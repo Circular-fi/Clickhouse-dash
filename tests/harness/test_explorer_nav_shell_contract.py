@@ -7,29 +7,68 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_view_tabs_and_containers_replace_the_section_dropdown() -> None:
+def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() -> None:
     html = read("src/static/explorer.html")
     ui = read("src/static/app_explorer.js")
     assert 'id="explorerViewTabs" class="explorerViewTabs" role="tablist"' in html
-    for tab, view in [("explorerCatalogTab", "catalog"), ("explorerGraphTab", "graph"), ("explorerStorageTab", "storage"),
-                      ("explorerFunctionsTab", "functions"), ("explorerOpsTab", "operations")]:
+    for tab, view in [("explorerCatalogTab", "catalog"), ("explorerFunctionsTab", "functions"), ("explorerOpsTab", "operations")]:
         assert f'id="{tab}"' in html and f'data-view="{view}"' in html
+    # Graph and Storage are modes of the Catalog, not top tabs.
+    for removed in ["explorerGraphTab", "explorerStorageTab", "explorerBreadcrumb", "explorerSectionSelect",
+                    "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring", "explorerFunctionSettings"]:
+        assert f'id="{removed}"' not in html
     # Operations stays hidden until its module is loaded.
     assert 'data-view="operations" aria-selected="false" hidden>' in html
-    for container in ["explorerCatalogView", "explorerGraphPane", "explorerSystemPane", "explorerFunctionsPane", "explorerOpsPane"]:
+    # One tree, then the mode bar above the card, the graph and the storage.
+    catalog = html[html.index('id="explorerListView"'):html.index('id="explorerFunctionsPane"')]
+    order = ["explorerListPane", "explorerCatalogMain", "explorerModeBar", "explorerModeTabs", "explorerCatalogView",
+             "explorerGraphPane", "explorerSystemPane"]
+    assert [catalog.index(f'id="{name}"') for name in order] == sorted(catalog.index(f'id="{name}"') for name in order)
+    for mode, pane in [("browse", "explorerCatalogView"), ("graph", "explorerGraphPane"), ("storage", "explorerSystemPane")]:
+        assert f'data-mode="{mode}"' in catalog and f'aria-controls="{pane}"' in catalog
+    assert 'id="explorerScopeUp" class="explorerScopeUp" type="button" hidden>' in catalog
+    for container in ["explorerFunctionsPane", "explorerOpsPane"]:
         assert f'id="{container}"' in html
-    for removed in ["explorerSectionSelect", "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring"]:
-        assert f'id="{removed}"' not in html
-    assert 'id="explorerBreadcrumb" class="explorerBreadcrumb"' in html
-    # Hooks for the Storage and Operations modules.
+    assert 'const MODES = ["browse", "graph", "storage"];' in ui
+    assert 'const VIEWS = ["catalog", "functions", "operations"];' in ui
+    # The tree selection is the scope of every mode.
+    assert "function selectionScope() {" in ui
+    assert "graph?.focusTable?.(scope.database, scope.table, { ensureVisible: true });" in ui
+    assert "graph?.focusDatabase?.(scope.database);" in ui
+    # Storage zooms move the tree selection; the System chip filters Storage.
     assert 'storageView.show(dom.explorerSystemPane, {' in ui
-    assert 'onIncludeSystemChange: (value) => {' in ui and 'onScopeChange: (scope) => {' in ui
-    assert 'ns.explorerOps.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });' in ui
-    assert 'operations: operationsAvailable(),' in ui
+    assert "includeSystem: model.includeSystem," in ui
+    assert "if (scope.database && scope.table) void selectTable(scope.database, scope.table);" in ui
+    assert 'if (key === "system" && model.section === "tables" && model.mode === "storage") renderSystemView();' in ui
+    assert "onIncludeSystemChange" not in ui and "renderBreadcrumb" not in ui
+    # Operations: module hook kept, the view hidden while the module is not loaded.
+    assert 'ns.explorerOps.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openCard(database, table) });' in ui
+    assert 'const available = { catalog: true, functions: true, operations: operationsAvailable() };' in ui
     assert 'return !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;' in ui
-    assert 'if (previous === "system" && !system) ns.explorerStorage?.hide?.();' in ui
     assert 'const OPERATIONS_ROUTE_SEGMENT = "_operations";' in ui
     assert 'init, setWorkspace, setSection, setMode, setView, currentView, storageScope,' in ui
+
+
+def test_operations_view_is_hidden_by_not_loading_its_module() -> None:
+    app = read("src/static/app.js")
+    explorer_css = read("src/static/style.explorer.css")
+    skipped = app[app.index("const PAGE_SKIPPED_MODULES = {"):app.index("};", app.index("const PAGE_SKIPPED_MODULES = {"))]
+    explorer = skipped[skipped.index("explorer: ["):]
+    assert '"app_explorer_ops.js"' in explorer
+    assert 'drop\n  // "app_explorer_ops.js" from the explorer list and rerun\n  // tools/build_page_css.py.' in app
+    # Its rules are not shipped to the Explorer page while it is hidden.
+    assert ".explorerOpsTile" not in explorer_css
+
+
+def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
+    ui = read("src/static/app_explorer.js")
+    assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
+    assert 'if (mode !== "browse") params.set("mode", mode);' in ui
+    # ?view=graph, /_system?database=&table= and the card-tab paths are aliases.
+    assert '(params.get("view") === "graph" ? "graph" : "browse")' in ui
+    assert 'return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };' in ui
+    assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],' in ui
+    assert 'window.history.replaceState({ workspace: "explorer" }, "", canonical);' in ui
 
 
 def test_one_number_format_is_shared_with_every_explorer_module() -> None:
@@ -61,6 +100,9 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert 'setTreeDrawerOpen(false);' in tree
     assert 'function toggleTypeFilter(key)' in ui
     assert '.explorerShell.is-tree-open > .explorerGrid > .explorerListPane' in css
+    # Every Catalog mode slides the same tree in, under the mode bar.
+    assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui
+    assert ".explorerShell > #explorerListView > .explorerListPane,\n  #explorerTreeBackdrop {\n    top: var(--explorer-mode-bar-height);" in css
     # The header wraps on a phone through the one unscoped rule every shell shares.
     narrow = css[css.index("/* -- Narrow windows: the header wraps"):]
     assert "@media (max-width: 820px) {\n  .appHeader {\n    flex-wrap: wrap;" in narrow

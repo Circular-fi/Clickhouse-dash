@@ -100,10 +100,13 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert "graph {" in example
     assert "lineage" in example and "storage_topology" in example
     assert "explicitTypeChoice = modes.length > 1" in explorer
-    # Catalog / Graph are top-level view tabs, each hidden when its feature is off.
-    assert "catalog: browseEnabled," in explorer and "graph: graphEnabled," in explorer
+    # Browse / Graph are Catalog modes, each hidden when its feature is off; a
+    # disabled mode falls back to the first available one.
+    assert "browse: f.enabled !== false && f.browse !== false," in explorer
+    assert "graph: f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false)," in explorer
     assert "button.hidden = !available[name];" in explorer
-    assert 'if (!browseEnabled && graphEnabled && model.mode !== "graph") setMode("graph")' in explorer
+    assert "if (!available[model.mode]) setMode(model.mode);" in explorer
+    assert 'MODES.includes(requested) && available[requested] ? requested : (MODES.find((name) => available[name]) || "browse")' in explorer
 
 
 def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:

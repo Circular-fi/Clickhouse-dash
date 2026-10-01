@@ -64,12 +64,15 @@ def test_storage_ttl_parser_builds_ordered_timeline_actions() -> None:
     assert 'derive_ttl_timing' in cpp
 
 
-def test_function_filter_cog_reuses_query_run_settings_menu_structure() -> None:
+def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
     html = read("src/static/explorer.html")
-    assert 'id="explorerFunctionSettings" class="themeSelect runSettings explorerFunctionSettings"' in html
-    assert 'id="explorerFunctionSettingsButton" class="runSettings__button' in html
-    assert 'id="explorerFunctionSettingsMenu" class="themeSelect__menu runSettings__menu' in html
-    assert 'class="runMenu__opt' in html
+    ui = read("src/static/app_explorer.js")
+    # The former cog menu became chips like the object tree's type chips.
+    assert 'id="explorerFunctionSettings"' not in html
+    assert 'id="explorerFunctionFilters" class="explorerTreeFilters" role="group" aria-label="Function kinds"' in html
+    for kind in ["Function", "Aggregate Function", "Table Function", "user-defined"]:
+        assert f'class="explorerFilterChip" type="button" data-function-kind="{kind}" aria-pressed="false"' in html
+    assert 'const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;' in ui
 
 
 def test_terminal_single_query_failure_never_reopens_result_table() -> None:
@@ -101,5 +104,7 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    block = ui[ui.index('if (route.workspace === "explorer" && route.legacySchema'):ui.index('model.routeIntent = route;')]
-    assert 'if (!canonicalParams.has("view")) canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse");' in block
+    # ?view= and the other aliases are rewritten to the one Catalog scheme.
+    block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n      // Aliases'):ui.index('model.routeIntent = route;')]
+    assert "const canonical = appRoute(catalogPath({" in block
+    assert 'window.history.replaceState({ workspace: "explorer" }, "", canonical);' in block

@@ -176,12 +176,9 @@
         <button id="explorerTreeToggle" class="button button--small explorerTreeToggle" type="button" aria-controls="explorerListPane" aria-expanded="false" aria-label="Show objects" title="Objects"><span class="explorerTreeToggle__glyph" aria-hidden="true"></span><span class="explorerTreeToggle__text">Objects</span></button>
         <div id="explorerViewTabs" class="explorerViewTabs" role="tablist" aria-label="Explorer views">
           <button id="explorerCatalogTab" class="explorerViewTab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
-          <button id="explorerGraphTab" class="explorerViewTab" type="button" role="tab" data-view="graph" aria-selected="false">Graph</button>
-          <button id="explorerStorageTab" class="explorerViewTab" type="button" role="tab" data-view="storage" aria-selected="false">Storage</button>
           <button id="explorerFunctionsTab" class="explorerViewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
           <button id="explorerOpsTab" class="explorerViewTab" type="button" role="tab" data-view="operations" aria-selected="false" hidden>Operations</button>
         </div>
-        <nav id="explorerBreadcrumb" class="explorerBreadcrumb" aria-label="Location"></nav>
       </header>
 
       <div id="explorerError" class="errorBanner explorerError" hidden></div>
@@ -206,6 +203,16 @@
         </aside>
         <div id="explorerTreeBackdrop" class="explorerTreeBackdrop" hidden></div>
 
+        <div id="explorerCatalogMain" class="explorerCatalogMain">
+        <!-- Catalog modes: the tree selection is the scope of all three. -->
+        <div id="explorerModeBar" class="explorerModeBar">
+          <div id="explorerModeTabs" class="explorerViewTabs explorerViewTabs--compact explorerModeTabs" role="tablist" aria-label="Catalog mode">
+            <button id="explorerModeBrowse" class="explorerViewTab is-active" type="button" role="tab" data-mode="browse" aria-selected="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
+            <button id="explorerModeGraph" class="explorerViewTab" type="button" role="tab" data-mode="graph" aria-selected="false" aria-controls="explorerGraphPane" title="Lineage and topology around the selection">Graph</button>
+            <button id="explorerModeStorage" class="explorerViewTab" type="button" role="tab" data-mode="storage" aria-selected="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
+          </div>
+          <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><span class="explorerScopeUp__glyph" aria-hidden="true">&uarr;</span><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
+        </div>
         <div id="explorerCatalogView" class="explorerCatalogView">
         <section id="explorerDetailPane" class="explorerDetailPane" aria-live="polite">
           <div id="explorerEmptyState" class="explorerEmptyState">
@@ -266,6 +273,11 @@
           </div>
           <canvas id="explorerGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
         </section>
+
+        <!-- Storage mode: app_explorer_storage.js renders the server, database
+             or table storage of the tree selection into this pane. -->
+        <div id="explorerSystemPane" class="explorerSystemPane" aria-label="Storage" hidden></div>
+        </div>
       </div>
 
       <div id="explorerFunctionsPane" class="explorerGrid" hidden>
@@ -282,17 +294,13 @@
               <option value="Table Function">Table</option>
               <option value="user-defined">User-defined</option>
             </select>
-            <div id="explorerFunctionSettings" class="themeSelect runSettings explorerFunctionSettings" aria-label="Function filters">
-              <button id="explorerFunctionSettingsButton" class="runSettings__button explorerTableSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Function filters" title="Function filters"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
-              <div id="explorerFunctionSettingsMenu" class="themeSelect__menu runSettings__menu explorerFunctionSettings__menu" role="menu" tabindex="-1" hidden>
-                <button class="runMenu__opt is-checked" type="button" role="menuitemradio" data-function-kind="" aria-checked="true"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">All functions</span></button>
-                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Functions</span></button>
-                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Aggregate Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Aggregate</span></button>
-                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="Table Function" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">Table</span></button>
-                <button class="runMenu__opt" type="button" role="menuitemradio" data-function-kind="user-defined" aria-checked="false"><span class="runMenu__optCheck" aria-hidden="true"></span><span class="runMenu__optText">User-defined</span></button>
-              </div>
-            </div>
             <button id="explorerFunctionRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh functions" title="Refresh functions"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+          </div>
+          <div id="explorerFunctionFilters" class="explorerTreeFilters" role="group" aria-label="Function kinds">
+            <button class="explorerFilterChip" type="button" data-function-kind="Function" aria-pressed="false" title="Regular functions only">Functions</button>
+            <button class="explorerFilterChip" type="button" data-function-kind="Aggregate Function" aria-pressed="false" title="Aggregate functions only">Aggregate</button>
+            <button class="explorerFilterChip" type="button" data-function-kind="Table Function" aria-pressed="false" title="Table functions only">Table</button>
+            <button class="explorerFilterChip" type="button" data-function-kind="user-defined" aria-pressed="false" title="User-defined functions only">UDF</button>
           </div>
           <div id="explorerFunctionList" class="explorerTableList"></div>
         </aside>
@@ -314,11 +322,8 @@
         </section>
       </div>
 
-      <!-- Storage section: app_explorer_storage.js renders the server >
-           database > table storage view into this pane. -->
-      <div id="explorerSystemPane" class="explorerSystemPane" aria-label="Storage" hidden></div>
-
-      <!-- Server operations: app_explorer_ops.js renders into this pane. -->
+      <!-- Server operations: app_explorer_ops.js renders into this pane. The
+           view is hidden for now (app.js does not load the module). -->
       <div id="explorerOpsPane" class="explorerOpsPane" aria-label="Server operations" hidden></div>
     </section>
   </main>

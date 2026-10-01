@@ -50,15 +50,17 @@ def test_system_section_has_its_own_route_that_does_not_shadow_the_system_databa
     ui = read("src/static/app_explorer.js")
     storage = read("src/static/app_explorer_storage.js")
     html = read("src/static/explorer.html")
+    # The former Storage section route stays an alias of the Catalog's
+    # Storage mode (/explorer[/<db>[/<table>]]?mode=storage).
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
-    assert 'id="explorerStorageTab"' in html and 'data-view="storage"' in html
-    assert 'if (model.section === "system") return "storage";' in ui
+    assert 'return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };' in ui
+    assert 'id="explorerModeStorage"' in html and 'data-mode="storage"' in html
+    assert 'id="explorerStorageTab"' not in html
     assert 'id="explorerSystemPane"' in html
-    # The Storage section is rendered by app_explorer_storage.js, scoped by
-    # ?database=&table= on the reserved segment.
+    # app_explorer_storage.js renders the tree selection's storage.
     assert "storageView.show(dom.explorerSystemPane, {" in ui
-    assert 'scope.set("database", model.storageScope.database);' in ui
+    assert "scope: selectionScope()," in ui
     assert "ns.api.getExplorerStorage(host, !!force)" in storage
 
 
@@ -70,8 +72,10 @@ def test_storage_view_is_a_sorted_list_first_and_a_bounded_treemap_second() -> N
     assert "const shown = significantLeafCount(tree) >= TREEMAP_MIN_ITEMS;" in storage
     assert "if (significantLeafCount(tree) >= TREEMAP_MIN_ITEMS) {" in storage
     assert "root.append(header, notice, list, map, footnote);" in storage
-    # Breadcrumb server > database > table; treemap and list clicks zoom.
-    assert "scope: { database, table } });" in storage
+    # No in-view breadcrumb: the tree selection is the location; treemap and
+    # list clicks zoom (and move that selection).
+    assert "explorerStorageCrumbs" not in storage
+    assert "button.addEventListener(\"click\", () => setScope(row.zoom));" in storage
     assert 'else if (target.kind === "database") setScope({ database: target.database || target.name });' in storage
     # Partitions are the table level; slivers keep a rotated label or a mark.
     assert 'const isLeaf = declaredKind === "table" || declaredKind === "partition";' in treemap

@@ -320,7 +320,7 @@ def test_graph_keeps_browser_visible_has_inline_topology_controls_and_no_reset_f
     assert 'function resetFocus()' not in graph
     set_mode = ui[ui.index("function setMode("):ui.index("function setWorkspace", ui.index("function setMode("))]
     assert 'dom.explorerListView.hidden = !tables;' in set_mode
-    assert 'dom.explorerDetailPane.hidden = !tables || graphMode;' in set_mode
+    assert 'dom.explorerDetailPane.hidden = !browse;' in set_mode
     assert 'model.openTable(node.database, node.name)' in graph
     assert 'setFocus(node.id);' in graph
 

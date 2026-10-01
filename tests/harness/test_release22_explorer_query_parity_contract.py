@@ -45,11 +45,15 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
-    # The Browse/Graph icon selector became segmented view tabs.
+    # The Browse/Graph icon selector became segmented tabs: the top views and
+    # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
     assert 'id="explorerViewTabs" class="explorerViewTabs" role="tablist"' in html
-    for view in ['catalog', 'graph', 'storage', 'functions', 'operations']:
+    for view in ['catalog', 'functions', 'operations']:
         assert f'data-view="{view}"' in html
+    assert 'id="explorerModeTabs" class="explorerViewTabs explorerViewTabs--compact explorerModeTabs" role="tablist"' in html
+    for mode in ['browse', 'graph', 'storage']:
+        assert f'data-mode="{mode}"' in html
     assert 'button.setAttribute("aria-selected", String(active));' in ui
     assert '.explorerViewTab.is-active' in css
 
