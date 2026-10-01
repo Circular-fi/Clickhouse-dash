@@ -1360,7 +1360,7 @@
           target.style.height = `${v}px`;
           lastSaved = v;
         }
-        // index.html uses an !important pre-paint rule to avoid a startup jump.
+        // The page head script uses an !important pre-paint rule to avoid a startup jump.
         // Once the persisted height has been copied to the real element, release
         // that rule so the centered drag handle can change the used height.
         releasePrepaintHeight();
@@ -1531,7 +1531,8 @@
         });
       }
     } catch {
-      return;
+      // No OS theme change events: System keeps the theme resolved above.
+      // Startup still has to finish (ready class, hosts stream).
     }
 
     if (dom.root && dom.root.classList) dom.root.classList.add("is-ready");

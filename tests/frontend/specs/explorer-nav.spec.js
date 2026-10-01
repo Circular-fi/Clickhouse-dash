@@ -64,7 +64,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerSystemPane')).toBeHidden();
 
       await page.locator('#explorerFunctionsTab').click();
-      await expect(page).toHaveURL(/\/explorer\/functions$/);
+      await expect(page).toHaveURL(/\/explorer\/_functions$/);
       await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
 
       await page.locator('#explorerCatalogTab').click();
@@ -73,7 +73,7 @@ for (const theme of ['dark', 'light']) {
 
       // History walks back through the views.
       await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/functions$/);
+      await expect(page).toHaveURL(/\/explorer\/_functions$/);
       await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
 
       // Arrow keys move between tabs.
@@ -275,9 +275,140 @@ for (const theme of ['dark', 'light']) {
       const tabs = await page.locator('#explorerViewTabs').boundingBox();
       expect(tabs.x + tabs.width).toBeLessThanOrEqual(390);
       await expect(page.locator('#explorerBreadcrumb .explorerBreadcrumb__item')).toHaveCount(3);
-      // Views without a tree hide the drawer button.
-      await page.locator('#explorerFunctionsTab').click();
+      // Views without a side panel hide the drawer button.
+      await page.locator('#explorerStorageTab').click();
       await expect(toggle).toBeHidden();
+    });
+
+    test('the Functions list is a drawer too', async ({ page }) => {
+      await page.goto('/explorer/_functions');
+      const toggle = page.locator('#explorerTreeToggle');
+      const pane = page.locator('#explorerFunctionListPane');
+      await expect(toggle).toBeVisible();
+      await expect(toggle).toHaveAttribute('aria-controls', 'explorerFunctionListPane');
+      await expect(toggle).toHaveAttribute('aria-label', 'Show functions');
+      await expect(pane).toBeHidden();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(pane).toBeVisible();
+      // On screen once the slide-in settles.
+      await expect.poll(async () => (await pane.boundingBox()).x).toBeGreaterThanOrEqual(0);
+      const box = await pane.boundingBox();
+      expect(box.x + box.width).toBeLessThanOrEqual(390);
+      await page.locator('#explorerFunctionSearchInput').fill('arrayMap');
+      await page.locator('.explorerFunctionObject', { hasText: /^arrayMap$/ }).first().click();
+      await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
+      await expect(pane).toBeHidden();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      // Backdrop and Escape close it, as for the object tree.
+      await toggle.click();
+      await expect(pane).toBeVisible();
+      await page.locator('#explorerFunctionsPane .explorerTreeBackdrop').click({ position: { x: 370, y: 400 } });
+      await expect(pane).toBeHidden();
+      // Back on Catalog the button controls the object tree again.
+      await page.locator('#explorerCatalogTab').click();
+      await expect(toggle).toHaveAttribute('aria-controls', 'explorerListPane');
     });
   });
 }
+
+// Reserved routes start with "_" so no database name can shadow them; the
+// former /explorer/functions and /explorer/databases stay aliases unless a
+// database of that name exists.
+test.describe('explorer reserved routes', () => {
+  async function withDatabase(page, name) {
+    await page.route(/\/api\/explorer\/catalog\?/, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('database') === name) {
+        await route.fulfill({ json: { databases: [name], tables: [] } });
+        return;
+      }
+      const response = await route.fetch();
+      const json = await response.json();
+      json.databases = [...new Set([...(json.databases || []), name])].sort();
+      await route.fulfill({ response, json });
+    });
+  }
+
+  test('functions routes use the reserved segment and keep the old alias', async ({ page }) => {
+    await page.goto('/explorer/_functions/arrayMap');
+    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionDetail')).toContainText('arrayMap', { timeout: 15_000 });
+
+    await page.goto('/explorer/functions/arrayMap');
+    await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
+    await expect(page.locator('#explorerFunctionsTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionDetail')).toContainText('arrayMap', { timeout: 15_000 });
+
+    await page.goto('/explorer/functions');
+    await expect(page).toHaveURL(/\/explorer\/_functions$/);
+    await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
+
+    await page.goto('/explorer/databases');
+    await expect(page).toHaveURL(/\/explorer(\?view=browse)?$/);
+    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('a database named functions opens as a database', async ({ page }) => {
+    await withDatabase(page, 'functions');
+    await page.goto('/explorer/functions');
+    await expect(page.locator('#explorerDetailName')).toHaveText('functions', { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/explorer\/functions(\?view=browse)?$/);
+    await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#explorerFunctionsPane')).toBeHidden();
+    // The Functions view is still one tab away, on its reserved route.
+    await page.locator('#explorerFunctionsTab').click();
+    await expect(page).toHaveURL(/\/explorer\/_functions$/);
+    await page.goBack();
+    await expect(page.locator('#explorerDetailName')).toHaveText('functions');
+  });
+
+  test('a database named databases opens as a database', async ({ page }) => {
+    await withDatabase(page, 'databases');
+    await page.goto('/explorer/databases');
+    await expect(page.locator('#explorerDetailName')).toHaveText('databases', { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/explorer\/databases(\?view=browse)?$/);
+  });
+});
+
+// The CREATE statement scrolls sideways inside its block: it never runs over
+// the About column next to it, and it is set in the monospace token.
+test.describe('explorer DDL block', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('long DDL lines scroll inside the DDL block', async ({ page }) => {
+    await page.route(/\/api\/explorer\/table\?/, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      const long = `-- ${'x'.repeat(400)}`;
+      json.ddl = `${json.ddl || 'CREATE TABLE t'}\n${long}`;
+      if (json.formatted_ddl) json.formatted_ddl = `${json.formatted_ddl}\n${long}`;
+      await route.fulfill({ response, json });
+    });
+    await page.goto('/explorer/chdash_ui/weather_observations/ddl?view=browse');
+    const pre = page.locator('.explorerDdlWrap .explorerDdl');
+    await expect(pre).toBeVisible({ timeout: 15_000 });
+    const geometry = await page.evaluate(() => {
+      const code = document.querySelector('.explorerDdlWrap .explorerDdl');
+      const wrap = code.closest('.explorerDdlWrap');
+      const about = document.querySelector('.explorerCard > :not(.explorerCard__main)');
+      const box = (el) => el.getBoundingClientRect();
+      return {
+        scrollable: code.scrollWidth > code.clientWidth + 100,
+        overflowX: getComputedStyle(code).overflowX,
+        codeRight: box(code).right,
+        wrapLeft: box(wrap).left,
+        wrapRight: box(wrap).right,
+        aboutLeft: about ? box(about).left : -1,
+        font: getComputedStyle(code).fontFamily,
+      };
+    });
+    expect(geometry.overflowX).toBe('auto');
+    expect(geometry.scrollable).toBe(true);
+    expect(geometry.codeRight).toBeLessThanOrEqual(geometry.wrapRight + 1);
+    // At 1440 the About column sits to the right of the DDL.
+    expect(geometry.aboutLeft).toBeGreaterThan(geometry.wrapLeft);
+    expect(geometry.wrapRight).toBeLessThanOrEqual(geometry.aboutLeft + 1);
+    expect(geometry.font).toMatch(/monospace/);
+  });
+});

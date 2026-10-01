@@ -470,6 +470,11 @@
       root.appendChild(select);
     }
     select.classList.add("tracePicker__native");
+    // The custom button is the control: the visually hidden native select
+    // keeps the value and change events but takes no Tab stop and is not
+    // announced a second time.
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
 
     if (!button) {
       button = document.createElement("button");

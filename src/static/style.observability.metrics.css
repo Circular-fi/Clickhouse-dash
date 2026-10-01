@@ -13,12 +13,22 @@
 
   --accent: #1d4ed8;
   --accentBorder: #2563eb;
+  /* Accent-coloured text and icons (links, active facets, pins). */
+  --accentText: #93b4ff;
+  /* Keyboard focus indicator: the global :focus-visible outline and the
+     box-shadow --ring of controls that draw it as a shadow. */
+  --focusRingColor: #3b82f6;
+  --ring: 0 0 0 2px var(--focusRingColor);
+  /* Hover / focus tint of menu rows and tabs. */
+  --hoverTint: rgba(255, 255, 255, 0.06);
 
   --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 0.75rem 2rem rgba(0, 0, 0, 0.35);
   --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
     0 1.1rem 3rem rgba(0, 0, 0, 0.45);
-  --ring: 0 0 0 0.1875rem rgba(37, 99, 235, 0.22);
+
+  /* Code, identifiers and numbers set in monospace. */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
   --radius: 0.95rem;
   --radiusSm: 0.8rem;
@@ -78,12 +88,14 @@
 
     --accent: rgba(37, 99, 235, 0.14);
     --accentBorder: #2563eb;
+    --accentText: #1d4ed8;
+    --focusRingColor: #2563eb;
+    --hoverTint: rgba(0, 0, 0, 0.06);
 
     --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
       0 0.75rem 2rem rgba(2, 6, 23, 0.08);
     --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
       0 1.1rem 3rem rgba(2, 6, 23, 0.12);
-    --ring: 0 0 0 0.1875rem rgba(37, 99, 235, 0.2);
 
     --panelBg: rgba(255, 255, 255, 1);
 
@@ -92,7 +104,7 @@
 
     --pillBg: rgba(255, 255, 255, 0.72);
     --inputBg: rgba(255, 255, 255, 1);
-  --editorSolidBg: #ffffff;
+    --editorSolidBg: #ffffff;
     --tableBg: rgba(255, 255, 255, 0.84);
     --theadBg: rgba(255, 255, 255, 0.92);
 
@@ -124,6 +136,17 @@ html[data-theme="dark"] {
 
   --muted: #9aa4b2;
   --text: #e6edf3;
+
+  --accent: #1d4ed8;
+  --accentBorder: #2563eb;
+  --accentText: #93b4ff;
+  --focusRingColor: #3b82f6;
+  --hoverTint: rgba(255, 255, 255, 0.06);
+
+  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
+    0 0.75rem 2rem rgba(0, 0, 0, 0.35);
+  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.03),
+    0 1.1rem 3rem rgba(0, 0, 0, 0.45);
 
   --panelBg: rgba(15, 22, 35, 1);
 
@@ -166,6 +189,14 @@ html[data-theme="light"] {
 
   --accent: rgba(37, 99, 235, 0.14);
   --accentBorder: #2563eb;
+  --accentText: #1d4ed8;
+  --focusRingColor: #2563eb;
+  --hoverTint: rgba(0, 0, 0, 0.06);
+
+  --shadow1: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
+    0 0.75rem 2rem rgba(2, 6, 23, 0.08);
+  --shadow2: 0 0.0625rem 0 rgba(255, 255, 255, 0.55),
+    0 1.1rem 3rem rgba(2, 6, 23, 0.12);
 
   --panelBg: rgba(255, 255, 255, 1);
 
@@ -220,6 +251,14 @@ body {
 }
 * {
   box-sizing: border-box;
+}
+:where(a[href], area[href], button, input, select, textarea:not(#queryTextArea), summary, iframe,
+  [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])):focus-visible {
+  outline: 2px solid var(--focusRingColor) !important;
+  outline-offset: 0;
+}
+:where([role="option"], [role="treeitem"], [role="row"], [role^="menuitem"], tr, td, th):focus-visible {
+  outline-offset: -2px;
 }
 ::-webkit-scrollbar {
   width: 0.625rem;
@@ -434,7 +473,7 @@ html[data-theme="light"] {
 .chartCore__legendMode:hover,
 .chartCore__legendMode[aria-pressed="true"] { color: var(--text); }
 .chartCore__legendItem:focus-visible,
-.chartCore__legendMode:focus-visible { outline: none; box-shadow: var(--ring); }
+.chartCore__legendMode:focus-visible { box-shadow: var(--ring); }
 .chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panelBg) 3px 5px); }
 .chartCore__tipRow--more em { color: var(--muted); font-size: 10px; }
 .chartCore__markers { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; contain: strict; }
@@ -630,7 +669,6 @@ button.button:not(:disabled):hover {
   transform: translateY(-50%) rotate(180deg);
 }
 .themeSelect__button:focus-visible {
-  outline: none;
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }
@@ -703,7 +741,6 @@ button.button:not(:disabled):hover {
   border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
 }
 .themeSelect__option:focus-visible {
-  outline: none;
   box-shadow: var(--ring);
 }
 @supports not (color: color-mix(in srgb, white 50%, black)) {
@@ -855,11 +892,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   display: none;
 }
 @media (max-width: 820px) {
-  body[data-page="observability"] .appHeader { flex-wrap: wrap; row-gap: 8px; padding: 8px 10px; }
-  body[data-page="observability"] .appHeader__left { flex: 1 1 auto; }
-  body[data-page="observability"] .appHeader__right { flex: 1 1 100%; min-width: 0; justify-content: flex-end; gap: 6px; }
-  body[data-page="observability"] .appHeader__right .picker { flex: 1 1 auto; min-width: 0; }
-  body[data-page="observability"] .appHeader__right .picker__button { width: 100%; min-width: 0; max-width: none; grid-template-columns: 0.6rem minmax(3rem, 1fr) auto auto; }
   .obsNav { gap: 8px; padding: 6px 10px; }
 }
 .layout {
@@ -938,7 +970,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   background: var(--panel);
 }
 .picker__button:focus-visible {
-  outline: none;
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }
@@ -1074,7 +1105,7 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   padding: 0;
   white-space: pre;
   tab-size: 2;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.88em;
   line-height: 1.35;
 }
@@ -1400,7 +1431,6 @@ html.chdash-page-select-hidden .pageSelect {
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
-  outline: none !important;
 }
 #analysisCloseButton,
 .themeSelect__option--icon {
@@ -1423,7 +1453,6 @@ html.chdash-page-select-hidden .pageSelect {
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
-  outline: none !important;
 }
 .themeSelect--icons .themeSelect__button--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
@@ -1448,7 +1477,6 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   box-shadow: var(--ring) !important;
-  outline: none !important;
 }
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon,
 .themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
@@ -1473,7 +1501,6 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect__option--icon:focus-visible {
   background: var(--rowHover) !important;
   box-shadow: var(--ring) !important;
-  outline: none !important;
 }
 .themeSelect__option--icon[aria-selected="true"] {
   background: color-mix(in srgb, var(--accentBorder) 16%, transparent) !important;
@@ -1659,7 +1686,7 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .tracePicker__button:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accentBorder) 50%, var(--buttonBorder));
-  background: var(--buttonHover);
+  background: var(--buttonBgHover);
 }
 .tracePicker__button::after {
   right: .72rem;
@@ -1884,13 +1911,13 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .traceSearchBar .tracePicker__button:hover:not(:disabled) {
   border-color: var(--accentBorder) !important;
-  background: var(--buttonHoverBg) !important;
+  background: var(--buttonBgHover) !important;
   color: var(--text) !important;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button {
   border-color: var(--accentBorder) !important;
-  box-shadow: var(--ring) !important;
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accentBorder) 22%, transparent) !important;
 }
 .traceSearchBar .tracePicker__menu {
   border: 1px solid var(--border) !important;
@@ -1931,7 +1958,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceSearchBar button:focus-visible,
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible {
-  outline: none !important;
   border-color: var(--buttonBorder) !important;
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
 }
@@ -2019,7 +2045,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceSearchBar .tracePicker__button:focus-visible,
 .traceResultsSort .tracePicker__button:focus,
 .traceResultsSort .tracePicker__button:focus-visible {
-  outline: none !important;
   border-color: var(--buttonBorder) !important;
   box-shadow: none !important;
 }
@@ -2095,11 +2120,9 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
   border-color: var(--buttonBorderHover) !important;
   background: var(--buttonBg) !important;
   box-shadow: none !important;
-  outline: none !important;
 }
 .themeSelect--icons .themeSelect__option--icon:focus-visible {
   box-shadow: none !important;
-  outline: none !important;
 }
 .closeCross {
   display: inline-flex;
@@ -2126,7 +2149,6 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
   color: var(--text);
 }
 .closeCross:focus-visible {
-  outline: none;
   text-shadow: 0 0 6px var(--accentBorder);
 }
 .closeCross:disabled {
@@ -2303,7 +2325,6 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
 }
 .traceSearchBar .timeCalendar__nav:focus-visible,
 .traceSearchBar .timeRangeNav:focus-visible {
-  outline: 1px solid var(--buttonBorderHover) !important;
   outline-offset: -1px;
 }
 .traceSearchBar .timeRangeNav:disabled {
@@ -2374,7 +2395,6 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
   cursor: not-allowed;
 }
 .traceSearchBar .timeCalendar__day:focus-visible {
-  outline: none !important;
   border-color: var(--text) !important;
   border-radius: 6px;
 }
@@ -2433,7 +2453,6 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
 .traceSearchBar .timeRangeList__item:hover,
 .traceSearchBar .timeRangeList__item:focus-visible {
   background: var(--rowHover);
-  outline: none !important;
 }
 .traceSearchBar .timeRangeList__item:focus-visible { box-shadow: inset 0 0 0 1px var(--buttonBorderHover) !important; }
 .traceSearchBar .timeRangeList__item.is-selected {
@@ -2472,10 +2491,10 @@ html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
   }
 }
 :root { --traceWarn: #f0a33a; --traceError: #d64545; --traceDot: #12939a; }
-html[data-theme="dark"] { --traceWarn: #f0a33a; }
-html[data-theme="light"] { --traceWarn: #b56200; }
+html[data-theme="dark"] { --traceWarn: #f0a33a; --traceError: #d64545; }
+html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
 @media (prefers-color-scheme: light) {
-  html:not([data-theme="dark"]) { --traceWarn: #b56200; }
+  html:not([data-theme="dark"]) { --traceWarn: #b56200; --traceError: #b42318; }
 }
 .chartCore__tipRow.is-error em,
 .chartCore__tipRow.is-error b { color: var(--traceError); }
@@ -2746,7 +2765,7 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
 }
 .metricsCatalog__serviceHead:hover { background: var(--rowHover); }
 .metricsCatalog__serviceHead:focus-visible,
-.metricsCatalog__metric:focus-visible { outline: none; box-shadow: inset var(--ring); }
+.metricsCatalog__metric:focus-visible { box-shadow: inset var(--ring); }
 .metricsCatalog__chevron {
   flex: 0 0 auto;
   width: 0;
@@ -2797,7 +2816,7 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
   letter-spacing: .01em;
   white-space: nowrap;
 }
-.metricsBadge--unit { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; }
+.metricsBadge--unit { font-family: var(--mono); font-weight: 600; }
 .metricsBadge--gauge { color: color-mix(in srgb, var(--qchart-3) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-3) 40%, transparent); }
 .metricsBadge--sum { color: color-mix(in srgb, var(--qchart-1) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-1) 40%, transparent); }
 .metricsBadge--histogram,
@@ -2867,7 +2886,7 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 700 14px/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 700 14px/1.25 var(--mono);
 }
 .metricsPanel__badges { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
 .metricsPanel__service { color: var(--muted); font-size: 11px; font-weight: 600; margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2944,7 +2963,7 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
 }
 .metricsChip--not { border-color: color-mix(in srgb, #ef4444 45%, var(--border)); background: color-mix(in srgb, #ef4444 9%, transparent); }
 .metricsChip__key { font-weight: 700; white-space: nowrap; }
-.metricsChip__op { color: var(--muted); font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.metricsChip__op { color: var(--muted); font-weight: 700; font-family: var(--mono); }
 .metricsChip__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .metricsChip__remove {
   width: 19px;
@@ -2996,7 +3015,7 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   border: 0;
   background: var(--buttonBg);
   color: var(--muted);
-  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 700 11px/1 var(--mono);
   cursor: pointer;
 }
 .metricsFilterForm__op + .metricsFilterForm__op { border-left: 1px solid var(--buttonBorder); }
@@ -3079,7 +3098,6 @@ html[data-theme="light"] {
   --exd-ok: #34d399;
   --exd-warn: #fbbf24;
   --exd-err: #f87171;
-  --exd-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 @media (prefers-color-scheme: light) {
   :root {
@@ -3156,7 +3174,6 @@ html[data-theme="light"] {
   --explorer-section-title-weight: 600;
   --explorer-section-title-gap: 8px;
   --explorer-meta-font: 12px;
-  --explorer-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   /* In-cell bars (.explorerBar + --bar-pct): one colour, one opacity. */
   --explorer-bar-color: var(--accentBorder);
   --explorer-bar-alpha: 35%;
@@ -3194,7 +3211,6 @@ html[data-theme="light"] {
   color: var(--text);
 }
 .explorerViewTab:focus-visible {
-  outline: none;
   box-shadow: var(--ring);
 }
 .explorerViewTab.is-active {
@@ -3203,30 +3219,6 @@ html[data-theme="light"] {
   box-shadow: inset 0 0 0 1px var(--buttonBorder), 0 1px 2px rgba(2, 6, 23, 0.18);
 }
 @media (max-width: 820px) {
-  body[data-page="explorer"] .appHeader {
-    flex-wrap: wrap;
-    row-gap: 8px;
-    padding: 8px 10px;
-  }
-  body[data-page="explorer"] .appHeader__left {
-    flex: 1 1 auto;
-  }
-  body[data-page="explorer"] .appHeader__right {
-    flex: 1 1 100%;
-    min-width: 0;
-    justify-content: flex-end;
-    gap: 6px;
-  }
-  body[data-page="explorer"] .appHeader__right .picker {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  body[data-page="explorer"] .appHeader__right .picker__button {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    grid-template-columns: 0.6rem minmax(3rem, 1fr) auto auto;
-  }
   .explorerViewTabs {
     flex: 1 1 0;
     min-width: 0;
@@ -3692,7 +3684,7 @@ html[data-theme="light"] {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
 }
 .qhItem--error .qhItem__sql {
@@ -3842,7 +3834,7 @@ html[data-theme="light"] {
   border-radius: 0.5rem;
   background: var(--editorSolidBg);
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.7rem;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -3930,7 +3922,6 @@ html[data-theme="light"] {
   font-size: 0.8rem;
 }
 .qlInput:focus {
-  outline: 0;
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }

@@ -41,6 +41,8 @@
     // Tree object-type chips (Tables / Views / MV / Dict); System is includeSystem.
     filters: { tables: true, views: true, mv: true, dict: true },
     treeOpen: false,
+    // Side panel the mobile drawer toggle controls (drawerPane()).
+    drawerPaneId: "",
     // Storage section (app_explorer_storage.js): breadcrumb scope of the
     // server / database / table storage view.
     storageScope: { database: "", table: "" },
@@ -53,6 +55,10 @@
   const SYSTEM_ROUTE_SEGMENT = "_system";
   // Route slug of the Server operations section (app_explorer_ops.js).
   const OPERATIONS_ROUTE_SEGMENT = "_operations";
+  // Route slug of the Functions section. The former "/explorer/functions"
+  // route stays an alias, but only while no database is named "functions":
+  // a real database always wins (resolveLegacyAlias below).
+  const FUNCTIONS_ROUTE_SEGMENT = "_functions";
 
   // Table detail tabs (app_explorer_detail.js hides the ones without content).
   const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];
@@ -96,7 +102,7 @@
     if (path === "/explorer") return { workspace: "explorer", section: "tables", viewMode, graphType, graphDepth };
     if (!path.startsWith("/explorer/")) return { workspace: "query" };
     const parts = path.slice("/explorer/".length).split("/").filter(Boolean).map(decodeRouteSegment);
-    if (parts[0] === "functions") {
+    if (parts[0] === FUNCTIONS_ROUTE_SEGMENT) {
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
     if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
@@ -106,22 +112,29 @@
       const storageDatabase = params.get("database") || "";
       return { workspace: "explorer", section: "system", storageScope: { database: storageDatabase, table: storageDatabase ? params.get("table") || "" : "" } };
     }
-    if (parts[0] === "databases") {
-      return { workspace: "explorer", section: "tables" };
-    }
     const database = parts[0] || "";
     const table = parts[1] || "";
     const requestedTab = String(parts[2] || DEFAULT_TAB).toLowerCase();
     // Old tab slugs are rewritten to the tab that replaced them.
     const legacySchema = TAB_BY_SLUG.has(requestedTab) && !TABS.some((label) => label.toLowerCase() === requestedTab);
     const tab = TAB_BY_SLUG.get(requestedTab) || DEFAULT_TAB;
-    return { workspace: "explorer", section: "tables", database, table, tab, legacySchema, viewMode, graphType, graphDepth };
+    const route = { workspace: "explorer", section: "tables", database, table, tab, legacySchema, viewMode, graphType, graphDepth };
+    // Former reserved routes, now plain database routes that keep an alias:
+    // /explorer/functions[/<name>] opened Functions, /explorer/databases the
+    // catalog root. They only stand for the section when no database of that
+    // name exists, which needs the catalog (resolveLegacyAlias).
+    if (database === "functions" && parts.length <= 2) {
+      route.legacyAlias = { section: "functions", functionName: table };
+    } else if (database === "databases" && parts.length === 1) {
+      route.legacyAlias = { section: "tables" };
+    }
+    return route;
   }
 
   function currentExplorerPath() {
     if (model.section === "functions") {
       const selected = (model.functionsCatalog?.functions || []).find((candidate) => functionKey(candidate) === model.selectedFunctionKey) || null;
-      return selected?.name ? `/explorer/functions/${encodeRouteSegment(selected.name)}` : "/explorer/functions";
+      return selected?.name ? `/explorer/${FUNCTIONS_ROUTE_SEGMENT}/${encodeRouteSegment(selected.name)}` : `/explorer/${FUNCTIONS_ROUTE_SEGMENT}`;
     }
     if (model.section === "system") return `/explorer/${SYSTEM_ROUTE_SEGMENT}`;
     if (model.section === "operations") return `/explorer/${OPERATIONS_ROUTE_SEGMENT}`;
@@ -388,7 +401,8 @@
   //              the tab is hidden while the module is absent or disabled
   // Routes: catalog/graph keep /explorer[/<db>[/<table>/<tab>]]?view=browse|graph,
   // storage is /explorer/_system[?database=&table=], functions
-  // /explorer/functions[/<name>], operations /explorer/_operations.
+  // /explorer/_functions[/<name>], operations /explorer/_operations.
+  // Reserved segments start with "_" so they never shadow a database.
   const VIEWS = ["catalog", "graph", "storage", "functions", "operations"];
 
   function shellEl(id) {
@@ -442,10 +456,29 @@
     }
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     if (shell) shell.dataset.explorerView = view;
-    const treeView = view === "catalog" || view === "graph";
+    // Every view with a side panel gets the drawer toggle on a phone.
+    const pane = drawerPane(view);
     const toggle = shellEl("explorerTreeToggle");
-    if (toggle) toggle.hidden = !treeView;
-    if (!treeView) setTreeDrawerOpen(false);
+    if (toggle) {
+      toggle.hidden = !pane;
+      if (pane) {
+        toggle.setAttribute("aria-controls", pane.id);
+        toggle.title = pane.label;
+        const text = toggle.querySelector(".explorerTreeToggle__text");
+        if (text) text.textContent = pane.label;
+      }
+    }
+    // Catalog and Graph share one tree; another panel starts closed.
+    const paneId = pane?.id || "";
+    if (paneId !== model.drawerPaneId) setTreeDrawerOpen(false);
+    model.drawerPaneId = paneId;
+  }
+
+  // The side panel a view slides in as a drawer on a phone (null: none).
+  function drawerPane(view = currentView()) {
+    if (view === "catalog" || view === "graph") return { id: "explorerListPane", label: "Objects" };
+    if (view === "functions") return { id: "explorerFunctionListPane", label: "Functions" };
+    return null;
   }
 
   function setView(view, { historyMode = "push" } = {}) {
@@ -532,11 +565,11 @@
     shell?.classList.toggle("is-tree-open", value);
     const toggle = shellEl("explorerTreeToggle");
     if (toggle) {
+      const label = (drawerPane()?.label || "Objects").toLowerCase();
       toggle.setAttribute("aria-expanded", String(value));
-      toggle.setAttribute("aria-label", value ? "Hide objects" : "Show objects");
+      toggle.setAttribute("aria-label", value ? `Hide ${label}` : `Show ${label}`);
     }
-    const backdrop = shellEl("explorerTreeBackdrop");
-    if (backdrop) backdrop.hidden = !value;
+    for (const backdrop of shell?.querySelectorAll?.(".explorerTreeBackdrop") || []) backdrop.hidden = !value;
   }
 
   function setSection(section) {
@@ -1325,7 +1358,7 @@
           const badge = functionKindBadge(item, category);
           if (badge) button.appendChild(node("span", "explorerFunctionObject__badge", badge));
           button.title = item.name || "";
-          button.addEventListener("click", () => selectFunction(item, category));
+          button.addEventListener("click", () => { selectFunction(item, category); setTreeDrawerOpen(false); });
           children.appendChild(button);
         }
         section.appendChild(children);
@@ -2212,8 +2245,56 @@
     }
   }
 
+  // The selected host id, once the host list has chosen one ("" after timeoutMs).
+  function selectedHostReady(timeoutMs = 10000) {
+    if (state.selectedHostId) return Promise.resolve(String(state.selectedHostId));
+    return new Promise((resolve) => {
+      const done = () => {
+        window.removeEventListener("chdash:host-changed", done);
+        clearTimeout(timer);
+        resolve(state.selectedHostId ? String(state.selectedHostId) : "");
+      };
+      const timer = setTimeout(done, timeoutMs);
+      window.addEventListener("chdash:host-changed", done);
+    });
+  }
+
+  // /explorer/functions[/<name>] and /explorer/databases predate the reserved
+  // "_" segments. A database of that name wins; otherwise the alias opens the
+  // section it used to, under its canonical URL.
+  async function resolveLegacyAlias(route) {
+    const alias = route.legacyAlias;
+    if (!alias) return route;
+    const location = `${window.location.pathname}${window.location.search || ""}`;
+    let exists = false;
+    // On a fresh load the host list may not have arrived yet.
+    const hostId = model.catalog ? "" : await selectedHostReady();
+    if (model.catalog) {
+      exists = catalogHasDatabase(route.database);
+    } else if (hostId) {
+      try {
+        const payload = await api.getExplorerCatalog(hostId, "", false);
+        exists = (payload?.databases || []).some((name) => String(name || "") === route.database);
+      } catch {
+        exists = false;
+      }
+    }
+    if (`${window.location.pathname}${window.location.search || ""}` !== location) return null;
+    if (exists) return { ...route, legacyAlias: null };
+    if (alias.section === "functions") {
+      const name = alias.functionName ? `/${encodeRouteSegment(alias.functionName)}` : "";
+      window.history.replaceState({ workspace: "explorer" }, "", appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`));
+      return { workspace: "explorer", section: "functions", functionName: alias.functionName || "" };
+    }
+    window.history.replaceState({ workspace: "explorer" }, "", `${appRoute("/explorer")}${window.location.search || ""}`);
+    return { ...route, database: "", table: "", legacyAlias: null };
+  }
+
   async function applyRouteFromLocation() {
-    const route = parseExplorerRoute();
+    const route = await resolveLegacyAlias(parseExplorerRoute());
+    // The address changed while the alias was being resolved: that newer
+    // navigation applies its own route.
+    if (!route) return;
     if (route.workspace === "explorer" && route.legacySchema && route.database && route.table) {
       const canonicalPath = appRoute(`/explorer/${encodeRouteSegment(route.database)}/${encodeRouteSegment(route.table)}/${String(route.tab || DEFAULT_TAB).toLowerCase()}`);
       const canonicalParams = new URLSearchParams(window.location.search || "");
@@ -2386,7 +2467,9 @@
       chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });
     }
     shellEl("explorerTreeToggle")?.addEventListener("click", () => setTreeDrawerOpen(!model.treeOpen));
-    shellEl("explorerTreeBackdrop")?.addEventListener("click", () => setTreeDrawerOpen(false));
+    for (const backdrop of document.querySelectorAll(".explorerShell .explorerTreeBackdrop")) {
+      backdrop.addEventListener("click", () => setTreeDrawerOpen(false));
+    }
     try {
       window.matchMedia("(max-width: 820px)").addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
     } catch {}

@@ -321,6 +321,9 @@
   // A native <select> shipped inside its picker root (logs.html markup).
   function enhanceSelect(select, onChange) {
     const root = select.parentElement;
+    // The button is the control; the hidden native select only keeps the value.
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
     const button = root.querySelector(":scope > .tracePicker__button");
     const menu = root.querySelector(":scope > .tracePicker__menu");
     const refresh = () => {

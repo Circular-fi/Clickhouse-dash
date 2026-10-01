@@ -58,15 +58,20 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert 'setTreeDrawerOpen(false);' in tree
     assert 'function toggleTypeFilter(key)' in ui
     assert '.explorerShell.is-tree-open > .explorerGrid > .explorerListPane' in css
-    assert 'body[data-page="explorer"] .appHeader {' in css
+    # The header wraps on a phone through the one unscoped rule every shell shares.
+    narrow = css[css.index("/* -- Narrow windows: the header wraps"):]
+    assert "@media (max-width: 820px) {\n  .appHeader {\n    flex-wrap: wrap;" in narrow
+    assert 'body[data-page="explorer"] .appHeader' not in css
+    assert 'body[data-page="observability"] .appHeader' not in css
 
 
 def test_shared_bar_and_typography_tokens() -> None:
     css = read("src/static/style.css")
     block = css[css.index("Explorer nav: shell"):]
-    for token in ["--explorer-table-font: 13px;", "--explorer-section-title-weight: 600;", "--explorer-bar-alpha: 35%;",
-                  "--explorer-mono:"]:
+    for token in ["--explorer-table-font: 13px;", "--explorer-section-title-weight: 600;", "--explorer-bar-alpha: 35%;"]:
         assert token in block
+    # Monospace comes from the one global --mono token.
+    assert "--explorer-mono" not in css and "--mono: ui-monospace" in css
     assert ".explorerBar {" in block and "background-size: var(--bar-pct, 0%) 100%;" in block
     assert ".resultTable tbody td.explorerBar--cell" in block
 
