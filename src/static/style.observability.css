@@ -7578,41 +7578,11 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
 .logsSevSwatch.logsSev--warn { background: var(--log-sev-warn); }
 .logsSevSwatch.logsSev--info { background: var(--log-sev-info); }
 .logsSevSwatch.logsSev--debug { background: var(--log-sev-debug); }
-.logsHistogram__chart { position: relative; height: 116px; overflow: hidden; }
+.logsHistogram__chart { position: relative; z-index: 2; height: 120px; }
+.logsHistogram__chart .chartCore__plot { overflow: visible; }
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 11px; }
 .logsHistogram__placeholder.is-error { color: var(--log-sev-error); }
-.logsHistogram__svg { display: block; user-select: none; }
-.logsBar { shape-rendering: crispEdges; }
-.logsSevFill--error { fill: var(--log-sev-error); }
-.logsSevFill--warn { fill: var(--log-sev-warn); }
-.logsSevFill--info { fill: color-mix(in srgb, var(--log-sev-info) 78%, transparent); }
-.logsSevFill--debug { fill: color-mix(in srgb, var(--log-sev-debug) 60%, transparent); }
-.logsHistogram__grid { stroke: var(--border); stroke-dasharray: 2 3; }
-.logsHistogram__axis,
-.logsHistogram__tick { stroke: var(--borderStrong); }
-.logsHistogram__xLabel,
-.logsHistogram__yLabel { fill: var(--muted); font: 9.5px Arial, Helvetica, sans-serif; }
-.logsHistogram__hit { fill: transparent; cursor: crosshair; }
-.logsHistogram__brush { fill: color-mix(in srgb, var(--accentBorder) 22%, transparent); stroke: var(--accentBorder); stroke-width: 1; pointer-events: none; }
-.logsHistogram__tooltip {
-  position: absolute;
-  top: 4px;
-  z-index: 3;
-  display: grid;
-  gap: 3px;
-  min-width: 168px;
-  padding: 7px 9px;
-  border: 1px solid var(--borderStrong);
-  border-radius: 6px;
-  background: var(--panelBg);
-  box-shadow: var(--shadow1);
-  color: var(--text);
-  font: 11px/1.3 Arial, Helvetica, sans-serif;
-  pointer-events: none;
-}
-.logsHistogram__tooltip > span { display: flex; align-items: center; gap: 6px; }
-.logsHistogram__tooltip b { margin-left: auto; font-variant-numeric: tabular-nums; }
-.logsHistogram__tooltipTotal { padding-top: 3px; border-top: 1px solid var(--border); }
+.logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity 120ms ease; }
 .logsToolbar {
   flex: 0 0 auto;
   display: flex;

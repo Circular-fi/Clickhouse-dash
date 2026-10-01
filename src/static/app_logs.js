@@ -863,40 +863,21 @@
   }
 
   // --- Histogram ------------------------------------------------------------------------
+  // Drawn by the shared canvas engine (app_chart_core.js): bars stacked by
+  // severity over the requested range, the engine's cursor and tooltip, and a
+  // drag that searches the dragged time range (onZoom). Resizes and refetches
+  // update the one chart instance; the severity legend above it filters.
 
-  const TIME_STEPS = [1e3, 2e3, 5e3, 1e4, 15e3, 3e4, 6e4, 12e4, 3e5, 6e5, 9e5, 18e5, 36e5, 72e5, 108e5, 216e5, 432e5, 864e5, 1728e5, 6048e5];
-
-  function tickLabel(ms, step, multiDay) {
-    const d = new Date(ms);
-    const clock = `${pad2(d.getHours())}:${pad2(d.getMinutes())}${step < 60000 ? `:${pad2(d.getSeconds())}` : ""}`;
-    const day = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    if (step >= 864e5 || (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0)) return day;
-    return multiDay ? `${day} ${clock}` : clock;
-  }
-
-  function axisTicks(startMs, endMs, width) {
-    const span = Math.max(1, endMs - startMs);
-    const multiDay = span > 864e5;
-    const sample = multiDay ? "Sep 30 12:00" : "00:00:00";
-    let step = TIME_STEPS[TIME_STEPS.length - 1];
-    for (const candidate of TIME_STEPS) {
-      if (span / candidate > 40) continue;
-      if (width * candidate / span >= sample.length * 6 + 22) { step = candidate; break; }
-    }
-    const ticks = [];
-    // Local wall-clock ticks: grid anchored at the local midnight.
-    const origin = localMidnight(startMs);
-    let t = origin + Math.ceil((startMs - origin) / step) * step;
-    for (let guard = 0; t <= endMs && guard < 200; guard += 1, t += step) ticks.push({ t, label: tickLabel(t, step, multiDay) });
-    return ticks;
-  }
-
-  function niceMax(value) {
-    if (value <= 0) return 1;
-    const exp = Math.pow(10, Math.floor(Math.log10(value)));
-    for (const m of [1, 2, 2.5, 5, 10]) if (m * exp >= value) return m * exp;
-    return 10 * exp;
-  }
+  const SEV_STACK = ["debug", "info", "warn", "error"];
+  const SEV_COLUMN = { error: 1, warn: 2, info: 3, debug: 4 };
+  const SEV_COLORS = {
+    error: "var(--log-sev-error)",
+    warn: "var(--log-sev-warn)",
+    info: "color-mix(in srgb, var(--log-sev-info) 78%, transparent)",
+    debug: "color-mix(in srgb, var(--log-sev-debug) 60%, transparent)",
+  };
+  const HISTOGRAM_HEIGHT = 120;
+  let histogramChart = null;
 
   async function loadHistogram(range) {
     const seq = ++model.seq.histogram;
@@ -923,6 +904,59 @@
     }
   }
 
+  // A message in place of the bars (the chart keeps its instance, hidden).
+  function histogramMessage(box, text, isError = false) {
+    if (histogramChart) histogramChart.root.hidden = true;
+    let note = box.querySelector(":scope > .logsHistogram__placeholder");
+    if (!note) {
+      box.querySelector(":scope > .tracesEmpty")?.remove();
+      note = document.createElement("div");
+      box.appendChild(note);
+    }
+    note.className = `logsHistogram__placeholder${isError ? " is-error" : ""}`;
+    note.textContent = text;
+    note.hidden = false;
+  }
+
+  // Bucket starts -> bars centred on [start, start + bucket_ms).
+  function histogramData(h) {
+    const rows = Array.isArray(h.buckets) ? h.buckets : [];
+    const bucketMs = Number(h.bucket_ms) || 60000;
+    const xs = new Float64Array(rows.length);
+    const columns = {};
+    for (const sev of SEV_STACK) columns[sev] = new Float64Array(rows.length);
+    rows.forEach((b, i) => {
+      xs[i] = Number(b[0]) + bucketMs / 2;
+      for (const sev of SEV_STACK) columns[sev][i] = Number(b[SEV_COLUMN[sev]]) || 0;
+    });
+    return {
+      xs,
+      xDomain: Array.isArray(h.range) ? [Number(h.range[0]), Number(h.range[1])] : null,
+      series: SEV_STACK.map((sev) => ({ id: sev, label: SEV_LABELS[sev], color: SEV_COLORS[sev], values: columns[sev], nulls: null, group: 0 })),
+    };
+  }
+
+  function bucketTitle(i) {
+    const h = model.histogram;
+    const bucketMs = Number(h?.bucket_ms) || 60000;
+    const start = Number(h?.buckets?.[i]?.[0]);
+    if (!Number.isFinite(start)) return "";
+    const tr = ns.timeRange;
+    return `${tr.formatDateTime(start)} \u2192 ${tr.formatDateTime(start + bucketMs).slice(11)}`;
+  }
+
+  // A drag over the bars searches that time range (whole seconds).
+  function onHistogramZoom(range, fromUser) {
+    if (!fromUser || !range) return;
+    const startMs = Math.floor(range[0] / 1000) * 1000;
+    const endMs = Math.ceil(range[1] / 1000) * 1000;
+    if (endMs - startMs < 1000) return;
+    const tr = ns.timeRange;
+    model.timeRange = { from: tr.formatDateTime(startMs), to: tr.formatDateTime(endMs) };
+    timePicker?.refresh();
+    void search({ push: true });
+  }
+
   function renderHistogram() {
     const box = $("logsHistogram");
     const total = $("logsTotal");
@@ -933,13 +967,14 @@
       const node = document.querySelector(`[data-sev-count="${sev}"]`);
       if (node) node.textContent = h ? compactCount(h.totals?.[sev] || 0) : "";
     }
+    box.classList.toggle("is-loading", model.histogramLoading && !!h);
     if (model.histogramLoading && !h) {
-      box.innerHTML = '<div class="logsHistogram__placeholder">Loading volume\u2026</div>';
+      histogramMessage(box, "Loading volume\u2026");
       if (total) total.textContent = "\u2013";
       return;
     }
     if (model.histogramError) {
-      box.innerHTML = `<div class="logsHistogram__placeholder is-error">${esc(model.histogramError)}</div>`;
+      histogramMessage(box, model.histogramError, true);
       if (total) total.textContent = "\u2013";
       return;
     }
@@ -947,116 +982,36 @@
     const count = Number(h.totals?.total || 0);
     if (total) total.textContent = `${formatCount(count)} log${count === 1 ? "" : "s"}`;
     if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${Math.round(h.bucket_ms / 1000) >= 60 ? `${Math.round(h.bucket_ms / 60000)} min` : `${Math.round(h.bucket_ms / 1000)} s`} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
-    const width = Math.max(200, box.clientWidth || 800);
-    const height = 116;
-    const left = 44, right = 8, top = 8, bottom = 20;
-    const plotW = width - left - right;
-    const plotH = height - top - bottom;
-    const [startMs, endMs] = h.range;
-    const x = (t) => left + ((t - startMs) / Math.max(1, endMs - startMs)) * plotW;
-    const buckets = (h.buckets || []).map((b) => ({ t: b[0], error: b[1], warn: b[2], info: b[3], debug: b[4], sum: b[1] + b[2] + b[3] + b[4] }));
-    const maxValue = niceMax(Math.max(1, ...buckets.map((b) => b.sum)));
-    const y = (v) => top + plotH - (v / maxValue) * plotH;
-    let bars = "";
-    for (const b of buckets) {
-      const x0 = Math.max(left, x(b.t));
-      const x1 = Math.min(left + plotW, x(b.t + h.bucket_ms));
-      const w = Math.max(1, x1 - x0 - (x1 - x0 > 4 ? 1 : 0));
-      if (x1 <= left || x0 >= left + plotW) continue;
-      let acc = 0;
-      for (const sev of ["debug", "info", "warn", "error"]) {
-        const v = b[sev];
-        if (!v) continue;
-        const y0 = y(acc + v);
-        const y1 = y(acc);
-        bars += `<rect class="logsBar logsSevFill--${sev}" x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(0.5, y1 - y0).toFixed(1)}"></rect>`;
-        acc += v;
-      }
+    // While a refetch runs, the previous bars stay (dimmed) until it answers.
+    if (model.histogramLoading || !ns.chartCore) return;
+    for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .tracesEmpty")) note.hidden = true;
+    const data = histogramData(h);
+    if (!histogramChart) {
+      histogramChart = ns.chartCore.create(box, {
+        ...data,
+        xKind: "time",
+        type: "bar",
+        stack: true,
+        height: HISTOGRAM_HEIGHT,
+        xFractionDigits: 0,
+        legend: false,
+        barWidthRatio: 0.86,
+        cursorPoints: false,
+        tooltipSort: "reverse",
+        tooltipTitle: bucketTitle,
+        formatValue: (v) => formatCount(v),
+        formatY: (v) => formatCount(Math.max(0, v)),
+        onZoom: onHistogramZoom,
+      });
+      histogramChart.root.setAttribute("role", "group");
+      histogramChart.root.setAttribute("aria-label", "Log volume by severity");
+    } else {
+      histogramChart.root.hidden = false;
+      histogramChart.setData({ ...data, zoom: null });
     }
-    const grid = [0.5, 1].map((f) => `<line class="logsHistogram__grid" x1="${left}" x2="${left + plotW}" y1="${y(maxValue * f).toFixed(1)}" y2="${y(maxValue * f).toFixed(1)}"></line><text class="logsHistogram__yLabel" x="${left - 6}" y="${(y(maxValue * f) + 3).toFixed(1)}" text-anchor="end">${esc(compactCount(maxValue * f))}</text>`).join("");
-    const ticks = axisTicks(startMs, endMs, plotW).map((tick) => `<line class="logsHistogram__tick" x1="${x(tick.t).toFixed(1)}" x2="${x(tick.t).toFixed(1)}" y1="${top + plotH}" y2="${top + plotH + 3}"></line><text class="logsHistogram__xLabel" x="${x(tick.t).toFixed(1)}" y="${height - 5}" text-anchor="middle">${esc(tick.label)}</text>`).join("");
-    box.innerHTML = `<svg class="logsHistogram__svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Log volume by severity">
-      ${grid}<line class="logsHistogram__axis" x1="${left}" x2="${left + plotW}" y1="${top + plotH}" y2="${top + plotH}"></line>${bars}${ticks}
-      <rect class="logsHistogram__hit" x="${left}" y="${top}" width="${plotW}" height="${plotH}"></rect>
-      <rect class="logsHistogram__brush" x="0" y="${top}" width="0" height="${plotH}" hidden></rect>
-    </svg><div class="logsHistogram__tooltip" hidden></div>`;
-    box._geometry = { left, plotW, top, plotH, startMs, endMs, buckets, bucketMs: h.bucket_ms };
   }
 
   function initHistogram() {
-    const box = $("logsHistogram");
-    if (!box) return;
-    let drag = null;
-    const toMs = (clientX) => {
-      const g = box._geometry;
-      const rect = box.querySelector("svg")?.getBoundingClientRect();
-      if (!g || !rect) return NaN;
-      const px = Math.max(g.left, Math.min(g.left + g.plotW, clientX - rect.left));
-      return g.startMs + ((px - g.left) / g.plotW) * (g.endMs - g.startMs);
-    };
-    const pxOf = (clientX) => {
-      const g = box._geometry;
-      const rect = box.querySelector("svg")?.getBoundingClientRect();
-      return Math.max(g.left, Math.min(g.left + g.plotW, clientX - rect.left));
-    };
-    box.addEventListener("pointerdown", (event) => {
-      if (!event.target.closest(".logsHistogram__hit") || !box._geometry) return;
-      event.preventDefault();
-      drag = { x0: pxOf(event.clientX), ms0: toMs(event.clientX) };
-      box.setPointerCapture?.(event.pointerId);
-    });
-    box.addEventListener("pointermove", (event) => {
-      const g = box._geometry;
-      if (!g) return;
-      const tooltip = box.querySelector(".logsHistogram__tooltip");
-      if (drag) {
-        const brush = box.querySelector(".logsHistogram__brush");
-        const x1 = pxOf(event.clientX);
-        brush.removeAttribute("hidden");
-        brush.setAttribute("x", String(Math.min(drag.x0, x1)));
-        brush.setAttribute("width", String(Math.abs(x1 - drag.x0)));
-        if (tooltip) tooltip.hidden = true;
-        return;
-      }
-      if (!event.target.closest(".logsHistogram__hit")) { if (tooltip) tooltip.hidden = true; return; }
-      const ms = toMs(event.clientX);
-      const bucket = g.buckets.find((b) => ms >= b.t && ms < b.t + g.bucketMs);
-      if (!tooltip) return;
-      if (!bucket) { tooltip.hidden = true; return; }
-      const tr = ns.timeRange;
-      tooltip.innerHTML = `<strong>${esc(tr.formatDateTime(bucket.t))} \u2192 ${esc(tr.formatDateTime(bucket.t + g.bucketMs).slice(11))}</strong>` +
-        ["error", "warn", "info", "debug"].map((sev) => `<span><i class="logsSevSwatch logsSev--${sev}"></i>${SEV_LABELS[sev]}<b>${formatCount(bucket[sev])}</b></span>`).join("") +
-        `<span class="logsHistogram__tooltipTotal">Total<b>${formatCount(bucket.sum)}</b></span>`;
-      tooltip.hidden = false;
-      const rect = box.getBoundingClientRect();
-      const px = event.clientX - rect.left;
-      tooltip.style.left = `${Math.min(rect.width - 180, Math.max(0, px + 12))}px`;
-    });
-    const finish = (event) => {
-      if (!drag) return;
-      const g = box._geometry;
-      const x1 = pxOf(event.clientX);
-      const ms1 = toMs(event.clientX);
-      const d = drag;
-      drag = null;
-      box.querySelector(".logsHistogram__brush")?.setAttribute("hidden", "");
-      if (!g || Math.abs(x1 - d.x0) < 4) return;
-      const startMs = Math.floor(Math.min(d.ms0, ms1) / 1000) * 1000;
-      const endMs = Math.ceil(Math.max(d.ms0, ms1) / 1000) * 1000;
-      if (endMs - startMs < 1000) return;
-      const tr = ns.timeRange;
-      model.timeRange = { from: tr.formatDateTime(startMs), to: tr.formatDateTime(endMs) };
-      timePicker?.refresh();
-      void search({ push: true });
-    };
-    box.addEventListener("pointerup", finish);
-    box.addEventListener("pointercancel", () => { drag = null; box.querySelector(".logsHistogram__brush")?.setAttribute("hidden", ""); });
-    box.addEventListener("pointerleave", () => { const t = box.querySelector(".logsHistogram__tooltip"); if (t && !drag) t.hidden = true; });
-    let lastWidth = 0;
-    new ResizeObserver(() => {
-      const w = box.clientWidth;
-      if (Math.abs(w - lastWidth) > 2) { lastWidth = w; renderHistogram(); }
-    }).observe(box);
     document.getElementById("logsLegend")?.addEventListener("click", (event) => {
       const item = event.target.closest("[data-sev]");
       if (!item) return;

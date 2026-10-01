@@ -453,7 +453,8 @@ for (const theme of ['dark', 'light']) {
     await page.goto(`/observability/logs?from=${encodeURIComponent(fmt(end - 30 * 60000))}&to=${encodeURIComponent(fmt(end + 1000))}`);
     const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator('#logsHistogram rect.logsBar').first()).toBeVisible();
+    await expect(page.locator('#logsHistogram .chartCore__canvas')).toBeVisible();
+    await expect.poll(async () => Number(await page.locator('#logsHistogram .chartCore').getAttribute('data-points-drawn'))).toBeGreaterThan(0);
     const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     expect(await noOverflow()).toBe(true);
     await captureState(page, testInfo, `logs-results-${theme}`);

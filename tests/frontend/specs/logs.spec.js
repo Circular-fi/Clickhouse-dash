@@ -29,6 +29,24 @@ function param(page, name) {
   return new URL(page.url()).searchParams.getAll(name);
 }
 
+// The histogram draws on the shared canvas engine: its data attributes say
+// what each severity drew (seriesStats: { Error: { points } ... }).
+const histogram = (page) => page.locator('#logsHistogram .chartCore');
+async function barsOf(page) {
+  const stats = JSON.parse((await histogram(page).getAttribute('data-series-stats')) || '{}');
+  return Object.fromEntries(Object.entries(stats).map(([label, s]) => [label, s.points]));
+}
+async function expectBars(page) {
+  await expect(histogram(page).locator('.chartCore__canvas')).toBeVisible();
+  await expect.poll(async () => Number(await histogram(page).getAttribute('data-points-drawn'))).toBeGreaterThan(0);
+}
+// The plot rectangle in page coordinates.
+async function plotBox(page) {
+  const box = await histogram(page).locator('.chartCore__overlay').boundingBox();
+  const [left, top, width, height] = (await histogram(page).getAttribute('data-plot')).split(' ').map(Number);
+  return { x: box.x + left, y: box.y + top, width, height };
+}
+
 test('logs: search by text, URL round-trip and back navigation', async ({ page, request }) => {
   const win = await logsWindow(request);
   await openLogs(page, logsUrl(win));
@@ -81,8 +99,9 @@ test('logs: service, level and severity class filters', async ({ page, request }
   await expect(page.locator('#logsChips')).toContainText('Level: Warn');
   await expect(rows(page).first()).toBeVisible();
   for (const badge of await page.locator('#logsTableRows .logsSevBadge').allInnerTexts()) expect(badge).toBe('WARN');
-  await expect(page.locator('#logsHistogram rect.logsSevFill--warn').first()).toBeVisible();
-  await expect(page.locator('#logsHistogram rect.logsSevFill--info')).toHaveCount(0);
+  // The histogram refetches with the filter: only Warn bars are left.
+  await expect.poll(async () => (await barsOf(page)).Info).toBe(0);
+  expect((await barsOf(page)).Warn).toBeGreaterThan(0);
   // Removing the chip removes the filter.
   await page.locator('#logsChips .logsChip__remove').first().click();
   await expect.poll(() => param(page, 'sev')).toEqual([]);
@@ -91,14 +110,21 @@ test('logs: service, level and severity class filters', async ({ page, request }
 test('logs: dragging over the histogram zooms the time range', async ({ page, request }) => {
   const win = await logsWindow(request, 30);
   await openLogs(page, logsUrl(win));
-  await expect(page.locator('#logsHistogram rect.logsBar').first()).toBeVisible();
+  await expectBars(page);
   const total = async () => Number((await page.locator('#logsTotal').innerText()).replace(/[^\d]/g, ''));
   const before = await total();
-  const hit = await page.locator('#logsHistogram .logsHistogram__hit').boundingBox();
+  const hit = await plotBox(page);
+  // Hovering reads one bucket: its range, a row per severity and the total.
+  await page.mouse.move(hit.x + hit.width * 0.45, hit.y + hit.height / 2);
+  const tip = histogram(page).locator('.chartCore__tooltip');
+  await expect(tip).toBeVisible();
+  await expect(tip.locator('strong')).toContainText('\u2192');
+  await expect(tip.locator('.chartCore__tipRow:not(.chartCore__tipRow--total) em')).toHaveText(['Error', 'Warn', 'Info', 'Debug']);
+  await expect(tip.locator('.chartCore__tipRow--total')).toContainText('Total');
   await page.mouse.move(hit.x + hit.width * 0.4, hit.y + hit.height / 2);
   await page.mouse.down();
   await page.mouse.move(hit.x + hit.width * 0.5, hit.y + hit.height / 2, { steps: 6 });
-  await expect(page.locator('#logsHistogram .logsHistogram__brush')).toBeVisible();
+  await expect(histogram(page).locator('.chartCore__select')).toBeVisible();
   await page.mouse.up();
   await expect.poll(() => param(page, 'from')[0]).not.toBe(win.from);
   const from = Date.parse(`${param(page, 'from')[0].replace(' ', 'T')}Z`);
