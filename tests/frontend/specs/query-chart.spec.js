@@ -152,7 +152,8 @@ test('the example query charts within budget, explains the Array column and read
     expect(s.points).toBeLessThanOrEqual(Math.ceil(plotW) * 4 + 4);
     expect(s.points).toBeGreaterThan(plotW);
   }
-  await expect(chart.locator('.queryChart__rangeText')).toContainText(/plus\(now\(\), number\) \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.000 → \d{2}:\d{2}:\d{2}\.000/);
+  // now() + 10,000 s can cross midnight: the end then repeats its date.
+  await expect(chart.locator('.queryChart__rangeText')).toContainText(/plus\(now\(\), number\) \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.000 → (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\.000/);
 
   // Crosshair: the readout is the exact instant of the snapped row, with ms.
   const first = await hoverPlot(page, chart, 0);
