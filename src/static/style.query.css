@@ -1207,6 +1207,17 @@ html[data-theme="light"] {
 .chartCore__marker > i { display: none; width: 7px; height: 7px; border-radius: 1.5px; background: #f59e0b; box-shadow: 0 0 0 1.25px var(--panelBg); transform: rotate(45deg); }
 .chartCore__marker:hover > i,
 .chartCore__marker:focus-visible > i { display: block; }
+.chartCore__overlay.is-pickable { cursor: pointer; }
+.chartCore__pick { width: 0; height: 0; border: 1.5px solid var(--text); border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px var(--panel); }
+.chartCore__box { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border: 1.5px dashed color-mix(in srgb, var(--accentBorder) 80%, transparent); }
+.chartCore__region { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+.chartCore__region[hidden],
+.chartCore__box[hidden],
+.chartCore__pick[hidden] { display: none; }
+.chartCore__annotations { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.chartCore__annotation { position: absolute; top: 0; left: 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--text) 60%, transparent); will-change: transform; }
+.chartCore__annotation[hidden] { display: none; }
+.chartCore__annotation > span { position: absolute; top: 0; left: 3px; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: 9px; font-weight: 650; line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
 .button {
   padding: 0.56rem 0.8rem;
   border-radius: 0.75rem;

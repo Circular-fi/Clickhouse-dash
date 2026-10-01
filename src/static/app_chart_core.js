@@ -376,6 +376,25 @@
     return nulls;
   }
 
+  // --- Extensions (module level) ---------------------------------------------------
+
+  const instances = new WeakMap(); // chart root -> api
+
+  // 1-2-5 ticks per decade inside [lo, hi] (lo > 0); only the powers of ten
+  // past 7 ticks, and linear ticks when the range spans less than 8x.
+  function logTicks(lo, hi) {
+    if (!(lo > 0) || !(hi > lo)) return [];
+    if (hi / lo < 8) return linearTicks(lo, hi, 4).values.filter((v) => v > 0);
+    const ticks = [];
+    for (let k = Math.floor(Math.log10(lo)); k <= Math.ceil(Math.log10(hi)); k++) {
+      for (const m of [1, 2, 5]) {
+        const v = Number((m * 10 ** k).toPrecision(12));
+        if (v >= lo && v <= hi) ticks.push(v);
+      }
+    }
+    return ticks.length > 7 ? ticks.filter((v) => Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-9) : ticks;
+  }
+
   // --- Chart ------------------------------------------------------------------
 
   function create(host, initial = {}) {
@@ -508,6 +527,7 @@
       const state = new Map();
       stacks = new Map();
       for (const s of visibleSeries()) {
+        if (ownMark(s)) continue;
         const key = s.group == null ? "" : String(s.group);
         if (!state.has(key)) state.set(key, { pos: new Float64Array(n), neg: opts.type === "bar" ? new Float64Array(n) : null });
         const st = state.get(key);
@@ -612,15 +632,19 @@
       const vis = visibleSeries();
       for (const s of vis) {
         const st = stacks && stacks.get(s.id);
+        const [a0, a1] = s.xs ? ownRange(s, xLo, xHi) : [v0, v1];
         for (const a of st ? [st.top, st.base] : [s.values]) {
-          const e = extent(a, v0, v1);
+          const e = extent(a, a0, a1);
           if (e.min < yMin) yMin = e.min;
           if (e.max > yMax) yMax = e.max;
         }
       }
       const included = includedY();
       if (included) { yMin = Math.min(yMin, included[0]); yMax = Math.max(yMax, included[1]); }
+      const cellsY = cellsExtent(xLo, xHi);
+      if (cellsY) { yMin = Math.min(yMin, cellsY[0]); yMax = Math.max(yMax, cellsY[1]); }
       if (!(yMin <= yMax)) { yMin = 0; yMax = 1; }
+      const dataMin = yMin, dataMax = yMax;
       const pinned = isStacked() || opts.type === "bar";
       if (pinned) { yMin = Math.min(0, yMin); yMax = Math.max(0, yMax); }
       else if (yMin >= 0 && yMax - yMin > 0.25 * yMax) yMin = 0;
@@ -637,9 +661,11 @@
       const xTwoLines = opts.xKind === "time" && !opts.xDateOnly;
       const bottom = xTwoLines ? 34 : 22;
       const plotH = Math.max(40, opts.height - PAD_TOP - bottom);
-      const yt = linearTicks(yMin, yMax, Math.max(2, Math.floor(plotH / Y_TICK_SPACE)));
+      const yAx = customYAxis(dataMin, dataMax, plotH);
+      if (yAx) { yMin = yAx.min; yMax = yAx.max; }
+      const yt = yAx ? { step: yAx.step || 0, values: yAx.ticks.map((t) => t.v) } : linearTicks(yMin, yMax, Math.max(2, Math.floor(plotH / Y_TICK_SPACE)));
       const yUnit = yUnitFor(Math.max(Math.abs(yMin), Math.abs(yMax)));
-      const yLabels = yt.values.map((v) => formatTick(v, yt.step, yUnit));
+      const yLabels = yAx ? yAx.ticks.map((t) => t.label) : yt.values.map((v) => yTickLabel(v, yt.step, yUnit));
       let labelW = 0;
       for (const l of yLabels) labelW = Math.max(labelW, measure(l));
       const left = Math.ceil(Math.max(24, labelW) + 12);
@@ -655,6 +681,7 @@
         xAt: (px) => xLo + (px - left) / kx,
         yAt: (py) => yMin + (PAD_TOP + plotH - py) / ky,
       };
+      if (opts.yScale === "log") applyLogScale(L);
       L.xTicks = xTicks(L);
       return L;
     }
@@ -725,10 +752,12 @@
       ctx.beginPath();
       ctx.rect(layout.left, layout.top - 1, layout.plotW, layout.plotH + 2);
       ctx.clip();
-      let points = 0;
-      const vis = visibleSeries();
+      let points = drawCells(ctx, layout);
+      const all = visibleSeries();
+      const own = all.filter(ownMark);
+      const vis = own.length ? all.filter((s) => !own.includes(s)) : all;
       const perSeries = {};
-      if (opts.type === "bar") points = drawBars(ctx, layout, vis, perSeries);
+      if (opts.type === "bar") points = Math.max(points, drawBars(ctx, layout, vis, perSeries));
       else {
         for (const s of vis) {
           const drawn = drawSeries(ctx, layout, s);
@@ -736,9 +765,11 @@
           points = Math.max(points, drawn);
         }
       }
+      points = Math.max(points, drawOwnMarks(ctx, layout, own, perSeries));
       ctx.restore();
-      stats = { points, series: vis.length, perSeries, ms: performance.now() - t0 };
+      stats = { points, series: all.length, perSeries, ms: performance.now() - t0 };
       publish();
+      publishExtras();
       drawOverlay();
       renderLegend();
       placeMarkers();
@@ -820,6 +851,7 @@
         ctx.textAlign = "center";
         ctx.fillStyle = theme.label;
         ctx.fillText(t.label, cx, y1);
+        (L.xDrawn || (L.xDrawn = [])).push([t.label, t.context || pendingContext, Math.round(cx - w / 2), Math.round(cx + w / 2)]);
         lastRight = cx + w / 2;
         const context = t.context || pendingContext;
         pendingContext = "";
@@ -952,7 +984,7 @@
     function drawSeries(ctx, L, s) {
       const c = seriesColor(s);
       const alpha = alphaFor(s);
-      const type = opts.type;
+      const type = s.type || opts.type;
       const nulls = s.nulls || null;
       const st = stacks && stacks.get(s.id);
       if (type === "area" && st) {
@@ -1112,6 +1144,7 @@
     }
 
     function xReadout(i) {
+      if (typeof opts.xReadout === "function") return opts.xReadout(i);
       if (opts.xKind === "category") return String(opts.categories[i] ?? "");
       const x = opts.xs[i];
       if (opts.xKind === "time") return opts.xDateOnly ? dateText(x) : formatInstant(x, opts.xFractionDigits);
@@ -1150,7 +1183,8 @@
           changed = true;
         }
         if (!changed || destroyed) return;
-        if (cursor && !tooltipEl.hidden && tooltipKey && tooltipKey !== "marker") renderTooltip();
+        if (contentTip && !tooltipEl.hidden) placeContentTip();
+        else if (cursor && !tooltipEl.hidden && tooltipKey && tooltipKey !== "marker") renderTooltip();
         scheduleOverlay();
       })
       : null;
@@ -1224,6 +1258,7 @@
         place(yLine, L.left, py);
         // Points on every visible series at that x.
         for (const s of opts.cursorPoints === false ? [] : visibleSeries()) {
+          if (s.xs) continue;
           const st = stacks && stacks.get(s.id);
           const v = st ? st.top[i] : s.values[i];
           if (!(v === v) || !(s.values[i] === s.values[i])) continue;
@@ -1264,6 +1299,7 @@
     function nearestSeries(i, py) {
       let best = null, bestD = Infinity;
       for (const s of visibleSeries()) {
+        if (s.xs) continue;
         const st = stacks && stacks.get(s.id);
         const v = st ? st.top[i] : s.values[i];
         if (!(v === v) || !(s.values[i] === s.values[i])) continue;
@@ -1282,7 +1318,7 @@
         const rows = [];
         let total = 0, any = false;
         for (const s of tooltipSeries(i)) {
-          if (opts.tooltip === "single" && s.id !== cursor.nearest) continue;
+          if (s.xs || (opts.tooltip === "single" && s.id !== cursor.nearest)) continue;
           const v = s.values[i];
           const has = v === v;
           const isNull = !has && (s.nulls === null || s.nulls === undefined || s.nulls[i]);
@@ -1293,7 +1329,7 @@
           rows.push(`<span class="chartCore__tipRow${has ? "" : " is-empty"}${s.id === cursor.nearest ? " is-nearest" : ""}"><i style="background:${rgba(c)}"></i><em>${esc(s.label)}</em><b>${esc(text)}</b></span>`);
         }
         if (isStacked() && opts.tooltip !== "single" && rows.length > 1 && any) {
-          rows.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(formatValue(total))}</b></span>`);
+          rows.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(typeof opts.formatValue === "function" ? opts.formatValue(total, null) : formatValue(total))}</b></span>`);
         }
         if (!rows.length) rows.push(`<span class="chartCore__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
         capTooltipRows(rows);
@@ -1327,8 +1363,9 @@
     }
 
     function moveCursor(p) {
-      if (!layout || !opts.xs.length) return;
+      if (!layout || !opts.xs.length || boxDrag) return;
       if (!inPlot(p) && !(drag && drag.active)) { leaveCursor(); return; }
+      if (!(drag && drag.active) && showPick(p)) return;
       const px = Math.max(layout.left, Math.min(layout.left + layout.plotW, p.px));
       cursorIndex = nearestIndex(px);
       cursor = { px, py: p.py, nearest: cursorIndex >= 0 ? nearestSeries(cursorIndex, p.py) : null };
@@ -1342,6 +1379,7 @@
     }
 
     function leaveCursor() {
+      clearPick();
       if (!cursor && tooltipEl.hidden) return;
       cursor = null;
       cursorIndex = -1;
@@ -1399,6 +1437,7 @@
       if (ev.button !== 0 || !layout) return;
       const p = localPoint(ev);
       if (!inPlot(p)) return;
+      if (startBox(p, ev)) return;
       moveCursor(p);
       if (opts.zoomable === false || opts.xs.length < 2) return;
       drag = { x0: Math.max(layout.left, Math.min(layout.left + layout.plotW, p.px)), x1: p.px, active: false, id: ev.pointerId };
@@ -1451,7 +1490,7 @@
       ev.preventDefault();
       i = Math.max(first, Math.min(last, i));
       const px = L.xOf(opts.xKind === "category" ? i : opts.xs[i]);
-      const s = visibleSeries().find((x) => x.values[i] === x.values[i]);
+      const s = visibleSeries().find((x) => !x.xs && x.values[i] === x.values[i]);
       const st = s && stacks && stacks.get(s.id);
       const py = s ? L.yOf(st ? st.top[i] : s.values[i]) : L.top + L.plotH / 2;
       moveCursor({ px, py });
@@ -1464,7 +1503,7 @@
     function calcs(s) {
       const L = layout;
       let min = Infinity, max = -Infinity, sum = 0, count = 0, last = NaN;
-      const a = L ? L.v0 : 0, b = L ? L.v1 : s.values.length;
+      const a = L && !s.xs ? L.v0 : 0, b = L && !s.xs ? L.v1 : s.values.length;
       for (let i = a; i < b; i++) {
         const v = s.values[i];
         if (v !== v) continue;
@@ -1844,6 +1883,7 @@
       for (const canvas of [baseCanvas]) { canvas.width = 0; canvas.height = 0; }
       sizeW = 0;
       leaveCursor();
+      cancelBox();
     }
 
     function setData(next = {}) {
@@ -1882,9 +1922,505 @@
       if (drawRaf) cancelAnimationFrame(drawRaf);
       if (overRaf) cancelAnimationFrame(overRaf);
       if (moveRaf) cancelAnimationFrame(moveRaf);
+      destroyExtras();
       release();
       root.remove();
     }
+
+    // --- Extensions: own-x and per-point marks, picking, heatmap cells, custom /
+    // log y axes, annotation markers, regions, 2-D brush (first used by the
+    // Traces charts). Every option is optional: without them the chart behaves
+    // as described above.
+    //
+    //   series[k].type        "line" | "area" | "points" | "bar": the series' own mark
+    //                         (a line over bars, points over lines).
+    //   series[k].xs          its own ascending x column (a scatter over the
+    //                         shared-x series): it counts for the y domain, not
+    //                         for the cursor snap, cursor dots or tooltip rows.
+    //   series[k].radius      points: px, one number or a Float64Array per point.
+    //   series[k].pointColor  points: (i) => CSS colour of point i (null: the series').
+    //   series[k].fillAlpha   points: fill opacity (0.5; outlines at 0.85).
+    //   series[k].pickable    points: hovering picks the point under the pointer
+    //                         (within 3 px of its edge; the closer, smaller one wins).
+    //   pick(pt)              custom picking, pt = { px, py, x, y }: a hit object
+    //                         ({ key, x, px, py, r } all optional) or null.
+    //   pickTooltip(hit)      { title, rows: [{ label, value, color, className }], footer }.
+    //   onPick(hit)           a click on a hit (the pointer shows it is clickable).
+    //   xReadout(i)           text of x index i (x badge, and the tooltip title
+    //                         without tooltipTitle).
+    //   yTickFormat(v, step)  y tick labels.
+    //   yAxis(min, max, plotH) -> { min, max, ticks: [{ v, label }], step }: the y
+    //                         domain and ticks from the data extent.
+    //   yScale: "log"         log y (positive values; ticks 1-2-5 per decade).
+    //   cells: { x0, x1, y0, y1: Float64Array, level: Uint8Array, palette: [CSS colours] }
+    //                         heatmap cells: one rect each, palette[level - 1] (0: none).
+    //   annotations: [{ x, label, title, className }]   vertical annotation lines
+    //                         with a label (releases); markers are the exemplar links.
+    //   regions: [{ id, x0, x1, y0, y1, className, hidden }]   persistent boxes in data
+    //                         units (no y0 / y1: the plot height); setRegions(list).
+    //   brush: "xy"           a drag (or a click) selects a box instead of zooming:
+    //                         brushSnap(range) -> range, brushTooltip(range) -> tooltip,
+    //                         onBrush(range) on release, range = { x0, x1, y0, y1 };
+    //                         brushClass styles the box.
+    //   keyboard: false       no keyboard cursor (the host element handles keys).
+    // (The x domain, the y readout and the NULL rows are the xDomain, formatY
+    // and tooltipNulls options above.)
+    // API: setRegions(list), showTooltip(content, px, py), hideTooltip(),
+    // points(id) -> [{ index, x, y, r }] (plot px), toClient(x, y) -> { x, y }.
+
+    const annotationsEl = document.createElement("div");
+    annotationsEl.className = "chartCore__annotations";
+    annotationsEl.setAttribute("aria-hidden", "true");
+    plotEl.appendChild(annotationsEl);
+    const pickRing = document.createElement("i");
+    pickRing.className = "chartCore__pick";
+    pickRing.hidden = true;
+    cursorEl.appendChild(pickRing);
+    const boxEl = document.createElement("i");
+    boxEl.className = "chartCore__box";
+    boxEl.hidden = true;
+    cursorEl.appendChild(boxEl);
+    const annotationEls = [];
+    const regionEls = new Map();
+    const pickPoints = new Map(); // series id -> { index, px, py, r } arrays of the last draw
+    let pickHit = null;
+    let boxDrag = null;
+    let boxRaf = 0;
+    let press = null;
+    if (opts.keyboard === false) overCanvas.removeAttribute("tabindex");
+    if (opts.brush === "xy") overCanvas.style.touchAction = "none";
+
+    const pointsMark = (s) => s.type === "points" || (!!s.xs && !s.type);
+    function ownMark(s) {
+      if (opts.yScale === "log" || s.xs) return true;
+      if (s.type === "points") return s.radius != null || typeof s.pointColor === "function" || !!s.pickable;
+      return opts.type === "bar" && !!s.type && s.type !== "bar";
+    }
+
+    function ownRange(s, lo, hi) {
+      return [lowerBound(s.xs, lo), upperBound(s.xs, hi)];
+    }
+
+    function cssColor(value) {
+      if (!theme.cssColors) theme.cssColors = new Map();
+      let c = theme.cssColors.get(value);
+      if (!c) { c = color(value); theme.cssColors.set(value, c); }
+      return c;
+    }
+
+    function yTickLabel(v, step, unit) {
+      return typeof opts.yTickFormat === "function" ? opts.yTickFormat(v, step) : formatTick(v, step, unit);
+    }
+
+    // The y domain and ticks of a yAxis hook, or of a log scale.
+    function customYAxis(dataMin, dataMax, plotH) {
+      if (typeof opts.yAxis === "function") {
+        const ax = opts.yAxis(dataMin, dataMax, plotH);
+        if (ax && ax.max > ax.min && Array.isArray(ax.ticks)) return ax;
+      }
+      if (opts.yScale !== "log") return null;
+      const lo = dataMin > 0 ? dataMin : dataMax > 0 ? dataMax / 10 : 1;
+      const hi = dataMax > lo ? dataMax : lo * 10;
+      const unit = compactUnitFor(hi);
+      return { min: lo, max: hi, ticks: logTicks(lo, hi).map((v) => ({ v, label: yTickLabel(v, v, unit) })) };
+    }
+
+    function applyLogScale(L) {
+      const lo = Math.max(L.yMin, Number.MIN_VALUE);
+      const hi = Math.max(L.yMax, lo * 1.000001);
+      const lmin = Math.log(lo), lmax = Math.log(hi);
+      const ky = L.plotH / (lmax - lmin);
+      const base = L.top + L.plotH;
+      Object.assign(L, {
+        logY: true, yMin: lo, yMax: hi, ky,
+        yOf: (y) => base - (Math.log(Math.max(y, lo)) - lmin) * ky,
+        yAt: (py) => Math.exp(lmin + (base - py) / ky),
+        // The same plot linear in log units, for the line / area tracer.
+        logView: { ...L, yMin: lmin, yMax: lmax, ky, yOf: (v) => base - (v - lmin) * ky },
+      });
+    }
+
+    const logValues = new WeakMap();
+    function logSeries(s) {
+      let values = logValues.get(s.values);
+      if (!values) {
+        values = new Float64Array(s.values.length);
+        for (let i = 0; i < values.length; i++) { const v = s.values[i]; values[i] = v > 0 ? Math.log(v) : NaN; }
+        logValues.set(s.values, values);
+      }
+      return { ...s, values };
+    }
+
+    let cellsCache = null;
+    function cellsExtent(lo, hi) {
+      const c = opts.cells;
+      if (!c || !c.level || !c.level.length) return null;
+      if (cellsCache && cellsCache.cells === c && cellsCache.lo === lo && cellsCache.hi === hi) return cellsCache.out;
+      let min = Infinity, max = -Infinity;
+      for (let k = 0; k < c.level.length; k++) {
+        if (!(c.x1[k] > lo && c.x0[k] < hi)) continue;
+        if (c.y0[k] < min) min = c.y0[k];
+        if (c.y1[k] > max) max = c.y1[k];
+      }
+      const out = min <= max ? [min, max] : null;
+      cellsCache = { cells: c, lo, hi, out };
+      return out;
+    }
+
+    // One fill per palette step; cells snap to device pixels and keep a 1 px
+    // gap once they are wider (taller) than 3 px.
+    function drawCells(ctx, L) {
+      const c = opts.cells;
+      if (!c || !c.level || !c.level.length) { delete root.dataset.cellsDrawn; return 0; }
+      const palette = c.palette || [];
+      const snap = (v) => Math.round(v * dpr) / dpr;
+      let drawn = 0;
+      for (let step = 1; step <= palette.length; step++) {
+        ctx.beginPath();
+        let any = false;
+        for (let k = 0; k < c.level.length; k++) {
+          if (c.level[k] !== step || !(c.x1[k] > L.xLo && c.x0[k] < L.xHi)) continue;
+          const xa = snap(L.xOf(c.x0[k])), xb = snap(L.xOf(c.x1[k]));
+          const ya = snap(L.yOf(c.y1[k])), yb = snap(L.yOf(c.y0[k]));
+          const gx = xb - xa > 3 ? 1 : 0, gy = yb - ya > 3 ? 1 : 0;
+          ctx.rect(xa, ya, Math.max(0.5, xb - xa - gx), Math.max(0.5, yb - ya - gy));
+          any = true;
+          drawn++;
+        }
+        if (!any) continue;
+        ctx.fillStyle = rgba(cssColor(palette[step - 1]));
+        ctx.fill();
+      }
+      root.dataset.cellsDrawn = String(drawn);
+      return drawn;
+    }
+
+    // Series the main pass leaves out: points with their own x or per-point
+    // styling, lines over bars, every series of a log chart.
+    function drawOwnMarks(ctx, L, list, perSeries) {
+      if (!list.length) return 0;
+      let points = 0;
+      const bars = list.filter((s) => (s.type || opts.type) === "bar" && !s.xs);
+      if (bars.length) points = drawBars(ctx, L, bars, perSeries);
+      for (const s of list) {
+        if (bars.includes(s)) continue;
+        let drawn;
+        if (pointsMark(s)) drawn = drawPoints(ctx, L, s);
+        else if (L.logY) drawn = drawSeries(ctx, L.logView, logSeries(s));
+        else drawn = drawSeries(ctx, L, s);
+        perSeries[s.label] = { points: drawn, runs: pointsMark(s) ? (drawn ? 1 : 0) : runs.length };
+        points = Math.max(points, drawn);
+      }
+      return points;
+    }
+
+    function drawPoints(ctx, L, s) {
+      const own = !!s.xs;
+      const xs = own ? s.xs : opts.xs;
+      const category = !own && opts.xKind === "category";
+      const [i0, i1] = own ? ownRange(s, L.xLo, L.xHi) : [L.v0, L.v1];
+      const values = s.values;
+      const radius = s.radius;
+      const alpha = alphaFor(s);
+      const fill = s.fillAlpha == null ? 0.5 : s.fillAlpha;
+      const cache = { index: [], px: [], py: [], r: [] };
+      const groups = new Map();
+      for (let i = i0; i < i1 && cache.index.length < 50000; i++) {
+        const v = values[i];
+        if (v !== v) continue;
+        const key = typeof s.pointColor === "function" ? s.pointColor(i) || "" : "";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(cache.index.length);
+        cache.index.push(i);
+        cache.px.push(L.xOf(category ? i : xs[i]));
+        cache.py.push(L.yOf(v));
+        cache.r.push(typeof radius === "number" ? radius : radius ? radius[i] : 2.6);
+      }
+      for (const [key, members] of groups) {
+        const c = key ? cssColor(key) : seriesColor(s);
+        ctx.beginPath();
+        for (const k of members) {
+          ctx.moveTo(cache.px[k] + cache.r[k], cache.py[k]);
+          ctx.arc(cache.px[k], cache.py[k], cache.r[k], 0, Math.PI * 2);
+        }
+        ctx.fillStyle = rgba(c, fill * alpha);
+        ctx.fill();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = rgba(c, 0.85 * alpha);
+        ctx.stroke();
+      }
+      pickPoints.set(s.id, cache);
+      return cache.index.length;
+    }
+
+    // --- picking ---
+
+    const picking = () => typeof opts.pick === "function" || opts.series.some((s) => s.pickable);
+
+    function pickPoint(p) {
+      let best = null, bestScore = Infinity;
+      for (const s of visibleSeries()) {
+        if (!s.pickable) continue;
+        const c = pickPoints.get(s.id);
+        if (!c) continue;
+        for (let k = 0; k < c.index.length; k++) {
+          const r = c.r[k];
+          const d = Math.hypot(c.px[k] - p.px, c.py[k] - p.py);
+          if (d > r + 3) continue;
+          const score = d / (r + 3) + r / 100;
+          if (score < bestScore) {
+            bestScore = score;
+            const i = c.index[k];
+            best = { key: `${s.id}:${i}`, series: s, seriesId: s.id, index: i, x: (s.xs || opts.xs)[i], px: c.px[k], py: c.py[k], r };
+          }
+        }
+      }
+      return best;
+    }
+
+    function pickAt(p) {
+      if (!layout || !picking()) return null;
+      const custom = typeof opts.pick === "function" ? opts.pick({ px: p.px, py: p.py, x: layout.xAt(p.px), y: layout.yAt(p.py) }) : null;
+      return custom || pickPoint(p);
+    }
+
+    function tooltipHtml(content) {
+      if (!content) return "";
+      const rows = (content.rows || []).map((row) => {
+        const swatch = row.color ? ` style="background:${rgba(cssColor(row.color))}"` : "";
+        return `<span class="chartCore__tipRow${row.className ? ` ${esc(row.className)}` : ""}"><i${swatch}></i><em>${esc(row.label)}</em> <b>${esc(row.value)}</b></span>`;
+      }).join("");
+      return `${content.title != null ? `<strong>${esc(content.title)}</strong>` : ""}${rows}${content.footer ? `<small>${esc(content.footer)}</small>` : ""}`;
+    }
+
+    // A tooltip with the host's content beside (px, py), in plot px; its size
+    // comes from the size observer, which re-places it once the new content
+    // is laid out (no synchronous layout on a pointer move).
+    let contentTip = null;
+    function showContentTooltip(content, px, py) {
+      const key = `content|${JSON.stringify(content)}`;
+      if (!content) { tooltipEl.hidden = true; tooltipKey = ""; contentTip = null; return; }
+      if (key !== tooltipKey || tooltipEl.hidden) {
+        tooltipKey = key;
+        tooltipEl.innerHTML = tooltipHtml(content);
+        delete tooltipEl.dataset.index;
+        tooltipEl.hidden = false;
+      }
+      contentTip = { px, py };
+      placeContentTip();
+    }
+
+    function placeContentTip() {
+      if (!contentTip) return;
+      const size = measured(tooltipEl);
+      const { px, py } = contentTip;
+      const width = layout ? layout.width : plotEl.clientWidth;
+      let lx = px + 16;
+      if (lx + size.w > width - 4) lx = px - 16 - size.w;
+      lx = Math.max(4, lx);
+      const ty = Math.max(0, Math.min(opts.height - size.h, py - size.h / 2));
+      tooltipEl.style.transform = `translate(${Math.round(lx)}px, ${Math.round(ty)}px)`;
+    }
+
+    function showPick(p) {
+      const hit = pickAt(p);
+      if (!hit) { clearPick(); return false; }
+      const same = pickHit && pickHit.key != null && pickHit.key === hit.key;
+      pickHit = hit;
+      cursor = { px: p.px, py: p.py, nearest: null };
+      cursorIndex = -1;
+      overCanvas.classList.toggle("is-pickable", typeof opts.onPick === "function");
+      if (!same) {
+        if (hit.r != null && hit.px != null) {
+          const size = 2 * hit.r + 4;
+          pickRing.style.width = `${size}px`;
+          pickRing.style.height = `${size}px`;
+          pickRing.style.margin = `${-size / 2}px 0 0 ${-size / 2}px`;
+          place(pickRing, hit.px, hit.py);
+          show(pickRing, true);
+        } else show(pickRing, false);
+        root.dataset.pick = String(hit.key == null ? "" : hit.key);
+      }
+      showContentTooltip(typeof opts.pickTooltip === "function" ? opts.pickTooltip(hit) : null, p.px, p.py);
+      scheduleOverlay();
+      broadcast(Number.isFinite(hit.x) && opts.xKind !== "category" ? hit.x : null);
+      return true;
+    }
+
+    function clearPick() {
+      if (!pickHit) return;
+      pickHit = null;
+      tooltipKey = "";
+      contentTip = null;
+      show(pickRing, false);
+      overCanvas.classList.remove("is-pickable");
+      delete root.dataset.pick;
+    }
+
+    overCanvas.addEventListener("pointerdown", (ev) => { press = { x: ev.clientX, y: ev.clientY }; });
+    overCanvas.addEventListener("click", (ev) => {
+      const from = press;
+      press = null;
+      if (typeof opts.onPick !== "function" || !from || Math.hypot(ev.clientX - from.x, ev.clientY - from.y) >= DRAG_MIN_PX) return;
+      const hit = pickAt(localPoint(ev));
+      if (hit) opts.onPick(hit);
+    });
+
+    // --- 2-D brush ---
+
+    function clampPoint(p) {
+      const L = layout;
+      return { px: Math.max(L.left, Math.min(L.left + L.plotW, p.px)), py: Math.max(L.top, Math.min(L.top + L.plotH, p.py)) };
+    }
+
+    function startBox(p, ev) {
+      if (opts.brush !== "xy" || !layout) return false;
+      const at = clampPoint(p);
+      boxDrag = { a: at, b: at, id: ev.pointerId, range: null };
+      try { overCanvas.setPointerCapture(ev.pointerId); } catch { /* capture is optional */ }
+      clearPick();
+      cursor = null;
+      cursorIndex = -1;
+      scheduleOverlay();
+      updateBox(at);
+      return true;
+    }
+
+    function boxRange(a, b) {
+      const L = layout;
+      const range = {
+        x0: L.xAt(Math.min(a.px, b.px)), x1: L.xAt(Math.max(a.px, b.px)),
+        y0: L.yAt(Math.max(a.py, b.py)), y1: L.yAt(Math.min(a.py, b.py)),
+      };
+      return typeof opts.brushSnap === "function" ? opts.brushSnap(range) || range : range;
+    }
+
+    function placeBox(el, r, L) {
+      const xa = Math.max(L.left, L.xOf(r.x0)), xb = Math.min(L.left + L.plotW, L.xOf(r.x1));
+      const y0 = r.y0 == null ? L.yMin : r.y0, y1 = r.y1 == null ? L.yMax : r.y1;
+      const ya = Math.max(L.top, L.yOf(y1)), yb = Math.min(L.top + L.plotH, L.yOf(y0));
+      el.style.width = `${Math.max(1, xb - xa)}px`;
+      el.style.height = `${Math.max(1, yb - ya)}px`;
+      place(el, xa, ya);
+    }
+
+    function updateBox(p) {
+      if (!boxDrag || !layout) return;
+      boxDrag.b = clampPoint(p);
+      const r = boxRange(boxDrag.a, boxDrag.b);
+      boxDrag.range = r;
+      boxEl.className = `chartCore__box${opts.brushClass ? ` ${opts.brushClass}` : ""}`;
+      placeBox(boxEl, r, layout);
+      show(boxEl, true);
+      showContentTooltip(typeof opts.brushTooltip === "function" ? opts.brushTooltip(r) : null, p.px, p.py);
+    }
+
+    function cancelBox() {
+      if (!boxDrag) return;
+      const d = boxDrag;
+      boxDrag = null;
+      try { overCanvas.releasePointerCapture(d.id); } catch { /* already released */ }
+      show(boxEl, false);
+      tooltipEl.hidden = true;
+      tooltipKey = "";
+      contentTip = null;
+      return d;
+    }
+
+    overCanvas.addEventListener("pointermove", (ev) => {
+      if (!boxDrag) return;
+      const p = localPoint(ev);
+      if (!boxRaf) boxRaf = requestAnimationFrame(() => { boxRaf = 0; updateBox(p); });
+    });
+    overCanvas.addEventListener("pointerup", (ev) => {
+      if (!boxDrag) return;
+      updateBox(localPoint(ev));
+      const d = cancelBox();
+      if (d && d.range && typeof opts.onBrush === "function") opts.onBrush(d.range);
+    });
+    overCanvas.addEventListener("pointercancel", () => cancelBox());
+    overCanvas.addEventListener("lostpointercapture", () => { if (boxDrag) cancelBox(); });
+    const onBoxKey = (ev) => { if (ev.key === "Escape" && boxDrag) cancelBox(); };
+    document.addEventListener("keydown", onBoxKey, true);
+
+    // --- annotations and regions (DOM, moved on every draw) ---
+
+    function placeAnnotations(L) {
+      const list = Array.isArray(opts.annotations) ? opts.annotations : [];
+      while (annotationEls.length < list.length) {
+        const el = document.createElement("div");
+        el.appendChild(document.createElement("span"));
+        annotationsEl.appendChild(el);
+        annotationEls.push(el);
+      }
+      annotationEls.forEach((el, k) => {
+        const m = list[k];
+        const x = m ? L.xOf(Number(m.x)) : NaN;
+        const on = !!m && x >= L.left - 0.5 && x <= L.left + L.plotW + 0.5;
+        el.hidden = !on;
+        if (!on) return;
+        el.className = `chartCore__annotation${m.className ? ` ${m.className}` : ""}`;
+        el.dataset.label = String(m.label == null ? "" : m.label);
+        el.firstChild.textContent = el.dataset.label;
+        el.firstChild.title = String(m.title || el.dataset.label);
+        el.style.height = `${L.plotH}px`;
+        place(el, x, L.top);
+      });
+    }
+
+    function placeRegions(L) {
+      const list = Array.isArray(opts.regions) ? opts.regions : [];
+      const seen = new Set();
+      for (const r of list) {
+        const id = String(r.id);
+        seen.add(id);
+        let el = regionEls.get(id);
+        if (!el) {
+          el = document.createElement("i");
+          cursorEl.insertBefore(el, pickRing);
+          regionEls.set(id, el);
+        }
+        el.className = `chartCore__region${r.className ? ` ${r.className}` : ""}`;
+        const on = !r.hidden && r.x1 > r.x0 && !!L;
+        el.hidden = !on;
+        if (on) placeBox(el, r, L);
+      }
+      for (const [id, el] of regionEls) if (!seen.has(id)) el.hidden = true;
+    }
+
+    function publishExtras() {
+      const L = layout;
+      root.dataset.yTicks = JSON.stringify(L.yTicks.map((t) => t.label));
+      root.dataset.xTicks = JSON.stringify(L.xDrawn || []);
+      if (opts.yScale) root.dataset.yScale = opts.yScale; else delete root.dataset.yScale;
+      placeAnnotations(L);
+      placeRegions(L);
+      if (pickHit) clearPick();
+      if (boxDrag && boxDrag.range) placeBox(boxEl, boxDrag.range, L);
+    }
+
+    function destroyExtras() {
+      document.removeEventListener("keydown", onBoxKey, true);
+      if (boxRaf) cancelAnimationFrame(boxRaf);
+      cancelBox();
+    }
+
+    const extraApi = {
+      setRegions(list) {
+        opts.regions = Array.isArray(list) ? list : [];
+        if (layout && !released) placeRegions(layout);
+      },
+      showTooltip(content, px, py) { showContentTooltip(content, px, py); },
+      hideTooltip() { tooltipEl.hidden = true; tooltipKey = ""; contentTip = null; },
+      points(id) {
+        const c = pickPoints.get(id);
+        return c ? c.index.map((index, k) => ({ index, x: c.px[k], y: c.py[k], r: c.r[k] })) : [];
+      },
+      toClient(x, y) {
+        const box = plotEl.getBoundingClientRect();
+        return layout ? { x: box.left + layout.xOf(x), y: box.top + layout.yOf(y) } : null;
+      },
+    };
 
     const api = {
       root,
@@ -1911,6 +2447,8 @@
       // Markers move with the plot; replacing them needs no plot redraw.
       setMarkers(list) { opts.markers = list; scheduleDraw(); },
     };
+    Object.assign(api, extraApi);
+    instances.set(root, api);
     live.add(api);
     watchTheme();
     if (opts.syncKey) {
@@ -1939,4 +2477,15 @@
     upperBound,
     bridgeGaps,
   };
+
+  // --- Extensions (module level): log ticks, chart lookup -----------------------
+
+  Object.assign(ns.chartCore, {
+    logTicks,
+    // The chart drawn in (or at) an element: tests and hosts reach its API.
+    of(el) {
+      const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && el.querySelector(".chartCore"));
+      return (node && instances.get(node)) || null;
+    },
+  });
 })();
