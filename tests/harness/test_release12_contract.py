@@ -20,17 +20,17 @@ def test_query_reload_does_not_mark_known_relation_unknown_before_metadata_arriv
 
 
 def test_graph_focus_freezes_camera_and_retained_node_coordinates_and_has_selected_halo() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'function stabilizeLayoutPositions(' in graph
     assert 'item.x = previous.x;' in graph and 'item.y = previous.y;' in graph
     set_focus = graph[graph.index('function setFocus('):graph.index('function defaultFocusId', graph.index('function setFocus('))]
     assert 'model.offsetX' not in set_focus and 'model.offsetY' not in set_focus and 'model.scale' not in set_focus
     # The focused card's halo is a translucent ring plus a crisp stroke in
     # the graph halo token, readable on the light theme's white canvas.
-    halo = graph[graph.index('function drawFocusHalo('):graph.index('function compactTitleFont(')]
-    assert 'ctx.strokeStyle = graphColor("halo");' in halo
+    halo = graph[graph.index('function drawHalo('):graph.index('function drawCard(')]
+    assert 'ctx.strokeStyle = color("halo");' in halo
     assert 'ctx.lineWidth = 6;' in halo
-    assert 'if (isFocus && node.layer === "logical") drawFocusHalo(ctx, item, radius, viewLike);' in graph
+    assert 'halo: isFocus && node.layer === "logical",' in graph and 'haloDashed: viewLike,' in graph
 
 
 def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -> None:

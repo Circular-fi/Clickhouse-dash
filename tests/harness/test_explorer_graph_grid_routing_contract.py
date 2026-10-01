@@ -8,27 +8,27 @@ def read(path: str) -> str:
 
 
 def test_lineage_layout_uses_shared_row_grid_and_top_anchored_ports() -> None:
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'const LINEAGE_NODE_PORT_TOP_OFFSET = 36;' in js
     assert 'const lineageRowPitch = model.detailMode === "logical"' in js
-    assert '70 + gridRow * lineageRowPitch' in js
+    assert 'origin + gridRow * lineageRowPitch' in js and 'origin: 70,' in js
     assert 'const lineageRows = new Map();' in js
     assert 'const betweenRowYs = [];' in js
-    assert 'lineageNodePort(item, "right")' in js
-    assert 'lineageNodePort(item, "left")' in js
+    assert 'nodePort(item, "right")' in js
+    assert 'nodePort(item, "left")' in js
 
 
 def test_materialized_views_keep_dashed_node_outline() -> None:
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     # Card outline and focus halo are both dashed for View / MV objects.
     assert 'const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";' in js
-    assert 'if (viewLike || storageDisabled) ctx.setLineDash([5, 4]);' in js
-    assert 'drawFocusHalo(ctx, item, radius, viewLike);' in js
+    assert 'dashed: viewLike || storageDisabled,' in js and 'if (card.dashed) ctx.setLineDash([5, 4]);' in js
+    assert 'haloDashed: viewLike,' in js and 'if (card.halo) drawHalo(ctx, item, radius, !!card.haloDashed);' in js
     assert 'if (dashed) ctx.setLineDash([5, 4]);' in js
 
 
 def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'function visibilityRequirements()' in graph
     assert 'required.includeSystem || options.includeSystem === true' in graph
@@ -45,7 +45,7 @@ def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> 
 
 
 def test_manual_graph_refresh_reflows_current_projection() -> None:
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'async function refresh(force = false, { reflow = false } = {})' in js
     assert 'computeLayout({ preserveExisting: hadLayout && !reflow });' in js
     assert 'refresh(true, { reflow: true })' in js
@@ -54,11 +54,12 @@ def test_manual_graph_refresh_reflows_current_projection() -> None:
 
 
 def test_lineage_routes_are_directionally_monotone_except_same_row_obstacles() -> None:
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'const verticalDirection = verticalDelta < -0.001 ? -1 : (verticalDelta > 0.001 ? 1 : 0);' in js
     assert 'const sameRowNeedsDetour = verticalDirection === 0 && !clearSegment(sourceFan, targetFan);' in js
-    assert 'if (direction > 0 && dx < -0.001) continue;' in js
-    assert 'if (direction < 0 && dx > 0.001) continue;' in js
-    assert 'if (dy > 0.001 || nextPoint.y < targetFan.y - 0.001) continue;' in js
-    assert 'if (dy < -0.001 || nextPoint.y > targetFan.y + 0.001) continue;' in js
+    # One relaxation rule (stepCost) for both grid searches of the kit router.
+    assert 'if (direction > 0 && dx < -0.001) return null;' in js
+    assert 'if (direction < 0 && dx > 0.001) return null;' in js
+    assert 'if (dy > 0.001 || nextPoint.y < targetFan.y - 0.001) return null;' in js
+    assert 'if (dy < -0.001 || nextPoint.y > targetFan.y + 0.001) return null;' in js
     assert 'Same-row obstacle exception' in js

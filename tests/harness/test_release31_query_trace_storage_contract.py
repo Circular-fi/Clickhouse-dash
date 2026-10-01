@@ -45,10 +45,10 @@ def test_data_preview_numeric_finalized_states_and_menu_portal_positioning() -> 
 
 
 def test_storage_graph_and_minimap_share_routed_geometry() -> None:
-    src = read("src/static/app_explorer_graph.js")
+    src = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "const storageRowY = Number.isFinite(storedAnchorY) ? storedAnchorY : cursorY;" in src
     assert "let tierY = storageRowY;" in src
-    minimap = src[src.index("function drawMinimap()") : src.index("function draw(now", src.index("function drawMinimap()"))]
+    minimap = src[src.index("function drawMinimap(frame)") : src.index("function draw(ctx, frame)", src.index("function drawMinimap(frame)"))]
     assert "storageRouteGeometry(from, to, edge).points" in minimap
     assert "ensureLineageRouteCache()" in minimap
     assert "bezierRoutePoints" in minimap

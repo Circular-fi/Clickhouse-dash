@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert '`${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
     ui = read("src/static/app_explorer_detail.js")
     assert "renderResidentRuntime" not in ui
@@ -79,18 +79,21 @@ def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> No
 
 
 def test_flow_emission_is_time_based_and_zoom_out_is_clamped_to_fit_scale() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "const FLOW_EMISSION_INTERVAL_MS = 900;" in graph
     assert "const travelMs = metric.total / FLOW_SPEED_WORLD_PER_SECOND * 1000;" in graph
     assert "newestAgeMs" in graph and "markerCount" in graph
     assert "function minimumZoomScale()" in graph
     assert "model.fitScale" in graph
-    assert "Math.max(minimumZoomScale(), Math.min(3.2, model.scale * factor))" in graph
+    # One zoom range for every graph: the kit clamps to the client's minimum
+    # (the Explorer: its fit scale) and to MAX_SCALE.
+    assert "minScale: minimumZoomScale," in graph and "const MAX_SCALE = 3.2;" in graph
+    assert "view.scale = Math.max(minScale(), Math.min(MAX_SCALE, view.scale * factor));" in graph
     assert "Math.max(0.06, Math.min(3.2, model.scale * factor))" not in graph
 
 
 def test_storage_layout_places_buffers_before_downstream_targets() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     align = graph[graph.index("function alignPhysicalStorageRows"):graph.index("function computeLayout")]
     assert 'edge.kind === "buffer"' in align
     assert "const maxSourceY = target.y - source.height - rowGap;" in align

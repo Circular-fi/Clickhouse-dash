@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_lineage_routes_detour_around_cards_and_penalize_edge_crossings() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'function segmentHitsItem(' in graph
     assert 'function orthogonalSegmentConflict(' in graph
     assert 'function routeConflictPenalty(' in graph
@@ -20,7 +20,7 @@ def test_lineage_routes_detour_around_cards_and_penalize_edge_crossings() -> Non
 
 
 def test_logical_dependencies_never_animate_but_selected_dependency_gets_blue_dash_halo() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'function isLogicalDependencyEdge(edge)' in graph
     assert '["view", "dependency", "dictionary_source"]' in graph
     assert 'function drawSelectedLogicalDependencyHalo(' in graph
@@ -34,7 +34,7 @@ def test_logical_dependencies_never_animate_but_selected_dependency_gets_blue_da
 
 
 def test_flow_dot_emission_is_time_based_across_zoom_changes() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'flowMarkerState: new Map()' in graph
     marker = graph[graph.index('function drawNormalizedFlowMarker('):graph.index('function drawStorageFlowMarker(')]
     assert 'const newestAgeMs = (now + state.phaseOffsetMs) % FLOW_EMISSION_INTERVAL_MS;' in marker
@@ -45,7 +45,7 @@ def test_flow_dot_emission_is_time_based_across_zoom_changes() -> None:
 
 
 def test_storage_includes_buffer_and_automatically_retains_flush_destination() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     projection = graph[graph.index('function rawStorageProjection()'):graph.index('function storageProjection()')]
     eligibility = graph[graph.index('function canUseStorageForId('):graph.index('function canUseStorageForTable(')]
     assert 'current.kind !== "buffer"' in eligibility
@@ -68,7 +68,7 @@ def test_storage_sidebar_keeps_buffer_available_while_other_non_storing_objects_
 
 def test_legend_is_vertical_and_explorer_health_dot_is_smaller() -> None:
     css = read("src/static/style.css")
-    legend = css[css.index('.explorerGraphLegend {'):css.index('.explorerGraphLegend span')]
+    legend = css[css.index('.graphKitLegend {'):css.index('.graphKitLegend[hidden]')]
     assert 'grid-template-columns: 1fr;' in legend
     start = css.index('.explorerTreeHealthDot {')
     health = css[start:css.index('.explorerDetailPane {', start)]

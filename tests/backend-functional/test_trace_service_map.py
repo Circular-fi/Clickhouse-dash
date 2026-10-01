@@ -110,6 +110,26 @@ def test_unsampled_map_equals_a_direct_parent_child_join(window):
     assert edges[(source, target)]["p95_ns"] == pytest.approx(p95, rel=0.1)
 
 
+def test_edge_kind_is_async_for_messaging_spans(window):
+    """An edge is "async" when most of its child spans are Consumer spans or have
+    a Producer parent (messaging), else "sync": the map dashes async calls."""
+    start, end = window
+    body, _ = service_map({"start_ms": start, "end_ms": end})
+    _, edges = as_maps(body)
+    scope = f"FROM {TABLE} WHERE {time_sql(start, end)}"
+    kinds = {(r[0], r[1]): int(r[2]) * 2 >= int(r[3]) and int(r[2]) > 0 for r in ch_rows(
+        f"SELECT p.ServiceName, c.ServiceName, "
+        f"countIf(c.SpanKind IN ('Consumer', 'SPAN_KIND_CONSUMER') OR p.SpanKind IN ('Producer', 'SPAN_KIND_PRODUCER')), count() "
+        f"FROM (SELECT TraceId, ParentSpanId, ServiceName, SpanKind {scope} AND ParentSpanId != '') AS c "
+        f"ANY LEFT JOIN (SELECT TraceId, SpanId, ServiceName, SpanKind {scope}) AS p "
+        f"ON c.TraceId = p.TraceId AND c.ParentSpanId = p.SpanId "
+        f"WHERE p.ServiceName != '' AND p.ServiceName != c.ServiceName GROUP BY 1, 2")}
+    assert edges and kinds
+    for key, edge in edges.items():
+        assert edge["kind"] in ("sync", "async"), edge
+        assert edge["kind"] == ("async" if kinds[key] else "sync"), key
+
+
 def test_forced_trace_sampling_scales_counts(window):
     start, end = window
     body, _ = service_map({"start_ms": start, "end_ms": end, "sample_factor": 4})

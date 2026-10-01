@@ -305,24 +305,23 @@
         <section id="traceServicesView" class="traceTabView traceTabView--services" role="tabpanel" aria-labelledby="tracesTab-services" hidden></section>
 
         <section id="traceMapView" class="traceMap" role="tabpanel" aria-labelledby="tracesTab-map" hidden>
-          <div class="traceMap__toolbar">
-            <h2 class="traceMap__title">Service map</h2>
-            <span id="traceMapMeta" class="traceMap__meta"></span>
-            <span id="traceMapSampled" class="traceMap__badge" hidden></span>
-            <div class="traceMap__tools" role="group" aria-label="Map view">
-              <button id="traceMapZoomOut" class="traceMap__tool" type="button" aria-label="Zoom out" title="Zoom out">&minus;</button>
-              <button id="traceMapZoomIn" class="traceMap__tool" type="button" aria-label="Zoom in" title="Zoom in">+</button>
-              <button id="traceMapFit" class="traceMap__tool traceMap__tool--text" type="button" title="Fit the map to the view">Fit</button>
+          <div id="traceMapPane" class="graphKitPane traceMap__pane">
+            <canvas id="traceMapCanvas" class="graphKit__canvas" tabindex="0" aria-label="Service map. Arrow keys move between services, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>
+            <div id="traceMapBar" class="graphKitBar" aria-label="Service map controls">
+              <div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">
+                <button id="traceMapZoomOut" class="graphKitTool" type="button" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>
+                <button id="traceMapFit" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit the map to the view" title="Fit the map to the view (0)"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg></button>
+                <button id="traceMapZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
+              </div>
             </div>
-          </div>
-          <div class="traceMap__body">
-            <div id="traceMapCanvas" class="traceMap__canvas">
-              <svg id="traceMapSvg" class="traceMap__svg" aria-label="Service map graph"></svg>
-              <div id="traceMapState" class="traceMap__state"><div class="tracesEmpty">Search to load the service map.</div></div>
-              <div id="traceMapLegend" class="traceMap__legend" aria-label="Legend"></div>
-              <div id="traceMapTip" class="traceMap__tip" role="tooltip" hidden></div>
+            <div id="traceMapState" class="traceMap__state"><div class="tracesEmpty">Search to load the service map.</div></div>
+            <div class="graphKitDock">
+              <div id="traceMapLegend" class="graphKitLegend" aria-label="Legend"></div>
+              <div class="graphKitStatus"><span id="traceMapMeta" class="graphKitStatus__text" role="status"></span><span id="traceMapSampled" class="graphKitStatus__badge" hidden></span></div>
             </div>
-            <aside id="traceMapPanel" class="traceMap__panel" aria-label="Service map selection" hidden></aside>
+            <canvas id="traceMapMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
+            <section id="traceMapList" class="graphKitList" aria-label="Services and calls" hidden></section>
+            <aside id="traceMapPanel" class="graphKitPanel" aria-label="Service map selection" hidden></aside>
           </div>
         </section>
       </section>

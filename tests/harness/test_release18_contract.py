@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_storage_focus_expands_reverse_buffer_ingress() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     raw = graph[graph.index("function rawStorageProjection()"):graph.index("function storageProjection()")]
     assert "const incoming = new Map();" in raw
     assert "const addBuffersFeeding =" in raw
@@ -19,7 +19,7 @@ def test_storage_focus_expands_reverse_buffer_ingress() -> None:
 
 
 def test_lineage_uses_global_obstacle_and_crossing_aware_orthogonal_routing() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "lineageRouteCache: null" in graph
     assert "function orthogonalRouteForEdge(" in graph
     assert "function orthogonalSegmentConflict(" in graph
@@ -34,7 +34,7 @@ def test_lineage_uses_global_obstacle_and_crossing_aware_orthogonal_routing() ->
 
 
 def test_flow_marker_scales_size_and_apparent_speed_with_zoom() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     marker = graph[graph.index("const FLOW_SPEED_WORLD_PER_SECOND"):graph.index("function drawStorageFlowMarker")]
     assert "const FLOW_SPEED_WORLD_PER_SECOND = 72;" in marker
     assert "const FLOW_DOT_RADIUS_WORLD = 2.35;" in marker

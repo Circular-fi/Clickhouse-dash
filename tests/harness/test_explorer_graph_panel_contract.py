@@ -51,7 +51,7 @@ def test_graph_expansions_are_bounded_and_only_grow_from_shown_anchors() -> None
 
 
 def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = read("src/static/style.css")
     assert "const READABLE_TEXT_PX = 11;" in js
     assert "model.scale = Math.max(overview, readableScale());" in js
@@ -65,8 +65,11 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     assert "return mobileLayout() ? \"list\" : \"canvas\";" in js
     assert "model.openCard(node.database, node.name)" in js
     # Canvas colours come from graph tokens defined for both themes.
-    for token in ("--graphMuted", "--graphAccentText", "--graphHalo", "--graphEdge"):
+    for token in ("--graph-muted", "--graph-accent-text", "--graph-halo", "--graph-edge"):
         assert f"{token}:" in css
-    assert 'html[data-theme="light"] {\n  --graphMuted:' in css
+        assert f'color("' not in token
+    assert 'html[data-theme="light"] {\n  --graph-grid:' in css
+    # No colour literal in the canvas code: every colour is a --graph-* token.
+    assert "graphColor(role) {\n    return kit.color(role);" in js
     ui = read("src/static/app_explorer.js")
     assert "openCard: openTableCardFromGraph" in ui

@@ -9,10 +9,12 @@ def read(path: str) -> str:
 
 def test_theme_change_repaints_graph_in_same_ui_transaction() -> None:
     ui = read("src/static/app_ui.js")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "ns.explorerGraph?.redrawThemeNow?.();" in ui
     assert "function redrawThemeNow()" in graph
-    assert "cancelAnimationFrame(model.animationFrame)" in graph
+    # The kit controller cancels the pending frame and paints synchronously.
+    assert "model.view?.drawNow();" in graph
+    assert "if (control.frame) cancelAnimationFrame(control.frame);" in graph
     assert "draw(performance.now());" in graph
     assert "redrawThemeNow," in graph
 
@@ -34,7 +36,7 @@ def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
 
 def test_storage_graph_has_no_depth_controls_and_switch_preserves_focused_screen_position() -> None:
     html = read("src/static/explorer.html")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     dom = read("src/static/app_dom.js")
     assert 'id="explorerGraphDepthControls"' in html
     assert 'explorerGraphDepthControls: byId("explorerGraphDepthControls")' in dom
@@ -45,7 +47,7 @@ def test_storage_graph_has_no_depth_controls_and_switch_preserves_focused_screen
 
 
 def test_graph_click_then_browse_sync_preserves_canvas_camera_but_offscreen_sidebar_focus_can_fit() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'function setFocus(id, center = false, { preserveDepth = true } = {})' in graph
     assert 'const needsFit = shouldEnsure && !nodeIsOnScreen(id);' in graph
     assert 'setFocus(id, needsFit, { preserveDepth: true });' in graph

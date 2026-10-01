@@ -3302,54 +3302,77 @@ html[data-theme="light"] {
   --exd-err: #dc2626;
 }
 :root {
-  --graphMuted: #a3adbb;
-  --graphAccentText: #93b4ff;
-  --graphHalo: #7c9cff;
-  --graphEdge: #6b8cff;
-  --graphEdgeMuted: #8b96a8;
-  --graphNodeBorder: rgba(148, 163, 184, 0.34);
-  --graphNodeBg: #141b27;
-  --graphGroupBg: #172033;
-  --graphWarn: #f0a33a;
-  --graphError: #f87171;
+  --graph-bg: var(--bg);
+  --graph-grid: rgba(154, 164, 178, 0.16);
+  --graph-text: var(--text);
+  --graph-muted: #a3adbb;
+  --graph-accent-text: #93b4ff;
+  --graph-halo: #7c9cff;
+  --graph-edge: #6b8cff;
+  --graph-edge-muted: #8b96a8;
+  --graph-node-border: rgba(148, 163, 184, 0.34);
+  --graph-node-bg: #141b27;
+  --graph-disabled-bg: var(--panelBg);
+  --graph-group-bg: #172033;
+  --graph-band-bg: var(--tableBg);
+  --graph-label-bg: var(--panelBg);
+  --graph-warn: #f0a33a;
+  --graph-error: #f87171;
+  --graph-surface: rgba(15, 22, 35, 0.92);
+  --graph-minimap-bg: var(--panelBg);
+  --graph-minimap-view: var(--graph-halo);
+  --graph-minimap-view-fill: transparent;
+  --graph-panel-width: min(340px, 42%);
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --graphMuted: #3d4f78;
-    --graphAccentText: #1d4ed8;
-    --graphHalo: #2563eb;
-    --graphEdge: #2563eb;
-    --graphEdgeMuted: #5b6b8c;
-    --graphNodeBorder: rgba(15, 23, 42, 0.34);
-    --graphNodeBg: #ffffff;
-    --graphGroupBg: #eef3ff;
-    --graphWarn: #b45309;
-    --graphError: #b91c1c;
+    --graph-grid: rgba(0, 41, 138, 0.13);
+    --graph-muted: #3d4f78;
+    --graph-accent-text: #1d4ed8;
+    --graph-halo: #2563eb;
+    --graph-edge: #2563eb;
+    --graph-edge-muted: #5b6b8c;
+    --graph-node-border: rgba(15, 23, 42, 0.34);
+    --graph-node-bg: #ffffff;
+    --graph-group-bg: #eef3ff;
+    --graph-warn: #b45309;
+    --graph-error: #b91c1c;
+    --graph-surface: rgba(255, 255, 255, 0.94);
+    --graph-minimap-view: rgba(15, 23, 42, 0.92);
+    --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
   }
 }
 html[data-theme="dark"] {
-  --graphMuted: #a3adbb;
-  --graphAccentText: #93b4ff;
-  --graphHalo: #7c9cff;
-  --graphEdge: #6b8cff;
-  --graphEdgeMuted: #8b96a8;
-  --graphNodeBorder: rgba(148, 163, 184, 0.34);
-  --graphNodeBg: #141b27;
-  --graphGroupBg: #172033;
-  --graphWarn: #f0a33a;
-  --graphError: #f87171;
+  --graph-grid: rgba(154, 164, 178, 0.16);
+  --graph-muted: #a3adbb;
+  --graph-accent-text: #93b4ff;
+  --graph-halo: #7c9cff;
+  --graph-edge: #6b8cff;
+  --graph-edge-muted: #8b96a8;
+  --graph-node-border: rgba(148, 163, 184, 0.34);
+  --graph-node-bg: #141b27;
+  --graph-group-bg: #172033;
+  --graph-warn: #f0a33a;
+  --graph-error: #f87171;
+  --graph-surface: rgba(15, 22, 35, 0.92);
+  --graph-minimap-view: var(--graph-halo);
+  --graph-minimap-view-fill: transparent;
 }
 html[data-theme="light"] {
-  --graphMuted: #3d4f78;
-  --graphAccentText: #1d4ed8;
-  --graphHalo: #2563eb;
-  --graphEdge: #2563eb;
-  --graphEdgeMuted: #5b6b8c;
-  --graphNodeBorder: rgba(15, 23, 42, 0.34);
-  --graphNodeBg: #ffffff;
-  --graphGroupBg: #eef3ff;
-  --graphWarn: #b45309;
-  --graphError: #b91c1c;
+  --graph-grid: rgba(0, 41, 138, 0.13);
+  --graph-muted: #3d4f78;
+  --graph-accent-text: #1d4ed8;
+  --graph-halo: #2563eb;
+  --graph-edge: #2563eb;
+  --graph-edge-muted: #5b6b8c;
+  --graph-node-border: rgba(15, 23, 42, 0.34);
+  --graph-node-bg: #ffffff;
+  --graph-group-bg: #eef3ff;
+  --graph-warn: #b45309;
+  --graph-error: #b91c1c;
+  --graph-surface: rgba(255, 255, 255, 0.94);
+  --graph-minimap-view: rgba(15, 23, 42, 0.92);
+  --graph-minimap-view-fill: rgba(15, 23, 42, 0.10);
 }
 :root {
   --explorer-table-font: 13px;

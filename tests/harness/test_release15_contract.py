@@ -34,14 +34,14 @@ def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> Non
 
 
 def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "function canUseStorageForId" in graph
     assert 'model.detailMode === "physical" && !canUseStorageForId(id)' in graph
     assert 'node.storage_disabled === true' in graph
     assert 'function nodeIsStorageDisabled(node)' in graph
     assert 'function nodeIsClickable(node)' in graph
-    clickable = graph[graph.index('function nodeIsClickable(node)'):graph.index('function updateCanvasPointerState')]
+    clickable = graph[graph.index('function nodeIsClickable(node)'):graph.index('function hitTarget(')]
     assert '!nodeIsStorageDisabled(node)' in clickable
     assert 'graph?.canUseStorageForTable?.(database, table) === false' in explorer
     assert 'button.disabled = !!storageBlocked;' in explorer
@@ -49,7 +49,7 @@ def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> 
 
 def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
     ui = read("src/static/app_explorer.js")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'params.set("view", model.mode === "graph" ? "graph" : "browse")' in ui
     assert 'params.set("graph", route.mode === "physical" ? "storage" : "lineage")' in ui
     assert 'params.set("depth", String(route.depth ?? 1))' in ui
@@ -86,8 +86,8 @@ def test_create_statement_has_no_internal_vertical_height_limit() -> None:
 def test_graph_camera_controls_are_separate_and_buffer_ttl_metadata_is_exposed() -> None:
     html = read("src/static/explorer.html")
     graph_cpp = read("src/explorer_graph.cpp")
-    graph_js = read("src/static/app_explorer_graph.js")
-    assert 'class="explorerGraphCameraControls"' in html
+    graph_js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    assert 'class="graphKitGroup graphKitTools"' in html
     assert 'id="explorerGraphZoomOutButton"' in html
     assert 'id="explorerGraphZoomInButton"' in html
     assert 'id="explorerGraphFitButton"' in html
@@ -129,5 +129,5 @@ def test_legacy_schema_canonicalization_preserves_explorer_query_state() -> None
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'const canonicalParams = new URLSearchParams(window.location.search || "");' in ui
     assert 'canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse")' in ui
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "model.onStateChange?.();" in graph

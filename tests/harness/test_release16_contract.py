@@ -9,7 +9,7 @@ def read(rel: str) -> str:
 
 def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'const hasDepth = params.has("depth");' in ui
     assert 'const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;' in ui
     assert ': 1;' in ui[ui.index('const graphDepth'):ui.index('if (path === "/explorer")')]
@@ -27,13 +27,13 @@ def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> 
 
 def test_graph_has_no_hover_popup_and_camera_controls_are_inline_after_depth() -> None:
     html = read("src/static/explorer.html")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'id="explorerGraphTooltip"' not in html
     assert 'explorerGraphTooltip' not in graph
     assert 'showTooltip(node' not in graph[graph.index('canvas.addEventListener("pointermove"'):graph.index('const endDrag')]
     type_pos = html.index('id="explorerGraphTypeSelect"')
     depth_pos = html.index('id="explorerGraphDepthControls"')
-    camera_pos = html.index('class="explorerGraphCameraControls"')
+    camera_pos = html.index('class="graphKitGroup graphKitTools"')
     refresh_pos = html.index('id="explorerGraphRefreshButton"')
     assert type_pos < depth_pos < camera_pos < refresh_pos
     assert '>Storage<' in html
@@ -41,7 +41,7 @@ def test_graph_has_no_hover_popup_and_camera_controls_are_inline_after_depth() -
 
 
 def test_hidden_views_and_materialized_views_are_contracted_before_depth() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'function logicalProjection()' in graph
     assert 'const projection = logicalProjection();' in graph
     assert 'if (!model.includeNonStoring && isNonStoringNode(node) && node.id !== model.focusedId)' in graph

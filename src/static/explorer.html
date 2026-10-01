@@ -228,12 +228,12 @@
         </section>
         </div>
 
-        <section id="explorerGraphPane" class="explorerGraphPane" hidden aria-label="ClickHouse topology graph">
-          <canvas id="explorerGraphCanvas" class="explorerGraphCanvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph"></canvas>
-          <div class="explorerGraphViewportControls" aria-label="Graph viewport controls">
-            <div class="explorerGraphViewportGroup" aria-label="Graph scope controls">
+        <section id="explorerGraphPane" class="explorerGraphPane graphKitPane" hidden aria-label="ClickHouse topology graph">
+          <canvas id="explorerGraphCanvas" class="explorerGraphCanvas graphKit__canvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph. Arrow keys move between objects, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>
+          <div class="explorerGraphViewportControls graphKitBar" aria-label="Graph viewport controls">
+            <div class="graphKitGroup explorerGraphScopeControls" aria-label="Graph scope controls">
               <div id="explorerGraphTypeSelect" class="themeSelect explorerGraphTypeSelect">
-                <button id="explorerGraphTypeSelectButton" class="explorerGraphViewportControl explorerGraphViewportControl--text themeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Lineage</button>
+                <button id="explorerGraphTypeSelectButton" class="graphKitTool graphKitTool--text themeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Lineage</button>
                 <div id="explorerGraphTypeSelectMenu" class="themeSelect__menu explorerGraphTypeSelect__menu" role="listbox" tabindex="-1" hidden>
                   <button id="explorerGraphLogicalButton" class="themeSelect__option" type="button" role="option" data-value="logical" aria-selected="true">Lineage</button>
                   <button id="explorerGraphPhysicalButton" class="themeSelect__option" type="button" role="option" data-value="physical" aria-selected="false">Storage</button>
@@ -241,28 +241,30 @@
               </div>
               <span id="explorerGraphDepthControls" class="explorerGraphDepthControls">
                 <span class="explorerGraphViewportControls__label">Depth:</span>
-                <button id="explorerGraphContractButton" class="explorerGraphViewportControl" type="button" aria-label="Decrease graph depth">−</button>
+                <button id="explorerGraphContractButton" class="graphKitTool" type="button" aria-label="Decrease graph depth">&minus;</button>
                 <span id="explorerGraphDepthValue" class="explorerGraphViewportControls__value">1</span>
-                <button id="explorerGraphExpandButton" class="explorerGraphViewportControl" type="button" aria-label="Increase graph depth">+</button>
+                <button id="explorerGraphExpandButton" class="graphKitTool" type="button" aria-label="Increase graph depth">+</button>
               </span>
             </div>
-            <div class="explorerGraphCameraControls" aria-label="Graph camera controls">
-              <button id="explorerGraphZoomOutButton" class="explorerGraphViewportControl" type="button" aria-label="Zoom out" title="Zoom out">−</button>
-              <button id="explorerGraphFitButton" class="explorerGraphViewportControl explorerGraphViewportControl--icon" type="button" aria-label="Fit graph to viewport" title="Fit graph to viewport"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg></button>
-              <button id="explorerGraphZoomInButton" class="explorerGraphViewportControl" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+            <div class="graphKitGroup graphKitTools" role="group" aria-label="Zoom">
+              <button id="explorerGraphZoomOutButton" class="graphKitTool" type="button" aria-label="Zoom out" title="Zoom out (-)">&minus;</button>
+              <button id="explorerGraphFitButton" class="graphKitTool graphKitTool--icon" type="button" aria-label="Fit graph to viewport" title="Fit graph to viewport (0)"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6.1 3.5H3.5v2.6M11.9 3.5h2.6v2.6M14.5 11.9v2.6h-2.6M6.1 14.5H3.5v-2.6"/><circle cx="9" cy="9" r="2.1"/></svg></button>
+              <button id="explorerGraphZoomInButton" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
             </div>
-            <div class="explorerGraphViewportAux" aria-label="Graph actions">
-              <button id="explorerGraphRefreshButton" class="explorerGraphViewportControl explorerGraphViewportControl--text" type="button" title="Refresh graph" aria-label="Refresh graph"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+            <div class="graphKitGroup" aria-label="Graph actions">
+              <button id="explorerGraphRefreshButton" class="graphKitTool graphKitTool--icon" type="button" title="Refresh graph" aria-label="Refresh graph"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
             </div>
           </div>
-          <div id="explorerGraphStatus" class="explorerGraphStatus">Graph not loaded</div>
-          <div class="explorerGraphLegend" aria-label="Graph legend">
-            <span title="Insert-time movement, for example Buffer forwarding or Materialized View flow"><i class="explorerLegendLine explorerLegendLine--flow"></i> data flow</span>
-            <span title="Query-time dependency, for example an ordinary View; no insert-time data flow"><i class="explorerLegendLine explorerLegendLine--logical"></i> logical dependency</span>
-            <span title="Structural routing or containment, for example Distributed routing or physical topology"><i class="explorerLegendLine explorerLegendLine--route"></i> routing/topology</span>
-            <span id="explorerGraphLegendTtl" title="TTL lifecycle transition, for example MOVE TO VOLUME or terminal DELETE" hidden><i class="explorerLegendLine explorerLegendLine--ttl"></i> TTL lifecycle</span>
+          <div class="graphKitDock">
+            <div class="graphKitLegend" aria-label="Graph legend">
+              <span class="graphKitLegend__row" title="Insert-time movement, for example Buffer forwarding or Materialized View flow"><i class="graphKitLegend__line graphKitLegend__line--edge"></i> data flow</span>
+              <span class="graphKitLegend__row" title="Query-time dependency, for example an ordinary View; no insert-time data flow"><i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--muted"></i> logical dependency</span>
+              <span class="graphKitLegend__row" title="Structural routing or containment, for example Distributed routing or physical topology"><i class="graphKitLegend__line graphKitLegend__line--dotted graphKitLegend__line--edge"></i> routing/topology</span>
+              <span id="explorerGraphLegendTtl" class="graphKitLegend__row" title="TTL lifecycle transition, for example MOVE TO VOLUME or terminal DELETE" hidden><i class="graphKitLegend__line graphKitLegend__line--dashed graphKitLegend__line--edge"></i> TTL lifecycle</span>
+            </div>
+            <div class="graphKitStatus"><span id="explorerGraphStatus" class="graphKitStatus__text" role="status">Graph not loaded</span></div>
           </div>
-          <canvas id="explorerGraphMinimap" class="explorerGraphMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
+          <canvas id="explorerGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
         </section>
       </div>
 

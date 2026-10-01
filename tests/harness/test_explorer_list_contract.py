@@ -142,7 +142,7 @@ def test_information_schema_is_excluded_at_runner_discovery_boundary() -> None:
 
 def test_explorer_uses_arial_and_owns_no_document_scroll_on_desktop() -> None:
     css = read("src/static/style.css")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'font-family: Arial, Helvetica, sans-serif;' in css
     assert '"Inter"' not in css
     assert 'Arial, Helvetica, sans-serif' in graph

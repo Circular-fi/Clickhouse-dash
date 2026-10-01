@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_storage_places_buffer_above_targets_before_table_tier() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "const columnGap = 150;" in graph
     assert 'edge.kind === "buffer"' in graph
     assert "const maxSourceY = target.y - source.height - rowGap;" in graph
@@ -17,9 +17,9 @@ def test_storage_places_buffer_above_targets_before_table_tier() -> None:
 
 
 def test_lineage_has_single_input_output_port_and_perpendicular_fan_stubs() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    assert "one semantic output point (right edge, at a" in graph
-    assert "one semantic input point" in graph
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    assert "one output port (right edge, at a stable offset from" in graph
+    assert "one input port (left edge, same offset)" in graph
     assert "current.a = port;" in graph
     assert "current.b = port;" in graph
     assert "current.aFan = { x: port.x + offset, y: port.y };" in graph
@@ -29,27 +29,28 @@ def test_lineage_has_single_input_output_port_and_perpendicular_fan_stubs() -> N
 
 
 def test_crossing_router_evaluates_multiple_global_route_orders() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "function routePairConflictScore(" in graph
-    assert "function lineageRouteSetScore(" in graph
-    assert "function buildLineageRouteCandidate(" in graph
-    assert "function improveLineageRouteCandidate(" in graph
+    assert "function routeSetScore(" in graph
+    assert "function buildRouteCandidate(" in graph
+    assert "function improveRouteCandidate(" in graph
     assert "Rip-up/reroute the most conflicted edge" in graph
     assert "const verticalFirst = edges.slice().sort" in graph
-    assert "candidates.push(buildLineageRouteCandidate(verticalFirst, ports))" in graph
-    assert "lineageRouteSetScore(a, edgesById) - lineageRouteSetScore(b, edgesById)" in graph
+    assert "candidates.push(buildRouteCandidate(verticalFirst, ports))" in graph
+    assert "routeSetScore(a, edgesById) - routeSetScore(b, edgesById)" in graph
     assert "conflict.crossings * 28_000" in graph
 
 
 def test_ttl_lifecycle_dash_is_documented_in_vertical_legend() -> None:
     html = read("src/static/explorer.html")
     css = read("src/static/style.css")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "TTL lifecycle" in html
-    assert "explorerLegendLine--ttl" in html
+    ttl_row = html[html.index('id="explorerGraphLegendTtl"'):html.index("TTL lifecycle</span>")]
+    assert "graphKitLegend__line--dashed graphKitLegend__line--edge" in ttl_row
     assert 'id="explorerGraphLegendTtl"' in html
     assert 'id="explorerGraphLegendTtl"' in html and "hidden" in html
-    assert ".explorerLegendLine--ttl" in css
+    assert ".graphKitLegend__line--dashed" in css
     assert 'edge.kind === "ttl_delete" || edge.kind === "ttl_move"' in graph
     assert 'document.getElementById("explorerGraphLegendTtl")' in graph
     assert 'ttlLegend.hidden = next !== "physical"' in graph

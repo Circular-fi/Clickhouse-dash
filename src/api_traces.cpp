@@ -2458,17 +2458,20 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   const std::string sql =
       "SELECT toString(GROUPING(caller)), caller, service, toString(count()), toString(countIf(err)), "
       "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[1])), toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[2])), "
-      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[3])) "
+      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[3])), toString(countIf(c.consumer OR p.producer)) "
       "FROM (SELECT if(ParentSpanId = '', 0, cityHash64(TraceId, ParentSpanId)) AS pk, toString(ServiceName) AS service, "
-      "Duration AS dur, StatusCode = 'Error' AS err" + side + ") AS c "
-      "ANY LEFT JOIN (SELECT cityHash64(TraceId, SpanId) AS k, toString(ServiceName) AS parent_service" + side + ") AS p ON c.pk = p.k "
+      "Duration AS dur, StatusCode = 'Error' AS err, SpanKind IN ('Consumer', 'SPAN_KIND_CONSUMER') AS consumer" + side + ") AS c "
+      "ANY LEFT JOIN (SELECT cityHash64(TraceId, SpanId) AS k, toString(ServiceName) AS parent_service, "
+      "SpanKind IN ('Producer', 'SPAN_KIND_PRODUCER') AS producer" + side + ") AS p ON c.pk = p.k "
       "GROUP BY GROUPING SETS ((if(p.parent_service != c.service, p.parent_service, '') AS caller, service), (service)) "
       "HAVING GROUPING(caller) = 1 OR caller != '' "
       "SETTINGS max_execution_time = " + std::to_string(kServiceMapTimeBudgetSeconds) +
       ", timeout_overflow_mode = 'throw', force_grouping_standard_compatibility = 1, join_use_nulls = 0";
 
   struct NodeRow { std::string service; ServiceMapStats stats; };
-  struct EdgeRow { std::string source, target; ServiceMapStats stats; };
+  // Call kind of an edge: "async" when most of its child spans are Consumer
+  // spans or have a Producer parent (messaging), else "sync".
+  struct EdgeRow { std::string source, target; ServiceMapStats stats; uint64_t async = 0; };
   std::vector<NodeRow> nodes;
   std::vector<EdgeRow> edges;
   const auto query_started = std::chrono::steady_clock::now();
@@ -2482,7 +2485,8 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
         stats.p95 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
         stats.p99 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 7, row)));
         if (ch_block_text_at(block, 0, row) == "1") nodes.push_back(NodeRow{ch_block_text_at(block, 2, row), stats});
-        else edges.push_back(EdgeRow{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), stats});
+        else edges.push_back(EdgeRow{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), stats,
+                                     static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 8, row)))});
       }
     });
   } catch (const std::exception& e) {
@@ -2537,6 +2541,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
     w.StartObject();
     w.Key("source"); w.String(edge.source.c_str());
     w.Key("target"); w.String(edge.target.c_str());
+    w.Key("kind"); w.String(edge.async > 0 && edge.async * 2 >= edge.stats.count ? "async" : "sync");
     write_service_map_stats(w, edge.stats, scale, "calls");
     w.EndObject();
   }

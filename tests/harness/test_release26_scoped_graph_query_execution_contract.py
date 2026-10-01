@@ -34,7 +34,7 @@ def test_graph_api_is_server_scoped_to_focus_depth_and_mode() -> None:
 def test_live_activity_endpoint_is_not_exposed_or_polled() -> None:
     server = read("src/server.cpp")
     api = read("src/static/app_api.js")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert '/api/explorer/activity' not in server
     assert 'getExplorerActivity' not in api
@@ -43,7 +43,7 @@ def test_live_activity_endpoint_is_not_exposed_or_polled() -> None:
 
 
 def test_focused_graph_requests_exact_depth_and_groups_databases() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert "options.depth = model.detailMode === \"logical\" ? Math.min(8, model.focusDepth) : 0;" in graph
     assert "groupLogicalPositionsByDatabase(positions);" in graph
@@ -58,15 +58,16 @@ def test_focused_graph_requests_exact_depth_and_groups_databases() -> None:
 
 
 def test_logical_node_labels_are_database_qualified() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     # Short object name as the title, its database (and engine) as the
     # subtitle: a long database prefix never truncates the distinctive part.
-    assert 'const subtitle = `${node.database || ""} · ${nodeKindLabel(node)}`;' in graph
+    assert 'subtitle: `${node.database || ""} \\u00b7 ${nodeKindLabel(node)}`,' in graph
+    assert '{ text: texts.subtitle, y: 41 },' in graph
     assert "NODE_WIDTH = 264" in graph
 
 
 def test_focus_animation_cannot_escape_selected_table_edges() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     start = graph.index("function lineageEdgeShouldAnimate")
     end = graph.index("function drawEdge", start)
     block = graph[start:end]
@@ -81,7 +82,7 @@ def test_focus_animation_cannot_escape_selected_table_edges() -> None:
 
 def test_logical_payload_retains_storage_availability_without_physical_batch() -> None:
     cpp = read("src/api_explorer.cpp")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "logical_storage_available_ids" in cpp
     assert 'w.Key("storage_available")' in cpp
     assert 'typeof root.storage_available === "boolean"' in graph

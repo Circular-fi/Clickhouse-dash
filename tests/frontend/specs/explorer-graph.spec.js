@@ -1,10 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
+import {
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames,
+} from '../helpers/graph-kit.js';
 
-// Explorer graph: readable fit, database groups, per-node expansion, side
-// panel, edge definitions, impact list, light theme tokens and the phone
-// layout. The graph is a canvas: ChDash.explorerGraph.inspect() reports the
-// last drawn frame in client coordinates so the tests click real pixels.
+// Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
+// fit, database groups, per-node expansion, side panel, edge definitions,
+// impact list, the kit's look (dot grid, cards, orthogonal edges, always
+// visible labels, legend / status bottom-left, minimap, icon toolbar), hover
+// halo, click = recentre + select, keyboard, both themes, the phone layout and
+// performance budgets. The graph is a canvas:
+// ChDash.explorerGraph.inspect() reports the last drawn frame in client
+// coordinates so the tests click real pixels.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -30,7 +37,7 @@ async function graphReady(page, pattern = /[1-9]\d* (nodes|collapsed)/) {
   await expect(page.locator('#explorerGraphPane')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerGraphStatus')).toHaveText(pattern, { timeout: 20_000 });
   // Two frames: the layout of the payload has been drawn at least once.
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await settle(page);
 }
 
 async function inspect(page) {
@@ -78,7 +85,7 @@ test('unfocused lineage collapses databases, hides objects without dependencies 
   expect(state.nodes.some((node) => node.kind === 'database_group' && node.database === 'otel')).toBe(true);
 });
 
-test('fit keeps canvas text readable and cards carry the short name with the database as subtitle', async ({ page }) => {
+test('fit keeps canvas text readable, cards carry the short name and the minimap shows the clipped rest', async ({ page }) => {
   for (const viewport of [VIEWPORTS['desktop-1440'], VIEWPORTS['laptop-1280']]) {
     await page.setViewportSize(viewport);
     await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 3 }));
@@ -88,12 +95,105 @@ test('fit keeps canvas text readable and cards carry the short name with the dat
     expect(state.scale * 12).toBeGreaterThanOrEqual(11 - 1e-6);
     const focus = state.nodes.find((node) => node.id === 'table:chdash_ui.weather_observations');
     expect(focus.height).toBeGreaterThanOrEqual(72);
-    // The focused neighbourhood no longer fits at that scale: the minimap
-    // shows where the rest is.
-    if (state.nodes.some((node) => node.x + node.width > viewport.width || node.y + node.height > viewport.height)) {
+    // The minimap is shown exactly when a card is clipped.
+    const canvas = await page.locator('#explorerGraphCanvas').boundingBox();
+    const clipped = state.nodes.some((node) => node.x < canvas.x - 0.5 || node.y < canvas.y - 0.5
+      || node.x + node.width > canvas.x + canvas.width + 0.5 || node.y + node.height > canvas.y + canvas.height + 0.5);
+    expect(state.minimapVisible).toBe(clipped || state.scale < state.readableScale - 1e-6);
+    if (clipped) {
       await expect(page.locator('#explorerGraphMinimap')).toBeVisible();
+      const minimap = await page.locator('#explorerGraphMinimap').boundingBox();
+      // Bottom-right of the pane.
+      expect(canvas.x + canvas.width - (minimap.x + minimap.width)).toBeLessThan(20);
+      expect(canvas.y + canvas.height - (minimap.y + minimap.height)).toBeLessThan(20);
     }
   }
+});
+
+test('the kit look: dot grid, icon toolbar, legend and status bottom-left, orthogonal edges and labels on every edge', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
+  await graphReady(page, /neighborhood depth 2/);
+  const state = await inspect(page);
+  expect(state.kit).toBe(true);
+  const colors = await tokenColors(page, ['--graph-bg', '--bg']);
+  expect(colors['--graph-bg']).toEqual(colors['--bg']);
+  expect(colors['--graph-bg'][3]).toBe(1);
+  await expectDotGrid(page, '#explorerGraphCanvas', state, colors['--graph-bg']);
+  await expectKitChrome(page, {
+    pane: '#explorerGraphPane', zoomOut: '#explorerGraphZoomOutButton', fit: '#explorerGraphFitButton', zoomIn: '#explorerGraphZoomInButton',
+    legend: '#explorerGraphPane .graphKitLegend', status: '#explorerGraphPane .graphKitStatus',
+  });
+  await expect(page.locator('#explorerGraphPane .graphKitLegend')).toContainText('data flow');
+  // Every Lineage edge is orthogonal (axis-aligned segments) and labelled.
+  expect(state.edges.length).toBeGreaterThan(3);
+  for (const edge of state.edges) {
+    expect(edge.points.length, edge.id).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < edge.points.length; i += 1) {
+      const a = edge.points[i - 1];
+      const b = edge.points[i];
+      expect(Math.abs(a.x - b.x) < 0.5 || Math.abs(a.y - b.y) < 0.5, `${edge.id} segment ${i}`).toBe(true);
+    }
+  }
+  expect(state.edgeLabelsPlaced).toBe(state.edges.length);
+  expectLabelsClear(state);
+});
+
+test('edge labels stay clear of each other when a node is selected (flush / MV next to weather_buffer)', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_buffer'));
+  await graphReady(page, /neighborhood depth 1/);
+  await clickBox(page, await nodeBox(page, 'table:chdash_ui.weather_buffer'));
+  await expect(page.locator('#explorerGraphPanel')).toBeVisible();
+  await settle(page);
+  // Hovering the selected node highlights all of its edges: their labels keep
+  // their places instead of being forced on top of each other.
+  const buffer = await nodeBox(page, 'table:chdash_ui.weather_buffer');
+  await page.mouse.move(buffer.x + buffer.width / 2, buffer.y + buffer.height / 2);
+  await settle(page);
+  const state = await inspect(page);
+  const texts = state.edgeLabels.map((label) => label.text).sort();
+  expect(texts).toEqual(expect.arrayContaining(['MV', 'flush']));
+  expectLabelsClear(state);
+});
+
+test('hover outlines the hovered card only and click recentres on the card and selects it', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_observations'));
+  await graphReady(page, /neighborhood depth 1/);
+  let state = await inspect(page);
+  const target = state.nodes.find((node) => node.name === 'weather_daily_summary_mv');
+  const other = state.nodes.find((node) => node.name === 'valid_weather_observations');
+  const halo = (await tokenColors(page, ['--graph-halo']))['--graph-halo'];
+  const edgePixel = (node) => pixel(page, '#explorerGraphCanvas', node.x + node.width / 2, node.y + 0.5);
+  const beforeTarget = await edgePixel(target);
+  const beforeOther = await edgePixel(other);
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+  await settle(page);
+  state = await inspect(page);
+  expect(state.hoveredId).toBe(target.id);
+  await expect(page.locator('#explorerGraphCanvas')).toHaveClass(/is-clickable/);
+  // The hovered card's outline turns to the halo colour; the others are untouched (no dimming).
+  expect(colorDistance(await edgePixel(target), halo)).toBeLessThan(colorDistance(beforeTarget, halo));
+  expect(colorDistance(await edgePixel(other), beforeOther)).toBeLessThan(2);
+  // No hover popup on the canvas.
+  await expect(page.locator('#explorerGraphPane [role="tooltip"]')).toHaveCount(0);
+
+  await page.mouse.click(target.x + target.width / 2, target.y + target.height / 2);
+  const panel = page.locator('#explorerGraphPanel');
+  await expect(panel).toBeVisible();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\//);
+  await cameraIdle(page, 'ChDash.explorerGraph');
+  state = await inspect(page);
+  expect(state.focusedId).toBe(target.id);
+  expect(state.panel).toEqual({ type: 'node', id: target.id });
+  // Recentred in the area the panel leaves free.
+  const canvas = await page.locator('#explorerGraphCanvas').boundingBox();
+  const panelBox = await panel.boundingBox();
+  const node = state.nodes.find((candidate) => candidate.id === target.id);
+  expect(Math.abs(node.x + node.width / 2 - (canvas.x + (panelBox.x - canvas.x) / 2))).toBeLessThan(3);
+  expect(Math.abs(node.y + node.height / 2 - (canvas.y + canvas.height / 2))).toBeLessThan(3);
+  expect(node.x + node.width).toBeLessThan(panelBox.x);
 });
 
 test('node click opens the side panel with summary, definition and columns, and Open card opens the table card', async ({ page }) => {
@@ -103,8 +203,10 @@ test('node click opens the side panel with summary, definition and columns, and 
   await clickBox(page, await nodeBox(page, 'table:chdash_ui.weather_daily_summary_mv'));
   const panel = page.locator('#explorerGraphPanel');
   await expect(panel).toBeVisible();
-  await expect(panel.locator('.explorerGraphPanel__title')).toHaveText('weather_daily_summary_mv');
-  await expect(panel.locator('.explorerGraphPanel__subtitle')).toHaveText('chdash_ui');
+  await expect(panel).toHaveClass(/graphKitPanel/);
+  await expect(panel.locator('.graphKitPanel__eyebrow')).toHaveText('Materialized View');
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('weather_daily_summary_mv');
+  await expect(panel.locator('.graphKitPanel__subtitle')).toHaveText('chdash_ui');
   await expect(panel).toContainText('Writes to');
   await expect(panel).toContainText('chdash_ui.weather_daily_summary');
   await expect(panel.locator('.explorerGraphPanel__sql')).toContainText('countState()');
@@ -132,7 +234,7 @@ test('edge click explains the Materialized View SELECT, the dictionary source an
   expect(mvLabel.text).toBe('MV');
   await clickBox(page, mvLabel);
   await expect(panel).toHaveAttribute('data-panel-type', 'edge');
-  await expect(panel.locator('.explorerGraphPanel__title')).toHaveText('Materialized View trigger');
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('Materialized View trigger');
   await expect(panel).toContainText('chdash_ui.weather_observations');
   await expect(panel.locator('.explorerGraphPanel__sql')).toContainText('FROM chdash_ui.weather_observations');
 
@@ -143,7 +245,7 @@ test('edge click explains the Materialized View SELECT, the dictionary source an
   expect(dictionaryLabel, 'dictionary source edge from loading_dependencies').toBeTruthy();
   expect(dictionaryLabel.from).toBe('table:chdash_ui.station_dictionary_source');
   await clickBox(page, dictionaryLabel);
-  await expect(panel.locator('.explorerGraphPanel__title')).toHaveText('Dictionary source');
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('Dictionary source');
   await expect(panel).toContainText('CLICKHOUSE · chdash_ui.station_dictionary_source');
   await expect(panel).toContainText('COMPLEX_KEY_HASHED');
   await expect(panel).toContainText('MIN 0 MAX 0');
@@ -156,7 +258,7 @@ test('edge click explains the Materialized View SELECT, the dictionary source an
   const routeLabel = state.edgeLabels.find((label) => label.kind === 'distributed_route');
   expect(routeLabel).toBeTruthy();
   await clickBox(page, routeLabel);
-  await expect(panel.locator('.explorerGraphPanel__title')).toHaveText('Distributed route');
+  await expect(panel.locator('.graphKitPanel__title')).toHaveText('Distributed route');
   await expect(panel).toContainText('chdash_cluster');
   await expect(panel).toContainText('chdash_repl.replicated_events');
   await expect(panel).toContainText('rand()');
@@ -175,6 +277,8 @@ test('per-node expand adds one hop in one direction on top of the global depth a
   expect(buffer.hiddenDownstream).toBe(2);
   const plus = state.controls.find((control) => control.nodeId === buffer.id && control.direction === 'down');
   expect(plus.label).toBe('+2');
+  // Labels never sit on an expand control.
+  for (const label of state.edgeLabels) for (const control of state.controls) expect(overlaps(label, control), `${label.text} on ${control.label}`).toBe(false);
 
   const request = page.waitForRequest((req) => req.url().includes('/api/explorer/graph?')
     && new URL(req.url()).searchParams.getAll('expand').includes('down:table:chdash_ui.weather_buffer'));
@@ -187,7 +291,7 @@ test('per-node expand adds one hop in one direction on top of the global depth a
   // The global depth is unchanged; the URL keeps it.
   await expect(page.locator('#explorerGraphDepthValue')).toHaveText('1');
   const minus = state.controls.find((control) => control.nodeId === buffer.id && control.direction === 'down');
-  expect(minus.label).toBe('\u2212');
+  expect(minus.label).toBe('−');
   // Revealed nodes offer their own next hop.
   expect(state.controls.some((control) => control.nodeId === 'table:chdash_ui.weather_buffer_alert_mv' && control.label === '+1')).toBe(true);
 
@@ -197,6 +301,44 @@ test('per-node expand adds one hop in one direction on top of the global depth a
   expect(state.nodes.some((node) => node.name === 'weather_buffer_alert_mv')).toBe(false);
 });
 
+test('keyboard: the canvas takes the focus, arrows move between cards, Enter selects, + - 0 zoom and Escape closes', async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_observations'));
+  await graphReady(page, /neighborhood depth 1/);
+  const canvas = page.locator('#explorerGraphCanvas');
+  await expect(canvas).toHaveAttribute('tabindex', '0');
+  await canvas.focus();
+  const fitted = (await inspect(page)).scale;
+  await page.keyboard.press('+');
+  expect((await inspect(page)).scale).toBeGreaterThan(fitted);
+  await page.keyboard.press('-');
+  await page.keyboard.press('-');
+  expect((await inspect(page)).scale).toBeLessThan(fitted + 1e-9);
+  await page.keyboard.press('0');
+  expect(Math.abs((await inspect(page)).scale - fitted)).toBeLessThan(1e-6);
+
+  // The first arrow picks the focused object (the selection), the next one moves right.
+  await page.keyboard.press('ArrowRight');
+  let state = await inspect(page);
+  const first = state.keyboardId;
+  expect(first).toBeTruthy();
+  expect(state.hoveredId).toBe(first);
+  await page.keyboard.press('ArrowRight');
+  state = await inspect(page);
+  expect(state.keyboardId).not.toBe(first);
+  const from = state.nodes.find((node) => node.id === first);
+  const to = state.nodes.find((node) => node.id === state.keyboardId);
+  expect(to.x).toBeGreaterThan(from.x);
+  await expect(page.locator('#explorerGraphPane [aria-live="polite"]')).toContainText(to.name);
+  const chosen = state.keyboardId;
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#explorerGraphPanel')).toBeVisible();
+  expect((await inspect(page)).panel).toEqual({ type: 'node', id: chosen });
+  await canvas.focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#explorerGraphPanel')).toBeHidden();
+});
+
 test('impact list gives direction and depth relative to the focus and refocuses on click', async ({ page }) => {
   await page.setViewportSize(VIEWPORTS['laptop-1280']);
   await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
@@ -204,6 +346,7 @@ test('impact list gives direction and depth relative to the focus and refocuses 
   await page.locator('#explorerGraphListViewButton').click();
   const list = page.locator('#explorerGraphImpact');
   await expect(list).toBeVisible();
+  await expect(list).toHaveClass(/graphKitList/);
   await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'hidden');
   await expect(list.locator('thead th')).toHaveText(['Object', 'Type', 'Direction', 'Depth', 'Database']);
   const row = (name) => list.locator(`tbody tr[data-node-id="table:chdash_ui.${name}"] td`);
@@ -212,44 +355,42 @@ test('impact list gives direction and depth relative to the focus and refocuses 
   await expect(row('weather_observations').nth(2)).toHaveText('selected');
   await expect(row('weather_daily_summary_mv').nth(2)).toHaveText('downstream');
   await expect(row('weather_daily_summary').nth(3)).toHaveText('2');
-  await expect(list.locator('.explorerGraphImpact__meta')).toContainText(/\d+ upstream · \d+ downstream · depth 2/);
+  await expect(list.locator('.graphKitList__meta')).toContainText(/\d+ upstream · \d+ downstream · depth 2/);
 
   await row('weather_daily_summary_mv').first().locator('button').click();
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\//);
-  await expect(list.locator('.explorerGraphImpact__title')).toHaveText('Impact of chdash_ui.weather_daily_summary_mv');
+  await expect(list.locator('.graphKitList__title')).toHaveText('Impact of chdash_ui.weather_daily_summary_mv');
   await expect(page.locator('#explorerGraphPanel')).toBeVisible();
   await page.locator('#explorerGraphCanvasViewButton').click();
   await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'visible');
 });
 
 test('graph colour tokens stay readable in both themes and Storage keeps its readable fit', async ({ page }) => {
-  const luminance = (rgb) => {
-    const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const contrast = (a, b) => { const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme });
     await page.addInitScript((t) => { try { localStorage.setItem('chdash.theme', t); } catch (_) {} }, theme);
     await page.goto(focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }));
     await graphReady(page, /\d+ nodes/);
-    const tokens = await page.evaluate(() => {
-      const probe = document.createElement('div');
-      document.body.append(probe);
-      const read = (name) => { probe.style.color = `var(${name})`; return getComputedStyle(probe).color; };
-      const out = { muted: read('--graphMuted'), accent: read('--graphAccentText'), halo: read('--graphHalo'), bg: read('--graphNodeBg') };
-      probe.remove();
-      return out;
-    });
-    const rgb = (value) => value.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
-    // TTL expressions use the accent text token, secondary text the muted one.
-    expect(contrast(rgb(tokens.accent), rgb(tokens.bg)), `${theme} accent`).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(rgb(tokens.muted), rgb(tokens.bg)), `${theme} muted`).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(rgb(tokens.halo), rgb(tokens.bg)), `${theme} focus halo`).toBeGreaterThanOrEqual(3);
+    const tokens = await tokenColors(page, ['--graph-text', '--graph-muted', '--graph-accent-text', '--graph-halo', '--graph-node-bg',
+      '--graph-label-bg', '--graph-bg', '--graph-warn', '--graph-error', '--graph-edge', '--accent']);
+    const bg = tokens['--graph-node-bg'];
+    // Card and label text, TTL expressions (accent text) and secondary text.
+    for (const name of ['--graph-text', '--graph-muted', '--graph-accent-text']) {
+      expect(contrast(tokens[name], bg), `${theme} ${name} on cards`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(tokens[name], tokens['--graph-label-bg']), `${theme} ${name} on labels`).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const name of ['--graph-halo', '--graph-warn', '--graph-error', '--graph-edge']) {
+      expect(contrast(tokens[name], bg), `${theme} ${name}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(tokens[name], tokens['--graph-bg']), `${theme} ${name} on the background`).toBeGreaterThanOrEqual(3);
+    }
+    // The shared accent is a 14 % tint in the light theme: the graph never uses it.
+    if (theme === 'light') expect(tokens['--accent'][3]).toBeLessThan(0.5);
     const state = await inspect(page);
     // 11px is the smallest Storage font.
     expect(state.scale * 11).toBeGreaterThanOrEqual(11 - 1e-6);
     expect(state.nodes.some((node) => node.kind === 'storage_tier')).toBe(true);
+    await expectDotGrid(page, '#explorerGraphCanvas', state, tokens['--graph-bg']);
+    await expect(page.locator('#explorerGraphLegendTtl')).toBeVisible();
   }
 });
 
@@ -275,15 +416,94 @@ test('phones show lineage as a list, keep every graph control inside the pane an
   const panelBox = await panel.boundingBox();
   expect(panelBox.width).toBeGreaterThan(VIEWPORTS.mobile.width - 60);
   expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(VIEWPORTS.mobile.height + 1);
+  expect(panelBox.y).toBeGreaterThan(pane.y + 40);
   await expect(panel.locator('#explorerGraphPanelOpenCard')).toBeVisible();
 
   // The canvas is one tap away and its toolbar wraps instead of being cut.
-  await panel.locator('.explorerGraphPanel__close').click();
+  await panel.locator('.graphKitPanel__close').click();
+  await expect(panel).toBeHidden();
   await page.locator('#explorerGraphCanvasViewButton').click();
   await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'visible');
+  await expect(page.locator('#explorerGraphZoomInButton')).toBeVisible();
   for (const control of await page.locator('.explorerGraphViewportControls > :not([hidden])').all()) {
     const box = await control.boundingBox();
     if (!box) continue;
     expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
   }
+});
+
+// A synthetic 2k-object database (1500 tables, 300 views, 100 MVs and their
+// targets, 50 buffers) mocked into the all-databases payload.
+function scaleCatalog(base) {
+  const template = base.nodes.find((node) => node.layer === 'logical');
+  const nodes = [];
+  const edges = [];
+  const node = (name, kind, engine, extra = {}) => nodes.push({ ...template, id: `table:chdash_scale.${name}`, database: 'chdash_scale', name, label: name, kind, engine, rows: 1000, logical_bytes: 24000, ...extra });
+  const edge = (from, to, kind) => edges.push({ id: `edge:s${edges.length}`, from: `table:chdash_scale.${from}`, to: `table:chdash_scale.${to}`, kind, label: kind, can_animate: kind !== 'view' });
+  const t = (i) => `t${String(i).padStart(4, '0')}`;
+  for (let i = 0; i < 1500; i += 1) node(t(i), 'mergetree', 'MergeTree');
+  for (let i = 0; i < 300; i += 1) { node(`v${i}`, 'view', 'View', { rows: null }); edge(t(i), `v${i}`, 'view'); }
+  for (let i = 0; i < 100; i += 1) {
+    node(`agg${i}`, 'mergetree', 'SummingMergeTree');
+    node(`mv${i}`, 'materialized_view', 'MaterializedView', { rows: null });
+    edge(t(i), `mv${i}`, 'materialized_view');
+    edge(`mv${i}`, `agg${i}`, 'materialized_view_output');
+  }
+  for (let i = 0; i < 50; i += 1) { node(`buf${i}`, 'buffer', 'Buffer'); edge(`buf${i}`, t(i), 'buffer'); }
+  return { ...base, nodes: [...base.nodes, ...nodes], edges: [...base.edges, ...edges] };
+}
+
+test('performance budgets: hover and redraw on the fixture, expanding a 2k-object database', async ({ page, request }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize(VIEWPORTS['desktop-1440']);
+  await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
+  await graphReady(page, /neighborhood depth 2/);
+  // Pointer moves are hit-tested synchronously and redraw once per frame.
+  const hover = await page.evaluate(async () => {
+    const canvas = document.getElementById('explorerGraphCanvas');
+    const box = canvas.getBoundingClientRect();
+    let sync = 0;
+    for (let i = 0; i < 120; i += 1) {
+      const started = performance.now();
+      canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: box.left + 40 + (i * 11) % (box.width - 80), clientY: box.top + 40 + (i * 7) % (box.height - 80), bubbles: true }));
+      sync += performance.now() - started;
+      if (i % 4 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    const started = performance.now();
+    for (let i = 0; i < 20; i += 1) window.ChDash.explorerGraph.redrawThemeNow();
+    return { sync, redraw: (performance.now() - started) / 20 };
+  });
+  expect(hover.sync, 'hit testing of 120 pointer moves (ms)').toBeLessThan(120);
+  expect(hover.redraw, 'one full redraw (ms)').toBeLessThan(12);
+
+  const base = await (await request.get('/api/explorer/graph?host_id=local&mode=logical&include_non_storing=1')).json();
+  const scale = scaleCatalog(base);
+  await page.route('**/api/explorer/graph?**', (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('mode') === 'logical' && !url.searchParams.get('focus_table') && !url.searchParams.get('database')) return route.fulfill({ json: scale });
+    return route.continue();
+  });
+  await page.goto('/explorer?view=graph&graph=lineage&depth=1');
+  await graphReady(page, /collapsed database/);
+  const group = (await inspect(page)).nodes.find((node) => node.database === 'chdash_scale');
+  // Layout + orthogonal routing of 852 cards and 550 edges (7 s before the kit router).
+  const expand = await measureFrames(page, async () => {
+    await clickBox(page, group);
+    await expect(page.locator('#explorerGraphStatus')).toHaveText(/\d+ nodes/, { timeout: 60_000 });
+  });
+  expect(expand.wallMs, 'expanding the 2k-object database (ms)').toBeLessThan(6000);
+  const state = await inspect(page);
+  expect(state.nodes.length).toBeGreaterThan(800);
+  // Sub-columns 28 px apart share every gap: most labels still find a free
+  // spot (never on top of a card or another label), a regression guard.
+  expect(state.edgeLabelsDropped.length, 'labels that found no free spot').toBeLessThan(state.edges.length * 0.25);
+  expectLabelsClear({ ...state, edgeLabelsDropped: [] });
+  const box = await page.locator('#explorerGraphCanvas').boundingBox();
+  const pan = await measureFrames(page, async () => {
+    await page.mouse.move(box.x + box.width / 3, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 0; i < 20; i += 1) { await page.mouse.move(box.x + box.width / 3 - i * 8, box.y + box.height / 2 - i * 3); await settle(page); }
+    await page.mouse.up();
+  });
+  expect(pan.p95, 'pan frame p95 on 852 cards (ms)').toBeLessThan(40);
 });

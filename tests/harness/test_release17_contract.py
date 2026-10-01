@@ -10,17 +10,17 @@ def read(path: str) -> str:
 def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> None:
     html = read("src/static/explorer.html")
     css = read("src/static/style.css")
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
-    assert 'class="explorerGraphViewportGroup"' in html
-    assert 'class="explorerGraphViewportAux"' in html
+    assert 'class="graphKitGroup explorerGraphScopeControls"' in html
+    assert '<div class="graphKitGroup" aria-label="Graph actions">' in html
     assert ".themeSelect__button--singleOption" in css
     assert 'dom.explorerGraphTypeSelectButton.dataset.singleOption = storageAllowed ? "0" : "1"' in js
     assert 'button.dataset.singleOption === "1"' in js
 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
 
     assert '"buffer"' in frontend
@@ -66,14 +66,14 @@ def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types(
 
 
 def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert 'function rawStorageProjection()' in graph
     assert 'function storageProjection()' in graph
     assert 'kind: "storage_tier"' in graph
     assert 'tier_disks: disks' in graph
     assert 'if (node.kind === "storage_policy") continue;' in graph
-    assert 'Storage policy · ${node.storage_policy}' in graph
+    assert 'Storage policy \\u00b7 ${node.storage_policy}' in graph
     assert 'kind: "policy_volume"' in graph
     assert 'current.ttl_events.push(event);' in graph
     assert 'addTtlEdgeEvent(current, target, event);' in graph
@@ -106,7 +106,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
     assert 'const storageTierGap = 82;' in graph
     assert 'tierY += item.height + storageTierGap;' in graph
     lifecycle = graph[graph.index('function drawLifecycleEdgeLabel('):graph.index('function drawNode(')]
-    assert 'ctx.fillStyle = css("--panelBg", "#0f1623");' in lifecycle
+    assert 'ctx.fillStyle = graphColor("labelBg");' in lifecycle
     assert 'ctx.fillStyle = css("--tableBg", "#10141d");' not in lifecycle
     assert 'const hasStorageAnimation = model.detailMode === "physical"' in graph
     assert 'prefers-reduced-motion: reduce' in graph
@@ -116,7 +116,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
 
 def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> None:
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = read("src/static/style.css")
 
     assert 'button.classList.toggle("is-storage-blocked", !!storageBlocked);' in explorer
@@ -129,15 +129,16 @@ def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> Non
     assert 'storage_disabled: !canUseStorageForId(node.id)' in graph
     # Greyed in Storage mode by a dashed frame and muted text at full
     # opacity: legible in the light theme, unlike a translucent card.
-    assert 'if (viewLike || storageDisabled) ctx.setLineDash([5, 4]);' in graph
-    assert 'ctx.fillStyle = storageDisabled ? graphColor("muted") : graphColor("text");' in graph
+    assert 'dashed: viewLike || storageDisabled,' in graph
+    assert 'const titleColor = storageDisabled ? graphColor("muted") : graphColor("text");' in graph
     assert 'ctx.fillText("No persistent storage"' in graph
     assert 'function nodeIsStorageDisabled(node)' in graph
     assert 'function nodeIsClickable(node)' in graph
-    assert 'canvas.classList.toggle("is-node-clickable", !model.dragging && nodeIsClickable(node));' in graph
-    assert 'canvas.classList.toggle("is-node-disabled", !model.dragging && nodeIsStorageDisabled(node));' in graph
-    assert '.explorerGraphCanvas.is-node-clickable' in css
-    assert '.explorerGraphCanvas.is-node-disabled' in css
+    assert 'disabled: !nodeIsClickable(node)' in graph
+    assert 'canvas.classList.toggle("is-clickable", !control.drag && !!target && !target.disabled);' in graph
+    assert 'canvas.classList.toggle("is-disabled", !control.drag && !!target && !!target.disabled);' in graph
+    assert '.graphKit__canvas.is-clickable' in css
+    assert '.graphKit__canvas.is-disabled' in css
 
 
 def test_create_table_tuple_closers_and_index_columns_are_aligned() -> None:

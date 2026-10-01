@@ -17,7 +17,7 @@ def test_storage_topology_is_physical_only_and_ttl_is_rendered_as_tier_lifecycle
     backend = read("src/explorer_graph.cpp")
     header = read("src/explorer_graph.hpp")
     api = read("src/api_explorer.cpp")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "FROM system.storage_policies" in backend
     assert '"volume_tier"' in backend
     assert "previous_volume_id" in backend
@@ -35,9 +35,9 @@ def test_storage_topology_is_physical_only_and_ttl_is_rendered_as_tier_lifecycle
 
 
 def test_graph_layout_has_barycentric_and_local_transposition_crossing_minimization() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "Sugiyama-style barycentric sweeps" in graph
-    assert "const crossingScore = () =>" in graph
+    assert "const swapDelta = (leftId, rightId) =>" in graph
     assert "Adjacent transposition after barycentric sweeps" in graph
 
 

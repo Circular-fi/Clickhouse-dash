@@ -643,17 +643,29 @@ velocity, independent of edge kind, zoom, direction or route length.
 
 ## Graph rendering
 
-The graph uses a Canvas renderer rather than one DOM element per object. The
-layout is deterministic and DAG-oriented, with a cycle fallback for schemas
-whose dependency graph is not acyclic. The UI supports:
+The graph uses a Canvas renderer rather than one DOM element per object: the
+shared graph kit (`app_graph_kit.js`, `ChDash.graphKit`), which also draws the
+Traces service map, so both graphs look and behave the same (dot grid on
+`--graph-bg`, rectangular cards, orthogonal edges with a dash pattern per kind,
+always visible edge labels, `−` / fit / `+` icon tools, legend and status line
+bottom-left, minimap bottom-right, side panel shell, keyboard access and a List
+view). The layout is deterministic and DAG-oriented (`kit.layered`), with a
+cycle fallback for schemas whose dependency graph is not acyclic. The UI
+supports:
 
 - all runner-visible logical objects, with search/focus rather than a database dropdown;
 - Lineage / Storage topology mode when both are enabled (the sole mode is implicit otherwise);
-- wheel zoom;
+- wheel zoom (one factor and one zoom range for every kit graph);
 - pointer pan;
 - fit-to-screen;
-- logical-node selection synchronized with Browse and the browser route;
+- logical-node selection synchronized with Browse and the browser route: a
+  click recentres the camera on the card (in the area the side panel leaves
+  free) and selects it;
+- hover outlines the hovered card and highlights its edges, without dimming;
 - node focus and neighbor dimming;
+- keyboard: the canvas is focusable; arrows move between cards (the first one
+  lands on the selection), Enter selects, `+` / `-` zoom, `0` fits, Escape
+  closes the panel (a live region names the card under the keyboard);
 - search-to-focus;
 - minimap, shown as soon as any rendered graph card is even partially outside
   the viewport or the zoom is below the readable scale;
@@ -661,9 +673,12 @@ whose dependency graph is not acyclic. The UI supports:
   definition, columns, **Open card** to the Browse table card) and on edge click
   (see Graph object definitions);
 - per-node `+N` / `−` controls per direction on focused Lineage cards;
-- short edge labels (`MV`, `MV output`, `view`, `flush`, `route`, `dictionary`,
-  `×N` between collapsed databases) and a hover highlight of the hovered edge
-  or of every edge of the hovered object;
+- short edge labels on every Lineage edge (`MV`, `MV output`, `view`, `flush`,
+  `route`, `dictionary`, `×N` between collapsed databases), placed once per
+  routed layout at the first spot along the route that covers neither a card,
+  a `+N` control nor another label; hover and selection only restyle them (a
+  label never jumps on top of another one), and a label without any free spot
+  is left out (`inspect().edgeLabelsDropped`);
 - a **Graph | List** switch: the list is the impact analysis of the shown
   neighbourhood (object, type, direction, depth, database);
 - level-of-detail rendering, including database groups at very low zoom.
@@ -685,9 +700,10 @@ Readability rules:
   **Show objects without dependencies** is checked. Edges between collapsed
   databases are aggregated with their count. A single database is always shown
   expanded.
-- Canvas colours come from the `--graph*` tokens of style.css, defined for
-  both themes: the shared `--accent` is a translucent tint in the light theme
-  and is not used for canvas text, edges or the focus halo.
+- Canvas colours come from the `--graph-*` tokens of style.css ("Graph kit"
+  block), defined for both themes, with no colour literal in the JavaScript:
+  the shared `--accent` is a translucent tint in the light theme and is not
+  used for canvas text, edges or the focus halo.
 - On phones (width ≤ 720px) the List is the default Lineage view, the toolbar
   wraps instead of being cut and the side panel is a bottom sheet.
 
@@ -708,7 +724,7 @@ Explorer uses three visual edge families:
 - **Logical dependency** — query-time dependencies such as ordinary Views, and the table a dictionary loads from (dash-dot). These dashed edges do not animate. Selecting either endpoint adds a subtle blue halo to the dashes.
 - **Routing / topology** — structural routing/containment rather than row flow, for example a `Distributed` engine route or physical storage topology/containment.
 
-Lineage routing avoids drawing an edge through an unrelated node card: when the normal Bezier would intersect another card, the renderer selects a clear orthogonal detour.
+Lineage edges are orthogonal routes (`kit.routeEdges`): one output port on the right of a card and one input port on its left, routed on the layout's row grid around the other cards, each route in its own lane past a small fan zone. The router searches a sparse grid per edge with typed arrays and reused buffers; on a 2k-object database (852 cards, 550 edges) routing takes about 1.5 s instead of 7 s, and about 3.6 s instead of 44 s with objects without dependencies shown, with the same routes.
 
 In **Storage** mode, ordinary non-storing objects remain excluded from the canvas, with one deliberate exception: a `Buffer` is shown as a write-routing stage together with the persistent table it flushes into. Selecting a Buffer therefore expands automatically to `Buffer → destination table → storage tiers`.
 

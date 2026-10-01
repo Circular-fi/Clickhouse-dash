@@ -8,8 +8,9 @@ def read(path: str) -> str:
 
 
 def test_layout_transposition_uses_incremental_crossing_delta() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    layout = graph[graph.index("function computeLayout("):graph.index("function overviewScale()")]
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    layout = graph[graph.index("function layered(options)"):graph.index("function cycleBackEdges(")]
+    assert "kit.layered({" in graph[graph.index("function computeLayout("):graph.index("function overviewScale()")]
     # Re-scoring every crossing twice per adjacent swap froze a 2k-node catalog
     # for a minute; the swap decision must use the exact incremental delta.
     assert "const before = crossingScore();" not in layout
@@ -19,12 +20,12 @@ def test_layout_transposition_uses_incremental_crossing_delta() -> None:
 
 
 def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     projection = graph[graph.index("function logicalProjection()"):graph.index("function canUseStorageForId")]
     assert projection.index("logicalProjectionCacheValid(model.logicalProjectionCache)") < projection.index("resolveBufferRepresentative")
     assert "function visibleSet()" in graph
     assert "themeCache.colors.get(name)" in graph
-    assert "invalidateThemeCache();" in graph[graph.index("function redrawThemeNow()"):]
+    assert "kit.theme.invalidate();" in graph[graph.index("function redrawThemeNow()"):]
     assert "if (routeBoxesApart(routeBox(routeA), routeBox(routeB))) return score;" in graph
     assert "if (segmentsApart(a, b, segment.a, segment.b)) continue;" in graph
     assert "setInterval" not in graph
@@ -36,8 +37,12 @@ def test_explorer_search_debounces_graph_focus() -> None:
 
 
 def test_orthogonal_router_hot_paths_are_indexed_without_changing_routes() -> None:
-    graph = (ROOT / "src/static/app_explorer_graph.js").read_text(encoding="utf-8")
-    router = graph[graph.index("function orthogonalRouteForEdge("):graph.index("function assembleOrthogonalRoute(")]
+    graph = ((ROOT / "src/static/app_explorer_graph.js").read_text(encoding="utf-8") + (ROOT / "src/static/app_graph_kit.js").read_text(encoding="utf-8"))
+    router = graph[graph.index("function orthogonalRouteForEdge("):graph.index("function routePairConflictScore(")]
+    # The indexed grid (typed arrays, reused buffers) gives the same routes as
+    # the keyed reference search, kept for points off the deduplicated grid.
+    assert "found = searchIndexedGrid();" in router and "found = searchKeyedGrid();" in router
+    assert "const buffers = gridBuffers(total);" in router
     # Heap on (f, insertion order) == the former stable sort + shift().
     assert "const queue = createRouteQueue();" in router
     assert "queue.sort(" not in router and "queue.shift()" not in router

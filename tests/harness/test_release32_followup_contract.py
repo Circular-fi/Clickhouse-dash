@@ -60,10 +60,11 @@ def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> No
 
 
 def test_light_minimap_viewport_is_darker_and_icon_selectors_keep_outline() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = read("src/static/style.css")
-    assert 'ctx.fillStyle = "rgba(15, 23, 42, 0.10)";' in graph
-    assert 'ctx.strokeStyle = lightThemeActive() ? "rgba(15, 23, 42, 0.92)"' in graph
+    # The light viewport rectangle is a darker fill and stroke, now tokens.
+    assert 'ctx.fillStyle = color("minimapViewFill");' in graph and 'ctx.strokeStyle = color("minimapView");' in graph
+    assert '--graph-minimap-view-fill: rgba(15, 23, 42, 0.10);' in css and '--graph-minimap-view: rgba(15, 23, 42, 0.92);' in css
     assert ".themeSelect--icons .themeSelect__button--icon {" in css
     tail = css[css.rindex("/* Release 32:"):]
     assert "border: 1px solid var(--buttonBorder) !important;" in tail

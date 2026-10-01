@@ -64,12 +64,18 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
     assert "const tabSearch = ns.traceTabs?.activeSearch?.();" in traces
     assert "ns.traceTabs?.install?.({" in traces
     assert "api/traces/service_map?" in api
-    for element in ('id="tracesTabs"', 'id="traceMapView"', 'id="traceMapSvg"', 'id="traceMapSampled"', 'id="traceMapPanel"',
-                    'id="traceMapFit"', 'role="tablist"', "chdash-trace-tab-"):
+    for element in ('id="tracesTabs"', 'id="traceMapView"', 'id="traceMapCanvas"', 'id="traceMapSampled"', 'id="traceMapPanel"',
+                    'id="traceMapFit"', 'id="traceMapList"', 'id="traceMapMinimap"', 'role="tablist"', "chdash-trace-tab-"):
         assert element in html, element
     for text in ("Search this service", "Search errors", "Focus map", "Search calls", "sampled ×", "Loading service map",
-                 "No services in this time range", "Node size: spans", "Red ring: error rate"):
+                 "No services in this time range", "Health dot: error rate", "asynchronous message (producer"):
         assert text in mapjs, text
+    # The map is drawn by the shared canvas graph kit, like the Explorer graph.
+    assert boot.index('"app_graph_kit.js"') < boot.index('"app_trace_map.js"')
+    for text in ("kit.mount({", "kit.layered({", "kit.routeEdges(positions", "kit.placeLabels(requests", "kit.drawCard(context, item, card)",
+                 "kit.drawMinimap(minimap", "kit.viewSwitch({", "kit.panelHeader({"):
+        assert text in mapjs, text
+    assert "<svg" not in mapjs and "createElementNS" not in mapjs
     assert "ns.traceSearch.applyFilter({ kind: \"service\" }, service, \"include\")" in mapjs
     assert "ctx.serviceColor(node.service)" in mapjs
 

@@ -50,7 +50,7 @@ def test_graph_uses_structured_metadata_and_only_targeted_sql_parsing() -> None:
 
 def test_graph_has_no_live_activity_polling_and_animation_is_topological() -> None:
     server = read("src/server.cpp")
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     app_api = read("src/static/app_api.js")
 
     assert '/api/explorer/activity' not in server
@@ -67,7 +67,7 @@ def test_graph_has_no_live_activity_polling_and_animation_is_topological() -> No
 
 def test_graph_frontend_uses_canvas_dag_lod_zoom_pan_focus_and_minimap() -> None:
     html = read("src/static/explorer.html")
-    js = read("src/static/app_explorer_graph.js")
+    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert '<canvas id="explorerGraphCanvas"' in html
     assert '<canvas id="explorerGraphMinimap"' in html
@@ -86,7 +86,7 @@ def test_graph_frontend_uses_canvas_dag_lod_zoom_pan_focus_and_minimap() -> None
 def test_logical_lineage_and_physical_storage_are_separate_projections_of_one_backend_model() -> None:
     graph_h = read("src/explorer_graph.hpp")
     graph_cpp = read("src/explorer_graph.cpp")
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert 'std::string layer = "logical"' in graph_h
     assert 'replica.layer = "physical"' in graph_cpp
@@ -106,7 +106,7 @@ def test_ttl_is_serialized_as_ordered_metadata_and_projected_onto_storage_lifecy
     graph_h = read("src/explorer_graph.hpp")
     graph_cpp = read("src/explorer_graph.cpp")
     api = read("src/api_explorer.cpp")
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert "struct ExplorerGraphTtlRule" in graph_h
     assert "std::vector<ExplorerGraphTtlRule> ttl_rules" in graph_h
@@ -130,7 +130,7 @@ def test_ttl_is_serialized_as_ordered_metadata_and_projected_onto_storage_lifecy
 
 
 def test_hidden_buffer_projection_uses_forwarding_table_as_representative() -> None:
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     projection = frontend[frontend.index("function logicalProjection()"):frontend.index("function canUseStorageForId")]
 
     assert "resolveBufferRepresentative" in projection
@@ -142,7 +142,7 @@ def test_hidden_buffer_projection_uses_forwarding_table_as_representative() -> N
 
 
 def test_visibility_toggle_recomputes_canonical_layout_and_only_preserves_camera_anchor() -> None:
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     recompute = frontend[frontend.index("function recomputePreservingFocusAnchorOnly"):frontend.index("function logicalFocusId")]
     visibility = frontend[frontend.index("function setVisibilityOptions"):frontend.index("function activate", frontend.index("function setVisibilityOptions"))]
 
@@ -154,7 +154,7 @@ def test_visibility_toggle_recomputes_canonical_layout_and_only_preserves_camera
 
 
 def test_storage_node_selection_keeps_logical_neighborhood_anchor() -> None:
-    frontend = read("src/static/app_explorer_graph.js")
+    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert "function logicalFocusId" in frontend
     assert 'const incoming = new Map();' in frontend
