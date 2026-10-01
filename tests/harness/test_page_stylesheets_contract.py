@@ -53,3 +53,17 @@ def test_page_stylesheets_keep_style_css_order_and_drop_only_unmatchable_rules()
     # Lookups of an id another page owns do not keep that page's rules.
     assert not builder.Corpus(builder.page_corpus("logs")).has("explorerDetailTabs")
     assert builder.selector_can_match(".traceX:not(.queryOnlyName)", corpus) == corpus.has("traceX")
+
+
+def test_query_and_explorer_skip_the_modules_they_never_run():
+    builder = load_builder()
+    app = read("src/static/app.js")
+    assert "const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);" in app
+    assert "if (skipped.has(f)) continue;" in app
+    query = builder.page_modules("query")
+    explorer = builder.page_modules("explorer")
+    assert {"app_explorer.js", "app_run.js", "app_autocomplete.js", "app_analysis.js"} <= set(query)
+    assert "app_explorer_graph.js" not in query and "app_explorer_treemap.js" not in query
+    assert {"app_explorer.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_results.js", "app_highlight.js"} <= set(explorer)
+    for name in ["app_autocomplete.js", "app_run.js", "app_analysis.js", "app_pipeline_viewer.js", "app_trace_viewer.js", "app_download.js", "app_export.js"]:
+        assert name not in explorer, name

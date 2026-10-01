@@ -11,14 +11,14 @@ page keeps) and next to style.css (so relative url()s resolve the same).
 A rule is dropped from a page only when one of the class or id names its
 selector requires appears nowhere in that page's sources: the page HTML plus,
 transitively, every static .js file a source names ("app_x.js"), lazily loaded
-modules included. A name counts as present when it is written in full, or when
-a part of it ending at a "-"/"_" seam is followed by a quote or "${" (the name
-is assembled at run time, e.g. "chdash-trace-tab-" + tab); id lookups such as
-byId("x") or dom.x are not counted, since they only find what the HTML or a
-script already created. Arguments of
-functional pseudo-classes (:not(), :is(), :has(), ...) never cause a drop.
-Everything else (element, attribute and :root rules, @keyframes, @font-face)
-is kept.
+modules included, except the modules app.js skips on that page. A name counts
+as present when it is written in full, or when a part of it ending at a "-"/"_"
+seam is followed by a quote or "${" (the name is assembled at run time, e.g.
+"chdash-trace-tab-" + tab); id lookups such as byId("x") or dom.x are not
+counted, since they only find what the HTML or a script already created.
+Arguments of functional pseudo-classes (:not(), :is(), :has(), ...) never cause
+a drop. Everything else (element, attribute and :root rules, @keyframes,
+@font-face) is kept.
 
 Run after editing style.css, a page shell or a module's class names:
     python3 tools/build_page_css.py          # rewrite src/static/style.<page>.css
@@ -46,18 +46,43 @@ ELEMENT_LOOKUP = re.compile(
 )
 
 
-def page_corpus(page: str) -> str:
-    """Page HTML plus every static script it can load, transitively."""
+# app.js loads one module list for Query and Explorer minus the modules a page
+# never runs: PAGE_SKIPPED_MODULES = { query: ["app_x.js", ...], ... }.
+SKIPPED_MODULES = re.compile(r"PAGE_SKIPPED_MODULES = \{(.*?)\n\s*\};", re.S)
+SKIPPED_ENTRY = re.compile(r"(\w+): \[([^\]]*)\]")
+
+
+def skipped_modules(page: str, text: str) -> set[str]:
+    block = SKIPPED_MODULES.search(text)
+    if not block:
+        return set()
+    for name, files in SKIPPED_ENTRY.findall(block.group(1)):
+        if name == page:
+            return set(re.findall(r'"([^"]+\.js)"', files))
+    return set()
+
+
+def page_modules(page: str) -> list[str]:
+    """Every static script the page can load, transitively, in discovery order."""
     texts = [(STATIC / f"{page}.html").read_text(encoding="utf-8")]
-    seen: set[str] = set()
+    names: list[str] = []
+    skipped: set[str] = set()
     i = 0
     while i < len(texts):
+        skipped |= skipped_modules(page, texts[i])
         for name in SCRIPT_NAME.findall(texts[i]):
             path = STATIC / name
-            if name not in seen and path.is_file():
-                seen.add(name)
+            if name not in names and name not in skipped and path.is_file():
+                names.append(name)
                 texts.append(path.read_text(encoding="utf-8"))
         i += 1
+    return names
+
+
+def page_corpus(page: str) -> str:
+    """Page HTML plus every static script it can load."""
+    texts = [(STATIC / f"{page}.html").read_text(encoding="utf-8")]
+    texts += [(STATIC / name).read_text(encoding="utf-8") for name in page_modules(page)]
     return ELEMENT_LOOKUP.sub(" ", "\n".join(texts))
 
 

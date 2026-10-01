@@ -21,9 +21,27 @@
     if (explorer) explorer.init();
   };
 
+  // Modules a page shell never runs: Query has no Explorer graph or storage
+  // treemap; Explorer has no editor, Run controls, downloads or profiling modal.
+  // Every module the page loads costs its source, compiled code and the
+  // stylesheet rules it can use (tools/build_page_css.py reads this list).
+  const PAGE_SKIPPED_MODULES = {
+    query: ["app_explorer_graph.js", "app_explorer_treemap.js"],
+    explorer: ["app_autocomplete.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js"],
+  };
+  const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);
+
+  // Namespace each core module registers, by file.
+  const CORE_MODULES = {
+    dom: "app_dom.js", ui: "app_ui.js", run: "app_run.js", results: "app_results.js", api: "app_api.js", sql: "app_sql.js",
+    util: "app_util.js", storage: "app_state.js", pipelineViewer: "app_pipeline_viewer.js", analysisData: "app_analysis_data.js",
+    analysis: "app_analysis.js", download: "app_download.js", massExport: "app_export.js", explorerGraph: "app_explorer_graph.js",
+    explorerTreemap: "app_explorer_treemap.js", explorer: "app_explorer.js",
+  };
+
   const hasCore = () => {
     const ns = window.ChDash;
-    return !!(ns && ns.dom && ns.ui && ns.run && ns.results && ns.api && ns.sql && ns.util && ns.storage && ns.pipelineViewer && ns.analysisData && ns.analysis && ns.download && ns.massExport && ns.explorerGraph && ns.explorerTreemap && ns.explorer);
+    return !!ns && Object.entries(CORE_MODULES).every(([key, file]) => skipped.has(file) || !!ns[key]);
   };
 
   // Capture the bootstrap script location while document.currentScript is
@@ -86,6 +104,7 @@
 
     for (const f of files) {
       if (hasCore()) break;
+      if (skipped.has(f)) continue;
       const url = new URL(f, base).toString();
       await loadScript(url);
     }
