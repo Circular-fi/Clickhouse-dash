@@ -35,8 +35,12 @@ def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> 
     assert 'const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;' in graph
     assert 'includeNonStoring: !!node && isNonStoringNode(node)' in graph
     assert 'function syncVisibilityOptionLocks' in explorer
-    assert 'dom.explorerIncludeSystem.disabled = required.includeSystem;' in explorer
-    assert 'dom.explorerIncludeNonStoring.disabled = required.includeNonStoring;' in explorer
+    # The tree filter chips replace the settings checkboxes: the System chip and
+    # the chip of the selected object's type are pressed and locked.
+    assert 'const locked = system ? !!required.includeSystem : required.kind === key;' in explorer
+    assert 'chip.disabled = locked;' in explorer
+    assert 'if (required.kind && model.filters[required.kind] === false) { model.filters[required.kind] = true; changed = true; }' in explorer
+    assert 'model.filters.views !== false || model.filters.mv !== false || required.includeNonStoring' in explorer
     assert 'syncVisibilityOptionLocks({ propagate: true });' in explorer
 
 

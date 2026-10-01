@@ -18,6 +18,66 @@ Explorer ACL/catalog/graph/function caches are scoped by configured host/runner 
 
 The important invariant is that `system_uri` is enrichment-only: it never authorizes an object and never executes SQL supplied by a panel caller. If different callers require different ClickHouse ACLs, they must use distinct runner-backed deployments/hosts outside ChDash.
 
+## Shell and navigation
+
+The Explorer shell is a row of segmented view tabs above the content,
+`Catalog | Graph | Storage | Functions | Operations`, followed by a breadcrumb
+`host › database › table` (each crumb but the last navigates). Routes keep their
+existing form, so deep links and history are unchanged:
+
+| View | Route | Container |
+| --- | --- | --- |
+| Catalog | `/explorer[/<db>[/<table>/<tab>]]?view=browse` | tree + `#explorerCatalogView` (`#explorerDetailPane`) |
+| Graph | same path, `?view=graph&graph=lineage\|storage&depth=N` | tree + `#explorerGraphPane` |
+| Storage | `/explorer/_system[?database=<db>[&table=<t>]]` | `#explorerSystemPane` |
+| Functions | `/explorer/functions[/<name>]` | `#explorerFunctionsPane` |
+| Operations | `/explorer/_operations` | `#explorerOpsPane` |
+
+Storage calls `ns.explorerStorage.show(container, { scope, includeSystem,
+onScopeChange, onIncludeSystemChange, onOpenTable })`; the Storage tab scopes it to
+the Catalog/Graph selection (`{ database, table }`, the server when nothing is
+selected) and the storage breadcrumb then moves freely. Operations calls
+`ns.explorerOps.show(container, { onOpenTable })`; its tab is hidden while the
+module is absent or `explorer.operations.enabled = false` (a deep link then falls
+back to Catalog). Leaving a view calls its `hide()`; a host change calls the
+Operations `refresh()` and re-shows Storage. `ns.explorer.setView(view)` switches
+views programmatically. Tabs disabled by `explorer.browse` / `explorer.graph` are
+hidden.
+
+The object tree shows one line per object: a type icon (table, Distributed,
+Buffer, Memory, view, materialized view, dictionary), the name, a health dot for
+warning/error tables and a right-aligned size badge whose bar is relative to the
+largest object of the database (rows for Buffer, nothing for views). Engine, rows
+and size are in the row tooltip. Search filters by `database.name engine`,
+highlights the matches, drops loaded databases without a match and shows the
+matching branches open. Chips under the search filter object types: Tables,
+Views, MV, Dict and System (system databases). The chip of the selected object's
+type, and System for a system object, stay pressed and locked so a selection is
+never hidden by a filter. The graph's non-storing projection follows the chips
+(Views or MV on = non-storing objects included). Filters persist in
+`chdash.explorer.typeFilters.v1` and `chdash.explorer.includeSystem`.
+
+On narrow screens (820 px and below) the tree is a drawer opened with the
+Objects button of the navigation bar; picking an object closes it.
+
+### Number formats and shared tokens
+
+Every Explorer number goes through the helpers at the top of `app_explorer.js`,
+also exposed as `ns.explorerFormat` for the other Explorer modules:
+
+- `fmtInt`: `120,064` (en-US grouping, as `util.formatInt` elsewhere in the app);
+- `fmtCompactInt`: `120.1K`, `3.2M`, `1.5B`;
+- `fmtBytes` / `fmtStorageBytes`: `0 B`, `205 B`, `1.7 KB`, `10.3 MB`, one decimal
+  from KB up, 1024 base, the same precision in the tree, treemaps and tables;
+- `fmtRate`, `fmtPercent`; a missing value is always `—` (`MISSING`).
+
+`style.css` defines the Explorer tokens (`--explorer-table-font` 13px,
+`--explorer-table-head-font` 12px, `--explorer-section-title-size` 13.5px /
+`--explorer-section-title-weight` 600, `--explorer-mono`) and the shared in-cell
+bar: `class="explorerBar"` with `style="--bar-pct: 42%"` (callers normalise to the
+column maximum), plus `explorerBar--cell` on result-table cells. The bar uses
+`--explorer-bar-color` at `--explorer-bar-alpha` (35%) in both themes.
+
 ## List catalog
 
 `GET /api/explorer/catalog?host_id=<id>` returns only readable objects. Optional

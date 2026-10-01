@@ -31,7 +31,7 @@ def test_functions_frontend_has_search_filter_and_safe_text_rendering() -> None:
     js = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     api = read("src/static/app_api.js")
 
-    assert 'id="explorerFunctionsSectionButton"' in html
+    assert 'id="explorerFunctionsTab"' in html and 'data-view="functions"' in html
     assert 'id="explorerFunctionCategorySelect"' in html
     assert 'id="explorerFunctionList"' in html
     assert "getExplorerFunctions" in api

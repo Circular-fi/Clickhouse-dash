@@ -231,7 +231,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
   // Database detail meta is "<n> tables · <database bytes>"; the per-database
   // disk list was replaced by a per-object list with rows/footprint stats.
-  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await expect(page.locator('#explorerDatabaseObjects tbody tr[data-table="weather_observations"]'))
@@ -369,8 +369,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns\?view=browse$/);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Columns', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toContainText('temperature_c');
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator('#explorerFunctionsSectionButton').click();
+  await page.locator('#explorerFunctionsTab').click();
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
   await page.locator('#explorerFunctionSearchInput').fill('array');
   const firstFunctionName = await page.locator('#explorerFunctionList .explorerFunctionObject .explorerTreeObject__name').first().textContent();
@@ -507,22 +506,21 @@ test('graph table click keeps graph focus, browser selection and URL on the same
   await openApp(page);
   await openExplorerDatabase(page);
   await page.getByText('weather_observations', { exact: true }).first().click();
-  await page.locator('#explorerModeSelectButton').click();
-  await page.locator('#explorerGraphModeButton').click();
+  await page.locator('#explorerGraphTab').click();
   await expect(page.locator('#explorerGraphPane')).toBeVisible();
   // The graph is a canvas, so use the exported selection bridge to exercise the
   // same path as a logical-node click without relying on fragile pixel positions.
   await page.evaluate(() => window.ChDash.explorer.selectTable('chdash_ui', 'wide_types'));
   await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns\?view=graph&graph=lineage&depth=1$/);
-  await page.locator('#explorerModeSelectButton').click();
-  await page.locator('#explorerListModeButton').click();
+  await page.locator('#explorerCatalogTab').click();
   await expect(page.locator('.explorerTreeObject.is-selected')).toContainText('wide_types');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 });
 
 // Database detail object table (under the storage band): display-order snapshot of
 // every row, numeric cells carry their raw value in data-value.
-const DATABASE_OBJECT_HEADERS = ['#', 'Name', 'Engine', 'Rows', 'Size', 'Compressed', 'Uncompressed', 'Ratio', '% database', 'Parts', 'Modified'];
+const DATABASE_OBJECT_HEADERS = ['#', 'Name', 'Engine', 'Rows', 'Size', 'Compressed', 'Ratio', '% database', 'Parts', 'Modified'];
+const DATABASE_OBJECT_NUMERIC = (column) => column >= 2 && column <= 7;
 
 async function databaseObjectRows(page) {
   return page.locator('#explorerDatabaseObjects tbody tr').evaluateAll((rows) => rows.map((tr) => ({
@@ -540,7 +538,7 @@ async function expectObjectColumnSorted(page, column, direction) {
   await header.click();
   await expect(header).toHaveAttribute('data-sort', direction);
   const rows = await databaseObjectRows(page);
-  const numeric = column >= 2 && column <= 8;
+  const numeric = DATABASE_OBJECT_NUMERIC(column);
   const keys = rows.map((row) => {
     const cell = row.cells[column];
     if (numeric) return cell.value === '' || cell.value == null ? null : Number(cell.value);
@@ -583,28 +581,34 @@ test('database detail lists every object under the storage band, sorts each colu
   expect(weather[1].text).toBe('Merge Tree');
   expect(Number(weather[2].value)).toBe(weatherSummary.rows);
   expect(Number(weather[3].value)).toBe(weatherSummary.bytes);
-  expect(weather[3].text).toMatch(/^\d+(?:\.\d+)?[KMG]B$/);
-  expect(weather[4].text).toMatch(/^\d+(?:\.\d+)?[KMG]B$/);
-  expect(Number(weather[5].value)).toBe(weatherSummary.uncompressed_bytes);
-  expect(weather[6].text).toMatch(/^\d+\.\d\d×$/);
-  expect(Number(weather[7].value)).toBeGreaterThan(50);
-  expect(weather[7].text).toMatch(/^\d+(?:\.\d)?%$/);
-  expect(Number(weather[8].value)).toBe(weatherSummary.active_parts);
-  expect(weather[9].text).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+  // One byte format: one decimal and a unit (10.3 MB); rows are grouped.
+  expect(weather[2].text).toBe(Number(weatherSummary.rows).toLocaleString('en-US'));
+  expect(weather[3].text).toMatch(/^\d+\.\d [KMG]B$/);
+  expect(weather[4].text).toMatch(/^\d+\.\d [KMG]B$/);
+  // Uncompressed bytes moved into the Ratio tooltip (the table fits 1280 px).
+  expect(weather[5].text).toMatch(/^\d+\.\d\d×$/);
+  await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(6)).toHaveAttribute('title', /uncompressed .* compressed/);
+  expect(Number(weather[6].value)).toBeGreaterThan(50);
+  expect(weather[6].text).toMatch(/^\d+(?:\.\d)?%$/);
+  expect(Number(weather[7].value)).toBe(weatherSummary.active_parts);
+  expect(weather[8].text).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
   // Resident memory is labelled and never takes a share of the on-disk total.
   const memory = rows.find((row) => row.name === 'memory_weather').cells;
   expect(memory[3].text).toMatch(/RAM$/);
-  expect(memory[7].text).toBe('—');
+  expect(memory[6].text).toBe('—');
   // Views have no storage: dashes, not zeros.
   const view = rows.find((row) => row.name === 'valid_weather_observations').cells;
   expect(view[1].text).toBe('View');
   expect(view[3].text).toBe('—');
-  // Byte columns use the shared numeric gauge.
-  await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(4)).toHaveClass(/resultTable__gaugeCell/);
+  // Rows / bytes / share columns use the shared Explorer in-cell bar,
+  // normalised to the column maximum (the largest object fills the cell).
+  const weatherSize = objects.locator('tbody tr[data-table="weather_observations"] td').nth(4);
+  await expect(weatherSize).toHaveClass(/explorerBar/);
+  expect(await weatherSize.evaluate((td) => td.style.getPropertyValue('--bar-pct'))).toBe('100%');
 
   // Text columns start ascending, numeric ones descending; each toggles.
-  for (let column = 0; column < 10; column++) {
-    const numeric = column >= 2 && column <= 8;
+  for (let column = 0; column < 9; column++) {
+    const numeric = DATABASE_OBJECT_NUMERIC(column);
     const first = numeric ? 'desc' : 'asc';
     const second = numeric ? 'asc' : 'desc';
     rows = await expectObjectColumnSorted(page, column, first);
@@ -647,7 +651,7 @@ test('database object table handles hundreds of tables and empty databases', asy
   await openExplorerDatabase(page, 'chdash_perf');
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_perf' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_perf');
-  await expect(page.locator('#explorerDetailMeta')).toContainText(`${count} tables`);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(`${count} objects`);
   await expect(page.locator('#explorerDatabaseObjects tbody tr')).toHaveCount(count);
 
   const sizeHeader = page.locator('#explorerDatabaseObjects thead th').nth(4);
@@ -661,17 +665,17 @@ test('database object table handles hundreds of tables and empty databases', asy
   const maxBytes = Math.max(...synthetic.map((table) => table.bytes));
   const rows = await databaseObjectRows(page);
   expect(Number(rows[0].cells[3].value)).toBe(maxBytes);
-  expect(rows[0].cells[3].text).toMatch(/^\d+(?:\.\d+)?[KM]B$/);
+  expect(rows[0].cells[3].text).toMatch(/^\d+\.\d [KM]B$/);
   const sizes = rows.map((row) => Number(row.cells[3].value));
   expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
   await expectObjectColumnSorted(page, 3, 'asc');
   await expectObjectColumnSorted(page, 2, 'desc');
-  await expectObjectColumnSorted(page, 8, 'desc');
+  await expectObjectColumnSorted(page, 7, 'desc');
 
   await expandExplorerDatabase(page, 'otel');
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'otel' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('otel');
-  await expect(page.locator('#explorerDetailMeta')).toContainText(/^0 tables/);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^0 objects/);
   await expect(page.locator('#explorerDetailContent')).toContainText('No on-disk data in this database.');
   await expect(page.locator('#explorerDetailContent')).toContainText('No objects in this database.');
   await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);

@@ -45,12 +45,13 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
-    assert 'id="explorerTableModeTabs" class="themeSelect themeSelect--icons explorerModeSelect"' in html
-    assert 'themeSelect__button--icon explorerModeSelect__button' in html
-    assert 'themeSelect__option themeSelect__option--icon' in html
-    assert 'explorerModeIcon--browse' in html and 'explorerModeIcon--graph' in html
-    assert 'icon.className = `explorerModeIcon explorerModeIcon--${graphMode ? "graph" : "browse"}`;' in ui
-    assert '.explorerModeIcon--browse' in css and '.explorerModeIcon--graph' in css
+    # The Browse/Graph icon selector became segmented view tabs.
+    assert 'id="explorerTableModeTabs"' not in html
+    assert 'id="explorerViewTabs" class="explorerViewTabs" role="tablist"' in html
+    for view in ['catalog', 'graph', 'storage', 'functions', 'operations']:
+        assert f'data-view="{view}"' in html
+    assert 'button.setAttribute("aria-selected", String(active));' in ui
+    assert '.explorerViewTab.is-active' in css
 
 
 def test_storage_metric_tables_reuse_query_result_component() -> None:

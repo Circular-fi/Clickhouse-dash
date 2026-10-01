@@ -32,7 +32,11 @@ def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
 def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_removed() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
-    assert 'return `${sign}${v.toFixed(2)}${units[unit]}`;' in ui
+    # One byte format everywhere: one decimal from KB up, "0 B" for zero; the
+    # storage helper keeps its name and delegates to it.
+    assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in ui
+    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in ui
+    assert 'function fmtStorageBytes(value) {\n    return fmtBytes(value);' in ui
     assert 'fmtStorageBytes(item.compressed)' in ui
     assert 'min-width: 9.5ch;' in css
     assert 'font-variant-numeric: tabular-nums;' in css

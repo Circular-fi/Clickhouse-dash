@@ -35,7 +35,12 @@
     detailPromises: new Map(),
     routeIntent: null,
     includeSystem: false,
+    // Derived from the Views / MV chips (plus the selected object): the graph
+    // projection hides or contracts non-storing objects when it is false.
     includeNonStoring: true,
+    // Tree object-type chips (Tables / Views / MV / Dict); System is includeSystem.
+    filters: { tables: true, views: true, mv: true, dict: true },
+    treeOpen: false,
     // Storage section (app_explorer_storage.js): breadcrumb scope of the
     // server / database / table storage view.
     storageScope: { database: "", table: "" },
@@ -94,12 +99,12 @@
     if (parts[0] === "functions") {
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
+    if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
+      return { workspace: "explorer", section: "operations" };
+    }
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
       const storageDatabase = params.get("database") || "";
       return { workspace: "explorer", section: "system", storageScope: { database: storageDatabase, table: storageDatabase ? params.get("table") || "" : "" } };
-    }
-    if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
-      return { workspace: "explorer", section: "operations" };
     }
     if (parts[0] === "databases") {
       return { workspace: "explorer", section: "tables" };
@@ -214,54 +219,85 @@
     dom.explorerError.hidden = false;
   }
 
+  // One number format for the whole Explorer (tree, database page, detail,
+  // treemap labels, graph cards). Other Explorer modules read the same helpers
+  // through ns.explorerFormat at render time.
+  //   integers  120,064 (en-US grouping, like util.formatInt everywhere else)
+  //   compact   120.1K / 3.2M / 1.5B
+  //   bytes     0 B, 205 B, 1.7 KB, 10.3 MB: one decimal from KB up, 1024 base
+  //   missing   \u2014 (one dash style for every absent value)
+  const MISSING = "\u2014";
+  const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
+
+  function finiteOrNull(value) {
+    if (value == null || value === "") return null;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
   function fmtInt(value) {
-    if (value == null) return "\u2014";
-    return util.formatInt(value);
+    const n = finiteOrNull(value);
+    if (n == null) return MISSING;
+    return Math.trunc(n).toLocaleString("en-US");
   }
 
   function fmtBytes(value) {
-    if (value == null) return "\u2014";
-    return util.formatBytes(value);
-  }
-
-  function fmtStorageBytes(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "unknown";
+    const n = finiteOrNull(value);
+    if (n == null) return MISSING;
     const sign = n < 0 ? "-" : "";
     let v = Math.abs(n);
-    const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-    let unit = 0;
-    while (v >= 1024 && unit < units.length - 1) {
+    if (v < 1024) return `${sign}${Math.round(v)} B`;
+    let unit = -1;
+    while (v >= 1024 && unit < BYTE_UNITS.length - 1) {
       v /= 1024;
       unit += 1;
     }
-    return `${sign}${v.toFixed(2)}${units[unit]}`;
+    // 1023.96 KB would print as "1024.0 KB": carry into the next unit.
+    if (Number(v.toFixed(1)) >= 1024 && unit < BYTE_UNITS.length - 1) {
+      v /= 1024;
+      unit += 1;
+    }
+    return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;
+  }
+
+  // Storage figures (tree, database headers, System rail) use the same
+  // precision as every other byte value; the name is kept for callers.
+  function fmtStorageBytes(value) {
+    return fmtBytes(value);
   }
 
   function fmtCompactInt(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "\u2014";
-    try {
-      return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-    } catch {
-      if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-      if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-      if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-      return String(Math.trunc(n));
+    const n = finiteOrNull(value);
+    if (n == null) return MISSING;
+    const abs = Math.abs(n);
+    if (abs < 1000) return Math.trunc(n).toLocaleString("en-US");
+    const units = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
+    for (let i = 0; i < units.length; i += 1) {
+      const [scale, suffix] = units[i];
+      if (abs < scale) continue;
+      const scaled = Math.round((abs / scale) * 10) / 10;
+      // 999.96K rounds to 1000.0K: promote to the next suffix instead.
+      if (scaled >= 1000 && i > 0) {
+        const [upScale, upSuffix] = units[i - 1];
+        return `${n < 0 ? "-" : ""}${(Math.round((abs / upScale) * 10) / 10).toFixed(1).replace(/\.0$/, "")}${upSuffix}`;
+      }
+      return `${n < 0 ? "-" : ""}${scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
     }
+    return Math.trunc(n).toLocaleString("en-US");
   }
 
   function fmtRate(value, suffix) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "\u2014";
+    const n = finiteOrNull(value);
+    if (n == null) return MISSING;
     if (suffix === "rows/s") {
-      if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(2)}B rows/s`;
-      if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(2)}M rows/s`;
-      if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}k rows/s`;
+      if (Math.abs(n) >= 1000) return `${fmtCompactInt(n)} rows/s`;
       return `${n.toFixed(n < 10 ? 2 : 0)} rows/s`;
     }
-    return `${util.formatBytes(n)}/s`;
+    return `${fmtBytes(n)}/s`;
   }
+
+  // fmtPercent is declared further down (hoisted) next to the percent bars.
+  ns.explorerFormat = { MISSING, fmtInt, fmtBytes, fmtStorageBytes, fmtCompactInt, fmtRate, fmtPercent };
 
   function quoteIdent(value) {
     return `\`${String(value).replace(/`/g, "``")}\``;
@@ -350,40 +386,200 @@
   }
 
 
-  function setSection(section) {
-    const operationsEnabled = !!ns.explorerOps && explorerFeatures().operations?.enabled !== false;
-    const next = section === "functions" || section === "system" || (section === "operations" && operationsEnabled) ? section : "tables";
-    model.section = next;
-    const functions = next === "functions";
-    const system = next === "system";
-    const operations = next === "operations";
-    const tables = next === "tables";
+  // ---------------------------------------------------------------------------
+  // Explorer shell: top-level view tabs, breadcrumb, mobile tree drawer.
+  //
+  // Views and their containers (other Explorer modules render into these):
+  //   catalog    #explorerListView  -> tree + #explorerCatalogView (#explorerDetailPane)
+  //   graph      #explorerListView  -> tree + #explorerGraphPane
+  //   storage    #explorerSystemPane via ns.explorerStorage.show(container, { scope,
+  //              includeSystem, onScopeChange, onIncludeSystemChange, onOpenTable })
+  //   functions  #explorerFunctionsPane
+  //   operations #explorerOpsPane via ns.explorerOps.show(container, { onOpenTable });
+  //              the tab is hidden while the module is absent or disabled
+  // Routes: catalog/graph keep /explorer[/<db>[/<table>/<tab>]]?view=browse|graph,
+  // storage is /explorer/_system[?database=&table=], functions
+  // /explorer/functions[/<name>], operations /explorer/_operations.
+  const VIEWS = ["catalog", "graph", "storage", "functions", "operations"];
 
-    dom.explorerTablesSectionButton?.setAttribute("aria-selected", String(tables));
-    dom.explorerFunctionsSectionButton?.setAttribute("aria-selected", String(functions));
-    dom.explorerSystemSectionButton?.setAttribute("aria-selected", String(system));
-    dom.explorerOpsSectionButton?.setAttribute("aria-selected", String(operations));
-    if (dom.explorerSectionSelectButton) dom.explorerSectionSelectButton.textContent = functions ? "Functions" : (system ? "Storage" : (operations ? "Operations" : "Tables"));
-    closeDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu, { immediate: true });
-    if (dom.explorerTableModeTabs) dom.explorerTableModeTabs.hidden = !tables;
+  function shellEl(id) {
+    return dom[id] || document.getElementById(id);
+  }
+
+  function operationsAvailable() {
+    const f = explorerFeatures();
+    return !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;
+  }
+
+  function showOperationsView() {
+    if (!dom.explorerOpsPane || !ns.explorerOps) return;
+    ns.explorerOps.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });
+  }
+
+  function currentView() {
+    if (model.section === "functions") return "functions";
+    if (model.section === "system") return "storage";
+    if (model.section === "operations") return "operations";
+    return model.mode === "graph" ? "graph" : "catalog";
+  }
+
+  function storageScope() {
+    const table = selectedTable();
+    if (table) return { database: String(table.database || ""), table: String(table.name || "") };
+    if (model.selectedDatabase) return { database: model.selectedDatabase, table: "" };
+    return { database: "", table: "" };
+  }
+
+  function syncViewTabs() {
+    const view = currentView();
+    const f = explorerFeatures();
+    const gf = f.graph || {};
+    const browseEnabled = f.enabled !== false && f.browse !== false;
+    const graphEnabled = f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false);
+    const available = {
+      catalog: browseEnabled,
+      graph: graphEnabled,
+      storage: true,
+      functions: true,
+      operations: operationsAvailable(),
+    };
+    for (const button of shellEl("explorerViewTabs")?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {
+      const name = String(button.dataset.view || "");
+      const active = name === view;
+      button.hidden = !available[name];
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    }
+    const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
+    if (shell) shell.dataset.explorerView = view;
+    const treeView = view === "catalog" || view === "graph";
+    const toggle = shellEl("explorerTreeToggle");
+    if (toggle) toggle.hidden = !treeView;
+    if (!treeView) setTreeDrawerOpen(false);
+  }
+
+  function setView(view, { historyMode = "push" } = {}) {
+    const next = VIEWS.includes(view) ? view : "catalog";
+    if (next === "catalog" || next === "graph") {
+      if (model.section !== "tables") {
+        model.mode = next === "graph" ? "graph" : "list";
+        setSection("tables");
+      } else {
+        setMode(next === "graph" ? "graph" : "list");
+      }
+    } else if (next === "storage") {
+      if (model.section !== "system") model.storageScope = storageScope();
+      setSection("system");
+    }
+    else if (next === "functions") setSection("functions");
+    else setSection(operationsAvailable() ? "operations" : "tables");
+    syncExplorerUrl(historyMode);
+  }
+
+  function hostLabel() {
+    const hosts = Array.isArray(state.hostsSnapshot?.hosts) ? state.hostsSnapshot.hosts : [];
+    const selected = hosts.find((host) => host && String(host.id) === String(state.selectedHostId || "")) || null;
+    return selected ? String(selected.label || selected.id || "Server") : String(state.selectedHostId || "Server");
+  }
+
+  // host > database > table. Each crumb but the last navigates; the trail
+  // follows the Catalog / Graph selection and stays on the host elsewhere.
+  function renderBreadcrumb() {
+    const nav = shellEl("explorerBreadcrumb");
+    if (!nav) return;
+    const view = currentView();
+    const tree = view === "catalog" || view === "graph";
+    const table = tree ? selectedTable() : null;
+    const database = table ? String(table.database || "") : (tree ? String(model.selectedDatabase || "") : "");
+    const crumbs = [{ label: hostLabel(), kind: "host", onClick: database && tree ? () => openCatalogRoot() : null }];
+    if (database) crumbs.push({ label: database, kind: "database", onClick: table ? () => selectDatabase(database) : null });
+    if (table) crumbs.push({ label: String(table.name || ""), kind: "table", onClick: null });
+    const items = [];
+    crumbs.forEach((crumb, index) => {
+      if (index) items.push(node("span", "explorerBreadcrumb__sep", "\u203a"));
+      const current = index === crumbs.length - 1;
+      const el = node(crumb.onClick ? "button" : "span", `explorerBreadcrumb__item explorerBreadcrumb__item--${crumb.kind}`, crumb.label);
+      el.title = crumb.label;
+      if (crumb.onClick) {
+        el.type = "button";
+        el.addEventListener("click", crumb.onClick);
+      }
+      if (current) el.setAttribute("aria-current", "location");
+      items.push(el);
+    });
+    nav.replaceChildren(...items);
+  }
+
+  function openCatalogRoot() {
+    model.selectedKey = null;
+    model.selectedDatabase = null;
+    model.detailSerial += 1;
+    model.detail = null;
+    model.detailLoading = false;
+    model.preview = null;
+    destroyDatabaseTreemap();
+    if (dom.explorerEmptyState) {
+      dom.explorerEmptyState.hidden = false;
+      dom.explorerEmptyState.replaceChildren(node("strong", "", "Select a table"), node("span", "", "Pick a database or an object in the tree."));
+    }
+    if (dom.explorerDetail) dom.explorerDetail.hidden = true;
+    syncVisibilityOptionLocks({ propagate: true });
+    renderTableList();
+    renderBreadcrumb();
+    syncExplorerUrl("push");
+  }
+
+  function isMobileShell() {
+    try { return window.matchMedia("(max-width: 820px)").matches; } catch { return false; }
+  }
+
+  // Mobile: the tree is an off-canvas drawer over the detail / graph.
+  function setTreeDrawerOpen(open) {
+    const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
+    const value = !!open && isMobileShell();
+    model.treeOpen = value;
+    shell?.classList.toggle("is-tree-open", value);
+    const toggle = shellEl("explorerTreeToggle");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", String(value));
+      toggle.setAttribute("aria-label", value ? "Hide objects" : "Show objects");
+    }
+    const backdrop = shellEl("explorerTreeBackdrop");
+    if (backdrop) backdrop.hidden = !value;
+  }
+
+  function setSection(section) {
+    const next = ["functions", "system", "operations"].includes(section) ? section : "tables";
+    const resolved = next === "operations" && !operationsAvailable() ? "tables" : next;
+    const previous = model.section;
+    model.section = resolved;
+    const functions = resolved === "functions";
+    const system = resolved === "system";
+    const operations = resolved === "operations";
+
     if (dom.explorerFunctionsPane) dom.explorerFunctionsPane.hidden = !functions;
     if (dom.explorerSystemPane) dom.explorerSystemPane.hidden = !system;
     if (dom.explorerOpsPane) dom.explorerOpsPane.hidden = !operations;
+    if (previous === "system" && !system) ns.explorerStorage?.hide?.();
     if (!operations) ns.explorerOps?.hide?.();
+    syncViewTabs();
+    renderBreadcrumb();
 
-    if (system || operations) {
+    if (system || functions || operations) {
       if (dom.explorerListView) dom.explorerListView.hidden = true;
       if (dom.explorerGraphPane) dom.explorerGraphPane.hidden = true;
       graph?.deactivate();
-      if (system) renderSystemView();
-      else if (model.active) ns.explorerOps?.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });
+    }
+    if (system) {
+      renderSystemView();
       return;
     }
-
+    if (operations) {
+      if (model.active) showOperationsView();
+      return;
+    }
     if (functions) {
-      if (dom.explorerListView) dom.explorerListView.hidden = true;
-      if (dom.explorerGraphPane) dom.explorerGraphPane.hidden = true;
-      graph?.deactivate();
       renderFunctionList();
       if (model.active) refreshFunctions(false);
       return;
@@ -403,10 +599,7 @@
     const browseEnabled = f.enabled !== false && f.browse !== false;
     const gf = f.graph || {};
     const graphEnabled = f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false);
-    if (dom.explorerTableModeTabs) dom.explorerTableModeTabs.hidden = !(browseEnabled && graphEnabled) || model.section !== "tables";
-    const operationsEnabled = !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;
-    if (dom.explorerOpsSectionButton) dom.explorerOpsSectionButton.hidden = !operationsEnabled;
-    if (!operationsEnabled && model.section === "operations") setSection("tables");
+    if (!operationsAvailable() && model.section === "operations") setSection("tables");
     if (!browseEnabled && graphEnabled && model.mode !== "graph") setMode("graph");
     else if (!graphEnabled && model.mode === "graph") setMode("list");
 
@@ -418,6 +611,7 @@
     if (dom.explorerGraphLogicalButton) dom.explorerGraphLogicalButton.hidden = gf.lineage === false;
     if (dom.explorerGraphPhysicalButton) dom.explorerGraphPhysicalButton.hidden = gf.storage_topology === false;
     if (modes.length === 1) graph?.setDetailMode?.(modes[0]);
+    syncViewTabs();
   }
 
   function setMode(mode) {
@@ -431,18 +625,12 @@
     const tables = model.section === "tables";
     // Browse stays mounted on the left in both Browse and Graph modes.
     if (dom.explorerListView) dom.explorerListView.hidden = !tables;
+    const catalogView = shellEl("explorerCatalogView");
+    if (catalogView) catalogView.hidden = !tables || graphMode;
     if (dom.explorerDetailPane) dom.explorerDetailPane.hidden = !tables || graphMode;
     if (dom.explorerGraphPane) dom.explorerGraphPane.hidden = !tables || !graphMode;
-    dom.explorerListModeButton?.setAttribute("aria-selected", String(!graphMode));
-    dom.explorerGraphModeButton?.setAttribute("aria-selected", String(graphMode));
-    if (dom.explorerModeSelectButton) {
-      const label = graphMode ? "Graph" : "Browse";
-      const icon = dom.explorerModeSelectButton.querySelector(".explorerModeIcon");
-      if (icon) icon.className = `explorerModeIcon explorerModeIcon--${graphMode ? "graph" : "browse"}`;
-      dom.explorerModeSelectButton.setAttribute("aria-label", `Table view: ${label}`);
-      dom.explorerModeSelectButton.title = label;
-    }
-    closeDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu, { immediate: true });
+    syncViewTabs();
+    renderBreadcrumb();
     if (!model.active || !tables) return;
     if (graphMode) {
       const table = selectedTable();
@@ -494,7 +682,7 @@
     if (explorer) {
       if (model.section === "functions") refreshFunctions(false);
       else if (model.section === "system") renderSystemView();
-      else if (model.section === "operations") ns.explorerOps?.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });
+      else if (model.section === "operations") showOperationsView();
       else {
         refreshCatalog(false);
         if (model.mode === "graph") graph?.activate(false);
@@ -510,11 +698,21 @@
     return key === "view" || key === "parameterizedview" || key === "materializedview" || key === "buffer";
   }
 
+  const TYPE_FILTERS = ["tables", "views", "mv", "dict"];
+  const TYPE_FILTER_STORAGE_KEY = "chdash.explorer.typeFilters.v1";
+
+  function filterKindOf(table) {
+    const key = engineKey(table);
+    if (key === "dictionary") return "dict";
+    if (key === "materializedview") return "mv";
+    if (key === "view" || key === "parameterizedview") return "views";
+    return "tables";
+  }
+
   function sidebarObjectVisible(table) {
     if (!table) return false;
     if (!model.includeSystem && isSystemDatabaseName(table.database)) return false;
-    if (!model.includeNonStoring && nonStoringSummary(table)) return false;
-    return true;
+    return model.filters[filterKindOf(table)] !== false;
   }
 
   function isSystemDatabaseName(database) {
@@ -526,46 +724,81 @@
     const graphRequirements = model.mode === "graph" ? (graph?.visibilityRequirements?.() || {}) : {};
     return {
       includeSystem: !!graphRequirements.includeSystem || !!table && isSystemDatabaseName(table.database),
-      // A non-storing object cannot remain selected while being excluded from
-      // the current Explorer scope. Keep the option checked/locked until the
-      // user moves to a storing object.
-      includeNonStoring: !!table && nonStoringSummary(table),
+      // A selected object cannot be hidden by the filter that would exclude
+      // it: its type chip stays pressed and locked until the selection moves.
+      kind: table ? filterKindOf(table) : null,
+      includeNonStoring: !!table && nonStoringSummary(table) || !!graphRequirements.includeNonStoring,
     };
   }
 
   function persistVisibilityOptions() {
     try {
       localStorage.setItem("chdash.explorer.includeSystem", model.includeSystem ? "1" : "0");
-      localStorage.setItem("chdash.explorer.includeNonStoring", model.includeNonStoring ? "1" : "0");
+      localStorage.setItem(TYPE_FILTER_STORAGE_KEY, TYPE_FILTERS.filter((key) => model.filters[key] !== false).join(","));
     } catch {}
+  }
+
+  function loadVisibilityOptions() {
+    try {
+      model.includeSystem = localStorage.getItem("chdash.explorer.includeSystem") === "1";
+      const stored = localStorage.getItem(TYPE_FILTER_STORAGE_KEY);
+      if (stored != null) {
+        const enabled = new Set(String(stored).split(",").filter(Boolean));
+        for (const key of TYPE_FILTERS) model.filters[key] = enabled.has(key);
+      } else if (localStorage.getItem("chdash.explorer.includeNonStoring") === "0") {
+        // Former "Include non-storing objects" switch.
+        model.filters.views = false;
+        model.filters.mv = false;
+      }
+    } catch {}
+  }
+
+  function syncFilterChips(required) {
+    const root = shellEl("explorerTreeFilters");
+    if (!root) return;
+    for (const chip of root.querySelectorAll(".explorerFilterChip[data-filter]")) {
+      const key = String(chip.dataset.filter || "");
+      const system = key === "system";
+      const pressed = system ? model.includeSystem : model.filters[key] !== false;
+      const locked = system ? !!required.includeSystem : required.kind === key;
+      chip.setAttribute("aria-pressed", String(pressed));
+      chip.classList.toggle("is-on", pressed);
+      chip.disabled = locked;
+      chip.classList.toggle("is-locked", locked);
+      if (!chip.dataset.baseTitle) chip.dataset.baseTitle = chip.title || "";
+      chip.title = locked
+        ? (system ? "Required while the selected object belongs to a system database." : "Required while the selected object is of this type.")
+        : chip.dataset.baseTitle;
+    }
   }
 
   function syncVisibilityOptionLocks({ propagate = false } = {}) {
     const required = visibilityRequirementsForCurrentObject();
     let changed = false;
     if (required.includeSystem && !model.includeSystem) { model.includeSystem = true; changed = true; }
-    if (required.includeNonStoring && !model.includeNonStoring) { model.includeNonStoring = true; changed = true; }
-
-    if (dom.explorerIncludeSystem) {
-      dom.explorerIncludeSystem.checked = model.includeSystem;
-      dom.explorerIncludeSystem.disabled = required.includeSystem;
-      dom.explorerIncludeSystem.title = required.includeSystem ? "Required while the selected object belongs to a system database." : "";
-    }
-    if (dom.explorerIncludeNonStoring) {
-      dom.explorerIncludeNonStoring.checked = model.includeNonStoring;
-      dom.explorerIncludeNonStoring.disabled = required.includeNonStoring;
-      dom.explorerIncludeNonStoring.title = required.includeNonStoring ? "Required while the selected object does not store data itself." : "";
-    }
+    if (required.kind && model.filters[required.kind] === false) { model.filters[required.kind] = true; changed = true; }
+    const includeNonStoring = model.filters.views !== false || model.filters.mv !== false || required.includeNonStoring;
+    if (includeNonStoring !== model.includeNonStoring) { model.includeNonStoring = includeNonStoring; changed = true; }
+    syncFilterChips(required);
     if (changed) persistVisibilityOptions();
     if ((changed || propagate) && model.mode === "graph") {
       const effective = graph?.setVisibilityOptions?.({ includeSystem: model.includeSystem, includeNonStoring: model.includeNonStoring });
       if (effective) {
         model.includeSystem = !!effective.includeSystem;
         model.includeNonStoring = !!effective.includeNonStoring;
-        if (dom.explorerIncludeSystem) dom.explorerIncludeSystem.checked = model.includeSystem;
-        if (dom.explorerIncludeNonStoring) dom.explorerIncludeNonStoring.checked = model.includeNonStoring;
+        syncFilterChips(required);
       }
     }
+  }
+
+  function toggleTypeFilter(key) {
+    if (key === "system") model.includeSystem = !model.includeSystem;
+    else if (TYPE_FILTERS.includes(key)) model.filters[key] = model.filters[key] === false;
+    else return;
+    persistVisibilityOptions();
+    syncVisibilityOptionLocks({ propagate: true });
+    renderTableList();
+    if (model.section === "tables" && model.mode !== "graph" && model.selectedDatabase && !model.selectedKey) renderDatabaseDetail(model.selectedDatabase);
   }
 
   function visibleTables() {
@@ -1287,7 +1520,7 @@
       scope: model.storageScope,
       includeSystem: model.includeSystem,
       onIncludeSystemChange: (value) => {
-        if (dom.explorerIncludeSystem?.disabled && !value) return;
+        if (shellEl("explorerFilterSystem")?.disabled && !value) return;
         model.includeSystem = !!value;
         persistVisibilityOptions();
         syncVisibilityOptionLocks({ propagate: true });
@@ -1334,7 +1567,7 @@
     if (dom.explorerDetailName) dom.explorerDetailName.textContent = name;
     if (dom.explorerDetailMeta) {
       const databaseSummary = (model.catalog?.database_summaries || []).find((item) => String(item?.name || "") === name) || null;
-      const meta = [`${fmtInt(tables.length)} tables`];
+      const meta = [`${fmtInt(tables.length)} ${tables.length === 1 ? "object" : "objects"}`];
       if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) meta.push(fmtStorageBytes(databaseSummary.bytes));
       dom.explorerDetailMeta.textContent = meta.join(" · ");
     }
@@ -1345,7 +1578,6 @@
     if (!dom.explorerDetailContent) return;
     clear(dom.explorerDetailContent);
     renderDatabaseStorage(dom.explorerDetailContent, name);
-    dom.explorerDetailContent.appendChild(sectionTitle("Objects"));
     renderDatabaseObjects(dom.explorerDetailContent, name, tables);
   }
 
@@ -1354,9 +1586,12 @@
   // only from the per-database catalog payload already loaded for the sidebar
   // and the treemap (system.tables + one system.parts GROUP BY), never from
   // per-table requests. Missing values sort last in both directions.
-  const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Uncompressed", "Ratio", "% database", "Parts", "Modified"];
-  const DATABASE_OBJECT_TYPES = ["String", "String", "UInt64", "UInt64", "UInt64", "UInt64", "Float64", "Float64", "UInt64", "DateTime"];
-  const DATABASE_OBJECT_BYTE_COLUMNS = new Set([3, 4, 5]);
+  // Uncompressed bytes live in the Ratio tooltip so the table fits a 1280 px
+  // window without horizontal scrolling.
+  const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];
+  const DATABASE_OBJECT_TYPES = ["String", "String", "UInt64", "UInt64", "UInt64", "Float64", "Float64", "UInt64", "DateTime"];
+  const DATABASE_OBJECT_BYTE_COLUMNS = new Set([3, 4]);
+  const DATABASE_OBJECT_NUMERIC = (index) => index >= 2 && index <= 7;
 
   function validCatalogTime(value) {
     const text = String(value || "").trim();
@@ -1383,32 +1618,44 @@
       optional(table.rows),
       footprint,
       compressed,
-      uncompressed,
       ratio,
       share,
       parts,
       times.length ? times[times.length - 1] : null,
     ];
-    row.__explorerObject = { database: String(table.database || ""), name: String(table.name || ""), resident };
+    row.__explorerObject = { database: String(table.database || ""), name: String(table.name || ""), resident, compressed, uncompressed };
     return row;
   }
 
+  // Columns drawn with an in-cell bar normalised to the column maximum.
+  const DATABASE_OBJECT_BAR_COLUMNS = new Set([2, 3, 4, 6]);
+
+  function shortCatalogTime(value) {
+    // "2026-09-30 12:34:56[.000]" -> "2026-09-30 12:34"; the full value stays in the tooltip.
+    const text = String(value || "");
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+    return match ? `${match[1]} ${match[2]}` : text;
+  }
+
   function renderDatabaseObjects(container, database, tables) {
+    const section = node("section", "explorerSection explorerDatabaseObjects");
+    const head = node("div", "explorerSectionHead");
+    head.append(node("h3", "explorerSectionTitle", "Objects"), node("span", "explorerSectionCount", fmtInt(tables.length)));
+    section.appendChild(head);
+    container.appendChild(section);
     if (!tables.length) {
-      container.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
+      section.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
       return;
     }
     const onDiskTotal = databaseStorageTree(database).root.bytes;
     const rows = tables.map((table) => databaseObjectRow(table, onDiskTotal));
     const maxima = DATABASE_OBJECT_COLUMNS.map((_, index) => Math.max(0, ...rows.map((row) => Number(row[index]) || 0)));
-    maxima[7] = 100;
-    const gauges = rows.length > 1;
-    const setGauge = (td, value, max, text) => {
+    const bars = rows.length > 1;
+    const setBar = (td, value, max, text) => {
       td.classList.add("resultTable__numeric");
-      if (gauges) {
-        td.classList.add("resultTable__gaugeCell", "explorerStorageGaugeCell");
-        const fill = value == null || max <= 0 ? 0 : Math.max(0, Math.min(100, (value / max) * 100));
-        td.style.setProperty("--gaugeFill", `${fill}%`);
+      if (bars && DATABASE_OBJECT_BAR_COLUMNS.has(td.__columnIndex)) {
+        td.classList.add("explorerBar", "explorerBar--cell");
+        td.style.setProperty("--bar-pct", `${barPercent(value, max)}%`);
       }
       td.textContent = text;
     };
@@ -1420,14 +1667,15 @@
       nullsLast: true,
       decorateHeader: (th, ctx) => {
         th.title = {
+          2: "Rows (buffered rows for Buffer)",
           3: "On-disk bytes of active parts (resident memory for Memory / Buffer / Dictionary)",
           4: "Compressed data bytes of active parts",
-          5: "Uncompressed data bytes of active parts",
-          6: "Uncompressed / compressed",
-          7: "Share of the database on-disk bytes (the treemap area)",
-          8: "Active parts",
-          9: "Latest of the newest part and the metadata modification time",
+          5: "Uncompressed / compressed data bytes of active parts",
+          6: "Share of the database on-disk bytes (the treemap area)",
+          7: "Active parts",
+          8: "Latest of the newest part and the metadata modification time",
         }[ctx.columnIndex] || "";
+        th.classList.add(`explorerDatabaseObjectsTable__col--${ctx.columnIndex}`);
       },
       decorateRow: (tr, ctx) => {
         const item = ctx.row?.__explorerObject;
@@ -1436,7 +1684,9 @@
       renderCell: (td, ctx) => {
         const item = ctx.row?.__explorerObject || null;
         const value = ctx.value;
-        if (ctx.columnIndex >= 2 && ctx.columnIndex <= 8) td.dataset.value = value == null ? "" : String(value);
+        td.__columnIndex = ctx.columnIndex;
+        td.classList.add(`explorerDatabaseObjectsTable__col--${ctx.columnIndex}`);
+        if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.dataset.value = value == null ? "" : String(value);
         if (ctx.columnIndex === 0) {
           const button = node("button", "explorerDatabaseObjectsTable__open", String(value || ""));
           button.type = "button";
@@ -1447,25 +1697,43 @@
           return true;
         }
         if (value == null) {
-          if (ctx.columnIndex >= 2 && ctx.columnIndex <= 8) td.classList.add("resultTable__numeric");
-          td.textContent = "\u2014";
+          if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.classList.add("resultTable__numeric");
+          td.textContent = MISSING;
           td.classList.add("explorerDatabaseObjectsTable__missing");
           return true;
         }
+        if (ctx.columnIndex === 1) {
+          td.textContent = String(value);
+          td.title = String(value);
+          return true;
+        }
+        if (ctx.columnIndex === 2 || ctx.columnIndex === 7) {
+          setBar(td, value, maxima[ctx.columnIndex], fmtInt(value));
+          return true;
+        }
         if (DATABASE_OBJECT_BYTE_COLUMNS.has(ctx.columnIndex)) {
-          const text = util.formatBytes(value);
-          setGauge(td, value, maxima[ctx.columnIndex], ctx.columnIndex === 3 && item?.resident ? `${text} RAM` : text);
+          const text = fmtBytes(value);
+          setBar(td, value, maxima[ctx.columnIndex], ctx.columnIndex === 3 && item?.resident ? `${text} RAM` : text);
           if (ctx.columnIndex === 3 && item?.resident) td.title = "RAM held by the object, not on disk";
           return true;
         }
-        if (ctx.columnIndex === 6) { setGauge(td, value, maxima[6], `${value.toFixed(2)}×`); return true; }
-        if (ctx.columnIndex === 7) { setGauge(td, value, 100, fmtPercent(value)); return true; }
+        if (ctx.columnIndex === 5) {
+          setBar(td, value, maxima[5], `${value.toFixed(2)}\u00d7`);
+          if (item) td.title = `${fmtBytes(item.uncompressed)} uncompressed / ${fmtBytes(item.compressed)} compressed`;
+          return true;
+        }
+        if (ctx.columnIndex === 6) { setBar(td, value, maxima[6], fmtPercent(value)); return true; }
+        if (ctx.columnIndex === 8) {
+          td.textContent = shortCatalogTime(value);
+          td.title = String(value);
+          return true;
+        }
         return false;
       },
     });
     if (!objectTable) throw new Error("Shared result table component is unavailable.");
     objectTable.id = "explorerDatabaseObjects";
-    container.appendChild(objectTable);
+    section.appendChild(objectTable);
   }
 
   function selectDatabase(database, { historyMode = "push", expand = true } = {}) {
@@ -1526,15 +1794,87 @@
     return byName;
   }
 
+  // Tree icon per object family; the glyphs are Latin-1-escaped geometric shapes
+  // available in every system font.
+  const TREE_KINDS = {
+    table: { glyph: "\u25a6", label: "Table" },
+    distributed: { glyph: "\u229e", label: "Distributed table" },
+    buffer: { glyph: "\u25a4", label: "Buffer" },
+    memory: { glyph: "\u25a2", label: "Memory table" },
+    view: { glyph: "\u25c7", label: "View" },
+    mv: { glyph: "\u25c6", label: "Materialized view" },
+    dict: { glyph: "\u25c8", label: "Dictionary" },
+  };
+
+  function treeKind(table) {
+    const key = engineKey(table);
+    if (key === "dictionary") return "dict";
+    if (key === "materializedview") return "mv";
+    if (key === "view" || key === "parameterizedview") return "view";
+    if (key === "distributed") return "distributed";
+    if (key === "buffer") return "buffer";
+    if (key === "memory") return "memory";
+    return "table";
+  }
+
+  // Text with every case-insensitive occurrence of `query` wrapped in <mark>.
+  function highlightedText(className, text, query) {
+    const el = node("span", className);
+    const value = String(text || "");
+    const q = String(query || "").toLowerCase();
+    if (!q) { el.textContent = value; return el; }
+    const lower = value.toLowerCase();
+    let at = 0;
+    for (let index = lower.indexOf(q); index >= 0; index = lower.indexOf(q, at)) {
+      if (index > at) el.appendChild(document.createTextNode(value.slice(at, index)));
+      el.appendChild(node("mark", "explorerTreeMark", value.slice(index, index + q.length)));
+      at = index + q.length;
+    }
+    if (at < value.length) el.appendChild(document.createTextNode(value.slice(at)));
+    return el;
+  }
+
+  function barPercent(value, max) {
+    const v = Number(value);
+    if (!Number.isFinite(v) || v <= 0 || !(max > 0)) return 0;
+    const pct = Math.min(100, (v / max) * 100);
+    return pct < 1 ? 0 : pct;
+  }
+
+  // Right-aligned badge of a tree row: on-disk (or resident) bytes, else
+  // buffered rows; nothing for objects that hold no data (views, MVs).
+  function treeBadge(table) {
+    const footprint = summaryFootprintBytes(table);
+    const resident = isResidentMemorySummary(table);
+    const rows = optionalNumber(table.rows);
+    if (footprint != null && (footprint > 0 || (!resident && !isViewLikeSummary(table)))) {
+      return { text: fmtBytes(footprint), value: footprint };
+    }
+    if (rows != null && rows > 0) return { text: `${fmtCompactInt(rows)} rows`, value: null };
+    return null;
+  }
+
+  function treeObjectTitle(table) {
+    const footprint = summaryFootprintBytes(table);
+    const bits = [humanEngine(table.engine)];
+    const rows = summaryRowsLabel(table);
+    if (rows) bits.push(rows);
+    if (footprint != null) bits.push(isResidentMemorySummary(table) ? `${fmtBytes(footprint)} in memory` : `${fmtBytes(footprint)} on disk`);
+    const health = String(table.health || "healthy");
+    if (health !== "healthy") bits.push(healthLabel(table));
+    return `${table.database}.${table.name}\n${bits.join(" · ")}`;
+  }
+
   function renderTableList() {
     if (!dom.explorerTableList) return;
     clear(dom.explorerTableList);
+    renderBreadcrumb();
     const catalog = model.catalog;
     const databases = [...new Set([
       ...(catalog?.databases || []),
       ...(catalog?.tables || []).map((table) => String(table.database || "")),
     ].filter(Boolean))]
-      .filter((database) => model.includeSystem || !["system", "information_schema", "INFORMATION_SCHEMA"].includes(database))
+      .filter((database) => model.includeSystem || !isSystemDatabaseName(database))
       .sort((a, b) => a.localeCompare(b));
 
     if (!databases.length) {
@@ -1545,12 +1885,23 @@
     const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
     const groupedTables = tablesByDatabase(catalog?.tables || []);
     const summaries = summaryByDatabase(catalog?.database_summaries || []);
+    const databaseBytes = (database) => {
+      const value = Number(summaries.get(database)?.bytes);
+      return Number.isFinite(value) ? value : null;
+    };
+    const maxDatabaseBytes = Math.max(0, ...databases.map((database) => databaseBytes(database) || 0));
+    let shown = 0;
     for (const database of databases) {
       const allItems = (groupedTables.get(database) || []).filter((table) => sidebarObjectVisible(table));
       const items = allItems.filter((table) => !query || `${table.database}.${table.name} ${table.engine || ""}`.toLowerCase().includes(query));
       const loaded = model.databaseTablesLoaded.has(database);
       const loading = model.databaseTablesLoading.has(database);
-      const expanded = model.expandedDatabases.has(database);
+      const databaseMatches = !!query && database.toLowerCase().includes(query);
+      // While searching, a loaded database without any match is dropped and a
+      // loaded database with matches is shown open (its stored state is kept).
+      if (query && loaded && !items.length && !databaseMatches) continue;
+      shown += 1;
+      const expanded = model.expandedDatabases.has(database) || (!!query && loaded && items.length > 0);
       const section = node("section", "explorerTreeGroup");
       const header = node("div", `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}`);
       const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "\u2304" : "\u203a");
@@ -1579,17 +1930,24 @@
       const headerMain = node("button", "explorerTreeDatabase");
       headerMain.type = "button";
       const databaseSummary = summaries.get(database) || null;
-      const databaseMeta = [];
-      if (loading) databaseMeta.push("Loading\u2026");
-      else if (loaded) databaseMeta.push(`${fmtInt(allItems.length)} tables`);
-      else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) databaseMeta.push(`${fmtInt(databaseSummary.tables)} tables`);
-      else databaseMeta.push("Tables");
-      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) databaseMeta.push(fmtStorageBytes(databaseSummary.bytes));
+      let countText = "";
+      if (loading) countText = "Loading\u2026";
+      else if (loaded) countText = `${fmtInt(allItems.length)} ${allItems.length === 1 ? "object" : "objects"}`;
+      else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) {
+        const count = Number(databaseSummary.tables);
+        countText = `${fmtInt(count)} ${count === 1 ? "object" : "objects"}`;
+      }
+      const bytes = databaseBytes(database);
+      const size = node("span", "explorerTreeDatabase__size explorerBar", bytes == null ? "" : fmtBytes(bytes));
+      size.style.setProperty("--bar-pct", `${barPercent(bytes, maxDatabaseBytes)}%`);
+      if (bytes == null) size.hidden = true;
+      headerMain.title = [database, countText, bytes == null ? "" : `${fmtBytes(bytes)} on disk`].filter(Boolean).join(" · ");
       headerMain.append(
-        node("span", "explorerTreeDatabase__name", database),
-        node("span", "explorerTreeDatabase__count", databaseMeta.join(" · ")),
+        highlightedText("explorerTreeDatabase__name", database, query),
+        node("span", "explorerTreeDatabase__count", countText),
+        size,
       );
-      headerMain.addEventListener("click", () => selectDatabase(database));
+      headerMain.addEventListener("click", () => { selectDatabase(database); setTreeDrawerOpen(false); });
       header.append(toggle, headerMain);
       section.appendChild(header);
 
@@ -1600,35 +1958,52 @@
         } else if (model.databaseLoadErrors.has(database) && !loaded) {
           children.appendChild(node("div", "explorerListEmpty", "Unable to load tables"));
         } else if (loaded && !items.length) {
-          children.appendChild(node("div", "explorerListEmpty", query ? "No matching tables" : "No accessible tables or views"));
+          const filteredOut = (groupedTables.get(database) || []).length > 0;
+          children.appendChild(node("div", "explorerListEmpty", query ? "No matching objects" : (filteredOut ? "No objects match the type filters" : "No accessible tables or views")));
         } else {
+          const badges = new Map(items.map((table) => [table, treeBadge(table)]));
+          const maxBytes = Math.max(0, ...[...badges.values()].map((badge) => Number(badge?.value) || 0));
           for (const table of items.sort((a, b) => a.name.localeCompare(b.name))) {
             const key = `${table.database}\0${table.name}`;
-            const button = node("button", "explorerTreeObject");
+            const kind = treeKind(table);
+            const button = node("button", `explorerTreeObject explorerTreeObject--${kind}`);
             button.type = "button";
             button.classList.toggle("is-selected", key === model.selectedKey);
             button.dataset.database = table.database;
             button.dataset.table = table.name;
-            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${objectKind(table).toLowerCase().replace(/[^a-z]+/g, "-")}`, objectKind(table) === "Table" ? "\u25a6" : objectKind(table) === "View" ? "\u25c7" : objectKind(table) === "Materialized View" ? "\u25c6" : "\u25c8");
-            const labels = node("span", "explorerTreeObject__labels");
-            const footprint = summaryFootprintBytes(table);
-            const stats = [
-              summaryRowsLabel(table, { compact: true }),
-              footprint == null ? null : util.formatBytes(footprint),
-            ].filter(Boolean).join(" · ");
-            const objectName = node("span", "explorerTreeObject__name", table.name);
+            button.dataset.kind = kind;
+            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${kind}`, TREE_KINDS[kind].glyph);
+            icon.setAttribute("aria-hidden", "true");
+            const name = highlightedText("explorerTreeObject__name", table.name, query);
+            const srKind = node("span", "srOnly", `${TREE_KINDS[kind].label}, `);
+            button.append(icon, srKind, name);
+            // Replicated tables carry the replica health dot (item 19); other
+            // tables only show a dot when they are not healthy.
             const replicaDot = detailView?.replicaHealthDot?.(table);
-            if (replicaDot) objectName.appendChild(replicaDot);
-            labels.append(
-              objectName,
-              node("span", "explorerTreeObject__meta", [humanEngine(table.engine), stats].filter(Boolean).join(" · ")),
-            );
-            button.append(icon, labels);
+            const health = String(table.health || "healthy");
+            if (replicaDot) {
+              button.appendChild(replicaDot);
+            } else if (health === "warning" || health === "error") {
+              const dot = node("span", `explorerTreeObject__health explorerTreeObject__health--${health}`);
+              dot.setAttribute("aria-label", healthLabel(table));
+              button.appendChild(dot);
+            }
+            const badge = badges.get(table);
+            if (badge) {
+              const size = node("span", "explorerTreeObject__size explorerBar", badge.text);
+              size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);
+              button.appendChild(size);
+            }
+            button.title = treeObjectTitle(table);
             const storageBlocked = model.mode === "graph" && graph?.isStorageMode?.() && !storageCatalogEligible(table);
             button.disabled = !!storageBlocked;
             button.classList.toggle("is-storage-blocked", !!storageBlocked);
-            if (storageBlocked) button.title = "This object does not store data and has no storage topology.";
-            button.addEventListener("click", () => { if (!button.disabled) void selectTable(table.database, table.name); });
+            if (storageBlocked) button.title = `${button.title}\nThis object does not store data and has no storage topology.`;
+            button.addEventListener("click", () => {
+              if (button.disabled) return;
+              setTreeDrawerOpen(false);
+              void selectTable(table.database, table.name);
+            });
             children.appendChild(button);
           }
         }
@@ -1637,6 +2012,7 @@
       }
       dom.explorerTableList.appendChild(section);
     }
+    if (!shown) dom.explorerTableList.appendChild(node("div", "explorerListEmpty", "No matching databases or objects"));
   }
 
   function catalogContainsTable(payload, database, table) {
@@ -1657,6 +2033,7 @@
 
       const previousTables = force ? [] : (model.catalog?.tables || []);
       model.catalog = { ...payload, tables: previousTables };
+      renderBreadcrumb();
       if (force) {
         model.databaseTablesLoaded.clear();
         model.databaseLoadErrors.clear();
@@ -1719,8 +2096,8 @@
   function sectionTitle(text) { return node("h3", "explorerSectionTitle", text); }
 
   function fmtPercent(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "\u2014";
+    const n = finiteOrNull(value);
+    if (n == null) return MISSING;
     if (n > 0 && n < 0.1) return "<0.1%";
     return `${n.toFixed(n < 10 ? 1 : 0)}%`;
   }
@@ -1959,8 +2336,10 @@
     if (model.active) {
       if (model.section === "functions") refreshFunctions(false);
       else if (model.section === "system") renderSystemView();
-      else if (model.section !== "operations") refreshCatalog(false);
+      else if (model.section === "operations") ns.explorerOps?.refresh?.(true);
+      else refreshCatalog(false);
     }
+    renderBreadcrumb();
   }
 
   function openTableFromGraph(database, table) {
@@ -1983,30 +2362,33 @@
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
     window.addEventListener("popstate", () => { void applyRouteFromLocation(); });
-    dom.explorerSectionSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu));
-    dom.explorerModeSelectButton?.addEventListener("click", () => toggleDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu));
-    dom.explorerTablesSectionButton?.addEventListener("click", () => { setSection("tables"); syncExplorerUrl("push"); });
-    dom.explorerFunctionsSectionButton?.addEventListener("click", () => { setSection("functions"); syncExplorerUrl("push"); });
-    dom.explorerSystemSectionButton?.addEventListener("click", () => { setSection("system"); syncExplorerUrl("push"); });
-    dom.explorerOpsSectionButton?.addEventListener("click", () => { setSection("operations"); syncExplorerUrl("push"); });
-    dom.explorerListModeButton?.addEventListener("click", () => { setMode("list"); syncExplorerUrl("push"); });
-    dom.explorerGraphModeButton?.addEventListener("click", () => { setMode("graph"); syncExplorerUrl("push"); });
+    const viewTabs = shellEl("explorerViewTabs");
+    for (const tab of viewTabs?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {
+      tab.addEventListener("click", () => {
+        if (tab.dataset.view === currentView()) return;
+        setView(String(tab.dataset.view || "catalog"));
+      });
+    }
+    viewTabs?.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
+      const tabs = [...viewTabs.querySelectorAll(".explorerViewTab[data-view]")].filter((tab) => !tab.hidden);
+      const index = tabs.indexOf(document.activeElement);
+      if (index < 0 || !tabs.length) return;
+      event.preventDefault();
+      const target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[target].focus();
+      tabs[target].click();
+    });
+    for (const chip of shellEl("explorerTreeFilters")?.querySelectorAll?.(".explorerFilterChip[data-filter]") || []) {
+      chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });
+    }
+    shellEl("explorerTreeToggle")?.addEventListener("click", () => setTreeDrawerOpen(!model.treeOpen));
+    shellEl("explorerTreeBackdrop")?.addEventListener("click", () => setTreeDrawerOpen(false));
+    try {
+      window.matchMedia("(max-width: 820px)").addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
+    } catch {}
     dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));
-    dom.explorerTableSettingsButton?.addEventListener("click", () => toggleDropdown(dom.explorerTableSettings, dom.explorerTableSettingsButton, dom.explorerTableSettingsMenu));
-    dom.explorerIncludeSystem?.addEventListener("change", () => {
-      if (dom.explorerIncludeSystem.disabled) return syncVisibilityOptionLocks();
-      model.includeSystem = !!dom.explorerIncludeSystem.checked;
-      persistVisibilityOptions();
-      syncVisibilityOptionLocks({ propagate: true });
-      renderTableList();
-    });
-    dom.explorerIncludeNonStoring?.addEventListener("change", () => {
-      if (dom.explorerIncludeNonStoring.disabled) return syncVisibilityOptionLocks();
-      model.includeNonStoring = !!dom.explorerIncludeNonStoring.checked;
-      persistVisibilityOptions();
-      syncVisibilityOptionLocks({ propagate: true });
-      renderTableList();
-    });
     dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));
     // The list filter is cheap and stays per keystroke. Graph focus re-runs the
     // layout, the fit and a scoped graph fetch, so it only follows the query
@@ -2038,33 +2420,17 @@
     document.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (isDropdownOpen(dom.explorerSectionSelect) && !dom.explorerSectionSelect.contains(target)) {
-        closeDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu);
-      }
-      if (isDropdownOpen(dom.explorerTableModeTabs) && !dom.explorerTableModeTabs.contains(target)) {
-        closeDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu);
-      }
-      if (isDropdownOpen(dom.explorerTableSettings) && !dom.explorerTableSettings.contains(target)) {
-        closeDropdown(dom.explorerTableSettings, dom.explorerTableSettingsButton, dom.explorerTableSettingsMenu);
-      }
       if (isDropdownOpen(dom.explorerFunctionSettings) && !dom.explorerFunctionSettings.contains(target)) {
         closeDropdown(dom.explorerFunctionSettings, dom.explorerFunctionSettingsButton, dom.explorerFunctionSettingsMenu);
       }
     });
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
-      closeDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu, { immediate: true });
-      closeDropdown(dom.explorerTableModeTabs, dom.explorerModeSelectButton, dom.explorerModeSelectMenu, { immediate: true });
-      closeDropdown(dom.explorerTableSettings, dom.explorerTableSettingsButton, dom.explorerTableSettingsMenu, { immediate: true });
+      if (model.treeOpen) setTreeDrawerOpen(false);
       closeDropdown(dom.explorerFunctionSettings, dom.explorerFunctionSettingsButton, dom.explorerFunctionSettingsMenu, { immediate: true });
     });
-    try {
-      model.includeSystem = localStorage.getItem("chdash.explorer.includeSystem") === "1";
-      const nonStoring = localStorage.getItem("chdash.explorer.includeNonStoring");
-      model.includeNonStoring = nonStoring == null ? true : nonStoring !== "0";
-    } catch {}
-    if (dom.explorerIncludeSystem) dom.explorerIncludeSystem.checked = model.includeSystem;
-    if (dom.explorerIncludeNonStoring) dom.explorerIncludeNonStoring.checked = model.includeNonStoring;
+    loadVisibilityOptions();
+    model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
     syncVisibilityOptionLocks({ propagate: true });
     applyExplorerFeatures();
     setSection("tables");
@@ -2072,5 +2438,8 @@
     void applyRouteFromLocation();
   }
 
-  ns.explorer = { init, setWorkspace, setSection, setMode, refreshCatalog, refreshFunctions, selectTable, selectDatabase };
+  ns.explorer = {
+    init, setWorkspace, setSection, setMode, setView, currentView, storageScope,
+    refreshCatalog, refreshFunctions, selectTable, selectDatabase,
+  };
 })();

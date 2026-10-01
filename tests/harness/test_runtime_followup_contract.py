@@ -114,8 +114,8 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     html = read("src/static/explorer.html")
     css = read("src/static/style.css")
 
-    assert 'id="explorerTablesSectionButton"' in html
-    assert 'id="explorerFunctionsSectionButton"' in html
+    assert 'id="explorerCatalogTab"' in html
+    assert 'id="explorerFunctionsTab"' in html
     assert 'id="explorerDatabasesSectionButton"' not in html
     assert 'id="explorerSearchInput"' in html
     assert 'id="explorerFunctionCategorySelect"' in html
@@ -123,7 +123,7 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     assert 'id="explorerDatabaseSelect"' not in html
     assert "ACL filtered" not in html
     assert "Runner scoped" not in html
-    assert '#explorerTableModeTabs' in css and 'border-left:' in css[css.rindex('#explorerTableModeTabs'):]
+    assert '.explorerViewTabs {' in css and '.explorerTreeFilters {' in css
 
 def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> None:
     css = read("src/static/style.css")
@@ -202,7 +202,7 @@ def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -
     assert "function renderDatabaseDetail(database)" in ui
     assert "function selectDatabase(database" in ui
     assert 'model.selectedDatabase = name;' in ui
-    assert '`${fmtInt(tables.length)} tables`' in ui
+    assert '`${fmtInt(tables.length)} ${tables.length === 1 ? "object" : "objects"}`' in ui
     assert 'button.addEventListener("click", () => void selectTable(table.database, table.name));' in ui
 
 def test_table_switch_requires_requested_identity_instead_of_rendering_undefined() -> None:
@@ -367,9 +367,11 @@ def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     assert 'id="explorerFunctionCategorySelect"' in html
     assert 'id="explorerFunctionRefreshButton"' in html
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
-    assert 'databaseMeta.join(" · ")' in tree
-    assert 'fmtStorageBytes(databaseSummary.bytes)' in tree
-    assert 'humanEngine(table.engine)' in tree
-    assert 'summaryRowsLabel(table' in tree
-    assert 'summaryFootprintBytes(table)' in tree
+    assert 'node("span", "explorerTreeDatabase__count", countText)' in tree
+    assert 'fmtBytes(bytes)' in tree
+    assert 'treeObjectTitle(table)' in tree and 'treeBadge(table)' in tree
+    helpers = ui[ui.index("function treeBadge"):ui.index("function renderTableList")]
+    assert 'humanEngine(table.engine)' in helpers
+    assert 'summaryRowsLabel(table' in helpers
+    assert 'summaryFootprintBytes(table)' in helpers
     assert 'explorerTreeHealthDot' not in tree

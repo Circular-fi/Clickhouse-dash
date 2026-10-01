@@ -172,46 +172,41 @@
   <main id="explorerWorkspace" class="explorerWorkspace" role="main">
     <h1 class="srOnly">Explorer</h1>
     <section class="explorerShell">
-      <header class="explorerHeader explorerHeader--sidebar" aria-label="Explorer navigation">
-        <div id="explorerSectionSelect" class="themeSelect explorerNavSelect">
-          <button id="explorerSectionSelectButton" class="button themeSelect__button explorerNavSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Tables</button>
-          <div id="explorerSectionSelectMenu" class="themeSelect__menu explorerNavSelect__menu" role="listbox" tabindex="-1" hidden>
-            <button id="explorerTablesSectionButton" class="themeSelect__option" type="button" role="option" data-value="tables" aria-selected="true">Tables</button>
-            <button id="explorerFunctionsSectionButton" class="themeSelect__option" type="button" role="option" data-value="functions" aria-selected="false">Functions</button>
-            <button id="explorerSystemSectionButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false">Storage</button>
-            <button id="explorerOpsSectionButton" class="themeSelect__option" type="button" role="option" data-value="operations" aria-selected="false" hidden>Operations</button>
-          </div>
+      <header id="explorerTopBar" class="explorerTopBar" aria-label="Explorer navigation">
+        <button id="explorerTreeToggle" class="button button--small explorerTreeToggle" type="button" aria-controls="explorerListPane" aria-expanded="false" aria-label="Show objects" title="Objects"><span class="explorerTreeToggle__glyph" aria-hidden="true"></span><span class="explorerTreeToggle__text">Objects</span></button>
+        <div id="explorerViewTabs" class="explorerViewTabs" role="tablist" aria-label="Explorer views">
+          <button id="explorerCatalogTab" class="explorerViewTab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
+          <button id="explorerGraphTab" class="explorerViewTab" type="button" role="tab" data-view="graph" aria-selected="false">Graph</button>
+          <button id="explorerStorageTab" class="explorerViewTab" type="button" role="tab" data-view="storage" aria-selected="false">Storage</button>
+          <button id="explorerFunctionsTab" class="explorerViewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
+          <button id="explorerOpsTab" class="explorerViewTab" type="button" role="tab" data-view="operations" aria-selected="false" hidden>Operations</button>
         </div>
-        <div id="explorerTableModeTabs" class="themeSelect themeSelect--icons explorerModeSelect" aria-label="Table view">
-          <button id="explorerModeSelectButton" class="button themeSelect__button themeSelect__button--icon explorerModeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Table view: Browse" title="Browse"><span class="explorerModeIcon explorerModeIcon--browse" aria-hidden="true"></span></button>
-          <div id="explorerModeSelectMenu" class="themeSelect__menu themeSelect__menu--icons explorerModeSelect__menu" role="listbox" tabindex="-1" hidden>
-            <button id="explorerListModeButton" class="themeSelect__option themeSelect__option--icon" type="button" role="option" data-value="list" aria-label="Browse" title="Browse" aria-selected="true"><span class="explorerModeIcon explorerModeIcon--browse" aria-hidden="true"></span></button>
-            <button id="explorerGraphModeButton" class="themeSelect__option themeSelect__option--icon" type="button" role="option" data-value="graph" aria-label="Graph" title="Graph" aria-selected="false"><span class="explorerModeIcon explorerModeIcon--graph" aria-hidden="true"></span></button>
-          </div>
-        </div>
+        <nav id="explorerBreadcrumb" class="explorerBreadcrumb" aria-label="Location"></nav>
       </header>
 
       <div id="explorerError" class="errorBanner explorerError" hidden></div>
 
       <div id="explorerListView" class="explorerGrid">
-        <aside class="explorerListPane" aria-label="Tables">
+        <aside id="explorerListPane" class="explorerListPane" aria-label="Objects">
           <div class="explorerSidebarToolbar">
             <label class="explorerSearch explorerSearch--sidebar">
-              <span class="srOnly">Search tables</span>
-              <input id="explorerSearchInput" type="search" placeholder="Search tables" autocomplete="off" />
+              <span class="srOnly">Search objects</span>
+              <input id="explorerSearchInput" type="search" placeholder="Search objects" autocomplete="off" />
             </label>
-            <div id="explorerTableSettings" class="themeSelect explorerTableSettings">
-              <button id="explorerTableSettingsButton" class="button button--small explorerTableSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Table visibility settings" title="Table visibility settings"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
-              <div id="explorerTableSettingsMenu" class="themeSelect__menu explorerTableSettings__menu" role="menu" tabindex="-1" hidden>
-                <label class="explorerTableSettings__option"><input id="explorerIncludeSystem" type="checkbox" /> <span>Include system database</span></label>
-                <label class="explorerTableSettings__option"><input id="explorerIncludeNonStoring" type="checkbox" checked /> <span>Include non-storing objects</span></label>
-              </div>
-            </div>
             <button id="explorerRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh tables" title="Refresh tables"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
+          </div>
+          <div id="explorerTreeFilters" class="explorerTreeFilters" role="group" aria-label="Object types">
+            <button id="explorerFilterTables" class="explorerFilterChip" type="button" data-filter="tables" aria-pressed="true" title="Tables: MergeTree, Log, Memory, Buffer, Distributed and other engines">Tables</button>
+            <button id="explorerFilterViews" class="explorerFilterChip" type="button" data-filter="views" aria-pressed="true" title="Views and parameterized views">Views</button>
+            <button id="explorerFilterMv" class="explorerFilterChip" type="button" data-filter="mv" aria-pressed="true" title="Materialized views">MV</button>
+            <button id="explorerFilterDict" class="explorerFilterChip" type="button" data-filter="dict" aria-pressed="true" title="Dictionaries">Dict</button>
+            <button id="explorerFilterSystem" class="explorerFilterChip" type="button" data-filter="system" aria-pressed="false" title="Include the system and information_schema databases">System</button>
           </div>
           <div id="explorerTableList" class="explorerTableList"></div>
         </aside>
+        <div id="explorerTreeBackdrop" class="explorerTreeBackdrop" hidden></div>
 
+        <div id="explorerCatalogView" class="explorerCatalogView">
         <section id="explorerDetailPane" class="explorerDetailPane" aria-live="polite">
           <div id="explorerEmptyState" class="explorerEmptyState">
             <strong>Select a table</strong>
@@ -231,6 +226,7 @@
             <div id="explorerDetailContent" class="explorerDetailContent"></div>
           </div>
         </section>
+        </div>
 
         <section id="explorerGraphPane" class="explorerGraphPane" hidden aria-label="ClickHouse topology graph">
           <canvas id="explorerGraphCanvas" class="explorerGraphCanvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph"></canvas>

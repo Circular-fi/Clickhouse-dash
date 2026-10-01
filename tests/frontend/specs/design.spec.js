@@ -209,8 +209,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await fixture.click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
 
-  await page.locator('#explorerModeSelectButton').click();
-  await page.locator('#explorerGraphModeButton').click();
+  await page.locator('#explorerGraphTab').click();
   await expect(page.locator('#explorerGraphPane')).toBeVisible();
   await expect(page.locator('#explorerGraphStatus')).not.toContainText('0 nodes · 0 edges', { timeout: 12_000 });
   await captureState(page, testInfo, 'explorer-graph-lineage');
@@ -224,8 +223,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('aria-selected', 'true');
   await captureState(page, testInfo, 'explorer-graph-storage-topology');
 
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator('#explorerFunctionsSectionButton').click();
+  await page.locator('#explorerFunctionsTab').click();
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible();
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
   await page.locator('#explorerFunctionSearchInput').fill('arrayMap');
@@ -237,18 +235,15 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(page.locator('#explorerFunctionDescription a')).toHaveCount(0);
   await captureState(page, testInfo, 'explorer-function-markdown');
 
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator('#explorerTablesSectionButton').click();
+  await page.locator('#explorerCatalogTab').click();
   // The Tables section keeps the graph mode chosen above; database detail is
   // a browse-mode surface (in graph mode a database click focuses the graph).
-  await page.locator('#explorerModeSelectButton').click();
-  await page.locator('#explorerListModeButton').click();
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   const database = page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first();
   await expect(database).toBeVisible();
   await database.click();
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* tables · \d+(?:\.\d+)?\s*[KMGTP]?i?B$/);
+  await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-detail');
 });
@@ -260,8 +255,7 @@ test('explorer captures database storage, the Storage section and Server operati
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'explorer-database-storage');
 
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator('#explorerSystemSectionButton').click();
+  await page.locator('#explorerStorageTab').click();
   await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'explorer-storage-server');
 
@@ -276,8 +270,7 @@ test('explorer captures database storage, the Storage section and Server operati
   }
   await captureState(page, testInfo, 'explorer-storage-system-database');
 
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator('#explorerOpsSectionButton').click();
+  await page.locator('#explorerOpsTab').click();
   await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'explorer-server-operations');
 });

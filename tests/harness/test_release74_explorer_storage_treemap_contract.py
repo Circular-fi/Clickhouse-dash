@@ -52,7 +52,8 @@ def test_system_section_has_its_own_route_that_does_not_shadow_the_system_databa
     html = read("src/static/explorer.html")
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
-    assert 'id="explorerSystemSectionButton"' in html
+    assert 'id="explorerStorageTab"' in html and 'data-view="storage"' in html
+    assert 'if (model.section === "system") return "storage";' in ui
     assert 'id="explorerSystemPane"' in html
     # The Storage section is rendered by app_explorer_storage.js, scoped by
     # ?database=&table= on the reserved segment.

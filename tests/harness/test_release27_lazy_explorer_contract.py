@@ -82,8 +82,11 @@ def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> No
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'model.databaseTablesLoaded.has(database)' in tree
     assert 'loadDatabaseTables(database)' in tree
-    assert 'summaryRowsLabel(table' in tree
-    assert 'summaryFootprintBytes(table)' in tree
+    # One line per object: the size badge and the tooltip carry the stats.
+    assert 'treeBadge(table)' in tree and 'treeObjectTitle(table)' in tree
+    badge = ui[ui.index("function treeBadge"):ui.index("function renderTableList")]
+    assert 'summaryRowsLabel(table' in badge
+    assert 'summaryFootprintBytes(table)' in badge
     assert "explorerTreeHealthDot" not in tree
 
 

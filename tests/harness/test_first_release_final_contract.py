@@ -100,7 +100,9 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert "graph {" in example
     assert "lineage" in example and "storage_topology" in example
     assert "explicitTypeChoice = modes.length > 1" in explorer
-    assert "dom.explorerTableModeTabs.hidden = !(browseEnabled && graphEnabled)" in explorer
+    # Catalog / Graph are top-level view tabs, each hidden when its feature is off.
+    assert "catalog: browseEnabled," in explorer and "graph: graphEnabled," in explorer
+    assert "button.hidden = !available[name];" in explorer
     assert 'if (!browseEnabled && graphEnabled && model.mode !== "graph") setMode("graph")' in explorer
 
 

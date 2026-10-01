@@ -62,13 +62,17 @@ def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
 def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    assert 'id="explorerTableSettingsButton"' in html
-    assert 'id="explorerIncludeSystem"' in html
-    assert 'id="explorerIncludeNonStoring"' in html
+    # Release 15's settings cog became object-type chips under the search.
+    assert 'id="explorerTableSettingsButton"' not in html
+    for chip in ['explorerFilterTables', 'explorerFilterViews', 'explorerFilterMv', 'explorerFilterDict', 'explorerFilterSystem']:
+        assert f'id="{chip}"' in html
+    assert 'class="explorerFilterChip"' in html and 'aria-pressed=' in html
     assert 'chdash.explorer.includeSystem' in ui
-    assert 'chdash.explorer.includeNonStoring' in ui
+    assert 'chdash.explorer.typeFilters.v1' in ui
+    # The former "Include non-storing objects" off state still hides Views and MVs.
+    assert 'localStorage.getItem("chdash.explorer.includeNonStoring") === "0"' in ui
     assert 'if (!model.includeSystem' in ui
-    assert 'if (!model.includeNonStoring && nonStoringSummary(table) && !storageBuffer)' in ui
+    assert 'return model.filters[filterKindOf(table)] !== false;' in ui
 
 
 def test_create_statement_has_no_internal_vertical_height_limit() -> None:

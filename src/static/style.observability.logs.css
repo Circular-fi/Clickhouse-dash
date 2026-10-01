@@ -3291,3 +3291,44 @@ html[data-theme="light"] {
   --graphWarn: #b45309;
   --graphError: #b91c1c;
 }
+:root {
+  --explorer-table-font: 13px;
+  --explorer-table-head-font: 12px;
+  --explorer-table-head-weight: 600;
+  --explorer-section-title-size: 13.5px;
+  --explorer-section-title-weight: 600;
+  --explorer-section-title-gap: 8px;
+  --explorer-meta-font: 12px;
+  --explorer-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* In-cell bars (.explorerBar + --bar-pct): one colour, one opacity. */
+  --explorer-bar-color: var(--accentBorder);
+  --explorer-bar-alpha: 35%;
+  --explorer-bar-fill: color-mix(in srgb, var(--explorer-bar-color) var(--explorer-bar-alpha), transparent);
+  --explorer-tab-bg: var(--pillBg);
+}
+@media (max-width: 820px) {
+  body[data-page="explorer"] .appHeader {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 10px;
+  }
+  body[data-page="explorer"] .appHeader__left {
+    flex: 1 1 auto;
+  }
+  body[data-page="explorer"] .appHeader__right {
+    flex: 1 1 100%;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  body[data-page="explorer"] .appHeader__right .picker {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body[data-page="explorer"] .appHeader__right .picker__button {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: 0.6rem minmax(3rem, 1fr) auto auto;
+  }
+}

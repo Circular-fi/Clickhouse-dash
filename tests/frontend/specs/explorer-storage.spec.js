@@ -11,11 +11,11 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 
-async function openSection(page, buttonId) {
+// Storage and Operations are top-level Explorer view tabs.
+async function openSection(page, tabId) {
   await openApp(page);
   await openExplorer(page);
-  await page.locator('#explorerSectionSelectButton').click();
-  await page.locator(`#${buttonId}`).click();
+  await page.locator(`#${tabId}`).click();
 }
 
 // Rewrites the byte counters of real catalog tables, so a database can be
@@ -124,11 +124,11 @@ test('database page links to the Storage section scoped to the database', async 
 });
 
 test('Storage section lists databases by size and zooms into a database and a table with a breadcrumb', async ({ page }) => {
-  await openSection(page, 'explorerSystemSectionButton');
+  await openSection(page, 'explorerStorageTab');
   await expect(page).toHaveURL(/\/explorer\/_system$/);
   await expect(page.locator('#explorerSystemPane')).toBeVisible();
   await expect(page.locator('#explorerListView')).toBeHidden();
-  await expect(page.locator('#explorerSectionSelectButton')).toHaveText('Storage');
+  await expect(page.locator('#explorerStorageTab')).toHaveAttribute('aria-selected', 'true');
   const list = page.locator('#explorerStorageList');
   await expect(list.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.explorerStorageView__meta')).toHaveText(/^[\d,]+ databases · [\d,]+ tables with data · \d+(?:\.\d+)?\s?[KMGTP]?B$/);
@@ -187,7 +187,7 @@ test('Storage section lists databases by size and zooms into a database and a ta
 
 test('Storage treemap is secondary: hidden for one dominant database, nested and zoomable otherwise', async ({ page }) => {
   // Real fixture: without system databases one database holds ~100%.
-  await openSection(page, 'explorerSystemSectionButton');
+  await openSection(page, 'explorerStorageTab');
   await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
   const before = await page.locator('#explorerStorageList tbody td.explorerStorageList__cell--share').evaluateAll((cells) => cells.map((td) => Number(td.dataset.value)));
   const significant = before.filter((share) => share >= 1).length;
@@ -229,7 +229,7 @@ test('Storage treemap is secondary: hidden for one dominant database, nested and
 });
 
 test('Operations section reports replica health and Keeper, and lists problems first', async ({ page }) => {
-  await openSection(page, 'explorerOpsSectionButton');
+  await openSection(page, 'explorerOpsTab');
   await expect(page).toHaveURL(/\/explorer\/_operations$/);
   await expect(page.locator('#explorerOpsPane')).toBeVisible();
   const replicas = page.locator('#explorerOpsReplicas');

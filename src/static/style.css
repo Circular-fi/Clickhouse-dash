@@ -18908,3 +18908,585 @@ html[data-theme="light"] {
     padding-inline: 8px;
   }
 }
+
+/* ==========================================================================
+   Explorer nav: shell (view tabs, breadcrumb, mobile drawer), object tree,
+   database page, and the Explorer-wide typography / number / bar tokens.
+   Other Explorer areas read the tokens below (with var() fallbacks).
+   ========================================================================== */
+:root {
+  --explorer-table-font: 13px;
+  --explorer-table-head-font: 12px;
+  --explorer-table-head-weight: 600;
+  --explorer-section-title-size: 13.5px;
+  --explorer-section-title-weight: 600;
+  --explorer-section-title-gap: 8px;
+  --explorer-meta-font: 12px;
+  --explorer-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* In-cell bars (.explorerBar + --bar-pct): one colour, one opacity. */
+  --explorer-bar-color: var(--accentBorder);
+  --explorer-bar-alpha: 35%;
+  --explorer-bar-fill: color-mix(in srgb, var(--explorer-bar-color) var(--explorer-bar-alpha), transparent);
+  --explorer-tab-bg: var(--pillBg);
+}
+
+/* --- Shared in-cell bar ------------------------------------------------------
+   <el class="explorerBar" style="--bar-pct: 42%">: a left-anchored fill behind
+   the text, normalised by the caller (value / column max). In table cells add
+   explorerBar--cell: the fill stays inside the content box while a second
+   transparent layer keeps row hover / selection colours on the padding box. */
+.explorerBar {
+  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: var(--bar-pct, 0%) 100%;
+}
+
+.resultTable tbody td.explorerBar--cell,
+.resultTable tbody tr:hover td.explorerBar--cell {
+  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill)), linear-gradient(transparent, transparent);
+  background-repeat: no-repeat, no-repeat;
+  background-origin: content-box, padding-box;
+  background-clip: content-box, padding-box;
+  background-size: var(--bar-pct, 0%) 100%, 100% 100%;
+  background-position: left center, left top;
+}
+
+/* --- Typography scale --------------------------------------------------------
+   Tables 13px, headers 12px semibold, section titles 13.5px semibold above
+   their table; monospace only for DDL/SQL and identifiers. */
+.explorerWorkspace .explorerSectionTitle {
+  margin: 18px 0 var(--explorer-section-title-gap);
+  color: var(--text);
+  font-size: var(--explorer-section-title-size);
+  font-weight: var(--explorer-section-title-weight);
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.explorerWorkspace .explorerDetailContent > .explorerSectionTitle:first-child,
+.explorerWorkspace .explorerDetailContent > section:first-child .explorerSectionTitle:first-child {
+  margin-top: 4px;
+}
+
+.explorerWorkspace .resultTable {
+  font-size: var(--explorer-table-font);
+}
+
+.explorerWorkspace .resultTable thead th {
+  font-size: var(--explorer-table-head-font);
+  font-weight: var(--explorer-table-head-weight);
+  color: var(--muted);
+}
+
+.explorerWorkspace .resultTable tbody td {
+  font-size: var(--explorer-table-font);
+}
+
+.explorerWorkspace .explorerDetailMeta {
+  font-size: var(--explorer-meta-font);
+}
+
+/* --- Shell -------------------------------------------------------------------- */
+.explorerTopBar {
+  position: relative;
+  z-index: 12;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 46px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+
+.explorerViewTabs {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--explorer-tab-bg);
+}
+
+.explorerViewTab {
+  appearance: none;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 28px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.explorerViewTab[hidden] {
+  display: none;
+}
+
+.explorerViewTab:hover {
+  color: var(--text);
+}
+
+.explorerViewTab:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.explorerViewTab.is-active {
+  background: var(--buttonBg);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--buttonBorder), 0 1px 2px rgba(2, 6, 23, 0.18);
+}
+
+.explorerBreadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.explorerBreadcrumb__item {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 5px;
+  border-radius: 5px;
+}
+
+.explorerBreadcrumb__item--host {
+  flex-shrink: 0;
+  max-width: 34%;
+}
+
+button.explorerBreadcrumb__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.explorerBreadcrumb__item:hover,
+button.explorerBreadcrumb__item:focus-visible {
+  outline: none;
+  color: var(--text);
+  background: var(--rowHover);
+  text-decoration: underline;
+}
+
+.explorerBreadcrumb__item[aria-current] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.explorerBreadcrumb__sep {
+  flex: 0 0 auto;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.explorerTreeToggle {
+  display: none;
+}
+
+/* The navigation bar is a row of the shell now, not an overlay of the rail. */
+.explorerShell > .explorerGrid {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.explorerShell .explorerListPane {
+  padding-top: 0;
+}
+
+.explorerCatalogView {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.explorerCatalogView[hidden] {
+  display: none;
+}
+
+.explorerCatalogView > .explorerDetailPane {
+  flex: 1 1 auto;
+}
+
+.explorerTreeBackdrop[hidden] {
+  display: none;
+}
+
+/* --- Tree toolbar + type filter chips ----------------------------------------- */
+#explorerListPane > .explorerSidebarToolbar {
+  grid-template-columns: minmax(0, 1fr) 32px;
+  border-bottom: 0;
+  padding-bottom: 6px;
+}
+
+.explorerTreeFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+
+.explorerFilterChip {
+  appearance: none;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.explorerFilterChip:hover {
+  color: var(--text);
+  border-color: var(--buttonBorderHover);
+}
+
+.explorerFilterChip[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accentBorder) 55%, transparent);
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  color: var(--text);
+}
+
+.explorerFilterChip:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.explorerFilterChip:disabled {
+  cursor: default;
+}
+
+.explorerFilterChip.is-locked::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 2px;
+  opacity: 0.6;
+}
+
+/* --- Tree rows: one line per object -------------------------------------------- */
+.explorerWorkspace .explorerTreeDatabaseRow {
+  min-height: 28px;
+}
+
+.explorerWorkspace .explorerTreeDatabase {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 6px 2px 4px;
+}
+
+.explorerWorkspace .explorerTreeDatabase__name {
+  font: 600 12.5px/1.3 var(--explorer-mono);
+}
+
+.explorerWorkspace .explorerTreeDatabase__count {
+  max-width: 96px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.explorerWorkspace .explorerTreeDatabase__size,
+.explorerWorkspace .explorerTreeObject__size {
+  min-width: 62px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.explorerWorkspace .explorerTreeDatabase__size[hidden] {
+  display: none;
+}
+
+.explorerWorkspace .explorerTreeChildren {
+  margin-left: 11px;
+  padding-left: 8px;
+}
+
+.explorerWorkspace .explorerTreeObject {
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  gap: 6px;
+  min-height: 25px;
+  margin: 0;
+  padding: 1px 6px 1px 4px;
+  border-radius: 5px;
+}
+
+.explorerWorkspace .explorerTreeObject > .srOnly {
+  position: absolute;
+}
+
+.explorerWorkspace .explorerTreeObject__name {
+  font: 500 12.5px/1.35 var(--explorer-mono);
+}
+
+.explorerWorkspace .explorerTreeObject__icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.explorerTreeObject__icon--view,
+.explorerTreeObject__icon--mv {
+  color: color-mix(in srgb, #8b5cf6 70%, var(--muted));
+}
+
+.explorerTreeObject__icon--dict {
+  color: color-mix(in srgb, #0d9488 70%, var(--muted));
+}
+
+.explorerTreeObject__icon--buffer,
+.explorerTreeObject__icon--memory {
+  color: color-mix(in srgb, #d97706 70%, var(--muted));
+}
+
+.explorerTreeObject__icon--table,
+.explorerTreeObject__icon--distributed {
+  color: color-mix(in srgb, var(--accentBorder) 60%, var(--muted));
+}
+
+.explorerTreeObject__health {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.explorerTreeObject__health--error {
+  background: #ef4444;
+}
+
+.explorerTreeMark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, #facc15 45%, transparent);
+  color: inherit;
+}
+
+/* Greyed (Storage graph: objects without a storage topology). Readable in both
+   themes: muted text at full opacity instead of a 42% ghost. */
+.explorerWorkspace .explorerTreeObject.is-storage-blocked,
+.explorerWorkspace .explorerTreeObject:disabled.is-storage-blocked {
+  opacity: 1;
+  color: var(--muted);
+  cursor: default;
+}
+
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__name {
+  font-style: italic;
+}
+
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__icon,
+.explorerWorkspace .explorerTreeObject.is-storage-blocked .explorerTreeObject__size {
+  opacity: 0.55;
+}
+
+/* --- Database page ------------------------------------------------------------ */
+.explorerSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 var(--explorer-section-title-gap);
+}
+
+.explorerWorkspace .explorerSectionHead > .explorerSectionTitle {
+  margin: 0;
+}
+
+.explorerSectionCount {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explorerDatabaseObjects .explorerDatabaseObjectsTable {
+  margin-top: 0;
+}
+
+.explorerWorkspace .explorerDatabaseObjectsTable .resultTable thead th,
+.explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.explorerDatabaseObjectsTable__col--1 {
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorerDatabaseObjectsTable .resultTable tbody td.explorerDatabaseObjectsTable__col--0 {
+  max-width: 30ch;
+}
+
+/* --- Mobile: drawer tree, wrapped header --------------------------------------- */
+@media (max-width: 820px) {
+  body[data-page="explorer"] .appHeader {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 10px;
+  }
+  body[data-page="explorer"] .appHeader__left {
+    flex: 1 1 auto;
+  }
+  body[data-page="explorer"] .appHeader__right {
+    flex: 1 1 100%;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  body[data-page="explorer"] .appHeader__right .picker {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body[data-page="explorer"] .appHeader__right .picker__button {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: 0.6rem minmax(3rem, 1fr) auto auto;
+  }
+
+  .explorerWorkspace {
+    padding: 8px;
+  }
+
+  .explorerShell {
+    position: relative;
+    min-height: calc(100dvh - 120px);
+  }
+
+  .explorerTopBar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 8px;
+  }
+
+  .explorerTreeToggle:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 34px;
+    padding: 0;
+  }
+
+  .explorerTreeToggle__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .explorerTreeToggle__glyph {
+    width: 14px;
+    height: 10px;
+    border-top: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    background: linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat;
+  }
+
+  .explorerViewTabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .explorerViewTab {
+    padding: 0 10px;
+  }
+
+  .explorerBreadcrumb {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  .explorerShell > .explorerGrid {
+    position: relative;
+    display: block;
+  }
+
+  .explorerShell > .explorerGrid > .explorerListPane {
+    position: absolute;
+    z-index: 30;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 86%);
+    max-height: none;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+    background: var(--panelBg);
+    box-shadow: 8px 0 24px rgba(2, 6, 23, 0.28);
+    transform: translateX(-104%);
+    visibility: hidden;
+    transition: transform 160ms ease, visibility 0s linear 160ms;
+  }
+
+  .explorerShell.is-tree-open > .explorerGrid > .explorerListPane {
+    transform: none;
+    visibility: visible;
+    transition: transform 160ms ease;
+  }
+
+  .explorerTreeBackdrop {
+    position: absolute;
+    z-index: 29;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.38);
+  }
+
+  .explorerShell > .explorerGrid > .explorerCatalogView,
+  .explorerShell > .explorerGrid > .explorerGraphPane {
+    min-height: calc(100dvh - 170px);
+  }
+}
+
+@media (max-width: 820px) and (prefers-reduced-motion: reduce) {
+  .explorerShell > .explorerGrid > .explorerListPane,
+  .explorerShell.is-tree-open > .explorerGrid > .explorerListPane {
+    transition: none;
+  }
+}
