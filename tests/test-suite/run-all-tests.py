@@ -236,7 +236,7 @@ def main() -> int:
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,

@@ -90,7 +90,7 @@ The service/operation prefill is automatic: changing the selected time range ref
 
 ## Search filters
 
-Every filter describes one span: a trace is listed when at least one of its visible spans matches all of them (Jaeger's semantics). `/api/traces/search`, `/api/traces/analytics`, `/api/traces/prefill` and the facet endpoints accept the same repeated parameters:
+Every filter describes one span: a trace is listed when at least one of its visible spans matches all of them (Jaeger's semantics). `/api/traces/search`, `/api/traces/analytics`, `/api/traces/service_map`, `/api/traces/prefill` and the facet endpoints accept the same repeated parameters:
 
 | Parameter | Meaning |
 | --- | --- |
@@ -111,6 +111,24 @@ In the UI the Tag / Value inputs (with an `=` / `!=` / `exists` / `missing` oper
 ### Search state in the URL
 
 The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `limit`, `sort` and `results=table`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
+
+## Service map
+
+The Traces page has tabs above the search bar: *Search* (the result list) and *Service map* (`?tab=map` in the URL, next to the search parameters; other modules add tabs through `ChDash.traceTabs.register`). Every tab shares the time range, the filters and the chips; the Search button runs the selected tab's search.
+
+`GET /api/traces/service_map` (same parameters as search, plus an optional `sample_factor`) returns the services of the traces matching the filters (a trace is on the map when one of its visible spans matches, as in the result list) and the calls between them:
+
+- an **edge** `A -> B` counts the spans of service `B` whose parent span (same `TraceId`) belongs to another service `A`, with the error rate and the p50 / p95 / p99 of those child spans. That covers Client -> Server and Producer -> Consumer instrumentation (HyperDX joins those kinds) as well as flat traces whose root span's direct children run in other services (the OTel fixture has no Client span above a Server span, so a kind-based join finds nothing there). Calls inside one service are not edges;
+- a **node** counts every visible span of the service (spans, errors, p50 / p95 / p99).
+
+One query computes both with `GROUPING SETS ((caller, service), (service))` over a `LEFT ANY JOIN` of each span to its parent on `cityHash64(TraceId, ParentSpanId) = cityHash64(TraceId, SpanId)` (a 64-bit key instead of two strings: 0.45 s instead of 1.3 s on 10 minutes; `ANY` because the exporter may store a span twice), `max_execution_time = 30`, `service_allowlist` on both sides. The cost is bounded by two budgets:
+
+- **rows read**: `EXPLAIN ESTIMATE` (primary index only) gives the spans of the window. Above 12 M spans only evenly spaced time slices of about 3 minutes (at most 48) holding about 12 M spans are read. Trace sampling alone does not bound this: every `TraceId` must still be read and hashed (the fixture's peak hour took 2.8 s with 1 trace in 10);
+- **join size**: whole traces are kept with `cityHash64(TraceId) % N = 0` (HyperDX's sampling), `N = ceil(spans read / 3 M)`.
+
+Counts are scaled by `N / time coverage`; the answer reports `sampled`, `sample_factor` (the scale), `sampling` (`trace_factor`, `time_coverage`, `slices`, `estimated_spans`) and `sampled_count` per node / edge. Error rates and durations come from the sampled spans. An edge whose parent span started before a slice's start is not counted (children usually start milliseconds after their parent). Measured on the ~2 B span fixture: 10 minutes 0.26–0.59 s (N = 2), 1 hour 0.30–0.64 s (7 slices, N = 4), 24 hours 0.39–0.77 s (13 slices), 7 days 0.37–0.84 s (20 slices).
+
+The map is a layered directed graph (cycles broken for the ranking, barycentre ordering, left-to-right or top-down, whichever fits the view better): nodes take the service colour and grow with their spans, a red ring grows with their error rate (from 0.1 %), edges thicken with their calls and turn amber from 1 % and red from 5 % errors. Hover highlights the neighbours and shows the edge's p95 / calls; a click opens a side panel with the metrics, the busiest callers / callees, *Search this service* / *Search errors* (the Search tab with that service, and status Error) and *Focus map* (the service filter on the map). An edge's *Search calls A → B* searches the callee `B`. Wheel / drag / buttons zoom and pan, *Fit* (or `0`) fits the map; a `sampled ×N` badge explains the estimate.
 
 ## Attribute facets
 

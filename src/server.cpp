@@ -229,6 +229,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
     http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
     http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
+    http_.Get("/api/traces/service_map", [&](const auto& req, auto& res) { handle_traces_service_map(req, res); });
     http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
     http_.Get("/api/traces/facets", [&](const auto& req, auto& res) { handle_traces_facets(req, res); });
     http_.Get("/api/traces/facet_values", [&](const auto& req, auto& res) { handle_traces_facet_values(req, res); });

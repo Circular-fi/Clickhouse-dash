@@ -2061,6 +2061,288 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
   res.set_content(sb.GetString(), "application/json");
 }
 
+namespace {
+
+// --- Service map -------------------------------------------------------------
+// GET /api/traces/service_map: the services and the calls between them, after
+// HyperDX's DBServiceMapPage. An edge A -> B counts the spans of service B
+// whose parent span (same TraceId) belongs to another service A. That covers
+// Client -> Server / Producer -> Consumer instrumentation (HyperDX joins those
+// kinds) as well as flat traces whose root span's direct children run in other
+// services: the OTel fixture has no Client span above a Server span, so a
+// kind-based join finds no edge there. Edge metrics describe the callee spans;
+// node metrics every span of the service.
+//
+// The filters are the search's and select traces (a trace is on the map when
+// one of its spans matches them, as in the result list); the map then counts
+// every visible span of those traces inside the window.
+//
+// Cost (measured on the ~2 B span fixture, 33 M spans in its peak hour): the
+// self-join scans TraceId / SpanId / ParentSpanId once per side and hashes the
+// parent side. Two budgets bound it:
+//  * rows read: when the window holds more than kServiceMapReadRows spans
+//    (EXPLAIN ESTIMATE: primary-key granules, no scan), only evenly spaced
+//    ~3 minute time slices holding about that many spans are read. Trace
+//    sampling alone does not bound this: every TraceId must still be read and
+//    hashed (the peak hour took 2.8 s with 1 trace in 10);
+//  * join size: cityHash64(TraceId) % N = 0 keeps whole traces (HyperDX's
+//    sampling), N = ceil(rows read / kServiceMapJoinRows).
+// Counts are scaled by N / time coverage, and the factors are reported.
+// Measured: 10 min unsampled 0.59 s; 1 h 0.64 s; 24 h 0.77 s; 7 d 0.84 s.
+// Parent lookups join a 64-bit hash of (TraceId, SpanId) instead of the two
+// strings (0.45 s instead of 1.3 s on 10 minutes) with ANY (the exporter may
+// store a span twice: a child still counts once).
+constexpr uint64_t kServiceMapReadRows = 12000000;
+constexpr uint64_t kServiceMapJoinRows = 3000000;
+constexpr int64_t kServiceMapSliceMs = 3 * 60 * 1000;
+constexpr int kServiceMapMaxSlices = 48;
+constexpr int kServiceMapTimeBudgetSeconds = 30;
+constexpr int64_t kServiceMapFallbackWindowMs = 10 * 60 * 1000;
+constexpr size_t kServiceMapMaxNodes = 500;
+constexpr size_t kServiceMapMaxEdges = 2000;
+constexpr int kServiceMapMaxSampleFactor = 10000;
+
+// The time predicate of a service map read: the whole window, or `count`
+// equally long slices (together `coverage` of the window), each centred in
+// its share of the window. *actual is the coverage really read.
+std::string service_map_time_predicate(int64_t start_ms, int64_t end_ms, double coverage, int* slices, double* actual) {
+  const int64_t window_ms = end_ms - start_ms;
+  *slices = 0;
+  *actual = 1.0;
+  if (coverage >= 1.0) return trace_time_predicate(start_ms, end_ms);
+  const double covered_ms = static_cast<double>(window_ms) * coverage;
+  const int count = static_cast<int>(std::max<long long>(1, std::min<long long>(kServiceMapMaxSlices, std::llround(covered_ms / kServiceMapSliceMs))));
+  const int64_t length_ms = std::max<int64_t>(1000, static_cast<int64_t>(covered_ms / count));
+  if (length_ms * count >= window_ms) return trace_time_predicate(start_ms, end_ms);
+  const double stride_ms = static_cast<double>(window_ms) / count;
+  std::string out = "(";
+  for (int i = 0; i < count; ++i) {
+    const int64_t lo = start_ms + static_cast<int64_t>(i * stride_ms + (stride_ms - static_cast<double>(length_ms)) / 2.0);
+    if (i) out += " OR ";
+    out += "(Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(lo) + ") AND Timestamp < fromUnixTimestamp64Milli(" +
+           std::to_string(lo + length_ms) + "))";
+  }
+  *slices = count;
+  *actual = static_cast<double>(length_ms * count) / static_cast<double>(window_ms);
+  return out + ")";
+}
+
+struct ServiceMapStats {
+  uint64_t count = 0, errors = 0, p50 = 0, p95 = 0, p99 = 0;
+};
+
+void write_service_map_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, const ServiceMapStats& stats, double scale,
+                             const char* count_key) {
+  w.Key(count_key); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(stats.count) * scale)));
+  w.Key("errors"); w.Uint64(static_cast<uint64_t>(std::llround(static_cast<double>(stats.errors) * scale)));
+  w.Key("error_rate"); w.Double(stats.count ? static_cast<double>(stats.errors) / static_cast<double>(stats.count) : 0.0);
+  w.Key("sampled_count"); w.Uint64(stats.count);
+  w.Key("p50_ns"); w.Uint64(stats.p50);
+  w.Key("p95_ns"); w.Uint64(stats.p95);
+  w.Key("p99_ns"); w.Uint64(stats.p99);
+}
+
+}  // namespace
+
+void Server::handle_traces_service_map(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+
+  std::string disabled_message;
+  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
+
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+
+  int64_t start_ms = 0, end_ms = 0;
+  std::string range_error;
+  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &range_error)) {
+    return json_error(res, 400, "invalid_trace_range", range_error);
+  }
+
+  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
+    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+  }
+  // sample_factor forces the trace sampling factor (1 = every trace); the
+  // time slicing still applies above the read budget.
+  const int forced_factor = int_param(req, "sample_factor", 0, 1, kServiceMapMaxSampleFactor);
+
+  std::string validation_error;
+  TraceFilterSpec filters;
+  if (!parse_trace_filters(req, &filters, &validation_error)) return json_error(res, 400, "invalid_trace_filter", validation_error);
+
+  std::string error;
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  std::string span_filters;
+  {
+    std::string filter_code, filter_error;
+    if (!trace_filters_sql(*client, *host, cfg_.traces, filters, &span_filters, &filter_code, &filter_error)) {
+      return json_error(res, 400, filter_code, filter_error);
+    }
+  }
+
+  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const int64_t window_ms = end_ms - start_ms;
+
+  // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows:
+  // database, table, parts, rows, marks). Selecting FROM (EXPLAIN ...) would
+  // need CREATE TEMPORARY TABLE, so the rows are summed here.
+  const auto estimate_started = std::chrono::steady_clock::now();
+  uint64_t estimated_spans = 0;
+  std::string estimate_source = "explain";
+  try {
+    client->Select("EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
+                   [&](const clickhouse::Block& block) {
+                     if (block.GetColumnCount() < 4 || block.GetRowCount() == 0) return;
+                     const auto rows = block[3]->As<clickhouse::ColumnUInt64>();
+                     if (!rows) throw std::runtime_error("EXPLAIN ESTIMATE returned no rows column.");
+                     for (size_t row = 0; row < block.GetRowCount(); ++row) estimated_spans += rows->At(row);
+                   });
+  } catch (const std::exception&) {
+    // Without an estimate the window size decides: the read budget is
+    // assumed to cover ten minutes (on a fresh connection, see analytics).
+    estimate_source = "window";
+    estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
+    client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+    if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+  }
+  const double estimate_ms = elapsed_ms_since(estimate_started);
+
+  const double wanted_coverage = estimated_spans > kServiceMapReadRows
+      ? static_cast<double>(kServiceMapReadRows) / static_cast<double>(estimated_spans)
+      : 1.0;
+  int slices = 0;
+  double time_coverage = 1.0;
+  const std::string time_predicate = service_map_time_predicate(start_ms, end_ms, wanted_coverage, &slices, &time_coverage);
+  const double spans_read = static_cast<double>(estimated_spans) * time_coverage;
+  const uint64_t trace_factor = forced_factor > 0
+      ? static_cast<uint64_t>(forced_factor)
+      : std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(spans_read / static_cast<double>(kServiceMapJoinRows))));
+  const double scale = static_cast<double>(trace_factor) / time_coverage;
+  const bool sampled = trace_factor > 1 || slices > 0;
+  const std::string sample_sql = trace_factor > 1 ? " AND cityHash64(TraceId) % " + std::to_string(trace_factor) + " = 0" : std::string{};
+
+  // Trace selection by the search filters, on the same (sampled) spans.
+  const std::string duration_expr =
+      "(toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))))";
+  std::vector<std::string> duration_terms;
+  if (min_duration_ms > 0.0) {
+    duration_terms.push_back(duration_expr + " >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1000000.0))));
+  }
+  if (max_duration_ms > 0.0) {
+    duration_terms.push_back(duration_expr + " <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1000000.0))));
+  }
+  const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;
+  std::string candidate;
+  if (!duration_terms.empty()) {
+    std::string having = span_filters.empty() ? std::string{} : "countIf(1" + span_filters + ") > 0";
+    for (const auto& term : duration_terms) having += (having.empty() ? "" : " AND ") + term;
+    candidate = "SELECT TraceId" + scan + " GROUP BY TraceId HAVING " + having;
+  } else if (!span_filters.empty()) {
+    candidate = "SELECT TraceId" + scan + span_filters;
+  }
+  const std::string side = scan + (candidate.empty() ? std::string{} : " AND TraceId IN (" + candidate + ")");
+
+  const std::string sql =
+      "SELECT toString(GROUPING(caller)), caller, service, toString(count()), toString(countIf(err)), "
+      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[1])), toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[2])), "
+      "toString(toUInt64(quantiles(0.5, 0.95, 0.99)(dur)[3])) "
+      "FROM (SELECT if(ParentSpanId = '', 0, cityHash64(TraceId, ParentSpanId)) AS pk, toString(ServiceName) AS service, "
+      "Duration AS dur, StatusCode = 'Error' AS err" + side + ") AS c "
+      "ANY LEFT JOIN (SELECT cityHash64(TraceId, SpanId) AS k, toString(ServiceName) AS parent_service" + side + ") AS p ON c.pk = p.k "
+      "GROUP BY GROUPING SETS ((if(p.parent_service != c.service, p.parent_service, '') AS caller, service), (service)) "
+      "HAVING GROUPING(caller) = 1 OR caller != '' "
+      "SETTINGS max_execution_time = " + std::to_string(kServiceMapTimeBudgetSeconds) +
+      ", timeout_overflow_mode = 'throw', force_grouping_standard_compatibility = 1, join_use_nulls = 0";
+
+  struct NodeRow { std::string service; ServiceMapStats stats; };
+  struct EdgeRow { std::string source, target; ServiceMapStats stats; };
+  std::vector<NodeRow> nodes;
+  std::vector<EdgeRow> edges;
+  const auto query_started = std::chrono::steady_clock::now();
+  try {
+    client->Select(sql, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        ServiceMapStats stats;
+        stats.count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)));
+        stats.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
+        stats.p50 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
+        stats.p95 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
+        stats.p99 = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 7, row)));
+        if (ch_block_text_at(block, 0, row) == "1") nodes.push_back(NodeRow{ch_block_text_at(block, 2, row), stats});
+        else edges.push_back(EdgeRow{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), stats});
+      }
+    });
+  } catch (const std::exception& e) {
+    return json_error(res, 503, "trace_service_map_failed", e.what());
+  }
+  const double query_ms = elapsed_ms_since(query_started);
+
+  // Busiest first; a map beyond these sizes is unreadable anyway.
+  std::sort(nodes.begin(), nodes.end(), [](const NodeRow& a, const NodeRow& b) {
+    return a.stats.count != b.stats.count ? a.stats.count > b.stats.count : a.service < b.service;
+  });
+  std::sort(edges.begin(), edges.end(), [](const EdgeRow& a, const EdgeRow& b) {
+    if (a.stats.count != b.stats.count) return a.stats.count > b.stats.count;
+    return a.source != b.source ? a.source < b.source : a.target < b.target;
+  });
+  const bool truncated = nodes.size() > kServiceMapMaxNodes || edges.size() > kServiceMapMaxEdges;
+  if (nodes.size() > kServiceMapMaxNodes) nodes.resize(kServiceMapMaxNodes);
+  if (edges.size() > kServiceMapMaxEdges) edges.resize(kServiceMapMaxEdges);
+
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
+  w.Key("edge_rule"); w.String("parent_child_cross_service");
+  w.Key("sampled"); w.Bool(sampled);
+  w.Key("sample_factor"); w.Double(scale);
+  w.Key("sampling"); w.StartObject();
+  w.Key("trace_factor"); w.Uint64(trace_factor);
+  w.Key("time_coverage"); w.Double(time_coverage);
+  w.Key("slices"); w.Int(slices);
+  w.Key("estimated_spans"); w.Uint64(estimated_spans);
+  w.Key("estimate_source"); w.String(estimate_source.c_str());
+  w.EndObject();
+  w.Key("truncated"); w.Bool(truncated);
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("estimate"); w.Double(estimate_ms);
+  w.Key("query"); w.Double(query_ms);
+  w.Key("total"); w.Double(elapsed_ms_since(request_started));
+  w.EndObject();
+  w.Key("nodes"); w.StartArray();
+  for (const auto& node : nodes) {
+    w.StartObject();
+    w.Key("service"); w.String(node.service.c_str());
+    write_service_map_stats(w, node.stats, scale, "spans");
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("edges"); w.StartArray();
+  for (const auto& edge : edges) {
+    w.StartObject();
+    w.Key("source"); w.String(edge.source.c_str());
+    w.Key("target"); w.String(edge.target.c_str());
+    write_service_map_stats(w, edge.stats, scale, "calls");
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
 // Spans of OTHER traces whose Links point to this trace (or to one of its
 // spans). Links are stored on the linking span only, so the lookup scans
 // otel_traces: always inside the trace's own window widened by

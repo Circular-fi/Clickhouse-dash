@@ -213,6 +213,11 @@
     return getJson(`api/traces/search?${traceQuery(hostId, filters).toString()}`);
   }
 
+  // Services and the calls between them (sampled on wide windows).
+  async function getTraceServiceMap(hostId, filters = {}) {
+    return getJson(`api/traces/service_map?${traceQuery(hostId, filters).toString()}`);
+  }
+
   async function getTraceAnalytics(hostId, filters = {}) {
     return getJson(`api/traces/analytics?${traceQuery(hostId, filters).toString()}`);
   }
@@ -400,7 +405,7 @@
   ns.api = { resolveUrl, getJson,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
-    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
+    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,
   };

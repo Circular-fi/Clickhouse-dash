@@ -62,6 +62,12 @@
             document.documentElement.classList.add("chdash-trace-facets-collapsed");
           }
         } catch (_) {}
+        // The selected tab (?tab=, app_trace_tabs.js) shows its panel from
+        // the first paint.
+        try {
+          var tab = new URLSearchParams(window.location.search).get("tab");
+          if (tab && /^[a-z]+$/.test(tab) && tab !== "search") document.documentElement.classList.add("chdash-trace-tab-" + tab);
+        } catch (_) {}
         window.__chdashEarlyState = { themeMode: mode };
       } catch (_) {}
     })();
@@ -111,6 +117,10 @@
       <div id="tracesError" class="tracesError" hidden></div>
 
       <section id="tracesSearchView" class="traceSearchView">
+        <div id="tracesTabs" class="traceTabs" role="tablist" aria-label="Trace views">
+          <button type="button" class="traceTabs__tab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
+          <button type="button" class="traceTabs__tab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1" aria-controls="traceMapView">Service map</button>
+        </div>
         <form id="tracesForm" class="traceSearchBar" autocomplete="off">
           <div class="traceSearchBar__range">
             <div class="traceRangeCompact traceRangeCompact--preset">
@@ -238,6 +248,28 @@
         </section>
         </div>
         </div>
+
+        <section id="traceMapView" class="traceMap" role="tabpanel" aria-labelledby="tracesTab-map" hidden>
+          <div class="traceMap__toolbar">
+            <h2 class="traceMap__title">Service map</h2>
+            <span id="traceMapMeta" class="traceMap__meta"></span>
+            <span id="traceMapSampled" class="traceMap__badge" hidden></span>
+            <div class="traceMap__tools" role="group" aria-label="Map view">
+              <button id="traceMapZoomOut" class="traceMap__tool" type="button" aria-label="Zoom out" title="Zoom out">&minus;</button>
+              <button id="traceMapZoomIn" class="traceMap__tool" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+              <button id="traceMapFit" class="traceMap__tool traceMap__tool--text" type="button" title="Fit the map to the view">Fit</button>
+            </div>
+          </div>
+          <div class="traceMap__body">
+            <div id="traceMapCanvas" class="traceMap__canvas">
+              <svg id="traceMapSvg" class="traceMap__svg" aria-label="Service map graph"></svg>
+              <div id="traceMapState" class="traceMap__state"><div class="tracesEmpty">Search to load the service map.</div></div>
+              <div id="traceMapLegend" class="traceMap__legend" aria-label="Legend"></div>
+              <div id="traceMapTip" class="traceMap__tip" role="tooltip" hidden></div>
+            </div>
+            <aside id="traceMapPanel" class="traceMap__panel" aria-label="Service map selection" hidden></aside>
+          </div>
+        </section>
       </section>
 
       <section id="traceDetail" class="traceDetailPane traceDetailPane--jaeger" aria-live="polite" hidden>

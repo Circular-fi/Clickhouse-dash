@@ -3486,6 +3486,17 @@
     }
     if (searchState) searchState.writeUrl(url);
     else if (/\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) window.history.pushState({ workspace: "traces" }, "", route("traces"));
+    // Another tab (app_trace_tabs.js, e.g. the service map) runs its own
+    // search; the result list searches again when its tab comes back.
+    const tabSearch = ns.traceTabs?.activeSearch?.();
+    if (tabSearch) {
+      model.lastSearchKey = "";
+      setView(false);
+      setButtonLoading(dom.tracesSearchButton, false);
+      showError("");
+      tabSearch(filters, { force: url === "push" });
+      return;
+    }
     model.lastSearchKey = searchState?.searchKey?.() || "";
     setView(false);
     setButtonLoading(dom.tracesSearchButton, true);
@@ -3647,6 +3658,15 @@
       refreshServiceOperationOptions: () => { updateServiceOptions(); updateOperationOptions(); },
       syncServiceOperationPair,
       setResultsView: (view, options) => setResultsView(view, options),
+    });
+    ns.traceTabs?.install?.({
+      model, dom, api, esc, route, currentHost, serviceColor, registerServiceColors, formatDuration, showError,
+      runSearch: (options) => search(options),
+      // The result list tab is shown again: search when it is stale.
+      showSearch: () => {
+        const key = ns.traceSearch?.searchKey?.() || "";
+        if (!model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
+      },
     });
     // Search state from the URL (a shared link, a reload, a trace detail URL
     // carrying its search context).

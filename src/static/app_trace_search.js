@@ -17,7 +17,7 @@
   // Every URL parameter of the search page (the detail page keeps them as
   // its "back to search" context; span / view are the detail's own).
   const SEARCH_PARAMS = ["from", "to", "status", "service", "operation", "limit", "sort", "results",
-    "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not"];
+    "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab"];
   const PIN_STORE_KEY = "chdash.traceFacetPins.v1";
   const COLLAPSED_STORE_KEY = "chdash.traceFacetsCollapsed.v1";
   const KEYS_PAGE = 20;
@@ -251,6 +251,8 @@
     const sort = String(dom.tracesSort?.value || "recent");
     if (sort !== "recent") params.set("sort", sort);
     if (model.resultsView === "table") params.set("results", "table");
+    // The selected tab (app_trace_tabs.js), e.g. tab=map.
+    ns.traceTabs?.writeParams?.(params);
     return params;
   }
 
@@ -263,6 +265,7 @@
     const params = currentParams();
     params.delete("sort");
     params.delete("results");
+    params.delete("tab");
     return params.toString();
   }
 
@@ -290,6 +293,7 @@
   // trace detail URL carrying its search context).
   function applyParams(params, { initial = false } = {}) {
     const { dom, model } = ctx;
+    ns.traceTabs?.applyParams?.(params, { initial });
     const tr = ns.timeRange;
     const from = params.get("from") || "";
     const to = params.get("to") || "";
@@ -798,6 +802,7 @@
   ns.traceSearch = {
     install,
     chipParams,
+    applyFilter,
     commitPendingTag,
     contextQuery,
     searchKey,
