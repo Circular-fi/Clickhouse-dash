@@ -241,7 +241,16 @@
           <div class="traceSearchResults__toolbar">
             <h2 id="tracesResultCount">0 Traces</h2>
             <label class="traceResultsSort"><span>Sort:</span><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
-            <div class="traceViewToggle" role="group" aria-label="Results view">
+            <div id="traceSpanTools" class="traceSpanTools" role="group" aria-label="Span filters" hidden>
+              <label class="traceSpanTools__kind"><div class="themeSelect tracePicker"><select id="traceSpanKind" data-field-label="Kind" aria-label="Span kind" class="tracePicker__native"><option value="" selected>ALL</option><option value="Server">Server</option><option value="Client">Client</option><option value="Producer">Producer</option><option value="Consumer">Consumer</option><option value="Internal">Internal</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Kind · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+              <span class="traceSpanTools__duration" title="Span duration in milliseconds; Enter applies"><input id="traceSpanMinDuration" type="text" inputmode="decimal" placeholder="Min ms" aria-label="Minimum span duration (ms)" autocomplete="off" spellcheck="false" /><span aria-hidden="true">–</span><input id="traceSpanMaxDuration" type="text" inputmode="decimal" placeholder="Max ms" aria-label="Maximum span duration (ms)" autocomplete="off" spellcheck="false" /></span>
+              <button id="traceSpanColumnsButton" class="button button--small traceSpanTools__columns" type="button" aria-haspopup="dialog" aria-expanded="false" title="Attribute columns">Columns</button>
+            </div>
+            <div class="traceViewToggle traceModeToggle" role="group" aria-label="Results mode">
+              <button type="button" class="traceViewToggle__button is-active" data-results-mode="traces" aria-pressed="true" title="One row per trace">Traces</button>
+              <button type="button" class="traceViewToggle__button" data-results-mode="spans" aria-pressed="false" title="One row per matching span">Spans</button>
+            </div>
+            <div class="traceViewToggle traceResultsViewToggle" role="group" aria-label="Results view">
               <button type="button" class="traceViewToggle__button is-active" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
               <button type="button" class="traceViewToggle__button" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
             </div>

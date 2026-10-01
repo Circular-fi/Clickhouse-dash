@@ -984,7 +984,556 @@ double elapsed_ms_since(std::chrono::steady_clock::time_point started) {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 }
 
+// --- Span search (/api/traces/spans) ----------------------------------------
+// Newest-first spans matching the span filters (each span must match all of
+// them), after HyperDX's row search (DBSearchPage, useOffsetPaginatedQuery,
+// searchWindows) but paged by keyset instead of OFFSET:
+//   * order: Timestamp DESC, SpanId DESC, TraceId DESC. (TraceId, SpanId)
+//     is not unique (a span exported twice has two timestamps), so the key
+//     starts with Timestamp; rows equal on all three columns stay on one page.
+//   * slices: a page reads [lo, upper] time slices newest-first (15 min, 1 h,
+//     6 h, 24 h, then 24 h again) until it holds `limit` spans. A top-N over a
+//     slice reads about every row the slice holds, so a dense range answers
+//     from its first slice and a sparse filter widens. Each slice is sized from
+//     the cost seen so far to keep the page within kSpanPageBudgetMs; once the
+//     budget is spent the page stops with a resume cursor at the slice
+//     boundary (incomplete) instead of widening further.
+//   * cursor "1.<ts_ns>.<slice_ns>.<k|b>.<hex SpanId>.<hex TraceId>": k = the
+//     spans after the row key (ts, SpanId, TraceId); b = every span at or
+//     before ts (a slice boundary). slice_ns is the width the next page
+//     starts with.
+constexpr int kSpanPageDefaultLimit = 100;
+constexpr int kSpanPageMaxLimit = 500;
+constexpr int64_t kNsPerMinute = 60LL * 1000 * kNsPerMs;
+constexpr int64_t kSpanSlicesNs[] = {15 * kNsPerMinute, 60 * kNsPerMinute, 360 * kNsPerMinute, 1440 * kNsPerMinute};
+constexpr int64_t kSpanMinSliceNs = kNsPerMinute;
+constexpr double kSpanPageBudgetMs = 2000.0;
+// Per-slice guards: a slice that would read more rows, or run longer, fails
+// (throw mode, so a truncated top-N is never returned as a page).
+constexpr int kSpanSliceTimeoutSeconds = 20;
+constexpr uint64_t kSpanSliceReadRowsCap = 1000000000ULL;
+constexpr size_t kSpanColumnsMax = 20;
+constexpr size_t kSpanKindsMax = 16;
+
+struct SpanCursor {
+  bool present = false;
+  int64_t ts_ns = 0;
+  int64_t slice_ns = 0;
+  bool after_key = false;  // k: after (ts, span_id, trace_id); b: Timestamp <= ts
+  std::string span_id, trace_id;
+};
+
+std::string hex_text(std::string_view raw) {
+  static const char* digits = "0123456789abcdef";
+  std::string out;
+  out.reserve(raw.size() * 2);
+  for (unsigned char ch : raw) {
+    out.push_back(digits[ch >> 4]);
+    out.push_back(digits[ch & 15]);
+  }
+  return out;
+}
+
+bool unhex_text(std::string_view hex, std::string* out) {
+  if (hex.size() % 2) return false;
+  auto nibble = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+  };
+  out->clear();
+  for (size_t i = 0; i < hex.size(); i += 2) {
+    const int hi = nibble(hex[i]), lo = nibble(hex[i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out->push_back(static_cast<char>(hi * 16 + lo));
+  }
+  return true;
+}
+
+std::string encode_span_cursor(const SpanCursor& c) {
+  return "1." + std::to_string(c.ts_ns) + "." + std::to_string(c.slice_ns) + "." + (c.after_key ? "k" : "b") + "." +
+         hex_text(c.span_id) + "." + hex_text(c.trace_id);
+}
+
+bool decode_span_cursor(std::string_view text, SpanCursor* out) {
+  if (text.size() > 2048) return false;
+  const auto parts = split_char(text, '.');
+  if (parts.size() != 6 || parts[0] != "1" || (parts[3] != "k" && parts[3] != "b")) return false;
+  try {
+    size_t used = 0;
+    out->ts_ns = std::stoll(parts[1], &used);
+    if (used != parts[1].size()) return false;
+    out->slice_ns = std::stoll(parts[2], &used);
+    if (used != parts[2].size()) return false;
+  } catch (...) {
+    return false;
+  }
+  out->after_key = parts[3] == "k";
+  if (!unhex_text(parts[4], &out->span_id) || !unhex_text(parts[5], &out->trace_id)) return false;
+  if (out->ts_ns < 0 || out->slice_ns < 0) return false;
+  out->present = true;
+  return true;
+}
+
+// columns=span:http.route,resource:host.name,key: attribute values returned
+// with each span (scope "any" reads the span map first).
+struct SpanAttributeColumn {
+  std::string scope, key;
+};
+
+bool parse_span_columns(const httplib::Request& req, std::vector<SpanAttributeColumn>* out, std::string* error) {
+  for (const auto& raw : repeated_param_values(req, "columns")) {
+    for (const auto& item : split_char(raw, ',')) {
+      if (item.empty()) continue;
+      std::string_view rest;
+      SpanAttributeColumn column;
+      column.scope = split_tag_scope(item, &rest);
+      column.key = std::string(rest);
+      if (column.key.empty() || column.key.size() > kMaxTagKeyBytes) {
+        *error = "columns entries must be [span:|resource:]key with a 1 to 512 byte key.";
+        return false;
+      }
+      const bool seen = std::any_of(out->begin(), out->end(), [&](const SpanAttributeColumn& other) {
+        return other.scope == column.scope && other.key == column.key;
+      });
+      if (!seen) out->push_back(std::move(column));
+    }
+  }
+  if (out->size() > kSpanColumnsMax) {
+    *error = "At most 20 attribute columns are accepted.";
+    return false;
+  }
+  return true;
+}
+
+// ", toString(has), toString(value)" for each attribute column, or false when
+// a column needs an attribute map that is unusable (same rules as filters).
+bool span_columns_sql(const std::vector<SpanAttributeColumn>& columns, const AttributeColumns& cols, std::string* out,
+                      std::string* error_code, std::string* error) {
+  for (const auto& column : columns) {
+    std::vector<std::string> maps;
+    if (column.scope != "resource" && cols.span()) maps.push_back("SpanAttributes");
+    if (column.scope != "span" && cols.resource()) maps.push_back("ResourceAttributes");
+    if (maps.empty() || (column.scope == "span" && !cols.span()) || (column.scope == "resource" && !cols.resource())) {
+      const bool disabled = (column.scope == "span" && !cols.span_enabled) ||
+                            (column.scope == "resource" && !cols.resource_enabled) ||
+                            (column.scope == "any" && !cols.span_enabled && !cols.resource_enabled);
+      *error_code = disabled ? "trace_filter_disabled" : "trace_tag_search_unsupported";
+      *error = disabled ? "Attribute columns on this scope are disabled by traces.features."
+                        : "Selected attribute scope is not stored as Map(String, String).";
+      return false;
+    }
+    const std::string key = quote_string(column.key);
+    const std::string has0 = "mapContains(" + maps[0] + ", " + key + ")";
+    if (maps.size() == 1) {
+      *out += ", toString(toUInt8(" + has0 + ")), toString(" + maps[0] + "[" + key + "])";
+    } else {
+      const std::string has1 = "mapContains(" + maps[1] + ", " + key + ")";
+      *out += ", toString(toUInt8(" + has0 + " OR " + has1 + ")), toString(if(" + has0 + ", " + maps[0] + "[" + key +
+              "], " + maps[1] + "[" + key + "]))";
+    }
+  }
+  return true;
+}
+
+struct SpanSearchRow {
+  std::string timestamp, start_ns, trace_id, span_id, parent_span_id, service, name, kind, duration_ns, status, status_message;
+  std::vector<std::pair<bool, std::string>> attributes;
+  bool same_key(const SpanSearchRow& other) const {
+    return start_ns == other.start_ns && span_id == other.span_id && trace_id == other.trace_id;
+  }
+};
+
+const char* kSpanSearchColumns =
+    "toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
+    "toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), "
+    "toString(StatusCode), toString(StatusMessage)";
+
+void select_span_search_rows(clickhouse::Client& client, const std::string& sql, size_t attribute_count,
+                             std::vector<SpanSearchRow>* rows) {
+  client.Select(sql, [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      SpanSearchRow out;
+      out.timestamp = ch_block_text_at(block, 0, row);
+      out.start_ns = ch_block_text_at(block, 1, row);
+      out.trace_id = ch_block_text_at(block, 2, row);
+      out.span_id = ch_block_text_at(block, 3, row);
+      out.parent_span_id = ch_block_text_at(block, 4, row);
+      out.service = ch_block_text_at(block, 5, row);
+      out.name = ch_block_text_at(block, 6, row);
+      out.kind = ch_block_text_at(block, 7, row);
+      out.duration_ns = ch_block_text_at(block, 8, row);
+      out.status = ch_block_text_at(block, 9, row);
+      out.status_message = ch_block_text_at(block, 10, row);
+      for (size_t i = 0; i < attribute_count; ++i) {
+        out.attributes.emplace_back(ch_block_text_at(block, 11 + 2 * i, row) == "1", ch_block_text_at(block, 12 + 2 * i, row));
+      }
+      rows->push_back(std::move(out));
+    }
+  });
+}
+
+// The next slice width of the sequence after `width` (24 h repeats).
+int64_t next_span_slice_ns(int64_t width) {
+  for (int64_t candidate : kSpanSlicesNs) {
+    if (candidate > width) return candidate;
+  }
+  return kSpanSlicesNs[std::size(kSpanSlicesNs) - 1];
+}
+
+bool slice_guard_error(const clickhouse::ServerException& e) {
+  // TOO_MANY_ROWS (158), TIMEOUT_EXCEEDED (159).
+  return e.GetCode() == 158 || e.GetCode() == 159;
+}
+
 } // namespace
+
+void Server::handle_traces_spans(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+  std::string disabled_message;
+  if (feature_param_rejected(cfg_.traces, req, &disabled_message)) {
+    return json_error(res, 400, "trace_filter_disabled", disabled_message);
+  }
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+
+  int64_t start_ms = 0, end_ms = 0;
+  std::string error;
+  if (!trace_time_range(cfg_.traces, req, &start_ms, &end_ms, &error)) return json_error(res, 400, "invalid_trace_range", error);
+  const int limit = int_param(req, "limit", kSpanPageDefaultLimit, 1, kSpanPageMaxLimit);
+  // budget_ms may only lower the widening budget (tests use it to reach a
+  // resume point deterministically).
+  const double budget_ms = static_cast<double>(int_param(req, "budget_ms", static_cast<int>(kSpanPageBudgetMs), 0,
+                                                         static_cast<int>(kSpanPageBudgetMs)));
+  // Span-level here: the span's own Duration.
+  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
+    return json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+  }
+  TraceFilterSpec filters;
+  if (!parse_trace_filters(req, &filters, &error)) return json_error(res, 400, "invalid_trace_filter", error);
+  const std::vector<std::string> kinds = repeated_param_values(req, "kind");
+  if (kinds.size() > kSpanKindsMax) return json_error(res, 400, "invalid_trace_filter", "At most 16 span kinds are accepted.");
+  for (const auto& kind : kinds) {
+    if (kind.size() > 64) return json_error(res, 400, "invalid_trace_filter", "kind values are limited to 64 bytes.");
+  }
+  std::vector<SpanAttributeColumn> attribute_columns;
+  if (!parse_span_columns(req, &attribute_columns, &error)) return json_error(res, 400, "invalid_trace_columns", error);
+
+  const int64_t start_ns = start_ms * kNsPerMs;
+  const int64_t end_ns = end_ms * kNsPerMs;
+  SpanCursor cursor;
+  if (req.has_param("cursor") && !req.get_param_value("cursor").empty()) {
+    if (!decode_span_cursor(req.get_param_value("cursor"), &cursor) || cursor.ts_ns > end_ns) {
+      return json_error(res, 400, "invalid_cursor", "cursor is not a span search cursor of this range.");
+    }
+  }
+
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  // Column predicates (primary key ServiceName / SpanName, status, kind,
+  // duration) and the allowlist go to PREWHERE; attribute map predicates,
+  // which read the large map columns, stay in WHERE for the rows left.
+  std::string tag_sql, columns_sql;
+  if (!filters.tags.empty() || !attribute_columns.empty()) {
+    const AttributeColumns cols = trace_attribute_columns(*client, *host, cfg_.traces);
+    std::string code;
+    if (!tag_filters_sql(filters.tags, cols, &tag_sql, &code, &error)) return json_error(res, 400, code, error);
+    if (!span_columns_sql(attribute_columns, cols, &columns_sql, &code, &error)) return json_error(res, 400, code, error);
+  }
+  std::string column_filters = span_filters_sql(filters, "");
+  if (!kinds.empty()) column_filters += " AND " + exact_values_predicate("SpanKind", kinds);
+  if (min_duration_ms > 0.0) column_filters += " AND Duration >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1e6)));
+  if (max_duration_ms > 0.0) column_filters += " AND Duration <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1e6)));
+
+  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string select = std::string("SELECT ") + kSpanSearchColumns + columns_sql + " FROM " + table;
+  const std::string settings =
+      " SETTINGS max_execution_time = " + std::to_string(kSpanSliceTimeoutSeconds) +
+      ", timeout_overflow_mode = 'throw', max_rows_to_read = " + std::to_string(kSpanSliceReadRowsCap) +
+      ", read_overflow_mode = 'throw'";
+  const auto keyset_sql = [&](const SpanCursor& at) {
+    if (!at.after_key) return std::string{};
+    const std::string ts = ns_time(at.ts_ns);
+    return " AND (Timestamp < " + ts + " OR (Timestamp = " + ts + " AND (SpanId < " + quote_string(at.span_id) +
+           " OR (SpanId = " + quote_string(at.span_id) + " AND TraceId < " + quote_string(at.trace_id) + "))))";
+  };
+
+  struct Slice { int64_t lo_ns = 0, hi_ns = 0; size_t rows = 0; double ms = 0; };
+  std::vector<Slice> slices;
+  std::vector<SpanSearchRow> rows;
+  SpanCursor position = cursor;  // the spans still to read: at or before / after this
+  if (!position.present) {
+    position.present = true;
+    position.ts_ns = end_ns;
+    position.after_key = false;
+  }
+  int64_t width = cursor.present && cursor.slice_ns > 0
+      ? std::max(kSpanMinSliceNs, std::min(cursor.slice_ns, kSpanSlicesNs[std::size(kSpanSlicesNs) - 1]))
+      : kSpanSlicesNs[0];
+  bool exhausted = false;     // no span left in the range
+  bool incomplete = false;    // stopped by the budget or a slice guard
+  std::string stop_reason;
+  double query_ms = 0;
+  int64_t covered_ns = 0;
+  const auto loop_started = std::chrono::steady_clock::now();
+  SpanCursor next;
+  bool retried = false;
+  const int64_t page_upper_ns = position.ts_ns;
+
+  try {
+    while (true) {
+      if (position.ts_ns < start_ns) { exhausted = true; break; }
+      const int64_t upper = position.ts_ns;
+      const int64_t lo = std::max(start_ns, upper - width + 1);
+      const size_t need = static_cast<size_t>(limit) - rows.size();
+      const std::string sql = select +
+          " PREWHERE Timestamp >= " + ns_time(lo) + " AND Timestamp <= " + ns_time(upper) + " AND " + visibility + column_filters +
+          " WHERE 1" + keyset_sql(position) + tag_sql +
+          " ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT " + std::to_string(need + 1) + settings;
+      const auto slice_started = std::chrono::steady_clock::now();
+      std::vector<SpanSearchRow> got;
+      try {
+        select_span_search_rows(*client, sql, attribute_columns.size(), &got);
+      } catch (const clickhouse::ServerException& e) {
+        if (!slice_guard_error(e)) throw;
+        if (slices.empty() && width > kSpanMinSliceNs && !retried) {
+          // The page's first slice is too heavy: retry once, narrower.
+          retried = true;
+          width = std::max(kSpanMinSliceNs, width / 8);
+          continue;
+        }
+        if (slices.empty()) throw;
+        // A guard stop after answered slices is a resume point.
+        incomplete = true;
+        stop_reason = e.GetCode() == 158 ? "read_rows_limit" : "slice_timeout";
+        next = position;
+        next.slice_ns = std::max(kSpanMinSliceNs, width / 4);
+        break;
+      }
+      const double ms = elapsed_ms_since(slice_started);
+      query_ms += ms;
+      covered_ns += upper - lo + 1;
+      slices.push_back(Slice{lo, upper, std::min(got.size(), need), ms});
+
+      if (got.size() > need) {
+        // The page fills inside this slice: it ends after its last row.
+        got.resize(need + 1);
+        const SpanSearchRow boundary = got[need - 1];
+        const bool tie = got[need].same_key(boundary);
+        got.resize(need);
+        if (tie) {
+          // Exact copies of the boundary key straddle the seam: the page
+          // takes all of them, so the strict keyset after it skips none.
+          got.erase(std::remove_if(got.begin(), got.end(), [&](const SpanSearchRow& row) { return row.same_key(boundary); }), got.end());
+          const std::string ts = ns_time(std::stoll(boundary.start_ns));
+          select_span_search_rows(*client,
+              select + " PREWHERE Timestamp = " + ts + " AND " + visibility + column_filters +
+              " WHERE SpanId = " + quote_string(boundary.span_id) + " AND TraceId = " + quote_string(boundary.trace_id) + tag_sql +
+              settings, attribute_columns.size(), &got);
+        }
+        for (auto& row : got) rows.push_back(std::move(row));
+        next.present = true;
+        next.ts_ns = std::stoll(boundary.start_ns);
+        next.after_key = true;
+        next.span_id = boundary.span_id;
+        next.trace_id = boundary.trace_id;
+        // The next page starts with a slice about 4x the time this page
+        // covered (dense ranges then read far fewer rows per page).
+        next.slice_ns = std::max(kSpanMinSliceNs, std::min(width, 4 * (page_upper_ns - next.ts_ns + 1)));
+        break;
+      }
+      for (auto& row : got) rows.push_back(std::move(row));
+      if (lo <= start_ns) { exhausted = true; break; }
+      // The slice is exhausted: continue strictly before it.
+      position = SpanCursor{};
+      position.present = true;
+      position.ts_ns = lo - 1;
+      position.after_key = false;
+      if (rows.size() >= static_cast<size_t>(limit)) {
+        next = position;
+        next.slice_ns = width;
+        break;
+      }
+      // Widen, within the page budget at the cost rate seen so far.
+      const double spent = elapsed_ms_since(loop_started);
+      const double remaining = budget_ms - spent;
+      if (remaining <= 0) {
+        incomplete = true;
+        stop_reason = "time_budget";
+        next = position;
+        next.slice_ns = width;
+        break;
+      }
+      int64_t wider = next_span_slice_ns(width);
+      const double ms_per_ns = covered_ns > 0 ? query_ms / static_cast<double>(covered_ns) : 0.0;
+      if (ms_per_ns > 0 && ms_per_ns * static_cast<double>(wider) > remaining) {
+        wider = std::max(kSpanMinSliceNs, static_cast<int64_t>(0.8 * remaining / ms_per_ns));
+      }
+      width = wider;
+    }
+  } catch (const std::exception& e) {
+    if (client_pool_ && client) client_pool_->invalidate(client);
+    return json_error(res, 503, "trace_spans_failed", e.what());
+  }
+
+  // A parent hidden by the service allowlist must not leak its SpanId (as in
+  // trace detail): with a restricted allowlist parent ids are not reported.
+  const bool hide_parents = visibility != "1";
+  const bool has_more = !exhausted && next.present;
+  const int64_t searched_to_ns = exhausted ? start_ns : (next.present ? next.ts_ns : start_ns);
+
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(start_ms); w.Int64(end_ms); w.EndArray();
+  w.Key("limit"); w.Int(limit);
+  w.Key("attribute_columns"); w.StartArray();
+  for (const auto& column : attribute_columns) {
+    w.StartObject();
+    w.Key("scope"); w.String(column.scope.c_str());
+    w.Key("key"); w.String(column.key.c_str());
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("has_more"); w.Bool(has_more);
+  w.Key("cursor");
+  if (has_more) w.String(encode_span_cursor(next).c_str()); else w.Null();
+  w.Key("incomplete"); w.Bool(incomplete);
+  w.Key("budget_ms"); w.Double(budget_ms);
+  w.Key("stop_reason"); w.String(stop_reason.c_str());
+  w.Key("searched_to_ns"); w.String(std::to_string(searched_to_ns).c_str());
+  w.Key("slices"); w.StartArray();
+  for (const auto& slice : slices) {
+    w.StartObject();
+    w.Key("start_ns"); w.String(std::to_string(slice.lo_ns).c_str());
+    w.Key("end_ns"); w.String(std::to_string(slice.hi_ns).c_str());
+    w.Key("rows"); w.Uint64(slice.rows);
+    w.Key("ms"); w.Double(std::round(slice.ms * 10.0) / 10.0);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("queries"); w.Double(std::round(query_ms * 10.0) / 10.0);
+  w.Key("total"); w.Double(std::round(elapsed_ms_since(request_started) * 10.0) / 10.0);
+  w.EndObject();
+  w.Key("rows"); w.StartArray();
+  for (const auto& row : rows) {
+    w.StartObject();
+    w.Key("timestamp"); w.String(row.timestamp.c_str());
+    w.Key("start_ns"); w.String(row.start_ns.c_str());
+    w.Key("trace_id"); w.String(row.trace_id.c_str());
+    w.Key("span_id"); w.String(row.span_id.c_str());
+    w.Key("parent_span_id"); w.String(hide_parents ? "" : row.parent_span_id.c_str());
+    w.Key("service_name"); w.String(row.service.c_str());
+    w.Key("span_name"); w.String(row.name.c_str());
+    w.Key("span_kind"); w.String(row.kind.c_str());
+    w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
+    w.Key("status_code"); w.String(row.status.c_str());
+    w.Key("status_message"); w.String(row.status_message.c_str());
+    w.Key("attributes"); w.StartArray();
+    for (const auto& [present, value] : row.attributes) {
+      if (present) w.String(value.c_str(), static_cast<rapidjson::SizeType>(value.size())); else w.Null();
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// One span with its attributes, events and links, addressed by its full row
+// key (HyperDX's row WHERE): the exact Timestamp bounds the read to a few
+// granules.
+void Server::handle_traces_span(const httplib::Request& req, httplib::Response& res) {
+  if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");
+  const auto param = [&](const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; };
+  const std::string trace_id = param("trace_id");
+  const std::string span_id = param("span_id");
+  int64_t timestamp_ns = 0;
+  if (trace_id.empty() || span_id.empty() || !parse_i64_param(req, "timestamp_ns", &timestamp_ns)) {
+    return json_error(res, 400, "missing_span_key", "trace_id, span_id and timestamp_ns are required.");
+  }
+  if (trace_id.size() > 256 || span_id.size() > 256 || timestamp_ns < 0) {
+    return json_error(res, 400, "invalid_span_key", "The span key is invalid.");
+  }
+  std::string source_host_id;
+  const HostSpec* host = trace_host(cfg_, req, &source_host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Trace source host is not configured.");
+  std::string error;
+  auto client = acquire_trace_client(cfg_, *host, client_pool_, &error);
+  if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+
+  const auto& f = cfg_.traces.features;
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string sql =
+      std::string("SELECT ") + kSpanSearchColumns + ", " +
+      (f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'") + ", " +
+      (f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'") + ", " +
+      (f.events ? "toJSONString(Events.Timestamp), toJSONString(Events.Name), toJSONString(Events.Attributes)" : "'[]', '[]', '[]'") + ", " +
+      (f.links ? "toJSONString(Links.TraceId), toJSONString(Links.SpanId), toJSONString(Links.Attributes)" : "'[]', '[]', '[]'") +
+      " FROM " + qualified(cfg_.traces.database, cfg_.traces.table) +
+      " PREWHERE Timestamp = " + ns_time(timestamp_ns) + " AND " + visibility +
+      " WHERE TraceId = " + quote_string(trace_id) + " AND SpanId = " + quote_string(span_id) +
+      " LIMIT 1 SETTINGS max_execution_time = 10";
+  std::vector<std::string> values;
+  try {
+    client->Select(sql, [&](const clickhouse::Block& block) {
+      if (!values.empty() || block.GetRowCount() == 0) return;
+      for (size_t column = 0; column < block.GetColumnCount(); ++column) values.push_back(ch_block_text_at(block, column, 0));
+    });
+  } catch (const std::exception& e) {
+    if (client_pool_) client_pool_->invalidate(client);
+    return json_error(res, 503, "trace_span_failed", e.what());
+  }
+  if (values.size() < 19) return json_error(res, 404, "span_not_found", "Span was not found.");
+
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); w.String(source_host_id.c_str());
+  w.Key("span"); w.StartObject();
+  w.Key("timestamp"); w.String(values[0].c_str());
+  w.Key("start_ns_text"); w.String(values[1].c_str());
+  w.Key("start_ns"); w.Int64(std::stoll(values[1]));
+  w.Key("trace_id"); w.String(values[2].c_str());
+  w.Key("span_id"); w.String(values[3].c_str());
+  w.Key("parent_span_id"); w.String(visibility != "1" ? "" : values[4].c_str());
+  w.Key("service_name"); w.String(values[5].c_str());
+  w.Key("span_name"); w.String(values[6].c_str());
+  w.Key("span_kind"); w.String(values[7].c_str());
+  w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(values[8])));
+  w.Key("status_code"); w.String(values[9].c_str());
+  w.Key("status_message"); w.String(values[10].c_str());
+  if (f.span_attributes) { w.Key("span_attributes"); w.String(values[11].c_str()); }
+  if (f.resource_attributes) { w.Key("resource_attributes"); w.String(values[12].c_str()); }
+  if (f.events) {
+    w.Key("events_timestamp"); w.String(values[13].c_str());
+    w.Key("events_name"); w.String(values[14].c_str());
+    w.Key("events_attributes"); w.String(values[15].c_str());
+  }
+  if (f.links) {
+    w.Key("links_trace_id"); w.String(values[16].c_str());
+    w.Key("links_span_id"); w.String(values[17].c_str());
+    w.Key("links_attributes"); w.String(values[18].c_str());
+  }
+  w.EndObject();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
 
 void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& res) {
   if (!cfg_.traces.enabled) return json_error(res, 404, "traces_disabled", "Trace Explorer is disabled.");

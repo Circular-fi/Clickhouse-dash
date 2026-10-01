@@ -231,6 +231,10 @@ private:
   void handle_trace_detail(const httplib::Request& req, httplib::Response& res);
   void handle_traces_linked_from(const httplib::Request& req, httplib::Response& res);
   void handle_traces_context(const httplib::Request& req, httplib::Response& res);
+  // Span-level search (keyset pages over newest-first time slices) and one
+  // span by its row key, for the search page's Spans mode.
+  void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
+  void handle_traces_span(const httplib::Request& req, httplib::Response& res);
 
   // OTel logs / metrics schema detection (api_otel_signals.cpp).
   void handle_logs_meta(const httplib::Request& req, httplib::Response& res);

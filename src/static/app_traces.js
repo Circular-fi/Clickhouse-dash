@@ -1507,6 +1507,13 @@
     watchResultsWidth();
     hideServicePopover();
     syncResultsViewControls();
+    // Spans mode draws its own span table (app_trace_spans.js).
+    if (ns.traceSpans?.active?.()) {
+      renderAnalytics();
+      ns.traceSpans.render();
+      return;
+    }
+    ns.traceSpans?.leave?.();
     const rows = sortedResults();
     renderResultCount(rows);
     renderAnalytics();
@@ -3535,6 +3542,16 @@
     model.durationsError = "";
     renderAnalytics();
     try {
+      if (ns.traceSpans?.active?.()) {
+        // One row per span; the span table reports its own errors.
+        await ns.traceSpans.search(filters);
+        if (seq !== model.searchSeq) return;
+        model.searched = true;
+        model.lastSearchRange = { start_ms: Number(filters.start_ms), end_ms: Number(filters.end_ms) };
+        void loadAnalytics(filters);
+        searchState?.onSearched?.(filters);
+        return;
+      }
       const requested = performance.now();
       const payload = await api.searchTraces(currentHost(), filters);
       if (seq !== model.searchSeq) return;
@@ -3619,7 +3636,9 @@
     // The trace's search context may differ from the listed results (a
     // shared link, or Back / Forward across searches).
     const key = ns.traceSearch?.searchKey?.() || "";
-    if (!model.traces.length || !model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
+    const listed = ns.traceSpans?.active?.() ? ns.traceSpans.hasResults() : model.traces.length > 0;
+    if (!listed || !model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
+    else ns.traceSpans?.onShown?.();
   }
 
   async function reloadForHost() {
@@ -3678,6 +3697,12 @@
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
     dom.navTracesButton?.addEventListener("click", () => ui?.closePageMenu?.());
+    ns.traceSpans?.install?.({
+      model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl, serviceColor, registerServiceColors,
+      formatDuration, spanKindLabel, absoluteTimeText, renderJaegerAttributes, renderAttributeTable, attributeEntries,
+      spanEventList, eventItemHtml, spanLinkList, spanDetailClick, enhanceTraceSelect,
+      runSearch: (options) => search(options),
+    });
     ns.traceSearch?.install?.({
       model, dom, api, esc, route, copyText, currentHost, currentTag,
       runSearch: (options) => search(options),

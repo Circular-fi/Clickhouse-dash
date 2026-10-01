@@ -240,6 +240,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
     http_.Get("/api/traces/linked_from", [&](const auto& req, auto& res) { handle_traces_linked_from(req, res); });
     http_.Get("/api/traces/context", [&](const auto& req, auto& res) { handle_traces_context(req, res); });
+    http_.Get("/api/traces/spans", [&](const auto& req, auto& res) { handle_traces_spans(req, res); });
+    http_.Get("/api/traces/span", [&](const auto& req, auto& res) { handle_traces_span(req, res); });
     // Answers {"enabled": false, ...} when logs are disabled (no 404).
     http_.Get("/api/traces/logs", [&](const auto& req, auto& res) { handle_trace_logs(req, res); });
   }

@@ -18,7 +18,8 @@
   // its "back to search" context; span / view are the detail's own).
   const SEARCH_PARAMS = ["from", "to", "status", "service", "operation", "limit", "sort", "results",
     "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
-    "min_duration_ms", "max_duration_ms", "duration_view"];
+    "min_duration_ms", "max_duration_ms", "duration_view",
+    "mode", "kind", "span_min_duration_ms", "span_max_duration_ms"];
   const PIN_STORE_KEY = "chdash.traceFacetPins.v1";
   const COLLAPSED_STORE_KEY = "chdash.traceFacetsCollapsed.v1";
   const KEYS_PAGE = 20;
@@ -293,6 +294,8 @@
     // The selected tab (app_trace_tabs.js), e.g. tab=map.
     ns.traceTabs?.writeParams?.(params);
     ns.traceHeatmap?.writeParams?.(params);
+    // Spans mode (app_trace_spans.js): mode=spans and its span filters.
+    ns.traceSpans?.urlParams?.(params);
     return params;
   }
 
@@ -364,6 +367,7 @@
     const results = params.get("results");
     if (results === "table" || results === "list") ctx.setResultsView(results, { persist: false });
     else if (!initial || hasSearchParams(params)) ctx.setResultsView("list", { persist: false });
+    ns.traceSpans?.applyParams?.(params);
     search.chips = chipsFromParams(params);
     search.duration = durationFromParams(params);
     renderChips();
@@ -884,5 +888,7 @@
     filter: (field, value) => applyFilter(field, value, "include"),
     exclude: (field, value) => applyFilter(field, value, "exclude"),
     setDuration,
+    // Discovered attribute keys (the span table's column picker suggests them).
+    facetKeys: () => facets.keys.map(({ scope, key }) => ({ scope, key })),
   };
 })();
