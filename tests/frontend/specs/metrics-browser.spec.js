@@ -217,6 +217,10 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('host.name');
   await expect(panels.nth(1).locator('.chartCore__legendItem')).toHaveCount(3);
   await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(range.from.slice(0, 10));
+  // The filter bar (range first) spans the catalog and the panels.
+  const [bar, sidebar] = await Promise.all([page.locator('#metricsToolbar').boundingBox(), page.locator('#metricsSidebar').boundingBox()]);
+  expect(bar.x).toBe(sidebar.x);
+  expect(sidebar.y).toBeGreaterThanOrEqual(bar.y + bar.height - 0.5);
 
   // The page rewrites nothing it restored.
   const restored = new URL(page.url());

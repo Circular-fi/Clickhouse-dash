@@ -570,39 +570,25 @@
 
   let timePicker = null;
 
-  // The Grafana-style time range panel replaces the dropdown list of the
-  // shipped range picker (same root, button and menu, same open/close motion).
+  // The Grafana-style time range panel (built by app_timerange.js) is the
+  // dropdown of the shipped range picker (same root and button, same
+  // open/close motion). Its zoom button joins dom: the result views' "zoom
+  // out" actions click it.
   function initTimeRangePicker() {
     const select = dom.tracesRangeUnit;
     const root = select?.parentElement;
-    const button = root?.querySelector(":scope > .tracePicker__button");
-    const menu = root?.querySelector(":scope > .tracePicker__menu");
-    if (!ns.timeRange || !root || !button || !menu || !dom.tracesRangeStart || !dom.tracesRangeEnd) return;
+    if (!ns.timeRange || !root?.querySelector(":scope > .tracePicker__button")) return;
     select.dataset.tracePickerReady = "1";
     tracePickers.add(root);
-    timePicker = ns.timeRange.mountPicker({
-      button, menu, select,
-      fromInput: dom.tracesRangeStart,
-      toInput: dom.tracesRangeEnd,
-      fromError: dom.tracesRangeStartError,
-      toError: dom.tracesRangeEndError,
-      rangeError: dom.tracesRangeError,
-      calendar: dom.tracesTimeCalendar,
-      hint: dom.tracesTimeCalendarHint,
-      applyButton: dom.tracesCustomRangeApply,
-      quickSearch: dom.tracesQuickRangeSearch,
-      lists: dom.tracesQuickRanges,
-      timeZone: dom.tracesTimeZone,
-      shiftBack: dom.tracesRangeShiftBack,
-      shiftForward: dom.tracesRangeShiftForward,
-      zoomOut: dom.tracesRangeZoomOut,
-    }, {
+    timePicker = ns.timeRange.create(root, {
+      idPrefix: "traces",
       getValue: () => model.timeRange,
       getMaxMinutes: maxRangeMinutes,
       onApply: (raw, source) => { void applyCustomRange(raw, source); },
       open: () => openTracePicker(root),
       close: () => closeTracePicker(root),
     });
+    dom.tracesRangeZoomOut = timePicker.el.zoomOut;
   }
 
   // Meta decides the default window (until the user picks one) and the widest

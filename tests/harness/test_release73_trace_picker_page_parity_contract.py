@@ -30,16 +30,16 @@ def test_trace_picker_hover_and_close_motion_follow_page_selector():
 
 
 def test_custom_range_exposes_date_and_time_inputs():
-    page = read("src/static/observability.html")
-    html = page[page.index("<!-- observability:traces -->"):page.index("<!-- /observability:traces -->")]
     js = read("src/static/app_traces.js")
     picker = read("src/static/app_timerange.js")
-    # Date and time of day (hh:mm:ss) in From / To, plus a range calendar.
-    assert html.count('class="timeRangeField__input" type="text"') == 2
-    assert 'placeholder="YYYY-MM-DD hh:mm:ss or now-6h"' in html
-    assert 'id="tracesTimeCalendar"' in html
+    # Date and time of day (hh:mm:ss) in From / To, plus a range calendar,
+    # in the panel app_timerange.js builds for each view.
+    assert picker.count('class="timeRangeField__input" type="text"') == 1
+    assert '${field("Start", "From", "YYYY-MM-DD hh:mm:ss or now-6h")}${field("End", "To", "YYYY-MM-DD hh:mm:ss or now")}' in picker
+    assert 'id="${p}TimeCalendar"' in picker
     assert 'fromInput.value = `${dayKey(day)} 00:00:00`;' in picker
-    assert 'id="tracesCustomRangeApply"' in html
+    assert 'id="${p}CustomRangeApply"' in picker
+    assert 'timePicker = ns.timeRange.create(root, {\n      idPrefix: "traces",' in js
     assert 'async function applyCustomRange(raw, source = "form")' in js
     assert 'closeCustomRangeEditor();' in js
 

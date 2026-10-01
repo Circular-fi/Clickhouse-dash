@@ -1127,27 +1127,9 @@
   function initTimeRangePicker() {
     const unit = document.getElementById("metricsRangeUnit");
     const root = unit?.parentElement;
-    const button = root?.querySelector(":scope > .tracePicker__button");
-    const menu = root?.querySelector(":scope > .tracePicker__menu");
-    if (!ns.timeRange || !root || !button || !menu) return;
-    const byId = (id) => document.getElementById(id);
-    timePicker = ns.timeRange.mountPicker({
-      button, menu, select: unit,
-      fromInput: byId("metricsRangeStart"),
-      toInput: byId("metricsRangeEnd"),
-      fromError: byId("metricsRangeStartError"),
-      toError: byId("metricsRangeEndError"),
-      rangeError: byId("metricsRangeError"),
-      calendar: byId("metricsTimeCalendar"),
-      hint: byId("metricsTimeCalendarHint"),
-      applyButton: byId("metricsCustomRangeApply"),
-      quickSearch: byId("metricsQuickRangeSearch"),
-      lists: byId("metricsQuickRanges"),
-      timeZone: byId("metricsTimeZone"),
-      shiftBack: byId("metricsRangeShiftBack"),
-      shiftForward: byId("metricsRangeShiftForward"),
-      zoomOut: byId("metricsRangeZoomOut"),
-    }, {
+    if (!ns.timeRange || !root?.querySelector(":scope > .tracePicker__button")) return;
+    timePicker = ns.timeRange.create(root, {
+      idPrefix: "metrics",
       getValue: () => model.range,
       getMaxMinutes: () => MAX_RANGE_MINUTES,
       onApply: (raw) => { closePicker(root); applyRange(raw); },

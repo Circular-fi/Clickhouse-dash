@@ -360,25 +360,8 @@
     const root = select?.parentElement;
     if (!ns.timeRange || !root) return;
     pickers.add(root);
-    timePicker = ns.timeRange.mountPicker({
-      button: root.querySelector(":scope > .tracePicker__button"),
-      menu: root.querySelector(":scope > .tracePicker__menu"),
-      select,
-      fromInput: $("logsRangeStart"),
-      toInput: $("logsRangeEnd"),
-      fromError: $("logsRangeStartError"),
-      toError: $("logsRangeEndError"),
-      rangeError: $("logsRangeError"),
-      calendar: $("logsTimeCalendar"),
-      hint: $("logsTimeCalendarHint"),
-      applyButton: $("logsCustomRangeApply"),
-      quickSearch: $("logsQuickRangeSearch"),
-      lists: $("logsQuickRanges"),
-      timeZone: $("logsTimeZone"),
-      shiftBack: $("logsRangeShiftBack"),
-      shiftForward: $("logsRangeShiftForward"),
-      zoomOut: $("logsRangeZoomOut"),
-    }, {
+    timePicker = ns.timeRange.create(root, {
+      idPrefix: "logs",
       getValue: () => model.timeRange,
       getMaxMinutes: maxRangeMinutes,
       settingName: "logs.max_lookback_minutes",

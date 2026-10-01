@@ -19,7 +19,7 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
             assert dead not in source
     # The time range panel is the range picker's dropdown (absolutely
     # positioned menu), so editing a range never reflows the search bar.
-    assert 'class="themeSelect__menu tracePicker__menu timeRangePanel"' in html
+    assert 'class="themeSelect__menu tracePicker__menu timeRangePanel"' in read("src/static/app_timerange.js")
     assert '.traceSearchBar .tracePicker--range .tracePicker__menu.timeRangePanel {' in css
     assert '.themeSelect__menu {\n  position: absolute;' in css
 

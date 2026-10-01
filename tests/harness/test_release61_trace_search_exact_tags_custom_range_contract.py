@@ -45,13 +45,13 @@ def test_custom_range_inputs_take_dates_or_expressions_and_update_picker_label()
     # Free text From / To (absolute dates or Grafana expressions such as
     # now-6h), no native datetime control with min / max fighting the user.
     assert 'type="datetime-local"' not in html
-    assert '<input id="tracesRangeStart" class="timeRangeField__input" type="text"' in html
-    assert '<input id="tracesRangeEnd" class="timeRangeField__input" type="text"' in html
+    # app_timerange.js builds the panel of each view ("tracesRangeStart"...).
+    assert '<input id="${p}Range${side}" class="timeRangeField__input" type="text"' in picker
     assert 'function parseTime(text, roundUp, nowMs = Date.now())' in picker
     assert 'function applyDateMath(source, math, roundUp)' in picker
     assert 'function formatCustomRangeLabel()' in ui
     assert 'function refreshCustomRangeLabel()' in ui
     assert 'option.textContent = formatCustomRangeLabel()' in ui
     assert 'button.textContent = relative ? `Time range · ${text}` : text;' in picker
-    assert 'id="tracesCustomRangeApply"' in html
+    assert 'id="${p}CustomRangeApply"' in picker
     assert 'async function applyCustomRange(raw, source = "form")' in ui

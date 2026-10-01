@@ -92,7 +92,7 @@ def test_logs_page_script_reuses_shared_pieces():
     js = read("src/static/app_logs.js")
     ui = read("src/static/app_ui.js")
     state = read("src/static/app_state.js")
-    assert "timePicker = ns.timeRange.mountPicker(" in js
+    assert "timePicker = ns.timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
     assert 'settingName: "logs.max_lookback_minutes",' in js
     assert 'const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";' in js
     assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js

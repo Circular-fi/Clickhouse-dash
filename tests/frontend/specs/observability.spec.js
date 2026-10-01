@@ -374,8 +374,8 @@ test('observability: logs and metrics modules and rules load on their first show
   state = await loaded(page);
   expect(state.modules).toEqual({ traces: false, logs: true, metrics: false });
   expect(state.sheets).toEqual(['style.observability.logs.css']);
-  // The Logs view is styled by its own sheet.
-  expect(await page.locator('#logsForm').evaluate((el) => getComputedStyle(el).display)).toBe('grid');
+  // The Logs view is styled by its own sheet (the filter bar's flex layout).
+  expect(await page.locator('#logsForm').evaluate((el) => getComputedStyle(el).display)).toBe('flex');
 });
 
 test('observability: a view the server turns off has no tab and its URLs fall back', async ({ page }) => {

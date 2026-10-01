@@ -8,8 +8,8 @@ def test_trace_filter_cleanup_and_connected_tag_pair():
     css = (ROOT / "src/static/style.css").read_text()
 
     assert 'traceInfoButton--inline' not in html
-    assert 'id="tracesTagKey" type="text" placeholder="Tag"' in html
-    assert 'id="tracesTagValue" type="text" placeholder="Value"' in html
+    assert 'id="tracesTagKey" class="obsFilterBar__input" type="text" placeholder="Tag"' in html
+    assert 'id="tracesTagValue" class="obsFilterBar__input" type="text" placeholder="Value"' in html
     assert '.traceTagSearch__inputs {\n  gap: 0 !important;' in css
     assert 'border-radius: 6px 0 0 6px !important;' in css
     assert 'border-radius: 0 6px 6px 0 !important;' in css

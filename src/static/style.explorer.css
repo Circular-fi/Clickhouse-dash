@@ -4854,9 +4854,9 @@ html[data-theme="light"] {
   --log-sev-trace: #8c959f;
 }
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
-@keyframes logsPulse { 50% { opacity: .45; } }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
 @keyframes metricsSpin { to { transform: rotate(360deg); } }
+@keyframes obsBarPulse { 50% { opacity: .45; } }
 :root {
   --trace-heat-1: #0d366b; --trace-heat-2: #104281; --trace-heat-3: #184f95; --trace-heat-4: #256abf;
   --trace-heat-5: #2a78d6; --trace-heat-6: #5598e7; --trace-heat-7: #86b6ef; --trace-heat-8: #cde2fb;

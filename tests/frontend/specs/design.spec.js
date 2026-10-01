@@ -405,6 +405,28 @@ for (const theme of ['dark', 'light']) {
 }
 
 for (const theme of ['dark', 'light']) {
+  test(`captures the Traces, Logs and Metrics filter bars and their range panels (${theme})`, async ({ page }, testInfo) => {
+    await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
+    const bars = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
+    const heights = [];
+    for (const [view, selector] of Object.entries(bars)) {
+      await page.goto(`/observability/${view}?from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00`);
+      const bar = page.locator(selector);
+      await expect(bar).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      heights.push(Math.round((await bar.boundingBox()).height));
+      await captureState(page, testInfo, `${view}-filter-bar-${theme}`);
+      await bar.locator('.tracePicker--range > .tracePicker__button').click();
+      await expect(page.locator(`#${view}TimeRangePanel`)).toBeVisible();
+      await captureState(page, testInfo, `${view}-filter-bar-range-${theme}`);
+      await page.keyboard.press('Escape');
+    }
+    // One bar height on the three views.
+    expect(new Set(heights).size).toBe(1);
+  });
+}
+
+for (const theme of ['dark', 'light']) {
   test(`captures the traces filter chips, attribute facets and click-to-filter menu (${theme})`, async ({ page }, testInfo) => {
     await page.addInitScript((mode) => {
       localStorage.setItem('chdash.theme', mode);

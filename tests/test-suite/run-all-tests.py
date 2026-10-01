@@ -244,7 +244,7 @@ def main() -> int:
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/ui-foundations.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/obs-filterbar.spec.js', 'specs/ui-foundations.spec.js', '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,

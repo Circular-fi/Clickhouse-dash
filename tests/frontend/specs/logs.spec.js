@@ -315,6 +315,10 @@ test('logs: live tail prepends newer records', async ({ page }) => {
   });
   await page.goto('/observability/logs?from=now-15m&to=now');
   await expect(rows(page)).toHaveCount(3, { timeout: 30_000 });
+  // Live is a toggle of the filter bar, right before Search.
+  await expect(page.locator('#logsForm .obsFilterBar__actions > *')).toHaveCount(2);
+  await expect(page.locator('#logsForm .obsFilterBar__actions > :first-child')).toHaveId('logsLiveButton');
+  await expect(page.locator('#logsForm .obsFilterBar__actions > :last-child')).toHaveId('logsSearchButton');
   await page.locator('#logsLiveButton').click();
   await expect(page.locator('#logsLiveButton')).toHaveAttribute('aria-pressed', 'true');
   await expect(rows(page).first()).toContainText('fresh live record', { timeout: 15_000 });

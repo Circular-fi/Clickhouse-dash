@@ -84,7 +84,9 @@ def test_metrics_view_shell_and_switcher():
     html = read("src/static/observability.html")
     section = html[html.index("<!-- observability:metrics -->"):html.index("<!-- /observability:metrics -->")]
     assert '<main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">' in section
-    assert '<form id="metricsToolbar" class="traceSearchBar metricsToolbar" autocomplete="off">' in section
+    # The filter bar spans the catalog and the panels: it comes before the sidebar.
+    assert '<form id="metricsToolbar" class="obsFilterBar traceSearchBar metricsToolbar" autocomplete="off">' in section
+    assert section.index('id="metricsToolbar"') < section.index('id="metricsSidebar"')
     assert 'id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace"' in html
     assert not (ROOT / "src/static/metrics.html").exists()
     controller = read("src/static/app_observability.js")

@@ -15,7 +15,7 @@ def test_strict_trace_ranges_and_selection_only_prefill_pickers():
         assert f'["{value}", "now", ' in picker
     assert 'QUICK_RANGES.filter((option) => fits(option, now)' in picker
     assert 'endMs - startMs <= maxMs()' in picker
-    assert 'id="tracesRangeStart"' in html and 'id="tracesRangeEnd"' in html
+    assert 'id="${p}Range${side}"' in picker and 'field("Start", "From"' in picker and 'field("End", "To"' in picker
     assert 'enhanceTraceCombo' not in js
     assert 'traceCombo__menu' not in js
     assert '<select id="tracesService"' in html

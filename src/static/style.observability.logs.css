@@ -1753,8 +1753,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceRangeCompact > input:focus,
 .traceRangeCompact > select:focus,
 .traceTagSearch__inputs > select:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
-.traceRangeCompact { display: grid; grid-template-columns: 58px minmax(84px, 1fr); gap: 4px; }
-.traceRangeCompact > input { width: 58px; padding: 0 6px; }
 .traceActionButton,
 .traceSearchSubmit {
   height: 29px;
@@ -1768,12 +1766,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceButtonSpinner { display: none; width: 10px; height: 10px; margin-right: 5px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: traceSpin .7s linear infinite; }
 .is-loading > .traceButtonSpinner { display: inline-block; }
 @keyframes traceSpin { to { transform: rotate(360deg); } }
-@media (max-width: 1400px) {
-  .traceSearchBar { grid-template-columns: minmax(155px, 1.1fr) 88px minmax(135px, 1fr) minmax(145px, 1fr) minmax(210px, 1.35fr) 72px auto; }
-}
-@media (max-width: 1100px) {
-  .traceSearchBar { position: static; grid-template-columns: repeat(4, minmax(130px, 1fr)); }
-}
 .tracePicker {
   width: 100%;
   min-width: 0;
@@ -1853,7 +1845,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceSearchField > .tracePicker,
 .traceRangeCompact > .tracePicker,
 .traceTagSearch__inputs > .tracePicker { height: 29px; }
-.traceRangeCompact { grid-template-columns: 58px minmax(96px, 1fr); }
 .tracePicker {
   position: relative;
   width: 100%;
@@ -1931,24 +1922,6 @@ html.chdash-page-select-hidden .pageSelect {
   opacity: .48;
   background: color-mix(in srgb, var(--inputBg) 78%, transparent);
 }
-.traceRangeCompact {
-  grid-template-columns: 62px minmax(104px, 1fr);
-  gap: 0;
-}
-.traceRangeCompact > input {
-  width: 62px;
-  border-radius: var(--radiusSm) 0 0 var(--radiusSm);
-  position: relative;
-  z-index: 1;
-}
-.traceRangeCompact > .tracePicker { margin-left: -1px; }
-.traceRangeCompact > .tracePicker .tracePicker__button {
-  border-radius: 0 var(--radiusSm) var(--radiusSm) 0;
-}
-.traceRangeCompact > .tracePicker.themeSelect--open .tracePicker__button,
-.traceRangeCompact > .tracePicker.themeSelect--closing .tracePicker__button {
-  border-radius: 0 var(--radiusSm) 0 0;
-}
 .traceSearchField > .tracePicker,
 .traceTagSearch__inputs > .tracePicker,
 .traceRangeCompact > .tracePicker {
@@ -1971,19 +1944,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceRangeCompact > .tracePicker .tracePicker__button:hover {
   border-color: var(--accentBorder);
 }
-.traceRangeCompact {
-  gap: 0;
-}
-.traceRangeCompact > input {
-  border-radius: 6px 0 0 6px;
-  border-right: 0;
-}
-.traceRangeCompact > .tracePicker {
-  margin-left: -1px;
-}
-.traceRangeCompact > .tracePicker .tracePicker__button {
-  border-radius: 0 6px 6px 0;
-}
 .tracePicker__menu {
   border-radius: 8px;
 }
@@ -1991,16 +1951,6 @@ html.chdash-page-select-hidden .pageSelect {
   height: 30px;
   border-radius: 4px;
   font-size: 10.5px;
-}
-.traceRangeCompact--preset {
-  display: block;
-}
-.traceRangeCompact--preset > .tracePicker {
-  width: 100%;
-  margin: 0;
-}
-.traceRangeCompact--preset > .tracePicker .tracePicker__button {
-  border-radius: 6px;
 }
 .traceSearchBar__range {
   position: relative;
@@ -2041,53 +1991,6 @@ html.chdash-page-select-hidden .pageSelect {
   padding-right: 8px !important;
   cursor: default !important;
 }
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    120px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    100px
-    minmax(120px, .72fr);
-}
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    position: static;
-    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
-    grid-template-areas:
-      "range status service operation"
-      "tags tags limit search"
-      "source source source source";
-    gap: 7px;
-    align-items: center;
-  }
-  .traceSearchBar__range { grid-area: range; }
-  .traceSearchSubmit { grid-area: search; width: 100%; min-width: 0; }
-}
-@media (max-width: 760px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(0, 1fr) 100px;
-    grid-template-areas:
-      "range range"
-      "status limit"
-      "service service"
-      "operation operation"
-      "tags tags"
-      "search search"
-      "source source";
-  }
-}
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    140px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    120px
-    160px;
-}
 .traceSearchBar .tracePicker {
   height: 31px !important;
   min-height: 31px !important;
@@ -2126,36 +2029,6 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .traceSearchBar .tracePicker__option:hover:not(:disabled) {
   background: var(--rowHover) !important;
-}
-.traceSearchSubmit {
-  width: 160px !important;
-  min-width: 160px !important;
-  max-width: 160px !important;
-  justify-self: start !important;
-}
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(220px, 1.2fr) 140px minmax(180px, 1fr) minmax(180px, 1fr);
-    grid-template-areas:
-      "range status service operation"
-      "tags tags limit search"
-      "source source source source";
-  }
-  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; justify-self: start !important; }
-}
-@media (max-width: 760px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(0, 1fr) 120px;
-    grid-template-areas:
-      "range range"
-      "status limit"
-      "service service"
-      "operation operation"
-      "tags tags"
-      "search search"
-      "source source";
-  }
-  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; }
 }
 .traceSearchBar button:focus,
 .traceSearchBar button:focus-visible,
@@ -2206,21 +2079,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
   border-color: var(--buttonBorder) !important;
   background: var(--buttonBg) !important;
-}
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    120px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    120px
-    160px;
-}
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
-  }
 }
 .traceSearchBar .tracePicker,
 .traceResultsSort .tracePicker {
@@ -2313,7 +2171,7 @@ html.chdash-page-select-hidden .pageSelect {
 html[data-obs-view="traces"] .appHeader {
   border-bottom: 0 !important;
 }
-html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
+.traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu {
   max-height: none !important;
   overflow: visible !important;
   scrollbar-gutter: auto !important;
@@ -2842,18 +2700,6 @@ html.chdash-trace-facets-collapsed .traceFacets { flex-basis: 32px; width: 32px;
   .traceFacets { position: static; flex-basis: auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
   html.chdash-trace-facets-collapsed .traceFacets { width: auto; }
 }
-@media (min-width: 1101px) and (max-width: 1440px) {
-  .traceSearchBar {
-    grid-template-columns:
-      minmax(180px, 1.15fr)
-      120px
-      minmax(130px, 1fr)
-      minmax(130px, 1fr)
-      minmax(210px, 1.2fr)
-      120px
-      minmax(96px, 160px);
-  }
-}
 :root {
   --trace-log-fatal: var(--log-sev-fatal);
   --trace-log-error: var(--log-sev-error);
@@ -2905,76 +2751,14 @@ html[data-theme="light"] {
   --log-sev-trace: #8c959f;
 }
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
-html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
-  scrollbar-gutter: auto !important;
-}
 .logsWorkspace { display: flex; flex-direction: column; }
 .logsShell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.traceSearchBar.logsSearchBar {
-  position: relative;
-  flex: 0 0 auto;
-  grid-template-columns: minmax(200px, 250px) minmax(150px, 200px) 120px minmax(220px, 2fr) minmax(170px, 1fr) 110px;
-  grid-template-areas: none;
-  align-items: center;
-  min-height: 0;
-}
 .logsSearchBar .logsMultiPicker__menu {
   width: 290px !important;
   min-width: 290px !important;
   right: auto !important;
 }
 .logsSidePanel__headerActions .button--small { height: 26px; min-height: 26px; padding: 0 10px; font-size: 11px; }
-.logsSearchBar .logsSearchSubmit {
-  width: 110px !important;
-  min-width: 110px !important;
-  max-width: 110px !important;
-  height: 31px !important;
-}
-.logsSearchField--level,
-.logsSearchField--level > .tracePicker { width: 120px; }
-.logsSearchField--service > .tracePicker { width: 100%; }
-.logsSearchBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.logsQueryField,
-.logsFilterField { position: relative; min-width: 0; display: block; }
-.logsQueryField > input,
-.logsFilterField > input {
-  width: 100%;
-  height: 31px;
-  min-width: 0;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  outline: none;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 12px/1 var(--mono);
-}
-.logsQueryField > input { padding-left: 28px; }
-.logsQueryField > input:focus,
-.logsFilterField > input:focus { border-color: var(--accentBorder); }
-.logsQueryField > input:disabled { opacity: .6; cursor: not-allowed; }
-.logsQueryField__icon {
-  position: absolute;
-  left: 9px;
-  top: 50%;
-  width: 13px;
-  height: 13px;
-  transform: translateY(-50%);
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.6;
-  pointer-events: none;
-}
-@media (max-width: 1100px) {
-  .traceSearchBar.logsSearchBar {
-    grid-template-columns: minmax(200px, 1fr) minmax(150px, 1fr) 120px 110px;
-    grid-template-areas: none;
-  }
-  .logsQueryField { grid-column: 1 / 3; }
-  .logsFilterField { grid-column: 3 / 5; }
-}
 .logsMultiPicker__menu {
   min-width: 240px;
   max-height: 340px !important;
@@ -3135,11 +2919,6 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
 .logsColumnsPicker .tracePicker__menu { left: auto; right: 0; }
 .logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: 600 11px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
 .logsSwitch > input { margin: 0; accent-color: var(--accentBorder); }
-.logsLiveButton { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; font-size: 11px; }
-.logsLiveDot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.logsLiveButton.is-live { border-color: color-mix(in srgb, #22c55e 55%, var(--buttonBorder)); }
-.logsLiveButton.is-live .logsLiveDot { background: #22c55e; box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); animation: logsPulse 1.4s ease-in-out infinite; }
-@keyframes logsPulse { 50% { opacity: .45; } }
 .logsBody {
   position: relative;
   flex: 1 1 auto;
@@ -3365,19 +3144,138 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
+.metricsWorkspace > .obsFilterBar { grid-column: 1 / -1; }
 @media (min-width: 1700px) {
   .metricsWorkspace { grid-template-columns: 320px minmax(0, 1fr); }
 }
-html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
-  scrollbar-gutter: auto !important;
-}
 @keyframes metricsSpin { to { transform: rotate(360deg); } }
 @media (max-width: 900px) {
-  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 34vh) minmax(0, 1fr); }
+  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 34vh) minmax(0, 1fr); }
+}
+.obsFilterBar {
+  --obsBarGap: 8px;
+  --obsBarControl: 31px;
+  --obsBarRange: 264px;
+  --obsBarNarrow: 120px;
+  --obsBarSubmit: 112px;
+  --obsBarFont: 600 11px/1 Arial, Helvetica, sans-serif;
+}
+.traceSearchBar.obsFilterBar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  box-sizing: border-box;
+  display: flex !important;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--obsBarGap);
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 50%, transparent);
+}
+.obsFilterBar__lead,
+.obsFilterBar__tail { display: contents; }
+.obsFilterBar__range {
+  flex: 0 0 var(--obsBarRange);
+  width: var(--obsBarRange);
+  min-width: 0;
+}
+.obsFilterBar__range > .tracePicker { width: 100%; margin: 0; }
+.traceSearchBar.obsFilterBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.obsFilterBar .obsFilterBar__field { display: block; flex: 1 1 150px; width: auto; min-width: 120px; max-width: 240px; }
+.obsFilterBar .obsFilterBar__field > .tracePicker,
+.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+.obsFilterBar .obsFilterBar__field--narrow,
+.obsFilterBar .obsFilterBar__option {
+  flex: 0 0 var(--obsBarNarrow);
+  width: var(--obsBarNarrow) !important;
+  min-width: var(--obsBarNarrow) !important;
+  max-width: var(--obsBarNarrow) !important;
+}
+.obsFilterBar .obsFilterBar__text { position: relative; display: block; flex: 2 1 200px; min-width: 150px; }
+.obsFilterBar .logsFilterField { flex-grow: 1; }
+.obsFilterBar .obsFilterBar__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--obsBarControl);
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  outline: none;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: var(--obsBarFont);
+}
+.obsFilterBar .obsFilterBar__input::placeholder { color: var(--muted); opacity: .92; }
+.obsFilterBar .obsFilterBar__input:disabled { opacity: .6; cursor: not-allowed; }
+.obsFilterBar__search > .obsFilterBar__input { padding-left: 28px; }
+.obsFilterBar__searchIcon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  pointer-events: none;
+}
+.obsFilterBar__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--obsBarGap);
+  margin-left: auto;
+}
+.obsFilterBar .obsFilterBar__secondary,
+.obsFilterBar .obsFilterBar__submit {
+  box-sizing: border-box;
+  height: var(--obsBarControl) !important;
+  min-height: var(--obsBarControl) !important;
+  padding: 0 12px;
+  border-radius: 0.75rem;
+  font: 850 11px/1 Arial, Helvetica, sans-serif;
+  white-space: nowrap;
+}
+.obsFilterBar .obsFilterBar__submit {
+  width: var(--obsBarSubmit) !important;
+  min-width: var(--obsBarSubmit) !important;
+  max-width: var(--obsBarSubmit) !important;
+  justify-self: auto !important;
+}
+.obsFilterBar__toggle { gap: 6px; }
+.obsFilterBar__toggleDot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, #22c55e 55%, var(--buttonBorder)); }
+.obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { background: #22c55e; box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); animation: obsBarPulse 1.4s ease-in-out infinite; }
+@keyframes obsBarPulse { 50% { opacity: .45; } }
+@media (max-width: 1100px) {
+  .traceSearchBar.obsFilterBar { flex-direction: column; align-items: stretch; }
+  .obsFilterBar__lead,
+  .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+}
+@media (max-width: 760px) {
+  .traceSearchBar.obsFilterBar { position: static; }
+  .obsFilterBar__lead,
+  .obsFilterBar__tail { flex-wrap: wrap; }
+  .obsFilterBar__range { flex: 1 1 100%; width: auto; }
+  .obsFilterBar .obsFilterBar__field,
+  .obsFilterBar .obsFilterBar__field--narrow {
+    flex: 1 1 calc(50% - var(--obsBarGap) / 2);
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+  .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
 }
 :root {
   --trace-heat-1: #0d366b; --trace-heat-2: #104281; --trace-heat-3: #184f95; --trace-heat-4: #256abf;

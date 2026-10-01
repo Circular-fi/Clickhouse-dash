@@ -16,13 +16,20 @@ def test_time_range_picker_is_loaded_before_the_traces_page():
 
 def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
     html = read("src/static/observability.html")
-    menu = html[html.index('<div id="tracesTimeRangePanel"'):html.index('<div class="traceSearchField traceSearchField--status">')]
+    picker = read("src/static/app_timerange.js")
+    # One panel builder (app_timerange.js panelHtml) instead of a copy of the
+    # markup per view: the page ships only the range picker's button.
+    assert "timeRangePanel" not in html
+    assert html.count('<div class="themeSelect tracePicker tracePicker--range">') == 3
+    menu = picker[picker.index("  function panelHtml(p) {"):picker.index("  function create(root, options) {")]
     for token in (
-        'id="tracesRangeStart"', 'id="tracesRangeEnd"', 'id="tracesTimeCalendar"', 'id="tracesCustomRangeApply"',
-        'placeholder="Search quick ranges"', 'id="tracesQuickRanges"', 'id="tracesTimeZone"',
-        'aria-label="Move time range backwards"', 'aria-label="Zoom out time range"', 'aria-label="Move time range forwards"',
+        'id="${p}Range${side}"', 'field("Start", "From"', 'field("End", "To"', 'id="${p}TimeCalendar"', 'id="${p}CustomRangeApply"',
+        'placeholder="Search quick ranges"', 'id="${p}QuickRanges"', 'id="${p}TimeZone"',
+        '"Move time range backwards"', '"Zoom out time range"', '"Move time range forwards"',
     ):
         assert token in menu, token
+    for view in ("traces", "logs", "metrics"):
+        assert f'idPrefix: "{view}",' in read(f"src/static/app_{view}.js"), view
 
 
 def test_ranges_resolve_per_request_in_browser_local_time():

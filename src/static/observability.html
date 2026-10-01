@@ -164,94 +164,68 @@
       <div id="tracesError" class="tracesError" hidden></div>
 
       <section id="tracesSearchView" class="traceSearchView">
-        <form id="tracesForm" class="traceSearchBar" autocomplete="off">
-          <div class="traceSearchBar__range">
-            <div class="traceRangeCompact traceRangeCompact--preset">
+        <!-- The filter bar (.obsFilterBar), the same on Traces, Logs and
+             Metrics: the lead holds the time range and the field pickers,
+             the tail the free-text inputs, the view options and the actions
+             (secondary, then the primary submit). app_timerange.js builds the
+             range panel. -->
+        <form id="tracesForm" class="obsFilterBar traceSearchBar" autocomplete="off">
+          <div class="obsFilterBar__lead">
+            <div class="obsFilterBar__range traceSearchBar__range">
               <div class="themeSelect tracePicker tracePicker--range">
                 <select id="tracesRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 1 hour</option></select>
-                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="tracesTimeRangePanel">Time range · Last 1 hour</button>
-                <div id="tracesTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
-                  <div class="timeRangePanel__body">
-                    <section id="tracesCustomRange" class="timeRangePanel__absolute" aria-labelledby="tracesAbsoluteRangeTitle">
-                      <h3 id="tracesAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
-                      <label class="timeRangeField is-active">
-                        <span class="timeRangeField__label">From</span>
-                        <input id="tracesRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="tracesRangeStartError" />
-                        <span id="tracesRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
-                      </label>
-                      <label class="timeRangeField">
-                        <span class="timeRangeField__label">To</span>
-                        <input id="tracesRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="tracesRangeEndError" />
-                        <span id="tracesRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
-                      </label>
-                      <div id="tracesTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
-                      <div id="tracesTimeCalendar" class="timeCalendar"></div>
-                      <div id="tracesRangeError" class="timeRangePanel__error" role="alert" hidden></div>
-                      <button id="tracesCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
-                    </section>
-                    <section class="timeRangePanel__quick" aria-label="Quick ranges">
-                      <input id="tracesQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
-                      <div id="tracesQuickRanges" class="timeRangeList"></div>
-                    </section>
-                  </div>
-                  <footer class="timeRangePanel__footer">
-                    <span id="tracesTimeZone" class="timeRangePanel__zone">Browser time</span>
-                    <div class="timeRangePanel__nav">
-                      <button id="tracesRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
-                      <button id="tracesRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
-                      <button id="tracesRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
-                    </div>
-                  </footer>
-                </div>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false">Time range · Last 1 hour</button>
               </div>
             </div>
+            <div class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField traceSearchField--status">
+              <div class="themeSelect tracePicker">
+                <select id="tracesStatus" data-field-label="Status" aria-label="Status" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Status · ALL</button>
+                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+              </div>
+            </div>
+
+            <label class="obsFilterBar__field traceSearchField traceSearchField--service">
+              <div class="themeSelect tracePicker is-disabled is-empty">
+                <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service" class="tracePicker__native" tabindex="-1" aria-hidden="true">
+                  <option value="" selected>ALL</option>
+                </select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Service · ALL</button>
+                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+              </div>
+            </label>
+
+            <label class="obsFilterBar__field traceSearchField traceSearchField--operation">
+              <div class="themeSelect tracePicker is-disabled is-empty">
+                <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation" class="tracePicker__native" tabindex="-1" aria-hidden="true">
+                  <option value="" selected>ALL</option>
+                </select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Operation · ALL</button>
+                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+              </div>
+            </label>
           </div>
+          <div class="obsFilterBar__tail">
+            <div class="obsFilterBar__text traceTagSearch">
+              <div class="traceTagSearch__inputs traceTagSearch__inputs--op">
+                <input id="tracesTagKey" class="obsFilterBar__input" type="text" placeholder="Tag" aria-label="Tag" autocomplete="off" spellcheck="false" title="Attribute key; prefix span: or resource: to search one attribute map. Enter adds the filter." />
+                <button id="tracesTagOp" class="traceTagSearch__op" type="button" data-op="=" aria-label="Tag operator: equals" title="Operator: = (click for !=, exists, not exists)">=</button>
+                <input id="tracesTagValue" class="obsFilterBar__input" type="text" placeholder="Value" aria-label="Value" autocomplete="off" spellcheck="false" />
+              </div>
+            </div>
 
-          <div class="traceSearchField traceSearchField--status">
-            <div class="themeSelect tracePicker">
-              <select id="tracesStatus" data-field-label="Status" aria-label="Status" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="">ALL</option><option value="Ok">OK</option><option value="Error">ERROR</option><option value="Unset">UNSET</option></select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Status · ALL</button>
-              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+            <label class="obsFilterBar__option traceSearchField traceSearchField--limit">
+              <div class="themeSelect tracePicker">
+                <select id="tracesLimit" data-field-label="Results" aria-label="Results" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250" hidden disabled>250</option><option value="500" hidden disabled>500</option></select>
+                <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Results · 50</button>
+                <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
+              </div>
+            </label>
+
+            <div class="obsFilterBar__actions">
+              <button id="tracesSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
             </div>
           </div>
-
-          <label class="traceSearchField traceSearchField--service">
-            <div class="themeSelect tracePicker is-disabled is-empty">
-              <select id="tracesService" data-field-label="Service" data-disable-when-empty="1" aria-label="Service" class="tracePicker__native" tabindex="-1" aria-hidden="true">
-                <option value="" selected>ALL</option>
-              </select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Service · ALL</button>
-              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
-            </div>
-          </label>
-
-          <label class="traceSearchField traceSearchField--operation">
-            <div class="themeSelect tracePicker is-disabled is-empty">
-              <select id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1" aria-label="Operation" class="tracePicker__native" tabindex="-1" aria-hidden="true">
-                <option value="" selected>ALL</option>
-              </select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="true" disabled>Operation · ALL</button>
-              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
-            </div>
-          </label>
-
-          <div class="traceTagSearch">
-            <div class="traceTagSearch__inputs traceTagSearch__inputs--op">
-              <input id="tracesTagKey" type="text" placeholder="Tag" aria-label="Tag" autocomplete="off" spellcheck="false" title="Attribute key; prefix span: or resource: to search one attribute map. Enter adds the filter." />
-              <button id="tracesTagOp" class="traceTagSearch__op" type="button" data-op="=" aria-label="Tag operator: equals" title="Operator: = (click for !=, exists, not exists)">=</button>
-              <input id="tracesTagValue" type="text" placeholder="Value" aria-label="Value" autocomplete="off" spellcheck="false" />
-            </div>
-          </div>
-
-          <label class="traceSearchField traceSearchField--limit">
-            <div class="themeSelect tracePicker">
-              <select id="tracesLimit" data-field-label="Results" aria-label="Results" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option><option value="250" hidden disabled>250</option><option value="500" hidden disabled>500</option></select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Results · 50</button>
-              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
-            </div>
-          </label>
-
-          <button id="tracesSearchButton" class="button button--primary traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
         </form>
         <div id="tracesFilterChips" class="traceFilterChips" role="list" aria-label="Active filters" hidden></div>
 
@@ -365,74 +339,45 @@
   <!-- observability:logs -->
   <main id="logsWorkspace" data-obs-panel="logs" class="obsView tracesWorkspace tracesWorkspace--jaeger logsWorkspace" role="main">
     <section class="tracesShell tracesShell--jaeger logsShell">
-      <form id="logsForm" class="traceSearchBar logsSearchBar" autocomplete="off">
-        <div class="traceSearchBar__range logsSearchBar__range">
-          <div class="traceRangeCompact traceRangeCompact--preset">
+      <!-- The filter bar: the same .obsFilterBar as on Traces. -->
+      <form id="logsForm" class="obsFilterBar traceSearchBar logsSearchBar" autocomplete="off">
+        <div class="obsFilterBar__lead">
+          <div class="obsFilterBar__range traceSearchBar__range">
             <div class="themeSelect tracePicker tracePicker--range">
               <select id="logsRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 15 minutes</option></select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="logsTimeRangePanel">Time range · Last 15 minutes</button>
-              <div id="logsTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
-                <div class="timeRangePanel__body">
-                  <section id="logsCustomRange" class="timeRangePanel__absolute" aria-labelledby="logsAbsoluteRangeTitle">
-                    <h3 id="logsAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
-                    <label class="timeRangeField is-active">
-                      <span class="timeRangeField__label">From</span>
-                      <input id="logsRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="logsRangeStartError" />
-                      <span id="logsRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
-                    </label>
-                    <label class="timeRangeField">
-                      <span class="timeRangeField__label">To</span>
-                      <input id="logsRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="logsRangeEndError" />
-                      <span id="logsRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
-                    </label>
-                    <div id="logsTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
-                    <div id="logsTimeCalendar" class="timeCalendar"></div>
-                    <div id="logsRangeError" class="timeRangePanel__error" role="alert" hidden></div>
-                    <button id="logsCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
-                  </section>
-                  <section class="timeRangePanel__quick" aria-label="Quick ranges">
-                    <input id="logsQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
-                    <div id="logsQuickRanges" class="timeRangeList"></div>
-                  </section>
-                </div>
-                <footer class="timeRangePanel__footer">
-                  <span id="logsTimeZone" class="timeRangePanel__zone">Browser time</span>
-                  <div class="timeRangePanel__nav">
-                    <button id="logsRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
-                    <button id="logsRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
-                    <button id="logsRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
-                  </div>
-                </footer>
-              </div>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false">Time range · Last 15 minutes</button>
+            </div>
+          </div>
+          <div class="obsFilterBar__field traceSearchField logsSearchField--service">
+            <div id="logsServicePicker" class="themeSelect tracePicker logsMultiPicker">
+              <button id="logsServiceButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Service · ALL</button>
+              <div id="logsServiceMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
+            </div>
+          </div>
+
+          <div class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField logsSearchField--level">
+            <div class="themeSelect tracePicker">
+              <select id="logsLevel" data-field-label="Level" aria-label="Minimum severity" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>ALL</option><option value="5">≥ DEBUG</option><option value="9">≥ INFO</option><option value="13">≥ WARN</option><option value="17">≥ ERROR</option><option value="21">≥ FATAL</option></select>
+              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Level · ALL</button>
+              <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
             </div>
           </div>
         </div>
+        <div class="obsFilterBar__tail">
+          <label class="obsFilterBar__text obsFilterBar__search logsQueryField">
+            <svg class="obsFilterBar__searchIcon logsQueryField__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
+            <input id="logsQuery" class="obsFilterBar__input" type="search" placeholder="Search Body: words, &quot;exact phrase&quot;, -exclude" aria-label="Search log bodies" autocomplete="off" spellcheck="false" />
+          </label>
 
-        <div class="traceSearchField logsSearchField--service">
-          <div id="logsServicePicker" class="themeSelect tracePicker logsMultiPicker">
-            <button id="logsServiceButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Service · ALL</button>
-            <div id="logsServiceMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
+          <label class="obsFilterBar__text logsFilterField">
+            <input id="logsFilterInput" class="obsFilterBar__input" type="text" placeholder="Filter key=value, key!=value, TraceId=…" aria-label="Add a filter" autocomplete="off" spellcheck="false" />
+          </label>
+
+          <div class="obsFilterBar__actions">
+            <button id="logsLiveButton" class="button obsFilterBar__secondary obsFilterBar__toggle logsLiveButton" type="button" aria-pressed="false" title="Live tail: poll for new logs"><span class="obsFilterBar__toggleDot logsLiveDot" aria-hidden="true"></span><span>Live</span></button>
+            <button id="logsSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit logsSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
           </div>
         </div>
-
-        <div class="traceSearchField logsSearchField--level">
-          <div class="themeSelect tracePicker">
-            <select id="logsLevel" data-field-label="Level" aria-label="Minimum severity" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>ALL</option><option value="5">≥ DEBUG</option><option value="9">≥ INFO</option><option value="13">≥ WARN</option><option value="17">≥ ERROR</option><option value="21">≥ FATAL</option></select>
-            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Level · ALL</button>
-            <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
-          </div>
-        </div>
-
-        <label class="logsQueryField">
-          <svg class="logsQueryField__icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg>
-          <input id="logsQuery" type="search" placeholder="Search Body: words, &quot;exact phrase&quot;, -exclude" aria-label="Search log bodies" autocomplete="off" spellcheck="false" />
-        </label>
-
-        <label class="logsFilterField">
-          <input id="logsFilterInput" type="text" placeholder="Filter key=value, key!=value, TraceId=…" aria-label="Add a filter" autocomplete="off" spellcheck="false" />
-        </label>
-
-        <button id="logsSearchButton" class="button button--primary traceSearchSubmit logsSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
       </form>
 
       <div id="logsChips" class="logsChips" aria-label="Active filters" hidden></div>
@@ -464,7 +409,6 @@
             <button id="logsColumnsButton" class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Columns</button>
             <div id="logsColumnsMenu" class="themeSelect__menu tracePicker__menu logsMultiPicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
           </div>
-          <button id="logsLiveButton" class="button logsLiveButton" type="button" aria-pressed="false" title="Live tail: poll for new logs"><span class="logsLiveDot" aria-hidden="true"></span><span>Live</span></button>
         </div>
       </div>
 
@@ -521,6 +465,24 @@
 
   <!-- observability:metrics -->
   <main id="metricsWorkspace" data-obs-panel="metrics" class="obsView metricsWorkspace" role="main">
+    <!-- The filter bar: the same .obsFilterBar as on Traces, over the catalog and the panels. -->
+    <form id="metricsToolbar" class="obsFilterBar traceSearchBar metricsToolbar" autocomplete="off">
+      <div class="obsFilterBar__lead">
+        <div class="obsFilterBar__range traceSearchBar__range">
+          <div class="themeSelect tracePicker tracePicker--range">
+            <select id="metricsRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 1 hour</option></select>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false">Time range · Last 1 hour</button>
+          </div>
+        </div>
+      </div>
+      <div class="obsFilterBar__tail">
+        <span id="metricsRangeInfo" class="obsFilterBar__option obsFilterBar__info metricsToolbar__info" aria-live="polite"></span>
+        <div class="obsFilterBar__actions">
+          <button id="metricsAddPanelButton" class="button obsFilterBar__secondary" type="button" title="Add a chart panel">Add panel</button>
+          <button id="metricsRefreshButton" class="button button--primary obsFilterBar__submit" type="submit" title="Reload the catalog and charts">Refresh</button>
+        </div>
+      </div>
+    </form>
     <aside id="metricsSidebar" class="metricsSidebar" aria-label="Metrics catalog">
       <div class="metricsSidebar__head">
         <input id="metricsSearch" class="metricsSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
@@ -532,54 +494,6 @@
     </aside>
 
     <section class="metricsMain" aria-label="Metric charts">
-      <form id="metricsToolbar" class="traceSearchBar metricsToolbar" autocomplete="off">
-        <div class="traceSearchBar__range metricsToolbar__range">
-          <div class="traceRangeCompact traceRangeCompact--preset">
-            <div class="themeSelect tracePicker tracePicker--range">
-              <select id="metricsRangeUnit" data-field-label="Time range" aria-label="Time range" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="range" selected>Last 1 hour</option></select>
-              <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-disabled="false" aria-controls="metricsTimeRangePanel">Time range · Last 1 hour</button>
-              <div id="metricsTimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
-                <div class="timeRangePanel__body">
-                  <section id="metricsCustomRange" class="timeRangePanel__absolute" aria-labelledby="metricsAbsoluteRangeTitle">
-                    <h3 id="metricsAbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>
-                    <label class="timeRangeField is-active">
-                      <span class="timeRangeField__label">From</span>
-                      <input id="metricsRangeStart" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now-6h" aria-label="Range start" aria-describedby="metricsRangeStartError" />
-                      <span id="metricsRangeStartError" class="timeRangeField__error" role="alert" hidden></span>
-                    </label>
-                    <label class="timeRangeField">
-                      <span class="timeRangeField__label">To</span>
-                      <input id="metricsRangeEnd" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="YYYY-MM-DD hh:mm:ss or now" aria-label="Range end" aria-describedby="metricsRangeEndError" />
-                      <span id="metricsRangeEndError" class="timeRangeField__error" role="alert" hidden></span>
-                    </label>
-                    <div id="metricsTimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
-                    <div id="metricsTimeCalendar" class="timeCalendar"></div>
-                    <div id="metricsRangeError" class="timeRangePanel__error" role="alert" hidden></div>
-                    <button id="metricsCustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
-                  </section>
-                  <section class="timeRangePanel__quick" aria-label="Quick ranges">
-                    <input id="metricsQuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
-                    <div id="metricsQuickRanges" class="timeRangeList"></div>
-                  </section>
-                </div>
-                <footer class="timeRangePanel__footer">
-                  <span id="metricsTimeZone" class="timeRangePanel__zone">Browser time</span>
-                  <div class="timeRangePanel__nav">
-                    <button id="metricsRangeShiftBack" class="timeRangeNav" type="button" aria-label="Move time range backwards" title="Move time range backwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
-                    <button id="metricsRangeZoomOut" class="timeRangeNav" type="button" aria-label="Zoom out time range" title="Zoom out time range"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg></button>
-                    <button id="metricsRangeShiftForward" class="timeRangeNav" type="button" aria-label="Move time range forwards" title="Move time range forwards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
-                  </div>
-                </footer>
-              </div>
-            </div>
-          </div>
-        </div>
-        <span id="metricsRangeInfo" class="metricsToolbar__info" aria-live="polite"></span>
-        <div class="metricsToolbar__actions">
-          <button id="metricsAddPanelButton" class="button metricsToolbar__button" type="button" title="Add a chart panel">Add panel</button>
-          <button id="metricsRefreshButton" class="button button--primary metricsToolbar__button" type="submit" title="Reload the catalog and charts">Refresh</button>
-        </div>
-      </form>
       <div id="metricsError" class="tracesError metricsError" role="alert" hidden></div>
       <div id="metricsPanels" class="metricsPanels">
         <article class="metricsPanel is-active is-empty">

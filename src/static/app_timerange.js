@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  // Time range picker for the Traces search bar, modelled on Grafana's
+  // Time range picker of the Observability filter bars (Traces, Logs,
+  // Metrics), modelled on Grafana's
   // TimeRangePicker: a raw range keeps what the user typed ("now-6h", "now",
   // "2026-09-19 14:00:00") and is resolved to milliseconds for each request,
   // so relative ranges follow the clock. All dates are browser-local time,
@@ -202,9 +203,15 @@
     return absolute.dateOnly ? dayKey(absolute.date) : formatDateTime(absolute.date.getTime());
   }
 
-  // Grafana rangeutil.describeTimeRange: a known range by name, "Last N
-  // units" for now-N to now, otherwise both sides ("->" between them).
-  function describeRange(raw) {
+  // The label of an applied range, the same on every view (and in the
+  // recently used list): a known range by name ("Last 1 hour"), "Last N
+  // units" for now-N to now, otherwise both sides as 24 h local time,
+  // "YYYY-MM-DD HH:mm \u2192 HH:mm" with the date repeated only when the day
+  // changes, and seconds only when the range is under 10 minutes. Relative
+  // sides ("now-2d") are shown as typed.
+  const SECONDS_BELOW_MS = 10 * 60000;
+
+  function describeRange(raw, nowMs = Date.now()) {
     const quick = QUICK_RANGES.find((option) => sameRange(option, raw));
     if (quick) return { text: quick.display, relative: true };
     const from = String(raw?.from || "").trim();
@@ -215,20 +222,14 @@
     }
     const a = parseAbsolute(from);
     const b = parseAbsolute(to);
-    if (!a || !b) return { text: `${a ? formatSide(a) : from} \u2192 ${b ? formatSide(b) : to}`, relative: isRelative(raw) };
-    const wholeDays = (a.dateOnly || (a.hours === 0 && a.minutes === 0 && a.seconds === 0))
-      && (b.dateOnly || (b.hours === 23 && b.minutes === 59 && b.seconds === 59));
-    const aDay = dayKey(a.date);
-    const bDay = dayKey(b.date);
-    if (wholeDays) return { text: aDay === bDay ? aDay : `${aDay} \u2192 ${bDay}`, relative: false };
-    const bText = formatSide(b);
-    return { text: `${formatSide(a)} \u2192 ${aDay === bDay && !b.dateOnly ? bText.slice(11) : bText}`, relative: false };
-  }
-
-  function formatSide(absolute) {
-    if (absolute.dateOnly) return dayKey(absolute.date);
-    const text = formatDateTime(absolute.date.getTime());
-    return absolute.seconds ? text : text.slice(0, 16);
+    const startMs = parseTime(from, false, nowMs);
+    const endMs = parseTime(to, true, nowMs);
+    const seconds = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs && endMs - startMs < SECONDS_BELOW_MS;
+    const stamp = (ms) => { const text = formatDateTime(ms); return seconds ? text : text.slice(0, 16); };
+    const aText = a ? stamp(startMs) : from;
+    let bText = b ? stamp(endMs) : to;
+    if (a && b && aText.slice(0, 10) === bText.slice(0, 10)) bText = bText.slice(11);
+    return { text: `${aText} \u2192 ${bText}`, relative: !(a && b) };
   }
 
   function timeZoneLabel(nowMs = Date.now()) {
@@ -267,7 +268,7 @@
     nextYear: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5 8 8l-4.5 4.5M7.5 3.5 12 8l-4.5 4.5"/></svg>',
   };
 
-  // Mounts the picker on the shipped markup of observability.html. options:
+  // Mounts the picker on the panel markup (see create()). options:
   //   getValue()            -> applied raw range { from, to }
   //   getMaxMinutes()       -> widest range the server accepts
   //   onApply(raw, source)  -> the user applied a range ("form", "quick", "recent", "shift", "zoom")
@@ -279,6 +280,7 @@
     const cal = { year: 0, month: 0, focus: null, mode: "start", hover: null };
     const fields = { from: fromInput.closest(".timeRangeField"), to: toInput.closest(".timeRangeField") };
     const isOpen = () => button.getAttribute("aria-expanded") === "true";
+    const idPrefix = String(options.idPrefix || "timeRange");
 
     // Calendar skeleton: header (built once), weekday names, 6 x 7 day grid.
     calendar.innerHTML = `
@@ -464,12 +466,12 @@
       const recent = loadRecent().filter((raw) => fits(raw, now)).map((raw) => ({ raw, label: describeRange(raw).text })).filter((item) => matches(item.label, item.raw));
       const parts = [];
       if (recent.length) {
-        parts.push('<div class="timeRangeList__heading" id="tracesRecentRangesHeading">Recently used</div>');
-        parts.push(`<div class="timeRangeList__group" role="group" aria-labelledby="tracesRecentRangesHeading" data-group="recent">${recent.map((item) => listItem(item.raw, item.label, "recent")).join("")}</div>`);
+        parts.push(`<div class="timeRangeList__heading" id="${idPrefix}RecentRangesHeading">Recently used</div>`);
+        parts.push(`<div class="timeRangeList__group" role="group" aria-labelledby="${idPrefix}RecentRangesHeading" data-group="recent">${recent.map((item) => listItem(item.raw, item.label, "recent")).join("")}</div>`);
       }
-      parts.push('<div class="timeRangeList__heading" id="tracesQuickRangesHeading">Quick ranges</div>');
+      parts.push(`<div class="timeRangeList__heading" id="${idPrefix}QuickRangesHeading">Quick ranges</div>`);
       parts.push(quick.length
-        ? `<div class="timeRangeList__group" role="group" aria-labelledby="tracesQuickRangesHeading" data-group="quick">${quick.map((option) => listItem(option, option.display, "quick")).join("")}</div>`
+        ? `<div class="timeRangeList__group" role="group" aria-labelledby="${idPrefix}QuickRangesHeading" data-group="quick">${quick.map((option) => listItem(option, option.display, "quick")).join("")}</div>`
         : `<div class="timeRangeList__empty">No quick range matches \u201c${esc(query)}\u201d.</div>`);
       lists.innerHTML = parts.join("");
     }
@@ -677,6 +679,78 @@
     return { refresh, open: openPanel, close: closePanel, isOpen };
   }
 
+  // The range panel of one view: absolute From / To with a calendar on the
+  // left, quick and recently used ranges on the right, the time zone and the
+  // shift / zoom buttons in the footer. Every id starts with the view's
+  // prefix ("tracesRangeStart", "logsQuickRanges"...).
+  function panelHtml(p) {
+    const field = (side, label, placeholder) => `
+            <label class="timeRangeField${side === "Start" ? " is-active" : ""}">
+              <span class="timeRangeField__label">${label}</span>
+              <input id="${p}Range${side}" class="timeRangeField__input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="${placeholder}" aria-label="Range ${side.toLowerCase()}" aria-describedby="${p}Range${side}Error" />
+              <span id="${p}Range${side}Error" class="timeRangeField__error" role="alert" hidden></span>
+            </label>`;
+    const nav = (id, label, path) => `<button id="${p}${id}" class="timeRangeNav" type="button" aria-label="${label}" title="${label}"><svg viewBox="0 0 16 16" aria-hidden="true">${path}</svg></button>`;
+    return `<div id="${p}TimeRangePanel" class="themeSelect__menu tracePicker__menu timeRangePanel" role="dialog" aria-label="Time range" tabindex="-1" hidden>
+        <div class="timeRangePanel__body">
+          <section id="${p}CustomRange" class="timeRangePanel__absolute" aria-labelledby="${p}AbsoluteRangeTitle">
+            <h3 id="${p}AbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</h3>${field("Start", "From", "YYYY-MM-DD hh:mm:ss or now-6h")}${field("End", "To", "YYYY-MM-DD hh:mm:ss or now")}
+            <div id="${p}TimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
+            <div id="${p}TimeCalendar" class="timeCalendar"></div>
+            <div id="${p}RangeError" class="timeRangePanel__error" role="alert" hidden></div>
+            <button id="${p}CustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
+          </section>
+          <section class="timeRangePanel__quick" aria-label="Quick ranges">
+            <input id="${p}QuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
+            <div id="${p}QuickRanges" class="timeRangeList"></div>
+          </section>
+        </div>
+        <footer class="timeRangePanel__footer">
+          <span id="${p}TimeZone" class="timeRangePanel__zone">Browser time</span>
+          <div class="timeRangePanel__nav">
+            ${nav("RangeShiftBack", "Move time range backwards", '<path d="M10 3.5 5.5 8l4.5 4.5"/>')}
+            ${nav("RangeZoomOut", "Zoom out time range", '<circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/>')}
+            ${nav("RangeShiftForward", "Move time range forwards", '<path d="M6 3.5 10.5 8 6 12.5"/>')}
+          </div>
+        </footer>
+      </div>`;
+  }
+
+  // Builds the range panel in a view's filter bar picker (the shipped
+  // .tracePicker--range root: its hidden select and its button) and mounts
+  // the picker on it. options are mountPicker's, plus idPrefix (the view).
+  // Returns the picker and its elements (el).
+  function create(root, options) {
+    const p = String(options.idPrefix || "timeRange");
+    const select = root.querySelector(":scope > select");
+    const button = root.querySelector(":scope > .tracePicker__button");
+    let menu = root.querySelector(":scope > .timeRangePanel");
+    if (!menu) {
+      root.insertAdjacentHTML("beforeend", panelHtml(p));
+      menu = root.lastElementChild;
+    }
+    button.setAttribute("aria-controls", menu.id);
+    const part = (suffix) => menu.querySelector(`#${p}${suffix}`);
+    const el = {
+      button, menu, select,
+      fromInput: part("RangeStart"),
+      toInput: part("RangeEnd"),
+      fromError: part("RangeStartError"),
+      toError: part("RangeEndError"),
+      rangeError: part("RangeError"),
+      calendar: part("TimeCalendar"),
+      hint: part("TimeCalendarHint"),
+      applyButton: part("CustomRangeApply"),
+      quickSearch: part("QuickRangeSearch"),
+      lists: part("QuickRanges"),
+      timeZone: part("TimeZone"),
+      shiftBack: part("RangeShiftBack"),
+      shiftForward: part("RangeShiftForward"),
+      zoomOut: part("RangeZoomOut"),
+    };
+    return { ...mountPicker(el, { ...options, idPrefix: p }), el };
+  }
+
   ns.timeRange = {
     QUICK_RANGES,
     parseTime,
@@ -689,5 +763,6 @@
     timeZoneLabel,
     loadRecent,
     mountPicker,
+    create,
   };
 })();

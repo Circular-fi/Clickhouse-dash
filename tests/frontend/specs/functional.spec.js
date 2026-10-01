@@ -1928,7 +1928,7 @@ test('traces: the calendar takes a start older than the max range, moves on to t
   expect(Number(params.end_ms)).toBe(endDay + DAY_MS - 1000);
   expect(params.align_buckets).toBe('0');
   await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
-  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} → ${utcDay(endDay)}`);
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} 00:00 → ${utcDay(endDay)} 23:59`);
   const payload = await (await answered).json();
   if (fixtureIsOld) {
     expect(payload.rows.length).toBeGreaterThan(0);
@@ -2131,7 +2131,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   expect(Number(params.start_ms)).toBe(base - 7 * DAY_MS);
   expect(Number(params.end_ms)).toBe(base - 4 * DAY_MS - 1000);
   await expect(panel).toBeHidden();
-  await expect(button).toHaveText(`${startKey} → ${endKey}`);
+  await expect(button).toHaveText(`${startKey} 00:00 → ${endKey} 23:59`);
 });
 
 test('traces: shift and zoom out move the applied window like Grafana, within the max range', async ({ page }) => {

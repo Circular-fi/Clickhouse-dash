@@ -67,10 +67,13 @@ def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
     assert '.traceSearchField--status > .tracePicker {' in css
     assert 'width: 120px !important;' in css
     assert '.traceSearchField--limit,' in css
-    assert 'width: 160px !important;' in css
-    assert 'grid-template-areas:' in css
-    assert '"range status service operation"' in css
-    assert '"tags tags limit search"' in css
+    # The filter bar (.obsFilterBar) fixes Status / Results (narrow, 120 px)
+    # and the Search button (the same primary submit on every view).
+    assert '--obsBarNarrow: 120px;' in css
+    assert '--obsBarSubmit: 112px;' in css
+    assert 'width: var(--obsBarSubmit) !important;' in css
+    assert 'class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField traceSearchField--status"' in html
+    assert 'class="obsFilterBar__option traceSearchField traceSearchField--limit"' in html
 
 
 def test_result_limit_hides_values_above_server_limit():

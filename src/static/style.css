@@ -10749,11 +10749,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceServiceStat.is-error { border-color: color-mix(in srgb, #e45756 38%, var(--border)); }
 .traceServiceStat.is-error > span { color: #e45756; }
 
-@media (max-width: 1400px) {
-  .traceSearchBar { grid-template-columns: minmax(155px, 1.1fr) 88px minmax(135px, 1fr) minmax(145px, 1fr) minmax(210px, 1.35fr) 72px auto; }
-}
 @media (max-width: 1100px) {
-  .traceSearchBar { position: static; grid-template-columns: repeat(4, minmax(130px, 1fr)); }
   .traceSearchBar__source { grid-column: 1 / -1; }
   .traceAnalyticsGrid { grid-template-columns: 1fr; }
   .traceResult__wideTitle { max-width: 45%; }
@@ -12541,16 +12537,6 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   display: grid !important;
 }
 
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    120px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    100px
-    minmax(120px, .72fr);
-}
 
 .traceSearchField--status {
   width: 120px;
@@ -12570,55 +12556,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   width: 100px !important;
 }
 
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    position: static;
-    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
-    grid-template-areas:
-      "range status service operation"
-      "tags tags limit search"
-      "source source source source";
-    gap: 7px;
-    align-items: center;
-  }
-  .traceSearchBar__range { grid-area: range; }
-  .traceSearchField--status { grid-area: status; width: 120px; }
-  .traceSearchField--service { grid-area: service; }
-  .traceSearchField--operation { grid-area: operation; }
-  .traceTagSearch { grid-area: tags; }
-  .traceSearchField--limit { grid-area: limit; width: 100px; justify-self: end; }
-  .traceSearchSubmit { grid-area: search; width: 100%; min-width: 0; }
-  .traceSearchBar__source { grid-area: source; }
-}
-
-@media (max-width: 760px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(0, 1fr) 100px;
-    grid-template-areas:
-      "range range"
-      "status limit"
-      "service service"
-      "operation operation"
-      "tags tags"
-      "search search"
-      "source source";
-  }
-  .traceSearchField--status { width: 120px; }
-  .traceSearchField--limit { width: 100px; justify-self: end; }
-}
 
 
 /* Trace search v6: one picker geometry/interaction model + exact tag pair. */
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    140px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    120px
-    160px;
-}
 
 /* Every search selector uses the exact same tracePicker surface. Context only controls width. */
 .traceSearchBar .tracePicker {
@@ -12692,42 +12632,6 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   border-radius: 6px !important;
 }
 
-.traceSearchSubmit {
-  width: 160px !important;
-  min-width: 160px !important;
-  max-width: 160px !important;
-  justify-self: start !important;
-}
-
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(220px, 1.2fr) 140px minmax(180px, 1fr) minmax(180px, 1fr);
-    grid-template-areas:
-      "range status service operation"
-      "tags tags limit search"
-      "source source source source";
-  }
-  .traceSearchField--status { width: 140px !important; }
-  .traceSearchField--limit { width: 120px !important; justify-self: end; }
-  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; justify-self: start !important; }
-}
-
-@media (max-width: 760px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(0, 1fr) 120px;
-    grid-template-areas:
-      "range range"
-      "status limit"
-      "service service"
-      "operation operation"
-      "tags tags"
-      "search search"
-      "source source";
-  }
-  .traceSearchField--status { width: 140px !important; }
-  .traceSearchField--limit { width: 120px !important; justify-self: end; }
-  .traceSearchSubmit { width: 160px !important; min-width: 160px !important; max-width: 160px !important; }
-}
 
 /* Trace search v7: connected tag pair and page-selector style picker motion. */
 .traceSearchField--status {
@@ -12817,22 +12721,6 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   .traceSearchField--status { width: 120px !important; }
 }
 
-/* Status no longer has an info affordance, so its grid column is exactly 120px. */
-.traceSearchBar {
-  grid-template-columns:
-    minmax(220px, 1.15fr)
-    120px
-    minmax(180px, 1fr)
-    minmax(180px, 1fr)
-    minmax(260px, 1.2fr)
-    120px
-    160px;
-}
-@media (max-width: 1100px) {
-  .traceSearchBar {
-    grid-template-columns: minmax(220px, 1.2fr) 120px minmax(180px, 1fr) minmax(180px, 1fr);
-  }
-}
 
 /* Trace search v8: use the same connected themeSelect interaction as the page selector. */
 .traceSearchBar .tracePicker,
@@ -12957,8 +12845,8 @@ html[data-obs-view="traces"] .tracesResults--wide {
   border-top: 0 !important;
 }
 
-/* The time-range menu should not gain a scrollbar merely because Custom is active. */
-html[data-obs-view="traces"] .tracePicker--range .tracePicker__menu {
+/* The time-range menu (on every filter bar) should not gain a scrollbar merely because Custom is active. */
+.traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu {
   max-height: none !important;
   overflow: visible !important;
   scrollbar-gutter: auto !important;
@@ -15504,22 +15392,6 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   html.chdash-trace-facets-collapsed .traceFacets { width: auto; }
 }
 
-/* Laptop widths (1101-1440 px): the fixed column minimums of the trace search
-   bar added up to more than the viewport at 1280 px, clipping the Search
-   button. Range, service, operation, tag and the button shrink to fit; status
-   and results keep their 120 px. */
-@media (min-width: 1101px) and (max-width: 1440px) {
-  .traceSearchBar {
-    grid-template-columns:
-      minmax(180px, 1.15fr)
-      120px
-      minmax(130px, 1fr)
-      minmax(130px, 1fr)
-      minmax(210px, 1.2fr)
-      120px
-      minmax(96px, 160px);
-  }
-}
 
 /* ==========================================================================
    Trace logs (app_trace_logs.js): header toggle, logs panel, span row badges
@@ -15984,78 +15856,16 @@ html[data-theme="light"] {
 }
 
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
-html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
-  scrollbar-gutter: auto !important;
-}
 
 .logsWorkspace { display: flex; flex-direction: column; }
 .logsShell { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
-.traceSearchBar.logsSearchBar {
-  position: relative;
-  flex: 0 0 auto;
-  grid-template-columns: minmax(200px, 250px) minmax(150px, 200px) 120px minmax(220px, 2fr) minmax(170px, 1fr) 110px;
-  grid-template-areas: none;
-  align-items: center;
-  min-height: 0;
-}
 .logsSearchBar .logsMultiPicker__menu {
   width: 290px !important;
   min-width: 290px !important;
   right: auto !important;
 }
 .logsSidePanel__headerActions .button--small { height: 26px; min-height: 26px; padding: 0 10px; font-size: 11px; }
-.logsSearchBar .logsSearchSubmit {
-  width: 110px !important;
-  min-width: 110px !important;
-  max-width: 110px !important;
-  height: 31px !important;
-}
-.logsSearchField--level,
-.logsSearchField--level > .tracePicker { width: 120px; }
-.logsSearchField--service > .tracePicker { width: 100%; }
-.logsSearchBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
-.logsQueryField,
-.logsFilterField { position: relative; min-width: 0; display: block; }
-.logsQueryField > input,
-.logsFilterField > input {
-  width: 100%;
-  height: 31px;
-  min-width: 0;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  outline: none;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 12px/1 var(--mono);
-}
-.logsQueryField > input { padding-left: 28px; }
-.logsQueryField > input:focus,
-.logsFilterField > input:focus { border-color: var(--accentBorder); }
-.logsQueryField > input:disabled { opacity: .6; cursor: not-allowed; }
-.logsQueryField__icon {
-  position: absolute;
-  left: 9px;
-  top: 50%;
-  width: 13px;
-  height: 13px;
-  transform: translateY(-50%);
-  fill: none;
-  stroke: var(--muted);
-  stroke-width: 1.6;
-  pointer-events: none;
-}
-@media (max-width: 1100px) {
-  .traceSearchBar.logsSearchBar {
-    grid-template-columns: minmax(200px, 1fr) minmax(150px, 1fr) 120px 110px;
-    grid-template-areas: none;
-  }
-  .logsQueryField { grid-column: 1 / 3; }
-  .logsFilterField { grid-column: 3 / 5; }
-}
 
 .logsMultiPicker__menu {
   min-width: 240px;
@@ -16221,11 +16031,6 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
 .logsColumnsPicker .tracePicker__menu { left: auto; right: 0; }
 .logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: 600 11px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
 .logsSwitch > input { margin: 0; accent-color: var(--accentBorder); }
-.logsLiveButton { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; font-size: 11px; }
-.logsLiveDot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.logsLiveButton.is-live { border-color: color-mix(in srgb, #22c55e 55%, var(--buttonBorder)); }
-.logsLiveButton.is-live .logsLiveDot { background: #22c55e; box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); animation: logsPulse 1.4s ease-in-out infinite; }
-@keyframes logsPulse { 50% { opacity: .45; } }
 
 .logsBody {
   position: relative;
@@ -16453,8 +16258,9 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
 
 /* ==========================================================================
    Metrics browser (/metrics, app_metrics.js): catalog sidebar (service ->
-   metric) and chart panels. The toolbar and panel controls reuse the Traces
-   search surface (traceSearchBar pickers, time range panel) laid out as a row.
+   metric) and chart panels under the filter bar (.obsFilterBar, which spans
+   both columns). The panel controls reuse the Traces search surface
+   (traceSearchBar pickers) laid out as a row.
    ========================================================================== */
 .metricsWorkspace {
   flex: 1 1 auto;
@@ -16462,8 +16268,10 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
+.metricsWorkspace > .obsFilterBar { grid-column: 1 / -1; }
 @media (min-width: 1700px) {
   .metricsWorkspace { grid-template-columns: 320px minmax(0, 1fr); }
 }
@@ -16591,7 +16399,6 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
   flex-direction: column;
   overflow: hidden;
 }
-.traceSearchBar.metricsToolbar,
 .traceSearchBar.metricsPanel__controls {
   position: static;
   display: flex !important;
@@ -16603,21 +16410,7 @@ html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
   min-height: 0;
   box-shadow: none;
 }
-.traceSearchBar.metricsToolbar {
-  flex: 0 0 auto;
-  z-index: 8;
-  padding: 8px 14px;
-}
-.metricsToolbar__range { width: 260px; max-width: 100%; }
-.metricsToolbar__info { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.metricsToolbar__actions { display: flex; gap: 6px; margin-left: auto; }
-.metricsToolbar__button { height: 31px; min-height: 31px; padding: 0 12px; font-size: 11px; }
 .metricsError { flex: 0 0 auto; }
-html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
-  scrollbar-gutter: auto !important;
-}
 .metricsPanels {
   flex: 1 1 auto;
   min-height: 0;
@@ -16827,8 +16620,161 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
 .metricsTip__attr { color: var(--text); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metricsTip__attr em { color: var(--muted); font-style: normal; }
 @media (max-width: 900px) {
-  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 34vh) minmax(0, 1fr); }
+  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 34vh) minmax(0, 1fr); }
   .metricsSidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
+/* ==========================================================================
+   Observability filter bar (.obsFilterBar): one layout for the Traces, Logs
+   and Metrics bars (observability.html). Left to right: the time range
+   (always first, one width), the field pickers, the free-text inputs, the
+   view options, then the actions: secondary ones (Add panel, Live), then the
+   primary submit at the right end. __lead holds the range and the pickers,
+   __tail the rest:
+   - above 1100 px: one row;
+   - 761-1100 px: the lead and the tail are a row each;
+   - 760 px and below: the range alone on the first row, pickers two per row,
+     each input on its own row, the options and the actions on the last row.
+   The bar sticks to the top of its view above 760 px.
+   ========================================================================== */
+.obsFilterBar {
+  --obsBarGap: 8px;
+  --obsBarControl: 31px;
+  --obsBarRange: 264px;
+  --obsBarNarrow: 120px;
+  --obsBarSubmit: 112px;
+  --obsBarFont: 600 11px/1 Arial, Helvetica, sans-serif;
+}
+.traceSearchBar.obsFilterBar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  box-sizing: border-box;
+  display: flex !important;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--obsBarGap);
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 50%, transparent);
+}
+.obsFilterBar__lead,
+.obsFilterBar__tail { display: contents; }
+.obsFilterBar__range {
+  flex: 0 0 var(--obsBarRange);
+  width: var(--obsBarRange);
+  min-width: 0;
+}
+.obsFilterBar__range > .tracePicker { width: 100%; margin: 0; }
+.traceSearchBar.obsFilterBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.obsFilterBar .obsFilterBar__field { display: block; flex: 1 1 150px; width: auto; min-width: 120px; max-width: 240px; }
+.obsFilterBar .obsFilterBar__field > .tracePicker,
+.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+.obsFilterBar .obsFilterBar__field--narrow,
+.obsFilterBar .obsFilterBar__option {
+  flex: 0 0 var(--obsBarNarrow);
+  width: var(--obsBarNarrow) !important;
+  min-width: var(--obsBarNarrow) !important;
+  max-width: var(--obsBarNarrow) !important;
+}
+.obsFilterBar .obsFilterBar__text { position: relative; display: block; flex: 2 1 200px; min-width: 150px; }
+.obsFilterBar .logsFilterField { flex-grow: 1; }
+.obsFilterBar .obsFilterBar__info {
+  flex: 1 1 0;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  overflow: hidden;
+  color: var(--muted);
+  font: 500 10.5px/1.2 Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Free-text inputs: the pickers' font (sans), size and surface. */
+.obsFilterBar .obsFilterBar__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--obsBarControl);
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  outline: none;
+  background: var(--buttonBg);
+  color: var(--text);
+  font: var(--obsBarFont);
+}
+.obsFilterBar .obsFilterBar__input::placeholder { color: var(--muted); opacity: .92; }
+.obsFilterBar .obsFilterBar__input:disabled { opacity: .6; cursor: not-allowed; }
+.obsFilterBar__search > .obsFilterBar__input { padding-left: 28px; }
+.obsFilterBar__searchIcon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  pointer-events: none;
+}
+
+/* Actions: secondary buttons and toggles, then the primary submit. */
+.obsFilterBar__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--obsBarGap);
+  margin-left: auto;
+}
+.obsFilterBar .obsFilterBar__secondary,
+.obsFilterBar .obsFilterBar__submit {
+  box-sizing: border-box;
+  height: var(--obsBarControl) !important;
+  min-height: var(--obsBarControl) !important;
+  padding: 0 12px;
+  border-radius: 0.75rem;
+  font: 850 11px/1 Arial, Helvetica, sans-serif;
+  white-space: nowrap;
+}
+.obsFilterBar .obsFilterBar__submit {
+  width: var(--obsBarSubmit) !important;
+  min-width: var(--obsBarSubmit) !important;
+  max-width: var(--obsBarSubmit) !important;
+  justify-self: auto !important;
+}
+.obsFilterBar__toggle { gap: 6px; }
+.obsFilterBar__toggleDot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, #22c55e 55%, var(--buttonBorder)); }
+.obsFilterBar__toggle[aria-pressed="true"] .obsFilterBar__toggleDot { background: #22c55e; box-shadow: 0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); animation: obsBarPulse 1.4s ease-in-out infinite; }
+@keyframes obsBarPulse { 50% { opacity: .45; } }
+
+@media (max-width: 1100px) {
+  .traceSearchBar.obsFilterBar { flex-direction: column; align-items: stretch; }
+  .obsFilterBar__lead,
+  .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+}
+@media (max-width: 760px) {
+  .traceSearchBar.obsFilterBar { position: static; }
+  .obsFilterBar__lead,
+  .obsFilterBar__tail { flex-wrap: wrap; }
+  .obsFilterBar__range { flex: 1 1 100%; width: auto; }
+  .obsFilterBar .obsFilterBar__field,
+  .obsFilterBar .obsFilterBar__field--narrow {
+    flex: 1 1 calc(50% - var(--obsBarGap) / 2);
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+  .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
 }
 
 /* ==========================================================================

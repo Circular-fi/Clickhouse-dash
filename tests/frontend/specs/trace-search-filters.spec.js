@@ -116,6 +116,13 @@ test('the Tag / Value inputs add chips with =, !=, exists and missing', async ({
   const key = page.locator('#tracesTagKey');
   const value = page.locator('#tracesTagValue');
   const op = page.locator('#tracesTagOp');
+  // The pair is the bar's free-text input: after the pickers, in the UI font.
+  for (const input of [key, value]) {
+    await expect(input).toHaveClass(/\bobsFilterBar__input\b/);
+    expect(await input.evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/mono/i);
+  }
+  await expect(page.locator('#tracesForm .obsFilterBar__lead #tracesTagKey')).toHaveCount(0);
+  await expect(page.locator('#tracesForm .obsFilterBar__tail #tracesTagKey')).toHaveCount(1);
   await key.fill('http.route');
   await value.fill('/checkout');
   await value.press('Enter');
