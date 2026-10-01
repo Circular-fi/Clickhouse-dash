@@ -2764,7 +2764,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
 namespace {
 
 constexpr int kHeatmapBinsPerOctave = 32;  // fine log2 bins (~2.2 % wide)
-constexpr int kHeatmapTimeBudgetSeconds = 50;  // below the 60 s receive timeout
+constexpr int kHeatmapTimeBudgetSeconds = 55;  // below the 60 s receive timeout
 constexpr int kDeltaTimeBudgetSeconds = 30;
 constexpr int64_t kDeltaMaxCoreMs = 30LL * 60 * 1000;  // box time sampled at most
 constexpr int kDeltaSlices = 6;

@@ -110,7 +110,7 @@ In the UI the Tag / Value inputs (with an `=` / `!=` / `exists` / `missing` oper
 
 ### Search state in the URL
 
-The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `limit`, `sort` and `results=table`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
+The search page URL holds the whole search: `from` / `to` (relative expressions such as `now-6h` or absolute times, omitted for the default window), `status`, `service`, `operation`, the chip parameters above, `min_duration_ms` / `max_duration_ms` (the trace duration chip, see the heatmap below), `limit`, `sort`, `results=table` and `duration_view=heatmap`. Each search is a history entry (Back / Forward restore and re-run it), the page-load search keeps its URL, and a reload or a shared link opens the same search. Trace detail URLs (`/traces/<id>?span=…`) carry the same parameters, so *back to search* returns to the search the trace was opened from, also from a shared link.
 
 ## Service map
 
@@ -165,6 +165,54 @@ Measured on the local fixture (about 2.0 B spans over 7 days, 11 to 18 M spans p
 | tagged prefill, 1 h / 7 days | 134 ms / 889 ms | the 7-day scan stops at the 100 M read cap (estimated) |
 | search, two tag filters (= and !=), 1 h / 7 days | 76 ms / 288 ms | `trace_index_filtered` |
 | analytics counts, two tag filters, 1 h | 343 ms | span aggregation |
+
+## Duration heatmap and attribute comparison
+
+The *Trace duration* card has two modes (after HyperDX's search heatmap and event deltas): *Percentiles* (P50 / P90 / P95 / P99 plus the listed traces) and *Heatmap*. The choice is remembered in the browser and kept in the search URL as `duration_view=heatmap`. The heatmap shows exactly the traces of the percentiles: traces with at least one matching visible span, each at its first span start (x, the analytics' time buckets starting at local midnight) with its span-bounds duration (y, log scale); a cell's colour is its number of traces (8 sequential steps on a log scale). While the heatmap is shown the percentiles request is skipped.
+
+Dragging a box over the heatmap (or, with the chart focused: arrow keys to move, Shift + arrow keys to extend, Enter to compare, Escape to clear) opens the comparison panel below the charts: for the attributes that set the box's traces apart, paired bars with the share of the box's traces (orange) and of the baseline traces (gray) having a span with each value. The baseline is the other traces of the box's time range (default) or all traces of that time range. A value click adds it as a filter chip (its exclude button a `!=` chip; `ServiceName`, `SpanName` and `StatusCode` become the service / operation / status filters); *Search traces in this box* searches the box's time range with a trace duration filter (a removable `duration` chip, `min_duration_ms` / `max_duration_ms` in the URL).
+
+`GET /api/traces/heatmap` takes the analytics parameters (window, filters, `min_duration_ms` / `max_duration_ms`, `bucket_origin_ms`, `align_buckets`) plus `rows` (8–80, default 40). One pass counts the traces into fixed log2 bins, 32 per octave, per time bucket; the server then takes the bin holding the 1 % quantile as the lowest row and the slowest bin as the top and merges the fine bins into at most `rows` rows. Row edges (`y_edges_ns`) lie on fine-bin edges, so every count is exact, and traces faster than the lowest edge are counted in the lowest row (`below_min_count`). A separate `quantile(0.01)` / `max` pass would read the same spans a second time: the per-trace aggregation is the whole cost.
+
+```sql
+WITH [candidate_ids AS (SELECT TraceId FROM otel.otel_traces PREWHERE <window> WHERE <allowlist> <filters> LIMIT 1 BY TraceId),]
+trace_durations AS (
+  SELECT min(Timestamp) AS trace_start,
+         toInt64(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration))) - toInt64(min(toUnixTimestamp64Nano(Timestamp))) AS duration_ns
+  FROM otel.otel_traces PREWHERE <window> WHERE <allowlist> [AND TraceId IN (SELECT TraceId FROM candidate_ids)]
+  GROUP BY TraceId [HAVING <duration filters> | HAVING countIf(1 <broad service / operation filters>) > 0])
+SELECT <origin> + intDiv(toUnixTimestamp64Milli(trace_start) - <origin>, <bucket>) * <bucket> AS bucket_ms,
+       toInt32(floor(log2(greatest(duration_ns, 1)) * 32)) AS fine_bin, count()
+FROM trace_durations GROUP BY bucket_ms, fine_bin
+SETTINGS max_execution_time = 55
+```
+
+`GET /api/traces/deltas` takes the same parameters plus the box: `t0` / `t1` (trace start, epoch ms), `d0` / `d1` (trace duration, ms), `baseline=outside|all` and `sample` (traces per side, 100–2500, default 1000). The box's time range is aggregated per trace like the heatmap; a box wider than 30 minutes is sampled as 6 evenly spread 5-minute slices, so the cost does not grow with the box. Each slice is read with a margin of `clamp(2 × d1, 1 s, 5 min)` on both sides, so a box trace (no longer than `d1`) is aggregated whole. Traces in the duration range form the selection, the others the baseline, each side ordered by `cityHash64(TraceId)` (stable samples):
+
+```sql
+SELECT TraceId, in_box, count() OVER (PARTITION BY in_box) FROM (
+  SELECT TraceId, duration_ns >= <d0> AND duration_ns <= <d1> AS in_box FROM (
+    SELECT TraceId, min(Timestamp) AS trace_start, <duration> AS duration_ns FROM otel.otel_traces
+    PREWHERE (<slice 1 + margins> OR …) WHERE <allowlist> [AND TraceId IN candidate_ids]
+    GROUP BY TraceId HAVING (<trace_start in slice 1> OR …) [AND <duration filters>]))
+ORDER BY in_box DESC, cityHash64(TraceId) LIMIT <sample> BY in_box
+```
+
+A second query expands the sampled traces' spans only: `arrayJoin` over `ServiceName`, `SpanName`, `StatusCode` and the span / resource attribute maps (values up to 1 KiB; a scope disabled by `traces.features` or not stored as a `Map` is left out), counting per (scope, key, value) the sampled traces of each side having a span with it (`uniqExactIf(TraceId, side)`), and per key its 40 values with the largest shares. The server then ranks the keys like HyperDX's `eventDeltas.ts`: keys seen fewer than 5 times, identifier / timestamp keys (`…_id`, `uuid`, `timestamp`…, or mostly hex / long numeric values) and high-cardinality keys (more than 90 % unique values on both sides with more than 20 occurrences) are hidden (`hidden_keys`); a key's score is the largest gap between the selection and baseline shares of one of its values, plus 2 points for OpenTelemetry semantic-convention keys (`http.route`, `db.system`, `service.version`…) and the three columns. The answer holds the top 20 keys with their 6 most different values: `selection_pct` / `baseline_pct` (share of the side's sampled traces), the counts, and the sample and trace totals of both sides. With `baseline=all` the baseline shares weigh both samples by the traces they stand for. Both queries run with `max_execution_time = 30`.
+
+Measured on the local fixture (about 2.0 B spans, 7 days), through the API on the shared test ClickHouse (other suites running): medians of three requests.
+
+| Request | Median | Note |
+| --- | --- | --- |
+| heatmap, 1 h | 677 ms | 92,916 traces, span aggregation |
+| heatmap, 24 h | 6.5 s | 1.9 M traces |
+| heatmap, 7 days | 35 s | 18 M traces; the same cost as the 7-day percentiles (one run took 50 s under load) |
+| heatmap, 24 h, one service (broad) | 6.9 s | `HAVING countIf` form |
+| heatmap, 24 h, `status=Error` | 7.8 s | candidate traces |
+| heatmap, 24 h, one tag filter | 12 s (5.2 s to 18.6 s) | candidate traces |
+| deltas, 20-minute box | 415 ms | 1,000 + 1,000 sampled traces |
+| deltas, 24-hour box | 494 ms | 6 × 5-minute slices |
+| deltas, 7-day box | 593 ms | 6 × 5-minute slices |
 
 ## Trace detail rendering
 
