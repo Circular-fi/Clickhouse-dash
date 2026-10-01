@@ -231,7 +231,7 @@ test('query errors are surfaced', async ({ page }) => {
 test('profiling auto-opens Pipeline and lazily mounts Tracing', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
-  await expect(page.locator('#analysisModalBackdrop')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#analysisPipelineTab')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#analysisTraceTab')).toHaveAttribute('aria-selected', 'false');
   await expect(page.locator('.pipelineViewer')).toBeVisible({ timeout: 15_000 });
@@ -243,6 +243,77 @@ test('profiling auto-opens Pipeline and lazily mounts Tracing', async ({ page })
   await expect(page.locator('.traceViewer__row').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.traceViewer__bar').first()).toBeVisible();
   await expect(page.locator('#deepAnalyzeButton')).toHaveCount(0);
+});
+
+test('the profiling dialog is the shared modal: focus moves in and stays, Escape, backdrop and close return it', async ({ page }) => {
+  await openApp(page);
+  const modal = page.locator('#analysisModal');
+  await runSuccessfulQuery(page, 'SELECT count() FROM numbers(1000)', { profiling: true });
+  await expect(modal).toBeVisible({ timeout: 15_000 });
+  // A native modal <dialog> in the shared shell; the focus is inside it.
+  expect(await modal.evaluate((el) => [el.tagName, el.matches(':modal'), el.classList.contains('uiDialog'), el.classList.contains('uiDialog--lg')])).toEqual(['DIALOG', true, true, true]);
+  const inside = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return el === document.body || !!el?.closest('#analysisModal');
+  });
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('#analysisModal'))).toBe(true);
+  // Tab and Shift+Tab never reach the page behind.
+  for (let i = 0; i < 12; i += 1) {
+    await page.keyboard.press(i % 3 === 2 ? 'Shift+Tab' : 'Tab');
+    expect(await inside()).toBe(true);
+  }
+  // The page behind is inert: a click on it lands on the backdrop.
+  expect(await page.evaluate(() => document.elementFromPoint(4, 4)?.id)).toBe('analysisModal');
+  // Escape closes; the focus returns where it was when the dialog opened (the
+  // run gave it back to the editor).
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await expect(page.locator('#queryTextArea')).toBeFocused();
+  await expect(page.locator('#analysisContent')).toBeEmpty();
+
+  // Reopened from the results Analyze button: the backdrop closes it, and the
+  // focus goes back to that button.
+  const analyze = page.locator('#analyzeQueryButton');
+  if (await analyze.isVisible()) {
+    await analyze.click();
+    await expect(modal).toBeVisible();
+    await page.mouse.click(6, page.viewportSize().height - 6);
+    await expect(modal).toBeHidden();
+    await expect(analyze).toBeFocused();
+  }
+
+  // The close button too; a click inside the dialog does not.
+  await runSuccessfulQuery(page, 'SELECT count() FROM numbers(100)', { profiling: true });
+  await expect(modal).toBeVisible({ timeout: 15_000 });
+  await page.locator('#analysisModalTitle').click();
+  await expect(modal).toBeVisible();
+  await page.locator('#analysisCloseButton').click();
+  await expect(modal).toBeHidden();
+  await expect(page.locator('#queryTextArea')).toBeFocused();
+  // Opened with the focus nowhere (on <body>), it falls back to Analyze.
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.evaluate(() => window.ChDash.analysis.open());
+  await expect(modal).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  // (the results Profiling button, else Run).
+  const fallback = (await analyze.isVisible()) ? analyze : page.locator('#runButton');
+  await expect(fallback).toBeFocused();
+});
+
+test('no Ctrl+Enter hint beside Run: the shortcut is in its tooltip and still runs the query', async ({ page }) => {
+  await openApp(page);
+  // Nothing next to Run but the Run split, Format, the library and the cog.
+  await expect(page.locator('#runShortcutHint')).toHaveCount(0);
+  await expect(page.locator('.queryActions kbd')).toHaveCount(0);
+  await expect(page.locator('.queryActions')).not.toContainText(/Ctrl|⌘|Enter/);
+  await expect(page.locator('#runButton')).toHaveAttribute('title', /^Run \((Ctrl|⌘)\+Enter\)$/);
+  // The shortcut itself runs the editor content.
+  await page.locator('#queryTextArea').fill('SELECT 4242 AS shortcut_answer');
+  await page.locator('#queryTextArea').press('ControlOrMeta+Enter');
+  await waitForTerminal(page);
+  await expect(page.locator('#queryStatusText')).toHaveText(/done|finished/i);
+  await expect(page.locator('#resultTableBody')).toContainText('4242');
 });
 
 test('profiling is unavailable for multiquery editor content', async ({ page }) => {

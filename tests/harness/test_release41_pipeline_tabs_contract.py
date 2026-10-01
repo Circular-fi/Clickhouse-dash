@@ -15,8 +15,8 @@ def test_profiling_modal_opens_pipeline_first_and_tracing_second() -> None:
     analysis = read("src/static/app_analysis.js")
 
     assert html.index('id="analysisPipelineTab"') < html.index('id="analysisTraceTab"')
-    assert 'id="analysisPipelineTab" class="analysisTab is-active"' in html
-    assert 'id="analysisTraceTab" class="analysisTab"' in html
+    assert 'id="analysisPipelineTab" class="uiDialog__tab analysisTab is-active"' in html
+    assert 'id="analysisTraceTab" class="uiDialog__tab analysisTab"' in html
     assert 'analysisPipelineTab: byId("analysisPipelineTab")' in dom
     assert 'analysisTraceTab: byId("analysisTraceTab")' in dom
     assert 'let activeTab = "pipeline";' in analysis
@@ -62,8 +62,9 @@ def test_pipeline_and_trace_have_separate_lazy_mount_surfaces() -> None:
     assert '.analysisModal__content.pipelineViewerHost {' in css
     assert '.pipelineViewer__scroll {' in css
     assert 'scrollbar-gutter: stable;' in css[css.index('.pipelineViewer__scroll {'):]
-    assert '.analysisTabs {' in css
-    assert '.analysisTab.is-active {' in css
+    # The tab look is the shared dialog's (the query library uses it too).
+    assert '.uiDialog__tabs {' in css
+    assert '.uiDialog__tab[aria-selected="true"] {' in css
 
 
 def test_pipeline_model_behavior() -> None:

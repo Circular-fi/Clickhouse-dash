@@ -100,7 +100,8 @@ def test_analysis_ui_supports_single_multi_and_pipeline_degradation() -> None:
     results = read("src/static/app_results.js")
     analysis = read("src/static/app_analysis.js")
     assert 'id="runWithProfilingButton"' in html
-    assert 'id="analysisModalBackdrop"' in html
+    # The profiling dialog is the shared modal dialog (app_ui_dialog.js).
+    assert '<dialog id="analysisModal" class="uiDialog uiDialog--lg analysisModal"' in html
     assert 'api/query/analysis' in api
     assert 'handleRunMode("profiling")' in run
     assert 'analysis.setContext({ hostId, queryId: out.queryId, runMode })' in run
@@ -201,10 +202,11 @@ def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_vie
     assert 'if (activeTab === "tracing") renderTrace();' in ui
     assert 'else renderPipeline();' in ui
     assert 'ns.traceViewer.render(root' in ui
-    backdrop = css[css.index(".analysisModalBackdrop"):css.index(".analysisModalBackdrop[hidden]")]
-    assert 'padding: 6px' in backdrop
-    assert 'width: min(1800px, calc(100vw - 12px));' in css
-    assert 'height: calc(100vh - 12px);' in css
+    # The shell (and size) is the shared large dialog, which the query
+    # library uses too.
+    large = css[css.index(".uiDialog--lg {"):css.index("}", css.index(".uiDialog--lg {"))]
+    assert 'width: min(1460px, calc(100vw - 144px));' in large
+    assert 'height: calc(100vh - 192px);' in large
     assert 'padding: 6px 8px 8px;' in css
 
 

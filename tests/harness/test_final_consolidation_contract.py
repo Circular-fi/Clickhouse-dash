@@ -111,9 +111,11 @@ def test_query_telemetry_restores_right_rail_and_analysis_has_stable_geometry() 
     for canvas_id in ["readRowsChart", "readBytesChart", "writtenRowsChart", "writtenBytesChart", "cpuChart", "memoryChart"]:
         assert f'id="{canvas_id}"' in html
     assert 'id="clickhouseElapsedText"' in html
-    assert "width: min(1800px, calc(100vw - 12px));" in css
-    assert "height: calc(100vh - 12px);" in css
-    assert "align-items: flex-start;" in css[css.index(".analysisModalBackdrop"):css.index(".analysisModalBackdrop[hidden]")]
+    # Analysis geometry: the shared large dialog (app_ui_dialog.js), centred.
+    large = css[css.index(".uiDialog--lg {"):css.index("}", css.index(".uiDialog--lg {"))]
+    assert "width: min(1460px, calc(100vw - 144px));" in large
+    assert "height: calc(100vh - 192px);" in large
+    assert "margin: auto;" in css[css.index(".uiDialog {"):css.index("}", css.index(".uiDialog {"))]
 
 
 def test_production_source_has_no_fixture_database_coupling() -> None:

@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 
-// Query library panel: the toolbar book button (between Format and the run
-// settings cog) opens it, with two tabs, Saved (folders and saved queries) and
-// History. Browser mode keeps both in localStorage (chdash.queryLibrary.v2, migrated
+// Query library: the toolbar book button (between Format and the run settings
+// cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
+// same shell, size, backdrop and tabs), with two tabs, Saved (folders and saved
+// queries) and History, and its prompts stacked over it. Browser mode keeps both in localStorage (chdash.queryLibrary.v2, migrated
 // once from chdash.savedQueries.v1; chdash.queryHistory.v1). Server mode
 // (features.query_library.enabled) goes through /api/query-library: here a
 // small in-memory server behind page.route, writable or read-only, plus one
@@ -70,6 +71,18 @@ async function openLibrary(page) {
   await showPanel(page);
 }
 
+// The library is modal: the editor behind it is inert until it closes.
+async function closePanel(page) {
+  if (await panel(page).isVisible()) await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+}
+
+// Waits for the open animation (the dialog box is scaled meanwhile).
+async function settled(locator) {
+  await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+  return locator.boundingBox();
+}
+
 async function expandFolder(page, name) {
   const folder = node(page, name);
   if ((await folder.getAttribute('aria-expanded')) !== 'true') await folder.locator(':scope > .qlRow .qlRow__twisty').click();
@@ -133,6 +146,57 @@ test('browser mode migrates chdash.savedQueries.v1 once and keeps the legacy key
   await expect(panel(page)).toBeHidden();
 });
 
+test('confirm prompts: delete a query or a folder, clear the history; Cancel, Escape and the backdrop keep everything', async ({ page }) => {
+  await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
+  await openLibrary(page);
+  const confirm = dialog(page);
+
+  // Delete a query: the shared confirm, over the library, focus on Cancel.
+  await node(page, 'The answer').focus();
+  await page.keyboard.press('Delete');
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toHaveClass(/uiDialog--sm/);
+  await expect(confirm.locator('.uiDialog__title')).toHaveText('Delete query');
+  await expect(confirm.locator('.uiDialog__message')).toContainText('Delete \u201cThe answer\u201d? This cannot be undone.');
+  await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await expect(confirm.getByRole('button', { name: 'Delete' })).toHaveClass(/button--danger/);
+  // Enter on the focused Cancel keeps the query.
+  await page.keyboard.press('Enter');
+  await expect(confirm).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  await expect(node(page, 'The answer')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('li[role=treeitem]')?.dataset.id || '')).toBe('q_answer');
+  // The backdrop of the confirm closes the confirm only.
+  await page.keyboard.press('Delete');
+  await expect(confirm).toBeVisible();
+  await page.mouse.click(8, 8);
+  await expect(confirm).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  // Confirmed, it goes.
+  await page.keyboard.press('Delete');
+  await confirm.getByRole('button', { name: 'Delete' }).click();
+  await expect(node(page, 'The answer')).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  expect((await libraryState(page)).queries.map((q) => q.id).sort()).toEqual(['q_merges', 'q_parts']);
+  // Its toast is shown in the top dialog (the page under it is inert).
+  await expect(page.locator('#queryLibraryMenu > .qlToast')).toContainText('Query deleted.');
+
+  // Delete a non-empty folder: Escape keeps it.
+  await rowMenu(page, 'Operations');
+  await menuItem(page, 'Delete').click();
+  await expect(confirm.locator('.uiDialog__title')).toHaveText('Delete folder');
+  await expect(confirm).toContainText('2 queries and 1 subfolder');
+  await page.keyboard.press('Escape');
+  await expect(confirm).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  await expect(node(page, 'Operations')).toBeVisible();
+
+  // The toast follows the page when the library closes.
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.querySelector('.qlToast')?.parentElement === document.body)).toBe(true);
+});
+
 test('folders: create, nest, rename and delete a non-empty folder after confirmation', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] }, 'chdash.savedQueries.v1': null });
   await openLibrary(page);
@@ -147,7 +211,7 @@ test('folders: create, nest, rename and delete a non-empty folder after confirma
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await fillDialog(page, { name: 'monitoring', parent_id: 'Top level' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
-  await expect(dialog(page).locator('.qlDialog__error')).toContainText('already exists');
+  await expect(dialog(page).locator('.uiDialog__error')).toContainText('already exists');
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
 
@@ -159,6 +223,7 @@ test('folders: create, nest, rename and delete a non-empty folder after confirma
   await expect(node(page, 'Monitoring')).toHaveAttribute('aria-expanded', 'true');
   await expect(node(page, 'Disks')).toHaveAttribute('aria-level', '2');
 
+  await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT name, free_space FROM system.disks');
   await showPanel(page);
   await rowMenu(page, 'Disks');
@@ -198,6 +263,7 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   const editor = page.locator('#queryTextArea');
 
   // Save the editor with the panel's + button.
+  await closePanel(page);
   await editor.fill('SELECT count() FROM system.tables');
   await showPanel(page);
   await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
@@ -223,7 +289,7 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   // Ctrl+S on an opened query updates it in place (the panel can stay closed).
   await editor.fill('SELECT 42 AS answer, 43 AS next');
   await editor.press('Control+s');
-  await expect(dialog(page).locator('.qlDialog__title')).toHaveText('Save \u201cThe answer\u201d');
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Save \u201cThe answer\u201d');
   await dialog(page).getByRole('button', { name: 'Update' }).click();
   await expect(page.locator('.qlToast')).toContainText('Query updated');
   stored = await libraryState(page);
@@ -231,6 +297,7 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
   // Edit: name, description, tags and the SQL taken from the editor.
+  await closePanel(page);
   await editor.fill('SELECT 6 * 7 AS answer');
   await showPanel(page);
   await rowMenu(page, 'The answer');
@@ -308,14 +375,27 @@ test('search covers names, descriptions and SQL; the hover preview shows descrip
   await expect(preview.locator('.qlSql')).toContainText('FROM system.parts');
   await expect(preview.locator('.qlSql span').first()).toBeVisible();
   await expect(preview.locator('.qlTag')).toHaveText(['storage']);
+  // The preview is a pane of the dialog, right of the list: it stays while
+  // the pointer moves to it, and the next query replaces it.
+  const geometry = await page.evaluate(() => {
+    const pane = document.getElementById('queryLibraryPreview');
+    const list = document.getElementById('queryLibraryViewSaved').getBoundingClientRect();
+    return { inDialog: !!pane.closest('dialog#queryLibraryMenu'), beside: pane.getBoundingClientRect().left >= list.right - 1 };
+  });
+  expect(geometry).toEqual({ inDialog: true, beside: true });
   await page.locator('#queryLibraryViewSaved .ql__foot').hover();
-  await expect(preview).toBeHidden();
+  await preview.hover();
+  await expect(preview.locator('.qlPreview__title')).toHaveText('Active parts');
+  await node(page, 'The answer').locator(':scope > .qlRow').hover();
+  await expect(preview.locator('.qlPreview__title')).toHaveText('The answer');
+  await expect(preview.locator('.qlPreview__description')).toHaveCount(0);
 });
 
 test('a modifier-click adds the query as a new statement and turns multiquery on', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY, 'chdash.runOptions.v1': { autoFormat: false, multiQuery: false, executionStats: false, flattenTuple: true } });
   await openLibrary(page);
   const editor = page.locator('#queryTextArea');
+  await closePanel(page);
   await editor.fill('SELECT 1 AS first');
   await showPanel(page);
   await node(page, 'The answer').locator(':scope > .qlRow').click({ modifiers: ['ControlOrMeta'] });
@@ -457,7 +537,7 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   await expect(items).toHaveCount(3);
 
   // Re-run loads and runs it (and closes the panel).
-  await page.mouse.move(5, 300);
+  await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
   await ok.hover();
@@ -483,7 +563,7 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1')))).toEqual([]);
 });
 
-test('the panel is anchored to its button, closes on Escape, outside click and open, and remembers its tab', async ({ page }) => {
+test('the library opens in the profiling dialog: same shell, size and tabs; Escape, backdrop and close; focus in, trapped and back', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const button = page.locator('#queryLibraryButton');
@@ -493,41 +573,106 @@ test('the panel is anchored to its button, closes on Escape, outside click and o
   // The open-book icon (an SVG mask, like the Format icon).
   await expect(button.locator('.queryLibraryButton__icon')).toBeVisible();
   expect(await button.locator('.queryLibraryButton__icon').evaluate((el) => getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage)).toContain('svg');
-  const geometry = await page.evaluate(() => {
+  const toolbar = await page.evaluate(() => {
     const box = (id) => document.getElementById(id).getBoundingClientRect();
     const f = box('formatButton'); const b = box('queryLibraryButton'); const c = box('runSettingsButton');
     const style = (id) => { const cs = getComputedStyle(document.getElementById(id)); return [cs.width, cs.height, cs.borderRadius, cs.backgroundColor]; };
     return { order: f.right <= b.left && b.right <= c.left, sameLine: Math.abs((b.top + b.bottom) / 2 - (f.top + f.bottom) / 2) <= 2, sameStyle: JSON.stringify(style('formatButton')) === JSON.stringify(style('queryLibraryButton')) };
   });
-  expect(geometry).toEqual({ order: true, sameLine: true, sameStyle: true });
+  expect(toolbar).toEqual({ order: true, sameLine: true, sameStyle: true });
+  // Nothing of the dialog exists before it first opens.
+  await expect(panel(page)).toHaveCount(0);
+
+  // The shell of the library and of the profiling dialog, side by side.
+  const shellOf = (selector) => page.evaluate((sel) => {
+    const dialog = document.querySelector(sel);
+    const r = dialog.getBoundingClientRect();
+    const cs = getComputedStyle(dialog);
+    const round = (v) => Math.round(v * 10) / 10;
+    const head = dialog.querySelector(':scope > .uiDialog__frame > .uiDialog__head');
+    const tabs = dialog.querySelector(':scope > .uiDialog__frame > .uiDialog__tabs');
+    const tab = tabs.querySelector('.uiDialog__tab[aria-selected="true"]');
+    const tcs = getComputedStyle(tab);
+    const close = head.querySelector('.uiDialog__close');
+    return {
+      tag: dialog.tagName,
+      classes: [...dialog.classList].filter((c) => c.startsWith('uiDialog')).sort(),
+      modal: dialog.matches(':modal'),
+      box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+      look: [cs.borderRadius, cs.backgroundColor, cs.borderTopColor, cs.boxShadow],
+      backdrop: [getComputedStyle(dialog, '::backdrop').backgroundColor, getComputedStyle(dialog, '::backdrop').backdropFilter],
+      head: [Math.round(head.getBoundingClientRect().height), getComputedStyle(head.querySelector('.uiDialog__title')).fontSize],
+      close: [round(close.getBoundingClientRect().width), round(close.getBoundingClientRect().height), close.className],
+      tab: [tcs.fontSize, tcs.fontWeight, tcs.borderBottomWidth, tcs.borderBottomColor, tcs.color, tcs.minHeight],
+    };
+  }, selector);
 
   await button.click();
   await expect(panel(page)).toBeVisible();
   await expect(tree(page)).toBeVisible();
-  // 420-520 px wide, at most 70vh tall, right-aligned with its button.
-  const vh = page.viewportSize().height;
-  const [pb, bb] = [await panel(page).boundingBox(), await button.boundingBox()];
-  expect(pb.width).toBeGreaterThanOrEqual(416);
-  expect(pb.width).toBeLessThanOrEqual(520);
-  expect(pb.height).toBeLessThanOrEqual(vh * 0.7 + 1);
-  expect(Math.abs(pb.x + pb.width - (bb.x + bb.width))).toBeLessThanOrEqual(1);
-  expect(pb.y >= bb.y + bb.height || pb.y + pb.height <= bb.y).toBe(true);
-
-  // A click outside closes it; so does the close button.
-  await page.mouse.click(10, vh - 10);
+  await settled(panel(page));
+  const library = await shellOf('#queryLibraryMenu');
+  expect(library.tag).toBe('DIALOG');
+  expect(library.modal).toBe(true);
+  // Focus moved in (the search), the page behind is inert.
+  await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
+  expect(await page.evaluate(() => document.elementFromPoint(5, 5) === document.getElementById('queryLibraryMenu'))).toBe(true);
+  // Tab cycles inside the dialog (and its browser chrome), never to the page.
+  for (let i = 0; i < 25; i += 1) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => {
+      const el = document.activeElement;
+      return el === document.body || !!el?.closest('#queryLibraryMenu');
+    })).toBe(true);
+  }
+  // Escape closes it; the focus is back on the book button.
+  await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
   await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toBeFocused();
+
+  // A click on the backdrop closes it; so does the close button.
   await button.click();
+  await expect(panel(page)).toBeVisible();
+  await page.mouse.click(10, page.viewportSize().height - 10);
+  await expect(panel(page)).toBeHidden();
+  await expect(button).toBeFocused();
+  await button.click();
+  // A click inside (and a press that ends outside) keeps it open.
+  await page.locator('#queryLibraryViewSaved .ql__foot').click();
+  const foot = await page.locator('#queryLibraryViewSaved .ql__foot').boundingBox();
+  await page.mouse.move(foot.x + 5, foot.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(5, 5, { steps: 3 });
+  await page.mouse.up();
+  await expect(panel(page)).toBeVisible();
   await page.locator('#queryLibraryClose').click();
   await expect(panel(page)).toBeHidden();
   await expect(button).toBeFocused();
 
-  // A dialog opened from the panel keeps it open.
+  // The profiling dialog: the same element, classes, geometry, head, close
+  // button, backdrop and tab style.
+  await runSuccessfulQuery(page, 'SELECT count() FROM numbers(1000)', { profiling: true });
+  await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
+  await settled(page.locator('#analysisModal'));
+  const profiling = await shellOf('#analysisModal');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#analysisModal')).toBeHidden();
+  expect(profiling).toEqual(library);
+  expect(library.classes).toEqual(['uiDialog', 'uiDialog--lg']);
+
+  // A prompt opened from the library stacks over it: Escape closes the
+  // prompt only, and the focus goes back into the library.
   await button.click();
+  await expect(tree(page)).toBeVisible();
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+  await expect(dialog(page)).toBeVisible();
+  await expect(dialog(page).locator('[name="name"]')).toBeFocused();
+  expect(await page.evaluate(() => [...document.querySelectorAll('dialog:modal')].map((d) => d.id || d.className))).toEqual(['queryLibraryMenu', 'uiDialog uiDialog--sm qlDialog']);
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
+  expect(await page.evaluate(() => !!document.activeElement?.closest('#queryLibraryMenu'))).toBe(true);
 
   // The last tab is remembered.
   await page.locator('#queryLibraryTabHistory').click();
@@ -695,7 +840,7 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await fillDialog(page, { name: 'shared', parent_id: 'Top level' });
   await dialog(page).getByRole('button', { name: 'Create' }).click();
-  await expect(dialog(page).locator('.qlDialog__error')).toContainText('already exists');
+  await expect(dialog(page).locator('.uiDialog__error')).toContainText('already exists');
   await page.keyboard.press('Escape');
 
   // Two conflicts in a row: the user is told and the library is reloaded.
@@ -705,7 +850,7 @@ test('server mode: changes go through the API with If-Match; a conflict reloads 
   await dialog(page).locator('select[name="target"]').selectOption({ label: '\u00a0\u00a0\u00a0Shared' });
   await dialog(page).getByRole('button', { name: 'Move' }).click();
   // The dialog says so (the library was reloaded); Escape gives up.
-  await expect(dialog(page).locator('.qlDialog__error')).toContainText('changed by someone else');
+  await expect(dialog(page).locator('.uiDialog__error')).toContainText('changed by someone else');
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '1');
@@ -800,7 +945,16 @@ test('server mode offers once to import the browser queries', async ({ page }) =
   await openLibrary(page);
   const offer = page.locator('#queryLibraryViewSaved .qlNotice--import');
   await expect(offer).toContainText('2 queries are saved in this browser only');
+  // The import asks first (the shared confirm, over the library).
   await offer.getByRole('button', { name: 'Import my browser queries' }).click();
+  await expect(dialog(page).locator('.uiDialog__title')).toHaveText('Import browser queries');
+  await expect(dialog(page)).toContainText('Import the 2 queries saved in this browser');
+  await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog(page)).toHaveCount(0);
+  expect(server.requests.some((r) => r.path === '/import')).toBe(false);
+  await expect(offer).toBeVisible();
+  await offer.getByRole('button', { name: 'Import my browser queries' }).click();
+  await dialog(page).getByRole('button', { name: 'Import' }).click();
   await expect(page.locator('.qlToast')).toContainText('Imported 2 browser queries');
   await expect(offer).toHaveCount(0);
   const call = server.requests.find((r) => r.method === 'POST' && r.path === '/import');
@@ -814,7 +968,7 @@ test('server mode offers once to import the browser queries', async ({ page }) =
 
 // --- Phone and themes -------------------------------------------------------
 
-test('phone: the panel is a full-width sheet, the page never scrolls sideways, both themes', async ({ page }, testInfo) => {
+test('phone: the library and profiling dialogs are full-screen, a prompt is a bottom sheet, both themes', async ({ page }, testInfo) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await page.setViewportSize({ width: 390, height: 844 });
   for (const scheme of ['dark', 'light']) {
@@ -829,11 +983,19 @@ test('phone: the panel is a full-width sheet, the page never scrolls sideways, b
     await button.click();
     await expect(panel(page)).toBeVisible();
     await expect(tree(page)).toBeVisible();
-    const box = await panel(page).boundingBox();
-    expect(Math.round(box.x)).toBe(0);
-    expect(Math.round(box.width)).toBe(390);
-    expect(Math.round(box.y + box.height)).toBe(844);
-    await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-sheet-${scheme}.png` });
+    const box = await settled(panel(page));
+    expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 844]);
+    // No preview pane on a phone: the list takes the width.
+    await expect(page.locator('#queryLibraryPreview')).toBeHidden();
+    expect(Math.round((await page.locator('#queryLibraryViewSaved').boundingBox()).width)).toBe(390);
+    await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-${scheme}.png` });
+    // A prompt is a bottom sheet over it.
+    await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
+    const sheet = await settled(dialog(page));
+    expect([Math.round(sheet.x), Math.round(sheet.width), Math.round(sheet.y + sheet.height)]).toEqual([0, 390, 844]);
+    expect(sheet.y).toBeGreaterThan(100);
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toHaveCount(0);
     // Choosing a query closes the sheet and fills the editor.
     await node(page, 'The answer').locator(':scope > .qlRow').click();
     await expect(panel(page)).toBeHidden();
@@ -844,6 +1006,15 @@ test('phone: the panel is a full-width sheet, the page never scrolls sideways, b
     await expect(panel(page)).toBeHidden();
     const background = await panel(page).evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(background).toMatch(scheme === 'dark' ? /rgba?\((1[0-9]|[0-9]|2[0-9]), / : /rgba?\(255, 255, 255/);
+    // Profiling: the same full-screen dialog.
+    await runSuccessfulQuery(page, 'SELECT count() FROM numbers(10)', { profiling: true });
+    await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
+    const analysis = await settled(page.locator('#analysisModal'));
+    expect([Math.round(analysis.x), Math.round(analysis.y), Math.round(analysis.width), Math.round(analysis.height)]).toEqual([0, 0, 390, 844]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-profiling-${scheme}.png` });
+    await page.locator('#analysisCloseButton').click();
+    await expect(page.locator('#analysisModal')).toBeHidden();
   }
 });
 
@@ -855,11 +1026,11 @@ test('themes: panel, tree and preview follow dark and light', async ({ page }, t
     await openLibrary(page);
     await expandFolder(page, 'Operations');
     await node(page, 'Active parts').locator(':scope > .qlRow').hover();
-    await expect(page.locator('#queryLibraryPreview')).toBeVisible();
+    await expect(page.locator('#queryLibraryPreview .qlSql')).toBeVisible();
     colors[scheme] = await page.evaluate(() => ({
       nav: getComputedStyle(document.getElementById('queryLibraryMenu')).backgroundColor,
       name: getComputedStyle(document.querySelector('.qlRow__name')).color,
-      preview: getComputedStyle(document.getElementById('queryLibraryPreview')).backgroundColor,
+      preview: getComputedStyle(document.querySelector('#queryLibraryPreview .qlSql')).backgroundColor,
     }));
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-library-${scheme}.png` });
     await page.keyboard.press('Escape');
@@ -886,7 +1057,9 @@ test('live server library: create, save, move, reload and delete against a real 
   await dialog(page).getByRole('button', { name: 'Create' }).click();
   await expect(node(page, `${stamp} folder`)).toBeVisible();
 
+  await closePanel(page);
   await page.locator('#queryTextArea').fill(`SELECT '${stamp}' AS stamp`);
+  await showPanel(page);
   await page.locator('#queryLibraryViewSaved [data-action="save"]').click();
   await fillDialog(page, { name: `${stamp} query`, description: 'live check' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();

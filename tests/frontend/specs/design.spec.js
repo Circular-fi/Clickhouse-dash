@@ -141,7 +141,7 @@ test('profiling analysis renders Pipeline first and Tracing second', async ({ pa
   await runSuccessfulQuery(page, `SELECT city, count() AS rows, avg(temperature_c) AS avg_temperature
     FROM chdash_ui.mild_weather_observations
     GROUP BY city ORDER BY city`, { profiling: true });
-  await expect(page.locator('#analysisModalBackdrop')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
   await captureState(page, testInfo, 'analysis-pipeline');
   await page.locator('#analysisTraceTab').click();
@@ -313,7 +313,7 @@ test('captures the query library panel: saved queries, preview and history', asy
   await expect(page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts]')).toBeVisible();
   await captureState(page, testInfo, 'query-library');
   await page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts] > .qlRow').hover();
-  await expect(page.locator('#queryLibraryPreview')).toBeVisible();
+  await expect(page.locator('#queryLibraryPreview .qlPreview__title')).toHaveText('Active parts');
   await captureState(page, testInfo, 'query-library-preview');
   await page.locator('#queryLibraryTabHistory').click();
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();

@@ -96,10 +96,11 @@ def test_header_is_chips_and_about_is_value_context_tiles() -> None:
 
 def test_analysis_modal_has_large_desktop_inset() -> None:
     css = read("src/static/style.css")
-    tail = css[css.rfind('/* Release 16: analysis') :]
-    assert '.analysisModalBackdrop { padding: 96px 72px; }' in tail
-    assert 'width: min(1460px, calc(100vw - 144px));' in tail
-    assert 'height: calc(100vh - 192px);' in tail
+    # Deliberately smaller than the viewport: the shared large dialog.
+    tail = css[css.index('/* ==== Shared modal dialog') :]
+    large = tail[tail.index('.uiDialog--lg {'):]
+    assert 'width: min(1460px, calc(100vw - 144px));' in large
+    assert 'height: calc(100vh - 192px);' in large
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:

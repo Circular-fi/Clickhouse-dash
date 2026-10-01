@@ -1,11 +1,13 @@
 (() => {
   "use strict";
 
-  // Query library and History: the two tabs (Saved, History) of the panel the
-  // Query toolbar's book button opens.
+  // Query library and History: the two tabs (Saved, History) of the dialog the
+  // Query toolbar's book button opens (the shared modal dialog of
+  // app_ui_dialog.js; app_ui.js builds it, this module adds the preview pane).
   //
-  // app_ui.js loads this module the first time the panel opens (or Ctrl+S is
-  // used) and drives it through ns.queryLibrary. The data lives in
+  // app_ui.js loads this module the first time the dialog opens (or Ctrl+S is
+  // used) and drives it through ns.queryLibrary. Its prompts (forms, confirms)
+  // are ns.dialog dialogs stacked over the library. The data lives in
   // one of two storage adapters with the same interface:
   //   - local:  this browser (localStorage chdash.queryLibrary.v2, migrated
   //             once from chdash.savedQueries.v1; History in
@@ -722,7 +724,7 @@
     util.replaceTextAreaValue(dom.queryTextArea, String(sql || ""));
   }
 
-  // Opening a query closes the panel; the editor takes the focus.
+  // Opening a query closes the dialog; the editor takes the focus.
   function closePanel() {
     ns.ui?.closeQueryLibrary?.({ restoreFocus: false });
   }
@@ -780,13 +782,18 @@
 
   // ------------------------------------------------------------------ toast
 
+  // In the top dialog (the page under a modal dialog is inert and hidden from
+  // assistive technology); data-dialog-float moves it to the next one down
+  // when that dialog closes.
   let toastTimer = 0;
   function toast(message, kind = "info") {
-    let node = document.querySelector("body > .qlToast");
+    let node = document.querySelector(".qlToast");
     if (!node) {
       node = el("div", "qlToast");
-      document.body.appendChild(node);
+      node.dataset.dialogFloat = "";
     }
+    const layer = ns.dialog?.host?.() || document.body;
+    if (node.parentNode !== layer) layer.appendChild(node);
     node.textContent = message;
     node.className = `qlToast qlToast--${kind}`;
     node.setAttribute("role", kind === "error" ? "alert" : "status");
@@ -799,93 +806,19 @@
 
   // ---------------------------------------------------------------- dialogs
 
-  // Native <dialog>: modal, focus-trapped, Escape closes. Resolves with the
-  // submitted value, or null when dismissed.
-  function openDialog({ title, body, submitLabel = "Save", extraButtons = [], danger = false, onSubmit, className = "" }) {
-    return new Promise((resolve) => {
-      const dialog = el("dialog", `qlDialog ${className}`.trim());
-      dialog.setAttribute("aria-labelledby", "qlDialogTitle");
-      const form = el("form", "qlDialog__form");
-      form.method = "dialog";
-      form.noValidate = true;
-      const head = el("div", "qlDialog__head");
-      const heading = el("h2", "qlDialog__title", title);
-      heading.id = "qlDialogTitle";
-      const close = el("button", "closeCross qlDialog__close", "×");
-      close.type = "button";
-      close.setAttribute("aria-label", "Close");
-      head.append(heading, close);
-      const content = el("div", "qlDialog__body");
-      if (body) content.appendChild(body);
-      const error = el("div", "qlDialog__error");
-      error.setAttribute("role", "alert");
-      error.hidden = true;
-      const foot = el("div", "qlDialog__foot");
-      const cancel = el("button", "button", "Cancel");
-      cancel.type = "button";
-      const buttons = [];
-      for (const extra of extraButtons) {
-        const b = el("button", "button", extra.label);
-        b.type = "button";
-        b.dataset.value = extra.value;
-        buttons.push(b);
-      }
-      const submit = el("button", `button ${danger ? "button--danger" : "button--primary"} qlDialog__submit`, submitLabel);
-      submit.type = "submit";
-      foot.append(cancel, ...buttons, submit);
-      form.append(head, content, error, foot);
-      dialog.appendChild(form);
-      document.body.appendChild(dialog);
-
-      let settled = false;
-      const finish = (value) => {
-        if (settled) return;
-        settled = true;
-        if (dialog.open) dialog.close();
-        dialog.remove();
-        resolve(value);
-      };
-      const showError = (err) => {
-        error.textContent = err instanceof Error ? err.message : String(err || "The change failed.");
-        error.hidden = false;
-        for (const input of form.querySelectorAll("[aria-invalid]")) input.removeAttribute("aria-invalid");
-        const field = err instanceof LibraryError && err.field ? form.querySelector(`[data-field="${err.field}"]`) : null;
-        if (field) {
-          field.setAttribute("aria-invalid", "true");
-          field.focus();
-        }
-      };
-      const run = async (value) => {
-        if (submit.disabled) return;
-        submit.disabled = true;
-        for (const b of buttons) b.disabled = true;
-        try {
-          const result = onSubmit ? await onSubmit(value, form) : value;
-          if (result === false) return;
-          finish(result === undefined ? value : result);
-        } catch (err) {
-          showError(err);
-        } finally {
-          submit.disabled = false;
-          for (const b of buttons) b.disabled = false;
-        }
-      };
-      form.addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        run(submit.dataset.value || "submit");
-      });
-      for (const b of buttons) b.addEventListener("click", () => run(b.dataset.value));
-      cancel.addEventListener("click", () => finish(null));
-      close.addEventListener("click", () => finish(null));
-      dialog.addEventListener("cancel", (ev) => {
-        ev.preventDefault();
-        finish(null);
-      });
-      dialog.addEventListener("close", () => finish(null));
-      dialog.showModal();
-      const first = form.querySelector("[autofocus]") || form.querySelector("input, textarea, select") || submit;
-      first.focus();
-      if (typeof first.select === "function" && first.tagName === "INPUT") first.select();
+  // A form prompt: the shared ns.dialog (app_ui_dialog.js), stacked over the
+  // library. Resolves with the submitted value, or null when dismissed.
+  function openDialog({ title, body, submitLabel = "Save", extraButtons = [], danger = false, onSubmit }) {
+    return ns.dialog.open({
+      title,
+      body,
+      className: "qlDialog",
+      actions: [
+        { label: "Cancel", value: null },
+        ...extraButtons.map((extra) => ({ label: extra.label, value: extra.value })),
+        { label: submitLabel, value: "submit", kind: danger ? "danger" : "primary", submit: true },
+      ],
+      onSubmit,
     });
   }
 
@@ -1148,10 +1081,9 @@
     }
   }
 
-  async function confirmDialog({ title, message, confirmLabel = "Delete" }) {
-    const body = el("p", "qlConfirm", message);
-    const answer = await openDialog({ title, body, submitLabel: confirmLabel, danger: true });
-    return answer !== null;
+  // Yes / no on the shared dialog (the focus starts on Cancel).
+  function confirmDialog({ title, message, confirmLabel = "Delete", danger = true }) {
+    return ns.dialog.confirm({ title, message, confirmLabel, danger, className: "qlDialog" });
   }
 
   async function deleteItem(item) {
@@ -1193,6 +1125,14 @@
   }
 
   async function importBrowserQueries() {
+    const n = ctl.importOffer;
+    const ok = await confirmDialog({
+      title: "Import browser queries",
+      message: `Import the ${util.formatInt(n)} ${n === 1 ? "query" : "queries"} saved in this browser into the server library? Everyone using this server will see ${n === 1 ? "it" : "them"}; duplicates are skipped.`,
+      confirmLabel: "Import",
+      danger: false,
+    });
+    if (!ok) return;
     const raw = readJson(LOCAL_KEY, null);
     const lib = raw && raw.version === 2 ? normalizeLibrary(raw) : (() => {
       const legacy = storage.loadSavedQueries();
@@ -1379,6 +1319,16 @@
     const count = `${util.formatInt(lib.queries.length)} ${lib.queries.length === 1 ? "query" : "queries"}`;
     foot.textContent = `${count}${MIDDOT}${where}`;
     foot.title = ctl.mode === "server" ? "Shared by everyone using this ChDash server" : "Only this browser sees these queries";
+    renderSummary();
+  }
+
+  // The dialog subtitle: where the library lives, and whether it is editable.
+  function renderSummary() {
+    const summary = dom.queryLibrarySummary;
+    if (!summary) return;
+    const where = ctl.mode === "server" ? "Shared on this server" : "Stored in this browser";
+    summary.textContent = ctl.fatal ? "" : `${where}${ctl.writable ? "" : `${MIDDOT}read-only`}`;
+    summary.hidden = !summary.textContent;
   }
 
   function searchMatches() {
@@ -1512,6 +1462,7 @@
     if (current) current.tabIndex = 0;
     for (const li of items) li.setAttribute("aria-selected", String(li === current && !!ctl.selected));
     if (hadFocus && current) current.focus({ preventScroll: false });
+    refreshPreview();
   }
 
   function emptyRow(text) {
@@ -1793,7 +1744,7 @@
         closeMenu();
       }
     });
-    document.body.appendChild(menu);
+    (ns.dialog?.host?.() || document.body).appendChild(menu);
     menuEl = menu;
     menuReturnFocus = returnFocus || null;
     const rect = anchor ? anchor.getBoundingClientRect() : { left: point.x, right: point.x, top: point.y, bottom: point.y };
@@ -1933,29 +1884,71 @@
     for (const node of libraryEls.tree?.querySelectorAll(".is-dragging") || []) node.classList.remove("is-dragging");
   }
 
-  // ---------------------------------------------------------- hover preview
+  // ---------------------------------------------------------- preview pane
 
-  let previewEl = null;
+  // The right pane of the dialog (#queryLibraryPreview, beside the views):
+  // the query under the pointer or the keyboard focus, with its folder,
+  // description, tags and highlighted SQL, until another one replaces it.
   let previewTimer = 0;
   let previewFor = null;
+  let previewKey = "";
+  const PREVIEW_EMPTY = "Point at a query, or select it, to preview it here.";
 
+  // Cancels a pending preview (the one shown stays).
   function hidePreview() {
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = 0;
     previewFor = null;
-    if (previewEl) previewEl.hidden = true;
+  }
+
+  // The pane, added beside the views the first time the dialog shows them.
+  function previewPane() {
+    let pane = document.getElementById("queryLibraryPreview");
+    const views = dom.queryLibraryViewSaved?.parentElement;
+    if (!pane && views) {
+      pane = el("aside", "qlPreview");
+      pane.id = "queryLibraryPreview";
+      pane.setAttribute("aria-label", "Preview");
+      pane.appendChild(el("div", "qlPreview__empty", PREVIEW_EMPTY));
+      views.appendChild(pane);
+    }
+    return pane;
+  }
+
+  // Back to the placeholder.
+  function clearPreview() {
+    hidePreview();
+    previewKey = "";
+    document.getElementById("queryLibraryPreview")?.replaceChildren(el("div", "qlPreview__empty", PREVIEW_EMPTY));
   }
 
   function onTreeHover(ev) {
     if (dragItem || menuEl) return;
     const li = itemOf(ev.target);
     if (!li || li.dataset.kind !== "query") {
-      if (!li) return;
-      hidePreview();
+      if (li) hidePreview();
       return;
     }
     if (previewFor === li) return;
     schedulePreview(li, PREVIEW_DELAY_MS);
+  }
+
+  function queryPreview(query) {
+    return {
+      key: `q:${query.id}`,
+      title: query.name,
+      path: folderPath(ctl.library, query.folder_id).join(" / "),
+      description: query.description,
+      tags: query.tags,
+      sql: query.sql,
+      meta: [query.host_id ? `host ${query.host_id}` : "", query.updated_at_ms ? `updated ${dateLabel(query.updated_at_ms)}` : ""].filter(Boolean).join(MIDDOT),
+    };
+  }
+
+  function historyPreview(entry) {
+    const [, statusText] = statusInfo(entry.status);
+    const meta = [statusText, dateLabel(Number(entry.ran_at_ms) || 0), entry.host_id ? `host ${entry.host_id}` : ""].filter(Boolean).join(MIDDOT);
+    return { key: `h:${entry.id}`, title: oneLine(entry.sql, 80), sql: entry.sql, meta, error: entry.status === "error" ? entry.error : "" };
   }
 
   function schedulePreview(li, delay) {
@@ -1965,57 +1958,41 @@
       previewTimer = 0;
       if (previewFor !== li || !document.contains(li)) return;
       const query = entityOf(li);
-      if (query) showPreview(li, {
-        title: query.name,
-        path: folderPath(ctl.library, query.folder_id).join(" / "),
-        description: query.description,
-        tags: query.tags,
-        sql: query.sql,
-        meta: [query.host_id ? `host ${query.host_id}` : "", query.updated_at_ms ? `updated ${dateLabel(query.updated_at_ms)}` : ""].filter(Boolean).join(MIDDOT),
-      });
+      if (query) showPreview(queryPreview(query));
     }, delay);
   }
 
-  // One shared popover beside the panel: title, folder, description, tags
-  // and the highlighted SQL. It never takes the pointer or the focus.
-  function showPreview(anchor, { title, path = "", description = "", tags = [], sql = "", meta = "", error = "" }) {
+  // After a render: the same query or entry again (renamed, edited), or the
+  // placeholder when it is gone.
+  function refreshPreview() {
+    if (!previewKey) return;
+    const id = previewKey.slice(2);
+    const query = previewKey.startsWith("q:") ? queryById(ctl.library, id) : null;
+    const entry = previewKey.startsWith("h:") ? ctl.historyState.entries.find((e) => String(e.id) === id) : null;
+    if (query) showPreview(queryPreview(query));
+    else if (entry) showPreview(historyPreview(entry));
+    else clearPreview();
+  }
+
+  function showPreview({ key = "", title, path = "", description = "", tags = [], sql = "", meta = "", error = "" }) {
     if (ns.ui?.isPhoneLayout?.()) return;
-    if (!previewEl) {
-      previewEl = el("div", "qlPreview");
-      previewEl.setAttribute("role", "tooltip");
-      previewEl.id = "queryLibraryPreview";
-      document.body.appendChild(previewEl);
-    }
-    previewEl.innerHTML = "";
+    const pane = previewPane();
+    if (!pane) return;
+    previewKey = key;
+    pane.replaceChildren();
     const head = el("div", "qlPreview__head");
     head.appendChild(el("div", "qlPreview__title", title));
     if (path) head.appendChild(el("div", "qlPreview__path", path));
-    previewEl.appendChild(head);
-    if (description) previewEl.appendChild(el("div", "qlPreview__description", description));
-    if (error) previewEl.appendChild(el("div", "qlPreview__error", oneLine(error, 600)));
+    pane.appendChild(head);
+    if (description) pane.appendChild(el("div", "qlPreview__description", description));
+    if (error) pane.appendChild(el("div", "qlPreview__error", oneLine(error, 600)));
     if (tags && tags.length) {
       const list = el("div", "qlPreview__tags");
       for (const tag of tags) list.appendChild(el("span", "qlTag", tag));
-      previewEl.appendChild(list);
+      pane.appendChild(list);
     }
-    previewEl.appendChild(sqlPreview(sql));
-    if (meta) previewEl.appendChild(el("div", "qlPreview__meta", meta));
-    previewEl.hidden = false;
-    // Beside the panel: on its left (it is anchored at the toolbar's right end),
-    // on its right when there is no room.
-    const panel = dom.queryLibraryMenu?.getBoundingClientRect();
-    const rect = anchor.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const width = previewEl.offsetWidth;
-    const height = previewEl.offsetHeight;
-    const box = panel || rect;
-    let left = box.left - width - 8;
-    if (left < 8) left = box.right + 8;
-    if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
-    const top = Math.max(8, Math.min(rect.top - 6, vh - height - 8));
-    previewEl.style.left = `${Math.round(left)}px`;
-    previewEl.style.top = `${Math.round(top)}px`;
+    pane.appendChild(sqlPreview(sql));
+    if (meta) pane.appendChild(el("div", "qlPreview__meta", meta));
   }
 
   // ------------------------------------------------------------ history view
@@ -2186,6 +2163,7 @@
     const current = items.find((x) => x.dataset.id === focusedId) || items[0];
     if (current) current.tabIndex = 0;
     if (hadFocus && current) current.focus({ preventScroll: true });
+    refreshPreview();
   }
 
   async function loadHistory({ more = false } = {}) {
@@ -2344,9 +2322,7 @@
       previewTimer = 0;
       const entry = historyEntryOf(item);
       if (previewFor !== item || !entry || !document.contains(item)) return;
-      const [, statusText] = statusInfo(entry.status);
-      const meta = [statusText, dateLabel(Number(entry.ran_at_ms) || 0), entry.host_id ? `host ${entry.host_id}` : ""].filter(Boolean).join(MIDDOT);
-      showPreview(item, { title: oneLine(entry.sql, 80), sql: entry.sql, meta, error: entry.status === "error" ? entry.error : "" });
+      showPreview(historyPreview(entry));
     }, delay);
   }
 
@@ -2372,8 +2348,12 @@
 
   async function show(tab) {
     const next = tab === "history" ? "history" : "saved";
+    // Each tab previews its own items.
+    if (ctl.shown !== next) clearPreview();
+    previewPane();
     ctl.shown = next;
     await start();
+    renderSummary();
     if (next === "saved") {
       if (ctl.mode === "server" && ctl.rendered.library && Date.now() - ctl.loadedAt > SERVER_RELOAD_AFTER_MS) await reloadLibrary();
       if (!ctl.rendered.library) renderLibrary();
@@ -2401,9 +2381,8 @@
     }, 150);
   }
 
-  window.addEventListener("resize", hidePreview, { passive: true });
+  // The item menu is placed once: a scroll closes it.
   document.addEventListener("scroll", () => {
-    hidePreview();
     if (menuEl) closeMenu({ restoreFocus: false });
   }, { passive: true, capture: true });
   // Another tab changed the browser library.
@@ -2433,9 +2412,9 @@
     return true;
   }
 
-  // The panel closed: nothing of it stays on screen.
+  // The dialog closed: nothing of it stays on screen.
   function hidden() {
-    hidePreview();
+    clearPreview();
     closeMenu({ restoreFocus: false });
     ctl.shown = "";
   }

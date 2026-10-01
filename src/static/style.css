@@ -4217,44 +4217,8 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   background: var(--border);
 }
 
-.analysisModalBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 6px;
-  background: rgba(0, 0, 0, 0.56);
-  backdrop-filter: blur(3px);
-}
-
-.analysisModalBackdrop[hidden] { display: none; }
-
-.analysisModal {
-  width: min(1800px, calc(100vw - 12px));
-  height: calc(100vh - 12px);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border: 1px solid var(--borderStrong);
-  border-radius: 16px;
-  background: var(--panel);
-  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.45);
-  overflow: hidden;
-}
-
-.analysisModal__header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 7px 10px 6px;
-  border-bottom: 1px solid var(--border);
-}
-.analysisModal__title { font-size: 1rem; font-weight: 950; }
-.analysisModal__summary { margin-top: .35rem; color: var(--muted); font-size: .75rem; font-family: var(--mono); }
+/* The profiling dialog's shell is the shared .uiDialog (see "Shared modal dialog"). */
+.analysisModal__summary { font-family: var(--mono); }
 .analysisModal__notice { margin: 4px 8px 0; padding: 5px 7px; border: 1px solid var(--border); border-radius: 10px; font-size: .76rem; }
 .analysisModal__notice[data-kind="warning"] { border-color: rgba(245, 158, 11, .45); }
 .analysisModal__notice[data-kind="error"] { border-color: rgba(239, 68, 68, .55); }
@@ -4273,11 +4237,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 .analysisTable th, .analysisTable td { padding: .6rem .7rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .analysisTable th { position: sticky; top: 0; background: var(--panel); font-weight: 900; z-index: 1; }
 .analysisFootnote, .analysisEmpty { color: var(--muted); font-size: .76rem; padding: .6rem 0; }
-
-@media (max-width: 720px) {
-  .analysisModalBackdrop { padding: 8px; }
-  .analysisModal { width: 100%; height: calc(100vh - 16px); }
-}
 
 /* Explorer Functions */
 .explorerSectionTabs {
@@ -4714,28 +4673,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 /* Analysis: dense sections plus processor phase trace. */
-.analysisModal {
-  width: min(1800px, calc(100vw - 12px));
-  height: calc(100vh - 12px);
-  border-radius: 10px;
-  box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, .38);
-}
-
-.analysisModal__header {
-  padding: 7px 10px 6px;
-}
-
-.analysisModal__title {
-  font-size: .92rem;
-  font-weight: 700;
-}
-
-.analysisModal__summary {
-  margin-top: 3px;
-  font-size: .68rem;
-}
-
-
 .analysisModal__content {
   padding: 6px 8px 8px;
 }
@@ -4895,14 +4832,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   background-origin: content-box, padding-box;
   background-clip: content-box, padding-box;
   background-size: var(--gaugeFill, 0%) 100%, 100% 100%;
-}
-
-/* Analysis uses almost the full viewport. The header remains fixed while the
-   trace body owns vertical scrolling. */
-.analysisModal {
-  width: min(1800px, calc(100vw - 12px));
-  height: calc(100vh - 12px);
-  max-height: none;
 }
 
 
@@ -7718,19 +7647,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 .analysisPipelineSection { margin-top: 9px; }
 
-/* Review 10: borderless close affordance. */
-#analysisCloseButton {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  min-width: 28px;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 6px;
-  font-size: 1.05rem;
-}
-#analysisCloseButton:hover { background: var(--rowHover); }
 /* Reusable Jaeger-like wall-clock trace viewer. Kept independent from the
  * Analysis modal so the same component can later be mounted full-page. */
 .traceViewerHost {
@@ -8104,24 +8020,6 @@ html.chdash-page-select-hidden .pageSelect {
   scrollbar-gutter: auto;
 }
 
-/* Analysis is deliberately inset again: enough workspace remains visible around
-   the dialog to make the blurred click-to-dismiss backdrop obvious. */
-.analysisModalBackdrop {
-  align-items: center;
-  padding: 28px 18px;
-  background: rgba(0, 0, 0, .48);
-  backdrop-filter: blur(7px);
-}
-.analysisModal {
-  width: min(1680px, calc(100vw - 36px));
-  height: calc(100vh - 56px);
-  max-height: calc(100vh - 56px);
-}
-@media (max-width: 720px) {
-  .analysisModalBackdrop { padding: 14px 8px; }
-  .analysisModal { width: calc(100vw - 16px); height: calc(100vh - 28px); max-height: calc(100vh - 28px); }
-}
-
 /* Release 16: function-filter cog uses the exact same compact menu language as
    the Run-settings cog. The native select remains only as a state bridge. */
 .explorerSidebarToolbar--functions {
@@ -8148,21 +8046,6 @@ html.chdash-page-select-hidden .pageSelect {
 /* Hover is intentionally silent on the canvas. Graph information is expressed
    by the nodes/edges themselves; no mouse-following popup is rendered. */
 
-/* Release 16: analysis is deliberately smaller than the viewport. */
-.analysisModalBackdrop { padding: 96px 72px; }
-.analysisModal {
-  width: min(1460px, calc(100vw - 144px));
-  height: calc(100vh - 192px);
-  max-height: calc(100vh - 192px);
-}
-@media (max-width: 920px) {
-  .analysisModalBackdrop { padding: 32px 20px; }
-  .analysisModal {
-    width: calc(100vw - 40px);
-    height: calc(100vh - 64px);
-    max-height: calc(100vh - 64px);
-  }
-}
 
 /* Release 17: explorer graph control grouping, larger legend, fixed trace header,
    and complex type readability tweaks. */
@@ -9118,9 +9001,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* Modal close + theme icons use the same chrome-less hover grammar as the
    Explorer refresh/settings controls: emphasis changes on the glyph only. */
-#analysisCloseButton,
-#analysisCloseButton:hover,
-#analysisCloseButton:focus-visible,
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {
@@ -9128,14 +9008,11 @@ html.chdash-page-select-hidden .pageSelect {
   background: transparent !important;
   box-shadow: none !important;
 }
-#analysisCloseButton,
 .themeSelect__option--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   opacity: .8;
   transition: color 120ms ease, opacity 120ms ease;
 }
-#analysisCloseButton:hover,
-#analysisCloseButton:focus-visible,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible,
 .themeSelect__option--icon[aria-selected="true"] {
@@ -9520,37 +9397,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 
 /* Release 41: Profiling is split into a processor-centric Pipeline view and
-   the existing raw Tracing view. Pipeline is the default and owns its own
-   single scroll surface; Tracing remains lazily mounted on demand. */
-.analysisTabs {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: end;
-  gap: 2px;
-  padding: 4px 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-.analysisTab {
-  appearance: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  min-height: 30px;
-  padding: 0 10px;
-  font: 700 12px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-.analysisTab:hover,
-.analysisTab:focus-visible {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-.analysisTab.is-active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
+   the existing raw Tracing view (tabs: the shared .uiDialog__tabs). Pipeline
+   is the default and owns its own single scroll surface; Tracing remains
+   lazily mounted on demand. */
 .analysisModal__content.pipelineViewerHost {
   width: 100%;
   min-width: 0;
@@ -19329,13 +19178,226 @@ html[data-theme="light"] {
   }
 }
 
+/* ==== Shared modal dialog (app_ui_dialog.js) ===============================
+   One shell for every modal of the Query page: the profiling dialog and the
+   query library (.uiDialog--lg, the same size), and the form / confirm
+   prompts (.uiDialog--sm) opened over them. A native <dialog> shown with
+   showModal(): top layer, focus trap and inert page come from the browser. */
+.uiDialog {
+  box-sizing: border-box;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--borderStrong);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1.2rem 4rem rgba(0, 0, 0, .38);
+  overflow: hidden;
+  outline: none;
+}
+
+.uiDialog::backdrop {
+  background: rgba(0, 0, 0, .48);
+  backdrop-filter: blur(7px);
+}
+
+.uiDialog[open] {
+  animation: uiDialogIn 140ms ease-out;
+}
+
+.uiDialog[open]::backdrop {
+  animation: uiDialogFade 140ms ease-out;
+}
+
+@keyframes uiDialogIn {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+}
+
+@keyframes uiDialogFade {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uiDialog[open],
+  .uiDialog[open]::backdrop {
+    animation: none;
+  }
+}
+
+/* Large: deliberately smaller than the viewport, so the blurred
+   click-to-dismiss backdrop stays visible around it. */
+.uiDialog--lg {
+  width: min(1460px, calc(100vw - 144px));
+  height: calc(100vh - 192px);
+}
+
+.uiDialog--sm {
+  width: min(34rem, calc(100vw - 1.5rem));
+}
+
+.uiDialog__frame {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.uiDialog--sm > .uiDialog__frame {
+  max-height: calc(100dvh - 2rem);
+}
+
+.uiDialog__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.uiDialog__heading {
+  min-width: 0;
+}
+
+.uiDialog__title {
+  margin: 0;
+  color: var(--text);
+  font-size: .92rem;
+  font-weight: 700;
+}
+
+.uiDialog__subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.4;
+}
+
+.uiDialog__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.uiDialog__close {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 1.05rem;
+}
+
+.uiDialog__tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: end;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.uiDialog__tab {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  min-height: 30px;
+  padding: 0 10px;
+  font: 700 12px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.uiDialog__tab:hover,
+.uiDialog__tab:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* --accentBorder: solid in both themes (--accent is a light tint in light). */
+.uiDialog__tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accentBorder);
+}
+
+.uiDialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.uiDialog--sm .uiDialog__body {
+  padding: 0.7rem 0.9rem 0.6rem;
+}
+
+.uiDialog__message {
+  margin: 0.1rem 0 0.3rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.uiDialog__error {
+  flex: 0 0 auto;
+  margin: 0 0.9rem 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 0.55rem;
+  background: var(--error-bg);
+  font-size: 0.74rem;
+}
+
+.uiDialog__foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.65rem 0.9rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Tablets: the large dialog keeps a thin inset. */
+@media (max-width: 920px) {
+  .uiDialog--lg {
+    width: calc(100vw - 40px);
+    height: calc(100vh - 64px);
+  }
+}
+
+/* Phones: the large dialog is full-screen, a prompt is a bottom sheet. */
+@media (max-width: 760px) {
+  .uiDialog--lg {
+    width: 100vw;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .uiDialog--sm {
+    width: 100vw;
+    margin: auto 0 0;
+    border-bottom: 0;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .uiDialog__close {
+    width: 36px;
+    height: 36px;
+  }
+}
+
 /* ==== Query page revamp (2026-10) ===========================================
    Query library panel (Saved / History), toolbar hierarchy, running state,
    results summary, empty state and the phone layout of the Query page. One block:
    it relies only on the base tokens (--text, --muted, --border, --panelBg...)
    and comes last so it wins over the earlier layout passes. */
 
-/* -- Query library: book icon button and its anchored panel ------------------ */
+/* -- Query library: book icon button and its dialog -------------------------- */
 .queryLibrary {
   position: relative;
   display: inline-flex;
@@ -19360,78 +19422,26 @@ html[data-theme="light"] {
   color: var(--text);
 }
 
-.queryLibraryPanel {
-  position: fixed;
-  z-index: 950;
-  width: min(32rem, calc(100vw - 1rem));
-  min-width: min(26rem, calc(100vw - 1rem));
-  /* Steady between the tabs, at most 70vh (positionQueryLibrary caps it to
-     the room beside the button). */
-  height: min(34rem, 70vh);
-  max-height: 70vh;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.85rem;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-  color: var(--text);
-  outline: none;
+/* The library is a .uiDialog--lg: the list (Saved or History) on the left,
+   the preview of the query under the pointer or the focus on the right. */
+.queryLibraryDialog__body {
+  display: grid;
+  grid-template-columns: minmax(18rem, 34rem) minmax(0, 1fr);
   overflow: hidden;
 }
 
-.queryLibraryPanel__head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.6rem 0.45rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.queryLibraryPanel__tabs {
-  flex: 1 1 auto;
-  display: flex;
-  gap: 0.2rem;
-  max-width: 15rem;
-  padding: 0.18rem;
-  border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: var(--pillBg);
-}
-
-.queryLibraryPanel__tab {
-  flex: 1 1 0;
-  height: 1.7rem;
-  padding: 0 0.6rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.queryLibraryPanel__tab:hover {
-  color: var(--text);
-}
-
-.queryLibraryPanel__tab[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 18%, var(--panelBg));
-  color: var(--text);
-}
-
-.queryLibraryPanel__close {
-  margin-left: auto;
-}
-
-.queryLibraryPanel__view {
-  flex: 1 1 auto;
+.queryLibraryDialog__view {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+.queryLibraryDialog__view[hidden] {
+  display: none;
 }
 
 .qlIconButton {
@@ -19455,7 +19465,6 @@ html[data-theme="light"] {
 }
 
 .qlIconButton:focus-visible,
-.queryLibraryPanel__tab:focus-visible,
 .qlNode:focus-visible > .qlRow,
 .qhItem:focus-visible,
 .qlMenu__item:focus-visible {
@@ -19935,7 +19944,7 @@ html[data-theme="light"] {
   mask-size: 13px 13px;
 }
 
-/* Item menu and hover preview (appended to body). */
+/* Item menu (in the top dialog) and the docked preview. */
 .qlMenu {
   position: fixed;
   z-index: 1200;
@@ -19986,20 +19995,26 @@ html[data-theme="light"] {
 }
 
 .qlPreview {
-  position: fixed;
-  z-index: 1100;
-  width: min(30rem, calc(100vw - 2rem));
-  max-height: min(26rem, calc(100vh - 2rem));
-  overflow: hidden;
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.75rem;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-  pointer-events: none;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+}
+
+.qlPreview__empty {
+  margin: auto;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.qlPreview .qlSql {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .qlPreview__title {
@@ -20060,65 +20075,7 @@ html[data-theme="light"] {
   tab-size: 4;
 }
 
-/* Dialogs (native <dialog>, top layer). */
-.qlDialog {
-  width: min(34rem, calc(100vw - 1.5rem));
-  max-height: calc(100dvh - 2rem);
-  padding: 0;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.9rem;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-  color: var(--text);
-}
-
-.qlDialog::backdrop {
-  background: rgba(2, 6, 23, 0.55);
-}
-
-.qlDialog__form {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100dvh - 2rem);
-}
-
-.qlDialog__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.75rem 0.9rem 0.4rem;
-}
-
-.qlDialog__title {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 850;
-}
-
-.qlDialog__body {
-  min-height: 0;
-  overflow: auto;
-  padding: 0.35rem 0.9rem 0.6rem;
-}
-
-.qlDialog__error {
-  margin: 0 0.9rem 0.5rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  border-radius: 0.55rem;
-  background: var(--error-bg);
-  font-size: 0.74rem;
-}
-
-.qlDialog__foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 0.65rem 0.9rem 0.85rem;
-  border-top: 1px solid var(--border);
-}
-
+/* Library prompts: .uiDialog--sm forms (class qlDialog). */
 .qlForm {
   display: grid;
   gap: 0.7rem;
@@ -20189,47 +20146,10 @@ html[data-theme="light"] {
   font-size: 0.78rem;
 }
 
-.qlConfirm {
-  margin: 0.2rem 0 0.4rem;
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-
 /* -- Toolbar hierarchy: Run, then the secondary actions --------------------- */
 .panel--query .queryActions {
   align-items: center;
   gap: 0.45rem;
-}
-
-.queryActions__hint {
-  display: inline-flex;
-  gap: 0.15rem;
-  color: var(--muted);
-  font-size: 0.66rem;
-  user-select: none;
-}
-
-.panel--query[data-run-state="running"] .queryActions__hint {
-  visibility: hidden;
-}
-
-kbd,
-.queryActions__hint kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  padding: 0 0.28rem;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 0.3rem;
-  background: var(--pillBg);
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 0.62rem;
-  font-weight: 800;
-  line-height: 1;
 }
 
 /* A solid primary Run in the light theme as well. */
@@ -20450,18 +20370,17 @@ html:not(.is-ready) .queryEmptyState {
 /* -- Phones: wrapped toolbar, the library as a sheet ------------------------ */
 @media (max-width: 760px) {
 
-  /* The library panel is a bottom sheet. */
-  .queryLibraryPanel {
-    left: 0 !important;
-    right: 0;
-    top: auto !important;
-    bottom: 0 !important;
-    width: 100%;
-    min-width: 0;
-    height: min(85dvh, 40rem);
-    max-height: 85dvh !important;
-    border-radius: 0.95rem 0.95rem 0 0;
-    border-bottom: 0;
+  /* The library dialog is full-screen (.uiDialog--lg): the list alone. */
+  .queryLibraryDialog__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .queryLibraryDialog__view {
+    border-right: 0;
+  }
+
+  .qlPreview {
+    display: none;
   }
 
   body[data-page="query"] .layout {
@@ -20511,10 +20430,6 @@ html:not(.is-ready) .queryEmptyState {
     width: 100%;
     margin-left: 0;
     flex-wrap: nowrap;
-  }
-
-  .queryActions__hint {
-    display: none;
   }
 
   .panel--query .runSplit {

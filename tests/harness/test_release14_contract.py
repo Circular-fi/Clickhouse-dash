@@ -39,8 +39,9 @@ def test_analysis_has_two_profiling_tabs_and_uses_nearly_full_viewport() -> None
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html
     assert 'let activeTab = "pipeline";' in analysis
-    assert 'width: min(1800px, calc(100vw - 12px));' in css
-    assert 'height: calc(100vh - 12px);' in css
+    assert 'class="uiDialog uiDialog--lg analysisModal"' in html
+    assert 'width: min(1460px, calc(100vw - 144px));' in css
+    assert 'height: calc(100vh - 192px);' in css
     assert '.analysisModal__content { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 6px 8px 8px; }' in css
 
 

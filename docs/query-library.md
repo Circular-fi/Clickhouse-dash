@@ -32,12 +32,12 @@ query_library {
 
 ## In the Query page
 
-The book button of the Query toolbar (between Format and the run settings cog) opens the query library panel, with two tabs:
+The book button of the Query toolbar (between Format and the run settings cog) opens the query library in the same modal dialog as *Run with profiling* (same size, header, close button, backdrop and tab style; full-screen on a phone), with two tabs:
 
-- **Saved**: a folder tree (nested folders, saved queries with a description and tags), searched across names, descriptions, tags and SQL. Hovering a query shows its description and highlighted SQL. A click opens it in the editor; Ctrl/Cmd+click (or *Add as a new statement*) appends it as another statement, turning multiquery on. Folders and queries are created, renamed or edited (name, description, folder, tags, SQL from the editor), moved (drag and drop, or *Move to...*) and deleted; deleting a non-empty folder asks first and deletes everything in it.
+- **Saved**: a folder tree (nested folders, saved queries with a description and tags), searched across names, descriptions, tags and SQL. The query under the pointer or the keyboard focus is previewed beside the list (folder, description, tags, highlighted SQL). A click opens it in the editor (and closes the dialog); Ctrl/Cmd+click (or *Add as a new statement*) appends it as another statement, turning multiquery on. Folders and queries are created, renamed or edited (name, description, folder, tags, SQL from the editor), moved (drag and drop, or *Move to...*) and deleted; deleting a query, or a non-empty folder and everything in it, asks first (a confirm stacked over the library).
 - **History**: the runs grouped by day, with status (ok / error / cancelled), elapsed time, rows and host; search, run again, *Save to library* and *Clear*.
 
-Ctrl/Cmd+S saves the editor to the library (or updates the saved query the editor holds). The panel is fully keyboard driven: arrows, Home / End and type-ahead in the tree, Left / Right to collapse and expand, Enter to open, F2 to edit, Delete, Shift+F10 for the item menu, `/` for the search, Escape to close.
+Ctrl/Cmd+S saves the editor to the library (or updates the saved query the editor holds). The library is fully keyboard driven: the focus moves into the dialog and stays there; arrows, Home / End and type-ahead in the tree, Left / Right to collapse and expand, Enter to open, F2 to edit, Delete, Shift+F10 for the item menu, `/` for the search; Escape (or a click on the backdrop) closes it and the focus returns to the book button.
 
 | Mode | Library | History |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ Ctrl/Cmd+S saves the editor to the library (or updates the saved query the edito
 | `enabled = true` | the server file through `/api/query-library` | per `history.store` |
 | `writable = false` | shown with a *Read-only library* badge; every create / edit / move / delete control is hidden | no Clear, no per-entry removal |
 
-In server mode every folder / query change sends `If-Match: <revision>`; on a 409 conflict the panel reloads the library and retries once, then tells the user. When the server library is editable and the browser has queries of its own, the panel offers once to *Import my browser queries* (`POST /api/query-library/import`).
+In server mode every folder / query change sends `If-Match: <revision>`; on a 409 conflict the library reloads and retries once, then tells the user. When the server library is editable and the browser has queries of its own, the library offers once to *Import my browser queries* (`POST /api/query-library/import`, after a confirm).
 
 The page address follows the editor: `?saved=<id>` while it holds a library query unchanged, else `?sql=<text>` of the last run (up to 4,000 characters). Opened in a new tab, the link fills the editor.
 
@@ -145,4 +145,4 @@ Errors are JSON objects carrying `error` (and the same value in `error_code`, li
 
 - `tests/native/query_library_test.cpp`: store unit tests (atomic write, tree rules, If-Match, history, read-only, malformed file and reload, import, size cap). Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`; `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances; see "Query library" in [`tests/README.md`](../tests/README.md).
-- `tests/frontend/specs/query-library.spec.js`: the Query page panel in browser mode (migration, folders, save / edit / move, search, preview, keyboard, History), in server mode against a mocked API (If-Match and conflict retry, read-only, import, server History), on a phone and in both themes. Its last test runs against a real writable instance when `QUERY_LIBRARY_BASE_URL` names one (as the Playwright container reaches it).
+- `tests/frontend/specs/query-library.spec.js`: the Query page library dialog (the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, stacked confirms) in browser mode (migration, folders, save / edit / move, search, preview, keyboard, History), in server mode against a mocked API (If-Match and conflict retry, read-only, import, server History), on a phone and in both themes. Its last test runs against a real writable instance when `QUERY_LIBRARY_BASE_URL` names one (as the Playwright container reaches it).

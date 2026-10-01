@@ -699,12 +699,13 @@
     toggleRunOption(key);
   }
 
-  // --- Query library panel -----------------------------------------------------
-  // The toolbar book button opens a panel anchored to it, with two tabs:
-  // Saved (folders and saved queries) and History. query.html ships the panel
-  // shell; app_query_library.js renders both views and is loaded the first
-  // time the panel opens (or Ctrl+S is used): a page that never opens it costs
-  // no module.
+  // --- Query library dialog ----------------------------------------------------
+  // The toolbar book button opens the library in the shared modal dialog
+  // (app_ui_dialog.js: the shell, size, backdrop and focus handling of the
+  // profiling dialog), with two tabs: Saved (folders and saved queries) and
+  // History. The dialog is built the first time it opens; app_query_library.js
+  // renders both views and is loaded then (or when Ctrl+S is used): a page
+  // that never opens it costs no module and no dialog.
   const QUERY_LIBRARY_PREFS_KEY = "chdash.queryLibraryMenu.v1";
   const QUERY_LIBRARY_SCRIPT = "app_query_library.js";
   const scriptBase = (() => {
@@ -715,6 +716,7 @@
   })();
   let queryLibraryPromise = null;
   let queryLibraryTab = "saved";
+  let queryLibraryDialog = null;
 
   function readQueryLibraryPrefs() {
     try {
@@ -773,41 +775,7 @@
   }
 
   function isQueryLibraryOpen() {
-    return !!(dom.queryLibraryMenu && !dom.queryLibraryMenu.hidden);
-  }
-
-  // Below the button when there is room, above it otherwise; at most 70vh,
-  // right-aligned with the button. Phones show a bottom sheet (style.css).
-  function positionQueryLibrary() {
-    const panel = dom.queryLibraryMenu;
-    const button = dom.queryLibraryButton;
-    if (!panel || !button || panel.hidden) return;
-    if (isPhoneLayout()) {
-      for (const prop of ["left", "top", "bottom", "maxHeight"]) panel.style[prop] = "";
-      panel.dataset.side = "sheet";
-      return;
-    }
-    const rect = button.getBoundingClientRect();
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-    const gap = 8;
-    const width = Math.min(panel.offsetWidth || 480, vw - 16);
-    const cap = Math.round(vh * 0.7);
-    const below = vh - rect.bottom - gap - 8;
-    const above = rect.top - gap - 8;
-    const side = below >= Math.min(cap, 420) || below >= above ? "below" : "above";
-    const height = Math.max(240, Math.min(cap, side === "below" ? below : above));
-    const left = Math.max(8, Math.min(vw - width - 8, rect.right - width));
-    panel.dataset.side = side;
-    panel.style.left = `${Math.round(left)}px`;
-    panel.style.maxHeight = `${Math.round(height)}px`;
-    if (side === "below") {
-      panel.style.top = `${Math.round(rect.bottom + gap)}px`;
-      panel.style.bottom = "";
-    } else {
-      panel.style.top = "";
-      panel.style.bottom = `${Math.round(vh - rect.top + gap)}px`;
-    }
+    return !!queryLibraryDialog?.isOpen();
   }
 
   function setQueryLibraryTab(tab, { focus = false } = {}) {
@@ -828,73 +796,88 @@
     });
   }
 
-  // The panel content (tabs, close button, the two views) is built the first
-  // time it opens: an idle page carries an empty panel only.
-  function buildQueryLibraryPanel() {
-    const panel = dom.queryLibraryMenu;
-    if (!panel || panel.dataset.built) return;
-    panel.dataset.built = "1";
-    panel.innerHTML = `
-      <div class="queryLibraryPanel__head">
-        <div class="queryLibraryPanel__tabs" role="tablist" aria-label="Query library">
-          <button id="queryLibraryTabSaved" class="queryLibraryPanel__tab" type="button" role="tab" data-tab="saved" aria-controls="queryLibraryViewSaved">Saved</button>
-          <button id="queryLibraryTabHistory" class="queryLibraryPanel__tab" type="button" role="tab" data-tab="history" aria-controls="queryLibraryViewHistory">History</button>
-        </div>
-        <button id="queryLibraryClose" class="closeCross queryLibraryPanel__close" type="button" aria-label="Close the query library" title="Close (Esc)">\u00d7</button>
-      </div>
-      <div id="queryLibraryViewSaved" class="queryLibraryPanel__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved"><div class="qlEmpty">Loading the library\u2026</div></div>
-      <div id="queryLibraryViewHistory" class="queryLibraryPanel__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden><div class="qlEmpty">Loading the history\u2026</div></div>`;
-    for (const id of ["queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
+  // The dialog (title, Saved / History tabs in the profiling tab style and
+  // the two views) is built the first time it opens: an idle page carries
+  // none of it.
+  function buildQueryLibraryDialog() {
+    if (queryLibraryDialog || !ns.dialog || !dom.queryLibraryButton) return queryLibraryDialog;
+    const parts = ns.dialog.shell({
+      id: "queryLibraryMenu",
+      title: "Query library",
+      titleId: "queryLibraryTitle",
+      subtitleId: "queryLibrarySummary",
+      closeLabel: "Close the query library",
+      size: "lg",
+      className: "queryLibraryDialog",
+      tabs: {
+        label: "Query library",
+        items: [
+          { id: "queryLibraryTabSaved", label: "Saved", controls: "queryLibraryViewSaved", value: "saved" },
+          { id: "queryLibraryTabHistory", label: "History", controls: "queryLibraryViewHistory", value: "history" },
+        ],
+      },
+    });
+    parts.close.id = "queryLibraryClose";
+    // The two views; app_query_library.js adds the preview pane beside them.
+    parts.body.classList.add("queryLibraryDialog__body");
+    parts.body.innerHTML = `
+      <div id="queryLibraryViewSaved" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved"><div class="qlEmpty">Loading the library\u2026</div></div>
+      <div id="queryLibraryViewHistory" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden><div class="qlEmpty">Loading the history\u2026</div></div>`;
+    for (const id of ["queryLibraryMenu", "queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
       dom[id] = document.getElementById(id);
     }
-    dom.queryLibraryClose?.addEventListener("click", () => closeQueryLibrary());
-    const tabs = [dom.queryLibraryTabSaved, dom.queryLibraryTabHistory].filter(Boolean);
-    for (const tab of tabs) {
+    dom.queryLibrarySummary = parts.subtitle;
+    dom.queryLibraryButton.setAttribute("aria-controls", "queryLibraryMenu");
+    queryLibraryDialog = ns.dialog.bind(parts.dialog, {
+      closeButton: parts.close,
+      fallbackFocus: () => dom.queryLibraryButton,
+      onClose() {
+        dom.queryLibrary?.classList.remove("is-open");
+        dom.queryLibraryButton?.setAttribute("aria-expanded", "false");
+        ns.queryLibrary?.hidden?.();
+      },
+    });
+    const tabButtons = [dom.queryLibraryTabSaved, dom.queryLibraryTabHistory].filter(Boolean);
+    for (const tab of tabButtons) {
       tab.addEventListener("click", () => setQueryLibraryTab(tab.dataset.tab));
       tab.addEventListener("keydown", (ev) => {
         const step = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
         if (!step && ev.key !== "Home" && ev.key !== "End") return;
         ev.preventDefault();
-        const index = tabs.indexOf(tab);
-        const next = ev.key === "Home" ? tabs[0] : ev.key === "End" ? tabs[tabs.length - 1] : tabs[(index + step + tabs.length) % tabs.length];
+        const index = tabButtons.indexOf(tab);
+        const next = ev.key === "Home" ? tabButtons[0] : ev.key === "End" ? tabButtons[tabButtons.length - 1] : tabButtons[(index + step + tabButtons.length) % tabButtons.length];
         setQueryLibraryTab(next.dataset.tab);
         next.focus();
       });
     }
+    return queryLibraryDialog;
   }
 
   function openQueryLibrary(tab = queryLibraryTab, { focus = true } = {}) {
-    const panel = dom.queryLibraryMenu;
-    if (!panel || !dom.queryLibraryButton) return Promise.resolve(null);
-    buildQueryLibraryPanel();
+    const libraryDialog = buildQueryLibraryDialog();
+    if (!libraryDialog) return Promise.resolve(null);
     closeRunMenu({ immediate: true });
     closeRunSettings({ immediate: true });
     closeCopyMenu({ immediate: true });
-    panel.hidden = false;
+    // The focus moves into the dialog at once (the views render when the
+    // module is in) and comes back to the book button when it closes.
+    if (!libraryDialog.isOpen()) libraryDialog.open({ returnFocus: dom.queryLibraryButton });
     dom.queryLibrary?.classList.add("is-open");
     dom.queryLibraryButton.setAttribute("aria-expanded", "true");
     setQueryLibraryTab(tab);
-    positionQueryLibrary();
-    // Focus moves into the panel at once (the views render when the module is in).
-    panel.focus({ preventScroll: true });
+    const panel = dom.queryLibraryMenu;
     return withQueryLibrary(async (lib) => {
       if (!isQueryLibraryOpen()) return lib;
       await lib.show(queryLibraryTab);
-      positionQueryLibrary();
-      if (focus && isQueryLibraryOpen() && panel.contains(document.activeElement)) await lib.focus(queryLibraryTab);
+      if (focus && isQueryLibraryOpen() && document.activeElement === panel) await lib.focus(queryLibraryTab);
       return lib;
     });
   }
 
+  // restoreFocus: false when the caller moves the focus (a query opened in
+  // the editor).
   function closeQueryLibrary({ restoreFocus = true } = {}) {
-    const panel = dom.queryLibraryMenu;
-    if (!panel || panel.hidden) return;
-    const hadFocus = panel.contains(document.activeElement);
-    panel.hidden = true;
-    dom.queryLibrary?.classList.remove("is-open");
-    dom.queryLibraryButton?.setAttribute("aria-expanded", "false");
-    ns.queryLibrary?.hidden?.();
-    if (restoreFocus && (hadFocus || document.activeElement === document.body)) dom.queryLibraryButton?.focus({ preventScroll: true });
+    queryLibraryDialog?.close(null, { restoreFocus });
   }
 
   function toggleQueryLibrary() {
@@ -904,12 +887,6 @@
 
   function saveCurrentQuery() {
     withQueryLibrary((lib) => lib.saveCurrent());
-  }
-
-  // Clicks inside the panel, its dialogs, item menus and previews keep it open.
-  function isInsideQueryLibrary(target) {
-    if (!(target instanceof Element)) return false;
-    return !!(dom.queryLibrary?.contains(target) || target.closest("dialog.qlDialog, .qlMenu, .qlPreview"));
   }
 
   // URL state of the Query page: ?saved=<id> while the editor holds a library
@@ -948,36 +925,30 @@
   }
 
   function initQueryLibrary() {
-    if (!dom.queryLibraryButton || !dom.queryLibraryMenu) return;
     const mod = modifierKeyLabel();
     if (mod !== "Ctrl") {
-      for (const kbd of document.querySelectorAll("#runShortcutHint kbd:first-child, .queryKbd--mod")) kbd.textContent = mod;
+      for (const kbd of document.querySelectorAll(".queryKbd--mod")) kbd.textContent = mod;
     }
+    // The shortcut is told by the Run button's tooltip (no hint beside it).
     if (dom.runButton) dom.runButton.title = `Run (${mod}+Enter)`;
+    if (!dom.queryLibraryButton) return;
     queryLibraryTab = readQueryLibraryPrefs().tab === "history" ? "history" : "saved";
 
     dom.queryLibraryButton.addEventListener("click", toggleQueryLibrary);
 
-    document.addEventListener("pointerdown", (ev) => {
-      if (isQueryLibraryOpen() && !isInsideQueryLibrary(ev.target)) closeQueryLibrary({ restoreFocus: false });
-    }, true);
+    // Escape and a click on the backdrop close the dialog (app_ui_dialog.js).
     document.addEventListener("keydown", (ev) => {
       if (ev.defaultPrevented || ev.isComposing) return;
       const key = String(ev.key || "").toLowerCase();
       if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && key === "s") {
-        if (document.querySelector("dialog[open]")) return;
+        // Never the browser's "Save page". Over the library the save prompt
+        // stacks on it; over another dialog (a prompt, profiling) it waits.
         ev.preventDefault();
+        const top = ns.dialog?.host?.();
+        if (top && top !== document.body && top !== dom.queryLibraryMenu) return;
         saveCurrentQuery();
-        return;
-      }
-      if (ev.key === "Escape" && isQueryLibraryOpen() && !document.querySelector("dialog[open]")) {
-        ev.preventDefault();
-        closeQueryLibrary();
       }
     });
-    window.addEventListener("resize", positionQueryLibrary, { passive: true });
-    // The workspace scrolls under the toolbar: the panel follows its button.
-    dom.queryWorkspace?.addEventListener("scroll", positionQueryLibrary, { passive: true });
     // A finished run is a new History entry.
     window.addEventListener("chdash:query-history", () => {
       if (ns.queryLibrary) ns.queryLibrary.historyChanged();
@@ -1555,6 +1526,6 @@
   ns.ui = {
     init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
     applyProductFeatures, applyRunOptionsUi, setRunOption, setEditorError, clearEditorError,
-    loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, positionQueryLibrary, isPhoneLayout, modifierKeyLabel,
+    loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
   };
 })();

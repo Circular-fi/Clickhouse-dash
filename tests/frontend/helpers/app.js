@@ -89,6 +89,6 @@ export async function setFlattenTuple(page, enabled) {
 export async function openAnalysis(page) {
   await expect(page.locator('#analyzeQueryButton')).toBeVisible({ timeout: 10_000 });
   await page.locator('#analyzeQueryButton').click();
-  await expect(page.locator('#analysisModalBackdrop')).toBeVisible();
+  await expect(page.locator('#analysisModal')).toBeVisible();
   await expect(page.locator('#analysisSummary')).toContainText(/Session|ClickHouse|query/i, { timeout: 12_000 });
 }

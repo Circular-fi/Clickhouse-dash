@@ -13,6 +13,8 @@
   let traceController = null;
   let loadGeneration = 0;
   let activeTab = "pipeline";
+  // The shared modal dialog (app_ui_dialog.js) on #analysisModal.
+  let dialog = null;
 
   const fmtInt = (v) => Number.isFinite(Number(v)) ? new Intl.NumberFormat().format(Number(v)) : "\u2014";
   const fmtBytes = (v) => util && typeof util.formatBytes === "function" ? util.formatBytes(Number(v) || 0) : `${fmtInt(v)} B`;
@@ -146,11 +148,17 @@
     if (dom.analyzeQueryButton) dom.analyzeQueryButton.hidden = !current;
   }
 
-  function close() {
+  // However the dialog closes (close button, Escape, backdrop click), the
+  // pending loads stop and the views and their data are released.
+  function closed() {
     loadGeneration += 1;
-    if (dom.analysisModalBackdrop) dom.analysisModalBackdrop.hidden = true;
     clear(dom.analysisContent);
     releaseData();
+  }
+
+  function close() {
+    if (dialog?.isOpen()) dialog.close();
+    else closed();
   }
 
   function notice(text, kind = "info") {
@@ -352,7 +360,9 @@
     const generation = ++loadGeneration;
     activeTab = "pipeline";
     syncTabs();
-    if (dom.analysisModalBackdrop) dom.analysisModalBackdrop.hidden = false;
+    // The focus moves into the dialog (Tab reaches the close button and the
+    // tabs) and goes back to the opener, or to Run, when it closes.
+    dialog?.open();
     clear(dom.analysisContent);
     notice("Loading ClickHouse execution logs\u2026");
     if (dom.analysisSummary) dom.analysisSummary.textContent = current.queryId;
@@ -378,16 +388,19 @@
     dom.analysisPipelineTab?.addEventListener("click", () => setActiveTab("pipeline"));
     dom.analysisTraceTab?.addEventListener("click", () => setActiveTab("tracing"));
     dom.analysisTabs?.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const target = { ArrowLeft: "toggle", ArrowRight: "toggle", Home: "pipeline", End: "tracing" }[event.key];
+      if (!target) return;
       event.preventDefault();
       const views = profilingViews();
       if (!(views.pipeline && views.tracing)) return;
-      setActiveTab(activeTab === "pipeline" ? "tracing" : "pipeline");
+      setActiveTab(target === "toggle" ? (activeTab === "pipeline" ? "tracing" : "pipeline") : target);
       (activeTab === "pipeline" ? dom.analysisPipelineTab : dom.analysisTraceTab)?.focus();
     });
-    dom.analysisCloseButton?.addEventListener("click", close);
-    dom.analysisModalBackdrop?.addEventListener("click", (event) => { if (event.target === dom.analysisModalBackdrop) close(); });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape" && dom.analysisModalBackdrop && !dom.analysisModalBackdrop.hidden) close(); });
+    dialog = ns.dialog?.bind(dom.analysisModal, {
+      onClose: closed,
+      closeButton: dom.analysisCloseButton,
+      fallbackFocus: () => [dom.analyzeQueryButton, dom.runButton],
+    }) || null;
     setContext(null);
   }
 

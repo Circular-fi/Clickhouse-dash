@@ -112,11 +112,15 @@ def test_formatter_multilines_ttl_and_aligns_settings_when_comma_separated() -> 
 def test_analysis_dialog_is_inset_blurred_and_backdrop_click_dismisses() -> None:
     css = read("src/static/style.css")
     analysis = read("src/static/app_analysis.js")
-    tail = css[css.rfind("/* Release 15") :]
-    assert "backdrop-filter: blur(7px);" in tail
-    assert "padding: 96px 72px;" in tail
-    assert "height: calc(100vh - 192px);" in tail
-    assert 'event.target === dom.analysisModalBackdrop' in analysis
+    dialog = read("src/static/app_ui_dialog.js")
+    shared = css[css.index("/* ==== Shared modal dialog") :]
+    assert "backdrop-filter: blur(7px);" in shared[shared.index(".uiDialog::backdrop {"):]
+    assert "width: min(1460px, calc(100vw - 144px));" in shared
+    assert "height: calc(100vh - 192px);" in shared
+    # A click that starts and ends on the backdrop closes the shared dialog.
+    assert "pressedBackdrop = ev.target === dialog;" in dialog
+    assert "const backdrop = pressedBackdrop && ev.target === dialog;" in dialog
+    assert "dialog = ns.dialog?.bind(dom.analysisModal, {" in analysis
 
 
 def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:

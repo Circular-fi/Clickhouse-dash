@@ -310,15 +310,14 @@
               </button>
             </div>
           </div>
-          <span id="runShortcutHint" class="queryActions__hint" aria-hidden="true"><kbd>Ctrl</kbd><kbd>&#8629;</kbd></span>
           <!-- Format: an icon button between Run and the query library. -->
           <button id="formatButton" class="formatButton" type="button" aria-label="Format SQL" title="Format SQL"><span class="formatButton__icon" aria-hidden="true"></span></button>
-          <!-- Query library: saved queries (folders) and History, in a panel
-               anchored to this icon button. The panel is filled the first
-               time it opens (tabs: app_ui.js; views: app_query_library.js). -->
+          <!-- Query library: saved queries (folders) and History, in the
+               shared modal dialog (app_ui_dialog.js) the profiling uses too.
+               The dialog is built the first time it opens (tabs: app_ui.js;
+               views: app_query_library.js). -->
           <div id="queryLibrary" class="queryLibrary">
-            <button id="queryLibraryButton" class="formatButton queryLibraryButton" type="button" aria-label="Query library" title="Query library" aria-haspopup="dialog" aria-expanded="false" aria-controls="queryLibraryMenu"><span class="queryLibraryButton__icon" aria-hidden="true"></span></button>
-            <div id="queryLibraryMenu" class="queryLibraryPanel" role="dialog" aria-label="Query library" tabindex="-1" hidden></div>
+            <button id="queryLibraryButton" class="formatButton queryLibraryButton" type="button" aria-label="Query library" title="Query library" aria-haspopup="dialog" aria-expanded="false"><span class="queryLibraryButton__icon" aria-hidden="true"></span></button>
           </div>
 
           <div id="runSettings" class="themeSelect runSettings" aria-label="Run settings">
@@ -469,25 +468,27 @@
     </section>
   </main>
 
-  <div id="analysisModalBackdrop" class="analysisModalBackdrop" hidden>
-    <section id="analysisModal" class="analysisModal" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
-      <div class="analysisModal__header">
-        <div>
-          <div id="analysisModalTitle" class="analysisModal__title">Query Analysis</div>
-          <div id="analysisSummary" class="analysisModal__summary"></div>
+  <!-- Profiling: the shared modal dialog shell (app_ui_dialog.js builds the
+       same markup for the query library and its prompts). -->
+  <dialog id="analysisModal" class="uiDialog uiDialog--lg analysisModal" aria-labelledby="analysisModalTitle" aria-describedby="analysisSummary" tabindex="-1">
+    <div class="uiDialog__frame">
+      <div class="uiDialog__head">
+        <div class="uiDialog__heading">
+          <h2 id="analysisModalTitle" class="uiDialog__title">Query Analysis</h2>
+          <div id="analysisSummary" class="uiDialog__subtitle analysisModal__summary"></div>
         </div>
-        <div class="analysisModal__actions">
-          <button id="analysisCloseButton" class="button button--small" type="button" aria-label="Close analysis">×</button>
+        <div class="uiDialog__actions">
+          <button id="analysisCloseButton" class="closeCross uiDialog__close" type="button" aria-label="Close analysis" title="Close analysis (Esc)">×</button>
         </div>
       </div>
       <div id="analysisNotice" class="analysisModal__notice" hidden></div>
-      <div id="analysisTabs" class="analysisTabs" role="tablist" aria-label="Profiling view">
-        <button id="analysisPipelineTab" class="analysisTab is-active" type="button" role="tab" aria-selected="true">Pipeline</button>
-        <button id="analysisTraceTab" class="analysisTab" type="button" role="tab" aria-selected="false">Tracing</button>
+      <div id="analysisTabs" class="uiDialog__tabs analysisTabs" role="tablist" aria-label="Profiling view">
+        <button id="analysisPipelineTab" class="uiDialog__tab analysisTab is-active" type="button" role="tab" aria-selected="true">Pipeline</button>
+        <button id="analysisTraceTab" class="uiDialog__tab analysisTab" type="button" role="tab" aria-selected="false">Tracing</button>
       </div>
       <div id="analysisContent" class="analysisModal__content"></div>
-    </section>
-  </div>
+    </div>
+  </dialog>
 
   <script>
     (function () {

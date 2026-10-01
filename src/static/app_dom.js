@@ -33,8 +33,8 @@
     clearResultsButton: byId("clearResultsButton"),
     clearButton: byId("clearButton"),
 
-    // Query library panel (saved queries and History), anchored to its toolbar
-    // button; app_ui.js fills the panel (and these refs) when it first opens.
+    // Query library dialog (saved queries and History), opened by its toolbar
+    // button; app_ui.js builds the dialog (and these refs) when it first opens.
     queryLibrary: byId("queryLibrary"),
     queryLibraryButton: byId("queryLibraryButton"),
     queryLibraryMenu: byId("queryLibraryMenu"),
@@ -43,7 +43,6 @@
     queryLibraryTabHistory: byId("queryLibraryTabHistory"),
     queryLibraryViewSaved: byId("queryLibraryViewSaved"),
     queryLibraryViewHistory: byId("queryLibraryViewHistory"),
-    runShortcutHint: byId("runShortcutHint"),
 
     hostPicker: byId("hostPicker"),
     hostPickerButton: byId("hostPickerButton"),
@@ -198,7 +197,6 @@
     resultColumnsText: byId("resultColumnsText"),
     resultSummaryText: byId("resultSummaryText"),
     analyzeQueryButton: byId("analyzeQueryButton"),
-    analysisModalBackdrop: byId("analysisModalBackdrop"),
     analysisModal: byId("analysisModal"),
     analysisCloseButton: byId("analysisCloseButton"),
     analysisSummary: byId("analysisSummary"),

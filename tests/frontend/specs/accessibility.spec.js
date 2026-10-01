@@ -32,7 +32,7 @@ test('collects accessibility findings for key states', async ({ page }, testInfo
   await audit(page, testInfo, 'query-results');
 
   await runSuccessfulQuery(page, 'SELECT city, count() FROM chdash_ui.weather_observations GROUP BY city', { profiling: true });
-  await page.locator('#analysisModalBackdrop').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('#analysisModal').waitFor({ state: 'visible', timeout: 15_000 });
   await audit(page, testInfo, 'analysis-trace');
   await page.locator('#analysisCloseButton').click();
 
