@@ -276,16 +276,37 @@ test('explorer captures database storage, the Storage section and Server operati
 });
 
 
-test('captures query library and history navigation', async ({ page }, testInfo) => {
+test('captures the query library panel: saved queries, preview and history', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('design.seeded')) return;
+    sessionStorage.setItem('design.seeded', '1');
+    const now = Date.now();
+    localStorage.setItem('chdash.queryLibrary.v2', JSON.stringify({
+      version: 2, revision: 1,
+      folders: [{ id: 'f_ops', parent_id: null, name: 'Operations', description: 'Server health' }],
+      queries: [
+        { id: 'q_parts', folder_id: 'f_ops', name: 'Active parts', description: 'Parts per table', sql: 'SELECT table, count() FROM system.parts WHERE active GROUP BY table', host_id: null, tags: ['storage'], created_at_ms: now, updated_at_ms: now },
+        { id: 'q_answer', folder_id: null, name: 'The answer', description: '', sql: 'SELECT 42 AS answer', host_id: null, tags: [], created_at_ms: now, updated_at_ms: now },
+      ],
+    }));
+  });
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT 42 AS answer');
   await page.locator('#queryLibraryButton').click();
-  await expect(page.locator('#queryLibraryMenu')).toBeVisible();
+  const panel = page.locator('#queryLibraryMenu');
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#queryLibraryViewSaved [role=tree]')).toBeVisible();
+  await page.locator('#queryLibraryViewSaved [role=treeitem][data-kind=folder]').first().locator('.qlRow__twisty').click();
+  await expect(page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts]')).toBeVisible();
   await captureState(page, testInfo, 'query-library');
-  const history = page.locator('#queryLibraryTabHistory');
-  await expect(history).toBeVisible();
-  await history.click();
+  await page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts] > .qlRow').hover();
+  await expect(page.locator('#queryLibraryPreview')).toBeVisible();
+  await captureState(page, testInfo, 'query-library-preview');
+  await page.locator('#queryLibraryTabHistory').click();
+  await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
   await captureState(page, testInfo, 'query-library-history');
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
 });
 
 test('captures the light theme as a separate design state', async ({ page }, testInfo) => {

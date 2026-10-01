@@ -120,6 +120,15 @@ test('the example query charts within budget, explains the Array column and read
   await expect(mainTable(page)).toBeHidden();
   // Self-explanatory controls: labelled fields, an explicit Auto choice.
   await expect(chart.locator('.queryChart__fieldLabel')).toHaveText(['X axis', 'Y values', 'Split by']);
+  // The three pickers share one look: no native select chevron next to the
+  // custom Y values picker.
+  const looks = await chart.locator('.queryChart__x, .queryChart__seriesButton, .queryChart__group').evaluateAll((els) => els.map((el) => {
+    const cs = getComputedStyle(el);
+    return [cs.appearance, cs.height, cs.borderTopColor, cs.borderRadius, cs.backgroundColor, cs.backgroundImage, cs.paddingRight];
+  }));
+  expect(looks[0][0]).toBe('none');
+  expect(looks[1]).toEqual(looks[0]);
+  expect(looks[2]).toEqual(looks[0]);
   await expect(chart.locator('.queryChart__x')).toHaveValue('auto');
   await expect(chart.locator('.queryChart__x option').first()).toHaveText('Auto (plus(now(), number))');
   await expect(chart.locator('.queryChart__x option[value="2"]')).toContainText('Array(UInt64)');

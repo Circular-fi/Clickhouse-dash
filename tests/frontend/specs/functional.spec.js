@@ -63,6 +63,61 @@ test('query editor keeps the production sizing model with a centered bottom resi
   }
 });
 
+test('the editor never traps the keyboard: Tab indents, Escape then Tab leaves it', async ({ page }) => {
+  await openApp(page);
+  const editor = page.locator('#queryTextArea');
+  await editor.fill('SELECT 1');
+  await editor.press('End');
+  await editor.press('Tab');
+  await expect(editor).toBeFocused();
+  await expect(editor).not.toHaveValue('SELECT 1');
+  await editor.press('Escape');
+  await page.keyboard.press('Tab');
+  await expect(editor).not.toBeFocused();
+  // Back in, Tab indents again.
+  await editor.focus();
+  const before = await editor.inputValue();
+  await editor.press('Tab');
+  await expect(editor).toBeFocused();
+  expect((await editor.inputValue()).length).toBeGreaterThan(before.length);
+  await expect(editor).toHaveAttribute('aria-describedby', 'queryEditorKeysHint');
+  await expect(page.locator('#queryEditorKeysHint')).toContainText('Escape, then Tab');
+});
+
+test('the address bar links to the query: ?sql= after a run, read back by a new tab', async ({ page, context }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, 'SELECT 7 AS seven');
+  await expect.poll(() => new URL(page.url()).searchParams.get('sql')).toMatch(/SELECT\s+7 AS `?seven`?/);
+  const link = page.url();
+  const other = await context.newPage();
+  await other.goto(link);
+  await expect(other.locator('#runButton')).toBeEnabled();
+  await expect(other.locator('#queryTextArea')).toHaveValue(/SELECT\s+7 AS `?seven`?/);
+  await other.close();
+  // A reload keeps the tab's own draft over the link.
+  await page.locator('#queryTextArea').fill('SELECT 8 AS draft');
+  await page.waitForTimeout(300);
+  await page.reload();
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 8 AS draft');
+});
+
+test('the header wraps on narrow windows: brand, then host, page and theme, nothing clipped', async ({ page }) => {
+  for (const width of [600, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await openApp(page);
+    const boxes = await page.evaluate(() => {
+      const r = (sel) => { const b = document.querySelector(sel).getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+      return { brand: r('.appBrand'), host: r('#hostPickerButton'), pages: r('#pageSelectButton'), theme: r('#themeSelectButton'), vw: window.innerWidth, scroll: document.documentElement.scrollWidth };
+    });
+    expect(boxes.scroll).toBeLessThanOrEqual(width);
+    expect(boxes.host.top).toBeGreaterThanOrEqual(boxes.brand.bottom - 1);
+    for (const key of ['host', 'pages', 'theme']) {
+      expect(boxes[key].left).toBeGreaterThanOrEqual(0);
+      expect(boxes[key].right).toBeLessThanOrEqual(boxes.vw);
+    }
+  }
+});
+
 test('query and explorer are real browser routes with independent layouts', async ({ page }) => {
   await openApp(page);
   await openExplorer(page);
@@ -92,17 +147,17 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await expect(format).toBeDisabled();
   await expect(clear).toBeDisabled();
-  // Format is an icon button (indented lines) between Queries and the run
-  // settings cog, on the same line.
+  // Format is an icon button (indented lines) after Run, then the query
+  // library (book icon) and the run settings cog, on the same line.
   await expect(format).toHaveAttribute('aria-label', 'Format SQL');
   await expect(format).toHaveText('');
   await expect(format.locator('.formatButton__icon')).toBeVisible();
   const order = await page.evaluate(() => {
     const box = (id) => document.getElementById(id).getBoundingClientRect();
-    const q = box('queryLibraryButton'); const f = box('formatButton'); const c = box('runSettingsButton');
-    return { afterQueries: f.left >= q.right, beforeCog: f.right <= c.left, sameLine: Math.abs((f.top + f.bottom) / 2 - (c.top + c.bottom) / 2) <= 2 };
+    const r = box('runSplit'); const f = box('formatButton'); const l = box('queryLibraryButton'); const c = box('runSettingsButton');
+    return { afterRun: f.left >= r.right, beforeLibrary: f.right <= l.left, libraryBeforeCog: l.right <= c.left, sameLine: Math.abs((f.top + f.bottom) / 2 - (c.top + c.bottom) / 2) <= 2 };
   });
-  expect(order).toEqual({ afterQueries: true, beforeCog: true, sameLine: true });
+  expect(order).toEqual({ afterRun: true, beforeLibrary: true, libraryBeforeCog: true, sameLine: true });
   await editor.fill('select  1 as x');
   await expect(format).toBeEnabled();
   await format.click();
