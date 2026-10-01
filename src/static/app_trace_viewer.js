@@ -355,7 +355,7 @@
         const closed = collapsed.has(span.key);
         toggle.setAttribute("aria-expanded", String(!closed));
         toggle.setAttribute("aria-label", closed ? "Expand children" : "Collapse children");
-        toggle.textContent = closed ? "›" : "⌄";
+        toggle.textContent = closed ? "\u203a" : "\u2304";
       }
       const folded = foldedByKey.get(span.key);
       if (folded) folded.hidden = !(collapsed.has(span.key) && span.descendantCount);

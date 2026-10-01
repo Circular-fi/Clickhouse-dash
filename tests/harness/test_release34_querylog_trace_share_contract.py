@@ -29,7 +29,7 @@ def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() ->
     assert "explorerScopeMeters" in footprint
     assert "explorerScopeMeter__bytes" in footprint
     assert "explorerFootprintScopeBar" not in footprint
-    assert 'const displayName = String(item.name || "—");' in ui
+    assert 'const displayName = String(item.name || "\\u2014");' in ui
     assert "`<${item.name}>`" not in ui
     assert ".explorerScopeMeter__track" in css
 

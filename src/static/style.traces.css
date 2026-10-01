@@ -647,7 +647,7 @@ button.button:not(:disabled):hover {
   padding-right: 1.9rem;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
-  content: "↕";
+  content: "\2195";
   position: absolute;
   margin-left: 0.4rem;
   top: 50%;
@@ -661,11 +661,11 @@ button.button:not(:disabled):hover {
   opacity: 0.8;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
-  content: "▲";
+  content: "\25b2";
   opacity: 0.9;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
-  content: "▼";
+  content: "\25bc";
   opacity: 0.9;
 }
 .resultTable:not(.resultTable--vertical) tbody td.resultTable__numeric {
@@ -2815,7 +2815,7 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .traceJaegerGroup > summary::-webkit-details-marker { display: none; }
 .traceJaegerGroup > summary::before {
-  content: "›";
+  content: "\203a";
   width: 10px;
   flex: 0 0 10px;
   color: var(--muted);
@@ -5506,7 +5506,7 @@ html[data-theme="light"] {
 }
 .traceJson > summary::-webkit-details-marker { display: none; }
 .traceJson > summary::before {
-  content: "›";
+  content: "\203a";
   display: inline-block;
   width: 10px;
   color: var(--muted);
@@ -5550,7 +5550,7 @@ html[data-theme="light"] {
 }
 .traceSpanEvent > summary::-webkit-details-marker { display: none; }
 .traceSpanEvent > summary::before {
-  content: "›";
+  content: "\203a";
   flex: 0 0 9px;
   color: var(--muted);
   font-size: 14px;

@@ -304,7 +304,7 @@
     const duration = ctx.formatDuration(row.duration_ns);
     const attrs = state.loadedColumns.map((column, i) => {
       const value = Array.isArray(row.attributes) ? row.attributes[i] : null;
-      if (value == null) return '<span class="traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">—</span>';
+      if (value == null) return '<span class="traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">\u2014</span>';
       const scope = column.scope === "any" ? "any" : column.scope;
       return `<span class="traceSpanListRow__cell traceSpanListRow__cell--attr" role="gridcell">${filterValueHtml("tag", value, value === "" ? '""' : value, ` data-filter-scope="${esc(scope)}" data-filter-key="${esc(column.key)}"`)}</span>`;
     }).join("");
@@ -327,7 +327,7 @@
       return `<div class="traceSpanTable__foot is-error" role="alert"><span>${esc(state.error)}</span><button type="button" class="button button--small" data-span-retry>Retry</button></div>`;
     }
     if (state.loading) {
-      return `<div class="traceSpanTable__foot" role="status"><span class="traceSpanTable__spinner" aria-hidden="true"></span><span>${state.rows.length ? "Loading more spans…" : "Searching spans…"}</span></div>`;
+      return `<div class="traceSpanTable__foot" role="status"><span class="traceSpanTable__spinner" aria-hidden="true"></span><span>${state.rows.length ? "Loading more spans\u2026" : "Searching spans\u2026"}</span></div>`;
     }
     if (state.hasMore) {
       const asked = state.emptyPages >= AUTO_EMPTY_PAGES;
@@ -619,7 +619,7 @@
     ].map(([label, value]) => `<div class="traceSpanPanel__fact"><dt>${esc(label)}</dt><dd>${value}</dd></div>`).join("");
     let details = "";
     if (!entry || entry.status === "loading") {
-      details = '<div class="traceSpanPanel__status" role="status">Loading span details…</div>';
+      details = '<div class="traceSpanPanel__status" role="status">Loading span details\u2026</div>';
     } else if (entry.status === "error") {
       details = `<div class="traceSpanPanel__status is-error" role="alert">${esc(entry.error)} <button type="button" class="button button--small" data-span-panel-retry>Retry</button></div>`;
     } else if (!entry.span) {
@@ -651,8 +651,8 @@
         </div>
         <div class="traceSpanPanel__actions">
           <span class="traceSpanPanel__position">${index + 1} / ${state.rows.length.toLocaleString()}${state.hasMore ? "+" : ""}</span>
-          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (↑)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
-          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (↓)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
+          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
+          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
           <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>
           <button type="button" class="traceSpanPanel__close" data-span-panel-close aria-label="Close span details" title="Close (Esc)">×</button>
         </div>
@@ -760,7 +760,7 @@
   function renderColumns() {
     if (!columnsMenu) return;
     const list = state.columns.length
-      ? state.columns.map((column, index) => `<li class="traceSpanColumns__item"><span class="traceSpanColumns__scope">${esc(column.scope === "any" ? "any" : column.scope)}</span><span class="traceSpanColumns__key" title="${esc(column.key)}">${esc(column.key)}</span><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="-1" aria-label="Move ${esc(column.key)} left" title="Move left"${index === 0 ? " disabled" : ""}>←</button><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="1" aria-label="Move ${esc(column.key)} right" title="Move right"${index === state.columns.length - 1 ? " disabled" : ""}>→</button><button type="button" class="traceSpanColumns__remove" data-column-remove="${index}" aria-label="Remove column ${esc(column.key)}" title="Remove column">×</button></li>`).join("")
+      ? state.columns.map((column, index) => `<li class="traceSpanColumns__item"><span class="traceSpanColumns__scope">${esc(column.scope === "any" ? "any" : column.scope)}</span><span class="traceSpanColumns__key" title="${esc(column.key)}">${esc(column.key)}</span><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="-1" aria-label="Move ${esc(column.key)} left" title="Move left"${index === 0 ? " disabled" : ""}>\u2190</button><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="1" aria-label="Move ${esc(column.key)} right" title="Move right"${index === state.columns.length - 1 ? " disabled" : ""}>\u2192</button><button type="button" class="traceSpanColumns__remove" data-column-remove="${index}" aria-label="Remove column ${esc(column.key)}" title="Remove column">×</button></li>`).join("")
       : '<li class="traceSpanColumns__empty">No attribute columns yet.</li>';
     const options = columnSuggestions().map((label) => `<option value="${esc(label)}"></option>`).join("");
     columnsMenu.innerHTML = `<div class="traceSpanColumns__title">Attribute columns</div>

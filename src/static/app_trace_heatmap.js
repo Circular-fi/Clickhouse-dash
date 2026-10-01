@@ -171,9 +171,9 @@
   }
 
   function rowRangeLabel(r0, r1) {
-    const lo = r0 === 0 && Number(hm.data?.below_min_count || 0) > 0 ? `≤ ${fmt(geo.edges[1])}` : null;
+    const lo = r0 === 0 && Number(hm.data?.below_min_count || 0) > 0 ? `\u2264 ${fmt(geo.edges[1])}` : null;
     if (lo && r1 === 0) return lo;
-    return `${r0 === 0 && lo ? "0" : fmt(geo.edges[r0])} – ${fmt(geo.edges[r1 + 1])}`;
+    return `${r0 === 0 && lo ? "0" : fmt(geo.edges[r0])} \u2013 ${fmt(geo.edges[r1 + 1])}`;
   }
 
   // ---------------------------------------------------------------- render
@@ -186,7 +186,7 @@
     const data = hm.data;
     geo = null;
     if (hm.loading || (!data && !hm.error && hm.filters)) {
-      ctx.chartMessage(container, "Loading duration heatmap…");
+      ctx.chartMessage(container, "Loading duration heatmap\u2026");
       if (meta) meta.textContent = "Traces per cell";
       renderPanel();
       return;
@@ -360,7 +360,7 @@
   }
 
   function boxTooltip(box) {
-    return `<strong>≈ ${esc(traceCount(boxCount(box)))} in the box</strong><span>Start <b>${esc(ctx.bucketRangeLabel(geo.colStart(box.c0), (box.c1 - box.c0 + 1) * geo.bucketMs))}</b></span><span>Duration <b>${esc(rowRangeLabel(box.r0, box.r1))}</b></span>`;
+    return `<strong>\u2248 ${esc(traceCount(boxCount(box)))} in the box</strong><span>Start <b>${esc(ctx.bucketRangeLabel(geo.colStart(box.c0), (box.c1 - box.c0 + 1) * geo.bucketMs))}</b></span><span>Duration <b>${esc(rowRangeLabel(box.r0, box.r1))}</b></span>`;
   }
 
   // ------------------------------------------------------- pointer + keys
@@ -561,11 +561,11 @@
         + `<span class="traceDeltaRow__pct" aria-hidden="true"><b>${esc(pct(v.selection_pct))}</b><span>${esc(pct(v.baseline_pct))}</span></span>`
         + `<button type="button" class="traceDeltaRow__exclude" data-delta-exclude="${index}:${j}" title="Exclude this value" aria-label="Exclude ${esc(`${label} = ${text}`)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M4.2 11.8l7.6-7.6"/></svg></button></li>`;
     }).join("");
-    return `<article class="traceDeltaCard" data-delta-key="${esc(`${item.scope}:${item.key}`)}"><header><span class="traceDeltaCard__scope traceDeltaCard__scope--${esc(scope)}">${esc(scope === "column" ? "field" : scope)}</span><strong title="${esc(item.key)}">${esc(label)}</strong><span class="traceDeltaCard__score" title="Largest gap between the selection and baseline shares of one value (percentage points)">Δ ${esc(Math.round(Math.max(0, Number(item.score || 0) - (item.boosted ? 2 : 0))))} pts</span></header><ul class="traceDeltaCard__values">${values}</ul></article>`;
+    return `<article class="traceDeltaCard" data-delta-key="${esc(`${item.scope}:${item.key}`)}"><header><span class="traceDeltaCard__scope traceDeltaCard__scope--${esc(scope)}">${esc(scope === "column" ? "field" : scope)}</span><strong title="${esc(item.key)}">${esc(label)}</strong><span class="traceDeltaCard__score" title="Largest gap between the selection and baseline shares of one value (percentage points)">\u0394 ${esc(Math.round(Math.max(0, Number(item.score || 0) - (item.boosted ? 2 : 0))))} pts</span></header><ul class="traceDeltaCard__values">${values}</ul></article>`;
   }
 
   function panelBodyHtml() {
-    if (deltas.loading) return `<div class="traceDeltaPanel__state" role="status"><span class="traceDeltaSpinner" aria-hidden="true"></span>Comparing sampled traces of the box with the baseline…</div>`;
+    if (deltas.loading) return `<div class="traceDeltaPanel__state" role="status"><span class="traceDeltaSpinner" aria-hidden="true"></span>Comparing sampled traces of the box with the baseline\u2026</div>`;
     if (deltas.error) return `<div class="traceDeltaPanel__state traceChartError" role="alert"><span>${esc(deltas.error)}</span><button type="button" class="traceMiniButton" data-delta-retry>Retry</button></div>`;
     const data = deltas.data;
     if (!data) return "";
@@ -594,13 +594,13 @@
     panel.hidden = !show;
     if (!show) { panel.innerHTML = ""; return; }
     const when = ctx.bucketRangeLabel(sel.t0, Math.max(1, sel.t1 - sel.t0));
-    const duration = sel.d0 > 0 ? `${fmt(sel.d0)} – ${fmt(sel.d1)}` : `≤ ${fmt(sel.d1)}`;
+    const duration = sel.d0 > 0 ? `${fmt(sel.d0)} \u2013 ${fmt(sel.d1)}` : `\u2264 ${fmt(sel.d1)}`;
     const durationFilter = ctx.model.meta?.features?.duration_filter !== false;
     panel.innerHTML = `<header class="traceDeltaPanel__head"><div class="traceDeltaPanel__title"><strong>Selection vs baseline</strong><span>Traces starting <b>${esc(when)}</b> lasting <b>${esc(duration)}</b></span></div>`
       + `<div class="traceDeltaPanel__actions"><label class="traceDeltaPanel__baseline"><span>Baseline</span><select data-delta-baseline aria-label="Baseline traces"><option value="outside"${deltas.baseline === "outside" ? " selected" : ""}>Other traces of that time</option><option value="all"${deltas.baseline === "all" ? " selected" : ""}>All traces of that time</option></select></label>`
       + `<button type="button" class="button button--small traceDeltaPanel__search" data-delta-search title="${esc(durationFilter ? "Search this time range with this trace duration range" : "Search this time range (duration filters are disabled)")}">Search traces in this box</button>`
       + '<button type="button" class="button button--small traceDeltaPanel__clear" data-delta-clear title="Clear the selection (Escape)">Clear selection</button></div></header>'
-      + `<div class="traceDeltaPanel__meta"><span class="traceDeltaLegend"><span class="is-selection">Selection</span><span class="is-baseline">Baseline</span></span><span class="traceDeltaPanel__sample">${esc(deltas.data ? sampleText(deltas.data) : `≈ ${traceCount(sel.estimate)} in the box`)}</span></div>`
+      + `<div class="traceDeltaPanel__meta"><span class="traceDeltaLegend"><span class="is-selection">Selection</span><span class="is-baseline">Baseline</span></span><span class="traceDeltaPanel__sample">${esc(deltas.data ? sampleText(deltas.data) : `\u2248 ${traceCount(sel.estimate)} in the box`)}</span></div>`
       + `<div class="traceDeltaPanel__body">${panelBodyHtml()}</div>`;
   }
 

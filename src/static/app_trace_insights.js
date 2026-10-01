@@ -325,7 +325,7 @@
   function windowText(range) {
     if (!Array.isArray(range) || range.length !== 2) return "";
     const f = (ms) => new Date(Number(ms)).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    return `${f(range[0])} – ${f(range[1])}`;
+    return `${f(range[0])} \u2013 ${f(range[1])}`;
   }
 
   function linkedFromBodyHtml(state, cache) {
@@ -334,7 +334,7 @@
     if (!state || state.status === "idle") {
       return `${head()}<p class="traceLinkedFrom__note">Spans of other traces whose links point to this span, searched within ±${margin} min of this trace. <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Search</button></p>`;
     }
-    if (state.status === "loading") return `${head('<span class="traceLinkedFrom__status" role="status">Searching…</span>')}`;
+    if (state.status === "loading") return `${head('<span class="traceLinkedFrom__status" role="status">Searching\u2026</span>')}`;
     if (state.status === "error") {
       return `${head()}<p class="traceLinkedFrom__note is-error">${esc(state.error)} <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Retry</button></p>`;
     }
@@ -554,7 +554,7 @@
       const delta = BigInt(row.start_ns_text) - BigInt(context.anchor.ns);
       const n = Number(delta);
       if (n === 0) return "0";
-      return `${n > 0 ? "+" : "−"}${fmt(Math.abs(n))}`;
+      return `${n > 0 ? "+" : "\u2212"}${fmt(Math.abs(n))}`;
     } catch (_) {
       return "";
     }
@@ -589,7 +589,7 @@
     const attributePicker = context.filter === "attribute"
       ? `<label class="traceContextPanel__attr"><span>Attribute</span><select data-context-attribute>${a.attributes.map((item) => {
           const value = `${item.scope}\u001f${item.key}`;
-          return `<option value="${esc(value)}"${value === context.attribute ? " selected" : ""}>${esc(`${item.scope === "resource" ? "resource" : "span"} · ${item.key} = ${item.value.length > 60 ? `${item.value.slice(0, 60)}…` : item.value}`)}</option>`;
+          return `<option value="${esc(value)}"${value === context.attribute ? " selected" : ""}>${esc(`${item.scope === "resource" ? "resource" : "span"} · ${item.key} = ${item.value.length > 60 ? `${item.value.slice(0, 60)}\u2026` : item.value}`)}</option>`;
         }).join("")}</select></label>`
       : "";
     const rowsHtml = context.rows.map((row) => {
@@ -603,18 +603,18 @@
         <td class="traceContextRow__service"><span style="--trace-service-color:${ctx.serviceColor(row.service_name)}">${esc(row.service_name || "unknown")}</span></td>
         <td class="traceContextRow__op">${esc(row.span_name || "span")}${sameTrace && !anchor ? '<small class="traceContextRow__same" title="Span of the open trace">this trace</small>' : ""}</td>
         <td class="traceContextRow__duration">${esc(fmt(row.duration_ns))}</td>
-        <td class="traceContextRow__status">${status === "Unset" ? '<span class="traceContextRow__unset">—</span>' : `<span class="traceStatus traceStatus--${esc(status.toLowerCase())}">${esc(status)}</span>`}</td>
+        <td class="traceContextRow__status">${status === "Unset" ? '<span class="traceContextRow__unset">\u2014</span>' : `<span class="traceStatus traceStatus--${esc(status.toLowerCase())}">${esc(status)}</span>`}</td>
       </tr>`;
     }).join("");
     const pageButton = (direction, label, shown) => (shown
-      ? `<button type="button" class="button button--small traceContextPanel__more" data-context-more="${direction}"${context.loading ? " disabled" : ""}>${context.loading === direction ? "Loading…" : label}</button>`
+      ? `<button type="button" class="button button--small traceContextPanel__more" data-context-more="${direction}"${context.loading ? " disabled" : ""}>${context.loading === direction ? "Loading\u2026" : label}</button>`
       : "");
     const filterLabel = CONTEXT_FILTERS.find(([value]) => value === context.filter)?.[1] || "";
     const windowLabel = CONTEXT_WINDOWS.find(([ms]) => ms === context.windowMs)?.[1] || "";
     const status = context.error
       ? `<p class="traceContextPanel__error" role="alert">${esc(context.error)}</p>`
       : context.loading === "around"
-        ? '<p class="traceContextPanel__status" role="status">Loading spans…</p>'
+        ? '<p class="traceContextPanel__status" role="status">Loading spans\u2026</p>'
         : context.rows.length
           ? `<p class="traceContextPanel__status" role="status" data-context-summary>${context.rows.length} span${context.rows.length === 1 ? "" : "s"} · ${esc(windowLabel)} · ${esc(filterLabel)}${Number.isFinite(context.elapsedMs) ? ` · ${Math.round(context.elapsedMs)} ms` : ""}</p>`
           : `<p class="traceContextPanel__status" role="status" data-context-summary>No spans ${esc(windowLabel)} around this span (${esc(filterLabel)}).</p>`;

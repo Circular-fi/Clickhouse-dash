@@ -1619,7 +1619,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     if (statements.length > 1 && !state.runOptMultiQuery) {
       state.suppressResultsVisibility = false;
-      results.setError("Multiquery is disabled. Enable “Allow multiquery” in Run settings.");
+      results.setError("Multiquery is disabled. Enable \u201cAllow multiquery\u201d in Run settings.");
       results.setStatus("error");
       return;
     }

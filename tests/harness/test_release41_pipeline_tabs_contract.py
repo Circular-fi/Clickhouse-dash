@@ -36,7 +36,7 @@ def test_pipeline_viewer_combines_processor_cost_with_otel_wall_clock() -> None:
     assert 'processors: decodedProcessors.processors' in analysis
     assert 'spans: decodedSpans()' in analysis
     assert 'Activity density over time' in pipeline
-    assert 'Work Σ · share' in pipeline
+    assert 'Work \\u03a3 · share' in pipeline
     assert 'group.elapsedSum += elapsed;' in pipeline
     assert 'group.inputWaitMax = Math.max' in pipeline
     assert 'group.outputWaitMax = Math.max' in pipeline

@@ -11,7 +11,7 @@ def test_pipeline_is_dense_and_does_not_repeat_metric_labels_per_row() -> None:
     css = read("src/static/style.css")
     assert 'element("div", "metricsHead")' in pipeline
     assert '["In wait max", "Out wait max", "Input", "Output"]' in pipeline
-    assert 'Work Σ · share' in pipeline
+    assert 'Work \\u03a3 · share' in pipeline
     assert 'k.className = "pipelineViewer__metricLabel srOnly"' in pipeline
     assert '"Timing unavailable"' in pipeline
     assert 'min-height: 40px;' in css[css.index('.pipelineViewer__row {'):css.index('.pipelineViewer__row:hover')]

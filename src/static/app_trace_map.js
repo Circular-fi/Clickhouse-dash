@@ -83,7 +83,7 @@
 
   function shortName(name) {
     const text = String(name || "unknown");
-    return text.length > NAME_CHARS ? `${text.slice(0, NAME_CHARS - 1)}…` : text;
+    return text.length > NAME_CHARS ? `${text.slice(0, NAME_CHARS - 1)}\u2026` : text;
   }
 
   function factorText(value) {
@@ -335,9 +335,9 @@
     if (!legend) return;
     legend.hidden = !map.data || !map.data.nodes.length;
     legend.innerHTML = '<div class="traceMap__legendRow"><svg viewBox="0 0 38 18" aria-hidden="true"><circle cx="6" cy="9" r="4"/><circle cx="25" cy="9" r="8"/></svg><span>Node size: spans</span></div>'
-      + '<div class="traceMap__legendRow"><svg viewBox="0 0 38 18" aria-hidden="true"><circle class="is-ring" cx="19" cy="9" r="7"/></svg><span>Red ring: error rate ≥ 0.1%</span></div>'
+      + '<div class="traceMap__legendRow"><svg viewBox="0 0 38 18" aria-hidden="true"><circle class="is-ring" cx="19" cy="9" r="7"/></svg><span>Red ring: error rate \u2265 0.1%</span></div>'
       + '<div class="traceMap__legendRow"><svg viewBox="0 0 38 18" aria-hidden="true"><path d="M2 5h34" stroke-width="1.5"/><path d="M2 13h34" stroke-width="5"/></svg><span>Edge width: calls</span></div>'
-      + `<div class="traceMap__legendRow traceMap__legendRow--errors"><span class="traceMap__swatch is-ok"></span><span>&lt; ${ERROR_ELEVATED * 100}%</span><span class="traceMap__swatch is-warn"></span><span>${ERROR_ELEVATED * 100}–${ERROR_HIGH * 100}%</span><span class="traceMap__swatch is-err"></span><span>≥ ${ERROR_HIGH * 100}% errors</span></div>`;
+      + `<div class="traceMap__legendRow traceMap__legendRow--errors"><span class="traceMap__swatch is-ok"></span><span>&lt; ${ERROR_ELEVATED * 100}%</span><span class="traceMap__swatch is-warn"></span><span>${ERROR_ELEVATED * 100}\u2013${ERROR_HIGH * 100}%</span><span class="traceMap__swatch is-err"></span><span>\u2265 ${ERROR_HIGH * 100}% errors</span></div>`;
   }
 
   function renderState() {
@@ -349,7 +349,7 @@
     byId("traceMapView")?.setAttribute("aria-busy", map.loading ? "true" : "false");
     let html = "";
     if (map.loading) {
-      html = `<div class="traceMap__message${hasGraph ? " traceMap__message--over" : ""}" role="status"><span class="traceButtonSpinner traceMap__spinner" aria-hidden="true"></span>Loading service map…</div>`;
+      html = `<div class="traceMap__message${hasGraph ? " traceMap__message--over" : ""}" role="status"><span class="traceButtonSpinner traceMap__spinner" aria-hidden="true"></span>Loading service map\u2026</div>`;
     } else if (map.error) {
       html = `<div class="traceMap__message traceMap__message--error" role="alert"><strong>Service map failed</strong><span>${esc(map.error)}</span><button type="button" class="button button--small" data-map-retry>Retry</button></div>`;
     } else if (!map.data) {
@@ -518,7 +518,7 @@
     } else {
       const edge = map.layout.edges[target.index]?.edge;
       if (!edge) { tip.hidden = true; return; }
-      html = `<strong>${esc(edge.source)} → ${esc(edge.target)}</strong>`
+      html = `<strong>${esc(edge.source)} \u2192 ${esc(edge.target)}</strong>`
         + `<span>${esc(compact(edge.calls))} calls · ${esc(perSecond(edge.calls))}</span>`
         + `<span class="is-${severity(edge.error_rate)}">${esc(percent(edge.error_rate))} errors</span>`
         + `<span>p50 ${esc(duration(edge.p50_ns))} · p95 ${esc(duration(edge.p95_ns))}</span>`;
@@ -585,7 +585,7 @@
     if (!items.length) return `<section class="traceMapPanel__list"><h3>${esc(title)}</h3><p class="traceMapPanel__none">None</p></section>`;
     const rows = items.slice(0, PANEL_EDGES).map(({ item, i }) => {
       const service = item.edge[other];
-      return `<li><button type="button" class="traceMapPanel__edge" data-map-select-edge="${i}" title="${esc(`${item.edge.source} → ${item.edge.target}`)}"><span class="traceMap__dot" style="background:${ctx.serviceColor(service)}"></span><span class="traceMapPanel__edgeName">${esc(service)}</span><span>${esc(compact(item.edge.calls))}</span><span class="is-${severity(item.edge.error_rate)}">${esc(percent(item.edge.error_rate))}</span><span>${esc(duration(item.edge.p95_ns))}</span></button></li>`;
+      return `<li><button type="button" class="traceMapPanel__edge" data-map-select-edge="${i}" title="${esc(`${item.edge.source} \u2192 ${item.edge.target}`)}"><span class="traceMap__dot" style="background:${ctx.serviceColor(service)}"></span><span class="traceMapPanel__edgeName">${esc(service)}</span><span>${esc(compact(item.edge.calls))}</span><span class="is-${severity(item.edge.error_rate)}">${esc(percent(item.edge.error_rate))}</span><span>${esc(duration(item.edge.p95_ns))}</span></button></li>`;
     }).join("");
     const more = items.length > PANEL_EDGES ? `<p class="traceMapPanel__none">+${items.length - PANEL_EDGES} more</p>` : "";
     return `<section class="traceMapPanel__list"><h3>${esc(title)} <small>calls · errors · p95</small></h3><ul>${rows}</ul>${more}</section>`;
@@ -616,11 +616,11 @@
       const item = map.layout.edges[target.index];
       if (!item) { closePanel(); return; }
       const edge = item.edge;
-      html = `<header class="traceMapPanel__head"><h3 title="${esc(`${edge.source} → ${edge.target}`)}"><button type="button" class="traceMapPanel__link" data-map-select-node="${item.s}">${esc(edge.source)}</button><span aria-hidden="true">→</span><button type="button" class="traceMapPanel__link" data-map-select-node="${item.t}">${esc(edge.target)}</button></h3><button type="button" class="traceMapPanel__close" data-map-close aria-label="Close" title="Close">×</button></header>`
+      html = `<header class="traceMapPanel__head"><h3 title="${esc(`${edge.source} \u2192 ${edge.target}`)}"><button type="button" class="traceMapPanel__link" data-map-select-node="${item.s}">${esc(edge.source)}</button><span aria-hidden="true">\u2192</span><button type="button" class="traceMapPanel__link" data-map-select-node="${item.t}">${esc(edge.target)}</button></h3><button type="button" class="traceMapPanel__close" data-map-close aria-label="Close" title="Close">×</button></header>`
         + statsHtml(edge, "Calls", edge.calls)
         + `<p class="traceMapPanel__note">Durations and errors of the ${esc(edge.target)} spans whose parent span is a ${esc(edge.source)} span.</p>`
         + '<div class="traceMapPanel__actions">'
-        + `<button type="button" class="button button--primary button--small" data-map-search-edge="${target.index}">Search calls ${esc(shortName(edge.source))} → ${esc(shortName(edge.target))}</button>`
+        + `<button type="button" class="button button--primary button--small" data-map-search-edge="${target.index}">Search calls ${esc(shortName(edge.source))} \u2192 ${esc(shortName(edge.target))}</button>`
         + ((Number(edge.errors) || 0) > 0 ? `<button type="button" class="button button--small" data-map-search-edge-errors="${target.index}">Search errors</button>` : "")
         + "</div>";
     }

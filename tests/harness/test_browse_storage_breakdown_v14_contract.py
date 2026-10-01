@@ -15,7 +15,7 @@ def test_browse_uses_flat_storage_breakdown_and_share_bars() -> None:
     assert "explorerKvGrid" not in css
     assert "explorerSchemaList" not in css
     assert 'ns.results?.createStaticResultTable?.({' in ui
-    assert 'const displayName = String(item.name || "—");' in ui
+    assert 'const displayName = String(item.name || "\\u2014");' in ui
     assert 'renderStorageMetricTable(container, "Indexes", "indexes"' in ui
     assert 'renderStorageMetricTable(container, "Projections", "projections"' in ui
     assert 'renderTableFootprint(container, detail);' in ui

@@ -23,7 +23,7 @@ def test_overview_uses_ram_labels_without_resident_runtime_cards_or_extra_sectio
 def test_lineage_cards_show_plain_database_dot_table_names() -> None:
     ui = read("src/static/app_explorer.js")
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
-    assert 'const qualified = `${dep.database || "—"}.${dep.table || "—"}`;' in deps
+    assert 'const qualified = `${dep.database || "\\u2014"}.${dep.table || "\\u2014"}`;' in deps
     assert 'const qualified = `<${dep.database' not in deps
 
 

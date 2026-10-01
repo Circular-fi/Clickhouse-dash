@@ -14,12 +14,12 @@
   let loadGeneration = 0;
   let activeTab = "pipeline";
 
-  const fmtInt = (v) => Number.isFinite(Number(v)) ? new Intl.NumberFormat().format(Number(v)) : "—";
+  const fmtInt = (v) => Number.isFinite(Number(v)) ? new Intl.NumberFormat().format(Number(v)) : "\u2014";
   const fmtBytes = (v) => util && typeof util.formatBytes === "function" ? util.formatBytes(Number(v) || 0) : `${fmtInt(v)} B`;
-  const fmtMs = (v) => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString()} ms` : "—";
+  const fmtMs = (v) => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString()} ms` : "\u2014";
   const fmtSessionElapsed = (v) => Number.isFinite(Number(v)) && Number(v) >= 0
     ? (util && typeof util.formatSeconds === "function" ? util.formatSeconds(Number(v) / 1000) : fmtMs(v))
-    : "—";
+    : "\u2014";
 
   function clear(el) {
     if (el) {
@@ -314,7 +314,7 @@
     payload = response;
     renderSummary(payload);
     if (payload.partial_execution) notice("Execution stopped by result preview limit. Metrics describe a partial execution.", "warning");
-    else if (analysisLogsPending(payload)) notice("ClickHouse system logs are still being populated; refreshing automatically…", "warning");
+    else if (analysisLogsPending(payload)) notice("ClickHouse system logs are still being populated; refreshing automatically\u2026", "warning");
     else notice("");
     renderActiveTab();
   }
@@ -354,7 +354,7 @@
     syncTabs();
     if (dom.analysisModalBackdrop) dom.analysisModalBackdrop.hidden = false;
     clear(dom.analysisContent);
-    notice("Loading ClickHouse execution logs…");
+    notice("Loading ClickHouse execution logs\u2026");
     if (dom.analysisSummary) dom.analysisSummary.textContent = current.queryId;
     try {
       releaseData();

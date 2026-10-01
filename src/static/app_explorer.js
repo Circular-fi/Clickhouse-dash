@@ -199,12 +199,12 @@
   }
 
   function fmtInt(value) {
-    if (value == null) return "—";
+    if (value == null) return "\u2014";
     return util.formatInt(value);
   }
 
   function fmtBytes(value) {
-    if (value == null) return "—";
+    if (value == null) return "\u2014";
     return util.formatBytes(value);
   }
 
@@ -224,7 +224,7 @@
 
   function fmtCompactInt(value) {
     const n = Number(value);
-    if (!Number.isFinite(n)) return "—";
+    if (!Number.isFinite(n)) return "\u2014";
     try {
       return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
     } catch {
@@ -237,7 +237,7 @@
 
   function fmtRate(value, suffix) {
     const n = Number(value);
-    if (!Number.isFinite(n)) return "—";
+    if (!Number.isFinite(n)) return "\u2014";
     if (suffix === "rows/s") {
       if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(2)}B rows/s`;
       if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(2)}M rows/s`;
@@ -931,7 +931,7 @@
     const items = visibleFunctions();
     clear(dom.explorerFunctionList);
     if (!items.length) {
-      dom.explorerFunctionList.appendChild(node("div", "explorerListEmpty", model.loadingFunctions ? "Loading…" : "No functions found"));
+      dom.explorerFunctionList.appendChild(node("div", "explorerListEmpty", model.loadingFunctions ? "Loading\u2026" : "No functions found"));
       renderFunctionDetail();
       return;
     }
@@ -947,7 +947,7 @@
       const selectedInGroup = groupItems.some((item) => functionKey(item) === model.selectedFunctionKey);
       const expanded = searching || selectedInGroup || model.expandedFunctionCategories.has(category);
       const row = node("div", "explorerTreeDatabaseRow");
-      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "⌄" : "›");
+      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "\u2304" : "\u203a");
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${category}`);
       toggle.setAttribute("aria-expanded", String(expanded));
@@ -971,8 +971,8 @@
           button.type = "button";
           button.classList.toggle("is-selected", key === model.selectedFunctionKey);
           const labels = node("span", "explorerTreeObject__labels");
-          labels.append(node("span", "explorerTreeObject__name", item.name || "—"), node("span", "explorerTreeObject__meta", uniqueMetaBits([functionOrigin(item), item.kind || "Function"]).join(" · ")));
-          button.append(node("span", "explorerTreeObject__icon explorerTreeObject__icon--function", "ƒ"), labels);
+          labels.append(node("span", "explorerTreeObject__name", item.name || "\u2014"), node("span", "explorerTreeObject__meta", uniqueMetaBits([functionOrigin(item), item.kind || "Function"]).join(" · ")));
+          button.append(node("span", "explorerTreeObject__icon explorerTreeObject__icon--function", "\u0192"), labels);
           button.addEventListener("click", () => {
             model.selectedFunctionKey = key;
             model.expandedFunctionCategories.add(category);
@@ -1231,7 +1231,7 @@
     if (!list) return;
     clear(list);
     if (!databases.length) {
-      list.appendChild(node("div", "explorerListEmpty", model.loadingStorage ? "Loading…" : "No accessible databases"));
+      list.appendChild(node("div", "explorerListEmpty", model.loadingStorage ? "Loading\u2026" : "No accessible databases"));
       return;
     }
     const ordered = [...databases].sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0) || String(a.name).localeCompare(String(b.name)));
@@ -1242,7 +1242,7 @@
       button.type = "button";
       button.dataset.database = item.name;
       const head = node("span", "explorerSystemDatabase__head");
-      head.append(node("span", "explorerSystemDatabase__name", item.name), node("span", "explorerSystemDatabase__size", bytes > 0 ? fmtStorageBytes(bytes) : "—"));
+      head.append(node("span", "explorerSystemDatabase__name", item.name), node("span", "explorerSystemDatabase__size", bytes > 0 ? fmtStorageBytes(bytes) : "\u2014"));
       const meta = [`${fmtInt(item.storing_tables || 0)} tables with data`];
       if (bytes > 0) meta.push(fmtPercent(share));
       if (Number(item.resident_bytes || 0) > 0) meta.push(`${util.formatBytes(item.resident_bytes)} resident`);
@@ -1278,7 +1278,7 @@
     const root = systemStorageTree(databases);
     renderSystemDatabaseList(databases, root.bytes);
     if (dom.explorerSystemMeta) {
-      if (!model.storage) dom.explorerSystemMeta.textContent = model.loadingStorage ? "Loading…" : "";
+      if (!model.storage) dom.explorerSystemMeta.textContent = model.loadingStorage ? "Loading\u2026" : "";
       else {
         const meta = [
           `${fmtInt(databases.length)} databases`,
@@ -1292,7 +1292,7 @@
     if (!treemap || !model.storage) {
       model.systemTreemap?.destroy();
       model.systemTreemap = null;
-      dom.explorerSystemTreemap.replaceChildren(node("div", "explorerTreemap__empty", model.loadingStorage ? "Loading storage distribution…" : "Storage distribution unavailable."));
+      dom.explorerSystemTreemap.replaceChildren(node("div", "explorerTreemap__empty", model.loadingStorage ? "Loading storage distribution\u2026" : "Storage distribution unavailable."));
       if (dom.explorerSystemLegend) dom.explorerSystemLegend.replaceChildren();
       if (dom.explorerSystemFootnote) dom.explorerSystemFootnote.textContent = "";
       return;
@@ -1362,7 +1362,7 @@
         dom.explorerEmptyState.hidden = false;
         const error = model.databaseLoadErrors.get(name);
         dom.explorerEmptyState.replaceChildren(
-          node("strong", "", error ? "Unable to load database" : "Loading tables…"),
+          node("strong", "", error ? "Unable to load database" : "Loading tables\u2026"),
           node("span", "", error?.message || name),
         );
       }
@@ -1490,7 +1490,7 @@
         }
         if (value == null) {
           if (ctx.columnIndex >= 2 && ctx.columnIndex <= 8) td.classList.add("resultTable__numeric");
-          td.textContent = "—";
+          td.textContent = "\u2014";
           td.classList.add("explorerDatabaseObjectsTable__missing");
           return true;
         }
@@ -1580,7 +1580,7 @@
       .sort((a, b) => a.localeCompare(b));
 
     if (!databases.length) {
-      dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading…" : "No accessible databases"));
+      dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading\u2026" : "No accessible databases"));
       return;
     }
 
@@ -1595,7 +1595,7 @@
       const expanded = model.expandedDatabases.has(database);
       const section = node("section", "explorerTreeGroup");
       const header = node("div", `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}`);
-      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "⌄" : "›");
+      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "\u2304" : "\u203a");
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${database}`);
       toggle.setAttribute("aria-expanded", String(expanded));
@@ -1622,7 +1622,7 @@
       headerMain.type = "button";
       const databaseSummary = summaries.get(database) || null;
       const databaseMeta = [];
-      if (loading) databaseMeta.push("Loading…");
+      if (loading) databaseMeta.push("Loading\u2026");
       else if (loaded) databaseMeta.push(`${fmtInt(allItems.length)} tables`);
       else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) databaseMeta.push(`${fmtInt(databaseSummary.tables)} tables`);
       else databaseMeta.push("Tables");
@@ -1638,7 +1638,7 @@
       if (expanded) {
         const children = node("div", "explorerTreeChildren");
         if (loading && !loaded) {
-          children.appendChild(node("div", "explorerListEmpty", "Loading tables…"));
+          children.appendChild(node("div", "explorerListEmpty", "Loading tables\u2026"));
         } else if (model.databaseLoadErrors.has(database) && !loaded) {
           children.appendChild(node("div", "explorerListEmpty", "Unable to load tables"));
         } else if (loaded && !items.length) {
@@ -1651,7 +1651,7 @@
             button.classList.toggle("is-selected", key === model.selectedKey);
             button.dataset.database = table.database;
             button.dataset.table = table.name;
-            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${objectKind(table).toLowerCase().replace(/[^a-z]+/g, "-")}`, objectKind(table) === "Table" ? "▦" : objectKind(table) === "View" ? "◇" : objectKind(table) === "Materialized View" ? "◆" : "◈");
+            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${objectKind(table).toLowerCase().replace(/[^a-z]+/g, "-")}`, objectKind(table) === "Table" ? "\u25a6" : objectKind(table) === "View" ? "\u25c7" : objectKind(table) === "Materialized View" ? "\u25c6" : "\u25c8");
             const labels = node("span", "explorerTreeObject__labels");
             const footprint = summaryFootprintBytes(table);
             const stats = [
@@ -1831,7 +1831,7 @@
     const tbody = document.createElement("tbody");
     for (const values of rows) {
       const tr = document.createElement("tr");
-      for (const value of values) tr.appendChild(node("td", "", value == null ? "—" : value));
+      for (const value of values) tr.appendChild(node("td", "", value == null ? "\u2014" : value));
       tbody.appendChild(tr);
     }
     table.append(thead, tbody);
@@ -1857,7 +1857,7 @@
 
   function formatStructuredType(type) {
     const text = String(type || "").trim();
-    if (!text) return "—";
+    if (!text) return "\u2014";
     if (!/\n/.test(text) && !/(Tuple\(|Array\(Tuple\(|Map\(|Enum(?:8|16)\()/.test(text)) return text;
     let depth = 0;
     let out = "";
@@ -1888,7 +1888,7 @@
 
   function fmtPercent(value) {
     const n = Number(value);
-    if (!Number.isFinite(n)) return "—";
+    if (!Number.isFinite(n)) return "\u2014";
     if (n > 0 && n < 0.1) return "<0.1%";
     return `${n.toFixed(n < 10 ? 1 : 0)}%`;
   }
@@ -1912,7 +1912,7 @@
   function simpleRows(items) {
     const list = node("div", "explorerSimpleList");
     for (const [label, value] of items) {
-      if (value == null || value === "" || value === "—" || value === "unknown engine") continue;
+      if (value == null || value === "" || value === "\u2014" || value === "unknown engine") continue;
       const row = node("div", "explorerSimpleRow");
       row.append(node("span", "explorerSimpleRow__label", label), node("code", "explorerSimpleRow__value", value));
       list.appendChild(row);
@@ -2110,7 +2110,7 @@
 
   function renderOverview(container, detail) {
     const s = detail.summary || {};
-    if (detail?._loading) container.appendChild(node("div", "explorerFootnote", "Loading detailed metadata…"));
+    if (detail?._loading) container.appendChild(node("div", "explorerFootnote", "Loading detailed metadata\u2026"));
     const viewLike = isViewLikeSummary(s);
     const resident = isResidentMemorySummary(s);
     const empty = isEmptyRowSummary(s);
@@ -2153,7 +2153,7 @@
     // display adapters for byte values and the percentage bar; sorting,
     // headers, row indexes, typography and table geometry remain shared.
     const tableRows = rows.map((item) => {
-      const displayName = String(item.name || "—");
+      const displayName = String(item.name || "\u2014");
       const row = [
         displayName,
         item.codec && item.codec !== "unknown" ? item.codec : "-",
@@ -2191,7 +2191,7 @@
         if (ctx.columnIndex === 0) {
           td.textContent = "";
           if (item?.tuple_root && tupleExpanded) {
-            const toggle = node("button", "explorerTreeDatabaseToggle explorerStorageTupleToggle", tupleExpanded.has(item.tuple_root) ? "⌄" : "›");
+            const toggle = node("button", "explorerTreeDatabaseToggle explorerStorageTupleToggle", tupleExpanded.has(item.tuple_root) ? "\u2304" : "\u203a");
             toggle.type = "button";
             toggle.setAttribute("aria-expanded", String(tupleExpanded.has(item.tuple_root)));
             toggle.setAttribute("aria-label", `${tupleExpanded.has(item.tuple_root) ? "Collapse" : "Expand"} ${item.tuple_root}`);
@@ -2200,16 +2200,16 @@
               const opening = !tupleExpanded.has(item.tuple_root);
               if (opening) tupleExpanded.add(item.tuple_root);
               else tupleExpanded.delete(item.tuple_root);
-              toggle.textContent = opening ? "⌄" : "›";
+              toggle.textContent = opening ? "\u2304" : "\u203a";
               toggle.setAttribute("aria-expanded", String(opening));
               toggle.setAttribute("aria-label", `${opening ? "Collapse" : "Expand"} ${item.tuple_root}`);
               for (const row of table?.querySelectorAll?.("tbody tr[data-tuple-parent]") || []) {
                 if (row.dataset.tupleParent === item.tuple_root) row.hidden = !opening;
               }
             });
-            td.append(toggle, node("span", "explorerStorageTupleName", String(ctx.value ?? "—")));
+            td.append(toggle, node("span", "explorerStorageTupleName", String(ctx.value ?? "\u2014")));
           } else {
-            const label = node("span", item?.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", String(ctx.value ?? "—"));
+            const label = node("span", item?.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", String(ctx.value ?? "\u2014"));
             td.appendChild(label);
           }
           if (item?.title) td.title = item.title;
@@ -2273,7 +2273,7 @@
     for (const c of visibleColumns) {
       const compressed = optionalNumber(c.compressed_bytes);
       const uncompressed = optionalNumber(c.uncompressed_bytes);
-      const name = String(c.name || "—");
+      const name = String(c.name || "\u2014");
       const tupleParent = c.is_subcolumn
         ? (tupleRoots.find((root) => name.startsWith(`${root}.`)) || null)
         : null;
@@ -2327,7 +2327,7 @@
       const kind = String(item.kind || "");
       return {
         position,
-        name: item.name || "—",
+        name: item.name || "\u2014",
         title: item.expression || "",
         kind,
         codec: kind.startsWith("index:") ? kind.slice(6) : kind.startsWith("projection:") ? kind.slice(11) : (kind || "unknown"),
@@ -2357,7 +2357,7 @@
     for (const item of items) {
       const value = optionalNumber(item.value);
       const row = node("div", "explorerMetricBars__row");
-      const label = node("div", "explorerMetricBars__label", item.label || "—");
+      const label = node("div", "explorerMetricBars__label", item.label || "\u2014");
       if (item.title) label.title = item.title;
       const track = node("div", "explorerMetricBars__track");
       if (value == null) {
@@ -2449,7 +2449,7 @@
     }
     const rows = merges.map((merge) => [
       merge.result_part_name || merge.partition || "merge",
-      merge.partition || "—",
+      merge.partition || "\u2014",
       Number(merge.elapsed_seconds || 0),
       Math.max(0, Math.min(100, Number(merge.progress || 0) * 100)),
       Number(merge.num_parts || 0),
@@ -2484,18 +2484,18 @@
     container.appendChild(simpleRows([
       ["Engine", s.engine],
       ["Engine definition", s.engine_full],
-      ["Replica", r.available ? r.replica_name : "—"],
-      ["Active replicas", r.available ? `${r.active_replicas}/${r.total_replicas}` : "—"],
-      ["Replication queue", r.available ? fmtInt(r.queue_size) : "—"],
-      ["Absolute delay", r.available ? `${fmtInt(r.absolute_delay_seconds)}s` : "—"],
-      ["Coordination path", r.available ? r.zookeeper_path : "—"],
+      ["Replica", r.available ? r.replica_name : "\u2014"],
+      ["Active replicas", r.available ? `${r.active_replicas}/${r.total_replicas}` : "\u2014"],
+      ["Replication queue", r.available ? fmtInt(r.queue_size) : "\u2014"],
+      ["Absolute delay", r.available ? `${fmtInt(r.absolute_delay_seconds)}s` : "\u2014"],
+      ["Coordination path", r.available ? r.zookeeper_path : "\u2014"],
     ]));
     const topology = detail.topology || [];
     if (topology.length) {
       container.appendChild(dataTable(
         ["Cluster", "Shard", "Replica", "Host", "Address", "Port", "Local", "Errors", "Slowdowns", "Recovery"],
         topology.map((n) => [
-          n.cluster, fmtInt(n.shard_num), fmtInt(n.replica_num), n.host_name || "—", n.host_address || "—",
+          n.cluster, fmtInt(n.shard_num), fmtInt(n.replica_num), n.host_name || "\u2014", n.host_address || "\u2014",
           fmtInt(n.port), n.is_local ? "yes" : "no", fmtInt(n.errors_count), fmtInt(n.slowdowns_count),
           `${fmtInt(n.estimated_recovery_time)}s`,
         ]),
@@ -2510,7 +2510,7 @@
       if (distributionQueue.length) {
         container.appendChild(dataTable(
           ["Data path", "Blocked", "Errors", "Files", "Compressed", "Broken files", "Broken bytes", "Last error time", "Last exception"],
-          distributionQueue.map((q) => [q.data_path || "—", q.blocked ? "yes" : "no", fmtInt(q.error_count), fmtInt(q.data_files), fmtBytes(q.data_compressed_bytes), fmtInt(q.broken_data_files), fmtBytes(q.broken_data_compressed_bytes), q.last_exception_time || "—", q.last_exception || "—"]),
+          distributionQueue.map((q) => [q.data_path || "\u2014", q.blocked ? "yes" : "no", fmtInt(q.error_count), fmtInt(q.data_files), fmtBytes(q.data_compressed_bytes), fmtInt(q.broken_data_files), fmtBytes(q.broken_data_compressed_bytes), q.last_exception_time || "\u2014", q.last_exception || "\u2014"]),
           "explorerDataTableWrap--wide",
         ));
       } else if (sectionUnavailable("distribution_queue")) {
@@ -2533,14 +2533,14 @@
       ["Client ingress · rows/s · 5m", fmtRate(client.rows_per_second_5m, "rows/s")],
       ["Client ingress · rows/s · 1h", fmtRate(client.rows_per_second_1h, "rows/s")],
       ["Client ingress · bytes/s · 1m", fmtRate(client.bytes_per_second_1m, "bytes/s")],
-      ["Client ingress · total · 1h", client.rows_total_1h == null && client.bytes_total_1h == null ? "—" : `${fmtInt(client.rows_total_1h)} rows · ${fmtBytes(client.bytes_total_1h)}`],
+      ["Client ingress · total · 1h", client.rows_total_1h == null && client.bytes_total_1h == null ? "\u2014" : `${fmtInt(client.rows_total_1h)} rows · ${fmtBytes(client.bytes_total_1h)}`],
       ["Physical writes · rows/s · 1m", fmtRate(physical.rows_per_second_1m, "rows/s")],
       ["Physical writes · rows/s · 5m", fmtRate(physical.rows_per_second_5m, "rows/s")],
       ["Physical writes · bytes/s · 1m", fmtRate(physical.bytes_per_second_1m, "bytes/s")],
-      ["Physical writes · total · 1h", physical.rows_total_1h == null && physical.bytes_total_1h == null ? "—" : `${fmtInt(physical.rows_total_1h)} rows · ${fmtBytes(physical.bytes_total_1h)}`],
+      ["Physical writes · total · 1h", physical.rows_total_1h == null && physical.bytes_total_1h == null ? "\u2014" : `${fmtInt(physical.rows_total_1h)} rows · ${fmtBytes(physical.bytes_total_1h)}`],
       ["New parts / minute", fmtInt(physical.new_parts_per_minute)],
-      ["Last client write", client.last_event_time || "—"],
-      ["Last physical write", physical.last_event_time || "—"],
+      ["Last client write", client.last_event_time || "\u2014"],
+      ["Last physical write", physical.last_event_time || "\u2014"],
     ]));
     container.appendChild(node("div", "explorerFootnote", "Client ingress and physical persisted writes are intentionally separate. MV output and Buffer forwarding are not merged into either label."));
   }
@@ -2566,12 +2566,12 @@
       group.appendChild(node("h4", "explorerDependencyGroup__title", relation === "upstream" ? "Upstream" : "Downstream"));
       const list = node("div", "explorerDependencyList");
       if (!items.length) {
-        list.appendChild(node("div", "explorerDependencyEmpty", "—"));
+        list.appendChild(node("div", "explorerDependencyEmpty", "\u2014"));
       } else {
         for (const dep of items) {
           const button = node("button", "explorerDependencyItem");
           button.type = "button";
-          const qualified = `${dep.database || "—"}.${dep.table || "—"}`;
+          const qualified = `${dep.database || "\u2014"}.${dep.table || "\u2014"}`;
           const label = node("code", "explorerDependencyItem__qualified", qualified);
           label.title = `${dep.database || ""}.${dep.table || ""}`;
           button.appendChild(label);
@@ -2626,7 +2626,7 @@
   }
 
   function renderIndexes(container, detail) {
-    const rows = (detail.indexes_and_projections || []).map((p) => [p.name, p.kind, p.expression || "—", p.compressed_bytes == null ? "—" : fmtBytes(p.compressed_bytes)]);
+    const rows = (detail.indexes_and_projections || []).map((p) => [p.name, p.kind, p.expression || "\u2014", p.compressed_bytes == null ? "\u2014" : fmtBytes(p.compressed_bytes)]);
     if (!rows.length) container.appendChild(node("div", "explorerEmptySection", "No visible data-skipping indexes or projections were returned."));
     else container.appendChild(dataTable(["Name", "Kind", "Expression", "Compressed"], rows));
   }
@@ -2638,19 +2638,19 @@
       return;
     }
     container.appendChild(simpleRows([
-      ["Replica", r.replica_name || "—"],
+      ["Replica", r.replica_name || "\u2014"],
       ["Active replicas", `${fmtInt(r.active_replicas)}/${fmtInt(r.total_replicas)}`],
       ["Queue size", fmtInt(r.queue_size)],
       ["Absolute delay", `${fmtInt(r.absolute_delay_seconds)}s`],
       ["Read-only", r.readonly ? "yes" : "no"],
       ["Session expired", r.session_expired ? "yes" : "no"],
-      ["Coordination path", r.zookeeper_path || "—"],
+      ["Coordination path", r.zookeeper_path || "\u2014"],
     ]));
     const queue = detail.replication_queue || [];
     if (queue.length) {
       container.appendChild(dataTable(
         ["Type", "Created", "Source replica", "Part", "Tries", "Last attempt", "Last exception"],
-        queue.map((q) => [q.type, q.create_time, q.source_replica || "—", q.new_part_name || "—", fmtInt(q.num_tries), q.last_attempt_time || "—", q.last_exception || "—"]),
+        queue.map((q) => [q.type, q.create_time, q.source_replica || "\u2014", q.new_part_name || "\u2014", fmtInt(q.num_tries), q.last_attempt_time || "\u2014", q.last_exception || "\u2014"]),
         "explorerDataTableWrap--wide",
       ));
     } else if (sectionUnavailable("replication_queue")) {
@@ -2674,7 +2674,7 @@
     container.appendChild(node("h3", "explorerSectionTitle", "Mutations"));
     if (mutations.length) {
       container.appendChild(dataTable(["Mutation", "Created", "State", "Parts to do", "Command", "Last failure"], mutations.map((m) => [
-        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "—",
+        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "\u2014",
       ]), "explorerDataTableWrap--wide"));
     } else container.appendChild(node("div", "explorerEmptySection", sectionUnavailable("mutations") ? "Mutation metadata unavailable." : "No mutations."));
   }
@@ -2722,7 +2722,7 @@
     if (mutations.length) {
       container.appendChild(sectionTitle("Mutations"));
       container.appendChild(dataTable(["Mutation", "Created", "State", "Parts to do", "Command", "Last failure"], mutations.map((m) => [
-        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "—",
+        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "\u2014",
       ]), "explorerDataTableWrap--wide"));
     } else if (sectionUnavailable("mutations")) {
       container.appendChild(unavailableMessage("Mutation metadata"));
@@ -2755,7 +2755,7 @@
     if (mutations.length) {
       container.appendChild(sectionTitle("Mutations"));
       container.appendChild(dataTable(["Mutation", "Created", "State", "Parts to do", "Command", "Last failure"], mutations.map((m) => [
-        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "—",
+        m.mutation_id, m.create_time, m.done ? "done" : "pending", fmtInt(m.parts_to_do), m.command, m.latest_fail_reason || "\u2014",
       ]), "explorerDataTableWrap--wide"));
     }
   }
@@ -2967,7 +2967,7 @@
     toolbar.append(actions);
     container.appendChild(toolbar);
 
-    if (model.previewLoading) return container.appendChild(node("div", "explorerEmptySection", "Loading preview…"));
+    if (model.previewLoading) return container.appendChild(node("div", "explorerEmptySection", "Loading preview\u2026"));
     if (!model.preview) {
       container.appendChild(node("div", "explorerEmptySection", "Preview not loaded."));
       setTimeout(loadPreview, 0);
@@ -3040,7 +3040,7 @@
     const detail = model.detail;
     if (!detail) return;
     if (detail._loading && model.tab !== "Overview") {
-      container.appendChild(node("div", "explorerEmptySection", "Loading detailed metadata…"));
+      container.appendChild(node("div", "explorerEmptySection", "Loading detailed metadata\u2026"));
       return;
     }
 
@@ -3120,7 +3120,7 @@
     } else {
       if (dom.explorerEmptyState) {
         dom.explorerEmptyState.hidden = false;
-        dom.explorerEmptyState.replaceChildren(node("strong", "", "Loading table…"), node("span", "", `${database}.${table}`));
+        dom.explorerEmptyState.replaceChildren(node("strong", "", "Loading table\u2026"), node("span", "", `${database}.${table}`));
       }
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
     }

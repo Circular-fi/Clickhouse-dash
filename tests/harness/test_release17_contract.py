@@ -86,7 +86,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
     assert 'function ttlTimingSummary(rule)' in graph
     assert 'if (base && offset) return `${base} ${offset}`;' in graph
     assert 'lines.push(ttlTimingSummary(event));' in graph
-    assert '`MOVE → ${kind ? `${kind} ` : ""}${target}`' in graph
+    assert '`MOVE \\u2192 ${kind ? `${kind} ` : ""}${target}`' in graph
     assert 'lines.push("DELETE");' in graph
     assert 'ctx.globalAlpha = 1;' in graph[graph.index('function drawLifecycleEdgeLabel('):graph.index('function drawNode(')]
     assert 'function alignPhysicalStorageRows(' in graph

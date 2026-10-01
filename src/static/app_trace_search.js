@@ -131,8 +131,8 @@
   }
 
   function durationLabel(duration) {
-    if (duration.min && duration.max) return `${durationText(duration.min)} – ${durationText(duration.max)}`;
-    return duration.min ? `≥ ${durationText(duration.min)}` : `≤ ${durationText(duration.max)}`;
+    if (duration.min && duration.max) return `${durationText(duration.min)} \u2013 ${durationText(duration.max)}`;
+    return duration.min ? `\u2265 ${durationText(duration.min)}` : `\u2264 ${durationText(duration.max)}`;
   }
 
   // Sets (or clears, with null) the trace duration filter; the caller searches.
@@ -678,7 +678,7 @@
   }
 
   function facetValuesHtml(scope, key, entry, estimated) {
-    if (entry.loading && !entry.values) return '<div class="traceFacet__status">Loading values…</div>';
+    if (entry.loading && !entry.values) return '<div class="traceFacet__status">Loading values\u2026</div>';
     if (entry.error) return `<div class="traceFacet__status is-error" role="alert">${esc(entry.error)}</div>`;
     const values = [...(entry.values || [])];
     // Values filtered on stay listed (checked) even outside the top values.
@@ -691,12 +691,12 @@
       const included = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "="));
       const excluded = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "!="));
       const shown = item.value === "" ? '""' : item.value;
-      const count = item.count == null ? "—" : `${estimated || entry.estimated ? "≈" : ""}${compactCount(item.count)}`;
+      const count = item.count == null ? "\u2014" : `${estimated || entry.estimated ? "\u2248" : ""}${compactCount(item.count)}`;
       return `<div class="traceFacetValue${excluded ? " is-excluded" : ""}" data-facet-value="${esc(item.value)}"><label class="traceFacetValue__label" title="${esc(item.value)}"><input type="checkbox" data-facet-include${included ? " checked" : ""}><span class="traceFacetValue__text">${esc(shown)}</span></label><span class="traceFacetValue__count" title="${item.count == null ? "Not in the sampled top values" : `${Number(item.count).toLocaleString()} span${item.count === 1 ? "" : "s"}${estimated || entry.estimated ? " (estimated from a sample)" : ""}`}">${esc(count)}</span><button type="button" class="traceFacetValue__exclude" data-facet-exclude aria-pressed="${excluded ? "true" : "false"}" title="${excluded ? "Stop excluding this value" : "Exclude this value"}" aria-label="${excluded ? "Stop excluding" : "Exclude"} ${esc(shown)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/><path d="M4.4 11.6 11.6 4.4"/></svg></button></div>`;
     }).join("");
     const next = VALUE_LIMITS.find((limit) => limit > entry.limit);
     const more = entry.hasMore && next ? `<button type="button" class="traceFacet__more" data-facet-more-values>Load more values</button>` : "";
-    return `<div class="traceFacet__valueList">${rows}</div>${entry.loading ? '<div class="traceFacet__status">Loading values…</div>' : more}`;
+    return `<div class="traceFacet__valueList">${rows}</div>${entry.loading ? '<div class="traceFacet__status">Loading values\u2026</div>' : more}`;
   }
 
   function facetHtml(item, pinned) {
@@ -704,7 +704,7 @@
     const entry = facets.expanded.get(id);
     const open = !!entry;
     const active = search.chips.some((chip) => chip.kind === "tag" && chip.key === item.key && (chip.scope === item.scope || chip.scope === "any"));
-    const count = item.count == null ? "" : `${facets.estimated ? "≈" : ""}${compactCount(item.count)}`;
+    const count = item.count == null ? "" : `${facets.estimated ? "\u2248" : ""}${compactCount(item.count)}`;
     const title = item.count == null ? item.key : `${item.key}: ${Number(item.count).toLocaleString()} span${item.count === 1 ? "" : "s"}${facets.estimated ? " in the sample" : ""}`;
     return `<section class="traceFacet${open ? " is-open" : ""}${active ? " is-active" : ""}" data-facet-scope="${esc(item.scope)}" data-facet-key="${esc(item.key)}">
       <div class="traceFacet__head"><button type="button" class="traceFacet__expand" data-facet-expand aria-expanded="${open ? "true" : "false"}" title="${esc(title)}"><svg class="traceFacet__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg><span class="traceFacet__scope traceFacet__scope--${esc(item.scope)}" title="${item.scope === "resource" ? "Resource attribute" : "Span attribute"}">${item.scope === "resource" ? "R" : "S"}</span><span class="traceFacet__key">${esc(item.key)}</span><span class="traceFacet__count">${esc(count)}</span></button><button type="button" class="traceFacet__pin" data-facet-pin aria-pressed="${pinned ? "true" : "false"}" title="${pinned ? "Unpin" : "Pin to the top"}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(item.key)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.6 2.2v1H4v-1l2.6-2.2zM8 9.7V14"/></svg></button></div>
@@ -718,7 +718,7 @@
     syncToggle();
     if (!list) return;
     if (meta) {
-      meta.textContent = facets.loading ? "Loading…" : facets.keys.length ? `${facets.estimated ? "≈" : ""}${compactCount(facets.sampled)} spans` : "";
+      meta.textContent = facets.loading ? "Loading\u2026" : facets.keys.length ? `${facets.estimated ? "\u2248" : ""}${compactCount(facets.sampled)} spans` : "";
       meta.title = facets.estimated
         ? `Estimated: counted over a sample of ${facets.sampled.toLocaleString()} matching spans${facets.timedOut ? " (the time budget stopped the scan)" : ""}.`
         : facets.keys.length ? `Counted over all ${facets.sampled.toLocaleString()} matching spans of the range.` : "";
@@ -734,7 +734,7 @@
     const rest = facets.keys.filter((item) => !facets.pins.includes(facetId(item.scope, item.key)) && matches(item));
     const shown = rest.slice(0, facets.shown);
     if (!pinned.length && !rest.length) {
-      list.innerHTML = `<div class="traceFacets__empty">${facets.loading ? "Loading attributes…" : query ? "No attribute key matches." : "No attributes in the matching spans."}</div>`;
+      list.innerHTML = `<div class="traceFacets__empty">${facets.loading ? "Loading attributes\u2026" : query ? "No attribute key matches." : "No attributes in the matching spans."}</div>`;
       return;
     }
     const more = rest.length > shown.length

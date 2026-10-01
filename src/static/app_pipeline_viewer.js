@@ -12,7 +12,7 @@
 
   const fmtInt = (value) => Number.isFinite(Number(value))
     ? new Intl.NumberFormat().format(Number(value))
-    : "—";
+    : "\u2014";
 
   const fmtBytes = (value) => util && typeof util.formatBytes === "function"
     ? util.formatBytes(Number(value) || 0)
@@ -632,7 +632,7 @@
     const legend = element("div", "legend");
     legend.append(element("span", "explanation", "Stages process blocks concurrently. Read each row on the same time axis."));
     const scale = element("span", "densityLegend", "Height + shade: work density ");
-    scale.append(element("span", "densityRamp"), document.createTextNode(" low → high"));
+    scale.append(element("span", "densityRamp"), document.createTextNode(" low \u2192 high"));
     scale.title = "Same color scale for every stage. Summed processor work divided by the observed window duration; not CPU utilization. Activity inside each summary window is coalesced.";
     legend.append(scale);
     root.appendChild(legend);
@@ -647,7 +647,7 @@
       : "Detailed Tracing is truncated; missing activity cannot be reconstructed from first/last timestamps.");
     if (model.envelopeCount) warnings.push("Older summary: dashed ranges show first/last timestamps only. Run with profiling again to record activity windows.");
     if (model.unmatched) warnings.push(`${model.unmatched} timing groups have an ambiguous stage match.`);
-    if (model.estimatedCount) warnings.push("≈ marks an estimated stage match; the timestamps themselves are measured.");
+    if (model.estimatedCount) warnings.push("\u2248 marks an estimated stage match; the timestamps themselves are measured.");
     if (model.invalidIdentities) warnings.push("Some processor IDs are missing, duplicated or imprecise; their links are unavailable.");
     if (model.cyclic) warnings.push("The stage graph contains a cycle; remaining stages use a stable display order.");
     if (!model.start && !options.traceError && !options.summaryError) warnings.push("No OpenTelemetry timing is available; processor counters are shown below.");
@@ -669,10 +669,10 @@
       setView(view.start + (view.width - width) / 2, view.start + (view.width + width) / 2);
     };
     const reset = button("Full query", "Show the complete query", () => setView(0, model.window));
-    const back = button("←", "Move to earlier activity", () => shift(-1));
-    const zoomOut = button("−", "Zoom out", () => zoom(2));
+    const back = button("\u2190", "Move to earlier activity", () => shift(-1));
+    const zoomOut = button("\u2212", "Zoom out", () => zoom(2));
     const zoomIn = button("+", "Zoom in", () => zoom(0.5));
-    const forward = button("→", "Move to later activity", () => shift(1));
+    const forward = button("\u2192", "Move to later activity", () => shift(1));
     const end = button("End · 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
     const rangeLabel = element("output", "range");
     rangeLabel.setAttribute("aria-live", "polite");
@@ -691,7 +691,7 @@
     const body = element("div", "scroll");
     const head = element("div", "head");
     const timelineHead = element("div", "timelineHead");
-    const workHead = element("div", "workHead", "Work Σ · share");
+    const workHead = element("div", "workHead", "Work \u03a3 · share");
     workHead.title = "Accumulated active processor time and share of total recorded work. This is not elapsed query time.";
     const metricsHead = element("div", "metricsHead");
     for (const label of ["In wait max", "Out wait max", "Input", "Output"]) metricsHead.appendChild(element("span", "", label));
@@ -735,7 +735,7 @@
       if (overviewTables.length === 1 && /read|source|mergetree/i.test(`${group.planStepName} ${sub.textContent}`)) sub.textContent += ` · ${overviewTables[0]}`;
       stageText.title = `${title.textContent}\n${sub.textContent}\n${group.description || ""}\nHost: ${group.hostname || "unknown"}\nQuery: ${group.queryId || "unknown"}`;
       stageText.append(title, sub);
-      const focus = button("⌕", `Focus activity for stage ${index + 1}: ${stageTitle(group)}`, () => focusGroup(group));
+      const focus = button("\u2315", `Focus activity for stage ${index + 1}: ${stageTitle(group)}`, () => focusGroup(group));
       focus.classList.add("pipelineViewer__focus");
       focus.disabled = !group.segments.length;
       stage.append(element("span", "ordinal", String(index + 1).padStart(2, "0")), stageText, focus);
@@ -753,8 +753,8 @@
       metrics.append(
         metric("In wait", durationLabel(group.inputWaitMax), "Maximum input wait on one processor; its position in time is not recorded."),
         metric("Out wait", durationLabel(group.outputWaitMax), "Maximum output/backpressure wait on one processor; its position in time is not recorded."),
-        metric("Input", [group.flowApproximate ? `≈ ${fmtInt(group.inputRows)}` : fmtInt(group.inputRows), fmtBytes(group.inputBytes)], "Sum at stage entry processors; incomplete boundaries are approximate."),
-        metric("Output", [group.flowApproximate ? `≈ ${fmtInt(group.outputRows)}` : fmtInt(group.outputRows), fmtBytes(group.outputBytes)], "Sum at stage exit processors; parallel lanes are included."));
+        metric("Input", [group.flowApproximate ? `\u2248 ${fmtInt(group.inputRows)}` : fmtInt(group.inputRows), fmtBytes(group.inputBytes)], "Sum at stage entry processors; incomplete boundaries are approximate."),
+        metric("Output", [group.flowApproximate ? `\u2248 ${fmtInt(group.outputRows)}` : fmtInt(group.outputRows), fmtBytes(group.outputBytes)], "Sum at stage exit processors; parallel lanes are included."));
       row.append(stage, timeline, work, metrics);
       return { group, row, timeline, order: index };
     }
@@ -767,10 +767,10 @@
 
     const hint = element("div", "hint");
     const defaultHint = () => number(options.summaryBucketUs) > 0
-      ? `Summary resolution: ${durationLabel(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use ⌕ to focus a stage.`
+      ? `Summary resolution: ${durationLabel(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use \u2315 to focus a stage.`
       : model.envelopeCount
-        ? "Dashed ranges contain unknown activity gaps. Work Σ stays available even when the temporal detail is missing."
-        : "Recorded intervals use the available trace resolution. Work Σ covers the whole query; waits have no recorded position on the time axis.";
+        ? "Dashed ranges contain unknown activity gaps. Work \u03a3 stays available even when the temporal detail is missing."
+        : "Recorded intervals use the available trace resolution. Work \u03a3 covers the whole query; waits have no recorded position on the time axis.";
     hint.textContent = defaultHint();
     table.appendChild(body);
     root.append(table, hint);
@@ -818,7 +818,7 @@
       timelineHead.replaceChildren(document.createTextNode(model.start ? "Activity density over time" : "Activity timing unavailable"));
       if (model.start) addTimelineTicks(timelineHead, view);
       rangeLabel.textContent = model.start
-        ? `${timeLabel(view.start, view.width)} → ${timeLabel(view.finish, view.width)} · ${(model.window / view.width).toFixed(1)}×`
+        ? `${timeLabel(view.start, view.width)} \u2192 ${timeLabel(view.finish, view.width)} · ${(model.window / view.width).toFixed(1)}×`
         : "No recorded timestamps";
       reset.disabled = !model.start || view.width >= model.window;
       back.disabled = !model.start || view.start <= 0;
@@ -865,7 +865,7 @@
             const time = absoluteStart + (event.clientX - bounds.left) / bounds.width * view.width;
             const cell = cells.find((candidate) => time >= candidate.start && time <= candidate.finish);
             hint.textContent = cell
-              ? `${stageTitle(group)}${group.timingEstimated ? " · ≈ stage match" : ""}: ${timeLabel(cell.start - model.start, view.width)} → ${timeLabel(cell.finish - model.start, view.width)} · ${cell.bucketed ? `≈ ${durationLabel(cell.workUs)} work in this display cell; activity inside the summary window is unknown.` : "Recorded intervals at the available trace resolution."}`
+              ? `${stageTitle(group)}${group.timingEstimated ? " · \u2248 stage match" : ""}: ${timeLabel(cell.start - model.start, view.width)} \u2192 ${timeLabel(cell.finish - model.start, view.width)} · ${cell.bucketed ? `\u2248 ${durationLabel(cell.workUs)} work in this display cell; activity inside the summary window is unknown.` : "Recorded intervals at the available trace resolution."}`
               : defaultHint();
           };
           timeline.onpointerleave = () => { hint.textContent = defaultHint(); };
@@ -889,7 +889,7 @@
             first = Math.min(first, segment.start);
             last = Math.max(last, segment.finish);
           }
-          const label = element("span", "timeRange", `${group.timingEstimated ? "≈ " : ""}${envelopes.length && !cells.length ? "First / last only · " : ""}${timeLabel(Math.max(0, first - model.start), view.width)} → ${timeLabel(last - model.start, view.width)}`);
+          const label = element("span", "timeRange", `${group.timingEstimated ? "\u2248 " : ""}${envelopes.length && !cells.length ? "First / last only · " : ""}${timeLabel(Math.max(0, first - model.start), view.width)} \u2192 ${timeLabel(last - model.start, view.width)}`);
           label.title = "First and last observed activity in this view; this range is not continuous work.";
           timeline.appendChild(label);
         } else {

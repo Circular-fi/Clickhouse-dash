@@ -1594,7 +1594,7 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
-  content: "↕";
+  content: "\2195";
   position: absolute;
   margin-left: 0.4rem;
   top: 50%;
@@ -1610,12 +1610,12 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
-  content: "▲";
+  content: "\25b2";
   opacity: 0.9;
 }
 
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
-  content: "▼";
+  content: "\25bc";
   opacity: 0.9;
 }
 
@@ -9371,7 +9371,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   .traceInspector { max-height: 260px; border-top: 1px solid var(--border); }
 }
 
-/* Trace Explorer v2 — Jaeger-inspired search/results/detail composition. */
+/* Trace Explorer v2 - Jaeger-inspired search/results/detail composition. */
 .tracesWorkspace--jaeger {
   padding: 0;
   overflow: hidden;
@@ -9843,7 +9843,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   .traceInspectorKv--horizontal { grid-template-columns: auto minmax(0, 1fr); }
 }
 
-/* Trace search dashboard — dense full-width search, analytics and result rows. */
+/* Trace search dashboard - dense full-width search, analytics and result rows. */
 .traceSearchView {
   flex: 1 1 auto;
   min-height: 0;
@@ -10526,7 +10526,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 .traceJaegerGroup > summary::-webkit-details-marker { display: none; }
 .traceJaegerGroup > summary::before {
-  content: "›";
+  content: "\203a";
   width: 10px;
   flex: 0 0 10px;
   color: var(--muted);
@@ -10654,7 +10654,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   .traceInspectorHead__meta { margin-left: 0; justify-content: flex-start; }
 }
 
-/* Trace detail/list polish — denser rows, inline multi-inspectors, stronger picker styling. */
+/* Trace detail/list polish - denser rows, inline multi-inspectors, stronger picker styling. */
 .traceWaterfall--jaeger,
 .traceTimelineFrame,
 .traceWaterfallBody,
@@ -13714,7 +13714,7 @@ html[data-theme="light"] {
 }
 .traceJson > summary::-webkit-details-marker { display: none; }
 .traceJson > summary::before {
-  content: "›";
+  content: "\203a";
   display: inline-block;
   width: 10px;
   color: var(--muted);
@@ -13760,7 +13760,7 @@ html[data-theme="light"] {
 }
 .traceSpanEvent > summary::-webkit-details-marker { display: none; }
 .traceSpanEvent > summary::before {
-  content: "›";
+  content: "\203a";
   flex: 0 0 9px;
   color: var(--muted);
   font-size: 14px;
@@ -14748,7 +14748,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   html.chdash-trace-facets-collapsed .traceFacets { width: auto; }
 }
 
-/* Laptop widths (1101–1440 px): the fixed column minimums of the trace search
+/* Laptop widths (1101-1440 px): the fixed column minimums of the trace search
    bar added up to more than the viewport at 1280 px, clipping the Search
    button. Range, service, operation, tag and the button shrink to fit; status
    and results keep their 120 px. */

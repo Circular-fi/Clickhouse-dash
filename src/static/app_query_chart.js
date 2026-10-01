@@ -230,7 +230,7 @@
   // Full instant for tooltips: 2026-09-30 14:05:00 (milliseconds when the
   // data has them).
   function formatInstant(ms, withMillis) {
-    if (!Number.isFinite(ms)) return "—";
+    if (!Number.isFinite(ms)) return "\u2014";
     const d = new Date(Math.floor(ms));
     const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     return `${date} ${clockLabel(d.getTime(), withMillis ? "milli" : "second")}`;
@@ -955,7 +955,7 @@
         dirty = false;
       }
       syncTypeButtons(rows.length);
-      if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows…"); return; }
+      if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows\u2026"); return; }
       if (!cfg.series.length) { showMessage("Select at least one numeric series."); return; }
       const type = effectiveType(rows.length);
       hostEl.dataset.chartType = type;
@@ -1121,7 +1121,7 @@
         xOf = (i) => left + (i + 0.5) * band;
         barWidth = Math.max(1, Math.min(60, band * 0.72));
         const maxChars = 18;
-        const labels = model.categories.map((c) => (c.length > maxChars ? `${c.slice(0, maxChars - 1)}…` : c));
+        const labels = model.categories.map((c) => (c.length > maxChars ? `${c.slice(0, maxChars - 1)}\u2026` : c));
         const widest = labels.reduce((m, c) => Math.max(m, labelWidthPx(c)), 0);
         const every = Math.max(1, Math.ceil((Math.min(widest, labelWidthPx("x".repeat(maxChars))) + 10) / band));
         const parts = [];
@@ -1334,7 +1334,7 @@
       if (hover.stacked && hover.visible.length > 1 && anyValue) {
         rowsHtml.push(`<span class="queryChart__tipRow queryChart__tipRow--total"><i></i><em>Total</em><b>${esc(formatFullNumber(total))}</b></span>`);
       }
-      if (!rowsHtml.length) rowsHtml.push(`<span class="queryChart__tipRow is-empty"><i></i><em>No value</em><b>—</b></span>`);
+      if (!rowsHtml.length) rowsHtml.push(`<span class="queryChart__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
       layer.querySelector(".queryChart__hoverDots").innerHTML = dots;
       layer.removeAttribute("hidden");
       tooltipEl.innerHTML = `<strong>${esc(xLabelAt(i))}</strong>${rowsHtml.join("")}`;

@@ -1400,7 +1400,7 @@ button.button:not(:disabled):hover {
   padding-right: 1.9rem;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
-  content: "↕";
+  content: "\2195";
   position: absolute;
   margin-left: 0.4rem;
   top: 50%;
@@ -1414,11 +1414,11 @@ button.button:not(:disabled):hover {
   opacity: 0.8;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
-  content: "▲";
+  content: "\25b2";
   opacity: 0.9;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
-  content: "▼";
+  content: "\25bc";
   opacity: 0.9;
 }
 .resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {

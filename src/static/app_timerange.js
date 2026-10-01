@@ -203,7 +203,7 @@
   }
 
   // Grafana rangeutil.describeTimeRange: a known range by name, "Last N
-  // units" for now-N to now, otherwise both sides ("→" between them).
+  // units" for now-N to now, otherwise both sides ("->" between them).
   function describeRange(raw) {
     const quick = QUICK_RANGES.find((option) => sameRange(option, raw));
     if (quick) return { text: quick.display, relative: true };
@@ -215,14 +215,14 @@
     }
     const a = parseAbsolute(from);
     const b = parseAbsolute(to);
-    if (!a || !b) return { text: `${a ? formatSide(a) : from} → ${b ? formatSide(b) : to}`, relative: isRelative(raw) };
+    if (!a || !b) return { text: `${a ? formatSide(a) : from} \u2192 ${b ? formatSide(b) : to}`, relative: isRelative(raw) };
     const wholeDays = (a.dateOnly || (a.hours === 0 && a.minutes === 0 && a.seconds === 0))
       && (b.dateOnly || (b.hours === 23 && b.minutes === 59 && b.seconds === 59));
     const aDay = dayKey(a.date);
     const bDay = dayKey(b.date);
-    if (wholeDays) return { text: aDay === bDay ? aDay : `${aDay} → ${bDay}`, relative: false };
+    if (wholeDays) return { text: aDay === bDay ? aDay : `${aDay} \u2192 ${bDay}`, relative: false };
     const bText = formatSide(b);
-    return { text: `${formatSide(a)} → ${aDay === bDay && !b.dateOnly ? bText.slice(11) : bText}`, relative: false };
+    return { text: `${formatSide(a)} \u2192 ${aDay === bDay && !b.dateOnly ? bText.slice(11) : bText}`, relative: false };
   }
 
   function formatSide(absolute) {
@@ -470,7 +470,7 @@
       parts.push('<div class="timeRangeList__heading" id="tracesQuickRangesHeading">Quick ranges</div>');
       parts.push(quick.length
         ? `<div class="timeRangeList__group" role="group" aria-labelledby="tracesQuickRangesHeading" data-group="quick">${quick.map((option) => listItem(option, option.display, "quick")).join("")}</div>`
-        : `<div class="timeRangeList__empty">No quick range matches “${esc(query)}”.</div>`);
+        : `<div class="timeRangeList__empty">No quick range matches \u201c${esc(query)}\u201d.</div>`);
       lists.innerHTML = parts.join("");
     }
 

@@ -3017,10 +3017,10 @@
     let high = text.length;
     while (low < high) {
       const mid = Math.ceil((low + high) / 2);
-      if (ctx.measureText(`${text.slice(0, mid)}…`).width <= maxWidth) low = mid;
+      if (ctx.measureText(`${text.slice(0, mid)}\u2026`).width <= maxWidth) low = mid;
       else high = mid - 1;
     }
-    return `${text.slice(0, low)}…`;
+    return `${text.slice(0, low)}\u2026`;
   }
 
   function ttlTimingSummary(rule) {
@@ -3038,7 +3038,7 @@
     if (action === "recompress") return target ? `RECOMPRESS · ${target}` : "RECOMPRESS";
     if (action === "move") {
       const kind = targetKind ? `${targetKind.toUpperCase()} ` : "";
-      return target ? `MOVE → ${kind}${target}` : "MOVE";
+      return target ? `MOVE \u2192 ${kind}${target}` : "MOVE";
     }
     if (action === "delete") return target ? `DELETE · ${target}` : "DELETE";
     if (action === "group_by") return target ? `GROUP BY · ${target}` : "GROUP BY";
@@ -3084,7 +3084,7 @@
     const free = Number(disk.disk_free_space);
     const total = Number(disk.disk_total_space);
     const used = Math.max(0, total - free);
-    const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity —";
+    const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity \u2014";
     return `${pct} · ${util.formatBytes(free)} free`;
   }
 
@@ -3220,7 +3220,7 @@
       if (event.action === "move") {
         const kind = String(event.target_kind || "").toUpperCase();
         const target = String(event.target || "");
-        lines.push(target ? `MOVE → ${kind ? `${kind} ` : ""}${target}` : "MOVE");
+        lines.push(target ? `MOVE \u2192 ${kind ? `${kind} ` : ""}${target}` : "MOVE");
       } else if (event.action === "delete") {
         lines.push("DELETE");
       }
@@ -3321,7 +3321,7 @@
       const free = Number(node.disk_free_space);
       const total = Number(node.disk_total_space);
       const used = Math.max(0, total - free);
-      const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity —";
+      const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity \u2014";
       ctx.fillStyle = css("--muted", "#8993a4");
       ctx.font = "9px Arial, Helvetica, sans-serif";
       ctx.fillText(`${pct} · ${util.formatBytes(free)} free`, item.x + 10, item.y + 47);
@@ -3332,12 +3332,12 @@
       ctx.fillStyle = css("--muted", "#8993a4");
       ctx.font = "10px Arial, Helvetica, sans-serif";
       const rows = node.rows == null
-        ? (node.kind === "buffer" ? "— buffered rows" : "— rows")
+        ? (node.kind === "buffer" ? "\u2014 buffered rows" : "\u2014 rows")
         : `${util.formatInt(node.rows)}${node.kind === "buffer" ? " buffered rows" : " rows"}`;
       const memoryResident = node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary";
       const rawBytes = memoryResident ? node.resident_bytes : node.logical_bytes;
       const bytes = rawBytes == null
-        ? "—"
+        ? "\u2014"
         : `${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`;
       ctx.fillText(`${rows} · ${bytes}`, item.x + 10, item.y + 52);
       if (model.detailMode === "physical" && node.storage_policy) {
@@ -3345,12 +3345,12 @@
         ctx.fillText(canvasEllipsis(ctx, `Storage policy · ${node.storage_policy}`, item.width - 20), item.x + 10, item.y + 70);
       }
       if (node.kind === "buffer") {
-        const minTime = node.buffer_min_time == null ? "—" : `${util.formatInt(node.buffer_min_time)}s`;
-        const maxTime = node.buffer_max_time == null ? "—" : `${util.formatInt(node.buffer_max_time)}s`;
-        const minRows = node.buffer_min_rows == null ? "—" : util.formatInt(node.buffer_min_rows);
-        const maxRows = node.buffer_max_rows == null ? "—" : util.formatInt(node.buffer_max_rows);
+        const minTime = node.buffer_min_time == null ? "\u2014" : `${util.formatInt(node.buffer_min_time)}s`;
+        const maxTime = node.buffer_max_time == null ? "\u2014" : `${util.formatInt(node.buffer_max_time)}s`;
+        const minRows = node.buffer_min_rows == null ? "\u2014" : util.formatInt(node.buffer_min_rows);
+        const maxRows = node.buffer_max_rows == null ? "\u2014" : util.formatInt(node.buffer_max_rows);
         ctx.font = "9px Arial, Helvetica, sans-serif";
-        ctx.fillText(`${node.buffer_layers || "—"} layers · ${minTime}–${maxTime} · ${minRows}–${maxRows} rows`, item.x + 10, item.y + 69);
+        ctx.fillText(`${node.buffer_layers || "\u2014"} layers · ${minTime}\u2013${maxTime} · ${minRows}\u2013${maxRows} rows`, item.x + 10, item.y + 69);
       }
       const badge = String(node.topology_badge || "");
       if (badge) {
@@ -3550,7 +3550,7 @@
     if (!model.graph || !model.layout.size) {
       ctx.fillStyle = css("--muted", "#8993a4");
       ctx.font = "13px Arial, Helvetica, sans-serif";
-      ctx.fillText(model.loading ? "Loading graph…" : "No accessible objects in this scope", 24, 34);
+      ctx.fillText(model.loading ? "Loading graph\u2026" : "No accessible objects in this scope", 24, 34);
       return;
     }
 
@@ -3856,7 +3856,7 @@
   function updateStatus() {
     if (!dom.explorerGraphStatus) return;
     if (model.loading) {
-      dom.explorerGraphStatus.textContent = "Loading graph…";
+      dom.explorerGraphStatus.textContent = "Loading graph\u2026";
       return;
     }
     const nodes = visibleNodes().length;

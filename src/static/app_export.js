@@ -47,7 +47,7 @@
     let statements = sql.splitSqlStatements(raw.trim());
     if (!statements.length) throw new Error("Query is empty.");
     if (statements.length > 1 && !state.runOptMultiQuery) {
-      throw new Error("Multiquery is disabled. Enable “Allow multiquery” in Run settings.");
+      throw new Error("Multiquery is disabled. Enable \u201cAllow multiquery\u201d in Run settings.");
     }
 
     if (state.runOptAutoFormat) {

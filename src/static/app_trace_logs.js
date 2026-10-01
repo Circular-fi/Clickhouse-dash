@@ -206,8 +206,8 @@
   function offsetText(record) {
     const start = Number(ctx.activeTraceCache().bounds.start);
     const delta = record.ns - start;
-    if (!Number.isFinite(delta)) return "—";
-    return `${delta < 0 ? "−" : "+"}${ctx.formatDuration(Math.abs(delta))}`;
+    if (!Number.isFinite(delta)) return "\u2014";
+    return `${delta < 0 ? "\u2212" : "+"}${ctx.formatDuration(Math.abs(delta))}`;
   }
 
   function absoluteText(record) {
@@ -317,7 +317,7 @@
     let extra = "";
     if (v.status === "loading") { value = '<span class="traceButtonSpinner" aria-hidden="true"></span>'; title = "Loading the logs of this trace"; cls = " is-loading"; }
     else if (v.status === "error") { value = "!"; title = `Logs could not be loaded: ${v.message}`; cls = " is-error"; }
-    else if (v.status === "unavailable") { value = "—"; title = v.message; cls = " is-unavailable"; }
+    else if (v.status === "unavailable") { value = "\u2014"; title = v.message; cls = " is-unavailable"; }
     else {
       const n = v.records.length;
       const errors = v.records.filter((r) => r.sev === "error" || r.sev === "fatal").length;
@@ -417,7 +417,7 @@
     if (!visible) { panel.innerHTML = ""; delete panel.dataset.traceLogsState; return; }
     panel.dataset.traceLogsState = v.status;
     if (v.status === "loading") {
-      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", '<span class="traceButtonSpinner" aria-hidden="true"></span>Loading the logs of this trace…')}`;
+      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", '<span class="traceButtonSpinner" aria-hidden="true"></span>Loading the logs of this trace\u2026')}`;
       return;
     }
     if (v.status === "error" || v.status === "unavailable") {

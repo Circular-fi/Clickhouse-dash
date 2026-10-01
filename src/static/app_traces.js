@@ -65,7 +65,7 @@
   // a time ("8 min 30 s", "2 h 5 min", "3 d 4 h"), never "8.5 min".
   function formatDuration(nsValue) {
     const n = Number(nsValue);
-    if (!Number.isFinite(n) || n < 0) return "—";
+    if (!Number.isFinite(n) || n < 0) return "\u2014";
     const decimal = [[1e9, "s"], [1e6, "ms"], [1e3, "µs"]];
     if (n < 1e3) return `${Math.round(n)} ns`;
     if (n < 59.95e9) {
@@ -249,7 +249,7 @@
       return ticks;
     }
     if (stepMs >= HOUR_MS) {
-      // Wall-clock hours (00:00, 06:00, 12:00…) even on 23 h / 25 h DST days.
+      // Wall-clock hours (00:00, 06:00, 12:00...) even on 23 h / 25 h DST days.
       const everyHours = Math.round(stepMs / HOUR_MS);
       const seen = new Set();
       for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1, day.setDate(day.getDate() + 1)) {
@@ -284,7 +284,7 @@
     return timeTicksBetween(startMs, endMs, chosen).map((t) => ({ t, label: timeTickLabel(t, chosen, multiDay) }));
   }
 
-  // Tooltip span of a bucket: "Sep 13, 14:00 → 15:00" (or both dates when
+  // Tooltip span of a bucket: "Sep 13, 14:00 -> 15:00" (or both dates when
   // it crosses midnight).
   function bucketRangeLabel(startMs, sizeMs) {
     const end = startMs + sizeMs;
@@ -292,7 +292,7 @@
     const from = `${dayLabel(startMs)}, ${clockLabel(startMs, withSeconds)}`;
     const sameDay = localMidnight(startMs) === localMidnight(end - 1);
     const to = sameDay ? clockLabel(end, withSeconds) : `${dayLabel(end)}, ${clockLabel(end, withSeconds)}`;
-    return `${from} → ${to}`;
+    return `${from} \u2192 ${to}`;
   }
 
   function timestampToNs(value) {
@@ -323,7 +323,7 @@
 
   function shortId(value, size = 7) {
     const s = String(value || "");
-    return s.length <= size * 2 + 1 ? s : `${s.slice(0, size)}…${s.slice(-size)}`;
+    return s.length <= size * 2 + 1 ? s : `${s.slice(0, size)}\u2026${s.slice(-size)}`;
   }
 
   function parseStartMs(value) {
@@ -556,7 +556,7 @@
         item.className = "themeSelect__option tracePicker__option";
         item.setAttribute("role", "option");
         item.dataset.value = option.value;
-        item.textContent = option.textContent || option.value || "—";
+        item.textContent = option.textContent || option.value || "\u2014";
         item.disabled = !!option.disabled;
         item.setAttribute("aria-selected", option.value === select.value ? "true" : "false");
         item.addEventListener("click", () => {
@@ -972,7 +972,7 @@
     const a = model.analytics;
     if (a && !a.has_durations) {
       if (model.durationsError) chartMessage(container, model.durationsError, true);
-      else chartMessage(container, "Computing duration percentiles…");
+      else chartMessage(container, "Computing duration percentiles\u2026");
       if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = "P50 / P90 / P95 / P99";
       return;
     }
@@ -1098,8 +1098,8 @@
     // The heatmap loads on its own: the count chart states do not apply to it.
     const heatmap = ns.traceHeatmap?.active?.() === true;
     if (model.analyticsLoading && !model.analytics) {
-      chartMessage(dom.traceServiceChart, "Loading trace activity…");
-      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, "Loading duration distribution…");
+      chartMessage(dom.traceServiceChart, "Loading trace activity\u2026");
+      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, "Loading duration distribution\u2026");
       return;
     }
     if (model.analyticsError && !model.analytics) {
@@ -1220,7 +1220,7 @@
   // One line of service pills; layoutServicePills hides the ones that do not
   // fit and shows them behind a "+N" chip.
   function servicePillsHtml(stats) {
-    if (!stats.length) return '<div class="traceSvcPills is-empty">—</div>';
+    if (!stats.length) return '<div class="traceSvcPills is-empty">\u2014</div>';
     return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" aria-haspopup="true" aria-expanded="false" hidden>+0</button></div>`;
   }
 
@@ -2066,7 +2066,7 @@
     if (dom.traceDetailStats) {
       const start = traceStartParts(bounds.start);
       const items = [
-        ["Trace Start", { html: start ? `${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small>` : "—" }, "is-start"],
+        ["Trace Start", { html: start ? `${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small>` : "\u2014" }, "is-start"],
         ["Duration", formatDuration(bounds.duration)],
         ["Services", String(cache.serviceCount)],
         ["Depth", String(cache.maxLevel + 1)],
@@ -2160,7 +2160,7 @@
     resetZoom: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14M5 7h4"/></svg>',
   };
 
-  // Jaeger's Ticks: 5 ticks, labels at least 130 px apart (every 2nd, 4th…
+  // Jaeger's Ticks: 5 ticks, labels at least 130 px apart (every 2nd, 4th...
   // label when narrower), the first and last always labelled. Each label is
   // the offset from the trace start with the wall-clock time below it.
   const TIMELINE_TICKS = 5;
@@ -2933,7 +2933,7 @@
     const count = `${entries.length} ${noun}${entries.length === 1 ? "" : "s"}`;
     const body = entries.map(([key, item]) => `<div class="traceJson__entry">${isArray ? "" : `<span class="traceJson__key">${esc(key)}</span><span class="traceJson__colon">:</span>`}${jsonTreeHtml(item, expandNested, depth + 1)}</div>`).join("");
     const isOpen = depth === 0 || expandNested;
-    return `<details class="traceJson"${isOpen ? " open" : ""}><summary><span class="traceJson__brace">${open}</span><span class="traceJson__fold">…${close}</span><span class="traceJson__count">${count}</span></summary><div class="traceJson__body">${body}</div><span class="traceJson__brace">${close}</span></details>`;
+    return `<details class="traceJson"${isOpen ? " open" : ""}><summary><span class="traceJson__brace">${open}</span><span class="traceJson__fold">\u2026${close}</span><span class="traceJson__count">${count}</span></summary><div class="traceJson__body">${body}</div><span class="traceJson__brace">${close}</span></details>`;
   }
 
   // filterScope ("span" / "resource"): the value opens the click-to-filter
@@ -3035,7 +3035,7 @@
   }
 
   function eventItemHtml(event, traceStartNs, { hidden = false, open = false } = {}) {
-    const offset = Number.isFinite(event.ns) ? formatDuration(Math.max(0, event.ns - traceStartNs)) : "—";
+    const offset = Number.isFinite(event.ns) ? formatDuration(Math.max(0, event.ns - traceStartNs)) : "\u2014";
     const body = event.attributes && typeof event.attributes === "object" && !Array.isArray(event.attributes)
       ? renderAttributeTable(event.attributes, "No attributes")
       : (event.attributes == null ? '<span class="traceJaegerEmpty">No attributes</span>' : `<pre class="traceJaegerRaw">${esc(typeof event.attributes === "string" ? event.attributes : JSON.stringify(event.attributes, null, 2))}</pre>`);
@@ -3129,7 +3129,7 @@
 
   function spanKindLabel(kind) {
     const text = String(kind || "").replace(/^SPAN_KIND_/i, "").trim();
-    if (!text) return "—";
+    if (!text) return "\u2014";
     return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
   }
 
@@ -3431,7 +3431,7 @@
     model.analyticsError = "";
     model.durationsError = "";
     renderAnalytics();
-    // Buckets start at local midnight (3 h buckets at 00:00, 03:00… local).
+    // Buckets start at local midnight (3 h buckets at 00:00, 03:00... local).
     const analyticsFilters = { ...filters, bucket_origin_ms: String(localMidnight(Number(filters.start_ms))) };
     delete analyticsFilters.limit;
     model.analyticsFilters = analyticsFilters;
@@ -3585,7 +3585,7 @@
     model.pendingSpanId = "";
     showError("");
     setView(true);
-    if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace…</div>';
+    if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace\u2026</div>';
     if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.innerHTML = ""; }
     void ns.traceLogs?.load?.(null);
     try {

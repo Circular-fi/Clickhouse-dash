@@ -237,7 +237,7 @@
   function headerCell(key, label, title, numeric = true) {
     const active = view.sort.key === key;
     const sort = active ? (view.sort.dir === "asc" ? "ascending" : "descending") : "none";
-    return `<th scope="col" class="${numeric ? "is-num" : ""}" aria-sort="${sort}"><button type="button" class="traceSvcSort${active ? " is-active" : ""}" data-svc-sort="${key}" title="${esc(title)}">${esc(label)}${active ? `<span class="traceSvcSort__dir" aria-hidden="true">${view.sort.dir === "asc" ? "▲" : "▼"}</span>` : ""}</button></th>`;
+    return `<th scope="col" class="${numeric ? "is-num" : ""}" aria-sort="${sort}"><button type="button" class="traceSvcSort${active ? " is-active" : ""}" data-svc-sort="${key}" title="${esc(title)}">${esc(label)}${active ? `<span class="traceSvcSort__dir" aria-hidden="true">${view.sort.dir === "asc" ? "\u25b2" : "\u25bc"}</span>` : ""}</button></th>`;
   }
 
   function p99Cell(row, service, operation = "") {
@@ -271,7 +271,7 @@
     const bits = [];
     const fraction = Number(payload.sample_fraction || 1);
     if (payload.estimated) {
-      bits.push(`<span class="traceSvcBadge traceSvcBadge--estimated" title="${esc(`The window holds about ${Number(payload.estimated_rows || 0).toLocaleString()} spans (over ${Number(payload.exact_rows_limit || 0).toLocaleString()}): one time slice per chart bucket was read and the counts scaled up. Percentiles come from the sampled spans.`)}">≈ Estimated from ${esc(percentText(fraction * 100))} of the window</span><button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button>`);
+      bits.push(`<span class="traceSvcBadge traceSvcBadge--estimated" title="${esc(`The window holds about ${Number(payload.estimated_rows || 0).toLocaleString()} spans (over ${Number(payload.exact_rows_limit || 0).toLocaleString()}): one time slice per chart bucket was read and the counts scaled up. Percentiles come from the sampled spans.`)}">\u2248 Estimated from ${esc(percentText(fraction * 100))} of the window</span><button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button>`);
     }
     if (payload.partial) bits.push('<span class="traceSvcBadge traceSvcBadge--partial" title="The query reached its time budget before reading the whole window: the numbers cover only part of it.">Partial: time budget reached</span>');
     if (view.exact && !payload.estimated) bits.push('<button type="button" class="traceSvcAction" data-svc-sampled title="Go back to the time-sampled answer on large windows">Allow sampling</button>');
@@ -293,14 +293,14 @@
     const meta = payload ? `${view.scope === "root" ? "root spans" : "entry spans"} · ${bucket} buckets${timing}` : "";
     let body;
     if (view.error && !payload) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(view.error)}</div>`;
-    else if (!payload) body = `<div class="tracesEmpty">${view.loading ? "Loading services…" : "Search to load services."}</div>`;
+    else if (!payload) body = `<div class="tracesEmpty">${view.loading ? "Loading services\u2026" : "Search to load services."}</div>`;
     else if (!count) body = `<div class="tracesEmpty">No ${view.scope === "root" ? "root" : "entry"} spans match in this range.</div>`;
     else body = tableHtml(rows);
     root.innerHTML = `<div class="traceSvc${view.loading ? " is-loading" : ""}" aria-busy="${view.loading ? "true" : "false"}">
       <div class="traceSvc__toolbar">
         <h2 id="traceSvcCount">${payload ? `${count} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
         <span class="traceSvc__meta" title="Entry spans: SpanKind Server / Consumer (and SPAN_KIND_* spellings) or root spans. The search filters apply to these spans.">${esc(meta)}</span>
-        <span class="traceSvc__status">${statusHtml(payload)}${view.loading && payload ? '<span class="traceSvcBadge">Loading…</span>' : ""}</span>
+        <span class="traceSvc__status">${statusHtml(payload)}${view.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}</span>
         ${scopeHtml()}
       </div>
       ${view.error && payload ? `<div class="traceSvc__error" role="alert">${esc(view.error)}</div>` : ""}
@@ -432,12 +432,12 @@
     const items = rows.length
       ? rows.map((r) => `<li data-release-version="${esc(r[0])}"><b>${esc(r[0])}</b><span>${esc(new Date(Number(r[1])).toLocaleString())}</span></li>`).join("")
       : '<li class="traceSvcEmpty">No ResourceAttributes[\'service.version\'] on this service\'s spans in range.</li>';
-    return `<section class="traceSvcSection"><h4>Releases${payload.releases_estimated ? ' <span class="traceSvcBadge traceSvcBadge--estimated" title="The read cap stopped the scan: later versions may be missing.">≈</span>' : ""}</h4><ul class="traceSvcReleases">${items}</ul></section>`;
+    return `<section class="traceSvcSection"><h4>Releases${payload.releases_estimated ? ' <span class="traceSvcBadge traceSvcBadge--estimated" title="The read cap stopped the scan: later versions may be missing.">\u2248</span>' : ""}</h4><ul class="traceSvcReleases">${items}</ul></section>`;
   }
 
   function dbHtml() {
     const db = view.db;
-    if (db.loading && !db.payload) return '<div class="traceSvcEmpty">Loading database statements…</div>';
+    if (db.loading && !db.payload) return '<div class="traceSvcEmpty">Loading database statements\u2026</div>';
     if (db.error) return `<div class="traceSvcEmpty traceChartError" role="alert">${esc(db.error)}</div>`;
     const payload = db.payload;
     if (!payload) return "";
@@ -448,8 +448,8 @@
     const total = rows.reduce((sum, r) => sum + Number(r[5] || 0), 0) || 1;
     return `<table class="traceSvcTable traceSvcTable--compact traceSvcDb" aria-label="Database statements"><thead><tr><th scope="col">Statement</th><th scope="col">System</th><th scope="col" class="is-num">Count</th><th scope="col" class="is-num">Throughput</th><th scope="col" class="is-num">P95</th><th scope="col">Total time</th></tr></thead><tbody>${rows.map((r) => {
       const share = (Number(r[5] || 0) / total) * 100;
-      return `<tr data-db-statement="${esc(r[1])}"><th scope="row"><code class="traceSvcDb__stmt" title="${esc(r[1])}">${esc(r[1])}</code></th><td>${esc(r[2] || "—")}</td><td class="is-num">${Number(r[3] || 0).toLocaleString()}</td><td class="is-num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="is-num">${esc(fmt(r[6]))}</td><td class="traceSvcShare"><span class="traceSvcShare__bar" style="--share:${share.toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt(r[5]))}</span></td></tr>`;
-    }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcEmpty">≈ The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
+      return `<tr data-db-statement="${esc(r[1])}"><th scope="row"><code class="traceSvcDb__stmt" title="${esc(r[1])}">${esc(r[1])}</code></th><td>${esc(r[2] || "\u2014")}</td><td class="is-num">${Number(r[3] || 0).toLocaleString()}</td><td class="is-num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="is-num">${esc(fmt(r[6]))}</td><td class="traceSvcShare"><span class="traceSvcShare__bar" style="--share:${share.toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt(r[5]))}</span></td></tr>`;
+    }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcEmpty">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
   }
 
   function renderDetail() {
@@ -468,10 +468,10 @@
       : "";
     let body;
     if (detail.error) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(detail.error)}</div>`;
-    else if (!payload) body = '<div class="tracesEmpty">Loading service…</div>';
+    else if (!payload) body = '<div class="tracesEmpty">Loading service\u2026</div>';
     else if (!row) body = '<div class="tracesEmpty">No entry spans of this service match in this range.</div>';
     else {
-      body = `${payload.estimated ? `<div class="traceSvcNote">≈ Estimated from ${esc(percentText(Number(payload.sample_fraction || 1) * 100))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
+      body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(percentText(Number(payload.sample_fraction || 1) * 100))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">
           <article class="traceAnalyticsCard"><header><strong>Requests</strong><span>entry spans per second · errors in red</span></header><div class="traceChart traceSvcChart" data-svc-chart="rate"></div></article>
           <article class="traceAnalyticsCard"><header><strong>Error rate</strong><span>% of entry spans with status Error</span></header><div class="traceChart traceSvcChart" data-svc-chart="errors"></div></article>
@@ -485,7 +485,7 @@
     panel.innerHTML = `<header class="traceSvcDetail__head" style="--trace-service-color:${ctx.serviceColor(name)}">
         <span class="traceSvcDot" aria-hidden="true"></span>
         <h3 id="traceSvcDetailTitle" title="${esc(name)}">${esc(name)}</h3>
-        ${detail.loading && payload ? '<span class="traceSvcBadge">Loading…</span>' : ""}
+        ${detail.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}
         <button type="button" class="traceSvcAction" data-svc-search="${esc(name)}" title="Search the traces of ${esc(name)}">Search traces</button>
         <button type="button" class="traceSvcDetail__close" data-svc-close aria-label="Close service details" title="Close (Esc)">×</button>
       </header>

@@ -418,7 +418,7 @@
     const rows = statisticsRows();
     const all = rows.flatMap((row) => [row, ...row.details]);
     const heat = heatBackground(all, view.stats.colorBy);
-    const sortMark = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? " ▴" : " ▾") : "");
+    const sortMark = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? " \u25b4" : " \u25be") : "");
     const ariaSort = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? "ascending" : "descending") : "none");
     const head = `<tr><th aria-sort="${ariaSort("name")}"><button type="button" data-stats-sort="name">${esc(GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`)}${sortMark("name")}</button></th>${STAT_COLUMNS.map(([key, label, title]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-stats-sort="${key}" title="${esc(title)}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
     const rowHtml = (row) => {
@@ -482,7 +482,7 @@
     const count = tools?.querySelector("#traceSpansCount");
     if (count) count.textContent = `${rows.length} of ${cache.spans.length} span${cache.spans.length === 1 ? "" : "s"}`;
     const shown = rows.slice(0, SPANS_TABLE_LIMIT);
-    const sortMark = (key) => (sortKey === key ? (sortAsc ? " ▴" : " ▾") : "");
+    const sortMark = (key) => (sortKey === key ? (sortAsc ? " \u25b4" : " \u25be") : "");
     const ariaSort = (key) => (sortKey === key ? (sortAsc ? "ascending" : "descending") : "none");
     const head = `<tr>${SPAN_COLUMNS.map(([key, label]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-spans-sort="${key}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
     const body = shown.map((span) => {

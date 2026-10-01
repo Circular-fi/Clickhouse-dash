@@ -55,7 +55,7 @@ def test_overview_lineage_has_one_normalized_two_direction_layout() -> None:
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
     assert 'const matrix = node("div", "explorerDependencyMatrix");' in deps
     assert 'for (const relation of ["upstream", "downstream"])' in deps
-    assert 'list.appendChild(node("div", "explorerDependencyEmpty", "—"));' in deps
+    assert 'list.appendChild(node("div", "explorerDependencyEmpty", "\\u2014"));' in deps
     assert ".explorerDependencyMatrix" in css
     assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
 

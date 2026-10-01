@@ -51,7 +51,7 @@ def test_dependency_cards_are_fixed_three_per_row_and_compact() -> None:
     ui = read("src/static/app_explorer.js")
     css = read("src/static/style.css")
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
-    assert 'const qualified = `${dep.database || "—"}.${dep.table || "—"}`;' in deps
+    assert 'const qualified = `${dep.database || "\\u2014"}.${dep.table || "\\u2014"}`;' in deps
     assert 'explorerDependencyItem__qualified' in deps
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in css
     assert "grid-auto-rows: 36px;" in css

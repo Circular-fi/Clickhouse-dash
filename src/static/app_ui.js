@@ -706,14 +706,14 @@
     const text = String(sql || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
     if (text.length <= maxLen) return text;
-    return `${text.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+    return `${text.slice(0, Math.max(0, maxLen - 1)).trimEnd()}\u2026`;
   }
 
   function trimLabel(text, maxLen) {
     const value = String(text || "").trim();
     if (!value) return "";
     if (value.length <= maxLen) return value;
-    return `${value.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+    return `${value.slice(0, Math.max(0, maxLen - 1)).trimEnd()}\u2026`;
   }
 
   function normalizeSavedQueryName(name) {
@@ -884,7 +884,7 @@
     const input = document.createElement("input");
     input.className = "savePanel__input";
     input.type = "text";
-    input.placeholder = "Search or save query…";
+    input.placeholder = "Search or save query\u2026";
     input.autocomplete = "off";
     input.spellcheck = false;
 

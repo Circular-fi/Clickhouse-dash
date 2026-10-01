@@ -1637,7 +1637,7 @@
     if (/^Tuple\s*\(/i.test(t)) return ["tuple"];
     if (/^Map\s*\(/i.test(t)) return ["map"];
     const base = t.replace(/\(.*/, "").trim();
-    if (base) badges.push(base.length > 16 ? `${base.slice(0, 15)}…` : base);
+    if (base) badges.push(base.length > 16 ? `${base.slice(0, 15)}\u2026` : base);
     return badges;
   }
 

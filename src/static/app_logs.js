@@ -478,7 +478,7 @@
     for (const sev of model.sev) chips.push({ kind: "sev", value: sev, text: `Level: ${SEV_LABELS[sev]}`, title: "Severity class" });
     for (const attr of model.attrs) {
       const { key, value, negate } = parseAttr(attr);
-      chips.push({ kind: "attr", value: attr, text: `${attrLabel(key)} ${negate ? "≠" : "="} ${value}`, title: key, negate });
+      chips.push({ kind: "attr", value: attr, text: `${attrLabel(key)} ${negate ? "\u2260" : "="} ${value}`, title: key, negate });
     }
     box.hidden = chips.length === 0;
     box.innerHTML = chips.map((chip) => `
@@ -562,7 +562,7 @@
     model.liveGap = false;
     setSearching(true);
     renderTable({ message: "loading" });
-    setStatus("Searching…");
+    setStatus("Searching\u2026");
     void loadHistogram(range);
     void loadServiceChoices(range);
     if (model.tab === "patterns") void loadPatterns();
@@ -710,7 +710,7 @@
     renderHead();
     if (message === "loading" && !model.rows.length) {
       messageBox.hidden = false;
-      messageBox.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Searching logs…</div>';
+      messageBox.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Searching logs\u2026</div>';
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
@@ -757,7 +757,7 @@
       html += `<div class="${classes.join(" ")}" role="row" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
-      html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? '<span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading older logs…' : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
+      html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? '<span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading older logs\u2026' : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
     }
     box.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
     box.innerHTML = html;
@@ -929,19 +929,19 @@
       if (node) node.textContent = h ? compactCount(h.totals?.[sev] || 0) : "";
     }
     if (model.histogramLoading && !h) {
-      box.innerHTML = '<div class="logsHistogram__placeholder">Loading volume…</div>';
-      if (total) total.textContent = "–";
+      box.innerHTML = '<div class="logsHistogram__placeholder">Loading volume\u2026</div>';
+      if (total) total.textContent = "\u2013";
       return;
     }
     if (model.histogramError) {
       box.innerHTML = `<div class="logsHistogram__placeholder is-error">${esc(model.histogramError)}</div>`;
-      if (total) total.textContent = "–";
+      if (total) total.textContent = "\u2013";
       return;
     }
     if (!h) return;
     const count = Number(h.totals?.total || 0);
     if (total) total.textContent = `${formatCount(count)} log${count === 1 ? "" : "s"}`;
-    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${Math.round(h.bucket_ms / 1000) >= 60 ? `${Math.round(h.bucket_ms / 60000)} min` : `${Math.round(h.bucket_ms / 1000)} s`} buckets${model.histogramLoading ? " · updating…" : ""}`;
+    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${Math.round(h.bucket_ms / 1000) >= 60 ? `${Math.round(h.bucket_ms / 60000)} min` : `${Math.round(h.bucket_ms / 1000)} s`} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
     const width = Math.max(200, box.clientWidth || 800);
     const height = 116;
     const left = 44, right = 8, top = 8, bottom = 20;
@@ -1019,7 +1019,7 @@
       if (!tooltip) return;
       if (!bucket) { tooltip.hidden = true; return; }
       const tr = ns.timeRange;
-      tooltip.innerHTML = `<strong>${esc(tr.formatDateTime(bucket.t))} → ${esc(tr.formatDateTime(bucket.t + g.bucketMs).slice(11))}</strong>` +
+      tooltip.innerHTML = `<strong>${esc(tr.formatDateTime(bucket.t))} \u2192 ${esc(tr.formatDateTime(bucket.t + g.bucketMs).slice(11))}</strong>` +
         ["error", "warn", "info", "debug"].map((sev) => `<span><i class="logsSevSwatch logsSev--${sev}"></i>${SEV_LABELS[sev]}<b>${formatCount(bucket[sev])}</b></span>`).join("") +
         `<span class="logsHistogram__tooltipTotal">Total<b>${formatCount(bucket.sum)}</b></span>`;
       tooltip.hidden = false;
@@ -1117,7 +1117,7 @@
     const toggle = $("logsDenoiseToggle");
     if (toggle) toggle.hidden = model.tab !== "patterns";
     if (model.patternsLoading && !model.patterns) {
-      box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Mining patterns from a sample…</div>';
+      box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Mining patterns from a sample\u2026</div>';
       return;
     }
     if (model.patternsError) {
@@ -1130,7 +1130,7 @@
     const hidden = model.denoise ? all.filter((item) => item.noisy).length : 0;
     const shown = model.denoise ? all.filter((item) => !item.noisy) : all;
     const summary = p.total
-      ? `${formatCount(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${formatCount(p.sample_size)} of ${formatCount(p.total)} logs (counts ×${p.scale >= 10 ? Math.round(p.scale) : p.scale.toFixed(1)})` : `${formatCount(p.total)} logs`}${hidden ? ` · denoise hides ${hidden} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating…" : ""}`
+      ? `${formatCount(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${formatCount(p.sample_size)} of ${formatCount(p.total)} logs (counts ×${p.scale >= 10 ? Math.round(p.scale) : p.scale.toFixed(1)})` : `${formatCount(p.total)} logs`}${hidden ? ` · denoise hides ${hidden} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating\u2026" : ""}`
       : "";
     if (!all.length) {
       box.innerHTML = `<div class="logsEmpty"><strong>No logs to mine in this range.</strong></div>`;
@@ -1379,7 +1379,7 @@
   function renderContext() {
     const box = $("logsContextRows");
     if (!box || model.side.tab !== "context") return;
-    if (model.side.contextLoading && !model.side.context) { box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading surrounding logs…</div>'; return; }
+    if (model.side.contextLoading && !model.side.context) { box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading surrounding logs\u2026</div>'; return; }
     if (model.side.contextError) { box.innerHTML = `<div class="logsEmpty logsEmpty--error">${esc(model.side.contextError)}</div>`; return; }
     const ctx = model.side.context;
     if (!ctx) { box.innerHTML = ""; return; }

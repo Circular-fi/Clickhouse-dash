@@ -102,7 +102,7 @@
 
   // One value with its unit, for tooltips and the legend.
   function formatValue(value, info) {
-    if (value == null || !Number.isFinite(value)) return "—";
+    if (value == null || !Number.isFinite(value)) return "\u2014";
     const rate = info.perSecond ? "/s" : "";
     if (info.kind === "duration") {
       const seconds = value * info.scale;
@@ -153,7 +153,7 @@
   }
 
   function formatInstant(ms) {
-    if (!Number.isFinite(ms)) return "—";
+    if (!Number.isFinite(ms)) return "\u2014";
     const d = new Date(ms);
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   }
@@ -391,8 +391,8 @@
     if (!root) return;
     const summary = dom.metricsCatalogSummary;
     if (model.catalogLoading && !model.catalog) {
-      root.innerHTML = `<div class="metricsEmpty metricsEmpty--loading">Loading the metrics catalog…</div>`;
-      if (summary) summary.textContent = "Loading metrics…";
+      root.innerHTML = `<div class="metricsEmpty metricsEmpty--loading">Loading the metrics catalog\u2026</div>`;
+      if (summary) summary.textContent = "Loading metrics\u2026";
       return;
     }
     if (model.catalogError) {
@@ -432,7 +432,7 @@
     if (!services.length) {
       root.innerHTML = `<div class="metricsEmpty">No metric points in this time range.${jumpToDataHtml()}</div>`;
     } else if (!groups.length) {
-      root.innerHTML = `<div class="metricsEmpty">No metric matches “${esc(model.search.trim())}”.</div>`;
+      root.innerHTML = `<div class="metricsEmpty">No metric matches \u201c${esc(model.search.trim())}\u201d.</div>`;
     } else {
       root.innerHTML = groups.join("");
     }
@@ -627,7 +627,7 @@
         <div class="metricsControl metricsControl--agg">
           <span class="metricsControl__label">Aggregation</span>
           <div class="themeSelect tracePicker metricsPicker metricsPicker--agg">
-            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">—</button>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">\u2014</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
@@ -918,7 +918,7 @@
     if (panel.loading && !data) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--loading";
-      stateEl.textContent = "Loading…";
+      stateEl.textContent = "Loading\u2026";
     } else if (panel.error) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--error";
@@ -939,7 +939,7 @@
     const data = panel.data;
     const parts = [];
     if (data?.note) parts.push(esc(data.note));
-    if (data?.truncated) parts.push(`Top ${esc(data.top_k)} of ${esc(data.group_count)} groups; the other ${esc(data.other_series_count)} are folded into “Other”.`);
+    if (data?.truncated) parts.push(`Top ${esc(data.top_k)} of ${esc(data.group_count)} groups; the other ${esc(data.other_series_count)} are folded into \u201cOther\u201d.`);
     if (data?.truncated_rows) parts.push("Too many groups: the result was cut; narrow the filters or the group-by.");
     if (panel.exemplars && panel.exemplarError) parts.push(`Exemplars: ${esc(panel.exemplarError)}`);
     note.innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
@@ -957,7 +957,7 @@
     const menu = panel.el?.querySelector(".metricsPicker--group .tracePicker__menu");
     if (!menu) return;
     const keys = [...new Set([...(panel.keys || []), ...panel.groupBy])];
-    if (loading && !panel.keys) { menu.innerHTML = `<div class="metricsPicker__hint">Loading attributes…</div>`; return; }
+    if (loading && !panel.keys) { menu.innerHTML = `<div class="metricsPicker__hint">Loading attributes\u2026</div>`; return; }
     if (!keys.length) { menu.innerHTML = `<div class="metricsPicker__hint">No point attributes.</div>`; return; }
     menu.innerHTML = keys.map((key) => {
       const checked = panel.groupBy.includes(key);
@@ -1304,7 +1304,7 @@
     const r = model.resolved;
     // A relative range ("Last 6 hours") shows what it resolved to; an
     // absolute one already reads as dates on the picker.
-    info.textContent = r && ns.timeRange?.isRelative?.(model.range) ? `${formatInstant(r.start_ms)} → ${formatInstant(r.end_ms)}` : "";
+    info.textContent = r && ns.timeRange?.isRelative?.(model.range) ? `${formatInstant(r.start_ms)} \u2192 ${formatInstant(r.end_ms)}` : "";
   }
 
   // --- Lifecycle ------------------------------------------------------------

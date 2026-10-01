@@ -332,7 +332,7 @@
       const nameBytes = encoder.encode(String(file.name || "file"));
       const dataBytes = encoder.encode(String(file.text ?? ""));
       if (dataBytes.length > 0xffffffff || offset > 0xffffffff) {
-        throw new Error("Received-results archive exceeds the browser ZIP32 limit. Use Run → Download for a full streamed export.");
+        throw new Error("Received-results archive exceeds the browser ZIP32 limit. Use Run \u2192 Download for a full streamed export.");
       }
       const crc = crc32(dataBytes);
       const local = new Uint8Array(30 + nameBytes.length);
@@ -377,7 +377,7 @@
     }
 
     if (files.length > 0xffff || centralSize > 0xffffffff || offset > 0xffffffff) {
-      throw new Error("Received-results archive exceeds the browser ZIP32 limit. Use Run → Download for a full streamed export.");
+      throw new Error("Received-results archive exceeds the browser ZIP32 limit. Use Run \u2192 Download for a full streamed export.");
     }
 
     const end = new Uint8Array(22);
@@ -427,7 +427,7 @@
     const lines = [
       "# ChDash Debug Archive",
       "",
-      "This archive is a self-contained diagnostic snapshot produced by **Run → Download Debug**.",
+      "This archive is a self-contained diagnostic snapshot produced by **Run \u2192 Download Debug**.",
       many
         ? "Each `query-NNN/` directory contains the files for one statement. Paths below are relative to that directory."
         : "The files below are stored at the archive root for this single-query export.",
