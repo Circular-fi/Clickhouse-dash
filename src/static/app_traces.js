@@ -196,8 +196,12 @@
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}${withSeconds ? `:${pad2(d.getSeconds())}` : ""}`;
   }
 
+  // One formatter for every label ("Sep 13"): the cursor readouts call it on
+  // each bucket change, and toLocaleDateString builds a formatter per call.
+  let dayFormat = null;
   function dayLabel(ms) {
-    return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+    if (!dayFormat) dayFormat = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+    return dayFormat.format(new Date(ms));
   }
 
   // Tooltip span of a bucket: "Sep 13, 14:00 -> 15:00" (or both dates when

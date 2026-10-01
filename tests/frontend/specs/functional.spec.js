@@ -2507,6 +2507,37 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
   await expect(page.locator('#traceDetail')).toBeVisible();
 });
 
+test('traces: a drag across a chart searches that time range, and the charts share one crosshair', async ({ page }) => {
+  test.setTimeout(90_000);
+  const searches = await openSyntheticTraces(page);
+  const counts = chartCore(page.locator('#traceServiceChart'));
+  const durations = chartCore(page.locator('#traceDurationChart'));
+  await expect(counts).toHaveAttribute('data-points-drawn', /^[1-9]/);
+  await expect(durations).toHaveAttribute('data-points-drawn', /^[1-9]/);
+  const box = await plotBox(counts);
+  // Hovering one chart shows the same instant on the other.
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await expect(counts).toHaveAttribute('data-cursor-index', /^\d+$/);
+  await expect(durations).toHaveAttribute('data-sync-x', /^\d+(\.\d+)?$/);
+  // Drag from a quarter to three quarters of the plot: a search of that range.
+  const xMin = Number(await counts.getAttribute('data-x-min'));
+  const span = Number(await counts.getAttribute('data-x-max')) - xMin;
+  const before = searches.length;
+  await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => searches.length).toBeGreaterThan(before);
+  const params = searches[searches.length - 1];
+  expect(Math.abs(Number(params.start_ms) - (xMin + span * 0.25))).toBeLessThan(span * 0.03);
+  expect(Math.abs(Number(params.end_ms) - (xMin + span * 0.75))).toBeLessThan(span * 0.03);
+  await expect.poll(() => new URL(page.url()).searchParams.get('from')).toBeTruthy();
+  // The new answer redraws the charts over the new range, not zoomed.
+  await expect(counts).toHaveAttribute('data-zoomed', 'false');
+  await expect.poll(async () => Number(await counts.getAttribute('data-x-max')) - Number(await counts.getAttribute('data-x-min'))).toBeLessThan(span * 0.6);
+});
+
 test('traces: an empty result names the searched range and zooms out from there', async ({ page }) => {
   test.setTimeout(90_000);
   const searches = await mockTraceResults(page, { traces: [] });
