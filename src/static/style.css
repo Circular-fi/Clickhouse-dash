@@ -6267,7 +6267,8 @@ button.explorerStorageList__name:focus-visible {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--accentBorder) 72%, transparent);
+  /* Same bar colour token as the shared .explorerBar in-cell bars. */
+  background: color-mix(in srgb, var(--explorer-bar-color, var(--accentBorder)) 72%, transparent);
 }
 
 .explorerStorageList__pct {
@@ -18934,7 +18935,9 @@ html[data-theme="light"] {
    <el class="explorerBar" style="--bar-pct: 42%">: a left-anchored fill behind
    the text, normalised by the caller (value / column max). In table cells add
    explorerBar--cell: the fill stays inside the content box while a second
-   transparent layer keeps row hover / selection colours on the padding box. */
+   transparent layer keeps row hover / selection colours on the padding box.
+   The shared result-table gauge cells used by the table card get the same
+   fill inside the Explorer (the Query page keeps its own lighter gauge). */
 .explorerBar {
   background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill));
   background-repeat: no-repeat;
@@ -18943,12 +18946,17 @@ html[data-theme="light"] {
 }
 
 .resultTable tbody td.explorerBar--cell,
-.resultTable tbody tr:hover td.explorerBar--cell {
+.resultTable tbody tr:hover td.explorerBar--cell,
+.explorerWorkspace .resultTable tbody td.resultTable__gaugeCell,
+.explorerWorkspace .resultTable tbody tr:hover td.resultTable__gaugeCell,
+.explorerWorkspace .resultTable tbody td.explorerStorageGaugeCell {
+  /* Gauge cells carry their fill in --gaugeFill, Explorer bars in --bar-pct. */
+  --bar-pct-resolved: var(--bar-pct, var(--gaugeFill, 0%));
   background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill)), linear-gradient(transparent, transparent);
   background-repeat: no-repeat, no-repeat;
   background-origin: content-box, padding-box;
   background-clip: content-box, padding-box;
-  background-size: var(--bar-pct, 0%) 100%, 100% 100%;
+  background-size: var(--bar-pct-resolved) 100%, 100% 100%;
   background-position: left center, left top;
 }
 
@@ -19209,7 +19217,9 @@ button.explorerBreadcrumb__item:focus-visible {
 }
 
 .explorerWorkspace .explorerTreeDatabase__name {
-  font: 600 12.5px/1.3 var(--explorer-mono);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .explorerWorkspace .explorerTreeDatabase__count {
@@ -19253,7 +19263,9 @@ button.explorerBreadcrumb__item:focus-visible {
 }
 
 .explorerWorkspace .explorerTreeObject__name {
-  font: 500 12.5px/1.35 var(--explorer-mono);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
 }
 
 .explorerWorkspace .explorerTreeObject__icon {
@@ -19340,8 +19352,8 @@ button.explorerBreadcrumb__item:focus-visible {
 
 .explorerWorkspace .explorerDatabaseObjectsTable .resultTable thead th,
 .explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 7px;
+  padding-right: 7px;
 }
 
 .explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
@@ -19349,14 +19361,18 @@ button.explorerBreadcrumb__item:focus-visible {
   padding-bottom: 5px;
 }
 
-.explorerDatabaseObjectsTable__col--1 {
+/* Table cells ignore max-width: long names and engines clip inside a span. */
+.explorerDatabaseObjectsTable__clip {
+  display: inline-block;
   max-width: 15ch;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
-.explorerDatabaseObjectsTable .resultTable tbody td.explorerDatabaseObjectsTable__col--0 {
-  max-width: 30ch;
+.explorerWorkspace .explorerDatabaseObjectsTable__open.explorerDatabaseObjectsTable__clip {
+  max-width: 24ch;
 }
 
 /* --- Mobile: drawer tree, wrapped header --------------------------------------- */
@@ -19392,7 +19408,6 @@ button.explorerBreadcrumb__item:focus-visible {
 
   .explorerShell {
     position: relative;
-    min-height: calc(100dvh - 120px);
   }
 
   .explorerTopBar {
@@ -19427,15 +19442,18 @@ button.explorerBreadcrumb__item:focus-visible {
     background: linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat;
   }
 
+  /* Basis 0: the tabs shrink next to the drawer button and scroll
+     sideways instead of wrapping onto a row of their own. */
   .explorerViewTabs {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
   }
 
   .explorerViewTab {
-    padding: 0 10px;
+    flex: 0 0 auto;
+    padding: 0 8px;
   }
 
   .explorerBreadcrumb {
@@ -19478,9 +19496,12 @@ button.explorerBreadcrumb__item:focus-visible {
     background: rgba(2, 6, 23, 0.38);
   }
 
+  /* The wrapped app header (two rows) and the navigation bar take ~230 px:
+     the graph and the detail fill the rest of the phone screen, no more, so
+     bottom sheets anchored to the pane stay on screen. */
   .explorerShell > .explorerGrid > .explorerCatalogView,
   .explorerShell > .explorerGrid > .explorerGraphPane {
-    min-height: calc(100dvh - 170px);
+    min-height: max(360px, calc(100dvh - 240px));
   }
 }
 

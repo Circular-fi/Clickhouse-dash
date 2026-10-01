@@ -39,6 +39,9 @@ export async function openExplorer(page) {
   await expect(page.locator('#explorerWorkspace')).toBeVisible();
   await expect(page).toHaveURL(/\/explorer(?:\/|$)/);
   await expect(page.locator('#explorerTableList')).toBeVisible({ timeout: 15_000 });
+  // The shell (view tabs included) is painted before app.js runs; the tree's
+  // first rendered row means the Explorer is initialised and its tabs bound.
+  await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
 }
 
 // The Explorer sidebar is lazy: the first paint lists database names only and

@@ -225,9 +225,9 @@
   //   integers  120,064 (en-US grouping, like util.formatInt everywhere else)
   //   compact   120.1K / 3.2M / 1.5B
   //   bytes     0 B, 205 B, 1.7 KB, 10.3 MB: one decimal from KB up, 1024 base
+  //             (util.formatBytes, shared with the whole app)
   //   missing   \u2014 (one dash style for every absent value)
   const MISSING = "\u2014";
-  const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
 
   function finiteOrNull(value) {
     if (value == null || value === "") return null;
@@ -241,23 +241,12 @@
     return Math.trunc(n).toLocaleString("en-US");
   }
 
+  // util.formatBytes owns the byte format, so Storage, Operations, Functions,
+  // the graph and the rest of the app print bytes exactly like the Explorer.
   function fmtBytes(value) {
     const n = finiteOrNull(value);
     if (n == null) return MISSING;
-    const sign = n < 0 ? "-" : "";
-    let v = Math.abs(n);
-    if (v < 1024) return `${sign}${Math.round(v)} B`;
-    let unit = -1;
-    while (v >= 1024 && unit < BYTE_UNITS.length - 1) {
-      v /= 1024;
-      unit += 1;
-    }
-    // 1023.96 KB would print as "1024.0 KB": carry into the next unit.
-    if (Number(v.toFixed(1)) >= 1024 && unit < BYTE_UNITS.length - 1) {
-      v /= 1024;
-      unit += 1;
-    }
-    return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;
+    return util.formatBytes(n);
   }
 
   // Storage figures (tree, database headers, System rail) use the same
@@ -469,7 +458,8 @@
         setMode(next === "graph" ? "graph" : "list");
       }
     } else if (next === "storage") {
-      if (model.section !== "system") model.storageScope = storageScope();
+      // The tab reopens the last storage scope (the server at first); the
+      // database page's storage band links to the database scope.
       setSection("system");
     }
     else if (next === "functions") setSection("functions");
@@ -599,7 +589,10 @@
     const browseEnabled = f.enabled !== false && f.browse !== false;
     const gf = f.graph || {};
     const graphEnabled = f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false);
-    if (!operationsAvailable() && model.section === "operations") setSection("tables");
+    if (!operationsAvailable() && model.section === "operations") {
+      setSection("tables");
+      syncExplorerUrl("replace");
+    }
     if (!browseEnabled && graphEnabled && model.mode !== "graph") setMode("graph");
     else if (!graphEnabled && model.mode === "graph") setMode("list");
 
@@ -1577,6 +1570,13 @@
     if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
     if (!dom.explorerDetailContent) return;
     clear(dom.explorerDetailContent);
+    // An empty database is one empty state, not an empty storage section
+    // followed by an empty object table.
+    if (!tables.length) {
+      destroyDatabaseTreemap();
+      dom.explorerDetailContent.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
+      return;
+    }
     renderDatabaseStorage(dom.explorerDetailContent, name);
     renderDatabaseObjects(dom.explorerDetailContent, name, tables);
   }
@@ -1688,7 +1688,7 @@
         td.classList.add(`explorerDatabaseObjectsTable__col--${ctx.columnIndex}`);
         if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.dataset.value = value == null ? "" : String(value);
         if (ctx.columnIndex === 0) {
-          const button = node("button", "explorerDatabaseObjectsTable__open", String(value || ""));
+          const button = node("button", "explorerDatabaseObjectsTable__open explorerDatabaseObjectsTable__clip", String(value || ""));
           button.type = "button";
           button.title = `Open ${database}.${value}`;
           const table = item || { database, name: String(value || "") };
@@ -1703,7 +1703,7 @@
           return true;
         }
         if (ctx.columnIndex === 1) {
-          td.textContent = String(value);
+          td.appendChild(node("span", "explorerDatabaseObjectsTable__clip", String(value)));
           td.title = String(value);
           return true;
         }
@@ -1846,7 +1846,7 @@
   function treeBadge(table) {
     const footprint = summaryFootprintBytes(table);
     const resident = isResidentMemorySummary(table);
-    const rows = optionalNumber(table.rows);
+    const rows = finiteOrNull(table.rows);
     if (footprint != null && (footprint > 0 || (!resident && !isViewLikeSummary(table)))) {
       return { text: fmtBytes(footprint), value: footprint };
     }
@@ -2303,6 +2303,8 @@
       model.selectedDatabase = null;
       renderTableList();
       if (model.catalog) model.routeIntent = null;
+      // Nothing selected on a phone: start with the tree drawer open.
+      if (isMobileShell() && !route.database) setTreeDrawerOpen(true);
     }
   }
 

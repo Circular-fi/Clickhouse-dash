@@ -676,8 +676,9 @@ test('database object table handles hundreds of tables and empty databases', asy
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'otel' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('otel');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^0 objects/);
-  await expect(page.locator('#explorerDetailContent')).toContainText('No on-disk data in this database.');
-  await expect(page.locator('#explorerDetailContent')).toContainText('No objects in this database.');
+  // One empty state: no empty storage section above an empty object table.
+  await expect(page.locator('#explorerDetailContent')).toHaveText('No objects in this database.');
+  await expect(page.locator('#explorerDetailContent .explorerSectionTitle')).toHaveCount(0);
   await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
 });
 

@@ -34,9 +34,9 @@ existing form, so deep links and history are unchanged:
 | Operations | `/explorer/_operations` | `#explorerOpsPane` |
 
 Storage calls `ns.explorerStorage.show(container, { scope, includeSystem,
-onScopeChange, onIncludeSystemChange, onOpenTable })`; the Storage tab scopes it to
-the Catalog/Graph selection (`{ database, table }`, the server when nothing is
-selected) and the storage breadcrumb then moves freely. Operations calls
+onScopeChange, onIncludeSystemChange, onOpenTable })`; the tab reopens the last
+storage scope (the server at first) and the database page's storage band links to
+the database scope. Operations calls
 `ns.explorerOps.show(container, { onOpenTable })`; its tab is hidden while the
 module is absent or `explorer.operations.enabled = false` (a deep link then falls
 back to Catalog). Leaving a view calls its `hide()`; a host change calls the
@@ -116,6 +116,17 @@ not invent remote disk capacity for cluster replicas that were not queried. A
 through `system.clusters`, while remote disk accounting remains explicitly out of
 scope until a safe cluster-wide metadata query is configured. Clicking a table in
 a database card opens that table's normal Explorer route.
+
+The database page (Catalog, a database selected) shows `N objects · size`, the
+storage section and an **Objects** table: Name, Engine, Rows, Size, Compressed,
+Ratio, % database, Parts, Modified. It lists the objects the type chips let
+through, uses the shared number formats (grouped rows, one-decimal bytes, `—`
+for absent values) and draws in-cell bars on Rows, Size, Compressed and
+% database, each normalised to its column maximum. Uncompressed bytes are in the
+Ratio tooltip and long names/engines are clipped with a tooltip so the table fits
+a 1280 px window without horizontal scrolling; Modified shows minutes (the full
+timestamp is the tooltip). A database without objects shows one empty state
+instead of an empty storage section and an empty table.
 
 ## Storage
 

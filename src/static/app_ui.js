@@ -41,6 +41,11 @@
           lineage,
           storage_topology: storageTopology,
         },
+        // Server operations view (explorer.operations): the tab is hidden when off.
+        operations: {
+          enabled: explorer.operations?.enabled !== false,
+          keeper: explorer.operations?.keeper === true,
+        },
       };
       const traces = data && data.features && data.features.traces ? data.features.traces : {};
       state.features.traces = { enabled: traces.enabled === true };

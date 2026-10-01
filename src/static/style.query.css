@@ -5313,12 +5313,17 @@ html[data-theme="light"] {
   background-size: var(--bar-pct, 0%) 100%;
 }
 .resultTable tbody td.explorerBar--cell,
-.resultTable tbody tr:hover td.explorerBar--cell {
+.resultTable tbody tr:hover td.explorerBar--cell,
+.explorerWorkspace .resultTable tbody td.resultTable__gaugeCell,
+.explorerWorkspace .resultTable tbody tr:hover td.resultTable__gaugeCell,
+.explorerWorkspace .resultTable tbody td.explorerStorageGaugeCell {
+  /* Gauge cells carry their fill in --gaugeFill, Explorer bars in --bar-pct. */
+  --bar-pct-resolved: var(--bar-pct, var(--gaugeFill, 0%));
   background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill)), linear-gradient(transparent, transparent);
   background-repeat: no-repeat, no-repeat;
   background-origin: content-box, padding-box;
   background-clip: content-box, padding-box;
-  background-size: var(--bar-pct, 0%) 100%, 100% 100%;
+  background-size: var(--bar-pct-resolved) 100%, 100% 100%;
   background-position: left center, left top;
 }
 .explorerTopBar {
@@ -5529,13 +5534,13 @@ button.explorerBreadcrumb__item:focus-visible {
 .explorerDatabaseObjects .explorerDatabaseObjectsTable {
   margin-top: 0;
 }
-.explorerDatabaseObjectsTable__col--1 {
+.explorerDatabaseObjectsTable__clip {
+  display: inline-block;
   max-width: 15ch;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.explorerDatabaseObjectsTable .resultTable tbody td.explorerDatabaseObjectsTable__col--0 {
-  max-width: 30ch;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 @media (max-width: 820px) {
   body[data-page="explorer"] .appHeader {
@@ -5564,7 +5569,6 @@ button.explorerBreadcrumb__item:focus-visible {
   }
   .explorerShell {
     position: relative;
-    min-height: calc(100dvh - 120px);
   }
   .explorerTopBar {
     flex-wrap: wrap;
@@ -5595,13 +5599,14 @@ button.explorerBreadcrumb__item:focus-visible {
     background: linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat;
   }
   .explorerViewTabs {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: none;
   }
   .explorerViewTab {
-    padding: 0 10px;
+    flex: 0 0 auto;
+    padding: 0 8px;
   }
   .explorerBreadcrumb {
     flex: 1 1 100%;

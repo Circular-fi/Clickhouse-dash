@@ -11,11 +11,18 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 
-// Storage and Operations are top-level Explorer view tabs.
+// Storage and Operations are top-level Explorer view tabs. The tab markup is
+// painted with the shell, before app.js binds it, so a click can land before
+// the Explorer is initialised: click until the tab is the selected view.
 async function openSection(page, tabId) {
   await openApp(page);
   await openExplorer(page);
-  await page.locator(`#${tabId}`).click();
+  const tab = page.locator(`#${tabId}`);
+  await expect(tab).toBeVisible({ timeout: 15_000 });
+  await expect(async () => {
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 // Rewrites the byte counters of real catalog tables, so a database can be

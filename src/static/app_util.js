@@ -124,21 +124,27 @@
     return `${n.toFixed(2)}s`;
   }
 
+  // One byte format for the whole app: "0 B", "205 B", "1.7 KB", "10.3 MB":
+  // one decimal from KB up, 1024 base, a space before the unit.
+  const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
+
   function formatBytes(value) {
     const n = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(n)) return "-";
-    const abs = Math.abs(n);
-    if (abs < 1024) return `${formatInt(n)}B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = abs;
-    let u = -1;
-    while (v >= 1024 && u < units.length - 1) {
-      v /= 1024;
-      u++;
-    }
     const sign = n < 0 ? "-" : "";
-    const num = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
-    return `${sign}${num}${units[u]}`;
+    let v = Math.abs(n);
+    if (v < 1024) return `${sign}${Math.round(v)} B`;
+    let unit = -1;
+    while (v >= 1024 && unit < BYTE_UNITS.length - 1) {
+      v /= 1024;
+      unit += 1;
+    }
+    // 1023.96 KB would print as "1024.0 KB": carry into the next unit.
+    if (Number(v.toFixed(1)) >= 1024 && unit < BYTE_UNITS.length - 1) {
+      v /= 1024;
+      unit += 1;
+    }
+    return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;
   }
 
   function replaceTextAreaValue(textAreaEl, nextValue) {
