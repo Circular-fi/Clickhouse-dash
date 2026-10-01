@@ -358,19 +358,35 @@
     root.innerHTML = `
       <div class="chartCore__plot">
         <canvas class="chartCore__canvas" aria-hidden="true"></canvas>
-        <canvas class="chartCore__canvas chartCore__overlay" tabindex="0" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends"></canvas>
+        <div class="chartCore__cursor" aria-hidden="true">
+          <i class="chartCore__select" hidden></i>
+          <i class="chartCore__xline" hidden></i>
+          <i class="chartCore__yline" hidden></i>
+          <span class="chartCore__badge chartCore__selectBadge" hidden></span>
+          <span class="chartCore__badge chartCore__xbadge" hidden></span>
+          <span class="chartCore__badge chartCore__ybadge" hidden></span>
+        </div>
         <div class="chartCore__tooltip" role="status" hidden></div>
+        <div class="chartCore__overlay" tabindex="0" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends, drag to zoom"></div>
         <i class="chartCore__probe" aria-hidden="true"></i>
       </div>
       <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
     host.appendChild(root);
     const plotEl = root.querySelector(".chartCore__plot");
-    const [baseCanvas, overCanvas] = root.querySelectorAll("canvas");
+    const baseCanvas = root.querySelector("canvas");
+    const overCanvas = root.querySelector(".chartCore__overlay");
+    const cursorEl = root.querySelector(".chartCore__cursor");
+    const selectEl = cursorEl.querySelector(".chartCore__select");
+    const xLine = cursorEl.querySelector(".chartCore__xline");
+    const yLine = cursorEl.querySelector(".chartCore__yline");
+    const selectBadge = cursorEl.querySelector(".chartCore__selectBadge");
+    const xBadge = cursorEl.querySelector(".chartCore__xbadge");
+    const yBadge = cursorEl.querySelector(".chartCore__ybadge");
+    const cursorDots = [];
     const tooltipEl = root.querySelector(".chartCore__tooltip");
     const probe = root.querySelector(".chartCore__probe");
     const legendEl = root.querySelector(".chartCore__legend");
     const baseCtx = baseCanvas.getContext("2d");
-    const overCtx = overCanvas.getContext("2d");
 
     const opts = {
       height: DEFAULT_HEIGHT,
@@ -407,6 +423,7 @@
     let drawRaf = 0;
     let overRaf = 0;
     let released = false;
+    let pendingDraw = false;
     let destroyed = false;
     let tooltipKey = "";
     let tooltipSize = { w: 0, h: 0 };
@@ -442,9 +459,6 @@
         grid: dark ? "rgba(240, 250, 255, 0.09)" : "rgba(0, 10, 23, 0.09)",
         axis: rgba(muted, 0.55),
         label: rgba(muted, 1),
-        cross: rgba(text, 0.55),
-        select: rgba(color("var(--accentBorder, #2563eb)"), 0.16),
-        selectEdge: rgba(color("var(--accentBorder, #2563eb)"), 0.7),
         seriesColors,
       };
     }
@@ -661,7 +675,8 @@
       drawRaf = 0;
       if (destroyed) return;
       const width = Math.floor(plotEl.clientWidth);
-      if (!width) return; // hidden: the resize observer draws on show
+      if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
+      pendingDraw = false;
       const t0 = performance.now();
       released = false;
       sizeW = width;
@@ -670,9 +685,6 @@
       if (stacks === undefined || stacks === null) computeStacks();
       layout = computeLayout(width);
       sizeCanvas(baseCanvas, baseCtx, width, opts.height);
-      // The cursor canvas gets its backing store on the first hover only.
-      if (overCanvas.width) sizeCanvas(overCanvas, overCtx, width, opts.height);
-      else { overCanvas.style.width = `${width}px`; overCanvas.style.height = `${opts.height}px`; }
       const ctx = baseCtx;
       ctx.clearRect(0, 0, width, opts.height);
       drawAxes(ctx, layout);
@@ -1077,62 +1089,75 @@
       if (!overRaf) overRaf = requestAnimationFrame(() => { overRaf = 0; drawOverlay(); });
     }
 
-    function badge(ctx, text, x, y, align, bounds) {
-      ctx.font = theme.fontBold;
-      const w = ctx.measureText(text).width + 10;
-      const h = 17;
+    // The cursor is DOM, like uPlot's: dashed lines, series points and the
+    // axis readouts move with compositor-only transforms, so hovering never
+    // repaints (or uploads) a canvas, whatever the devicePixelRatio.
+    const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
+    const place = (el, x, y) => { el.style.transform = `translate(${Math.round(x * dpr) / dpr}px, ${Math.round(y * dpr) / dpr}px)`; };
+    let lastBadgeX = "";
+    let lastBadgeY = "";
+
+    function placeBadge(el, x, y, align, lo, hi) {
+      if (el.dataset.w === undefined || el.dataset.text !== el.textContent) {
+        el.dataset.text = el.textContent;
+        el.dataset.w = String(el.offsetWidth);
+      }
+      const w = Number(el.dataset.w);
       let bx = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
-      bx = Math.max(bounds[0], Math.min(bounds[1] - w, bx));
-      ctx.fillStyle = rgba(theme.text, 0.92);
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(bx, y, w, h, 3); else ctx.rect(bx, y, w, h);
-      ctx.fill();
-      ctx.fillStyle = rgba(theme.panel, 1);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(text, bx + 5, y + h / 2 + 0.5);
+      bx = Math.max(lo, Math.min(hi - w, bx));
+      place(el, bx, y);
+    }
+
+    function dotFor(k) {
+      while (cursorDots.length <= k) {
+        const dot = document.createElement("i");
+        dot.className = "chartCore__dot";
+        dot.hidden = true;
+        cursorEl.appendChild(dot);
+        cursorDots.push(dot);
+      }
+      return cursorDots[k];
     }
 
     function drawOverlay() {
       if (!layout || released) return;
-      const ctx = overCtx;
       const L = layout;
-      const needed = !!((drag && drag.active) || (cursor && cursorIndex >= 0) || syncedX != null);
-      if (!overCanvas.width) {
-        if (!needed) return;
-        sizeCanvas(overCanvas, overCtx, L.width, L.height);
-      }
-      ctx.clearRect(0, 0, L.width, L.height);
-      if (drag && drag.active) {
+      const selecting = !!(drag && drag.active);
+      show(selectEl, selecting);
+      show(selectBadge, selecting && opts.xKind !== "category");
+      if (selecting) {
         const a = Math.max(L.left, Math.min(drag.x0, drag.x1));
         const b = Math.min(L.left + L.plotW, Math.max(drag.x0, drag.x1));
-        ctx.fillStyle = theme.select;
-        ctx.fillRect(a, L.top, b - a, L.plotH);
-        ctx.strokeStyle = theme.selectEdge;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(crisp(a), L.top); ctx.lineTo(crisp(a), L.top + L.plotH);
-        ctx.moveTo(crisp(b), L.top); ctx.lineTo(crisp(b), L.top + L.plotH);
-        ctx.stroke();
+        selectEl.style.width = `${Math.max(0, b - a)}px`;
+        selectEl.style.height = `${L.plotH}px`;
+        place(selectEl, a, L.top);
         const lo = L.xAt(a), hi = L.xAt(b);
         const fmt = (v) => (opts.xKind === "time" ? formatInstant(v, opts.xFractionDigits).slice(11) : formatValue(Number(v.toPrecision(8))));
-        if (opts.xKind !== "category") badge(ctx, `${fmt(lo)} \u2013 ${fmt(hi)}`, (a + b) / 2, L.top + 4, "center", [L.left, L.left + L.plotW]);
+        if (opts.xKind !== "category") {
+          selectBadge.textContent = `${fmt(lo)} \u2013 ${fmt(hi)}`;
+          placeBadge(selectBadge, (a + b) / 2, L.top + 4, "center", L.left, L.left + L.plotW);
+        }
       }
       const i = cursorIndex;
-      if (cursor && i >= 0) {
-        const xv = opts.xKind === "category" ? i : opts.xs[i];
-        const x = L.xOf(xv);
-        ctx.strokeStyle = theme.cross;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(crisp(x), L.top);
-        ctx.lineTo(crisp(x), L.top + L.plotH);
+      const active = !!(cursor && i >= 0);
+      const synced = !active && syncedX != null && opts.xKind !== "category";
+      let x = 0;
+      if (active) x = L.xOf(opts.xKind === "category" ? i : opts.xs[i]);
+      else if (synced) x = L.xOf(syncedX);
+      const xIn = (active || synced) && x >= L.left - 0.5 && x <= L.left + L.plotW + 0.5;
+      show(xLine, xIn);
+      if (xIn) {
+        xLine.style.height = `${L.plotH}px`;
+        place(xLine, x, L.top);
+      }
+      show(yLine, active);
+      show(xBadge, active);
+      show(yBadge, active);
+      let used = 0;
+      if (active) {
         const py = Math.max(L.top, Math.min(L.top + L.plotH, cursor.py));
-        ctx.moveTo(L.left, crisp(py));
-        ctx.lineTo(L.left + L.plotW, crisp(py));
-        ctx.stroke();
-        ctx.setLineDash([]);
+        yLine.style.width = `${L.plotW}px`;
+        place(yLine, L.left, py);
         // Points on every visible series at that x.
         for (const s of visibleSeries()) {
           const st = stacks && stacks.get(s.id);
@@ -1141,40 +1166,29 @@
           const dx = opts.type === "bar" ? (barOffsets.get(s.id) || 0) : 0;
           const y = L.yOf(v);
           if (y < L.top - 1 || y > L.top + L.plotH + 1) continue;
-          ctx.beginPath();
-          ctx.arc(x + dx, y, s.id === cursor.nearest ? 4.5 : 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = rgba(seriesColor(s), 1);
-          ctx.fill();
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = rgba(theme.panel, 1);
-          ctx.stroke();
+          const dot = dotFor(used++);
+          dot.style.background = rgba(seriesColor(s), 1);
+          dot.classList.toggle("is-nearest", s.id === cursor.nearest);
+          place(dot, x + dx, y);
+          show(dot, true);
         }
         // Exact readouts on both axes.
-        badge(ctx, xReadout(i), x, L.top + L.plotH + 2, "center", [0, L.width]);
-        const yv = L.yAt(py);
+        const xText = xReadout(i);
+        if (xText !== lastBadgeX) { xBadge.textContent = xText; lastBadgeX = xText; }
+        placeBadge(xBadge, x, L.top + L.plotH + 2, "center", 0, L.width);
         const yd = Math.min(10, decimalsFor(L.yStep) + 2);
-        badge(ctx, formatExact(Number(yv.toFixed(yd))), L.left - 3, py - 8.5, "right", [0, L.left - 2]);
+        const yText = formatExact(Number(L.yAt(py).toFixed(yd)));
+        if (yText !== lastBadgeY) { yBadge.textContent = yText; lastBadgeY = yText; }
+        placeBadge(yBadge, L.left - 3, py - 8.5, "right", 0, L.left - 2);
         root.dataset.cursorIndex = String(i);
-        root.dataset.cursorX = xReadout(i);
+        root.dataset.cursorX = xText;
         root.dataset.cursorPx = String(Math.round(x * 100) / 100);
-      } else if (syncedX != null && opts.xKind !== "category") {
-        const x = L.xOf(syncedX);
-        if (x >= L.left && x <= L.left + L.plotW) {
-          ctx.strokeStyle = theme.cross;
-          ctx.setLineDash([4, 3]);
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(crisp(x), L.top);
-          ctx.lineTo(crisp(x), L.top + L.plotH);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-      if (!cursor) {
+      } else {
         delete root.dataset.cursorIndex;
         delete root.dataset.cursorX;
         delete root.dataset.cursorPx;
       }
+      for (let k = used; k < cursorDots.length; k++) show(cursorDots[k], false);
     }
 
     // --- tooltip ------------------------------------------------------------------
@@ -1276,8 +1290,15 @@
 
     let pendingMove = null;
     let moveRaf = 0;
+    // The selection follows every move (cheap); the cursor redraws once per frame.
+    const trackDrag = (p) => {
+      if (!drag || !layout) return;
+      drag.x1 = Math.max(layout.left, Math.min(layout.left + layout.plotW, p.px));
+      if (!drag.active && Math.abs(drag.x1 - drag.x0) >= DRAG_MIN_PX) drag.active = true;
+    };
     overCanvas.addEventListener("pointermove", (ev) => {
       pendingMove = localPoint(ev);
+      trackDrag(pendingMove);
       if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; if (pendingMove) moveCursor(pendingMove); });
     });
     overCanvas.addEventListener("pointerleave", () => {
@@ -1285,6 +1306,16 @@
       pendingMove = null;
       leaveCursor();
     });
+    // A press on the plot is a zoom gesture, never a text selection or a
+    // native drag (which would cancel the pointer stream).
+    overCanvas.addEventListener("mousedown", (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      const sel = window.getSelection ? window.getSelection() : null;
+      if (sel && !sel.isCollapsed) sel.removeAllRanges();
+      overCanvas.focus({ preventScroll: true });
+    });
+    overCanvas.addEventListener("dragstart", (ev) => ev.preventDefault());
     overCanvas.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0 || !layout) return;
       const p = localPoint(ev);
@@ -1296,6 +1327,7 @@
     });
     const endDrag = (ev, commit) => {
       if (!drag) return;
+      if (ev && ev.type === "pointerup") trackDrag(localPoint(ev));
       const d = drag;
       drag = null;
       try { overCanvas.releasePointerCapture(d.id); } catch { /* already released */ }
@@ -1468,14 +1500,13 @@
       if (!drawRaf && !destroyed) drawRaf = requestAnimationFrame(draw);
     }
 
-    let lastObservedWidth = 0;
+    // Redraw when the width changes or when the chart shows again after a
+    // draw was skipped (hidden panel) or its canvases were released.
     const resizeObserver = typeof ResizeObserver === "function"
       ? new ResizeObserver((entries) => {
         const width = Math.floor(entries[entries.length - 1].contentRect.width);
-        if (width === lastObservedWidth) return;
-        lastObservedWidth = width;
         if (!width) { release(); return; }
-        if (width !== sizeW || released) scheduleDraw();
+        if (width !== sizeW || released || pendingDraw) scheduleDraw();
       })
       : null;
     if (resizeObserver) resizeObserver.observe(plotEl);
@@ -1493,7 +1524,7 @@
     function release() {
       if (released) return;
       released = true;
-      for (const canvas of [baseCanvas, overCanvas]) { canvas.width = 0; canvas.height = 0; }
+      for (const canvas of [baseCanvas]) { canvas.width = 0; canvas.height = 0; }
       sizeW = 0;
       leaveCursor();
     }

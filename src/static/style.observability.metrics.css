@@ -598,7 +598,15 @@ html[data-theme="light"] {
 .chartCore { position: relative; min-width: 0; }
 .chartCore__plot { position: relative; min-width: 0; overflow: hidden; }
 .chartCore__canvas { position: absolute; top: 0; left: 0; display: block; }
-.chartCore__overlay { cursor: crosshair; touch-action: pan-y; outline: none; }
+.chartCore__overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: pan-y; outline: none; user-select: none; -webkit-user-select: none; }
+.chartCore__cursor { position: absolute; inset: 0; overflow: hidden; pointer-events: none; contain: strict; }
+.chartCore__cursor > * { position: absolute; top: 0; left: 0; will-change: transform; }
+.chartCore__xline { width: 0; border-left: 1px dashed color-mix(in srgb, var(--text) 55%, transparent); }
+.chartCore__yline { height: 0; border-top: 1px dashed color-mix(in srgb, var(--text) 40%, transparent); }
+.chartCore__select { background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+.chartCore__dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border: 2px solid var(--panel); border-radius: 50%; box-sizing: border-box; }
+.chartCore__dot.is-nearest { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
+.chartCore__badge { padding: 0 5px; border-radius: 3px; background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: 11px; font-weight: 650; line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: 4px; }
 .chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; }
 .chartCore__tooltip {

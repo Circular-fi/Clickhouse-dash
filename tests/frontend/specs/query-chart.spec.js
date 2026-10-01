@@ -514,7 +514,7 @@ test('view choice persists across results and reloads; clear resets the panel', 
   await mainToggle(page).locator('[data-view="table"]').click();
   expect(await page.evaluate(() => localStorage.getItem('chdash.results.view'))).toBe('table');
   // A hidden chart gives its canvas memory back.
-  expect(await mainChart(page).locator('canvas').evaluateAll((els) => els.map((c) => c.width * c.height))).toEqual([0, 0]);
+  expect(await mainChart(page).locator('canvas').evaluateAll((els) => els.map((c) => c.width * c.height))).toEqual([0]);
 });
 
 test('multiquery panels chart independently, share the time crosshair and redraw on re-expand', async ({ page }) => {
