@@ -99,8 +99,9 @@
     if (!active()) return;
     params.set("mode", "spans");
     if (state.kind) params.set("kind", state.kind);
-    if (state.minMs) params.set("min_duration_ms", state.minMs);
-    if (state.maxMs) params.set("max_duration_ms", state.maxMs);
+    // span_* in the URL: min/max_duration_ms there are trace durations.
+    if (state.minMs) params.set("span_min_duration_ms", state.minMs);
+    if (state.maxMs) params.set("span_max_duration_ms", state.maxMs);
   }
 
   function cleanMs(value) {
@@ -114,8 +115,8 @@
     const mode = params.get("mode") === "spans" || params.get("results") === "spans" ? "spans" : "traces";
     const kind = params.get("kind") || "";
     state.kind = KINDS.includes(kind) ? kind : "";
-    state.minMs = cleanMs(params.get("min_duration_ms"));
-    state.maxMs = cleanMs(params.get("max_duration_ms"));
+    state.minMs = cleanMs(params.get("span_min_duration_ms"));
+    state.maxMs = cleanMs(params.get("span_max_duration_ms"));
     if (mode !== state.mode) {
       state.mode = mode;
       if (!active()) closePanel({ focus: false });

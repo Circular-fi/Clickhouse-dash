@@ -107,7 +107,7 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
   await expect.poll(() => requests[requests.length - 1].getAll('kind')).toEqual(['Client', 'SPAN_KIND_CLIENT']);
   await page.locator('#traceSpanMinDuration').fill('20');
   await page.locator('#traceSpanMinDuration').press('Enter');
-  await expect(page).toHaveURL(/[?&]min_duration_ms=20(&|$)/);
+  await expect(page).toHaveURL(/[?&]span_min_duration_ms=20(&|$)/);
   await expect.poll(() => requests[requests.length - 1].get('min_duration_ms')).toBe('20');
   await waitRows(page);
   await expect.poll(async () => (await rows(page).locator('.traceSpanListRow__cell--kind').allTextContents()).every((t) => t === 'Client')).toBe(true);

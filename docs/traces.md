@@ -263,6 +263,43 @@ Measured through the API on the local fixture (about 2.0 B spans over 7 days, de
 
 On the densest day the sampled span counts were within 1.5 % of the exact ones (the backend tests allow 15 % on the week).
 
+## Spans mode
+
+The search page's *Traces | Spans* toggle (`mode=spans` in the URL) lists matching **spans** instead of traces (after HyperDX's row search). The range, filters, chips and facets are the same, but they apply per span: every listed span matches all of them. Spans mode adds a span kind picker (`kind`) and a span duration range (`span_min_duration_ms` / `span_max_duration_ms` in the URL; `min_duration_ms` / `max_duration_ms` there stay trace durations).
+
+The table is virtualised (only the rows in view are rendered) and loads the next page by cursor when its end scrolls into view. Columns: time (local, exact UTC nanoseconds on hover), service (with its colour), operation, duration with a bar relative to the longest listed span, status, kind, and attribute columns chosen in the *Columns* picker (`span:key`, `resource:key` or `key` for either map; kept in the browser). Service, operation, status and attribute values open the click-to-filter menu. A row (or Enter) opens the span side panel: identity, status message, exceptions, Tags / Process attributes with filter actions, events and links, and *Open in trace* (`/traces/<id>?span=<span id>` with the search context, so Back returns to the same rows, selection and panel). Up / Down move through the rows (also with the panel open), Escape closes the panel.
+
+`GET /api/traces/spans` takes the search filters (`start_ms` / `end_ms` or `lookback_minutes`, `service`, `operation`, `status`, the `*_not` and `tag*` parameters), plus `kind` (repeatable), `min_duration_ms` / `max_duration_ms` (the span's own `Duration`), `limit` (default 100, at most 500), `columns=span:http.route,resource:host.name` (at most 20) and `cursor`. Rows are newest first: `timestamp`, `start_ns` (exact nanoseconds as text), `trace_id`, `span_id`, `parent_span_id` (empty with a restricted service allowlist, as in trace detail), `service_name`, `span_name`, `span_kind`, `duration_ns`, `status_code`, `status_message` and `attributes` (one value or `null` per requested column).
+
+Paging is a keyset on `(Timestamp, SpanId, TraceId)`, never `OFFSET`: `(TraceId, SpanId)` is not unique (a re-exported span has two timestamps), so the key starts with the timestamp, and exact copies of the page's last key are all kept on that page. A page reads newest-first time slices of 15 min, 1 h, 6 h, then 24 h until it holds `limit` spans (a top-N over a slice costs about the rows the slice holds, so a dense range answers from its first slice):
+
+```sql
+SELECT <span columns>, <attribute columns> FROM otel.otel_traces
+PREWHERE Timestamp >= <slice start> AND Timestamp <= <slice end or cursor time>
+     AND <allowlist> AND <service / operation (primary key), status, kind, duration>
+WHERE 1 [AND (Timestamp, SpanId, TraceId) < cursor] <attribute filters>
+ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT <remaining + 1>
+SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw',
+         max_rows_to_read = 1000000000, read_overflow_mode = 'throw'
+```
+
+Each next slice is sized from the cost rate seen so far so the page stays within a 2 s budget; once the budget is spent the page ends early with `incomplete: true`, `stop_reason: "time_budget"`, `searched_to_ns` and a cursor at the slice boundary, and the next request resumes exactly there. The cursor also carries the slice width the next page starts with. A slice guard (time or rows) after answered slices is a resume point too; on a page's first slice it is retried once eight times narrower. The table continues budget-stopped empty pages on its own three times, then offers *Keep searching*.
+
+`GET /api/traces/span?trace_id=…&span_id=…&timestamp_ns=…` returns one span with its attributes, events and links by its row key; the exact timestamp bounds the read to a few granules.
+
+Measured on the local fixture (about 2.0 B spans over 7 days), server time, medians of five requests:
+
+| Request | Median | Slices |
+| --- | --- | --- |
+| 1 h unfiltered, 100 spans (next page) | 50 ms (14 ms) | 15 min |
+| 1 h unfiltered, 500 spans, 2 attribute columns | 56 ms | 15 min |
+| 7 days unfiltered, 100 spans | 25 ms | 15 min |
+| 7 days, service + operation | 15 ms | 15 min |
+| 7 days, status = Error | 21 ms | 15 min |
+| 7 days, status = Error + tag, 500 spans (next page) | 224 ms (181 ms) | 15 min, 1 h, 6 h |
+| 7 days, tag + kind + span duration | 33 ms | 15 min |
+| 7 days, a tag matching nothing | 50 ms | the whole range (skip indexes) |
+
 ## Trace detail rendering
 
 The detail page derives the span tree, trace bounds, per-service counts, start-ordered overview bars and parsed event markers once per loaded trace. Opening or closing a span inspector and folding or unfolding a branch patch only the affected rows; service filters and range changes re-render the waterfall from the cached data. Waterfall controls use delegated listeners on the persistent container. The query-analysis trace viewer mounts rows lazily: only rows visible under the initial fold are built, and a branch mounts its children the first time it is expanded.

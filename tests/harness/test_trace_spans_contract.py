@@ -73,7 +73,7 @@ def test_spans_mode_page_wiring():
     assert bootstrap.index('"app_trace_search.js"') < bootstrap.index('"app_trace_spans.js"') < bootstrap.index('"app_trace_logs.js"')
     search = read("src/static/app_trace_search.js")
     params = search[search.index("const SEARCH_PARAMS"):search.index("const PIN_STORE_KEY")]
-    for name in ('"mode"', '"kind"', '"min_duration_ms"', '"max_duration_ms"'):
+    for name in ('"mode"', '"kind"', '"span_min_duration_ms"', '"span_max_duration_ms"'):
         assert name in params
     assert "ns.traceSpans?.urlParams?.(params)" in search and "ns.traceSpans?.applyParams?.(params)" in search
     traces = read("src/static/app_traces.js")
