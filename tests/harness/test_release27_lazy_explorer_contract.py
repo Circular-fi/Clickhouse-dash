@@ -65,7 +65,7 @@ def test_table_summary_queries_are_scoped_to_requested_object() -> None:
 
 
 def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     select = ui[ui.index("async function selectTable"):ui.index("async function applyRouteFromLocation")]
     set_mode = ui[ui.index("function setMode(mode)"):ui.index("function setWorkspace")]
 
@@ -78,7 +78,7 @@ def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> N
 
 
 def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'model.databaseTablesLoaded.has(database)' in tree
     assert 'loadDatabaseTables(database)' in tree
@@ -90,7 +90,7 @@ def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> No
 def test_selected_table_keeps_lazy_scope_totals_for_percentages() -> None:
     header = read("src/explorer_catalog.hpp")
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "database_footprint_bytes" in header
     assert "clickhouse_footprint_bytes" in header
     assert 'w.Key("footprint_scope")' in api

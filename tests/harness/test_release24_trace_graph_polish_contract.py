@@ -46,7 +46,7 @@ def test_offscreen_graph_sidebar_selection_performs_a_real_focused_fit() -> None
 
 
 def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     info = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function renderData(container", ui.index("function appendFinalizePreviewInfo"))]
     assert 'th.classList.add("has-finalize-info")' in info
@@ -60,14 +60,14 @@ def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
 
 
 def test_overview_has_no_redundant_lineage_title() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
     assert 'sectionTitle("Lineage")' not in overview
     assert 'if (deps.length) renderDependencies(container, detail);' in overview
 
 
 def test_storage_composition_legend_omits_zero_or_nonexistent_categories() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function buildStorageComposition"):ui.index("function renderOverview")]
     assert 'composition.items.filter((item) => Number(item.bytes) > 0)' in block
     assert 'if (legendItems.length) wrap.appendChild(legend);' in block

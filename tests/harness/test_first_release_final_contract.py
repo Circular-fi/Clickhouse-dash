@@ -71,7 +71,7 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     header = read("src/server.hpp")
     config = read("src/config.cpp")
     server = read("src/server.cpp")
-    explorer = read("src/static/app_explorer.js")
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     example = read("config.example.hcl")
 
     assert "bool browse = true" in header

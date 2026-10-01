@@ -71,7 +71,7 @@ def test_graph_refresh_discards_stale_scope_and_replays_latest_request() -> None
 
 
 def test_legacy_schema_route_is_canonicalized_to_overview() -> None:
-    explorer = read("src/static/app_explorer.js")
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     functional = read("tests/frontend/specs/functional.spec.js")
     assert 'const legacySchema = requestedTab === "schema";' in explorer
     assert 'const tab = legacySchema ? "Overview"' in explorer
@@ -125,7 +125,7 @@ def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
 
 def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_single_bound() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    explorer = read("src/static/app_explorer.js")
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (!exists) {' in graph
     assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
     assert 'model.refreshQueuedForce = true;' in graph

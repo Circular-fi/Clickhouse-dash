@@ -11,7 +11,7 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
     catalog = read("src/explorer_catalog.cpp")
     header = read("src/explorer_catalog.hpp")
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "bytes_allocated" in catalog
     assert "resident_bytes" in header
     assert 'w.Key("resident_bytes")' in api
@@ -21,7 +21,7 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
 
 
 def test_overview_embeds_lineage_and_uses_compact_rows_without_duplicate_engine_metrics() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     overview = ui[ui.index('function renderOverview'):ui.index('function renderColumns')]
     assert 'simpleRows(' not in overview
     assert '["Primary key"' not in overview
@@ -39,7 +39,7 @@ def test_overview_embeds_lineage_and_uses_compact_rows_without_duplicate_engine_
 
 def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    explorer = read("src/static/app_explorer.js")
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "function canUseStorageForId" in graph
     assert 'model.detailMode === "physical" && !canUseStorageForId(id)' in graph
     assert 'node.storage_disabled === true' in graph
@@ -52,7 +52,7 @@ def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> 
 
 
 def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert 'params.set("view", model.mode === "graph" ? "graph" : "browse")' in ui
     assert 'params.set("graph", route.mode === "physical" ? "storage" : "lineage")' in ui
@@ -64,7 +64,7 @@ def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
 
 def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     html = read("src/static/explorer.html")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'id="explorerTableSettingsButton"' in html
     assert 'id="explorerIncludeSystem"' in html
     assert 'id="explorerIncludeNonStoring"' in html
@@ -125,7 +125,7 @@ def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:
 
 
 def test_legacy_schema_canonicalization_preserves_explorer_query_state() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'const canonicalParams = new URLSearchParams(window.location.search || "");' in ui
     assert 'canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse")' in ui
     graph = read("src/static/app_explorer_graph.js")

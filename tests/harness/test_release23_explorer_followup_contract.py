@@ -23,8 +23,8 @@ def test_buffer_lineage_is_reversed_for_destination_details() -> None:
 
 
 def test_zero_row_tables_keep_only_overview_without_footprint_columns_or_storage() -> None:
-    ui = read("src/static/app_explorer.js")
-    tabs = ui[ui.index("function isEmptyRowSummary"):ui.index("function visibleFunctions")]
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    tabs = ui[ui.index("function isEmptyRowSummary"):ui.index("function summaryCard(")]
     overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
     assert 'return optionalNumber(summary?.rows) === 0;' in tabs
     assert 'if (isEmptyRowSummary(summary)) return ["Overview"];' in tabs

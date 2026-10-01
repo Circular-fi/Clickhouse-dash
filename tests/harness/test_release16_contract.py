@@ -8,7 +8,7 @@ def read(rel: str) -> str:
 
 
 def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert 'const hasDepth = params.has("depth");' in ui
     assert 'const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;' in ui
@@ -17,7 +17,7 @@ def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
 
 
 def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (model.section !== "tables") setSection("tables");' in ui
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
@@ -81,7 +81,7 @@ def test_terminal_single_query_failure_never_reopens_result_table() -> None:
 
 
 def test_compact_overview_does_not_repeat_engine_rows_or_bytes() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index('function renderOverview'):ui.index('function renderColumns')]
     assert '["Engine"' not in block
     assert '["Rows"' not in block
@@ -99,6 +99,6 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index('if (route.workspace === "explorer" && route.legacySchema'):ui.index('model.routeIntent = route;')]
     assert 'if (!canonicalParams.has("view")) canonicalParams.set("view", route.viewMode === "graph" ? "graph" : "browse");' in block

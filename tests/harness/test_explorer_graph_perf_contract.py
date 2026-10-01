@@ -31,7 +31,7 @@ def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
 
 
 def test_explorer_search_debounces_graph_focus() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "graphSearchTimer = setTimeout(() => graph?.searchFocus(), 200);" in ui
 
 

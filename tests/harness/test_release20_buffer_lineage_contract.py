@@ -22,7 +22,7 @@ def test_buffer_rows_use_one_system_tables_snapshot_before_parts_override() -> N
 
 def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary")' in catalog
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
@@ -38,7 +38,7 @@ def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
 
 
 def test_storage_metric_unknown_values_render_as_dash_only_inside_tables() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     row = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
     assert 'item.codec && item.codec !== "unknown" ? item.codec : "-"' in row
     assert 'ctx.value == null ? "-" : fmtStorageBytes(ctx.value)' in row
@@ -50,7 +50,7 @@ def test_storage_metric_unknown_values_render_as_dash_only_inside_tables() -> No
 
 
 def test_overview_lineage_has_one_normalized_two_direction_layout() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
     assert 'const matrix = node("div", "explorerDependencyMatrix");' in deps

@@ -39,7 +39,7 @@ def test_treemap_keeps_the_s3_browser_grouping_and_layout_contract() -> None:
 
 
 def test_database_treemap_excludes_resident_memory_from_disk_area() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function databaseStorageTree(database)"):ui.index("function renderDatabaseStorage(container, database)")]
     assert "if (isResidentMemorySummary(table)) {" in block
     assert "residentBytes += footprint;" in block

@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_overview_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
     assert '"Resident rows"' not in ui
@@ -21,14 +21,14 @@ def test_overview_uses_ram_labels_without_resident_runtime_cards_or_extra_sectio
 
 
 def test_lineage_cards_show_plain_database_dot_table_names() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
     assert 'const qualified = `${dep.database || "\\u2014"}.${dep.table || "\\u2014"}`;' in deps
     assert 'const qualified = `<${dep.database' not in deps
 
 
 def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equivalent_sql() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     data = ui[ui.index("function aggregatePreviewColumn"):ui.index("function renderDdl")]
     assert "Preview executes SELECT" not in data
     assert "Finalized for preview" not in data
@@ -41,7 +41,7 @@ def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equi
 
 def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     html = read("src/static/explorer.html")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     assert 'id="explorerTableModeTabs" class="themeSelect themeSelect--icons explorerModeSelect"' in html
     assert 'themeSelect__button--icon explorerModeSelect__button' in html
@@ -52,7 +52,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
 
 
 def test_storage_metric_tables_reuse_query_result_component_and_keep_only_percent_custom() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     block = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
     assert 'ns.results?.createStaticResultTable?.({' in block
@@ -64,9 +64,9 @@ def test_storage_metric_tables_reuse_query_result_component_and_keep_only_percen
 
 
 def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
-    ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent")]
+    ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
     assert 'node("div", "editorWrap explorerDdlWrap")' in ddl
     assert 'node("pre", "editorGutter explorerDdlGutter")' in ddl
     assert 'node("pre", "editorHighlight explorerDdl")' in ddl
@@ -98,7 +98,7 @@ def test_storage_layout_places_buffers_before_downstream_targets() -> None:
 
 def test_log_family_keeps_clickhouse_uncompressed_total_when_clickhouse_exposes_it() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)" in catalog
     assert "summary.uncompressed_bytes = total_uncompressed_bytes;" in catalog
     assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog

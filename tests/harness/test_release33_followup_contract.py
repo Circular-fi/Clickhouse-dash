@@ -29,7 +29,7 @@ def test_data_settings_cog_has_no_select_caret() -> None:
 
 
 def test_collapsing_selected_database_switches_to_database_view_without_reopening() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'function selectDatabase(database, { historyMode = "push", expand = true } = {})' in ui
     assert 'selectDatabase(database, { expand: false });' in ui
     assert 'model.expandedDatabases.delete(name);' in ui
@@ -49,7 +49,7 @@ def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() ->
 
 
 def test_footprint_scope_uses_two_readable_share_meters() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
     assert 'explorerScopeMeter__track' in footprint

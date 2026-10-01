@@ -81,7 +81,7 @@ def test_current_analysis_ui_has_no_raw_or_deep_and_uses_honest_processor_durati
     assert 'start_time_us' in viewer and 'finish_time_us' in viewer
 
 def test_function_search_is_name_only_and_server_description_catalog_is_cached() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     api = read("src/api_explorer.cpp")
     header = read("src/server.hpp")
     config = read("config.example.hcl")
@@ -98,7 +98,7 @@ def test_function_search_is_name_only_and_server_description_catalog_is_cached()
 
 
 def test_function_markdown_links_are_off_by_default_and_external_links_never_render() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     header = read("src/server.hpp")
     config = read("config.example.hcl")
 
@@ -137,9 +137,10 @@ def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> N
 
 
 def test_table_header_owns_state_and_codec_empty_value_uses_observed_part_default() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
 
-    header = ui[ui.index("function renderDetailHeader()") : ui.index("function renderTabs()")]
+    detail = read("src/static/app_explorer_detail.js")
+    header = detail[detail.index("function renderDetailHeader()") : detail.index("function renderTabs()")]
     assert 'detail.metric_scope || "local-replica"' in header
     assert "healthLabel(s).toLowerCase()" in header
     assert "active_parts" in header
@@ -154,7 +155,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
 
     assert "rows_total_1h" in header and "bytes_total_1h" in header
     assert "toString(sum(written_rows)), toString(sum(written_bytes))" in catalog
@@ -167,7 +168,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
 
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     graph_backend = read("src/explorer_graph.cpp")
 
@@ -192,7 +193,7 @@ def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_pro
 
 def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -> None:
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     html = read("src/static/explorer.html")
 
     catalog_handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
@@ -209,7 +210,7 @@ def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -
     assert 'button.addEventListener("click", () => void selectTable(table.database, table.name));' in ui
 
 def test_table_switch_requires_requested_identity_instead_of_rendering_undefined() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     start = ui.index("async function selectTable")
     end = ui.index("function renderListView", start) if "function renderListView" in ui[start:] else len(ui)
     block = ui[start:end]
@@ -237,7 +238,7 @@ def test_preview_ignores_empty_callback_blocks_before_validating_selected_column
 def test_column_metadata_uses_technical_account_and_reports_compact_storage_without_fake_per_column_bytes() -> None:
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     start = catalog.index("bool load_explorer_table_detail(")
     detail = catalog[start:catalog.index("bool load_explorer_functions", start)]
     assert 'bool columns_loaded = load_columns(system,' in detail
@@ -314,7 +315,7 @@ def test_preview_finalizes_aggregate_function_states_only_inside_bounded_limit()
 
 def test_graph_keeps_browser_visible_has_inline_topology_controls_and_no_reset_focus() -> None:
     html = read("src/static/explorer.html")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert html.index('id="explorerTableList"') < html.index('id="explorerGraphPane"')
     assert 'id="explorerGraphLogicalButton"' in html
@@ -355,7 +356,7 @@ def test_graph_uses_full_object_names_hides_view_storage_metrics_and_enriches_di
 
 
 def test_view_like_details_are_single_overview_and_lineage_tab_is_conditional() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (isViewLikeSummary(detail?.summary)) return ["Overview"];' in ui
     assert 'if (visibleDependencies(detail).length) tabs.push("Lineage");' not in ui
     assert 'container.appendChild(sectionTitle("CREATE statement"));' not in ui
@@ -366,7 +367,7 @@ def test_view_like_details_are_single_overview_and_lineage_tab_is_conditional() 
 
 def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     html = read("src/static/explorer.html")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'class="explorerSidebarToolbar"' in html
     assert 'id="explorerFunctionSearchInput"' in html
     assert 'id="explorerFunctionCategorySelect"' in html

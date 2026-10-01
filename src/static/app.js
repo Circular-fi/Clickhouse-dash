@@ -26,7 +26,7 @@
   // Every module the page loads costs its source, compiled code and the
   // stylesheet rules it can use (tools/build_page_css.py reads this list).
   const PAGE_SKIPPED_MODULES = {
-    query: ["app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js"],
+    query: ["app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"],
     explorer: ["app_autocomplete.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js"],
   };
   const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);
@@ -37,7 +37,7 @@
     util: "app_util.js", storage: "app_state.js", pipelineViewer: "app_pipeline_viewer.js", analysisData: "app_analysis_data.js",
     analysis: "app_analysis.js", download: "app_download.js", massExport: "app_export.js", explorerGraph: "app_explorer_graph.js",
     explorerTreemap: "app_explorer_treemap.js", explorerStorage: "app_explorer_storage.js", explorerOps: "app_explorer_ops.js",
-    explorer: "app_explorer.js",
+    explorerDetail: "app_explorer_detail.js", explorer: "app_explorer.js",
   };
 
   const hasCore = () => {
@@ -102,6 +102,7 @@
       "app_explorer_treemap.js",
       "app_explorer_storage.js",
       "app_explorer_ops.js",
+      "app_explorer_detail.js",
       "app_explorer.js",
     ];
 

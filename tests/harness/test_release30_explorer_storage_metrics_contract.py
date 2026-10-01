@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_finalize_hint_uses_svg_not_text_i() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple")]
     assert 'createElementNS("http://www.w3.org/2000/svg", "svg")' in block
     assert 'viewBox", "0 0 416.979 416.979"' in block
@@ -16,7 +16,7 @@ def test_finalize_hint_uses_svg_not_text_i() -> None:
 
 
 def test_non_storing_toggle_filters_sidebar_objects() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "function sidebarObjectVisible(table)" in ui
     assert "!model.includeNonStoring && nonStoringSummary(table)" in ui
     # Tables are grouped per database once per catalog payload; the visibility
@@ -27,7 +27,7 @@ def test_non_storing_toggle_filters_sidebar_objects() -> None:
 
 
 def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;" in graph
@@ -35,7 +35,7 @@ def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> 
 
 
 def test_storage_metric_columns_share_query_style_background_gauges() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function renderStorageMetricTable"):ui.index("function renderColumns")]
     assert 'classList.add("resultTable__gaugeCell", "resultTable__numeric", "explorerStorageGaugeCell")' in block
     assert "applyGauge(td, ctx.value, compressedMax" in block
@@ -44,7 +44,7 @@ def test_storage_metric_columns_share_query_style_background_gauges() -> None:
 
 
 def test_storage_shares_database_and_clickhouse_use_readable_scope_meters() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     footprint = ui[ui.index("function renderTableFootprint"):ui.index("function structureCompressedBytes")]
     assert "explorerShareList--footprint" in footprint
@@ -55,7 +55,7 @@ def test_storage_shares_database_and_clickhouse_use_readable_scope_meters() -> N
 
 
 def test_columns_indexes_projections_live_in_storage_not_overview() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     overview = ui[ui.index("function renderOverview"):ui.index("function isImplementationSubcolumn")]
     storage = ui[ui.index("function renderStorageCombined"):ui.index("function renderOperations")]
     assert "renderColumns(container, detail);" not in overview
@@ -67,7 +67,7 @@ def test_columns_indexes_projections_live_in_storage_not_overview() -> None:
 
 
 def test_tuple_storage_accounts_for_hidden_array_offsets_and_array_tuple_roots() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function renderColumns"):ui.index("function renderMergeProgress")]
     assert '/Tuple\\s*\\(/i.test(String(column?.type || ""))' in block
     assert "const implementationByRoot = new Map();" in block

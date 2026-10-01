@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_overview_is_storage_first_without_key_value_metadata_list() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     overview = ui[ui.index("function renderOverview") : ui.index("function isImplementationSubcolumn")]
     assert "simpleRows(" not in overview
     assert "renderTableFootprint(container, detail);" in overview
@@ -19,7 +19,7 @@ def test_overview_is_storage_first_without_key_value_metadata_list() -> None:
 
 
 def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return null;" in ui
     assert 'unknownText = "unknown"' in ui
     assert 'wrap.appendChild(node("span", "explorerPercentBar__text", unknownText));' in ui
@@ -29,7 +29,7 @@ def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> N
 
 
 def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     css = read("src/static/style.css")
     assert 'ns.results?.createStaticResultTable?.({' in ui
@@ -42,7 +42,7 @@ def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
 
 def test_buffer_rows_are_normalized_to_resident_rows() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "void normalize_buffer_runtime_rows" in catalog
     assert 'parse_engine_arguments_local(table.engine_full, "Buffer")' in catalog
     assert "std::unordered_map<std::string, std::optional<uint64_t>> raw_rows;" in catalog
@@ -52,8 +52,8 @@ def test_buffer_rows_are_normalized_to_resident_rows() -> None:
 
 
 def test_storage_and_operations_are_combined_for_storage_backed_tables() -> None:
-    ui = read("src/static/app_explorer.js")
-    tabs = ui[ui.index("function availableTabs") : ui.index("function visibleFunctions")]
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    tabs = ui[ui.index("function availableTabs") : ui.index("function summaryCard(")]
     assert 'if (hasStorage) tabs.push("Storage");' in tabs
     assert 'else if (!isDictionarySummary(summary)) tabs.push("Operations");' in tabs
     storage = ui[ui.index("function renderStorageCombined") : ui.index("function renderOperations")]

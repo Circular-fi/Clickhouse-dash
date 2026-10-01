@@ -9,7 +9,7 @@ def read(path: str) -> str:
 
 def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary"' in catalog
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
@@ -27,7 +27,7 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
 
 def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'if (summary.engine == "Buffer") {' in catalog
     assert 'parse_engine_arguments_local(summary.engine_full, "Buffer")' in catalog
     assert 'append_dependency(args[0], args[1], "downstream");' in catalog
@@ -36,7 +36,7 @@ def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
 
 def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog
     assert "summary.physical_bytes = total_bytes;" in catalog
     assert "summary.data_paths = split_unit_separator" in catalog
@@ -48,7 +48,7 @@ def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> Non
 
 
 def test_dependency_cards_are_fixed_three_per_row_and_compact() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     deps = ui[ui.index("function renderDependencies"):ui.index("function renderParts")]
     assert 'const qualified = `${dep.database || "\\u2014"}.${dep.table || "\\u2014"}`;' in deps
@@ -62,7 +62,7 @@ def test_column_default_codec_comes_from_active_parts_when_observable() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "std::vector<std::string> default_compression_codecs;" in header
     assert "groupUniqArray(default_compression_codec)" in catalog
     assert 'w.Key("default_compression_codecs");' in api

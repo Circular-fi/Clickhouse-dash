@@ -8,7 +8,7 @@ def read(path: str) -> str:
 
 
 def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     assert 'explorerStorageStackedBar' in ui
     assert 'explorerStorageCompositionLegend' in ui
@@ -19,7 +19,7 @@ def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
 
 
 def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'th.className = "resultTable__thSortable";' in results
@@ -30,7 +30,7 @@ def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
 
 
 def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_removed() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     assert 'return `${sign}${v.toFixed(2)}${units[unit]}`;' in ui
     assert 'fmtStorageBytes(ctx.value)' in ui

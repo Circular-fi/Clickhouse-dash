@@ -59,7 +59,7 @@ def test_storage_includes_buffer_and_automatically_retains_flush_destination() -
 
 
 def test_storage_sidebar_keeps_buffer_available_while_other_non_storing_objects_are_blocked() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'const storageBuffer = storageMode && engineKey(table) === "buffer";' in ui
     assert 'if (!model.includeNonStoring && nonStoringSummary(table) && !storageBuffer) return false;' in ui
     assert 'function storageCatalogEligible(summary)' in ui

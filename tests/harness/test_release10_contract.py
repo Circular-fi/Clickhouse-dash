@@ -21,7 +21,7 @@ def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    explorer = read("src/static/app_explorer.js")
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "bool finalized_for_preview = false;" in header
     assert 'out.columns[i].finalized_for_preview = declared_type.rfind("AggregateFunction(", 0) == 0;' in catalog
     assert 'w.Key("finalized_for_preview")' in api
@@ -54,8 +54,8 @@ def test_graph_click_then_browse_sync_preserves_canvas_camera_but_offscreen_side
 
 
 def test_zero_row_table_has_no_data_or_storage_tab() -> None:
-    explorer = read("src/static/app_explorer.js")
-    block = explorer[explorer.index("function isEmptyRowSummary"):explorer.index("function visibleFunctions()")]
+    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    block = explorer[explorer.index("function isEmptyRowSummary"):explorer.index("function summaryCard(")]
     assert 'return optionalNumber(summary?.rows) === 0;' in block
     assert 'if (isEmptyRowSummary(summary)) return ["Overview"];' in block
 

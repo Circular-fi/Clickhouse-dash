@@ -26,7 +26,7 @@ def test_trace_initial_expansion_uses_visible_span_budget_and_gutter_is_only_on_
 
 
 def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -> None:
-    src = read("src/static/app_explorer.js")
+    src = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     assert "tuple_root:" in src and "tuple_parent:" in src
     assert "explorerStorageTupleToggle" in src
@@ -38,7 +38,7 @@ def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -
 
 
 def test_data_preview_numeric_finalized_states_and_menu_portal_positioning() -> None:
-    src = read("src/static/app_explorer.js")
+    src = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'values.every((value) => Number.isFinite(Number(value))) ? "Float64" : c.type' in src
     assert 'menu.style.position = "fixed";' in src
     assert 'menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;' in src
