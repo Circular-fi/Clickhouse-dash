@@ -10,7 +10,6 @@
   if (!ns) return;
   const { dom, state, api, ui } = ns;
 
-  const SVG_NS = "http://www.w3.org/2000/svg";
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
   const PLOT_HEIGHT = 280;
   const MARGIN = { top: 14, right: 14, bottom: 28 };
@@ -95,7 +94,7 @@
     const abs = Math.abs(value);
     if (abs === 0) return "0";
     if (abs >= 1e4) {
-      const unit = ns.queryChart?.compactUnitFor ? ns.queryChart.compactUnitFor(abs) : { factor: 1, suffix: "" };
+      const unit = ns.chartCore ? ns.chartCore.compactUnitFor(abs) : { factor: 1, suffix: "" };
       return `${significant(value / unit.factor)}${unit.suffix}`;
     }
     if (abs >= 1) return Number(value.toPrecision(4)).toLocaleString("en-US", { maximumFractionDigits: 3 });
@@ -135,7 +134,7 @@
       return { factor: factor / info.scale, suffix: ` ${name}${rate}` };
     }
     if (info.kind === "percent") return { factor: 1, suffix: "%" };
-    const compact = ns.queryChart?.compactUnitFor ? ns.queryChart.compactUnitFor(maxAbs) : { factor: 1, suffix: "" };
+    const compact = ns.chartCore ? ns.chartCore.compactUnitFor(maxAbs) : { factor: 1, suffix: "" };
     return { factor: compact.factor, suffix: compact.suffix };
   }
 
@@ -145,14 +144,6 @@
     const decimals = scaledStep > 0 ? Math.min(6, Math.max(0, Math.ceil(-Math.log10(scaledStep) - 1e-9))) : 0;
     const text = (value / formatter.factor).toFixed(decimals);
     return `${/^-0(?:\.0*)?$/.test(text) ? "0" : text}${formatter.suffix}`;
-  }
-
-  function niceTicks(min, max, count) {
-    if (ns.queryChart?.niceTicks) return ns.queryChart.niceTicks(min, max, count);
-    const step = (max - min) / Math.max(1, count) || 1;
-    const values = [];
-    for (let i = 0; i <= count; i++) values.push(min + i * step);
-    return { min, max, step, values };
   }
 
   function formatInstant(ms) {
@@ -193,7 +184,7 @@
       values: new Map(),
       hidden: new Set(),
       el: null,
-      hover: null,
+      chart: null,
       filterDraft: null,
     };
   }
@@ -536,6 +527,7 @@
     if (model.panels.length <= 1) return;
     const index = panelIndex(panel);
     model.panels.splice(index, 1);
+    destroyChart(panel);
     panel.el?.remove();
     panel.el = null;
     if (model.active >= model.panels.length) model.active = model.panels.length - 1;
@@ -682,9 +674,7 @@
         <div class="metricsChart__axisTitle"></div>
         <div class="metricsChart__plot">
           <div class="metricsChart__state" hidden></div>
-          <div class="queryChart__tooltip metricsChart__tooltip" role="status" hidden></div>
         </div>
-        <div class="queryChart__legend metricsChart__legend" role="group" aria-label="Series"></div>
       </div>
       <div class="metricsPanel__empty metricsEmpty metricsEmpty--panel">Pick a metric in the catalog to chart it.</div>`;
     const keysList = el.querySelector(".metricsFilterForm__keys");
@@ -855,27 +845,6 @@
       if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel, panel.seq);
       else { panel.exemplarData = null; renderPanelNote(panel); drawChart(panel); }
     });
-
-    const legend = el.querySelector(".metricsChart__legend");
-    legend.addEventListener("click", (event) => {
-      const item = event.target.closest("[data-series-key]");
-      if (!item) return;
-      const key = item.dataset.seriesKey;
-      const series = panel.data?.series || [];
-      if (event.altKey || event.metaKey) {
-        // Isolate: show only this series (again: show all).
-        const others = series.filter((s) => seriesKey(s) !== key).map(seriesKey);
-        const isolated = others.every((k) => panel.hidden.has(k)) && !panel.hidden.has(key);
-        panel.hidden.clear();
-        if (!isolated) for (const k of others) panel.hidden.add(k);
-      } else if (panel.hidden.has(key)) panel.hidden.delete(key);
-      else panel.hidden.add(key);
-      drawChart(panel);
-    });
-
-    const plot = el.querySelector(".metricsChart__plot");
-    plot.addEventListener("pointermove", (event) => onPlotPointer(panel, event));
-    plot.addEventListener("pointerleave", () => hideHover(panel));
   }
 
   function renderPanel(panel) {
@@ -989,6 +958,12 @@
   }
 
   // --- Chart ----------------------------------------------------------------
+  // One canvas chart per panel (app_chart_core.js): lines with the slot
+  // colours and dashes, the shared crosshair across panels, the engine's
+  // tooltip and legend (click shows / hides, Alt+click isolates), exemplars as
+  // links over the plot, and a drag that sets the time range of every panel.
+
+  const SYNC_KEY = "metrics-panels";
 
   function seriesKey(series) {
     return series.other ? "\u0000other" : String(series.key ?? "");
@@ -1003,16 +978,10 @@
   }
 
   function slotStyle(index, other) {
-    if (other) return { color: "var(--qchart-other)", dash: "4 3" };
+    if (other) return { color: "var(--qchart-other)", dash: [4, 3] };
     const color = `var(--qchart-${(index % COLOR_SLOTS) + 1})`;
     const cycle = Math.floor(index / COLOR_SLOTS);
-    return { color, dash: cycle === 0 ? "" : cycle === 1 ? "6 3" : "2 3" };
-  }
-
-  function svg(tag, attrs = {}) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) if (v != null) node.setAttribute(k, String(v));
-    return node;
+    return { color, dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
   }
 
   // Exemplar values share the metric unit: they sit on the value axis when the
@@ -1024,250 +993,127 @@
     return !["increase", "count", "sum", "rate", "count_rate"].includes(String(data.agg || ""));
   }
 
-  function drawChart(panel) {
-    const el = panel.el;
-    const data = panel.data;
-    if (!el) return;
-    const plot = el.querySelector(".metricsChart__plot");
-    const legend = el.querySelector(".metricsChart__legend");
-    const axisTitle = el.querySelector(".metricsChart__axisTitle");
-    plot.querySelector("svg")?.remove();
-    panel.hover = null;
-    const series = Array.isArray(data?.series) ? data.series : [];
-    const timestamps = Array.isArray(data?.timestamps) ? data.timestamps.map(Number) : [];
-    if (!data || !series.length || !timestamps.length) {
-      legend.innerHTML = "";
-      axisTitle.textContent = "";
-      plot.style.height = `${PLOT_HEIGHT}px`;
-      return;
-    }
-    const valueInfo = parseUnit(data.value_unit ?? data.unit);
-    const metricInfo = parseUnit(data.unit);
-    axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${formatBucket(Number(data.bucket_ms || 0))} buckets`;
-
-    const width = Math.max(240, Math.round(plot.clientWidth || 600));
-    const height = PLOT_HEIGHT;
-    plot.style.height = `${height}px`;
-    const bucketMs = Number(data.bucket_ms) || 60000;
-    const x0 = Number(data.range?.[0] ?? timestamps[0]);
-    const x1 = Math.max(Number(data.range?.[1] ?? timestamps[timestamps.length - 1] + bucketMs), x0 + 1);
-    const visible = series.map((s, index) => ({ s, index, key: seriesKey(s), style: slotStyle(index, !!s.other) }))
-      .filter((item) => !panel.hidden.has(item.key));
-
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const { s } of visible) {
-      for (const v of s.values || []) {
-        if (v == null || !Number.isFinite(Number(v))) continue;
-        const n = Number(v);
-        if (n < lo) lo = n;
-        if (n > hi) hi = n;
-      }
-    }
-    const exemplarList = panel.exemplars && Array.isArray(panel.exemplarData?.exemplars) ? panel.exemplarData.exemplars : [];
-    const onAxis = exemplarsOnAxis(data);
-    if (onAxis) {
-      for (const ex of exemplarList) {
-        const n = Number(ex.value);
-        if (!Number.isFinite(n)) continue;
-        if (n < lo) lo = n;
-        if (n > hi) hi = n;
-      }
-    }
-    if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
-    if (lo > 0) lo = 0;
-    if (hi < 0) hi = 0;
-    // A little headroom so a line at the maximum does not sit on the top tick.
-    const ticks = niceTicks(lo, hi + (hi - lo) * 0.04, 5);
-    const formatter = axisFormatter(valueInfo, Math.max(Math.abs(ticks.min), Math.abs(ticks.max)));
-    const labels = ticks.values.map((v) => formatTick(v, ticks.step, formatter));
-    const left = Math.min(96, Math.max(34, Math.max(...labels.map((l) => l.length)) * 6.2 + 12));
-    const plotW = Math.max(40, width - left - MARGIN.right);
-    const plotH = height - MARGIN.top - MARGIN.bottom;
-    const xOf = (t) => left + ((t - x0) / (x1 - x0)) * plotW;
-    const yOf = (v) => MARGIN.top + plotH - ((v - ticks.min) / (ticks.max - ticks.min || 1)) * plotH;
-
-    const root = svg("svg", { class: "queryChart__svg metricsChart__svg", width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${panel.metric} chart` });
-    const grid = svg("g");
-    ticks.values.forEach((v, i) => {
-      const y = yOf(v);
-      grid.appendChild(svg("line", { class: v === 0 ? "queryChart__grid queryChart__grid--zero" : "queryChart__grid", x1: left, x2: left + plotW, y1: y, y2: y }));
-      const label = svg("text", { class: "queryChart__tick", x: left - 6, y: y + 3.5, "text-anchor": "end" });
-      label.textContent = labels[i];
-      grid.appendChild(label);
-    });
-    const timeTicks = ns.queryChart?.timeAxisTicks ? ns.queryChart.timeAxisTicks(x0, x1, plotW) : [];
-    for (const tick of timeTicks) {
-      const x = xOf(tick.t);
-      if (x < left - 0.5 || x > left + plotW + 0.5) continue;
-      grid.appendChild(svg("line", { class: "queryChart__tickMark", x1: x, x2: x, y1: MARGIN.top + plotH, y2: MARGIN.top + plotH + 4 }));
-      const label = svg("text", { class: "queryChart__tick", x, y: MARGIN.top + plotH + 16, "text-anchor": "middle" });
-      label.textContent = tick.label;
-      grid.appendChild(label);
-    }
-    grid.appendChild(svg("line", { class: "queryChart__baseline", x1: left, x2: left + plotW, y1: MARGIN.top + plotH, y2: MARGIN.top + plotH }));
-    root.appendChild(grid);
-
-    // One path per series. A series exported less often than the bucket has
-    // regular empty buckets: gaps up to twice its usual spacing are bridged,
-    // longer ones (missing data) break the line; a lone point is a dot.
-    const pxs = timestamps.map(xOf);
-    const lines = svg("g", { class: "metricsChart__lines" });
-    for (const { s, style } of [...visible].reverse()) {
-      let d = "";
-      let run = 0;
-      const dots = [];
-      const values = s.values || [];
-      const present = [];
-      for (let i = 0; i < timestamps.length; i++) {
-        const v = values[i];
-        if (v != null && Number.isFinite(Number(v))) present.push(i);
-      }
-      const gaps = present.slice(1).map((i, k) => i - present[k]).sort((a, b) => a - b);
-      const bridge = Math.max(1, 2 * (gaps.length ? gaps[gaps.length >> 1] : 1));
-      let previous = -Infinity;
-      for (const i of present) {
-        if (i - previous > bridge) {
-          if (run === 1) dots.push(previous);
-          run = 0;
-        }
-        d += `${run ? "L" : "M"}${pxs[i].toFixed(1)},${yOf(Number(values[i])).toFixed(1)}`;
-        run += 1;
-        previous = i;
-      }
-      if (run === 1) dots.push(previous);
-      if (d) lines.appendChild(svg("path", { class: "queryChart__line metricsChart__line", d, stroke: style.color, "stroke-dasharray": style.dash || null, "data-series": seriesKey(s) }));
-      for (const i of dots) lines.appendChild(svg("circle", { cx: pxs[i], cy: yOf(Number(values[i])), r: 2.5, fill: style.color }));
-    }
-    root.appendChild(lines);
-
-    const hover = svg("g", { class: "queryChart__hover", hidden: "" });
-    const cross = svg("line", { class: "queryChart__crosshair", y1: MARGIN.top, y2: MARGIN.top + plotH });
-    const hoverDots = svg("g", { class: "queryChart__hoverDots" });
-    hover.append(cross, hoverDots);
-    root.appendChild(hover);
-    root.appendChild(svg("rect", { class: "queryChart__hit", x: left, y: MARGIN.top, width: plotW, height: plotH }));
-
-    // Exemplars: links to the span, drawn above the hit area.
-    if (exemplarList.length) {
-      const group = svg("g", { class: "metricsChart__exemplars" });
-      const bottom = MARGIN.top + plotH - 5;
-      // Largest values first; a dot that would overlap one already placed is
-      // skipped, so every drawn dot stays clickable.
-      const placed = [];
-      const ordered = [...exemplarList].sort((a, b) => Number(b.value) - Number(a.value));
-      for (const ex of ordered) {
-        const t = Number(ex.t);
-        if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
-        const value = Number(ex.value);
-        const cy = onAxis && Number.isFinite(value) ? yOf(value) : bottom;
-        const cx = xOf(t);
-        if (placed.some(([px, py]) => Math.abs(px - cx) < 9 && Math.abs(py - cy) < 9)) continue;
-        placed.push([cx, cy]);
-        const href = `${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
-        const link = svg("a", { class: "metricsExemplar", href, "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "", "aria-label": `Exemplar ${formatValue(value, metricInfo)} at ${formatInstant(t)}: open trace ${ex.trace_id}` });
-        link.appendChild(svg("rect", { class: "metricsExemplar__mark", x: xOf(t) - 3.5, y: cy - 3.5, width: 7, height: 7, rx: 1.5, transform: `rotate(45 ${xOf(t)} ${cy})` }));
-        link.addEventListener("pointerenter", (event) => showExemplarTip(panel, ex, metricInfo, event));
-        link.addEventListener("pointerleave", () => hideHover(panel));
-        group.appendChild(link);
-      }
-      root.appendChild(group);
-    }
-    plot.insertBefore(root, plot.firstChild);
-
-    panel.hover = { timestamps, pxs, visible, yOf, cross, hoverDots, hoverGroup: hover, left, plotW, valueInfo, bucketMs };
-    renderLegend(panel, series);
-  }
-
-  function renderLegend(panel, series) {
-    const legend = panel.el.querySelector(".metricsChart__legend");
-    if (series.length <= 1 && !series[0]?.other && !panel.data?.group_by?.length && !panel.data?.per_series) {
-      legend.innerHTML = "";
-      return;
-    }
-    legend.innerHTML = series.map((s, index) => {
-      const key = seriesKey(s);
-      const style = slotStyle(index, !!s.other);
-      const shown = !panel.hidden.has(key);
-      const name = seriesName(panel, s);
-      return `<button type="button" class="queryChart__legendItem metricsLegend__item${style.dash ? " is-dashed" : ""}" data-series-key="${esc(key)}" aria-pressed="${shown}" title="${esc(`${name}\nClick: show / hide · Alt+click: only this one`)}"><i style="--series-color:${style.color};background:${style.color}"></i><span>${esc(name)}</span></button>`;
-    }).join("");
-  }
-
-  function hideHover(panel) {
-    const h = panel.hover;
-    if (h) h.hoverGroup.setAttribute("hidden", "");
-    const tip = panel.el?.querySelector(".metricsChart__tooltip");
-    if (tip) tip.hidden = true;
-  }
-
-  function placeTooltip(panel, tip, x, y) {
-    const plot = panel.el.querySelector(".metricsChart__plot");
-    const width = plot.clientWidth;
-    tip.hidden = false;
-    const tw = tip.offsetWidth;
-    const th = tip.offsetHeight;
-    let left = x + 14;
-    if (left + tw > width - 4) left = Math.max(4, x - tw - 14);
-    const top = Math.max(4, Math.min(PLOT_HEIGHT - th - 4, y - th / 2));
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
-  }
-
-  function onPlotPointer(panel, event) {
-    const h = panel.hover;
-    if (!h || !h.timestamps.length) return;
-    if (event.target.closest?.(".metricsExemplar")) return;
-    const plot = panel.el.querySelector(".metricsChart__plot");
-    const rect = plot.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    if (x < h.left - 4 || x > h.left + h.plotW + 4) { hideHover(panel); return; }
-    // Nearest bucket.
-    let lo = 0;
-    let hi = h.pxs.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (h.pxs[mid] < x) lo = mid + 1; else hi = mid;
-    }
-    const index = lo > 0 && Math.abs(h.pxs[lo - 1] - x) < Math.abs(h.pxs[lo] - x) ? lo - 1 : lo;
-    const px = h.pxs[index];
-    h.cross.setAttribute("x1", px);
-    h.cross.setAttribute("x2", px);
-    h.hoverDots.innerHTML = "";
-    const rows = [];
-    for (const { s, style } of h.visible) {
-      const v = s.values?.[index];
-      if (v == null || !Number.isFinite(Number(v))) continue;
-      rows.push({ name: seriesName(panel, s), value: Number(v), color: style.color });
-      h.hoverDots.appendChild(svg("circle", { cx: px, cy: h.yOf(Number(v)), r: 3.5, fill: style.color }));
-    }
-    h.hoverGroup.removeAttribute("hidden");
-    rows.sort((a, b) => b.value - a.value);
-    const tip = panel.el.querySelector(".metricsChart__tooltip");
-    const t = h.timestamps[index];
-    const shownRows = rows.slice(0, TOOLTIP_ROWS);
-    tip.innerHTML = `<strong>${esc(formatInstant(t))}</strong><span class="metricsTip__bucket">${esc(formatBucket(h.bucketMs))} bucket</span>` +
-      (shownRows.length
-        ? shownRows.map((r) => `<div class="queryChart__tipRow"><i style="background:${r.color}"></i><em>${esc(r.name)}</em><b>${esc(formatValue(r.value, h.valueInfo))}</b></div>`).join("")
-        : `<div class="metricsTip__none">No point in this bucket</div>`) +
-      (rows.length > shownRows.length ? `<div class="metricsTip__more">+${rows.length - shownRows.length} more</div>` : "");
-    placeTooltip(panel, tip, px, y);
-  }
-
-  function showExemplarTip(panel, ex, metricInfo, event) {
-    const tip = panel.el.querySelector(".metricsChart__tooltip");
-    const plot = panel.el.querySelector(".metricsChart__plot");
-    const rect = plot.getBoundingClientRect();
+  function exemplarTip(ex, metricInfo) {
     const attrs = ex.attributes && typeof ex.attributes === "object" ? Object.entries(ex.attributes).slice(0, 4) : [];
-    tip.innerHTML = `<strong>Exemplar · ${esc(formatValue(Number(ex.value), metricInfo))}</strong>` +
+    return `<strong>Exemplar · ${esc(formatValue(Number(ex.value), metricInfo))}</strong>` +
       `<span class="metricsTip__bucket">${esc(formatInstant(Number(ex.t)))}</span>` +
       `<div class="metricsTip__trace">Trace <code>${esc(ex.trace_id)}</code></div>` +
       (ex.span_id ? `<div class="metricsTip__trace">Span <code>${esc(ex.span_id)}</code></div>` : "") +
       attrs.map(([k, v]) => `<div class="metricsTip__attr"><em>${esc(k)}</em> ${esc(v)}</div>`).join("") +
       `<div class="metricsTip__hint">Click to open the span</div>`;
-    placeTooltip(panel, tip, event.clientX - rect.left, event.clientY - rect.top);
-    if (panel.hover) panel.hover.hoverGroup.setAttribute("hidden", "");
+  }
+
+  // Exemplar links, largest values first (the engine skips a dot that would
+  // overlap one already placed, so every drawn dot stays clickable).
+  function exemplarMarkers(panel, data, x0, x1) {
+    const list = panel.exemplars && Array.isArray(panel.exemplarData?.exemplars) ? panel.exemplarData.exemplars : [];
+    const onAxis = exemplarsOnAxis(data);
+    const metricInfo = parseUnit(data.unit);
+    const markers = [];
+    for (const ex of [...list].sort((a, b) => Number(b.value) - Number(a.value))) {
+      const t = Number(ex.t);
+      if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
+      const value = Number(ex.value);
+      const href = `${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
+      markers.push({
+        x: t,
+        y: onAxis && Number.isFinite(value) ? value : null,
+        href,
+        className: "metricsExemplar",
+        label: `Exemplar ${formatValue(value, metricInfo)} at ${formatInstant(t)}: open trace ${ex.trace_id}`,
+        attrs: { "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "" },
+        tooltip: () => exemplarTip(ex, metricInfo),
+      });
+    }
+    return { markers, values: onAxis ? markers.map((m) => m.y).filter((v) => v != null) : [] };
+  }
+
+  // A drag over a panel sets the time range of every panel (whole seconds).
+  function onChartZoom(range, fromUser) {
+    if (!fromUser || !range) return;
+    const startMs = Math.floor(range[0] / 1000) * 1000;
+    const endMs = Math.ceil(range[1] / 1000) * 1000;
+    if (endMs - startMs < 1000) return;
+    applyRange({ from: formatInstant(startMs), to: formatInstant(endMs) });
+  }
+
+  function drawChart(panel) {
+    const el = panel.el;
+    const data = panel.data;
+    if (!el) return;
+    const plot = el.querySelector(".metricsChart__plot");
+    const axisTitle = el.querySelector(".metricsChart__axisTitle");
+    const series = Array.isArray(data?.series) ? data.series : [];
+    const timestamps = Array.isArray(data?.timestamps) ? data.timestamps : [];
+    const core = ns.chartCore;
+    if (!data || !series.length || !timestamps.length || !core) {
+      axisTitle.textContent = "";
+      if (panel.chart) panel.chart.root.hidden = true;
+      return;
+    }
+    const valueInfo = parseUnit(data.value_unit ?? data.unit);
+    axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${formatBucket(Number(data.bucket_ms || 0))} buckets`;
+
+    const n = timestamps.length;
+    const xs = new Float64Array(n);
+    for (let i = 0; i < n; i++) xs[i] = Number(timestamps[i]);
+    const bucketMs = Number(data.bucket_ms) || 60000;
+    const x0 = Number(data.range?.[0] ?? xs[0]);
+    const x1 = Math.max(Number(data.range?.[1] ?? xs[n - 1] + bucketMs), x0 + 1);
+    // A series exported less often than the bucket has regular empty buckets:
+    // bridgeGaps joins those, longer gaps break the line, a lone point is a dot.
+    const lines = series.map((s, index) => {
+      const style = slotStyle(index, !!s.other);
+      const values = new Float64Array(n);
+      const raw = Array.isArray(s.values) ? s.values : [];
+      for (let i = 0; i < n; i++) {
+        const v = raw[i];
+        values[i] = v == null || v === "" ? NaN : Number(v);
+      }
+      return { id: seriesKey(s), label: seriesName(panel, s), color: style.color, dash: style.dash, values, nulls: core.bridgeGaps(values) };
+    });
+    const { markers, values: exemplarValues } = exemplarMarkers(panel, data, x0, x1);
+    const showLegend = !(series.length <= 1 && !series[0]?.other && !data.group_by?.length && !data.per_series);
+    const options = {
+      xs,
+      xDomain: [x0, x1],
+      series: lines,
+      hidden: [...panel.hidden],
+      legend: showLegend,
+      markers,
+      yInclude: [0, ...exemplarValues],
+      yUnit: (maxAbs) => axisFormatter(valueInfo, maxAbs),
+      formatValue: (v) => formatValue(v, valueInfo),
+      formatY: (v) => formatValue(v, valueInfo),
+      tooltipFooter: () => `${formatBucket(bucketMs)} bucket`,
+    };
+    if (!panel.chart) {
+      panel.chart = core.create(plot, {
+        ...options,
+        xKind: "time",
+        type: "line",
+        height: PLOT_HEIGHT,
+        xFractionDigits: 0,
+        syncKey: SYNC_KEY,
+        legendClick: "toggle",
+        tooltipSort: "desc",
+        tooltipMaxRows: TOOLTIP_ROWS,
+        tooltipNulls: false,
+        onZoom: onChartZoom,
+        onHiddenChange: (next) => { panel.hidden = next; },
+      });
+      panel.chart.root.setAttribute("role", "group");
+    } else {
+      panel.chart.root.hidden = false;
+      panel.chart.setData({ ...options, zoom: null });
+    }
+    panel.chart.root.setAttribute("aria-label", `${panel.metric} chart`);
+  }
+
+  function destroyChart(panel) {
+    if (!panel.chart) return;
+    panel.chart.destroy();
+    panel.chart = null;
   }
 
   // --- Time range -----------------------------------------------------------
@@ -1341,16 +1187,6 @@
     for (const panel of model.panels) loadPanel(panel);
   }
 
-  let resizeRaf = 0;
-  function onResize() {
-    // Hidden (another Observability view): the charts redraw when it shows again.
-    if (resizeRaf || !ownsUrl()) return;
-    resizeRaf = requestAnimationFrame(() => {
-      resizeRaf = 0;
-      for (const panel of model.panels) drawChart(panel);
-    });
-  }
-
   let started = false;
   async function start() {
     if (started || !state.selectedHostId) return;
@@ -1363,12 +1199,16 @@
   // that changed while the view was away (or another entry) reloads.
   function onLocation() {
     const before = urlQuery();
+    const previous = model.panels;
     readUrl();
     timePicker?.refresh?.();
     if (urlQuery() === before && model.catalog) {
+      // Same state: the panels (and their charts) stay.
+      model.panels = previous;
       if (model.focusService) renderCatalog();
       return;
     }
+    for (const panel of previous) destroyChart(panel);
     dom.metricsPanels?.replaceChildren();
     renderPanels();
     reloadAll();
@@ -1433,8 +1273,6 @@
       for (const root of [...openPickers]) if (!root.contains(event.target) && !path.includes(root)) closePicker(root);
     });
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePickers(); });
-    if (typeof ResizeObserver === "function" && dom.metricsPanels) new ResizeObserver(onResize).observe(dom.metricsPanels);
-    else window.addEventListener("resize", onResize);
     window.addEventListener("chdash:host-changed", () => {
       started = true;
       if (!ownsUrl()) { reloadWhenShown = true; return; }

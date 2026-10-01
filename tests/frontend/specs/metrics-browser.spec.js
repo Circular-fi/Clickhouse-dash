@@ -53,12 +53,25 @@ function metricsUrl(params) {
   return `/observability/metrics?${search.toString()}`;
 }
 
+// Panels draw on the shared canvas engine: its data attributes say what it
+// drew (data-series-drawn, data-points-drawn, data-markers, data-plot).
+const chartOf = (panel) => panel.locator('.metricsChart .chartCore');
+
 async function waitForChart(page, panel = page.locator('.metricsPanel').first()) {
-  // A flat line has an empty box: wait for the drawn path, not its visibility.
-  await expect(panel.locator('.metricsChart__svg path.metricsChart__line').first()).toBeAttached({ timeout: 30_000 });
-  await expect(panel.locator('.metricsChart__svg')).toBeVisible();
   await expect(panel.locator('.metricsChart')).not.toHaveClass(/is-loading/, { timeout: 30_000 });
+  await expect(chartOf(panel).locator('.chartCore__canvas')).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => Number(await chartOf(panel).getAttribute('data-points-drawn')), { timeout: 30_000 }).toBeGreaterThan(0);
 }
+
+// The plot rectangle in page coordinates.
+async function plotBox(panel) {
+  const chart = chartOf(panel);
+  const box = await chart.locator('.chartCore__overlay').boundingBox();
+  const [left, top, width, height] = (await chart.getAttribute('data-plot')).split(' ').map(Number);
+  return { x: box.x + left, y: box.y + top, width, height };
+}
+
+const seriesDrawn = async (panel) => Number(await chartOf(panel).getAttribute('data-series-drawn'));
 
 test('metrics: catalog lists services and metrics with type and unit badges, and search narrows it', async ({ page, request }) => {
   const range = await windowParams(request, 24);
@@ -140,16 +153,22 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(/group_by=status\.code/);
   await waitForChart(page, panel);
-  const legend = panel.locator('.metricsLegend__item');
+  const legend = panel.locator('.chartCore__legendItem');
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveCount(1);
   expect(await legend.count()).toBeGreaterThanOrEqual(2);
 
-  // Legend toggle hides a line.
-  const lines = panel.locator('.metricsChart__svg path.metricsChart__line');
-  const before = await lines.count();
+  // Legend click hides a line; Alt+click shows only that one (again: all).
+  const before = await seriesDrawn(panel);
   await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click();
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveAttribute('aria-pressed', 'false');
-  await expect(lines).toHaveCount(before - 1);
+  await expect.poll(() => seriesDrawn(panel)).toBe(before - 1);
+  await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click();
+  await expect.poll(() => seriesDrawn(panel)).toBe(before);
+  await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click({ modifiers: ['Alt'] });
+  await expect.poll(() => seriesDrawn(panel)).toBe(1);
+  await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveAttribute('aria-pressed', 'true');
+  await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click({ modifiers: ['Alt'] });
+  await expect.poll(() => seriesDrawn(panel)).toBe(before);
 
   // Filter status.code != STATUS_CODE_ERROR with value autocomplete.
   await panel.locator('.metricsFilters__add').click();
@@ -196,7 +215,7 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels.nth(1).locator('.metricsPanel__name')).toHaveText('queue.depth');
   await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Max');
   await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('host.name');
-  await expect(panels.nth(1).locator('.metricsLegend__item')).toHaveCount(3);
+  await expect(panels.nth(1).locator('.chartCore__legendItem')).toHaveCount(3);
   await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(range.from.slice(0, 10));
 
   // The page rewrites nothing it restored.
@@ -224,15 +243,15 @@ test('metrics: an exemplar dot opens its trace with the span selected', async ({
   await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'http.server.request.duration', kind: 'histogram', agg: 'p99' }));
   const panel = page.locator('.metricsPanel').first();
   await waitForChart(page, panel);
-  const exemplar = panel.locator('a.metricsExemplar').first();
-  await expect(exemplar).toBeAttached({ timeout: 30_000 });
+  const exemplar = panel.locator('a.metricsExemplar:not([hidden])').first();
+  await expect(exemplar).toBeVisible({ timeout: 30_000 });
   const traceId = await exemplar.getAttribute('data-trace-id');
   const spanId = await exemplar.getAttribute('data-span-id');
   expect(traceId).toMatch(/^[0-9a-f]{32}$/);
   expect(spanId).toMatch(/^[0-9a-f]{16}$/);
   await exemplar.hover();
-  await expect(panel.locator('.metricsChart__tooltip')).toContainText('Exemplar');
-  await expect(panel.locator('.metricsChart__tooltip')).toContainText(traceId);
+  await expect(panel.locator('.chartCore__tooltip')).toContainText('Exemplar');
+  await expect(panel.locator('.chartCore__tooltip')).toContainText(traceId);
   await exemplar.click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
@@ -245,12 +264,46 @@ test('metrics: crosshair tooltip lists the series values with their unit', async
   await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'process.cpu.utilization', kind: 'gauge', group_by: 'host.name', exemplars: '0' }));
   const panel = page.locator('.metricsPanel').first();
   await waitForChart(page, panel);
-  const box = await panel.locator('.queryChart__hit').boundingBox();
+  const box = await plotBox(panel);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  const tip = panel.locator('.metricsChart__tooltip');
+  const tip = panel.locator('.chartCore__tooltip');
   await expect(tip).toBeVisible();
-  await expect(tip.locator('.queryChart__tipRow')).toHaveCount(3);
+  await expect(tip.locator('.chartCore__tipRow')).toHaveCount(3);
   await expect(tip).toContainText('bucket');
+  // Rows are sorted by value, largest first.
+  const values = (await tip.locator('.chartCore__tipRow b').allInnerTexts()).map(Number);
+  expect(values).toEqual([...values].sort((a, b) => b - a));
+});
+
+test('metrics: panels share the crosshair, and a drag sets the time range of every panel', async ({ page, request }) => {
+  const range = await windowParams(request, 3);
+  const second = new URLSearchParams({ service: 'api_service', metric: 'queue.depth', kind: 'gauge', agg: 'max', group_by: 'host.name', exemplars: '0' }).toString();
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'process.cpu.utilization', kind: 'gauge', group_by: 'host.name', exemplars: '0', panel: [second] }));
+  const panels = page.locator('.metricsPanel');
+  await waitForChart(page, panels.nth(0));
+  await waitForChart(page, panels.nth(1));
+  const box = await plotBox(panels.nth(0));
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
+  await expect(chartOf(panels.nth(0))).toHaveAttribute('data-cursor-index', /\d+/);
+  await expect(chartOf(panels.nth(1))).toHaveAttribute('data-sync-x', /\d+/);
+  await expect(chartOf(panels.nth(1)).locator('.chartCore__xline')).toBeVisible();
+
+  // Drag a third of the plot: both panels reload on that range.
+  const reload = page.waitForResponse((r) => r.url().includes('/api/metrics/series'));
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2, { steps: 6 });
+  await expect(chartOf(panels.nth(0)).locator('.chartCore__select')).toBeVisible();
+  await page.mouse.up();
+  expect((await reload).ok()).toBeTruthy();
+  await expect.poll(() => new URL(page.url()).searchParams.get('from')).not.toBe(range.from);
+  const url = new URL(page.url());
+  const span = Date.parse(`${url.searchParams.get('to').replace(' ', 'T')}Z`) - Date.parse(`${url.searchParams.get('from').replace(' ', 'T')}Z`);
+  expect(span).toBeGreaterThan(40 * 60000);
+  expect(span).toBeLessThan(80 * 60000);
+  await waitForChart(page, panels.nth(0));
+  await waitForChart(page, panels.nth(1));
+  await expect(chartOf(panels.nth(0))).toHaveAttribute('data-zoomed', 'false');
 });
 
 test('metrics: values and axes follow the OpenTelemetry unit', async ({ page, request }) => {
@@ -296,7 +349,7 @@ for (const theme of ['dark', 'light']) {
     const panels = page.locator('.metricsPanel');
     await waitForChart(page, panels.nth(0));
     await waitForChart(page, panels.nth(1));
-    await expect(panels.nth(0).locator('a.metricsExemplar').first()).toBeAttached({ timeout: 30_000 });
+    await expect(panels.nth(0).locator('a.metricsExemplar:not([hidden])').first()).toBeVisible({ timeout: 30_000 });
     await captureState(page, testInfo, `metrics-browser-${theme}`);
     await panels.nth(1).locator('.metricsFilters__add').click();
     await panels.nth(1).locator('.metricsPicker--group .tracePicker__button').click();

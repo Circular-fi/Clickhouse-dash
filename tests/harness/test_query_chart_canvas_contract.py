@@ -38,10 +38,36 @@ def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_vie
     assert "canvas.width = 0; canvas.height = 0;" in engine
 
 
-def test_query_chart_keeps_the_axis_helpers_the_metrics_page_reads():
+def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
     chart = read("src/static/app_query_chart.js")
-    for name in ["niceTicks,", "timeAxisTicks,", "compactUnitFor,", "formatTickNumber,", "formatFullNumber,"]:
-        assert name in chart[chart.index("ns.queryChart = {"):], name
+    engine = read("src/static/app_chart_core.js")
+    logs = read("src/static/app_logs.js")
+    metrics = read("src/static/app_metrics.js")
+    controller = read("src/static/app_observability.js")
+    # The Logs and Metrics views load the engine, not the Query chart module.
+    assert '    logs: ["app_chart_core.js", "app_logs.js"],' in controller
+    assert '    metrics: ["app_chart_core.js", "app_metrics.js"],' in controller
+    # The SVG axis helpers metrics used to borrow are gone with their last reader.
+    exports = chart[chart.index("ns.queryChart = {"):]
+    for name in ["niceTicks", "timeAxisTicks", "compactUnitFor", "formatTickNumber"]:
+        assert name not in exports, name
+    assert "ns.queryChart" not in metrics
+    # Logs: stacked bars on the requested range; a drag searches that range.
+    assert "histogramChart = ns.chartCore.create(box, {" in logs
+    assert 'type: "bar",' in logs and "stack: true," in logs and "onZoom: onHistogramZoom," in logs
+    assert "<svg" not in logs[logs.index("// --- Histogram"):logs.index("function syncLegend()")]
+    # Metrics: one engine chart per panel, shared crosshair, exemplar markers.
+    assert "panel.chart = core.create(plot, {" in metrics
+    assert "syncKey: SYNC_KEY," in metrics and 'legendClick: "toggle",' in metrics
+    assert "nulls: core.bridgeGaps(values)" in metrics
+    assert 'className: "metricsExemplar",' in metrics
+    assert "SVG_NS" not in metrics and "createElementNS" not in metrics
+    # Engine options those views need (additive: the Query chart ignores them).
+    for option in ["opts.xDomain", "opts.yInclude", "opts.yUnit", "opts.formatY", "opts.barWidthRatio",
+                   "opts.tooltipSort", "opts.tooltipMaxRows", "opts.tooltipTitle", "opts.legendClick", "opts.markers"]:
+        assert option in engine, option
+    assert "function bridgeGaps(values, factor = 2) {" in engine
+    assert "ctx.setLineDash(dash);" in engine
 
 
 def test_explorer_skips_the_result_chart_and_its_engine():

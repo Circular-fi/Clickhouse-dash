@@ -88,7 +88,7 @@ def test_metrics_view_shell_and_switcher():
     assert 'id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace"' in html
     assert not (ROOT / "src/static/metrics.html").exists()
     controller = read("src/static/app_observability.js")
-    assert '    metrics: ["app_query_chart.js", "app_metrics.js"],' in controller
+    assert '    metrics: ["app_chart_core.js", "app_metrics.js"],' in controller
     # Query and Explorer: one Observability entry, hidden until /api/version reveals it.
     for page in ["query.html", "explorer.html"]:
         shell = read(f"src/static/{page}")

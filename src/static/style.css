@@ -1126,8 +1126,7 @@ html[data-theme="light"] {
   cursor: pointer;
 }
 .queryChart__select:focus-visible,
-.queryChart__type:focus-visible,
-.queryChart__legendItem:focus-visible { outline: none; box-shadow: var(--ring); }
+.queryChart__type:focus-visible { outline: none; box-shadow: var(--ring); }
 .queryChart__seriesButton { text-align: left; }
 .queryChart__seriesButton::after { content: " \25BE"; color: var(--muted); }
 .queryChart__seriesMenu {
@@ -1167,79 +1166,6 @@ html[data-theme="light"] {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
-.queryChart__plot {
-  position: relative;
-  height: 300px;
-  min-width: 0;
-}
-.queryChart__svg { display: block; overflow: visible; }
-.queryChart__grid { stroke: color-mix(in srgb, var(--muted) 16%, transparent); stroke-width: 1; }
-.queryChart__grid--zero,
-.queryChart__baseline { stroke: color-mix(in srgb, var(--muted) 42%, transparent); stroke-width: 1; }
-.queryChart__tickMark { stroke: color-mix(in srgb, var(--muted) 42%, transparent); }
-.queryChart__tick {
-  fill: var(--muted);
-  font: 500 10.5px system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-variant-numeric: tabular-nums;
-}
-.queryChart__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.queryChart__area { opacity: 0.32; stroke: none; }
-.queryChart__bar { stroke: var(--panelBg); stroke-width: 1; }
-.queryChart__crosshair { stroke: color-mix(in srgb, var(--text) 45%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
-.queryChart__hoverDots circle { stroke: var(--panelBg); stroke-width: 2; }
-.queryChart__hover[hidden] { display: none; }
-.queryChart__hit { fill: transparent; pointer-events: all; cursor: crosshair; }
-.queryChart__tooltip {
-  position: absolute;
-  z-index: 20;
-  min-width: 150px;
-  max-width: 320px;
-  padding: 7px 9px;
-  display: grid;
-  gap: 3px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--panelBg) 96%, var(--bg));
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 22%, transparent);
-  color: var(--text);
-  pointer-events: none;
-  font-size: 11px;
-  line-height: 1.35;
-}
-.queryChart__tooltip strong { font-weight: 750; font-variant-numeric: tabular-nums; }
-.queryChart__tipRow { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
-.queryChart__tipRow i { width: 8px; height: 8px; border-radius: 2px; }
-.queryChart__tipRow em { color: var(--muted); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queryChart__tipRow b { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
-.queryChart__tipRow--total { border-top: 1px solid var(--border); padding-top: 3px; }
-.queryChart__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  padding-top: 4px;
-}
-.queryChart__legend:empty { display: none; }
-.queryChart__legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 18rem;
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-.queryChart__legendItem:hover { border-color: var(--buttonBorder); }
-.queryChart__legendItem i { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; }
-.queryChart__legendItem span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.queryChart__legendItem[aria-pressed="false"] { color: var(--muted); }
-.queryChart__legendItem[aria-pressed="false"] i { opacity: 0.25; }
-.queryChart__legendItem[aria-pressed="false"] span { text-decoration: line-through; }
 .queryChart__message {
   height: 300px;
   display: grid;
@@ -16984,9 +16910,9 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   line-height: 1.4;
 }
 .metricsChart { padding: 0 10px 10px; min-width: 0; }
-.metricsChart.is-loading .metricsChart__plot svg { opacity: .45; transition: opacity 120ms ease; }
+.metricsChart.is-loading .chartCore__canvas { opacity: .45; transition: opacity 120ms ease; }
 .metricsChart__axisTitle { min-height: 14px; padding: 0 2px 2px; color: var(--muted); font-size: 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metricsChart__plot { position: relative; min-width: 0; height: 280px; }
+.metricsChart__plot { position: relative; min-width: 0; min-height: 280px; }
 .metricsChart__state {
   position: absolute;
   inset: 0;
@@ -17012,18 +16938,6 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   animation: metricsSpin 800ms linear infinite;
 }
 @keyframes metricsSpin { to { transform: rotate(360deg); } }
-.metricsChart__svg { width: 100%; }
-.metricsChart__line { stroke-width: 1.7; }
-.metricsExemplar { cursor: pointer; }
-.metricsExemplar__mark {
-  fill: color-mix(in srgb, var(--text) 82%, transparent);
-  stroke: var(--panelBg);
-  stroke-width: 1.25;
-}
-.metricsExemplar:hover .metricsExemplar__mark,
-.metricsExemplar:focus-visible .metricsExemplar__mark { fill: #f59e0b; }
-.metricsExemplar:focus-visible { outline: none; }
-.metricsChart__tooltip { max-width: 360px; }
 .metricsTip__bucket,
 .metricsTip__none,
 .metricsTip__more,
@@ -17031,7 +16945,6 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
 .metricsTip__trace code { font-size: 10px; overflow-wrap: anywhere; }
 .metricsTip__attr { color: var(--text); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metricsTip__attr em { color: var(--muted); font-style: normal; }
-.metricsLegend__item.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 2px, var(--panelBg) 2px 3px); }
 @media (max-width: 900px) {
   .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 34vh) minmax(0, 1fr); }
   .metricsSidebar { border-right: 0; border-bottom: 1px solid var(--border); }

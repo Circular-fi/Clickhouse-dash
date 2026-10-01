@@ -239,10 +239,14 @@ test('observability: logs and metrics modules and rules load on their first show
   }
   state = await loaded(page);
   expect(state.modules).toEqual({ traces: true, logs: true, metrics: true });
-  for (const name of ['app_logs.js', 'app_metrics.js', 'app_query_chart.js', 'app_traces.js']) {
+  // The views share the canvas chart engine, loaded once; the Query chart
+  // module is never part of this page.
+  for (const name of ['app_logs.js', 'app_metrics.js', 'app_chart_core.js', 'app_traces.js']) {
     expect(state.scripts.filter((s) => s === name), name).toHaveLength(1);
     expect(requested.filter((s) => s === name), name).toHaveLength(1);
   }
+  expect(state.scripts).not.toContain('app_query_chart.js');
+  expect(requested).not.toContain('app_query_chart.js');
   expect(state.sheets).toEqual(['style.observability.css']);
 
   // A page opened on Logs starts on the Logs sheet and modules only.
