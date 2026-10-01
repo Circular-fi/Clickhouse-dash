@@ -216,9 +216,16 @@ test('observability: logs and metrics modules and rules load on their first show
   for (const name of ['app_logs.js', 'app_metrics.js', 'app_query_chart.js']) expect(state.scripts).not.toContain(name);
   expect(state.sheets).toEqual(['style.observability.traces.css']);
   expect(requested.filter((n) => /^app_(logs|metrics|query_chart)\.js$/.test(n))).toEqual([]);
+  // The other views' markup is not in the document until they are shown.
+  await expect(page.locator('#logsWorkspace')).toHaveCount(0);
+  await expect(page.locator('#metricsWorkspace')).toHaveCount(0);
+  await expect(tab(page, 'logs')).not.toHaveAttribute('aria-controls', /./);
 
   await tab(page, 'logs').click();
   await expectView(page, 'logs');
+  await expect(page.locator('#logsWorkspace')).toHaveCount(1);
+  await expect(tab(page, 'logs')).toHaveAttribute('aria-controls', 'logsWorkspace');
+  await expect(page.locator('#metricsWorkspace')).toHaveCount(0);
   state = await loaded(page);
   expect(state.modules).toEqual({ traces: true, logs: true, metrics: false });
   // Two views shown: one sheet with every view's rules replaces the first.

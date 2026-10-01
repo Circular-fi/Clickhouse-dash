@@ -6,7 +6,7 @@
 
   const byId = (id) => document.getElementById(id);
 
-  const dom = {
+  const build = () => ({
     root: document.documentElement,
 
     queryTextArea: byId("queryTextArea"),
@@ -232,9 +232,16 @@
     errorBanner: byId("errorBanner"),
     resultTableHead: byId("resultTableHead"),
     resultTableBody: byId("resultTableBody"),
-  };
+  });
+  const dom = build();
 
   dom.liveResultsWrap = dom.resultTableBody ? dom.resultTableBody.closest(".tableWrap") : null;
+
+  // Markup added after load (an Observability view shown for the first time,
+  // app_observability.js) gets its element references too.
+  dom.refresh = () => {
+    for (const [key, value] of Object.entries(build())) if (value && dom[key] !== value) dom[key] = value;
+  };
 
   ns.dom = dom;
 })();

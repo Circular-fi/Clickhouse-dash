@@ -166,6 +166,32 @@
 
   const viewModule = (view) => window.ChDash[view] || null;
 
+  // The markup of the views not shown yet: the shell ships every view (any of
+  // them can be the first paint), and the others leave the document before
+  // any module runs, so the page holds one view's elements until another is
+  // shown.
+  const detached = new Map();
+
+  function detachViews(keep) {
+    for (const view of VIEWS) {
+      const panel = view === keep ? null : document.querySelector(`.obsView[data-obs-panel="${view}"]`);
+      if (!panel) continue;
+      const mark = document.createComment(`observability:${view}`);
+      detached.set(view, { mark, html: panel.outerHTML });
+      panel.replaceWith(mark);
+    }
+  }
+
+  function attachView(view) {
+    const entry = detached.get(view);
+    if (!entry) return;
+    detached.delete(view);
+    const template = document.createElement("template");
+    template.innerHTML = entry.html;
+    entry.mark.replaceWith(template.content);
+    window.ChDash.dom?.refresh?.();
+  }
+
   function featuresKnown() {
     return window.ChDash.observability?.featuresKnown === true;
   }
@@ -232,6 +258,10 @@
       button.classList.toggle("is-active", selected);
       button.setAttribute("aria-selected", String(selected));
       button.tabIndex = selected ? 0 : -1;
+      // A view not shown yet has no panel in the document.
+      const panel = document.querySelector(`.obsView[data-obs-panel="${view}"]`);
+      if (panel) button.setAttribute("aria-controls", panel.id);
+      else button.removeAttribute("aria-controls");
     }
   }
 
@@ -249,6 +279,9 @@
     if (view === ctl.active && !url) return;
     const seq = ++ctl.seq;
     const leaving = ctl.active && ctl.active !== view ? ctl.active : "";
+    // Hidden until applyActive() (the view rule every sheet holds), so its
+    // markup lands before its modules run.
+    attachView(view);
     try {
       await Promise.all([loadView(view), ensureSheet(view)]);
     } catch (error) {
@@ -359,13 +392,14 @@
 
   async function start() {
     window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, featuresKnown: false, VIEWS, VIEW_MODULES };
+    const named = viewFromPath(window.location.pathname);
+    const view = named && enabledViews().includes(named) ? named : defaultView();
+    detachViews(view);
     await loadModules(COMMON_MODULES);
     const early = String(document.documentElement.dataset.obsView || "");
     styled.add(VIEWS.includes(early) ? early : VIEWS[0]);
     bindShell();
     window.ChDash.ui?.init?.();
-    const named = viewFromPath(window.location.pathname);
-    const view = named && enabledViews().includes(named) ? named : defaultView();
     // /observability: the first enabled view, its parameters kept; a view
     // turned off: the first enabled one, on its own URL.
     const url = view === named ? currentUrl() : named ? viewRoute(view) : `${viewRoute(view)}${window.location.search}${window.location.hash}`;

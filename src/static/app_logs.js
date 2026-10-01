@@ -1,7 +1,8 @@
 (() => {
   "use strict";
-  // Logs explorer (the Logs view of /observability), modelled on HyperDX's search page: a search bar
-  // (time range, services, level, Body text, attribute filters), the volume
+  // Logs explorer (the Logs view of /observability), modelled on HyperDX's
+  // search page: a search bar (time range, services, level, Body text,
+  // attribute filters), the volume
   // histogram stacked by severity (drag to zoom), a virtualised newest-first
   // table paged by keyset cursors, a side panel with click-to-filter actions
   // and the surrounding context, a Patterns tab and a live tail. All search

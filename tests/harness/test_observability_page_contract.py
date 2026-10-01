@@ -50,6 +50,10 @@ def test_views_load_lazily_once_with_their_stylesheet():
     # The page starts on the common modules only; a view's modules come with its first show.
     start = js[js.index("async function start() {"):]
     assert "await loadModules(COMMON_MODULES);" in start
+    # The other views' markup leaves the document before any module runs, and comes back on first show.
+    assert start.index("detachViews(view);") < start.index("await loadModules(COMMON_MODULES);")
+    assert "window.ChDash.dom?.refresh?.();" in js
+    assert "dom.refresh = () => {" in read("src/static/app_dom.js")
     assert "VIEW_MODULES[" not in start
     # A view is initialised once, then told about the location.
     assert "if (!ctl.started.has(view)) {" in js
