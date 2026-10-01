@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults, syntheticAnalytics } from '../helpers/traces.js';
+import { canvasPixel, chartCore } from '../helpers/charts.js';
 
 // Duration heatmap + box-select comparison (app_trace_heatmap.js) after
 // HyperDX's DBSearchHeatmapChart / DBDeltaChart: the Percentiles / Heatmap
@@ -95,20 +96,28 @@ async function mockHeatmap(page, { deltas = (params) => ({ json: syntheticDeltas
   return seen;
 }
 
-const heatCells = (page) => page.locator('#traceDurationChart .traceHeatCell');
+// The heatmap draws on a canvas: its grid as drawn comes from the module's
+// test hook (cells in client coordinates, counts, colour levels).
+const heatRoot = (page) => chartCore(page.locator('#traceDurationChart'));
+const inspect = (page) => page.evaluate(() => window.ChDash.traceHeatmap.inspect());
+async function heatReady(page) {
+  await expect(heatRoot(page)).toHaveAttribute('data-cells-drawn', /^[1-9]/, { timeout: 30_000 });
+}
 const panel = (page) => page.locator('#traceDeltaPanel');
 const chips = (page) => page.locator('#tracesFilterChips .traceFilterChip');
 const last = (list) => list[list.length - 1];
 
 async function openHeatmap(page, query = 'duration_view=heatmap') {
   await page.goto(`/observability/traces?${query}`);
-  await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
+  await heatReady(page);
 }
 
 async function cellCenter(page, col, row) {
-  const box = await page.locator(`#traceDurationChart .traceHeatCell[data-heat-col="${col}"][data-heat-row="${row}"]`).boundingBox();
-  expect(box).not.toBeNull();
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  // A new search reloads the grid: wait until it is drawn.
+  await expect.poll(async () => (await inspect(page))?.cells?.length || 0).toBeGreaterThan(0);
+  const cell = (await inspect(page)).cells.find((c) => c.col === col && c.row === row);
+  expect(cell).toBeTruthy();
+  return { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 };
 }
 
 async function dragBox(page, from, to) {
@@ -122,7 +131,7 @@ async function dragBox(page, from, to) {
 }
 
 async function lastCol(page) {
-  return Number(await page.locator('#traceDurationChart svg.traceHeatmap').getAttribute('data-cols')) - 1;
+  return Number(await page.locator('#traceDurationChart').getAttribute('data-heat-cols')) - 1;
 }
 
 test('the Percentiles / Heatmap toggle lives in the URL and is remembered', async ({ page }) => {
@@ -135,13 +144,13 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
     return route.fulfill({ json: params.get('charts') === 'counts' ? { ...json, charts: ['counts'], duration_quantiles: [] } : json });
   });
   await page.goto('/observability/traces');
-  await expect(page.locator('#traceDurationChart .traceChartLegend--quantiles')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#traceDurationChart .chartCore__legendItem', { hasText: 'P99' })).toBeVisible({ timeout: 30_000 });
   const toggle = page.locator('[data-duration-view="heatmap"]');
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   const searchesBefore = seen.searches.length;
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(heatCells(page).first()).toBeVisible();
+  await heatReady(page);
   await expect.poll(() => new URL(page.url()).searchParams.get('duration_view')).toBe('heatmap');
   // A view toggle is not a new search: the heatmap loads for the same filters.
   expect(seen.searches.length).toBe(searchesBefore);
@@ -154,9 +163,9 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
   const durationsBefore = durations();
   expect(durationsBefore).toBe(1);
   await page.reload();
-  await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
+  await heatReady(page);
   await page.goto('/observability/traces');
-  await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
+  await heatReady(page);
   await expect.poll(() => new URL(page.url()).searchParams.get('duration_view')).toBe('heatmap');
   // The heatmap mode skips the percentiles request.
   expect(seen.heatmap.length).toBe(3);
@@ -164,7 +173,7 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
 
   // Back to the percentiles: requested again, URL parameter dropped.
   await page.locator('[data-duration-view="percentiles"]').click();
-  await expect(page.locator('#traceDurationChart .traceChartLegend--quantiles')).toBeVisible();
+  await expect(page.locator('#traceDurationChart .chartCore__legendItem', { hasText: 'P99' })).toBeVisible();
   await expect.poll(() => new URL(page.url()).searchParams.has('duration_view')).toBe(false);
   expect(durations()).toBe(durationsBefore + 1);
   // An explicit URL wins over the remembered mode.
@@ -177,34 +186,37 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
 test('heatmap cells: log rows, count colours, axes and tooltip', async ({ page }) => {
   await mockHeatmap(page);
   await openHeatmap(page);
-  const svg = page.locator('#traceDurationChart svg.traceHeatmap');
-  await expect(svg).toHaveAttribute('data-rows', String(ROWS));
-  const count = await heatCells(page).count();
-  expect(count).toBeGreaterThan(40);
+  await expect(page.locator('#traceDurationChart')).toHaveAttribute('data-heat-rows', String(ROWS));
+  const grid = await inspect(page);
+  expect(grid.rows).toBe(ROWS);
+  expect(grid.cells.length).toBeGreaterThan(40);
+  await expect(heatRoot(page)).toHaveAttribute('data-cells-drawn', String(grid.cells.length));
+  await expect(heatRoot(page)).toHaveAttribute('data-y-scale', 'log');
   // Colours: the busiest cell is the darkest step (dark theme: lightest), a
-  // single trace the faintest; both differ.
-  const busiest = page.locator('.traceHeatCell[data-count="400"]');
-  const single = page.locator('.traceHeatCell[data-count="1"]');
-  await expect(busiest).toHaveClass(/lvl-8/);
-  await expect(single).toHaveClass(/lvl-1/);
-  const fills = await Promise.all([busiest, single].map((cell) => cell.evaluate((el) => getComputedStyle(el).fill)));
-  expect(fills[0]).not.toBe(fills[1]);
+  // single trace the faintest; both differ on the canvas.
+  const busiest = grid.cells.find((c) => c.count === 400);
+  const single = grid.cells.find((c) => c.count === 1);
+  expect(busiest.level).toBe(8);
+  expect(single.level).toBe(1);
+  // (Polled: a resize-driven redraw may still be on its way.)
+  const pixels = () => Promise.all([busiest, single].map((c) => canvasPixel(heatRoot(page), c.x + c.width / 2, c.y + c.height / 2)));
+  await expect.poll(async () => { const [a, b] = await pixels(); return a[3] === 255 && b[3] === 255 && a.join() !== b.join(); }).toBe(true);
   await expect(page.locator('.traceHeatLegend [data-heat-max]')).toHaveText('400');
   // Log scale: equal row heights, slow rows above quick ones, 1-2-5 ticks.
-  const heights = await page.locator('.traceHeatCell[data-heat-col="0"]').evaluateAll((els) => els.map((el) => [Number(el.dataset.heatRow), Number(el.getAttribute('y')), Number(el.getAttribute('height'))]));
+  const heights = grid.cells.filter((c) => c.col === 0).map((c) => [c.row, c.y, c.height]);
   heights.sort((a, b) => a[0] - b[0]);
   expect(heights[0][1]).toBeGreaterThan(heights[heights.length - 1][1]);
   expect(Math.abs(heights[1][2] - heights[2][2])).toBeLessThan(0.5);
-  const ticks = await page.locator('#traceDurationChart [data-heat-tick]').allTextContents();
-  expect(ticks).toContain('10 ms');
-  expect(ticks).toContain('1 s');
+  expect(grid.ticks).toContain('10 ms');
+  expect(grid.ticks).toContain('1 s');
   // Tooltip on hover: count, start bucket and the row's duration range.
   const at = await cellCenter(page, 0, 6);
   await page.mouse.move(at.x, at.y);
-  const tip = page.locator('#traceDurationChart .traceChartTooltip');
+  const tip = page.locator('#traceDurationChart .chartCore__tooltip');
   await expect(tip).toBeVisible();
+  await expect(heatRoot(page)).toHaveAttribute('data-pick', '0:6');
   const text = await tip.textContent();
-  const cellCount = await page.locator('.traceHeatCell[data-heat-col="0"][data-heat-row="6"]').getAttribute('data-count');
+  const cellCount = grid.cells.find((c) => c.col === 0 && c.row === 6).count;
   expect(text).toContain(`${Number(cellCount).toLocaleString('en-US')} traces`);
   expect(text).toMatch(/Duration.*15\.8 ms – 25(\.1)? ms/);
 });
@@ -225,8 +237,15 @@ test('dragging a box opens the comparison panel with paired bars', async ({ page
   expect(Number(params.get('d1'))).toBeCloseTo(EDGES[18] / 1e6, 6);
   expect(params.get('baseline')).toBe('outside');
   expect(params.get('start_ms')).toBe(heat.get('start_ms'));
-  // The selection is drawn and summarised.
-  await expect(page.locator('#traceDurationChart .traceHeatSelection')).not.toHaveAttribute('hidden', '');
+  // The selection is drawn (on its cells) and summarised.
+  const selection = page.locator('#traceDurationChart .traceHeatSelection');
+  await expect(selection).not.toHaveAttribute('hidden', '');
+  const drawn = await selection.boundingBox();
+  const [a, b] = [await cellCenter(page, col - 2, 17), await cellCenter(page, col, 15)];
+  expect(drawn.x).toBeLessThan(a.x);
+  expect(drawn.x + drawn.width).toBeGreaterThan(b.x);
+  expect(drawn.y).toBeLessThan(a.y);
+  expect(drawn.y + drawn.height).toBeGreaterThan(b.y);
   await expect(panel(page)).toContainText('1,000 of 3,210 traces in the box');
   await expect(panel(page)).toContainText('1,000 of 90,412 traces');
   // Paired bars: selection and baseline widths follow the percentages.
@@ -322,7 +341,7 @@ test('keyboard: arrows move, Shift extends, Enter compares, Escape clears', asyn
   await chart.focus();
   await page.keyboard.press('ArrowRight');
   await expect(chart.locator('.traceHeatCursor')).not.toHaveAttribute('hidden', '');
-  await expect(chart.locator('.traceChartTooltip')).toBeVisible();
+  await expect(chart.locator('.chartCore__tooltip')).toBeVisible();
   await page.keyboard.press('Shift+ArrowLeft');
   await page.keyboard.press('Shift+ArrowUp');
   await expect(chart.locator('.traceHeatBrush')).not.toHaveAttribute('hidden', '');
@@ -390,7 +409,7 @@ test('comparison states: loading, error with retry, nothing to compare', async (
   await expect(page.locator('#traceDurationChart [role="alert"]')).toContainText('heatmap failed');
   failHeatmap = false;
   await page.locator('#traceDurationChart [data-heatmap-retry]').click();
-  await expect(heatCells(page).first()).toBeVisible();
+  await heatReady(page);
 });
 
 test('heatmap + comparison: screenshots in both themes, no page overflow', async ({ page }) => {
@@ -408,7 +427,7 @@ test('heatmap + comparison: screenshots in both themes, no page overflow', async
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
       const at = await cellCenter(page, 3, 6);
       await page.mouse.move(at.x, at.y);
-      await expect(page.locator('#traceDurationChart .traceChartTooltip')).toBeVisible();
+      await expect(page.locator('#traceDurationChart .chartCore__tooltip')).toBeVisible();
       const dir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/trace-heatmap`;
       await page.screenshot({ path: `${dir}/heatmap-${theme}-${width}.png` });
       await page.locator('#traceAnalyticsGrid').screenshot({ path: `${dir}/heatmap-chart-${theme}-${width}.png` });

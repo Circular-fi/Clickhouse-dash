@@ -86,12 +86,14 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await expect.poll(() => seen.services.some((p) => p.get('detail') === 'checkout')).toBe(true);
   await expect.poll(() => seen.db.some((p) => p.get('detail') === 'checkout')).toBe(true);
   for (const chart of ['rate', 'errors', 'latency']) {
-    await expect(drawer(page).locator(`[data-svc-chart="${chart}"] svg`)).toBeVisible();
+    await expect(drawer(page).locator(`[data-svc-chart="${chart}"] canvas.chartCore__canvas`)).toBeVisible();
     // Two releases in range: one marker each on every chart.
-    await expect(drawer(page).locator(`[data-svc-chart="${chart}"] .traceSvcRelease`)).toHaveCount(2);
+    await expect(drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`)).toHaveCount(2);
   }
-  await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-release', '1.4.0');
-  await expect(drawer(page).locator('[data-svc-chart="latency"] .traceDurationLine--p99')).toHaveCount(1);
+  await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-label', '1.4.0');
+  // Rate: successful + error bars stacked; latency: P50 / P95 / P99 lines.
+  await expect(drawer(page).locator('[data-svc-chart="rate"] .chartCore')).toHaveAttribute('data-type', 'bar');
+  await expect(drawer(page).locator('[data-svc-chart="latency"] .chartCore')).toHaveAttribute('data-series-stats', /"P99":\{"points":[1-9]/);
   await expect(drawer(page).locator('.traceSvcReleases li')).toHaveCount(2);
   await expect(drawer(page).locator('[data-svc-endpoint]')).toHaveCount(2);
   await expect(drawer(page).locator('[data-svc-endpoint]').first()).toHaveAttribute('data-svc-endpoint', 'POST /checkout');
@@ -102,10 +104,10 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
 
   // Hover on a chart shows the bucket tooltip.
   const latency = drawer(page).locator('[data-svc-chart="latency"]');
-  const box = await latency.locator('svg').boundingBox();
+  const box = await latency.locator('.chartCore__overlay').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await expect(latency.locator('.traceChartTooltip')).toBeVisible();
-  await expect(latency.locator('.traceChartTooltip')).toContainText('P99');
+  await expect(latency.locator('.chartCore__tooltip')).toBeVisible();
+  await expect(latency.locator('.chartCore__tooltip')).toContainText('P99');
 
   // Back closes the drawer, Forward reopens it; Escape closes it.
   await page.goBack();
@@ -221,7 +223,7 @@ for (const theme of ['dark', 'light']) {
     expect(await overflow()).toEqual([]);
     await page.screenshot({ path: path.join(dir, `traces-services-${theme}.png`), fullPage: false });
     await rows(page).filter({ hasText: 'checkout' }).locator('.traceSvcRow__label').click();
-    await expect(drawer(page).locator('[data-svc-chart="latency"] svg')).toBeVisible();
+    await expect(drawer(page).locator('[data-svc-chart="latency"] canvas.chartCore__canvas')).toBeVisible();
     await expect(drawer(page).locator('.traceSvcDb tbody tr')).toHaveCount(2);
     await stabilizePage(page);
     expect(await overflow()).toEqual([]);

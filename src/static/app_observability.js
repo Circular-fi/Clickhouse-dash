@@ -35,7 +35,7 @@
   // reads both lists: a view's stylesheet keeps the rules its modules can use.
   const COMMON_MODULES = ["app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
   const VIEW_MODULES = {
-    traces: ["app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_trace_map.js", "app_trace_heatmap.js"],
+    traces: ["app_chart_core.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_trace_map.js", "app_trace_heatmap.js"],
     logs: ["app_chart_core.js", "app_logs.js"],
     metrics: ["app_chart_core.js", "app_metrics.js"],
   };

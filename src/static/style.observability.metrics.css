@@ -2573,6 +2573,8 @@ html[data-theme="light"] { --traceWarn: #b56200; }
 @media (prefers-color-scheme: light) {
   html:not([data-theme="dark"]) { --traceWarn: #b56200; }
 }
+.chartCore__tipRow.is-error em,
+.chartCore__tipRow.is-error b { color: var(--traceError); }
 :root {
   --trace-span-color-1: #1192e8;
   --trace-span-color-2: #ff832b;

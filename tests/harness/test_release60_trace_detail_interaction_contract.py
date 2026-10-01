@@ -26,10 +26,12 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
 def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
     js = read("src/static/app_traces.js")
     cpp = read("src/api_traces.cpp")
-    assert 'attachChartTooltips' in js
-    assert 'traceChartTooltip' in js
-    assert 'data-count-ts' in js
-    assert 'data-q-ts' in js
+    # The charts draw on the shared canvas engine: its tooltip reads the
+    # bucket (count and percentile charts) or the picked trace (scatter).
+    assert 'mountChart(container, "counts", {' in js and 'mountChart(container, "percentiles", {' in js
+    assert "xReadout: (i) => bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs)" in js
+    assert "xReadout: (i) => bucketRangeLabel(xs[i] - qBucketMs / 2, qBucketMs)" in js
+    assert "pickTooltip: (hit) => {" in js
     assert 'range_ms / 1000 / 60' in cpp
     assert 'range_ms / 1000 / 120' in cpp
 

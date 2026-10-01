@@ -20,6 +20,7 @@
 
   let ctx = null;
   let geo = null;
+  let chart = null;
   const hm = {
     mode: readMode(),
     seq: 0,
@@ -146,16 +147,7 @@
   // ---------------------------------------------------------------- scales
 
   function niceLogTicks(lo, hi) {
-    if (hi / lo >= 8) {
-      const ticks = [];
-      for (let k = Math.floor(Math.log10(lo)); k <= Math.ceil(Math.log10(hi)); k += 1) {
-        for (const m of [1, 2, 5]) {
-          const value = m * 10 ** k;
-          if (value >= lo && value <= hi) ticks.push(value);
-        }
-      }
-      return ticks.length > 7 ? ticks.filter((value) => Math.abs(Math.log10(value) - Math.round(Math.log10(value))) < 1e-9) : ticks;
-    }
+    if (hi / lo >= 8) return ns.chartCore.logTicks(lo, hi);
     const axis = ctx.durationAxis(lo, hi, 4);
     return axis.values.map((tick) => tick.value).filter((value) => value >= lo && value <= hi);
   }
@@ -178,6 +170,12 @@
 
   // ---------------------------------------------------------------- render
 
+  const PALETTE = Array.from({ length: HEAT_LEVELS }, (_, i) => `var(--trace-heat-${i + 1})`);
+
+  // The heatmap draws on the shared canvas engine (app_chart_core.js): one
+  // canvas rect per cell, a log duration axis with the server's uneven bin
+  // edges, the engine's 2-D brush for the box and DOM regions for the
+  // selection and the keyboard cursor, moved without redrawing.
   function render() {
     const container = ctx?.dom?.traceDurationChart;
     if (!container || !active()) return;
@@ -185,6 +183,7 @@
     const meta = ctx.dom.traceDurationChartMeta;
     const data = hm.data;
     geo = null;
+    chart = null;
     if (hm.loading || (!data && !hm.error && hm.filters)) {
       ctx.chartMessage(container, "Loading duration heatmap\u2026");
       if (meta) meta.textContent = "Traces per cell";
@@ -192,6 +191,7 @@
       return;
     }
     if (hm.error) {
+      ctx.unmountChart(container);
       container.innerHTML = `<div class="tracesEmpty traceChartError" role="alert"><span>${esc(hm.error)}</span> <button type="button" class="traceMiniButton" data-heatmap-retry>Retry</button></div>`;
       container.querySelector("[data-heatmap-retry]")?.addEventListener("click", () => { void load(); });
       renderPanel();
@@ -214,61 +214,66 @@
     const gridStart = origin + Math.floor((xMin - origin) / bucketMs) * bucketMs;
     const cols = Math.max(1, Math.ceil((xMax - gridStart) / bucketMs));
     const lo = edges[0], hi = edges[rows];
-    const ticks = niceLogTicks(lo, hi);
-    const tickLabels = ticks.map((value) => fmt(value));
-    const W = ctx.chartWidth(container), H = ctx.CHART_HEIGHT, top = 10, bottom = 30, right = 12;
-    const left = Math.ceil(10 + Math.max(24, ...tickLabels.map((label) => ctx.labelWidthPx(label))));
-    const plotW = W - left - right, plotH = H - top - bottom;
-    const logLo = Math.log(lo), logSpan = Math.max(1e-9, Math.log(hi) - logLo);
-    const xOf = (ms) => Math.min(left + plotW, Math.max(left, left + ((ms - xMin) / (xMax - xMin)) * plotW));
-    const yOf = (value) => top + plotH - ((Math.log(Math.max(value, lo)) - logLo) / logSpan) * plotH;
     const maxCount = Math.max(1, Number(data.max_count || 0), ...cells.map((cell) => cell[2]));
     const counts = new Map();
-    geo = { W, H, top, left, plotW, plotH, xMin, xMax, bucketMs, gridStart, cols, rows, edges, xOf, yOf, logLo, logSpan, counts, maxCount };
     const colStart = (col) => gridStart + col * bucketMs;
-    const cellSvg = cells.map(([bucket, row, count]) => {
+    geo = { xMin, xMax, bucketMs, gridStart, cols, rows, edges, counts, maxCount, colStart };
+    const n = cells.length;
+    const box = { x0: new Float64Array(n), x1: new Float64Array(n), y0: new Float64Array(n), y1: new Float64Array(n), level: new Uint8Array(n), palette: PALETTE };
+    cells.forEach(([bucket, row, count], k) => {
       const col = Math.round((bucket - gridStart) / bucketMs);
       counts.set(`${col}:${row}`, count);
-      const x1 = xOf(bucket), x2 = xOf(bucket + bucketMs);
-      const y1 = yOf(edges[row + 1]), y2 = yOf(edges[row]);
-      const gapX = x2 - x1 > 3 ? 1 : 0, gapY = y2 - y1 > 3 ? 1 : 0;
-      return `<rect x="${x1.toFixed(2)}" y="${y1.toFixed(2)}" width="${Math.max(0.5, x2 - x1 - gapX).toFixed(2)}" height="${Math.max(0.5, y2 - y1 - gapY).toFixed(2)}" class="traceHeatCell lvl-${level(count, maxCount)}" data-heat-col="${col}" data-heat-row="${row}" data-heat-ts="${bucket}" data-count="${count}"/>`;
-    }).join("");
-    const yTicks = ticks.map((value, i) => {
-      const y = yOf(value);
-      return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick" data-heat-tick="${value}">${esc(tickLabels[i])}</text>`;
-    }).join("");
-    const xTicks = ctx.timeAxisSvg(xMin, xMax, left, plotW, H, W);
+      box.x0[k] = bucket;
+      box.x1[k] = bucket + bucketMs;
+      box.y0[k] = edges[row];
+      box.y1[k] = edges[row + 1];
+      box.level[k] = level(count, maxCount);
+    });
+    // One x per column (the cursor snaps to columns, the crosshair is shared
+    // with the count chart).
+    const xs = new Float64Array(cols);
+    for (let col = 0; col < cols; col += 1) xs[col] = colStart(col) + bucketMs / 2;
+    const ticks = niceLogTicks(lo, hi).map((value) => ({ v: value, label: fmt(value) }));
+    chart = ctx.mountChart(container, "heatmap", {
+      xKind: "time", xs, xDomain: [xMin, xMax], zoom: null, series: [], type: "line", legend: false,
+      syncKey: ctx.CHART_SYNC_KEY, keyboard: false, zoomable: false,
+      yScale: "log", yAxis: () => ({ min: lo, max: hi, ticks }),
+      cells: box,
+      xReadout: (i) => ctx.bucketRangeLabel(colStart(i), bucketMs),
+      formatY: (value) => fmt(value),
+      pick: (pt) => { const cell = cellAt(pt.x, pt.y); return { key: `${cell.col}:${cell.row}`, cell, x: colStart(cell.col) + bucketMs / 2 }; },
+      pickTooltip: (hit) => cellTooltip(hit.cell),
+      brush: "xy", brushClass: "traceHeatDrag",
+      brushSnap: (r) => boxRange(boxOf(cellAt(r.x0, r.y0), cellAt(r.x1, r.y1))),
+      brushTooltip: (r) => boxTooltip(r.box),
+      onBrush: (r) => { hm.anchor = null; hm.cursor = null; select(r.box); },
+      regions: regions(),
+    });
+    let legend = container.querySelector(":scope > .traceHeatLegend");
+    if (!legend) {
+      legend = document.createElement("div");
+      legend.className = "traceChartLegend traceHeatLegend";
+      const live = document.createElement("div");
+      live.className = "srOnly traceHeatLive";
+      live.setAttribute("aria-live", "polite");
+      container.append(legend, live);
+    }
     const ramp = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}"></i>`).join("");
-    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg traceHeatmap" data-rows="${rows}" data-cols="${cols}">${yTicks}<g class="traceHeatCells">${cellSvg}</g>${xTicks}<rect class="traceHeatSelection" hidden/><rect class="traceHeatBrush" hidden/><rect class="traceHeatCursor" hidden/><rect x="${left}" y="${top}" width="${plotW}" height="${plotH}" class="traceChartHit traceHeatHit"/></svg>`
-      + `<div class="traceChartLegend traceHeatLegend"><span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${ramp}</span><span data-heat-max>${esc(maxCount.toLocaleString())}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span></div>`
-      + '<div class="srOnly traceHeatLive" aria-live="polite"></div>';
-    geo.colStart = colStart;
+    legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${ramp}</span><span data-heat-max>${esc(maxCount.toLocaleString())}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
+    container.dataset.heatRows = String(rows);
+    container.dataset.heatCols = String(cols);
     if (meta) {
       meta.textContent = `${traceCount(Number(data.total || 0))} · ${fmt(bucketMs * 1e6)} × log duration`;
       meta.title = String(data.unit_label || "Traces with a matching span, at their first span start");
     }
-    attachPointer(container);
-    drawSelection();
-    drawCursor();
     renderPanel();
   }
 
   // ------------------------------------------------------- hit testing
 
-  function svgPoint(container, event) {
-    const svg = container.querySelector("svg");
-    const box = svg?.getBoundingClientRect();
-    if (!box || !box.width) return null;
-    return [(event.clientX - box.left) * (geo.W / box.width), (event.clientY - box.top) * (geo.H / box.height)];
-  }
-
-  function cellAt(x, y) {
-    const cx = Math.min(geo.left + geo.plotW - 0.01, Math.max(geo.left, x));
-    const cy = Math.min(geo.top + geo.plotH, Math.max(geo.top, y));
-    const ms = geo.xMin + ((cx - geo.left) / geo.plotW) * (geo.xMax - geo.xMin);
-    const col = Math.max(0, Math.min(geo.cols - 1, Math.floor((ms - geo.gridStart) / geo.bucketMs)));
-    const value = Math.exp(geo.logLo + ((geo.top + geo.plotH - cy) / geo.plotH) * geo.logSpan);
+  // The cell at a time (ms) and a duration (ns), clamped to the grid.
+  function cellAt(ms, value) {
+    const col = Math.max(0, Math.min(geo.cols - 1, Math.floor((Math.min(ms, geo.xMax - 1e-6) - geo.gridStart) / geo.bucketMs)));
     let row = 0;
     while (row < geo.rows - 1 && value >= geo.edges[row + 1]) row += 1;
     return { col, row };
@@ -278,18 +283,9 @@
     return { c0: Math.min(a.col, b.col), c1: Math.max(a.col, b.col), r0: Math.min(a.row, b.row), r1: Math.max(a.row, b.row) };
   }
 
-  function boxRect(box) {
-    const x1 = geo.xOf(geo.colStart(box.c0)), x2 = geo.xOf(geo.colStart(box.c1 + 1));
-    const y1 = geo.yOf(geo.edges[box.r1 + 1]), y2 = geo.yOf(geo.edges[box.r0]);
-    return { x: x1, y: y1, width: Math.max(1, x2 - x1), height: Math.max(1, y2 - y1) };
-  }
-
-  function placeRect(rect, box) {
-    if (!rect) return;
-    if (!box) { rect.setAttribute("hidden", ""); return; }
-    const r = boxRect(box);
-    for (const [name, value] of Object.entries(r)) rect.setAttribute(name, value.toFixed(2));
-    rect.removeAttribute("hidden");
+  // A box of cells in data units (the engine's regions and brush).
+  function boxRange(box) {
+    return { x0: geo.colStart(box.c0), x1: geo.colStart(box.c1 + 1), y0: geo.edges[box.r0], y1: geo.edges[box.r1 + 1], box };
   }
 
   function boxCount(box) {
@@ -303,116 +299,47 @@
     return { when: ctx.bucketRangeLabel(geo.colStart(cell.col), geo.bucketMs), duration: rowRangeLabel(cell.row, cell.row), count };
   }
 
-  function drawSelection() {
-    const svg = ctx.dom.traceDurationChart?.querySelector("svg.traceHeatmap");
-    if (!svg || !geo) return;
-    const sel = hm.selection;
-    placeRect(svg.querySelector(".traceHeatSelection"), sel && sel.c1 < geo.cols && sel.r1 < geo.rows ? sel : null);
-    svg.classList.toggle("has-selection", !!sel);
+  // The selection, the keyboard cursor and the keyboard box.
+  function regions() {
+    if (!geo) return [];
+    const inGrid = (box) => box && box.c1 < geo.cols && box.r1 < geo.rows;
+    const sel = inGrid(hm.selection) ? hm.selection : null;
+    const cursor = hm.cursor && hm.cursor.col < geo.cols && hm.cursor.row < geo.rows ? boxOf(hm.cursor, hm.cursor) : null;
+    const brush = cursor && hm.anchor ? boxOf(hm.anchor, hm.cursor) : null;
+    const region = (id, className, box) => (box ? { id, className, ...boxRange(box) } : { id, className, hidden: true });
+    return [region("selection", "traceHeatSelection", sel), region("brush", "traceHeatBrush", brush), region("cursor", "traceHeatCursor", cursor)];
   }
 
-  function drawCursor() {
-    const svg = ctx.dom.traceDurationChart?.querySelector("svg.traceHeatmap");
-    if (!svg || !geo) return;
-    const cursor = hm.cursor && hm.cursor.col < geo.cols && hm.cursor.row < geo.rows ? hm.cursor : null;
-    placeRect(svg.querySelector(".traceHeatCursor"), cursor ? boxOf(cursor, cursor) : null);
-    placeRect(svg.querySelector(".traceHeatBrush"), cursor && hm.anchor ? boxOf(hm.anchor, cursor) : null);
+  function drawSelection() {
+    if (!chart || !geo) return;
+    chart.setRegions(regions());
+    ctx.dom.traceDurationChart?.classList.toggle("has-selection", !!hm.selection);
   }
+
+  const drawCursor = drawSelection;
 
   // ------------------------------------------------------- tooltip
 
-  function tooltipEl(container) {
-    let tip = container.querySelector(".traceChartTooltip");
-    if (!tip) {
-      tip = document.createElement("div");
-      tip.className = "traceChartTooltip";
-      tip.hidden = true;
-      container.appendChild(tip);
-    }
-    return tip;
-  }
-
   function hideTooltip() {
-    const tip = ctx?.dom?.traceDurationChart?.querySelector(".traceChartTooltip");
-    if (tip) tip.hidden = true;
-  }
-
-  // At client coordinates, or next to the cell's box when keyboard driven.
-  function showTooltip(container, html, clientX, clientY) {
-    const tip = tooltipEl(container);
-    tip.innerHTML = html;
-    tip.hidden = false;
-    tip.style.left = "0px";
-    tip.style.top = "0px";
-    const size = tip.getBoundingClientRect();
-    const rect = container.getBoundingClientRect();
-    let left = clientX - rect.left + 12;
-    let top = clientY - rect.top + 12;
-    if (left + size.width > rect.width - 4) left = clientX - rect.left - size.width - 12;
-    if (top + size.height > rect.height - 4) top = clientY - rect.top - size.height - 12;
-    tip.style.left = `${Math.max(4, left)}px`;
-    tip.style.top = `${Math.max(4, top)}px`;
+    chart?.hideTooltip();
   }
 
   function cellTooltip(cell) {
     const text = cellText(cell);
-    return `<strong>${esc(traceCount(text.count))}</strong><span>Start <b>${esc(text.when)}</b></span><span>Duration <b>${esc(text.duration)}</b></span>`;
+    return { title: traceCount(text.count), rows: [{ label: "Start", value: text.when }, { label: "Duration", value: text.duration }] };
   }
 
   function boxTooltip(box) {
-    return `<strong>\u2248 ${esc(traceCount(boxCount(box)))} in the box</strong><span>Start <b>${esc(ctx.bucketRangeLabel(geo.colStart(box.c0), (box.c1 - box.c0 + 1) * geo.bucketMs))}</b></span><span>Duration <b>${esc(rowRangeLabel(box.r0, box.r1))}</b></span>`;
-  }
-
-  // ------------------------------------------------------- pointer + keys
-
-  function attachPointer(container) {
-    const surface = container.querySelector(".traceHeatHit");
-    const svg = container.querySelector("svg");
-    if (!surface || !svg) return;
-    const brush = svg.querySelector(".traceHeatBrush");
-    surface.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || !geo) return;
-      const at = svgPoint(container, event);
-      if (!at) return;
-      const cell = cellAt(at[0], at[1]);
-      hm.drag = { start: cell, current: cell };
-      hm.anchor = null;
-      hm.cursor = null;
-      drawCursor();
-      try { surface.setPointerCapture(event.pointerId); } catch { /* synthetic pointers */ }
-      event.preventDefault();
-      placeRect(brush, boxOf(cell, cell));
-      showTooltip(container, boxTooltip(boxOf(cell, cell)), event.clientX, event.clientY);
-    });
-    surface.addEventListener("pointermove", (event) => {
-      if (!geo) return;
-      const at = svgPoint(container, event);
-      if (!at) return;
-      const cell = cellAt(at[0], at[1]);
-      if (hm.drag) {
-        hm.drag.current = cell;
-        const box = boxOf(hm.drag.start, cell);
-        placeRect(brush, box);
-        showTooltip(container, boxTooltip(box), event.clientX, event.clientY);
-        return;
-      }
-      const inside = at[0] >= geo.left && at[0] <= geo.left + geo.plotW && at[1] >= geo.top && at[1] <= geo.top + geo.plotH;
-      if (!inside) { hideTooltip(); return; }
-      showTooltip(container, cellTooltip(cell), event.clientX, event.clientY);
-    });
-    const finish = (event, cancelled) => {
-      if (!hm.drag) return;
-      const { start, current } = hm.drag;
-      hm.drag = null;
-      placeRect(brush, null);
-      try { surface.releasePointerCapture(event.pointerId); } catch { /* not captured */ }
-      hideTooltip();
-      if (!cancelled) select(boxOf(start, current));
+    return {
+      title: `\u2248 ${traceCount(boxCount(box))} in the box`,
+      rows: [
+        { label: "Start", value: ctx.bucketRangeLabel(geo.colStart(box.c0), (box.c1 - box.c0 + 1) * geo.bucketMs) },
+        { label: "Duration", value: rowRangeLabel(box.r0, box.r1) },
+      ],
     };
-    surface.addEventListener("pointerup", (event) => finish(event, false));
-    surface.addEventListener("pointercancel", (event) => finish(event, true));
-    surface.addEventListener("pointerleave", () => { if (!hm.drag) hideTooltip(); });
   }
+
+  // ------------------------------------------------------- keys
 
   function announce(text) {
     const live = ctx.dom.traceDurationChart?.querySelector(".traceHeatLive");
@@ -420,9 +347,8 @@
   }
 
   function onKeydown(event) {
-    if (!active() || !geo || event.target !== ctx.dom.traceDurationChart) return;
+    if (!active() || !geo || !chart || event.target !== ctx.dom.traceDurationChart) return;
     const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
-    const container = ctx.dom.traceDurationChart;
     if (moves[event.key]) {
       event.preventDefault();
       const [dc, dr] = moves[event.key];
@@ -434,11 +360,9 @@
         : from;
       drawCursor();
       const box = hm.anchor ? boxOf(hm.anchor, hm.cursor) : null;
-      const svgBox = container.querySelector("svg").getBoundingClientRect();
-      const r = boxRect(boxOf(hm.cursor, hm.cursor));
-      const scale = svgBox.width / geo.W;
-      const html = box ? boxTooltip(box) : cellTooltip(hm.cursor);
-      showTooltip(container, html, svgBox.left + (r.x + r.width) * scale, svgBox.top + (r.y + r.height) * scale);
+      // The tooltip next to the cell's lower right corner.
+      const L = chart.layout();
+      if (L) chart.showTooltip(box ? boxTooltip(box) : cellTooltip(hm.cursor), L.xOf(geo.colStart(hm.cursor.col + 1)), L.yOf(geo.edges[hm.cursor.row]));
       const text = cellText(hm.cursor);
       announce(box ? `Box of ${traceCount(boxCount(box))}` : `${text.when}, ${text.duration}: ${traceCount(text.count)}`);
     } else if ((event.key === "Enter" || event.key === " ") && hm.cursor) {
@@ -457,6 +381,22 @@
       drawCursor();
       clearSelection();
     }
+  }
+
+  // Test and debugging hook: the grid as drawn, cells in client coordinates
+  // (clipped to the plot, like their canvas rects).
+  function inspect() {
+    if (!chart || !geo || !chart.layout()) return null;
+    const cells = [];
+    const lo = chart.toClient(geo.xMin, geo.edges[0]).x, hi = chart.toClient(geo.xMax, geo.edges[0]).x;
+    for (const [key, count] of geo.counts) {
+      const [col, row] = key.split(":").map(Number);
+      const a = chart.toClient(geo.colStart(col), geo.edges[row + 1]);
+      const b = chart.toClient(geo.colStart(col + 1), geo.edges[row]);
+      const x0 = Math.max(lo, a.x), x1 = Math.min(hi, b.x);
+      if (x1 > x0) cells.push({ col, row, count, level: level(count, geo.maxCount), x: x0, y: a.y, width: x1 - x0, height: b.y - a.y });
+    }
+    return { rows: geo.rows, cols: geo.cols, maxCount: geo.maxCount, ticks: JSON.parse(chart.root.dataset.yTicks || "[]"), cells };
   }
 
   // ------------------------------------------------------- selection
@@ -647,6 +587,8 @@
       button.addEventListener("click", () => setMode(button.getAttribute("data-duration-view")));
     });
     ctx.dom.traceDurationChart?.addEventListener("keydown", onKeydown);
+    // The canvas keeps the pointer: a press focuses the card for the keys.
+    ctx.dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) ctx.dom.traceDurationChart.focus({ preventScroll: true }); });
     ctx.dom.traceDurationChart?.addEventListener("blur", () => { if (hm.cursor && !hm.selection) { hm.cursor = null; hm.anchor = null; drawCursor(); } hideTooltip(); });
     byId("traceDeltaPanel")?.addEventListener("click", onPanelClick);
     byId("traceDeltaPanel")?.addEventListener("change", onPanelChange);
@@ -661,6 +603,7 @@
     writeParams,
     onSearch,
     render,
+    inspect,
     clearSelection: () => clearSelection(),
   };
 })();

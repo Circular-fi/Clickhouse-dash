@@ -50,11 +50,10 @@ def test_search_controls_embed_field_names_and_use_theme_colors():
 def test_chart_hover_highlights_and_duration_axis_has_more_uniform_ticks():
     js = read("src/static/app_traces.js")
     css = read("src/static/style.css")
+    engine = read("src/static/app_chart_core.js")
     assert "durationAxis(yMin, yMax, 7)" in js
-    assert "countAxis(maxTotal, 7)" in js
-    assert "timeAxisTicks(startMs, endMs, plotW)" in js
-    assert "data-count-bar" in js
-    assert "traceQuantileHover" in js
-    assert "data-q-hover" in js
-    assert ".traceCountBar.is-hovered" in css
-    assert ".traceQuantileHover.is-active" in css
+    # Hover highlights are the engine's cursor: one dot per series at the
+    # snapped bucket, the nearest one larger, a crosshair shared by the charts.
+    assert "syncKey: CHART_SYNC_KEY" in js
+    assert 'dot.classList.toggle("is-nearest", s.id === cursor.nearest);' in engine
+    assert ".chartCore__dot.is-nearest" in css

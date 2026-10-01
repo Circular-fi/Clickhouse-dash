@@ -108,27 +108,6 @@
     return steps;
   })();
 
-  function niceStep(maxValue, targetIntervals = 6, integerOnly = false) {
-    const max = Math.max(0, Number(maxValue || 0));
-    if (!max) return integerOnly ? 1 : 1;
-    const raw = max / Math.max(1, Number(targetIntervals || 6));
-    const magnitude = 10 ** Math.floor(Math.log10(raw));
-    const normalized = raw / magnitude;
-    let nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-    let step = nice * magnitude;
-    if (integerOnly) step = Math.max(1, Math.ceil(step));
-    return step;
-  }
-
-  function countAxis(maxValue, targetIntervals = 7) {
-    const max = Math.max(0, Number(maxValue || 0));
-    const step = niceStep(max, targetIntervals, true);
-    const axisMax = Math.max(step, Math.ceil(max / step) * step);
-    const values = [];
-    for (let value = 0; value <= axisMax + step * .001; value += step) values.push(Math.round(value));
-    return { axisMax, values };
-  }
-
   // Jaeger's ['auto', 'auto'] duration domain: the data range padded by 5 %
   // on each side (a flat series by 10 % of its value), snapped to whole
   // steps, so close percentiles do not flatten against a zero baseline. The
@@ -202,17 +181,9 @@
     return `${base}${String(micros).padStart(3, "0")}`;
   }
 
-  // --- Chart time axis (browser-local time, like the range picker) ---------
-  const SECOND_MS = 1000, MINUTE_MS = 60000, HOUR_MS = 3600000, DAY_MS = 86400000;
-  const TIME_AXIS_STEPS_MS = [
-    SECOND_MS, 2 * SECOND_MS, 5 * SECOND_MS, 10 * SECOND_MS, 15 * SECOND_MS, 30 * SECOND_MS,
-    MINUTE_MS, 2 * MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS,
-    HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS,
-    DAY_MS, 2 * DAY_MS, 7 * DAY_MS, 14 * DAY_MS,
-  ];
+  // --- Chart labels (browser-local time, like the range picker) -----------
+  const MINUTE_MS = 60000;
   const pad2 = (value) => String(value).padStart(2, "0");
-  // Rough width of a 10 px tick label; only used to keep labels apart.
-  const labelWidthPx = (text) => String(text).length * 5.9 + 4;
 
   function localMidnight(ms) {
     const d = new Date(Number(ms));
@@ -227,66 +198,6 @@
 
   function dayLabel(ms) {
     return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-
-  // Midnight ticks name the day ("Sep 13"); within a day ticks read the clock
-  // ("14:30", with seconds for sub-minute steps); a multi-day axis never
-  // shows a bare hour: mid-day ticks read "Sep 13 12:00".
-  function timeTickLabel(ms, stepMs, multiDay) {
-    if (stepMs >= DAY_MS || localMidnight(ms) === ms) return dayLabel(ms);
-    if (multiDay) return `${dayLabel(ms)} ${clockLabel(ms)}`;
-    return clockLabel(ms, stepMs < MINUTE_MS);
-  }
-
-  // Tick instants in [startMs, endMs] on local wall-clock boundaries: day
-  // steps on local midnights (every n-th calendar day), shorter steps restart
-  // at each local midnight so DST days keep round labels.
-  function timeTicksBetween(startMs, endMs, stepMs) {
-    const ticks = [];
-    const day = new Date(localMidnight(startMs));
-    if (stepMs >= DAY_MS) {
-      const everyDays = Math.round(stepMs / DAY_MS);
-      for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1, day.setDate(day.getDate() + 1)) {
-        const t = day.getTime();
-        const dayNumber = Math.round(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / DAY_MS);
-        if (t >= startMs && dayNumber % everyDays === 0) ticks.push(t);
-      }
-      return ticks;
-    }
-    if (stepMs >= HOUR_MS) {
-      // Wall-clock hours (00:00, 06:00, 12:00...) even on 23 h / 25 h DST days.
-      const everyHours = Math.round(stepMs / HOUR_MS);
-      const seen = new Set();
-      for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1, day.setDate(day.getDate() + 1)) {
-        for (let hour = 0; hour < 24; hour += everyHours) {
-          const t = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
-          if (t >= startMs && t <= endMs && !seen.has(t)) { seen.add(t); ticks.push(t); }
-        }
-      }
-      return ticks;
-    }
-    for (let guard = 0; day.getTime() <= endMs && guard < 400; guard += 1) {
-      const midnight = day.getTime();
-      day.setDate(day.getDate() + 1);
-      const next = day.getTime();
-      const first = midnight + Math.ceil(Math.max(0, startMs - midnight) / stepMs) * stepMs;
-      for (let t = first; t < next && t <= endMs; t += stepMs) ticks.push(t);
-    }
-    return ticks;
-  }
-
-  // The smallest step whose labels keep at least 18 px apart at this width.
-  function timeAxisTicks(startMs, endMs, plotWidthPx) {
-    const span = Math.max(1, Number(endMs) - Number(startMs));
-    const multiDay = span > DAY_MS;
-    const width = Math.max(80, Number(plotWidthPx || 0));
-    let chosen = TIME_AXIS_STEPS_MS[TIME_AXIS_STEPS_MS.length - 1];
-    for (const step of TIME_AXIS_STEPS_MS) {
-      if (span / step > 60) continue;
-      const sample = step >= DAY_MS ? "Sep 30" : multiDay ? "Sep 30 12:00" : step < MINUTE_MS ? "00:00:00" : "00:00";
-      if (width * step / span >= labelWidthPx(sample) + 18) { chosen = step; break; }
-    }
-    return timeTicksBetween(startMs, endMs, chosen).map((t) => ({ t, label: timeTickLabel(t, chosen, multiDay) }));
   }
 
   // Tooltip span of a bucket: "Sep 13, 14:00 -> 15:00" (or both dates when
@@ -810,115 +721,65 @@
     };
   }
 
-  // Chart geometry in CSS pixels: the SVG viewBox is the element's own size,
-  // so text, markers and hit-testing are never stretched.
+  // --- Analytics charts on the shared canvas engine ------------------------
+  // app_chart_core.js loads with the traces view. One chart per card, kept
+  // across answers (setData) and resized by the engine itself, so a resize or
+  // a new answer redraws a canvas instead of rebuilding an SVG; the cursor,
+  // the tooltip and the drag-to-zoom are the engine's (Grafana-like), shared
+  // by the two charts and the heatmap (one crosshair on the same time axis).
   const CHART_HEIGHT = 196;
-  function chartWidth(container) {
-    // A hidden card has no width yet: draw at a typical size, the resize
-    // observer redraws once it is laid out.
-    const width = Number(container?.clientWidth || 0);
-    return width > 12 ? Math.max(240, Math.round(width - 12)) : 640;
+  const CHART_SYNC_KEY = "traces-analytics";
+  const QUANTILE_COLORS = { p50: "#54a24b", p90: "#4c78a8", p95: "#f58518", p99: "#b279a2" };
+  const mountedCharts = new WeakMap(); // card body -> { kind, chart }
+
+  // The chart of kind `kind` in `container` with these options: the same
+  // chart redrawn, or a new one replacing what the card shows.
+  function mountChart(container, kind, options) {
+    if (!container || !ns.chartCore) return null;
+    const held = mountedCharts.get(container);
+    if (held && held.kind === kind && container.contains(held.chart.root)) {
+      held.chart.setData(options);
+      return held.chart;
+    }
+    if (held) held.chart.destroy();
+    container.textContent = "";
+    const chart = ns.chartCore.create(container, { height: CHART_HEIGHT, ...options });
+    mountedCharts.set(container, { kind, chart });
+    return chart;
   }
 
-  function timeAxisSvg(startMs, endMs, left, plotW, H, W) {
-    const xOf = (ms) => left + ((ms - startMs) / Math.max(1, endMs - startMs)) * plotW;
-    return timeAxisTicks(startMs, endMs, plotW).map(({ t, label }) => {
-      const x = xOf(t);
-      const half = labelWidthPx(label) / 2;
-      const anchor = x - half < 2 ? "start" : x + half > W - 2 ? "end" : "middle";
-      const tx = anchor === "start" ? Math.max(2, x) : anchor === "end" ? Math.min(W - 2, x) : x;
-      return `<line x1="${x.toFixed(1)}" y1="${H - 26}" x2="${x.toFixed(1)}" y2="${H - 22}" class="traceChart__grid"/><text x="${tx.toFixed(1)}" y="${H - 9}" text-anchor="${anchor}" class="traceChart__tick" data-time-tick="${t}">${esc(label)}</text>`;
-    }).join("");
+  function unmountChart(container) {
+    const held = container && mountedCharts.get(container);
+    if (!held) return;
+    held.chart.destroy();
+    mountedCharts.delete(container);
   }
 
-  // Grafana-like hover: the whole chart area is one hit surface; the pointer
-  // snaps to the nearest plotted point (points: [{ x, key }] sorted by x, in
-  // SVG units), so there are no dead zones between buckets.
-  // pick(x, y) may return a nearer 2-D target (a scatter dot) that wins over
-  // the x snap; onPick(point) runs when such a target is clicked.
-  function attachChartTooltips(container, points, htmlFor, onHover = null, pick = null, onPick = null) {
-    if (!container) return;
-    const svg = container.querySelector("svg");
-    const surface = container.querySelector(".traceChartHit");
-    if (!svg || !surface || (!points.length && !pick)) return;
-    let tooltip = container.querySelector(".traceChartTooltip");
-    if (!tooltip) {
-      tooltip = document.createElement("div");
-      tooltip.className = "traceChartTooltip";
-      tooltip.hidden = true;
-      container.appendChild(tooltip);
-    }
-    const viewWidth = Number(svg.viewBox?.baseVal?.width || 0);
-    const viewHeight = Number(svg.viewBox?.baseVal?.height || 0);
-    // Pointer position in SVG units, or null before the chart is laid out.
-    const svgPoint = (event) => {
-      const box = svg.getBoundingClientRect();
-      if (!box.width || !box.height) return null;
-      return [(event.clientX - box.left) * ((viewWidth || box.width) / box.width), (event.clientY - box.top) * ((viewHeight || box.height) / box.height)];
-    };
-    const xs = points.map((point) => point.x);
-    const nearest = (x) => {
-      if (!xs.length) return null;
-      let lo = 0, hi = xs.length - 1;
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (xs[mid] <= x) lo = mid; else hi = mid;
-      }
-      return Math.abs(xs[hi] - x) < Math.abs(xs[lo] - x) ? points[hi] : points[lo];
-    };
-    let current = null;
-    let tipWidth = 0;
-    let tipHeight = 0;
-    const hide = () => {
-      if (current) onHover?.(current, false);
-      tooltip.hidden = true;
-      current = null;
-    };
-    const move = (event) => {
-      const at = svgPoint(event);
-      if (!at) return;
-      const point = pick?.(at[0], at[1]) || nearest(at[0]);
-      surface.classList.toggle("is-pickable", !!point?.pickable);
-      if (!point) { hide(); return; }
-      if (current !== point) {
-        if (current) onHover?.(current, false);
-        const html = htmlFor(point);
-        if (!html) { current = null; tooltip.hidden = true; return; }
-        onHover?.(point, true);
-        tooltip.innerHTML = html;
-        tooltip.hidden = false;
-        // Measure at the origin so the natural size does not depend on where
-        // the previous point left the tooltip.
-        tooltip.style.left = "0px";
-        tooltip.style.top = "0px";
-        const size = tooltip.getBoundingClientRect();
-        tipWidth = size.width;
-        tipHeight = size.height;
-        current = point;
-      }
-      const rect = container.getBoundingClientRect();
-      let left = event.clientX - rect.left + 12;
-      let top = event.clientY - rect.top + 12;
-      if (left + tipWidth > rect.width - 4) left = event.clientX - rect.left - tipWidth - 12;
-      if (top + tipHeight > rect.height - 4) top = event.clientY - rect.top - tipHeight - 12;
-      tooltip.style.left = `${Math.max(4, left)}px`;
-      tooltip.style.top = `${Math.max(4, top)}px`;
-    };
-    surface.addEventListener("pointerenter", move);
-    surface.addEventListener("pointermove", move);
-    surface.addEventListener("pointerleave", () => { surface.classList.remove("is-pickable"); hide(); });
-    if (pick && onPick) {
-      surface.addEventListener("click", (event) => {
-        const at = svgPoint(event);
-        const target = at && pick(at[0], at[1]);
-        if (target) onPick(target);
-      });
-    }
+  // A drag on a time chart searches that range (Grafana's time zoom).
+  function zoomSearchRange(range) {
+    const format = ns.timeRange?.formatDateTime;
+    if (!range || !format) return;
+    const from = Math.floor(range[0] / 1000) * 1000;
+    const to = Math.max(from + 1000, Math.ceil(range[1] / 1000) * 1000);
+    void applyCustomRange({ from: format(from), to: format(to) }, "chart");
   }
 
   function chartMessage(container, text, isError = false) {
     if (!container) return;
+    unmountChart(container);
     container.innerHTML = `<div class="tracesEmpty${isError ? " traceChartError" : ""}"${isError ? ' role="alert"' : ""}>${esc(text)}</div>`;
+  }
+
+  // Bucket starts on a regular grid from the first to the last bucket, the
+  // value of each (0 / NaN where the answer has none).
+  function bucketGrid(buckets, bucketMs, empty) {
+    const first = buckets[0][0];
+    const count = Math.max(1, Math.min(20000, Math.round((buckets[buckets.length - 1][0] - first) / bucketMs) + 1));
+    const starts = new Float64Array(count);
+    for (let i = 0; i < count; i += 1) starts[i] = first + i * bucketMs;
+    const slot = new Int32Array(buckets.length);
+    buckets.forEach(([bucket], k) => { slot[k] = Math.max(0, Math.min(count - 1, Math.round((bucket - first) / bucketMs))); });
+    return { starts, slot, empty };
   }
 
   function renderServiceChart() {
@@ -937,29 +798,20 @@
       .filter(([bucket, count]) => count > 0 && bucket + bucketMs > start && bucket <= end)
       .sort((x, y) => x[0] - y[0]);
     if (!buckets.length) { chartMessage(container, "No matching traces in this range."); return; }
-    const W = chartWidth(container), H = CHART_HEIGHT, top = 10, bottom = 30, right = 10;
-    const maxTotal = Math.max(1, ...buckets.map((bucket) => bucket[1]));
-    const countScale = countAxis(maxTotal, 7);
-    const tickText = (value) => Number(value).toLocaleString();
-    const left = Math.ceil(10 + Math.max(...countScale.values.map((value) => labelWidthPx(tickText(value)))));
-    const plotW = W - left - right, plotH = H - top - bottom;
-    const xOf = (ms) => left + ((ms - start) / (end - start)) * plotW;
-    const slotW = (bucketMs / (end - start)) * plotW;
-    const inset = slotW > 4 ? slotW * 0.14 : 0;
-    const hover = [];
-    const bars = buckets.map(([bucket, count], i) => {
-      const x1 = Math.max(left, xOf(bucket) + inset);
-      const x2 = Math.min(left + plotW, xOf(bucket + bucketMs) - inset);
-      const w = Math.max(1, x2 - x1);
-      const h = Math.max(1, (count / countScale.axisMax) * plotH);
-      hover.push({ x: x1 + w / 2, key: i, bucket, count });
-      return `<rect x="${x1.toFixed(2)}" y="${(top + plotH - h).toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="1" class="traceCountBar" data-count-bar="${i}" data-count-ts="${bucket}" data-count="${count}"/>`;
-    }).join("");
-    const yTicks = countScale.values.map((value) => { const y = top + plotH - (value / countScale.axisMax) * plotH; return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tickText(value))}</text>`; }).join("");
-    const xTicks = timeAxisSvg(start, end, left, plotW, H, W);
-    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg">${yTicks}${bars}${xTicks}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg>`;
-    attachChartTooltips(container, hover, (point) => `<strong>${point.count.toLocaleString()} matching trace${point.count === 1 ? "" : "s"}</strong><span>${esc(bucketRangeLabel(point.bucket, bucketMs))}</span>`, (point, active) => {
-      container.querySelector(`[data-count-bar="${point.key}"]`)?.classList.toggle("is-hovered", active);
+    const grid = bucketGrid(buckets, bucketMs);
+    const xs = new Float64Array(grid.starts.length);
+    const values = new Float64Array(grid.starts.length);
+    for (let i = 0; i < xs.length; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
+    buckets.forEach(([, count], k) => { values[grid.slot[k]] += count; });
+    const countText = (value) => Math.round(value).toLocaleString();
+    mountChart(container, "counts", {
+      xKind: "time", xs, xDomain: [start, end], zoom: null,
+      series: [{ id: "traces", label: "Matching traces", color: "var(--accentBorder)", values, nulls: null }],
+      type: "bar", legend: false, syncKey: CHART_SYNC_KEY,
+      xReadout: (i) => bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
+      formatValue: (value) => countText(value),
+      formatY: (value) => countText(Math.max(0, value)),
+      onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); },
     });
     if (dom.traceServiceChartMeta) {
       const fromIndex = a.trace_count_source === "trace_index";
@@ -969,6 +821,11 @@
         : "Traces with at least one matching span in the range, each counted at its first span start.";
     }
   }
+
+  // Legend choices (shown / hidden percentiles) survive new answers.
+  let durationHidden = [];
+  // The listed traces of the scatter, in the order of its x column (start).
+  let scatterTraces = [];
 
   function renderDurationChart() {
     const container = dom.traceDurationChart;
@@ -986,85 +843,79 @@
     if (!qs.length) { chartMessage(container, "No trace durations in this range."); return; }
     const range = a?.range || [qs[0][0], qs[qs.length - 1][0]];
     const xMin = Number(range[0] || 0), xMax = Math.max(xMin + 1000, Number(range[1] || xMin + 1000));
+    const qBucketMs = Math.max(1000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
+    // Percentiles on the bucket grid: lines break over buckets without
+    // traces (NULL), and a lone bucket shows as a dot.
+    const grid = bucketGrid(qs, qBucketMs);
+    const n = grid.starts.length;
+    const xs = new Float64Array(n);
+    const nulls = new Uint8Array(n).fill(1);
+    const columns = [1, 2, 3, 4].map(() => new Float64Array(n).fill(NaN));
+    for (let i = 0; i < n; i += 1) xs[i] = grid.starts[i] + qBucketMs / 2;
+    qs.forEach((q, k) => {
+      const i = grid.slot[k];
+      nulls[i] = 0;
+      for (let c = 0; c < 4; c += 1) columns[c][i] = Number.isFinite(q[c + 1]) ? q[c + 1] : NaN;
+    });
     // Jaeger's scatter plot: one dot per listed trace (x = start, y =
     // duration, radius by span count, red with errors), over the percentiles.
-    const listed = (model.traces || []).filter((trace) => Number(trace.start_ms) > 0 && Number.isFinite(Number(trace.duration_ns)));
-    let yMin = Infinity, yMax = 0;
-    for (const q of qs) for (let i = 1; i <= 4; i += 1) { const v = Number(q[i]); if (Number.isFinite(v)) { yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); } }
-    for (const trace of listed) { const v = Number(trace.duration_ns); yMin = Math.min(yMin, v); yMax = Math.max(yMax, v); }
-    if (!Number.isFinite(yMin)) yMin = 0;
-    const durationScaleAxis = durationAxis(yMin, yMax, 7);
-    const W = chartWidth(container), H = CHART_HEIGHT, top = 10, bottom = 30, right = 12;
-    const left = Math.ceil(10 + Math.max(...durationScaleAxis.values.map((tick) => labelWidthPx(tick.label))));
-    const plotW = W - left - right, plotH = H - top - bottom;
-    const qBucketMs = Math.max(1000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
-    const xOf = (ms) => Math.min(left + plotW, Math.max(left, left + ((Number(ms) - xMin) / (xMax - xMin)) * plotW));
-    const ySpan = Math.max(1, durationScaleAxis.axisMax - durationScaleAxis.axisMin);
-    const yOf = (ns) => top + plotH - ((Number(ns || 0) - durationScaleAxis.axisMin) / ySpan) * plotH;
-    const yTicks = durationScaleAxis.values.map((tick) => { const y = yOf(tick.value); return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(tick.label)}</text>`; }).join("");
-    const xTicks = timeAxisSvg(xMin, xMax, left, plotW, H, W);
-    const qDefs = [[1, "p50"], [2, "p90"], [3, "p95"], [4, "p99"]];
-    // Lines break where buckets have no traces instead of bridging the gap,
-    // and a lone bucket gets a dot, so every drawn stretch holds real points.
-    const runs = [];
-    for (const q of qs) {
-      const last = runs[runs.length - 1];
-      if (last && q[0] - last[last.length - 1][0] <= qBucketMs * 1.5) last.push(q); else runs.push([q]);
-    }
-    const lines = qDefs.map(([col, cls]) => runs.map((run) => {
-      if (run.length === 1) return `<circle cx="${xOf(run[0][0] + qBucketMs / 2).toFixed(2)}" cy="${yOf(run[0][col]).toFixed(2)}" r="1.8" class="traceDurationDot traceDurationDot--${cls}"/>`;
-      const pts = run.map((q) => `${xOf(q[0] + qBucketMs / 2).toFixed(2)},${yOf(q[col]).toFixed(2)}`).join(" ");
-      return `<polyline points="${pts}" class="traceDurationLine traceDurationLine--${cls}" fill="none"/>`;
-    }).join("")).join("");
-    const hover = [];
-    const hoverPoints = qs.map((q, i) => {
-      const x = xOf(q[0] + qBucketMs / 2);
-      hover.push({ x, key: q[0], q });
-      const xs = x.toFixed(2);
-      return `<g class="traceQuantileHover" data-q-hover="${q[0]}" data-q-ts="${q[0]}"><line x1="${xs}" x2="${xs}" y1="${top}" y2="${top + plotH}"/>${qDefs.map(([col, cls]) => `<circle class="${cls}" cx="${xs}" cy="${yOf(q[col]).toFixed(2)}" r="3.5"/>`).join("")}</g>`;
-    }).join("");
-    const spanCounts = listed.map((trace) => Number(trace.span_count || 0));
+    scatterTraces = (model.traces || [])
+      .filter((trace) => Number(trace.start_ms) > 0 && Number.isFinite(Number(trace.duration_ns)))
+      .sort((p, q) => Number(p.start_ms) - Number(q.start_ms));
+    const dotXs = new Float64Array(scatterTraces.map((trace) => Number(trace.start_ms)));
+    const dotYs = new Float64Array(scatterTraces.map((trace) => Number(trace.duration_ns)));
+    const spanCounts = scatterTraces.map((trace) => Number(trace.span_count || 0));
     const spanMin = Math.min(...spanCounts), spanMax = Math.max(...spanCounts);
-    const dots = listed.map((trace) => {
-      const spans = Number(trace.span_count || 0);
-      const r = spanMax > spanMin ? 2.5 + 6.5 * ((spans - spanMin) / (spanMax - spanMin)) : 3.5;
-      return { trace, x: xOf(trace.start_ms), y: yOf(trace.duration_ns), r, pickable: true };
-    }).sort((p, q) => q.r - p.r);
-    const dotsSvg = dots.map((dot, index) => {
-      dot.key = index;
-      const errors = Number(dot.trace.error_count || 0) > 0;
-      return `<circle cx="${dot.x.toFixed(2)}" cy="${dot.y.toFixed(2)}" r="${dot.r.toFixed(2)}" class="traceScatterDot${errors ? " is-error" : ""}" data-trace-dot="${esc(dot.trace.trace_id)}" data-dot-key="${index}" data-spans="${Number(dot.trace.span_count || 0)}"/>`;
-    }).join("");
-    // The dot under the pointer (within 3 px of its edge); among overlapping
-    // dots the closer and smaller one wins, so a small dot on a big one stays
-    // reachable.
-    const pickDot = (x, y) => {
-      let best = null, bestScore = Infinity;
-      for (const dot of dots) {
-        const d = Math.hypot(dot.x - x, dot.y - y);
-        if (d > dot.r + 3) continue;
-        const score = d / (dot.r + 3) + dot.r / 100;
-        if (score < bestScore) { best = dot; bestScore = score; }
-      }
-      return best;
-    };
-    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg" data-y-min="${durationScaleAxis.axisMin}" data-y-max="${durationScaleAxis.axisMax}">${yTicks}${xTicks}<g class="traceScatter">${dotsSvg}</g>${lines}${hoverPoints}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg><div class="traceChartLegend traceChartLegend--quantiles">${dots.length ? '<span class="traces" title="One dot per listed trace; size by span count, red with errors. Click a dot to open its trace.">Listed traces</span>' : ""}<span class="p50">P50</span><span class="p90">P90</span><span class="p95">P95</span><span class="p99">P99</span></div>`;
-    const dotTooltip = (dot) => {
-      const trace = dot.trace;
-      const ms = parseStartMs(trace.start_ms);
-      const errors = Number(trace.error_count || 0);
-      const services = (trace.service_stats || []).length;
-      return `<strong>${esc(traceName(trace))}</strong><span>Spans <b>${Number(trace.span_count || 0)}</b></span><span>Services <b>${services}</b></span>${errors ? `<span class="is-error">Errors <b>${errors}</b></span>` : ""}<span>Duration <b>${esc(formatDuration(trace.duration_ns))}</b></span><span>Start <b>${esc(Number.isFinite(ms) ? `${dayLabel(ms)}, ${clockLabel(ms, true)}` : "")}</b></span>`;
-    };
-    attachChartTooltips(container, hover, (point) => {
-      if (point.trace) return dotTooltip(point);
-      const [bucket, p50, p90, p95, p99] = point.q;
-      return `<strong>${esc(bucketRangeLabel(bucket, qBucketMs))}</strong><span>P50 <b>${esc(formatDuration(p50))}</b></span><span>P90 <b>${esc(formatDuration(p90))}</b></span><span>P95 <b>${esc(formatDuration(p95))}</b></span><span>P99 <b>${esc(formatDuration(p99))}</b></span>`;
-    }, (point, active) => {
-      if (point.trace) container.querySelector(`[data-dot-key="${point.key}"]`)?.classList.toggle("is-hovered", active);
-      else container.querySelector(`[data-q-hover="${point.key}"]`)?.classList.toggle("is-active", active);
-    }, dots.length ? pickDot : null, (dot) => loadTrace(dot.trace.trace_id, { push: true }));
-    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${dots.length ? `${dots.length} listed trace${dots.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
+    const radius = new Float64Array(spanCounts.map((spans) => (spanMax > spanMin ? 2.5 + 6.5 * ((spans - spanMin) / (spanMax - spanMin)) : 3.5)));
+    const series = [["p50", "P50"], ["p90", "P90"], ["p95", "P95"], ["p99", "P99"]].map(([id, label], c) => ({ id, label, color: QUANTILE_COLORS[id], values: columns[c], nulls }));
+    if (scatterTraces.length) {
+      series.unshift({
+        id: "traces", label: "Listed traces", type: "points", xs: dotXs, values: dotYs, radius, color: "var(--traceDot)", pickable: true,
+        pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--traceError)" : null),
+      });
+    }
+    const traceAt = (hit) => (hit?.seriesId === "traces" ? scatterTraces[hit.index] : null);
+    mountChart(container, "percentiles", {
+      xKind: "time", xs, xDomain: [xMin, xMax], zoom: null, series, type: "line", fill: false,
+      hidden: durationHidden, onHiddenChange: (hidden) => { durationHidden = [...hidden]; },
+      legend: true, syncKey: CHART_SYNC_KEY, tooltipNulls: false,
+      // Jaeger's ['auto', 'auto'] domain, whole duration steps.
+      yAxis: (yMin, yMax) => {
+        const durationScaleAxis = durationAxis(yMin, yMax, 7);
+        return { min: durationScaleAxis.axisMin, max: durationScaleAxis.axisMax, ticks: durationScaleAxis.values.map((tick) => ({ v: tick.value, label: tick.label })) };
+      },
+      xReadout: (i) => bucketRangeLabel(xs[i] - qBucketMs / 2, qBucketMs),
+      formatValue: (value) => formatDuration(value),
+      formatY: (value) => formatDuration(Math.max(0, value)),
+      pickTooltip: (hit) => {
+        const trace = traceAt(hit);
+        if (!trace) return null;
+        const ms = parseStartMs(trace.start_ms);
+        const errors = Number(trace.error_count || 0);
+        const rows = [
+          { label: "Spans", value: String(Number(trace.span_count || 0)) },
+          { label: "Services", value: String((trace.service_stats || []).length) },
+        ];
+        if (errors) rows.push({ label: "Errors", value: String(errors), className: "is-error", color: "var(--traceError)" });
+        rows.push({ label: "Duration", value: formatDuration(trace.duration_ns) });
+        rows.push({ label: "Start", value: Number.isFinite(ms) ? `${dayLabel(ms)}, ${clockLabel(ms, true)}` : "" });
+        return { title: traceName(trace), rows, footer: "Click to open the trace" };
+      },
+      onPick: (hit) => { const trace = traceAt(hit); if (trace) loadTrace(trace.trace_id, { push: true }); },
+      onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); },
+    });
+    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${scatterTraces.length ? `${scatterTraces.length} listed trace${scatterTraces.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
+  }
+
+  // The scatter dots as drawn (test and debugging hook): client coordinates.
+  function scatterDots() {
+    const held = dom.traceDurationChart && mountedCharts.get(dom.traceDurationChart);
+    if (!held || held.kind !== "percentiles") return [];
+    const box = held.chart.root.querySelector(".chartCore__plot").getBoundingClientRect();
+    return held.chart.points("traces").map((dot) => {
+      const trace = scatterTraces[dot.index];
+      return { trace_id: trace.trace_id, error: Number(trace.error_count || 0) > 0, spans: Number(trace.span_count || 0), x: box.left + dot.x, y: box.top + dot.y, r: dot.r };
+    });
   }
 
   // Remembers whether meta enables analytics for the head script of the next
@@ -1074,33 +925,11 @@
     document.documentElement.classList.remove("chdash-trace-analytics");
   }
 
-  // Charts are drawn at their pixel width: redraw when a card changes width.
-  let chartResizeObserver = null;
-  let chartResizeFrame = 0;
-  const chartWidths = new WeakMap();
-  function watchChartWidths() {
-    if (chartResizeObserver || typeof ResizeObserver !== "function") return;
-    chartResizeObserver = new ResizeObserver((entries) => {
-      let changed = false;
-      for (const entry of entries) {
-        const width = Math.round(entry.contentRect.width);
-        if (chartWidths.get(entry.target) !== width) { chartWidths.set(entry.target, width); changed = true; }
-      }
-      if (!changed || chartResizeFrame) return;
-      chartResizeFrame = requestAnimationFrame(() => {
-        chartResizeFrame = 0;
-        if (model.analytics && !dom.traceAnalyticsGrid?.hidden) { renderServiceChart(); renderDurationChart(); }
-      });
-    });
-    for (const chart of [dom.traceServiceChart, dom.traceDurationChart]) if (chart) chartResizeObserver.observe(chart);
-  }
-
   function renderAnalytics() {
     const enabled = model.meta?.analytics_enabled === true;
     if (model.meta) rememberAnalyticsEnabled(enabled);
     if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
     if (!enabled) return;
-    watchChartWidths();
     // The heatmap loads on its own: the count chart states do not apply to it.
     const heatmap = ns.traceHeatmap?.active?.() === true;
     if (model.analyticsLoading && !model.analytics) {
@@ -3760,8 +3589,8 @@
       formatDuration,
     });
     ns.traceHeatmap?.install?.({
-      model, dom, api, esc, currentHost, formatDuration, durationAxis, labelWidthPx, chartWidth, chartMessage,
-      timeAxisSvg, bucketRangeLabel, dayLabel, clockLabel, CHART_HEIGHT,
+      model, dom, api, esc, currentHost, formatDuration, durationAxis, chartMessage, mountChart, unmountChart,
+      bucketRangeLabel, dayLabel, clockLabel, CHART_SYNC_KEY,
       renderDurationChart: () => renderDurationChart(),
       loadDurations: () => loadDurations(),
       applyRange: (raw) => applyCustomRange(raw, "heatmap"),
@@ -3770,7 +3599,7 @@
       model, dom, api, esc, route, currentHost, serviceColor, registerServiceColors, formatDuration, showError,
       copyText, loadTrace, spanTraceUrl, localMidnight,
       // Chart helpers of the result list charts (the Services view's RED charts).
-      chart: { CHART_HEIGHT, chartWidth, timeAxisSvg, attachChartTooltips, chartMessage, countAxis, durationAxis, labelWidthPx, bucketRangeLabel },
+      chart: { mountChart, unmountChart, chartMessage, durationAxis, bucketRangeLabel, bucketGrid, zoomSearchRange },
       runSearch: (options) => search(options),
       // The result list tab is shown again: search when it is stale.
       showSearch: () => {
@@ -3820,5 +3649,7 @@
     if (currentHost()) reloadForHost();
   }
 
-  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace };
+  // renderAnalytics (redraw the charts from the model) and scatterDots (the
+  // scatter as drawn) are test and benchmark hooks.
+  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, renderAnalytics, scatterDots };
 })();

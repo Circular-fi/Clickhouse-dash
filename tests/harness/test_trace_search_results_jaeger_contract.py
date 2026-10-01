@@ -49,6 +49,10 @@ def test_duration_chart_plots_listed_traces_over_a_padded_axis():
     css = read("src/static/style.css")
     assert "function durationAxis(minNsValue, maxNsValue, targetIntervals = 7)" in js
     assert "const pad = hi > lo ? (hi - lo) * 0.05 : Math.max(1, hi * 0.1);" in js
-    assert 'class="traceScatterDot${errors ? " is-error" : ""}"' in js
-    assert "const pickDot = (x, y) =>" in js
-    assert ".traceScatterDot.is-error" in css
+    engine = read("src/static/app_chart_core.js")
+    # One dot per listed trace on the engine's scatter (own x column, radius
+    # by span count, red with errors), picked under the pointer.
+    assert 'pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--traceError)" : null),' in js
+    assert 'id: "traces", label: "Listed traces", type: "points", xs: dotXs' in js
+    assert "function pickPoint(p)" in engine and "const score = d / (r + 3) + r / 100;" in engine
+    assert ".chartCore__tipRow.is-error" in css

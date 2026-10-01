@@ -296,6 +296,7 @@
     else if (!payload) body = `<div class="tracesEmpty">${view.loading ? "Loading services\u2026" : "Search to load services."}</div>`;
     else if (!count) body = `<div class="tracesEmpty">No ${view.scope === "root" ? "root" : "entry"} spans match in this range.</div>`;
     else body = tableHtml(rows);
+    releaseDetailCharts();
     root.innerHTML = `<div class="traceSvc${view.loading ? " is-loading" : ""}" aria-busy="${view.loading ? "true" : "false"}">
       <div class="traceSvc__toolbar">
         <h2 id="traceSvcCount">${payload ? `${count} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
@@ -312,59 +313,54 @@
 
   // ------------------------------------------------------------ the detail
 
-  function chartSvg(container, { start, end, bucketMs, series, axis, markers, tooltip, height = DETAIL_CHART_HEIGHT }) {
+  // The detail charts draw on the shared canvas engine (app_chart_core.js):
+  // per chart one canvas, the engine's cursor and tooltip (one crosshair over
+  // the three charts), release markers as DOM annotations, drag to search a
+  // range. points: [{ t (bucket start), ... }].
+  function detailChart(container, { start, end, bucketMs, points, series, type, axis, releases, footer, format }) {
     const chart = ctx.chart;
-    const W = chart.chartWidth(container), H = height, top = 16, bottom = 30, right = 10;
-    let values = [];
-    for (const s of series) for (const p of s.points) values.push(p.v);
-    values = values.filter(Number.isFinite);
-    if (!values.length) { chart.chartMessage(container, "No data in this range."); return; }
-    let ticks, yMin = 0, yMax;
-    if (axis === "duration") {
-      const scale = chart.durationAxis(Math.min(...values), Math.max(...values), 5);
-      ticks = scale.values.map((t) => ({ value: t.value, label: t.label }));
-      yMin = scale.axisMin; yMax = scale.axisMax;
-    } else if (axis === "percent") {
-      const max = Math.max(1, Math.ceil(Math.max(...values)));
-      const scale = chart.countAxis(max, 4);
-      ticks = scale.values.map((v) => ({ value: v, label: `${v}%` }));
-      yMax = scale.axisMax;
-    } else {
-      const scale = chart.countAxis(Math.max(1, ...values), 4);
-      ticks = scale.values.map((v) => ({ value: v, label: compact(v) }));
-      yMax = scale.axisMax;
-    }
-    const left = Math.ceil(10 + Math.max(...ticks.map((t) => chart.labelWidthPx(t.label))));
-    const plotW = W - left - right, plotH = H - top - bottom;
-    const xOf = (t) => left + ((t - start) / Math.max(1, end - start)) * plotW;
-    const yOf = (v) => top + plotH - ((v - yMin) / Math.max(1e-9, yMax - yMin)) * plotH;
-    const grid = ticks.map((t) => { const y = yOf(t.value); return `<line x1="${left}" y1="${y.toFixed(1)}" x2="${W - right}" y2="${y.toFixed(1)}" class="traceChart__grid"/><text x="${left - 6}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="traceChart__tick">${esc(t.label)}</text>`; }).join("");
-    const slotW = (bucketMs / Math.max(1, end - start)) * plotW;
-    const marks = series.map((s) => {
-      if (s.kind === "bar") {
-        const inset = slotW > 4 ? slotW * 0.14 : 0;
-        return s.points.map((p) => {
-          const x1 = Math.max(left, xOf(p.t) + inset), x2 = Math.min(left + plotW, xOf(p.t + bucketMs) - inset);
-          const h = Math.max(p.v > 0 ? 1 : 0, (p.v / Math.max(1e-9, yMax)) * plotH);
-          return `<rect x="${x1.toFixed(2)}" y="${(top + plotH - h).toFixed(2)}" width="${Math.max(1, x2 - x1).toFixed(2)}" height="${h.toFixed(2)}" class="${s.cls}"/>`;
-        }).join("");
-      }
-      const pts = s.points.map((p) => `${xOf(p.t + bucketMs / 2).toFixed(2)},${yOf(p.v).toFixed(2)}`).join(" ");
-      return s.points.length === 1
-        ? `<circle cx="${xOf(s.points[0].t + bucketMs / 2).toFixed(2)}" cy="${yOf(s.points[0].v).toFixed(2)}" r="2" class="${s.cls}"/>`
-        : `<polyline points="${pts}" class="${s.cls}" fill="none"/>`;
-    }).join("");
-    const releases = (markers || []).filter((m) => m.t >= start && m.t <= end).map((m) => {
-      const x = xOf(m.t).toFixed(1);
-      return `<g class="traceSvcRelease" data-release="${esc(m.label)}"><line x1="${x}" x2="${x}" y1="${top - 4}" y2="${top + plotH}"/><text x="${x}" y="${top - 6}" text-anchor="middle">${esc(m.label)}</text><title>${esc(`Release ${m.label}: first span ${new Date(m.t).toLocaleString()}`)}</title></g>`;
-    }).join("");
-    const buckets = [...new Set(series.flatMap((s) => s.points.map((p) => p.t)))].sort((a, b) => a - b);
-    const hover = buckets.map((t) => ({ x: xOf(t + bucketMs / 2), key: t, t }));
-    const guides = hover.map((h) => `<line class="traceSvcHover" data-svc-hover="${h.key}" x1="${h.x.toFixed(2)}" x2="${h.x.toFixed(2)}" y1="${top}" y2="${top + plotH}"/>`).join("");
-    container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="traceChart__svg traceSvcChart__svg">${grid}${marks}${releases}${guides}${chart.timeAxisSvg(start, end, left, plotW, H, W)}<rect x="0" y="0" width="${W}" height="${H}" class="traceChartHit"/></svg>`;
-    chart.attachChartTooltips(container, hover, (point) => tooltip(point.t), (point, active) => {
-      container.querySelector(`[data-svc-hover="${point.key}"]`)?.classList.toggle("is-active", active);
+    if (!points.length) { chart.chartMessage(container, "No data in this range."); return; }
+    const grid = chart.bucketGrid(points.map((p) => [p.t]), bucketMs);
+    const n = grid.starts.length;
+    const xs = new Float64Array(n);
+    for (let i = 0; i < n; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
+    // Lines break over buckets without spans (NULL); bars there are empty.
+    const nulls = new Uint8Array(n).fill(1);
+    points.forEach((p, k) => { nulls[grid.slot[k]] = 0; });
+    const columns = series.map((s) => {
+      const values = new Float64Array(n).fill(type === "bar" ? 0 : NaN);
+      points.forEach((p, k) => { const v = s.value(p); if (Number.isFinite(v)) values[grid.slot[k]] = v; });
+      return { id: s.id, label: s.label, color: s.color, values, nulls: type === "bar" ? null : nulls };
     });
+    let yAxis;
+    if (axis === "duration") {
+      yAxis = (yMin, yMax) => {
+        const scale = chart.durationAxis(yMin, yMax, 5);
+        return { min: scale.axisMin, max: scale.axisMax, ticks: scale.values.map((t) => ({ v: t.value, label: t.label })) };
+      };
+    } else if (axis === "percent") {
+      yAxis = (yMin, yMax) => {
+        const ticks = ns.chartCore.linearTicks(0, Math.max(1, Math.ceil(yMax)), 4);
+        const max = ticks.values[ticks.values.length - 1] < yMax ? yMax : ticks.values[ticks.values.length - 1];
+        return { min: 0, max, step: ticks.step, ticks: ticks.values.map((v) => ({ v, label: `${v}%` })) };
+      };
+    }
+    const byIndex = new Map(points.map((p, k) => [grid.slot[k], p]));
+    chart.mountChart(container, "service", {
+      height: DETAIL_CHART_HEIGHT, xKind: "time", xs, xDomain: [start, end], zoom: null,
+      series: columns, type, stack: type === "bar", legend: false, syncKey: "traces-service", tooltipNulls: false,
+      yAxis, annotations: releases,
+      xReadout: (i) => chart.bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
+      formatValue: (v) => format(v),
+      formatY: axis === "count" ? null : (v) => format(Math.max(0, v)),
+      tooltipFooter: footer ? (i) => { const p = byIndex.get(i); return p ? footer(p) : ""; } : null,
+      onZoom: (range, fromUser) => { if (fromUser && range) chart.zoomSearchRange(range); },
+    });
+  }
+
+  // The detail's charts leave with it (their engine state is released).
+  function releaseDetailCharts() {
+    root?.querySelectorAll("#traceSvcDetail [data-svc-chart]").forEach((el) => ctx.chart.unmountChart(el));
   }
 
   function drawDetailCharts() {
@@ -376,29 +372,25 @@
     const start = Number(range[0]), end = Math.max(start + 1000, Number(range[1]));
     const bucketMs = Math.max(1000, Number(payload.bucket_ms || 60000));
     const bucketSeconds = bucketMs / 1000;
-    const markers = (payload.releases || []).map((r) => ({ label: String(r[0]), t: Number(r[1]) }));
-    const label = (t) => ctx.chart.bucketRangeLabel(t, bucketMs);
-    const byT = new Map(points.map((p) => [p.t, p]));
+    const releases = (payload.releases || []).map((r) => ({ label: String(r[0]), x: Number(r[1]), title: `Release ${r[0]}: first span ${new Date(Number(r[1])).toLocaleString()}`, className: "traceSvcRelease" }));
+    const spansText = (p) => `${Math.round(p.spans).toLocaleString()} spans${p.errors ? `, ${Math.round(p.errors).toLocaleString()} errors` : ""}`;
     const rate = panel.querySelector('[data-svc-chart="rate"]');
-    if (rate) chartSvg(rate, {
-      start, end, bucketMs, axis: "count", markers,
+    if (rate) detailChart(rate, {
+      start, end, bucketMs, points, type: "bar", axis: "count", releases, footer: spansText, format: rateText,
       series: [
-        { kind: "bar", cls: "traceSvcBar", points: points.map((p) => ({ t: p.t, v: p.spans / bucketSeconds })) },
-        { kind: "bar", cls: "traceSvcBar traceSvcBar--error", points: points.filter((p) => p.errors > 0).map((p) => ({ t: p.t, v: p.errors / bucketSeconds })) },
+        { id: "ok", label: "Successful", color: ctx.serviceColor(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) / bucketSeconds },
+        { id: "errors", label: "Errors", color: "var(--traceError)", value: (p) => p.errors / bucketSeconds },
       ],
-      tooltip: (t) => { const p = byT.get(t); return p ? `<strong>${esc(label(t))}</strong><span>Requests <b>${esc(rateText(p.spans / bucketSeconds))}</b></span><span>Spans <b>${Math.round(p.spans).toLocaleString()}</b></span>${p.errors ? `<span class="is-error">Errors <b>${Math.round(p.errors).toLocaleString()}</b></span>` : ""}` : ""; },
     });
     const errors = panel.querySelector('[data-svc-chart="errors"]');
-    if (errors) chartSvg(errors, {
-      start, end, bucketMs, axis: "percent", markers,
-      series: [{ kind: "line", cls: "traceSvcLine traceSvcLine--error", points: points.map((p) => ({ t: p.t, v: p.spans ? (p.errors / p.spans) * 100 : 0 })) }],
-      tooltip: (t) => { const p = byT.get(t); return p ? `<strong>${esc(label(t))}</strong><span>Error rate <b>${esc(percentText(p.spans ? (p.errors / p.spans) * 100 : 0))}</b></span><span>Errors <b>${Math.round(p.errors).toLocaleString()}</b></span>` : ""; },
+    if (errors) detailChart(errors, {
+      start, end, bucketMs, points, type: "line", axis: "percent", releases, footer: spansText, format: percentText,
+      series: [{ id: "error_rate", label: "Error rate", color: "var(--traceError)", value: (p) => (p.spans ? (p.errors / p.spans) * 100 : 0) }],
     });
     const latency = panel.querySelector('[data-svc-chart="latency"]');
-    if (latency) chartSvg(latency, {
-      start, end, bucketMs, axis: "duration", markers,
-      series: ["p50", "p95", "p99"].map((q) => ({ kind: "line", cls: `traceDurationLine traceDurationLine--${q}`, points: points.map((p) => ({ t: p.t, v: p[q] })) })),
-      tooltip: (t) => { const p = byT.get(t); return p ? `<strong>${esc(label(t))}</strong><span>P50 <b>${esc(fmt(p.p50))}</b></span><span>P95 <b>${esc(fmt(p.p95))}</b></span><span>P99 <b>${esc(fmt(p.p99))}</b></span>` : ""; },
+    if (latency) detailChart(latency, {
+      start, end, bucketMs, points, type: "line", axis: "duration", releases, format: fmt,
+      series: [["p50", "P50", "#54a24b"], ["p95", "P95", "#f58518"], ["p99", "P99", "#b279a2"]].map(([id, label, color]) => ({ id, label, color, value: (p) => p[id] })),
     });
   }
 
@@ -458,6 +450,7 @@
     const name = view.detailName;
     panel.hidden = !name;
     root.querySelector(".traceSvc")?.classList.toggle("has-detail", !!name);
+    releaseDetailCharts();
     if (!name) { panel.innerHTML = ""; return; }
     const detail = view.detail;
     const payload = detail.payload;
@@ -600,21 +593,11 @@
     }
   }
 
-  let resizeObserver = null;
-  let lastWidth = 0;
   function mount(element, context) {
     ctx = context;
     root = element;
     root.addEventListener("click", onClick);
     document.addEventListener("keydown", onKeydown);
-    if (typeof ResizeObserver === "function") {
-      resizeObserver = new ResizeObserver(() => {
-        const panel = root.querySelector("#traceSvcDetail");
-        const width = Math.round(panel?.clientWidth || 0);
-        if (width && width !== lastWidth) { lastWidth = width; requestAnimationFrame(drawDetailCharts); }
-      });
-      resizeObserver.observe(root);
-    }
     render();
   }
 

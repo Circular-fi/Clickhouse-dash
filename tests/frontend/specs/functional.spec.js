@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
+import { canvasPixel, chartCore, chartJson, plotBox } from '../helpers/charts.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -2154,47 +2155,59 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     expect(countsParams.get('bucket_origin_ms')).toBe(countsParams.get('start_ms'));
     const countsPayload = await countsResponse.json();
     expect(countsPayload.trace_count_chart.length).toBeGreaterThan(0);
-    await expect(page.locator('#traceServiceChart .traceCountBar').first()).toBeVisible({ timeout: 30_000 });
+    const countChart = chartCore(page.locator('#traceServiceChart'));
+    await expect(countChart).toHaveAttribute('data-points-drawn', /^[1-9]/, { timeout: 30_000 });
 
     const durationsResponse = await durations;
     expect(durationsResponse.status()).toBe(200);
     const durationsPayload = await durationsResponse.json();
     expect(durationsPayload.duration_quantiles.length).toBeGreaterThan(0);
-    await expect(page.locator('#traceDurationChart .traceQuantileHover')).toHaveCount(durationsPayload.duration_quantiles.length);
-    expect(await page.locator('#traceDurationChart .traceDurationLine, #traceDurationChart .traceDurationDot').count()).toBeGreaterThan(0);
-    const bars = await page.locator('#traceServiceChart .traceCountBar').count();
-    expect(bars).toBe(durationsPayload.trace_count_chart.filter(([, count]) => Number(count) > 0).length);
+    const durationChart = chartCore(page.locator('#traceDurationChart'));
+    // One line per percentile (a lone bucket is a dot), over the listed traces.
+    await expect(durationChart).toHaveAttribute('data-series-stats', /"P99"/);
+    const stats = await chartJson(durationChart, 'data-series-stats');
+    for (const q of ['P50', 'P90', 'P95', 'P99']) expect(stats[q].points).toBeGreaterThan(0);
+    // One bar per bucket holding traces (the exact counts of the second answer).
+    const [rangeStart, rangeEnd] = durationsPayload.range.map(Number);
+    const bucketMs = Number(durationsPayload.bucket_ms);
+    const nonEmpty = durationsPayload.trace_count_chart.filter(([bucket, count]) => Number(count) > 0 && Number(bucket) + bucketMs > rangeStart && Number(bucket) <= rangeEnd).length;
+    await expect(countChart).toHaveAttribute('data-points-drawn', String(nonEmpty));
 
-    for (const chart of ['#traceServiceChart', '#traceDurationChart']) {
-      const ticks = page.locator(`${chart} [data-time-tick]`);
-      const labels = await ticks.allTextContents();
-      expect(labels.length).toBeGreaterThanOrEqual(4);
-      // A multi-day axis names days ("Sep 13", or "Sep 13 12:00"), never a bare hour.
-      for (const label of labels) expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}( \d\d:\d\d)?$/);
-      const spans = await ticks.evaluateAll((nodes) => nodes.map((node) => { const r = node.getBoundingClientRect(); return [r.left, r.right]; }));
-      for (let i = 1; i < spans.length; i += 1) expect(spans[i][0]).toBeGreaterThan(spans[i - 1][1] + 4);
+    for (const root of [countChart, durationChart]) {
+      // [label, context, left, right] of every x label drawn.
+      const ticks = await chartJson(root, 'data-x-ticks');
+      expect(ticks.length).toBeGreaterThanOrEqual(4);
+      // A multi-day axis reads days ("Sep 13") or clock times dated where the
+      // day changes ("00:00" over "Sep 14 2026"), the first label dated too.
+      for (const [label, context] of ticks) {
+        expect(label).toMatch(/^([A-Z][a-z]{2} \d{1,2}|\d\d:\d\d)$/);
+        if (label === '00:00') expect(context).toMatch(/^[A-Z][a-z]{2} \d{1,2} \d{4}$/);
+      }
+      expect(ticks[0][1]).toMatch(/\d{4}$/);
+      for (let i = 1; i < ticks.length; i += 1) expect(ticks[i][2]).toBeGreaterThan(ticks[i - 1][3] + 4);
     }
     // Whole units: "10 min", "8 min 30 s", never "8.5 min".
     const decimalUnits = /\d\.\d+\s*(min|h|d)\b/;
-    for (const label of await page.locator('#traceDurationChart .traceChart__tick:not([data-time-tick])').allTextContents()) expect(label).not.toMatch(decimalUnits);
+    for (const label of await chartJson(durationChart, 'data-y-ticks')) expect(label).not.toMatch(decimalUnits);
     for (const label of await page.locator('#tracesResults .traceResult__right > b').allTextContents()) expect(label).not.toMatch(decimalUnits);
 
     // Every x position over a chart snaps to a bucket: a tooltip with the
-    // bucket's date and time, and exactly one highlighted marker.
-    for (const [chart, marker] of [['#traceServiceChart', '.traceCountBar.is-hovered'], ['#traceDurationChart', '.traceQuantileHover.is-active']]) {
-      const box = await page.locator(`${chart} svg`).boundingBox();
-      const tooltip = page.locator(`${chart} .traceChartTooltip`);
+    // bucket's date and time, and exactly one cursor (a bucket or a picked dot).
+    for (const root of [countChart, durationChart]) {
+      const box = await plotBox(root);
+      const tooltip = root.locator('.chartCore__tooltip');
+      const marked = async () => Number((await root.getAttribute('data-cursor-index')) !== null) + Number((await root.getAttribute('data-pick')) !== null);
       for (let i = 0; i <= 30; i += 1) {
         await page.mouse.move(box.x + 1 + (box.width - 2) * (i / 30), box.y + box.height * (0.15 + 0.7 * ((i % 4) / 3)));
         await expect(tooltip).toBeVisible();
         await expect(tooltip).toContainText(/[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d/);
         await expect(tooltip).not.toContainText(decimalUnits);
         // Near a listed trace's dot the dot is picked instead of the bucket.
-        await expect(page.locator(`${chart} ${marker}, ${chart} .traceScatterDot.is-hovered`)).toHaveCount(1);
+        await expect.poll(marked).toBe(1);
       }
       await page.mouse.move(box.x + box.width / 2, box.y - 80);
       await expect(tooltip).toBeHidden();
-      await expect(page.locator(`${chart} ${marker}, ${chart} .traceScatterDot.is-hovered`)).toHaveCount(0);
+      await expect.poll(marked).toBe(0);
     }
   });
 });
@@ -2431,14 +2444,23 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
   test.setTimeout(90_000);
   await openSyntheticTraces(page);
   const chart = page.locator('#traceDurationChart');
-  const dots = chart.locator('.traceScatterDot');
-  await expect(dots).toHaveCount(SYNTHETIC_TRACES.length);
-  expect((await dots.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceDot))).sort()).toEqual(SYNTHETIC_TRACES.map((t) => t.trace_id).sort());
+  const root = chartCore(chart);
+  // The scatter as drawn (client coordinates), from the traces module's hook.
+  const scatter = () => page.evaluate(() => window.ChDash.traces.scatterDots());
+  await expect.poll(async () => (await scatter()).length).toBe(SYNTHETIC_TRACES.length);
+  const dots = await scatter();
+  expect(dots.map((dot) => dot.trace_id).sort()).toEqual(SYNTHETIC_TRACES.map((t) => t.trace_id).sort());
   const errorIds = SYNTHETIC_TRACES.filter((t) => t.errors).map((t) => t.trace_id).sort();
-  expect((await chart.locator('.traceScatterDot.is-error').evaluateAll((nodes) => nodes.map((node) => node.dataset.traceDot))).sort()).toEqual(errorIds);
-  expect(await chart.locator('.traceScatterDot.is-error').first().evaluate((node) => getComputedStyle(node).fill)).toBe('rgb(214, 69, 69)');
+  expect(dots.filter((dot) => dot.error).map((dot) => dot.trace_id).sort()).toEqual(errorIds);
+  // Error dots are red, the others teal (the canvas pixel at the dot farthest
+  // from the percentile lines, 400-440 ms).
+  const clear = (list) => list.map((dot) => [Math.abs(SYNTHETIC_TRACES.find((t) => t.trace_id === dot.trace_id).duration_ms - 420), dot]).sort((a, b) => b[0] - a[0])[0][1];
+  const red = await canvasPixel(root, clear(dots.filter((dot) => dot.error)).x, clear(dots.filter((dot) => dot.error)).y);
+  const teal = await canvasPixel(root, clear(dots.filter((dot) => !dot.error)).x, clear(dots.filter((dot) => !dot.error)).y);
+  expect(red[0]).toBeGreaterThan(red[2] + 30);
+  expect(teal[2]).toBeGreaterThan(teal[0] + 30);
   // Radius grows with the span count; a longer trace sits higher.
-  const geometry = Object.fromEntries(await dots.evaluateAll((nodes) => nodes.map((node) => [node.dataset.traceDot, { r: Number(node.getAttribute('r')), cx: Number(node.getAttribute('cx')), cy: Number(node.getAttribute('cy')) }])));
+  const geometry = Object.fromEntries(dots.map((dot) => [dot.trace_id, { r: dot.r, cx: dot.x, cy: dot.y }]));
   const bySpans = [...SYNTHETIC_TRACES].sort((a, b) => a.spans - b.spans);
   for (let i = 1; i < bySpans.length; i += 1) expect(geometry[bySpans[i].trace_id].r).toBeGreaterThanOrEqual(geometry[bySpans[i - 1].trace_id].r);
   expect(geometry[bySpans[bySpans.length - 1].trace_id].r).toBeGreaterThan(geometry[bySpans[0].trace_id].r);
@@ -2449,33 +2471,35 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
 
   // Padded min-max domain (Jaeger's ['auto', 'auto']): 330-610 ms of data and
   // 400-440 ms percentiles read 300 ms to 650 ms, not from 0.
-  const svg = chart.locator('svg');
-  expect(Number(await svg.getAttribute('data-y-min'))).toBe(300e6);
-  expect(Number(await svg.getAttribute('data-y-max'))).toBe(650e6);
-  const yLabels = await chart.locator('.traceChart__tick:not([data-time-tick])').allTextContents();
-  expect(yLabels).toEqual(['300 ms', '350 ms', '400 ms', '450 ms', '500 ms', '550 ms', '600 ms', '650 ms']);
-  // The percentile lines use the same axis: P99 (440 ms) above P50 (400 ms), inside the plot.
-  const lineYs = await chart.locator('.traceDurationLine--p50, .traceDurationLine--p99').evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('points').split(' ')[0].split(',')[1])));
-  expect(lineYs[1]).toBeLessThan(lineYs[0]);
+  expect(Number(await root.getAttribute('data-y-min'))).toBe(300e6);
+  expect(Number(await root.getAttribute('data-y-max'))).toBe(650e6);
+  expect(await chartJson(root, 'data-y-ticks')).toEqual(['300 ms', '350 ms', '400 ms', '450 ms', '500 ms', '550 ms', '600 ms', '650 ms']);
+  // The percentile lines share the axis (drawn, not clipped away).
+  const stats = await chartJson(root, 'data-series-stats');
+  expect(stats.P50.points).toBeGreaterThan(0);
+  expect(stats.P99.points).toBeGreaterThan(0);
 
   // Hovering a dot picks it over the percentile snap; clicking opens the trace.
   const target = SYNTHETIC_TRACES[3];
-  const box = await chart.locator(`[data-trace-dot="${target.trace_id}"]`).boundingBox();
+  const dot = dots.find((d) => d.trace_id === target.trace_id);
+  const box = { x: dot.x - dot.r, y: dot.y - dot.r, width: 2 * dot.r, height: 2 * dot.r };
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  const tooltip = chart.locator('.traceChartTooltip');
+  const tooltip = root.locator('.chartCore__tooltip');
   await expect(tooltip).toBeVisible();
   await expect(tooltip.locator('strong')).toHaveText(syntheticName(target));
   await expect(tooltip).toContainText(`Spans ${target.spans}`);
   await expect(tooltip).toContainText(`Services ${target.services.length}`);
   await expect(tooltip).toContainText('Duration 610 ms');
   await expect(tooltip).toContainText(/Start [A-Z][a-z]{2} \d{1,2}, \d\d:\d\d:\d\d/);
-  await expect(chart.locator(`[data-trace-dot="${target.trace_id}"]`)).toHaveClass(/is-hovered/);
-  await expect(chart.locator('.traceQuantileHover.is-active')).toHaveCount(0);
+  const order = (await page.evaluate(() => window.ChDash.traces.scatterDots().map((d) => d.trace_id))).indexOf(target.trace_id);
+  await expect(root).toHaveAttribute('data-pick', `traces:${order}`);
+  await expect(root.locator('.chartCore__pick')).toBeVisible();
+  await expect(root).not.toHaveAttribute('data-cursor-index', /./);
   // Away from the dots the pointer snaps to the percentile buckets again.
-  const plot = await svg.boundingBox();
+  const plot = await plotBox(root);
   await page.mouse.move(plot.x + plot.width * 0.2, plot.y + 14);
-  await expect(chart.locator('.traceQuantileHover.is-active')).toHaveCount(1);
-  await expect(chart.locator('.traceScatterDot.is-hovered')).toHaveCount(0);
+  await expect(root).toHaveAttribute('data-cursor-index', /^\d+$/);
+  await expect(root).not.toHaveAttribute('data-pick', /./);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.up();
