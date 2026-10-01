@@ -346,7 +346,9 @@ test('a trace that does not exist: a not-found state with Back to search and a w
   await expect(state).toBeVisible();
   await state.getByRole('button', { name: 'Back to search' }).click();
   await waitResults(page);
-  expect(Number(lastSearch(searches).get('end_ms')) - Number(lastSearch(searches).get('start_ms'))).toBe(2 * 3600_000);
+  // The results of the wider search may still be on screen when the restored
+  // search goes out: wait for the request itself.
+  await expect.poll(() => Number(lastSearch(searches).get('end_ms')) - Number(lastSearch(searches).get('start_ms'))).toBe(2 * 3600_000);
 });
 
 test('a trace that fails to load and a failed search say so in a sentence, without the error code, with Retry', async ({ page }) => {
