@@ -227,6 +227,10 @@ def main() -> int:
             str(ROOT / 'backend-functional' / 'test_rich_fixture.py'),
             str(ROOT / 'backend-functional' / 'test_trace_spans.py'),
             str(ROOT / 'backend-functional' / 'test_explorer_graph_panel.py'),
+            # Query library: the disabled checks run against chdash_source; the
+            # writable/read-only checks skip unless QUERY_LIBRARY_* point at
+            # dedicated instances (tests/README.md, "Query library").
+            str(ROOT / 'backend-functional' / 'test_query_library.py'),
             '/repo/tests/harness',
             '--junitxml', str(backend_dir / 'junit.xml'),
         ],

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "revision": 3,
+  "updated_at_ms": 1790000000000,
+  "folders": [
+    {
+      "id": "f_seed_ops",
+      "parent_id": null,
+      "name": "Operations",
+      "description": "Shared operational queries",
+      "created_at_ms": 1790000000000,
+      "updated_at_ms": 1790000000000
+    },
+    {
+      "id": "f_seed_merges",
+      "parent_id": "f_seed_ops",
+      "name": "Merges",
+      "description": "",
+      "created_at_ms": 1790000000000,
+      "updated_at_ms": 1790000000000
+    }
+  ],
+  "queries": [
+    {
+      "id": "q_seed_parts",
+      "folder_id": "f_seed_merges",
+      "name": "Active parts per table",
+      "description": "Largest tables by active part count",
+      "sql": "SELECT database, table, count() AS parts\nFROM system.parts\nWHERE active\nGROUP BY database, table\nORDER BY parts DESC\nLIMIT 20",
+      "host_id": null,
+      "tags": ["parts", "merges"],
+      "created_at_ms": 1790000000000,
+      "updated_at_ms": 1790000000000
+    }
+  ],
+  "history": []
+}

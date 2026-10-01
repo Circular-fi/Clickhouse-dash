@@ -185,6 +185,37 @@ Upload that single ZIP for review.
 
 The backend phase hits the running ChDash service rather than only inspecting source files. It checks formatter fixtures against `/api/format`, native query/result types, core health/meta/host routes, query run/stream, analysis/execution/deep-analysis, Explorer routes, export and cancel-token rejection behavior.
 
+### Query library
+
+`backend-functional/test_query_library.py` covers the server-side query library (`docs/query-library.md`). Against `chdash_source` (feature disabled) it only checks that every route answers 404; the other tests need dedicated instances and skip otherwise:
+
+| Variable | Instance |
+| --- | --- |
+| `QUERY_LIBRARY_BASE_URL` | `config/query-library.writable.hcl`, with an empty writable directory mounted at `/data` |
+| `QUERY_LIBRARY_RO_BASE_URL` | `config/query-library.readonly.hcl`, with a writable `/data` (optionally holding a copy of `config/query-library.seed.json` as `query_library.json`) |
+| `QUERY_LIBRARY_DATA_DIR` | the writable instance's `/data` as seen by pytest (file mode, external edit, malformed file) |
+| `QUERY_LIBRARY_RESTART_CMD` | a command restarting the writable instance (persistence across a restart) |
+| `QUERY_LIBRARY_DISABLED_BASE_URL` | optional; defaults to `API_BASE_URL` |
+
+Example, from the repository root with the compose stack running (run pytest on the host so the restart command can reach Docker; run the containers as your user so pytest can read the 0600 file):
+
+```bash
+mkdir -p /tmp/qlib/rw /tmp/qlib/ro && cp tests/config/query-library.seed.json /tmp/qlib/ro/query_library.json
+docker build -t chdash-qlib:local -f tests/Dockerfile.source .
+docker run -d --name chdash-qlib --network chdash-tests_default --user "$(id -u):$(id -g)" -p 127.0.0.1:18471:8080 \
+  -e CHDASH_CONFIG_FILE=/config/chdash.hcl -v "$PWD/tests/config/query-library.writable.hcl:/config/chdash.hcl:ro" \
+  -v /tmp/qlib/rw:/data chdash-qlib:local
+docker run -d --name chdash-qlib-ro --network chdash-tests_default --user "$(id -u):$(id -g)" -p 127.0.0.1:18472:8080 \
+  -e CHDASH_CONFIG_FILE=/config/chdash.hcl -v "$PWD/tests/config/query-library.readonly.hcl:/config/chdash.hcl:ro" \
+  -v /tmp/qlib/ro:/data chdash-qlib:local
+cd tests && QUERY_LIBRARY_DISABLED_BASE_URL=http://127.0.0.1:18080 \
+  QUERY_LIBRARY_BASE_URL=http://127.0.0.1:18471 QUERY_LIBRARY_RO_BASE_URL=http://127.0.0.1:18472 \
+  QUERY_LIBRARY_DATA_DIR=/tmp/qlib/rw QUERY_LIBRARY_RESTART_CMD="docker restart -t 2 chdash-qlib" \
+  python3 -m pytest -q backend-functional/test_query_library.py
+```
+
+The store's C++ unit tests (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
+
 ## Frontend functional
 
 Playwright validates interactions and behavior only. It does not capture design-review screenshots and does not fail because a page is aesthetically poor. Runtime page errors are still treated as functional failures.
