@@ -1,15 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import {
-  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome,
+  settle, cameraIdle, overlaps, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, freeArea, expectClearOfChrome, expectTouchCanvas,
 } from '../helpers/graph-kit.js';
 
 // Explorer graph on the shared canvas graph kit (app_graph_kit.js): readable
 // fit, database groups, per-node expansion, side panel, edge definitions,
-// impact list, the kit's look (dot grid, cards, orthogonal edges, always
+// the kit's look (dot grid, cards, orthogonal edges, always
 // visible labels, legend / status bottom-left, minimap, icon toolbar), hover
-// halo, click = recentre + select, keyboard, both themes, the phone layout and
-// performance budgets. The graph is a canvas:
+// halo, click = recentre + select, keyboard, both themes, the phone layout
+// (the canvas with touch pan / pinch and a bottom-sheet panel: there is no
+// List view) and performance budgets. The graph is a canvas:
 // ChDash.explorerGraph.inspect() reports the last drawn frame in client
 // coordinates so the tests click real pixels.
 
@@ -343,32 +344,6 @@ test('keyboard: the canvas takes the focus, arrows move between cards, Enter sel
   await expect(page.locator('#explorerGraphPanel')).toBeHidden();
 });
 
-test('impact list gives direction and depth relative to the focus and refocuses on click', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS['laptop-1280']);
-  await page.goto(focusUrl('chdash_ui', 'weather_observations', { depth: 2 }));
-  await graphReady(page, /neighborhood depth 2/);
-  await page.locator('#explorerGraphListViewButton').click();
-  const list = page.locator('#explorerGraphImpact');
-  await expect(list).toBeVisible();
-  await expect(list).toHaveClass(/graphKitList/);
-  await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'hidden');
-  await expect(list.locator('thead th')).toHaveText(['Object', 'Type', 'Direction', 'Depth', 'Database']);
-  const row = (name) => list.locator(`tbody tr[data-node-id="table:chdash_ui.${name}"] td`);
-  await expect(row('weather_buffer').nth(2)).toHaveText('upstream');
-  await expect(row('weather_buffer').nth(3)).toHaveText('1');
-  await expect(row('weather_observations').nth(2)).toHaveText('selected');
-  await expect(row('weather_daily_summary_mv').nth(2)).toHaveText('downstream');
-  await expect(row('weather_daily_summary').nth(3)).toHaveText('2');
-  await expect(list.locator('.graphKitList__meta')).toContainText(/\d+ upstream · \d+ downstream · depth 2/);
-
-  await row('weather_daily_summary_mv').first().locator('button').click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\//);
-  await expect(list.locator('.graphKitList__title')).toHaveText('Impact of chdash_ui.weather_daily_summary_mv');
-  await expect(page.locator('#explorerGraphPanel')).toBeVisible();
-  await page.locator('#explorerGraphCanvasViewButton').click();
-  await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'visible');
-});
-
 test('graph colour tokens stay readable in both themes and Storage keeps its readable fit', async ({ page }) => {
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme });
@@ -402,42 +377,43 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
   }
 });
 
-test('phones show lineage as a list, keep every graph control inside the pane and open details as a bottom sheet', async ({ page }) => {
-  await page.setViewportSize(VIEWPORTS.mobile);
-  await page.goto(focusUrl('chdash_ui', 'weather_observations'));
-  await graphReady(page, /neighborhood depth 1/);
-  const list = page.locator('#explorerGraphImpact');
-  await expect(list).toBeVisible();
-  await expect(page.locator('#explorerGraphListViewButton')).toHaveAttribute('aria-selected', 'true');
-  const pane = await page.locator('#explorerGraphPane').boundingBox();
-  for (const control of await page.locator('.explorerGraphViewportControls > :not([hidden])').all()) {
-    const box = await control.boundingBox();
-    if (!box) continue;
-    expect(box.x).toBeGreaterThanOrEqual(pane.x - 1);
-    expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
-  }
-  const listBox = await list.boundingBox();
-  expect(listBox.x + listBox.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
-  await list.locator('tbody tr[data-node-id="table:chdash_ui.weather_buffer"] button').click();
-  const panel = page.locator('#explorerGraphPanel');
-  await expect(panel).toBeVisible();
-  const panelBox = await panel.boundingBox();
-  expect(panelBox.width).toBeGreaterThan(VIEWPORTS.mobile.width - 60);
-  expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(VIEWPORTS.mobile.height + 1);
-  expect(panelBox.y).toBeGreaterThan(pane.y + 40);
-  await expect(panel.locator('#explorerGraphPanelOpenCard')).toBeVisible();
+test.describe('on a phone', () => {
+  test.use({ viewport: VIEWPORTS.mobile, hasTouch: true });
 
-  // The canvas is one tap away and its toolbar wraps instead of being cut.
-  await panel.locator('.graphKitPanel__close').click();
-  await expect(panel).toBeHidden();
-  await page.locator('#explorerGraphCanvasViewButton').click();
-  await expect(page.locator('#explorerGraphCanvas')).toHaveCSS('visibility', 'visible');
-  await expect(page.locator('#explorerGraphZoomInButton')).toBeVisible();
-  for (const control of await page.locator('.explorerGraphViewportControls > :not([hidden])').all()) {
-    const box = await control.boundingBox();
-    if (!box) continue;
-    expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
-  }
+  test('phones show the lineage canvas (no list), keep every control inside the pane, pan and pinch by touch and open details as a bottom sheet', async ({ page }) => {
+    await page.goto(focusUrl('chdash_ui', 'weather_observations'));
+    await graphReady(page, /neighborhood depth 1/);
+    await expect(page.locator('#explorerGraphImpact, #explorerGraphListViewButton, #explorerGraphCanvasViewButton')).toHaveCount(0);
+    const pane = await page.locator('#explorerGraphPane').boundingBox();
+    // The toolbar wraps instead of being cut.
+    for (const control of await page.locator('.explorerGraphViewportControls > :not([hidden])').all()) {
+      const box = await control.boundingBox();
+      if (!box) continue;
+      expect(box.x).toBeGreaterThanOrEqual(pane.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
+    }
+    await expectTouchCanvas(page, { pane: '#explorerGraphPane', canvas: '#explorerGraphCanvas', zoomIn: '#explorerGraphZoomInButton', inspect: () => inspect(page) });
+    // The icon toolbar works too: Fit (on the focused object at the readable
+    // scale), then a tap on its card opens the sheet.
+    await page.locator('#explorerGraphFitButton').tap();
+    await cameraIdle(page, 'ChDash.explorerGraph');
+    const focused = await nodeBox(page, 'table:chdash_ui.weather_observations');
+    await page.touchscreen.tap(focused.x + focused.width / 2, focused.y + focused.height / 2);
+    const panel = page.locator('#explorerGraphPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText('weather_observations');
+    const panelBox = await panel.boundingBox();
+    expect(panelBox.width).toBeGreaterThan(VIEWPORTS.mobile.width - 60);
+    expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(VIEWPORTS.mobile.height + 1);
+    expect(panelBox.y).toBeGreaterThan(pane.y + 40);
+    await expect(panel.locator('#explorerGraphPanelOpenCard')).toBeVisible();
+    // Recentred above the sheet.
+    await cameraIdle(page, 'ChDash.explorerGraph');
+    const moved = await nodeBox(page, 'table:chdash_ui.weather_observations');
+    expect(moved.y + moved.height / 2).toBeLessThan(panelBox.y);
+    await panel.locator('.graphKitPanel__close').tap();
+    await expect(panel).toBeHidden();
+  });
 });
 
 // A synthetic 2k-object database (1500 tables, 300 views, 100 MVs and their

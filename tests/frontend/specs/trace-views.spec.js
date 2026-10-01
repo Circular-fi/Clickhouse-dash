@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, measureFrames, expectTouchCanvas,
 } from '../helpers/graph-kit.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
@@ -827,51 +827,37 @@ test('trace graph: Time and Self time fill the cards with a heat between --graph
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
 
-test('trace graph: the List view tabulates the call paths; phones open it by default with a bottom-sheet panel', async ({ page }) => {
-  await openGraph(page);
-  await page.locator('#traceGraphListViewButton').click();
-  const list = page.locator('#traceGraphList');
-  await expect(list).toBeVisible();
-  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'hidden');
-  await expect(page.locator('#traceGraphBar .traceGraph__colour')).toBeHidden();
-  const rows = list.locator('[data-graph-list="paths"] tbody tr');
-  await expect(rows).toHaveCount(8);
-  // Call order, callees under their caller.
-  await expect(rows.locator('.graphKitList__open')).toHaveText([
-    /frontend\s*GET \/checkout/, /checkout\s*POST \/cart\/checkout/, /checkout\s*SELECT orders/, /payments\s*charge/,
-    /payments\s*fraud\.check/, /fraud\s*score/, /frontend\s*render/, /frontend\s*hydrate/,
-  ]);
-  await expect(rows.nth(2).locator('td').nth(1)).toHaveText('2');
-  await expect(rows.nth(3).locator('td').nth(2)).toHaveClass(/is-err/);
-  await page.locator('#traceGraphCanvasViewButton').click();
-  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'visible');
+test.describe('trace graph on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.reload();
-  await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(8);
-  await expect(list).toBeVisible();
-  await expect(page.locator('#traceGraphListViewButton')).toHaveAttribute('aria-selected', 'true');
-  expect((await inspectGraph(page)).viewMode).toBe('list');
-  await list.locator('[data-graph-select]').nth(3).click();
-  const panel = page.locator('#traceGraphPanel');
-  await expect(panel).toBeVisible();
-  await expect(panel.locator('.graphKitPanel__title')).toHaveText('payments');
-  const pane = await page.locator('#traceGraphPane').boundingBox();
-  const sheet = await panel.boundingBox();
-  expect(sheet.width).toBeGreaterThan(390 - 40);
-  expect(sheet.y + sheet.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
-  await expect(list.locator('tr.is-selected')).toHaveCount(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await panel.getByRole('button', { name: 'Show in the timeline' }).click();
-  await expect(page.locator('.traceTimelineFrame')).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`\\?span=${ID.D}$`));
-  await page.goBack();
-  await expect(list).toBeVisible();
-  // The canvas is one tap away.
-  await page.locator('#traceGraphCanvasViewButton').click();
-  await expect(page.locator('#traceGraphCanvas')).toHaveCSS('visibility', 'visible');
-  await expect(page.locator('#traceGraphZoomIn')).toBeVisible();
-  expect((await inspectGraph(page)).viewMode).toBe('canvas');
+  test('trace graph: phones show the canvas (no list), pan and pinch by touch and open a call path as a bottom sheet', async ({ page }) => {
+    await openGraph(page);
+    await expect(page.locator('#traceGraphList, #traceGraphListViewButton, #traceGraphCanvasViewButton')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await expectTouchCanvas(page, { pane: '#traceGraphPane', canvas: '#traceGraphCanvas', zoomIn: '#traceGraphZoomIn', inspect: () => inspectGraph(page) });
+    // Fit from the icon toolbar (the root opens top-left), then tap it.
+    await page.locator('#traceGraphFit').tap();
+    await settle(page);
+    const root = await graphNode(page, 'frontend GET /checkout');
+    await page.touchscreen.tap(root.x + root.width / 2, root.y + root.height / 2);
+    const panel = page.locator('#traceGraphPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText('frontend');
+    const pane = await page.locator('#traceGraphPane').boundingBox();
+    const sheet = await panel.boundingBox();
+    expect(sheet.width).toBeGreaterThan(390 - 40);
+    expect(sheet.y + sheet.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+    // Recentred above the sheet.
+    await cameraIdle(page, 'ChDash.traceGraph');
+    const moved = await graphNode(page, 'frontend GET /checkout');
+    expect(moved.y + moved.height / 2).toBeLessThan(sheet.y);
+    await panel.getByRole('button', { name: 'Show in the timeline' }).tap();
+    await expect(page.locator('.traceTimelineFrame')).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`\\?span=${ID.A}$`));
+    await page.goBack();
+    await expect(page.locator('#traceGraphCanvas')).toBeVisible();
+    await expect(page.locator('#traceGraphZoomIn')).toBeVisible();
+  });
 });
 
 // 10,000 spans whose call paths stay under the graph's limit: per level the

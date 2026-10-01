@@ -8,9 +8,11 @@
   // dot-grid background, card / halo / edge / label drawing, the orthogonal
   // edge router and the layered layout it routes, collision-free edge labels,
   // the minimap, keyboard access (focusable canvas, arrows between nodes,
-  // Enter, + - 0, Escape) and the DOM helpers of the shared chrome (Graph /
-  // List switch, foldable legend, side-panel shell). Colours come from the
-  // --graph-* tokens of style.css ("Graph kit" block), never from literals.
+  // Enter, + - 0, Escape, a live region naming the focused node), touch pan
+  // and pinch zoom, and the DOM helpers of the shared chrome (foldable
+  // legend, side-panel shell). The canvas is the only view of every graph,
+  // on phones too. Colours come from the --graph-* tokens of style.css
+  // ("Graph kit" block), never from literals.
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -2036,7 +2038,7 @@
   function mount(options) {
     const canvas = options.canvas;
     const view = options.view;
-    const control = { frame: 0, drag: null, hovered: null, keyboardId: null, animation: 0 };
+    const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0 };
     const live = document.createElement("p");
     live.className = "srOnly";
     live.setAttribute("aria-live", "polite");
@@ -2228,19 +2230,45 @@
       zoomAt(Math.exp(-event.deltaY * WHEEL_SPEED), event.clientX - rect.left, event.clientY - rect.top);
     }, { passive: false });
 
+    // One pointer pans (a mouse drag or a finger), two fingers pinch-zoom
+    // around their midpoint and pan with it; a tap or click that did not move
+    // selects. A finger may wander a few pixels during a tap.
+    const pointers = new Map();
+    const pinchOf = () => {
+      const [a, b] = [...pointers.values()];
+      const rect = canvas.getBoundingClientRect();
+      return { distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top };
+    };
     canvas.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       stopAnimation();
-      canvas.setPointerCapture?.(event.pointerId);
-      control.drag = { x: event.clientX, y: event.clientY, moved: false };
+      try { canvas.setPointerCapture?.(event.pointerId); } catch (_) { /* a pointer the browser no longer tracks */ }
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointers.size === 2) {
+        control.pinch = pinchOf();
+        if (control.drag) control.drag.moved = true;
+        return;
+      }
+      if (pointers.size > 2) return;
+      control.drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, slop: event.pointerType === "touch" ? 8 : 2 };
       canvas.classList.remove("is-clickable", "is-disabled");
       canvas.classList.add("is-dragging");
     });
     canvas.addEventListener("pointermove", (event) => {
+      if (pointers.has(event.pointerId)) pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (control.pinch && pointers.size >= 2) {
+        const next = pinchOf();
+        view.offsetX += next.x - control.pinch.x;
+        view.offsetY += next.y - control.pinch.y;
+        zoomAt(next.distance / control.pinch.distance, next.x, next.y);
+        control.pinch = next;
+        return;
+      }
       if (control.drag) {
         const dx = event.clientX - control.drag.x;
         const dy = event.clientY - control.drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) control.drag.moved = true;
+        if (Math.hypot(event.clientX - control.drag.startX, event.clientY - control.drag.startY) > control.drag.slop) control.drag.moved = true;
+        if (!control.drag.moved) return;
         view.offsetX += dx;
         view.offsetY += dy;
         clamp();
@@ -2252,10 +2280,19 @@
       setHover(options.hit?.(event.clientX, event.clientY) || null);
     });
     const endDrag = (event) => {
+      pointers.delete(event.pointerId);
+      try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) { /* already released */ }
+      if (control.pinch) {
+        if (pointers.size >= 2) { control.pinch = pinchOf(); return; }
+        control.pinch = null;
+        // The finger left on the canvas goes on panning from where it is.
+        const [rest] = [...pointers.values()];
+        if (rest && control.drag) { control.drag.x = rest.x; control.drag.y = rest.y; }
+        if (rest) return;
+      }
       const drag = control.drag;
-      if (!drag) return;
+      if (!drag || pointers.size) return;
       control.drag = null;
-      canvas.releasePointerCapture?.(event.pointerId);
       canvas.classList.remove("is-dragging");
       const target = options.hit?.(event.clientX, event.clientY) || null;
       setCursor(target);
@@ -2412,31 +2449,6 @@
     return control.auto;
   }
 
-  // Graph / List switch: role=tablist, aria-selected on the active option.
-  function viewSwitch({ idPrefix, label = "Graph view", onChange }) {
-    const group = el("div", "graphKitGroup graphKitSwitch");
-    group.setAttribute("role", "tablist");
-    group.setAttribute("aria-label", label);
-    const buttons = {};
-    for (const [mode, text] of [["canvas", "Graph"], ["list", "List"]]) {
-      const button = el("button", "graphKitTool graphKitTool--text graphKitSwitch__option", text);
-      button.type = "button";
-      button.id = `${idPrefix}${mode === "canvas" ? "Canvas" : "List"}ViewButton`;
-      button.dataset.graphView = mode;
-      button.setAttribute("role", "tab");
-      button.addEventListener("click", () => onChange(mode));
-      group.append(button);
-      buttons[mode] = button;
-    }
-    return {
-      element: group,
-      buttons,
-      set(mode) {
-        for (const [key, button] of Object.entries(buttons)) button.setAttribute("aria-selected", String(key === mode));
-      },
-    };
-  }
-
   // Side-panel header: eyebrow (kind), title, subtitle and the close button.
   function panelHeader({ eyebrow, title, subtitle, dot, onClose, closeLabel = "Close details" }) {
     const header = el("header", "graphKitPanel__head");
@@ -2523,7 +2535,6 @@
     clampView,
     mount,
     el,
-    viewSwitch,
     legendToggle,
     foldLegendToFit,
     panelHeader,

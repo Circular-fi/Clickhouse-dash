@@ -654,8 +654,10 @@
   // callee's span count, hover outlines a card, a click recentres on it and
   // opens its side panel (a button jumps to its spans in the timeline). The
   // Time / Self time colour modes fill the cards with a heat mixed in JS
-  // between --graph-node-bg and --graph-heat. A List view (the phone default)
-  // tabulates the call paths.
+  // between --graph-node-bg and --graph-heat. The canvas is the only view, on
+  // phones too (touch pans and pinches; the panel is a bottom sheet): the
+  // kit's keyboard access (arrows, Enter, the live region) is the accessible
+  // path.
   //
   // Layout: the tree slot layout turned left to right. Graph nodes form a
   // tree (one node per path), so the leaves take consecutive rows in call
@@ -684,7 +686,6 @@
   const graphUi = {
     pane: null,
     ctl: null,
-    switch: null,
     // The graphTree() the layout was built for.
     graph: null,
     layout: null,
@@ -695,8 +696,6 @@
     selected: null,
     // { type: "node" | "edge", id, key } | null
     hovered: null,
-    // "canvas" | "list"; null until the user picks one (phones default to list).
-    viewMode: null,
     labelHits: [],
     fills: new Map(),
     timing: null,
@@ -888,12 +887,8 @@
       + '<div class="graphKitDock"><div id="traceGraphLegend" class="graphKitLegend" aria-label="Legend"></div>'
       + '<div class="graphKitStatus"><span id="traceGraphMeta" class="graphKitStatus__text" role="status"></span></div></div>'
       + '<canvas id="traceGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>'
-      + '<section id="traceGraphList" class="graphKitList" aria-label="Call paths" hidden></section>'
       + '<aside id="traceGraphPanel" class="graphKitPanel" aria-label="Call path details" hidden></aside>';
     graphUi.pane = pane;
-    const bar = pane.querySelector("#traceGraphBar");
-    graphUi.switch = kit.viewSwitch({ idPrefix: "traceGraph", label: "Graph view", onChange: setGraphViewMode });
-    bar.insertBefore(graphUi.switch.element, bar.querySelector(".traceGraph__colour"));
     const select = pane.querySelector("#traceGraphMode");
     ctx.enhanceTraceSelect(select);
     select.addEventListener("change", () => {
@@ -950,9 +945,8 @@
       if (target && target !== document.body && !pane.contains(target)) return;
       event.preventDefault();
       closeGraphPanel();
-      if (currentGraphViewMode() === "canvas") canvas.focus({ preventScroll: true });
+      canvas.focus({ preventScroll: true });
     });
-    window.matchMedia?.(kit.MOBILE_QUERY)?.addEventListener?.("change", () => { if (graphUi.pane?.isConnected) renderGraphChrome(); });
     return pane;
   }
 
@@ -962,32 +956,6 @@
   function graphShown() {
     const alt = byId("traceAltView");
     return view.current === "graph" && !!graphUi.pane?.isConnected && !!alt && !alt.hidden;
-  }
-
-  function currentGraphViewMode() {
-    if (graphUi.viewMode) return graphUi.viewMode;
-    return graphKit()?.mobileLayout() ? "list" : "canvas";
-  }
-
-  function setGraphViewMode(mode) {
-    graphUi.viewMode = mode === "list" ? "list" : "canvas";
-    renderGraphChrome();
-    if (graphUi.viewMode === "canvas") {
-      graphUi.ctl?.size();
-      if (graphUi.fitted) fitGraph();
-      else graphUi.ctl?.scheduleDraw();
-    }
-  }
-
-  function renderGraphChrome() {
-    const pane = graphUi.pane;
-    if (!pane) return;
-    const list = currentGraphViewMode() === "list";
-    pane.classList.toggle("graphKitPane--list", list);
-    graphUi.switch?.set(list ? "list" : "canvas");
-    const section = pane.querySelector("#traceGraphList");
-    section.hidden = !list;
-    if (list) renderGraphList();
   }
 
   function renderGraphMeta() {
@@ -1185,12 +1153,22 @@
 
     if (minimap) {
       const visible = kit.anyClipped(layout.items.values(), v, frame.width, frame.height) || compact;
-      minimap.hidden = !visible || currentGraphViewMode() === "list";
+      minimap.hidden = !visible;
       if (!minimap.hidden) {
+        // The minimap's cards and edges are built once per layout, selection
+        // and theme, not on every pan frame.
+        const key = `${graphUi.selected || ""}\u0000${kit.color("error")}\u0000${kit.color("edgeMuted")}`;
+        if (!layout.minimap || layout.minimap.key !== key) {
+          layout.minimap = {
+            key,
+            nodes: [...layout.items.values()].map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height, alpha: item.node.id === graphUi.selected ? 1 : 0.62 })),
+            edges: layout.edges.map((item) => ({ points: item.points, dash: graphKindDash(item.kind), width: 1, color: graphEdgeColor(item, false) })),
+          };
+        }
         kit.drawMinimap(minimap, {
           bounds: layout.bounds,
-          nodes: [...layout.items.values()].map((item) => ({ x: item.x, y: item.y, width: item.width, height: item.height, alpha: item.node.id === graphUi.selected ? 1 : 0.62 })),
-          edges: layout.edges.map((item) => ({ points: item.points, dash: graphKindDash(item.kind), width: 1, color: graphEdgeColor(item, false) })),
+          nodes: layout.minimap.nodes,
+          edges: layout.minimap.edges,
           view: v,
           width: frame.width,
           height: frame.height,
@@ -1243,8 +1221,7 @@
     if (!item) return;
     graphUi.selected = id;
     renderGraphPanel();
-    renderGraphList();
-    if (center && currentGraphViewMode() === "canvas") graphUi.ctl?.centerOn(item);
+    if (center) graphUi.ctl?.centerOn(item);
     graphUi.ctl?.scheduleDraw();
   }
 
@@ -1253,7 +1230,6 @@
     const panel = graphPanel();
     if (panel) { panel.hidden = true; panel.replaceChildren(); }
     graphUi.pane?.classList.remove("graphKitPane--panel");
-    renderGraphList();
     graphUi.ctl?.scheduleDraw();
   }
 
@@ -1325,30 +1301,6 @@
     if (select) selectGraphNode(String(select.getAttribute("data-graph-select") || ""));
   }
 
-  // ---------------------------------------------------------- graph list
-
-  function renderGraphList() {
-    const section = graphUi.pane?.querySelector("#traceGraphList");
-    const graph = graphUi.graph;
-    if (!section || section.hidden || !graph) return;
-    const rows = [];
-    const visit = (node) => {
-      rows.push(`<tr data-graph-row="${esc(node.id)}"${node.id === graphUi.selected ? ' class="is-selected"' : ""}>`
-        + `<td class="graphKitList__name traceGraphList__name" style="padding-left:${12 + Math.min(node.depth, 24) * 14}px"><button type="button" class="graphKitList__open" data-graph-select="${esc(node.id)}" title="${esc(graphPathText(node))}"><span class="traceGraph__dot" style="background:${ctx.serviceColor(node.service)}"></span>${esc(node.service)}<span class="traceGraphList__op">${esc(node.operation)}</span></button></td>`
-        + `<td class="graphKitList__num">${node.count}</td>`
-        + `<td class="graphKitList__num${node.errors ? " is-err" : ""}">${node.errors}</td>`
-        + `<td class="graphKitList__num graphKitList__secondary">${esc(fmt(node.time / Math.max(1, node.count)))}</td>`
-        + `<td class="graphKitList__num">${esc(fmt(node.time))} <small class="graphKitList__secondary">${round2(node.percent)}%</small></td>`
-        + `<td class="graphKitList__num graphKitList__secondary">${esc(fmt(node.selfTime))} <small>${round2(node.percentSelf)}%</small></td></tr>`);
-      for (const child of node.children) visit(child);
-    };
-    for (const root of graph.roots) visit(root);
-    section.innerHTML = '<div class="graphKitList__header"><h3 class="graphKitList__title">Call paths</h3>'
-      + `<span class="graphKitList__meta">${graph.nodes.length} call path${graph.nodes.length === 1 ? "" : "s"} in call order, callees indented</span></div>`
-      + '<div class="graphKitList__wrap"><table class="graphKitList__table" data-graph-list="paths"><thead><tr><th>Call path</th><th class="graphKitList__num">Spans</th><th class="graphKitList__num">Errors</th><th class="graphKitList__num graphKitList__secondary">Avg</th><th class="graphKitList__num">Time</th><th class="graphKitList__num graphKitList__secondary">Self time</th></tr></thead>'
-      + `<tbody>${rows.join("")}</tbody></table></div>`;
-  }
-
   // ---------------------------------------------------------- graph view
 
   function graphMeasure() {
@@ -1386,7 +1338,6 @@
       renderGraphMeta();
     }
     renderGraphLegend();
-    renderGraphChrome();
     graphUi.ctl.size();
     if (graphUi.fitted) fitGraph();
     else graphUi.ctl.scheduleDraw();
@@ -1413,7 +1364,7 @@
       width: rect.width * v.scale,
       height: rect.height * v.scale,
     });
-    const layout = graphShown() || currentGraphViewMode() === "list" ? graphUi.layout : null;
+    const layout = graphShown() ? graphUi.layout : null;
     const minimap = graphUi.pane?.querySelector("#traceGraphMinimap");
     return {
       kit: true,
@@ -1424,7 +1375,6 @@
       readableScale: GRAPH_READABLE_SCALE,
       gridSpacing: graphKit()?.GRID_SPACING,
       fitted: graphUi.fitted,
-      viewMode: currentGraphViewMode(),
       mode: view.graph.mode,
       selected: graphUi.selected,
       hovered: graphUi.hovered ? { type: graphUi.hovered.type, id: graphUi.hovered.id } : null,

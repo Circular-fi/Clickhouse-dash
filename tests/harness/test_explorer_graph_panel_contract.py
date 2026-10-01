@@ -60,9 +60,12 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     assert "function drawNodeExpandControls(ctx, compact)" in js
     assert "function renderNodePanel(body, node)" in js
     assert "function renderEdgePanel(body, edge)" in js
-    assert "function renderImpactList()" in js
     assert 'const MOBILE_QUERY = "(max-width: 720px)";' in js
-    assert "return mobileLayout() ? \"list\" : \"canvas\";" in js
+    # The canvas is the only view, on phones too: no Graph / List switch, no
+    # impact list (keyboard access and the live region stay).
+    for gone in ("renderImpactList", "impactRows", "viewSwitch", "graphKitList", "currentViewMode"):
+        assert gone not in js, gone
+    assert 'live.setAttribute("aria-live", "polite");' in js
     assert "model.openCard(node.database, node.name)" in js
     # Canvas colours come from graph tokens defined for both themes.
     for token in ("--graph-muted", "--graph-accent-text", "--graph-halo", "--graph-edge"):

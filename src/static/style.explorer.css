@@ -5769,8 +5769,7 @@ html[data-theme="light"] {
   font-size: 12px;
 }
 .graphKitGroup[hidden] { display: none !important; }
-.graphKitTools,
-.graphKitSwitch { gap: 2px; }
+.graphKitTools { gap: 2px; }
 .graphKitTool {
   display: inline-flex;
   align-items: center;
@@ -5804,11 +5803,6 @@ html[data-theme="light"] {
   stroke-width: 1.35;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.graphKitSwitch__option { min-width: 44px; }
-.graphKitSwitch__option[aria-selected="true"] {
-  background: var(--rowHover);
-  color: var(--graph-accent-text);
 }
 .graphKitDock {
   position: absolute;
@@ -6072,104 +6066,8 @@ html[data-theme="light"] {
 .graphKitPanel__link:hover,
 .graphKitPanel__link:focus-visible { text-decoration: underline; }
 .graphKitPanel__arrow { color: var(--graph-muted); }
-.graphKitPanel .is-warn,
-.graphKitList .is-warn { color: var(--graph-warn); }
-.graphKitPanel .is-err,
-.graphKitList .is-err { color: var(--graph-error); }
-.graphKitList {
-  position: absolute;
-  z-index: 6;
-  inset: 56px 10px 10px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panelBg);
-  color: var(--text);
-  font-size: 13px;
-}
-.graphKitList[hidden] { display: none !important; }
-.graphKitPane--panel .graphKitList { right: calc(var(--graph-panel-width) + 20px); }
-.graphKitList__header {
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.graphKitList__title {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-  font-weight: 600;
-}
-.graphKitList__meta,
-.graphKitList__empty {
-  color: var(--graph-muted);
-  font-size: 12px;
-}
-.graphKitList__empty { margin: 12px; }
-.graphKitList__wrap {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-}
-.graphKitList__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.graphKitList__table th {
-  position: sticky;
-  top: 0;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--borderStrong);
-  background: var(--panelBg);
-  color: var(--graph-muted);
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
-.graphKitList__table td {
-  padding: 5px 12px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.graphKitList__table tr.is-selected td { background: var(--rowHover); }
-.graphKitList__name {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.graphKitList__open {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: transparent;
-  color: var(--graph-accent-text);
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.graphKitList__open:hover,
-.graphKitList__open:focus-visible { text-decoration: underline; }
-.graphKitList__num,
-.graphKitList__table th.graphKitList__num {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.graphKitPane--list .graphKit__canvas { visibility: hidden; }
-.graphKitPane--list .graphKitDock,
-.graphKitPane--list .graphKitMinimap,
-.graphKitPane--list .graphKitTools { display: none !important; }
+.graphKitPanel .is-warn { color: var(--graph-warn); }
+.graphKitPanel .is-err { color: var(--graph-error); }
 @media (max-width: 720px) {
   .graphKitBar {
     left: 8px;
@@ -6189,8 +6087,6 @@ html[data-theme="light"] {
     width: 130px;
     height: 80px;
   }
-  .graphKitList { inset: 56px 8px 8px; }
-  .graphKitPane--panel .graphKitList { right: 8px; }
   .graphKitPanel {
     top: auto;
     left: 8px;
@@ -6202,10 +6098,6 @@ html[data-theme="light"] {
     border-radius: 12px 12px 10px 10px;
   }
   .graphKitPane--panel .graphKitMinimap { display: none; }
-  .graphKitList__name { max-width: 190px; }
-  .graphKitList__table .graphKitList__secondary { display: none; }
-  .graphKitList__table th,
-  .graphKitList__table td { padding-inline: 8px; }
 }
 .explorerGraphViewportControls__label,
 .explorerGraphViewportControls__value {
@@ -6306,11 +6198,6 @@ html[data-theme="light"] {
   font-family: var(--mono);
   font-size: 12px;
   overflow-wrap: anywhere;
-}
-.explorerGraphImpact__direction--up { color: var(--graph-accent-text); }
-@media (max-width: 720px) {
-  .explorerGraphPane .graphKitList { inset: 96px 8px 8px; }
-  .explorerGraphPane.graphKitPane--panel .graphKitList { right: 8px; }
 }
 :root {
   --explorer-table-font: 13px;

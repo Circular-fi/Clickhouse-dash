@@ -3,7 +3,9 @@
 
   // Explorer Lineage / Storage graph on the shared canvas graph kit
   // (app_graph_kit.js): projections, layout, database groups, per-node
-  // expansion, side panel, impact list and the activity / TTL overlays.
+  // expansion, side panel (a bottom sheet on phones) and the activity / TTL
+  // overlays. The canvas is the only view, on phones too: the kit's keyboard
+  // access (arrows, Enter, the live region) is the accessible path.
   const ns = window.ChDash;
   if (!ns || !ns.graphKit) return;
 
@@ -62,8 +64,6 @@
     panelSerial: 0,
     definitionCache: new Map(),
     columnsCache: new Map(),
-    // "canvas" | "list"; null until the user picks one (mobile defaults to list).
-    viewMode: null,
   };
 
   const NODE_HEIGHT = 80;
@@ -79,14 +79,9 @@
   const STORAGE_FONT_MIN = 11;
   const READABLE_TEXT_PX = 11;
   const FONT = kit.FONT;
-  const MOBILE_QUERY = kit.MOBILE_QUERY;
 
   function readableScale() {
     return READABLE_TEXT_PX / (model.detailMode === "physical" ? STORAGE_FONT_MIN : LINEAGE_FONT_MIN);
-  }
-
-  function mobileLayout() {
-    return !!window.matchMedia?.(MOBILE_QUERY)?.matches;
   }
 
   // Theme tokens, canvas sizing, cards, routing, labels, minimap and the
@@ -2771,13 +2766,12 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Graph chrome: Graph / List switch, "objects without dependencies" toggle,
-  // side panel (node or edge) and the impact list. All of it lives inside
-  // #explorerGraphPane and is created once by init().
+  // Graph chrome: "objects without dependencies" toggle and side panel (node
+  // or edge). All of it lives inside #explorerGraphPane and is created once
+  // by init().
 
   const chrome = {
-    root: null, viewSwitch: null, canvasButton: null, listButton: null,
-    isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null, list: null,
+    root: null, isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null,
   };
 
   function el(tag, className, text) {
@@ -2787,21 +2781,11 @@
     return node;
   }
 
-  function currentViewMode() {
-    if (model.viewMode) return model.viewMode;
-    return mobileLayout() ? "list" : "canvas";
-  }
-
   function buildGraphChrome() {
     const pane = dom.explorerGraphPane;
     if (!pane || chrome.root) return;
     chrome.root = pane;
     const controls = pane.querySelector(".explorerGraphViewportControls");
-
-    chrome.viewSwitch = kit.viewSwitch({ idPrefix: "explorerGraph", onChange: (mode) => setViewMode(mode) });
-    chrome.canvasButton = chrome.viewSwitch.buttons.canvas;
-    chrome.listButton = chrome.viewSwitch.buttons.list;
-    const group = chrome.viewSwitch.element;
 
     const isolated = el("label", "graphKitGroup explorerGraphIsolatedToggle");
     chrome.isolatedInput = el("input");
@@ -2810,8 +2794,8 @@
     chrome.isolatedInput.addEventListener("change", () => setShowIsolated(chrome.isolatedInput.checked));
     isolated.append(chrome.isolatedInput, el("span", null, "Show objects without dependencies"));
     chrome.isolatedLabel = isolated;
-    if (controls) controls.append(group, isolated);
-    else pane.append(group, isolated);
+    if (controls) controls.append(isolated);
+    else pane.append(isolated);
 
     const panel = el("aside", "graphKitPanel explorerGraphPanel");
     panel.id = "explorerGraphPanel";
@@ -2820,154 +2804,16 @@
     chrome.panelBody = el("div", "graphKitPanel__body");
     panel.append(chrome.panelBody);
     chrome.panel = panel;
-
-    const list = el("section", "graphKitList explorerGraphImpact");
-    list.id = "explorerGraphImpact";
-    list.hidden = true;
-    list.setAttribute("aria-label", "Lineage impact list");
-    chrome.list = list;
-    pane.append(list, panel);
-
-    window.matchMedia?.(MOBILE_QUERY)?.addEventListener?.("change", () => renderGraphChrome());
-  }
-
-  function setViewMode(mode) {
-    model.viewMode = mode === "list" ? "list" : "canvas";
-    renderGraphChrome();
-    if (model.viewMode === "canvas") {
-      canvasSize();
-      if (!model.isFitted) scheduleDraw();
-      else fitToScreen();
-    }
+    pane.append(panel);
   }
 
   function renderGraphChrome() {
     updateStatus();
     if (!chrome.root) return;
-    const listMode = currentViewMode() === "list";
     const lineage = model.detailMode === "logical";
-    chrome.root.classList.toggle("graphKitPane--list", listMode);
     chrome.root.classList.toggle("graphKitPane--panel", !!model.panel && !chrome.panel.hidden);
-    chrome.viewSwitch?.set(listMode ? "list" : "canvas");
-    if (chrome.viewSwitch) chrome.viewSwitch.element.hidden = !lineage;
-    if (chrome.isolatedLabel) chrome.isolatedLabel.hidden = !lineage || !!model.focusedId || listMode;
+    if (chrome.isolatedLabel) chrome.isolatedLabel.hidden = !lineage || !!model.focusedId;
     if (chrome.isolatedInput) chrome.isolatedInput.checked = model.showIsolated;
-    if (chrome.list) {
-      chrome.list.hidden = !(listMode && lineage);
-      if (!chrome.list.hidden) renderImpactList();
-    }
-  }
-
-  // Directed hop distances from the focused object over the visible
-  // projection: upstream through incoming edges, downstream through outgoing.
-  function impactRows() {
-    const nodes = visibleNodes().filter((node) => node.layer === "logical" && !node.synthetic);
-    const edges = visibleEdges().filter((edge) => !edge.aggregated);
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const focus = model.focusedId && byId.has(model.focusedId) ? model.focusedId : null;
-    const walk = (forward, both = false) => {
-      const distance = new Map();
-      if (!focus) return distance;
-      const links = new Map();
-      const link = (from, to) => {
-        if (!links.has(from)) links.set(from, []);
-        links.get(from).push(to);
-      };
-      for (const edge of edges) {
-        if (both || forward) link(edge.from, edge.to);
-        if (both || !forward) link(edge.to, edge.from);
-      }
-      let frontier = [focus];
-      distance.set(focus, 0);
-      while (frontier.length) {
-        const next = [];
-        for (const id of frontier) {
-          for (const target of links.get(id) || []) {
-            if (distance.has(target)) continue;
-            distance.set(target, distance.get(id) + 1);
-            next.push(target);
-          }
-        }
-        frontier = next;
-      }
-      return distance;
-    };
-    const down = walk(true);
-    const up = walk(false);
-    // Siblings (another consumer of an upstream source, ...) are neither
-    // upstream nor downstream: listed as "related" at their hop distance.
-    const any = walk(true, true);
-    const rows = nodes.map((node) => {
-      const u = node.id === focus ? null : up.get(node.id);
-      const d = node.id === focus ? null : down.get(node.id);
-      let direction = "\u2014";
-      if (node.id === focus) direction = "selected";
-      else if (u != null && d != null) direction = "upstream · downstream";
-      else if (u != null) direction = "upstream";
-      else if (d != null) direction = "downstream";
-      else if (any.has(node.id)) direction = "related";
-      const depth = node.id === focus ? 0 : Math.min(u ?? Infinity, d ?? Infinity, any.get(node.id) ?? Infinity);
-      const order = node.id === focus ? 0 : u != null && d == null ? -1 : d != null ? 1 : 2;
-      return { node, direction, depth: Number.isFinite(depth) ? depth : null, order };
-    });
-    rows.sort((a, b) => a.order - b.order
-      || (a.order < 0 ? (b.depth ?? 0) - (a.depth ?? 0) : (a.depth ?? 0) - (b.depth ?? 0))
-      || `${a.node.database}.${a.node.name}`.localeCompare(`${b.node.database}.${b.node.name}`));
-    return { rows, focus: focus ? byId.get(focus) : null, upstream: up.size ? up.size - 1 : 0, downstream: down.size ? down.size - 1 : 0 };
-  }
-
-  function renderImpactList() {
-    const list = chrome.list;
-    if (!list) return;
-    list.replaceChildren();
-    const { rows, focus, upstream, downstream } = impactRows();
-    const header = el("div", "graphKitList__header");
-    if (focus) {
-      header.append(
-        el("span", "graphKitList__title", `Impact of ${focus.database}.${focus.name}`),
-        el("span", "graphKitList__meta", `${fmtInt(upstream)} upstream · ${fmtInt(downstream)} downstream · depth ${model.focusDepth}${model.expansions.size ? " + expanded" : ""}`),
-      );
-    } else {
-      header.append(
-        el("span", "graphKitList__title", "Objects with dependencies"),
-        el("span", "graphKitList__meta", "Select an object to list what it reads from and what depends on it."),
-      );
-    }
-    list.append(header);
-    if (!rows.length) {
-      list.append(el("p", "graphKitList__empty", model.loading ? "Loading graph\u2026" : "No objects in this scope."));
-      return;
-    }
-    const wrap = el("div", "graphKitList__wrap");
-    const table = el("table", "graphKitList__table");
-    const head = el("thead");
-    const headRow = el("tr");
-    for (const [label, column] of [["Object", "name"], ["Type", "type"], ["Direction", "direction"], ["Depth", "depth"], ["Database", "database"]]) {
-      headRow.append(el("th", column === "type" || column === "database" ? "graphKitList__secondary" : `graphKitList__col--${column}`, label));
-    }
-    head.append(headRow);
-    const body = el("tbody");
-    for (const row of rows) {
-      const tr = el("tr", row.node.id === model.focusedId ? "is-selected" : "");
-      tr.dataset.nodeId = row.node.id;
-      const name = el("button", "graphKitList__open", row.node.name);
-      name.type = "button";
-      name.title = `${row.node.database}.${row.node.name}`;
-      name.addEventListener("click", () => selectGraphNode(row.node.id));
-      const nameCell = el("td", "graphKitList__name");
-      nameCell.append(name);
-      tr.append(
-        nameCell,
-        el("td", "graphKitList__secondary", nodeKindLabel(row.node)),
-        el("td", `explorerGraphImpact__direction explorerGraphImpact__direction--${row.order === -1 ? "up" : row.order === 1 ? "down" : "none"}`, row.direction),
-        el("td", "graphKitList__num", row.depth == null ? "\u2014" : String(row.depth)),
-        el("td", "graphKitList__secondary", row.node.database),
-      );
-      body.append(tr);
-    }
-    table.append(head, body);
-    wrap.append(table);
-    list.append(wrap);
   }
 
   // Same path as a canvas click on a logical node: focus, tree/URL sync, the
@@ -4027,7 +3873,6 @@
       fitScale: model.fitScale,
       readableScale: readableScale(),
       gridSpacing: kit.GRID_SPACING,
-      viewMode: currentViewMode(),
       focusedId: model.focusedId,
       hoveredId: model.hoveredId,
       hoveredEdgeId: model.hoveredEdgeId,

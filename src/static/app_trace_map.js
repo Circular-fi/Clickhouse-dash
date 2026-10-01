@@ -11,8 +11,10 @@
   // the error severity and whose width grows mildly with the calls, and an
   // always visible "calls · p95" label on every edge. Hover outlines a service
   // and its calls; a click recentres on it and opens the side panel with the
-  // metrics and the hand-off to the Search tab. A List view (the phone
-  // default) lists services and calls.
+  // metrics and the hand-off to the Search tab. The canvas is the only view,
+  // on phones too (touch pans and pinches; the panel is a bottom sheet): the
+  // kit's keyboard access (arrows, Enter, the live region) is the accessible
+  // path.
   const ns = window.ChDash;
   if (!ns || !ns.traceTabs || !ns.graphKit) return;
   const kit = ns.graphKit;
@@ -53,8 +55,6 @@
     // { kind: "node" | "edge", id } | null
     selected: null,
     hovered: null,
-    // "canvas" | "list"; null until the user picks one (phones default to list).
-    viewMode: null,
   };
 
   // ---------------------------------------------------------------- format
@@ -237,15 +237,6 @@
     return !!view && !view.hidden;
   }
 
-  function mobileLayout() {
-    return kit.mobileLayout();
-  }
-
-  function currentViewMode() {
-    if (map.viewMode) return map.viewMode;
-    return mobileLayout() ? "list" : "canvas";
-  }
-
   function nodeHighlighted(id) {
     return map.hovered?.type === "node" && map.hovered.id === id;
   }
@@ -347,7 +338,7 @@
 
     if (minimap) {
       const visible = kit.anyClipped(layout.items.values(), view, frame.width, frame.height) || view.scale < READABLE_SCALE - 1e-6;
-      minimap.hidden = !visible || currentViewMode() === "list";
+      minimap.hidden = !visible;
       if (!minimap.hidden) {
         kit.drawMinimap(minimap, {
           bounds: layout.bounds,
@@ -451,11 +442,9 @@
       map.layout = null;
       closePanel();
       ctl?.scheduleDraw();
-      renderList();
       return;
     }
     map.layout = computeLayout(data, measureText());
-    renderList();
   }
 
   // ---------------------------------------------------------- view / camera
@@ -541,7 +530,6 @@
   function select(target, { center = true } = {}) {
     map.selected = target;
     renderPanel();
-    renderList();
     if (target?.kind === "node" && center) {
       const item = map.layout?.items.get(target.id);
       if (item) ctl?.centerOn(item);
@@ -554,7 +542,6 @@
     const panel = byId("traceMapPanel");
     if (panel) { panel.hidden = true; panel.replaceChildren(); }
     byId("traceMapPane")?.classList.remove("graphKitPane--panel");
-    renderList();
     ctl?.scheduleDraw();
   }
 
@@ -633,64 +620,6 @@
     byId("traceMapPane")?.classList.add("graphKitPane--panel");
   }
 
-  // ------------------------------------------------------------- list view
-
-  function setViewMode(mode) {
-    map.viewMode = mode === "list" ? "list" : "canvas";
-    renderChrome();
-    if (map.viewMode === "canvas") {
-      ctl?.size();
-      if (map.fitted) fit();
-      else ctl?.scheduleDraw();
-    }
-  }
-
-  function renderChrome() {
-    const pane = byId("traceMapPane");
-    const list = currentViewMode() === "list";
-    pane?.classList.toggle("graphKitPane--list", list);
-    map.switch?.set(list ? "list" : "canvas");
-    const section = byId("traceMapList");
-    if (section) {
-      section.hidden = !list;
-      if (list) renderList();
-    }
-  }
-
-  function renderList() {
-    const section = byId("traceMapList");
-    if (!section || section.hidden) return;
-    const data = map.data;
-    if (!data || !data.nodes.length) {
-      section.innerHTML = '<div class="graphKitList__header"><h3 class="graphKitList__title">Services</h3></div><p class="graphKitList__empty">No services in this time range.</p>';
-      return;
-    }
-    const selectedNode = map.selected?.kind === "node" ? map.selected.id : null;
-    const selectedEdge = map.selected?.kind === "edge" ? map.selected.id : null;
-    const services = data.nodes.map((node) => `<tr data-service="${esc(node.service)}"${node.service === selectedNode ? ' class="is-selected"' : ""}>`
-      + `<td class="graphKitList__name"><button type="button" class="graphKitList__open" data-map-select-node="${esc(node.service)}"><span class="traceMap__dot" style="background:${ctx.serviceColor(node.service)}"></span>${esc(node.service)}</button></td>`
-      + `<td class="graphKitList__num">${esc(compact(node.spans))}</td>`
-      + `<td class="graphKitList__num is-${severity(node.error_rate)}">${esc(percent(node.error_rate))}</td>`
-      + `<td class="graphKitList__num graphKitList__secondary">${esc(duration(node.p95_ns))}</td></tr>`).join("");
-    const edges = (map.layout?.edges || []).slice().sort((a, b) => (Number(b.edge.calls) || 0) - (Number(a.edge.calls) || 0));
-    const calls = edges.map((item) => `<tr data-edge="${esc(item.id)}"${item.id === selectedEdge ? ' class="is-selected"' : ""}>`
-      + `<td class="graphKitList__name"><button type="button" class="graphKitList__open" data-map-select-edge="${esc(item.id)}">${esc(item.edge.source)} \u2192 ${esc(item.edge.target)}</button></td>`
-      + `<td class="graphKitList__secondary">${esc(item.kind)}</td>`
-      + `<td class="graphKitList__num">${esc(compact(item.edge.calls))}</td>`
-      + `<td class="graphKitList__num is-${item.level}">${esc(percent(item.edge.error_rate))}</td>`
-      + `<td class="graphKitList__num graphKitList__secondary">${esc(duration(item.edge.p95_ns))}</td></tr>`).join("");
-    section.innerHTML = '<div class="graphKitList__wrap">'
-      + `<section class="traceMapList__section"><div class="graphKitList__header"><h3 class="graphKitList__title">Services</h3><span class="graphKitList__meta">${data.nodes.length} service${data.nodes.length === 1 ? "" : "s"}, busiest first</span></div>`
-      + '<table class="graphKitList__table" data-map-list="services"><thead><tr><th>Service</th><th class="graphKitList__num">Spans</th><th class="graphKitList__num">Errors</th><th class="graphKitList__num graphKitList__secondary">p95</th></tr></thead>'
-      + `<tbody>${services}</tbody></table></section>`
-      + `<section class="traceMapList__section"><div class="graphKitList__header"><h3 class="graphKitList__title">Calls</h3><span class="graphKitList__meta">${edges.length} call path${edges.length === 1 ? "" : "s"}</span></div>`
-      + (edges.length
-        ? '<table class="graphKitList__table" data-map-list="calls"><thead><tr><th>Call</th><th class="graphKitList__secondary">Kind</th><th class="graphKitList__num">Calls</th><th class="graphKitList__num">Errors</th><th class="graphKitList__num graphKitList__secondary">p95</th></tr></thead>'
-          + `<tbody>${calls}</tbody></table>`
-        : '<p class="graphKitList__empty">No calls between services.</p>')
-      + "</section></div>";
-  }
-
   // ---------------------------------------------------------------- hand-off
 
   // Search tab with the service filter (and status=Error): the search module
@@ -767,7 +696,6 @@
         renderMeta();
         renderLegend();
         renderState();
-        renderList();
       }
     }
   }
@@ -776,7 +704,6 @@
   // map unless it already shows it.
   function onShow() {
     const key = ns.traceSearch?.searchKey?.() || "";
-    renderChrome();
     if (key !== map.key || (!map.data && !map.loading)) void ctx.runSearch({ url: "none" });
     else if (map.layout && map.fitted) requestAnimationFrame(fit);
     else ctl?.scheduleDraw();
@@ -786,8 +713,6 @@
     ctx = context;
     const element = canvas();
     if (!element) return;
-    map.switch = kit.viewSwitch({ idPrefix: "traceMap", label: "Map view", onChange: setViewMode });
-    byId("traceMapBar")?.append(map.switch.element);
     ctl = kit.mount({
       canvas: element,
       view: map.view,
@@ -822,7 +747,6 @@
     });
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
     byId("traceMapPanel")?.addEventListener("click", onActionClick);
-    byId("traceMapList")?.addEventListener("click", onActionClick);
     // Escape closes the panel even when its focused button was re-rendered away.
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !map.selected || !shown() || event.defaultPrevented) return;
@@ -833,8 +757,6 @@
     byId("traceMapState")?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-map-retry]")) void ctx.runSearch({ url: "none" });
     });
-    window.matchMedia?.(kit.MOBILE_QUERY)?.addEventListener?.("change", () => renderChrome());
-    renderChrome();
     renderLegend();
     renderState();
   }
@@ -860,7 +782,6 @@
       readableScale: READABLE_SCALE,
       gridSpacing: kit.GRID_SPACING,
       fitted: map.fitted,
-      viewMode: currentViewMode(),
       selected: map.selected ? { ...map.selected } : null,
       hovered: map.hovered ? { type: map.hovered.type, id: map.hovered.id } : null,
       keyboardId: ctl?.keyboardId() || null,

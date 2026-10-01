@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import {
-  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome,
+  settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, freeArea, expectClearOfChrome, expectTouchCanvas,
 } from '../helpers/graph-kit.js';
 
 // Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
@@ -11,8 +11,9 @@ import {
 // orthogonal edges, cards (service colour strip, spans · errors, p95, health),
 // edges (dash = call kind, colour = errors, width = calls) and their always
 // visible "calls · p95" labels, hover halo, click = recentre + select, the
-// hand-off to the Search tab, keyboard access, the List view (the phone
-// default) with a bottom-sheet panel, both themes and performance budgets.
+// hand-off to the Search tab, keyboard access, the phone layout (the canvas
+// with touch pan / pinch and a bottom-sheet panel: there is no List view),
+// both themes and performance budgets.
 // The graphs are mocked (the OTel fixture is one flat star); one smoke test
 // reads the fixture. ChDash.traceMap.inspect() reports the drawn frame in
 // client coordinates.
@@ -455,39 +456,39 @@ test('service map: no page overflow and readable tokens in both themes', async (
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
 
-test('phones show services and calls as a list and open details as a bottom sheet', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await mockTraceResults(page);
-  await mockMap(page);
-  await openMap(page);
-  const list = page.locator('#traceMapList');
-  await expect(list).toBeVisible();
-  await expect(page.locator('#traceMapListViewButton')).toHaveAttribute('aria-selected', 'true');
-  expect((await inspect(page)).viewMode).toBe('list');
-  await expect(page.locator('#traceMapCanvas')).toHaveCSS('visibility', 'hidden');
-  await expect(list.locator('[data-map-list="services"] tbody tr')).toHaveCount(MAP.nodes.length);
-  await expect(list.locator('[data-map-list="calls"] tbody tr')).toHaveCount(MAP.edges.length);
-  // Busiest first, as on the canvas.
-  await expect(list.locator('[data-map-list="services"] tbody tr').first()).toContainText('frontend');
-  await list.locator('[data-map-list="services"] [data-map-select-node="checkout"]').click();
-  const panel = page.locator('#traceMapPanel');
-  await expect(panel).toBeVisible();
-  await expect(panel.locator('.graphKitPanel__title')).toHaveText('checkout');
-  const pane = await page.locator('#traceMapPane').boundingBox();
-  const sheet = await panel.boundingBox();
-  expect(sheet.width).toBeGreaterThan(390 - 40);
-  expect(sheet.y + sheet.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
-  await expect(list.locator('tr.is-selected')).toHaveCount(1);
-  await panel.locator('.graphKitPanel__close').click();
-  await expect(panel).toBeHidden();
-  await list.locator('[data-map-list="calls"] [data-map-select-edge="checkout\x1fpayment"]').click();
-  await expect(panel).toHaveAttribute('data-panel-type', 'edge');
-  await panel.locator('.graphKitPanel__close').click();
-  // The canvas is one tap away.
-  await page.locator('#traceMapCanvasViewButton').click();
-  await expect(page.locator('#traceMapCanvas')).toHaveCSS('visibility', 'visible');
-  await expect(page.locator('#traceMapZoomIn')).toBeVisible();
-  expect((await inspect(page)).viewMode).toBe('canvas');
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('phones show the map canvas (no list), pan and pinch by touch and open details as a bottom sheet', async ({ page }) => {
+    await mockTraceResults(page);
+    await mockMap(page);
+    await openMap(page);
+    await expect(page.locator('#traceMapList, #traceMapListViewButton, #traceMapCanvasViewButton')).toHaveCount(0);
+    await expectTouchCanvas(page, { pane: '#traceMapPane', canvas: '#traceMapCanvas', zoomIn: '#traceMapZoomIn', inspect: () => inspect(page) });
+    // Fit from the icon toolbar, then a tap on a card on screen opens its sheet.
+    await page.locator('#traceMapFit').tap();
+    await settle(page);
+    const canvas = await page.locator('#traceMapCanvas').boundingBox();
+    const dock = await page.locator('#traceMapPane .graphKitDock').boundingBox();
+    const state = await inspect(page);
+    const target = state.nodes.find((n) => n.x >= canvas.x && n.x + n.width <= canvas.x + canvas.width && n.y > canvas.y + 60 && n.y + n.height < dock.y);
+    expect(target, 'a service fully on screen').toBeTruthy();
+    await page.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2);
+    const panel = page.locator('#traceMapPanel');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.graphKitPanel__title')).toHaveText(target.service);
+    const pane = await page.locator('#traceMapPane').boundingBox();
+    const sheet = await panel.boundingBox();
+    expect(sheet.width).toBeGreaterThan(390 - 40);
+    expect(sheet.y + sheet.height).toBeLessThanOrEqual(pane.y + pane.height + 1);
+    // Recentred above the sheet.
+    await cameraIdle(page, 'ChDash.traceMap');
+    const moved = (await inspect(page)).nodes.find((n) => n.service === target.service);
+    expect(moved.y + moved.height / 2).toBeLessThan(sheet.y);
+    expect((await inspect(page)).selected).toEqual({ kind: 'node', id: target.service });
+    await panel.locator('.graphKitPanel__close').tap();
+    await expect(panel).toBeHidden();
+  });
 });
 
 test('performance budget: a 120-service map lays out, routes and redraws within budget', async ({ page }) => {

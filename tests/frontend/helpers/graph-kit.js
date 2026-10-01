@@ -162,6 +162,62 @@ export async function expectClearOfChrome(page, pane, state) {
   }
 }
 
+// Real touch input (Chromium's Input.dispatchTouchEvent; the context needs
+// hasTouch): a one-finger drag and a two-finger pinch around `centre` whose
+// finger gap goes from `fromGap` to `toGap` CSS pixels.
+async function touchSequence(page, frames) {
+  const cdp = await page.context().newCDPSession(page);
+  const points = (list) => list.map((p, id) => ({ x: p.x, y: p.y, id }));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(frames[0]) });
+  for (const frame of frames.slice(1)) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(frame) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+  await settle(page);
+}
+
+export async function touchDrag(page, from, to, steps = 8) {
+  const frames = [];
+  for (let i = 0; i <= steps; i += 1) frames.push([{ x: from.x + (to.x - from.x) * i / steps, y: from.y + (to.y - from.y) * i / steps }]);
+  await touchSequence(page, frames);
+}
+
+export async function pinch(page, centre, fromGap, toGap, steps = 8) {
+  const frames = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const gap = fromGap + (toGap - fromGap) * i / steps;
+    frames.push([{ x: centre.x - gap / 2, y: centre.y }, { x: centre.x + gap / 2, y: centre.y }]);
+  }
+  await touchSequence(page, frames);
+}
+
+// A phone shows the canvas (no Graph / List switch, no list), its icon
+// toolbar inside the pane, and the canvas follows one-finger pans and
+// two-finger pinches. `inspect` returns the graph's inspect() state.
+export async function expectTouchCanvas(page, { pane, canvas, zoomIn, inspect }) {
+  await expect(page.locator(canvas)).toBeVisible();
+  await expect(page.locator(canvas)).toHaveCSS('visibility', 'visible');
+  await expect(page.locator(`${pane} [role="tablist"], ${pane} .graphKitList`)).toHaveCount(0);
+  await expect(page.locator(zoomIn)).toBeVisible();
+  const paneBox = await page.locator(pane).boundingBox();
+  for (const group of await page.locator(`${pane} > .graphKitBar > *:visible`).all()) {
+    const box = await group.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(paneBox.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(paneBox.x + paneBox.width + 1);
+  }
+  const box = await page.locator(canvas).boundingBox();
+  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const before = await inspect();
+  await touchDrag(page, centre, { x: centre.x - 70, y: centre.y - 50 });
+  const panned = await inspect();
+  expect(panned.offsetX, 'a one-finger drag pans').toBeLessThan(before.offsetX - 30);
+  expect(panned.scale).toBeCloseTo(before.scale, 6);
+  await pinch(page, centre, 60, 180);
+  const zoomed = await inspect();
+  expect(zoomed.scale, 'a pinch out zooms in').toBeGreaterThan(panned.scale * 1.5);
+  await pinch(page, centre, 180, 60);
+  expect((await inspect()).scale, 'a pinch in zooms out').toBeLessThan(zoomed.scale / 1.5);
+}
+
 // Labels of every edge, none on top of another label or a card.
 export function expectLabelsClear(state) {
   expect(state.edgeLabelsDropped, 'every edge label is placed').toEqual([]);
