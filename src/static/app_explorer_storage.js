@@ -865,9 +865,13 @@
       return controller || { destroy() {} };
     }
 
-    // Share strip: the materialized top level (tables >= 1% + Others).
-    const items = (Array.isArray(tree.children) && tree.children.length ? tree.children : [tree])
-      .filter((item) => Number(item.bytes || 0) > 0);
+    // Share strip: the materialized top level (tables >= 1% + Others). A
+    // database of many tables that are each under 1% has no such level: it
+    // is drawn as one Others segment.
+    const top = Array.isArray(tree.children) && tree.children.length
+      ? tree.children
+      : [tree.kind === "table" ? tree : { kind: "other", name: "Others", members: Number(tree.count || 0), bytes: total }];
+    const items = top.filter((item) => Number(item.bytes || 0) > 0);
     const strip = node("div", "explorerStorageStrip");
     strip.id = "explorerDatabaseStorageStrip";
     strip.setAttribute("role", "list");
@@ -905,9 +909,10 @@
     view?.treemap?.destroy();
     if (view) view.treemap = null;
     resetData();
+    // The shell resets its own scope and calls show() again; a standalone
+    // view simply returns to the server scope.
     if (view?.root?.isConnected && view.container && !view.container.hidden) {
       view.scope = { database: "", table: "" };
-      view.options.onScopeChange?.({ ...view.scope });
       void ensureViewData(false);
     }
   });
