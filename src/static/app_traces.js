@@ -807,7 +807,7 @@
     const values = new Float64Array(grid.starts.length);
     for (let i = 0; i < xs.length; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
     buckets.forEach(([, count], k) => { values[grid.slot[k]] += count; });
-    const countText = (value) => Math.round(value).toLocaleString();
+    const countText = (value) => countFormat.format(Math.round(value));
     mountChart(container, "counts", {
       xKind: "time", xs, xDomain: [start, end], zoom: null,
       series: [{ id: "traces", label: "Matching traces", color: "var(--accentBorder)", values, nulls: null }],
@@ -825,6 +825,9 @@
         : "Traces with at least one matching span in the range, each counted at its first span start.";
     }
   }
+
+  // toLocaleString builds a formatter per call; the readouts format on every move.
+  const countFormat = new Intl.NumberFormat();
 
   // Legend choices (shown / hidden percentiles) survive new answers.
   let durationHidden = [];
