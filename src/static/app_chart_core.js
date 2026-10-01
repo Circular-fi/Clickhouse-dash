@@ -147,7 +147,7 @@
     let text = `${dateText(whole)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
     if (fractionDigits > 0) {
       text += `.${pad3(d.getMilliseconds())}`;
-      if (fractionDigits > 3) text += String(Math.round((ms - whole) * 1000)).padStart(3, "0").slice(0, fractionDigits - 3);
+      if (fractionDigits > 3) text += String(Math.min(999, Math.round((ms - whole) * 1000))).padStart(3, "0").slice(0, fractionDigits - 3);
     }
     return text;
   }
@@ -317,7 +317,7 @@
     if (themeWatch) return;
     const invalidate = () => { for (const chart of live) chart.themeChanged(); };
     const observer = new MutationObserver(invalidate);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
     if (media && media.addEventListener) media.addEventListener("change", invalidate);
     themeWatch = { observer, media, invalidate };
@@ -761,22 +761,28 @@
       ctx.textBaseline = "top";
       const y1 = top + plotH + TICK_LEN + 3;
       let lastRight = -Infinity;
+      let pendingContext = "";
       for (const t of L.xTicks) {
         const x = L.xOf(t.v);
         if (x < left - 0.5 || x > left + plotW + 0.5) continue;
         const w = measure(t.label);
         let cx = Math.max(w / 2 + 1, Math.min(L.width - w / 2 - 1, x));
-        if (cx - w / 2 < lastRight + 6) continue;
+        if (cx - w / 2 < lastRight + 6) {
+          if (t.context) pendingContext = t.context;
+          continue;
+        }
         ctx.textAlign = "center";
         ctx.fillStyle = theme.label;
         ctx.fillText(t.label, cx, y1);
         lastRight = cx + w / 2;
-        if (t.context) {
-          const cw = measure(t.context);
+        const context = t.context || pendingContext;
+        pendingContext = "";
+        if (context) {
+          const cw = measure(context);
           cx = Math.max(cw / 2 + 1, Math.min(L.width - cw / 2 - 1, x));
           ctx.font = theme.fontBold;
           ctx.fillStyle = rgba(theme.text, 0.8);
-          ctx.fillText(t.context, cx, y1 + 14);
+          ctx.fillText(context, cx, y1 + 14);
           ctx.font = theme.font;
           lastRight = Math.max(lastRight, cx + cw / 2);
         }
