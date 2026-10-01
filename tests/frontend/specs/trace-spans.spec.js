@@ -269,6 +269,47 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   expect(services.map((s) => s.trim())).not.toContain(excluded);
 });
 
+test('spans: another Traces tab hides the span mode; the trace-duration chip stays out of span searches', async ({ page, request }) => {
+  const range = await denseHour(request);
+  const requests = spanRequests(page);
+  // min/max_duration_ms are the trace-duration chip (heatmap); span_* are
+  // the span table's own duration range.
+  await page.goto(tracesUrl(range, { mode: 'spans', min_duration_ms: '10', max_duration_ms: '5000', span_min_duration_ms: '2' }));
+  await waitRows(page);
+  await expect(page.locator('#tracesFilterChips [data-chip-kind="duration"]')).toBeVisible();
+  const first = requests[requests.length - 1];
+  expect(first.get('min_duration_ms')).toBe('2');
+  expect(first.get('max_duration_ms')).toBeNull();
+  await expect(page.locator('#traceSpanMinDuration')).toHaveValue('2');
+  await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+
+  const other = page.locator('#tracesTabs [data-trace-tab]:not([data-trace-tab="search"])').first();
+  test.skip(!(await other.isVisible()), 'no other Traces tab in this configuration');
+  await other.click();
+  await expect(page).toHaveURL(/[?&]tab=/);
+  await expect(page.locator('#traceSpanTable')).toBeHidden();
+  await expect(page.locator('#traceSpanTools')).toBeHidden();
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('[data-results-mode="spans"]')).toBeHidden();
+  // The Search button runs the selected tab, never the span search.
+  await page.waitForTimeout(300);
+  const before = requests.length;
+  await page.locator('#tracesSearchButton').click();
+  await page.waitForTimeout(800);
+  expect(requests.length).toBe(before);
+
+  // Back on the Search tab: still Spans mode, with the same filters.
+  await page.locator('#tracesTabs [data-trace-tab="search"]').click();
+  await expect(page).not.toHaveURL(/[?&]tab=/);
+  await expect(page).toHaveURL(/[?&]mode=spans(&|$)/);
+  await waitRows(page);
+  await expect(page.locator('#traceSpanTools')).toBeVisible();
+  const last = requests[requests.length - 1];
+  expect(last.get('min_duration_ms')).toBe('2');
+  expect(last.get('max_duration_ms')).toBeNull();
+});
+
 test('spans: keyboard navigation through rows and the panel', async ({ page, request }) => {
   const range = await denseHour(request);
   await page.goto(tracesUrl(range, { mode: 'spans' }));

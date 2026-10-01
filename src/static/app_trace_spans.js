@@ -529,7 +529,8 @@
     panel.hidden = true;
     panel.addEventListener("click", onPanelClick);
     panel.addEventListener("keydown", onPanelKeydown);
-    (ctx.dom.tracesSearchView || document.body).appendChild(panel);
+    // Inside the Search tab's panel: another Traces tab hides it with it.
+    (document.querySelector(".traceSearchBody") || ctx.dom.tracesSearchView || document.body).appendChild(panel);
     return panel;
   }
 
@@ -713,6 +714,12 @@
     }
   }
 
+  // The open panel when it is on screen (not under a hidden tab or view).
+  function shownPanel() {
+    const panel = byId("traceSpanPanel");
+    return panel && !panel.hidden && !panel.parentElement?.closest("[hidden]") ? panel : null;
+  }
+
   function editable(element) {
     return !!element?.closest?.("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role=menu], [role=listbox], [role=dialog]:not(#traceSpanPanel)");
   }
@@ -720,7 +727,7 @@
   // Up / Down walk the rows while the panel is open (focus in the panel or
   // on the page, not in a field or a menu).
   function onDocumentKeydown(event) {
-    if (!active() || !state.panelOpen || ctx.dom.tracesSearchView?.hidden) return;
+    if (!active() || !state.panelOpen || ctx.dom.tracesSearchView?.hidden || shownPanel() === null) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target === byId("traceSpanTable") || editable(target)) return;
@@ -900,6 +907,9 @@
     urlParams,
     applyParams,
     onShown,
+    // The Search tab is shown again (app_trace_tabs.js): redraw the rows in view.
+    onTabShown: () => { if (active()) render(); else closeColumns(); },
+    onTabHidden: () => closeColumns(),
     hasResults: () => state.searched && !!state.base,
     leave: () => { ctx?.dom?.tracesResults?.classList.remove("tracesResults--spans"); closeColumns(); },
   };

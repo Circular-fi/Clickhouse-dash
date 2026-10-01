@@ -3729,6 +3729,7 @@
       showSearch: () => {
         const key = ns.traceSearch?.searchKey?.() || "";
         if (!model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
+        else ns.traceSpans?.onTabShown?.();
       },
     });
     // Search state from the URL (a shared link, a reload, a trace detail URL
