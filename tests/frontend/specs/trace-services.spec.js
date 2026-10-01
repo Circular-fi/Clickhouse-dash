@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { stabilizePage } from '../helpers/review.js';
-import { SYNTHETIC_TRACES, mockTraceResults, mockTraceServices } from '../helpers/traces.js';
+import { SYNTHETIC_TRACES, mockTraceResults, mockTraceServices, syntheticServices } from '../helpers/traces.js';
 
 // Services tab of the Traces page (after HyperDX's ServicesDashboardPage):
 // RED metrics per service, a detail drawer with charts, release markers,
@@ -230,3 +230,95 @@ for (const theme of ['dark', 'light']) {
     await page.screenshot({ path: path.join(dir, `traces-services-detail-${theme}.png`), fullPage: false });
   });
 }
+
+// A quiet window: every service 120 times slower, so checkout reads 5/min.
+async function mockQuietServices(page) {
+  await page.route('**/api/traces/services?**', (route) => {
+    const payload = syntheticServices(new URL(route.request().url()).searchParams);
+    const scale = (row) => [row[0], Math.round(row[1] / 120), Math.round(row[2] / 120), ...row.slice(3)];
+    payload.services = payload.services.map(scale);
+    for (const name of Object.keys(payload.series)) payload.series[name] = payload.series[name].map((p) => [p[0], p[1] / 120, p[2] / 120, ...p.slice(3)]);
+    if (payload.endpoints) payload.endpoints = payload.endpoints.map(scale);
+    return route.fulfill({ json: payload });
+  });
+}
+
+test('the detail charts read in the table\'s units: a per-minute Requests axis and readout, Error rate in the table\'s percent format', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  await mockQuietServices(page);
+  await openServices(page);
+  const checkout = rows(page).filter({ hasText: 'checkout' });
+  await expect(checkout.locator('[data-svc-col="rate"]')).toHaveText('5/min');
+  await expect(checkout.locator('[data-svc-col="errors"]')).toHaveText('2%');
+  await checkout.locator('.traceSvcRow__label').click();
+  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Requests' }).locator('b')).toHaveText('5/min');
+  const rate = drawer(page).locator('[data-svc-chart="rate"]');
+  await expect(rate.locator('.chartCore')).toHaveAttribute('data-y-ticks', /\/min/);
+  // data-y-ticks: the axis labels as drawn (app_chart_core.js).
+  const rateTicks = JSON.parse(await rate.locator('.chartCore').getAttribute('data-y-ticks'));
+  expect(rateTicks.length).toBeGreaterThan(1);
+  for (const tick of rateTicks) expect(tick).toMatch(/^\d+(\.\d{1,2})?\/min$/);
+  await expect(rate.locator('xpath=..').locator('header span')).toHaveText(/entry spans per minute/);
+  const errorTicks = JSON.parse(await drawer(page).locator('[data-svc-chart="errors"] .chartCore').getAttribute('data-y-ticks'));
+  for (const tick of errorTicks) expect(tick).toMatch(/^(0|\d+(\.\d{1,2})?)%$/);
+  // The cursor readout and the tooltip speak the same unit.
+  const box = await rate.locator('.chartCore__overlay').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(rate.locator('.chartCore__tooltip')).toBeVisible();
+  await expect(rate.locator('.chartCore__tooltip')).toContainText('/min');
+  await expect(rate.locator('.chartCore__tooltip')).not.toContainText('/s');
+});
+
+test('the service drawer opens under the search bar, a bottom sheet on a phone; Escape and its close button give focus back to the row', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  await openServices(page);
+  const checkout = rows(page).filter({ hasText: 'checkout' });
+  await checkout.locator('.traceSvcRow__label').click();
+  await expect(drawer(page)).toBeVisible();
+  // Desktop: the drawer starts where the (sticky) search bar ends, below
+  // #obsNav, and leaves both usable.
+  const form = await page.locator('#tracesForm').boundingBox();
+  const side = await drawer(page).boundingBox();
+  expect(Math.abs(side.y - (form.y + form.height))).toBeLessThanOrEqual(1);
+  await page.keyboard.press('Escape');
+  await expect(drawer(page)).toBeHidden();
+  await expect(checkout).toBeFocused();
+  // Phone: the header wraps; the drawer is a bottom sheet under it, the
+  // full width (no strip of the list beside it), its close button on top.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await checkout.locator('.traceSvcRow__label').click();
+  await expect(drawer(page)).toBeVisible();
+  await expect.poll(async () => Math.round((await drawer(page).boundingBox()).width)).toBe(390);
+  const sheet = await drawer(page).boundingBox();
+  const nav = await page.locator('#obsNav').boundingBox();
+  expect(sheet.x).toBe(0);
+  expect(sheet.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
+  expect(Math.round(sheet.y + sheet.height)).toBe(844);
+  const close = drawer(page).locator('[data-svc-close]');
+  const c = await close.boundingBox();
+  expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[data-svc-close]'), [c.x + c.width / 2, c.y + c.height / 2])).toBe(true);
+  await close.click();
+  await expect(drawer(page)).toBeHidden();
+  await expect(checkout).toBeFocused();
+});
+
+test('a failed services request says what failed in a sentence, without the error code, and Retry loads it again', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  let fail = true;
+  await page.route('**/api/traces/services?**', (route) => {
+    if (fail && !new URL(route.request().url()).searchParams.get('detail')) {
+      return route.fulfill({ status: 503, json: { error_code: 'trace_services_failed', message: 'Timeout exceeded: elapsed 30 seconds' } });
+    }
+    return route.fallback();
+  });
+  await page.goto('/observability/traces?tab=services');
+  const alert = page.locator('.traceSvc [role="alert"]').first();
+  await expect(alert).toContainText('Timeout exceeded', { timeout: 30_000 });
+  await expect(alert).not.toContainText('trace_services_failed');
+  fail = false;
+  await alert.getByRole('button', { name: 'Retry' }).click();
+  await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+});

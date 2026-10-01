@@ -329,6 +329,32 @@ test('metrics: values and axes follow the OpenTelemetry unit', async ({ page, re
   });
 });
 
+test('metrics: a failed catalog or chart says so in a sentence, without the error code, and Retry loads it again', async ({ page, request }) => {
+  const range = await windowParams(request, 6);
+  let failCatalog = true;
+  let failSeries = true;
+  await page.route('**/api/metrics/catalog?**', (route) => (failCatalog
+    ? route.fulfill({ status: 503, json: { error_code: 'metrics_query_failed', message: 'The metrics tables could not be read.' } })
+    : route.fallback()));
+  await page.route('**/api/metrics/series?**', (route) => (failSeries
+    ? route.fulfill({ status: 503, json: { error_code: 'metrics_query_failed', message: 'The series query timed out.' } })
+    : route.fallback()));
+  await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'http.server.request.duration', kind: 'histogram', agg: 'p95' }));
+  const catalog = page.locator('#metricsCatalog [role="alert"]');
+  await expect(catalog).toContainText('The metrics tables could not be read.', { timeout: 30_000 });
+  await expect(catalog).not.toContainText('metrics_query_failed');
+  const state = page.locator('.metricsPanel').first().locator('.metricsChart__state--error');
+  await expect(state).toContainText('The series query timed out.', { timeout: 30_000 });
+  await expect(state).not.toContainText('metrics_query_failed');
+  failCatalog = false;
+  failSeries = false;
+  await catalog.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.locator('#metricsCatalog .metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
+  // (A catalog answer may reload the panel by itself.)
+  if (await state.isVisible()) await state.getByRole('button', { name: 'Retry' }).click();
+  await waitForChart(page);
+});
+
 test('metrics: an empty range offers the latest data', async ({ page, request }) => {
   await metricBounds(request);
   await page.goto(metricsUrl({ from: '2001-01-01 00:00:00', to: '2001-01-01 01:00:00' }));

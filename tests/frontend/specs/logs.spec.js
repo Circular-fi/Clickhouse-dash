@@ -345,6 +345,45 @@ test('logs: an empty range offers the newest data, errors are shown', async ({ p
   await expect(page.locator('#logsTableMessage')).toContainText('Search failed');
 });
 
+test('logs: on a phone the record panel is a solid bottom sheet; Escape closes it back to the table; a failed search has Retry and no error code', async ({ page, request }) => {
+  const win = await logsWindow(request);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openLogs(page, logsUrl(win));
+  await rows(page).nth(1).click();
+  const side = page.locator('#logsSidePanel');
+  await expect(side).toBeVisible();
+  const sheet = await side.boundingBox();
+  const nav = await page.locator('#obsNav').boundingBox();
+  expect(sheet.x).toBe(0);
+  expect(Math.round(sheet.width)).toBe(390);
+  expect(sheet.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
+  expect(Math.round(sheet.y + sheet.height)).toBe(844);
+  // Opaque, and on top: the table header under it does not show through.
+  const background = await side.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(background).toMatch(/^rgb\(/);
+  for (const selector of ['#logsSideTitle', '#logsSideClose', '#logsSideTabContext']) {
+    const box = await page.locator(selector).boundingBox();
+    expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('#logsSidePanel'), [box.x + box.width / 2, box.y + box.height / 2]), selector).toBe(true);
+  }
+  await page.locator('#logsSideTabDetails').focus();
+  await page.keyboard.press('Escape');
+  await expect(side).toBeHidden();
+  await expect(page.locator('#logsTable')).toBeFocused();
+
+  let fail = true;
+  await page.route('**/api/logs/search**', (route) => (fail
+    ? route.fulfill({ status: 503, json: { error_code: 'logs_source_unavailable', message: 'The logs table could not be read.' } })
+    : route.fallback()));
+  // (The form scrolls sideways on a phone: submit it rather than aim at its button.)
+  await page.locator('#logsForm').evaluate((form) => form.requestSubmit());
+  await expect(page.locator('#logsError')).toContainText('The logs table could not be read.');
+  await expect(page.locator('#logsError')).not.toContainText('logs_source_unavailable');
+  await expect(page.locator('#logsTableMessage')).toContainText('Search failed');
+  fail = false;
+  await page.locator('#logsTableMessage').getByRole('button', { name: 'Retry' }).click();
+  await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+});
+
 test('logs: the page switcher reaches the Observability page, whose Logs tab opens the logs view', async ({ page, request }) => {
   const version = await (await request.get('/api/version')).json();
   test.skip(!version.features?.logs?.enabled, 'logs disabled');

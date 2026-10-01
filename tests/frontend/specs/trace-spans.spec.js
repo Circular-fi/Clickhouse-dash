@@ -310,6 +310,44 @@ test('spans: another Traces tab hides the span mode; the trace-duration chip sta
   expect(last.get('max_duration_ms')).toBeNull();
 });
 
+test('spans: the side panel opens under the search bar; on a phone, a bottom sheet with its close button in reach and room for values', async ({ page, request }) => {
+  const range = await denseHour(request);
+  await page.goto(tracesUrl(range, { mode: 'spans' }));
+  await waitRows(page);
+  await rows(page).first().locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+  // Desktop: right under the sticky search bar (header + #obsNav + bar,
+  // whatever their height).
+  const form = await page.locator('#tracesForm').boundingBox();
+  const side = await panel(page).boundingBox();
+  expect(Math.abs(side.y - (form.y + form.height))).toBeLessThanOrEqual(1);
+  // Phone: the header wraps to two rows; the panel is a bottom sheet under
+  // the page chrome, full width.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => Math.round((await panel(page).boundingBox()).width)).toBe(390);
+  const nav = await page.locator('#obsNav').boundingBox();
+  const header = await page.locator('body > .appHeader').boundingBox();
+  expect(header.height).toBeGreaterThan(60);
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--shell-top'))).toBe(`${Math.round(nav.y + nav.height)}px`);
+  const sheet = await panel(page).boundingBox();
+  expect(sheet.x).toBe(0);
+  expect(sheet.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
+  expect(Math.round(sheet.y + sheet.height)).toBe(844);
+  // Nothing covers the head: the title, prev / next and close are hit-tested.
+  for (const selector of ['#traceSpanPanelTitle', '[data-span-panel-nav="next"]', '.traceSpanPanel__close']) {
+    const box = await panel(page).locator(selector).boundingBox();
+    expect(await page.evaluate(([x, y, sel]) => !!document.elementFromPoint(x, y)?.closest(sel), [box.x + box.width / 2, box.y + box.height / 2, selector]), selector).toBe(true);
+  }
+  // Tag values get a column a value fits in (not one character per line).
+  const value = panel(page).locator('[data-span-section="tags"] .traceKv__row:not(.traceKv__row--tree) .traceKv__cell').first();
+  await expect(value).toBeVisible({ timeout: 15_000 });
+  expect((await value.boundingBox()).width).toBeGreaterThan(150);
+  // The close button closes it and gives focus back to the table.
+  await panel(page).locator('.traceSpanPanel__close').click();
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#traceSpanTable')).toBeFocused();
+});
+
 test('spans: keyboard navigation through rows and the panel', async ({ page, request }) => {
   const range = await denseHour(request);
   await page.goto(tracesUrl(range, { mode: 'spans' }));

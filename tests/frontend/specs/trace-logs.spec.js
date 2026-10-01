@@ -284,6 +284,41 @@ test('mocked: an error answer shows in the header and the panel, Retry loads aga
   await expect(spanRow(page, sid(7)).locator('.traceSpanLogsBadge')).toHaveAttribute('data-sev', 'error');
 });
 
+test('mocked: severities use the Logs view palette (info blue) in both themes; Escape closes the panel back to its toggle', async ({ page }) => {
+  await routeLogs(page, (route) => json(route, logsAnswer([
+    logRecord({ span: sid(1), at: 5, sev: 'INFO', body: 'request received' }),
+    logRecord({ span: sid(2), at: 9, sev: 'WARN', body: 'slow cache' }),
+    logRecord({ span: sid(7), at: 20, sev: 'ERROR', body: 'lock timeout' }),
+    logRecord({ span: sid(7), at: 21, sev: 'DEBUG', body: 'retrying' }),
+  ])));
+  await openMocked(page);
+  await headerToggle(page).click();
+  await expect(panelRows(page)).toHaveCount(4);
+  const colours = () => page.evaluate(() => {
+    const probe = document.createElement('i');
+    document.body.appendChild(probe);
+    const out = {};
+    for (const sev of ['error', 'warn', 'info', 'debug']) {
+      probe.style.background = `var(--log-sev-${sev})`;
+      const chip = document.querySelector(`#traceLogsPanel [data-log-severity="${sev}"] > i`);
+      out[sev] = { logs: getComputedStyle(probe).backgroundColor, trace: chip ? getComputedStyle(chip).backgroundColor : null };
+    }
+    probe.remove();
+    return out;
+  });
+  const blue = (rgb) => { const [r, g, b] = rgb.match(/\d+/g).map(Number); return b > r + 60 && b > g + 30; };
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate((mode) => { document.documentElement.dataset.theme = mode; }, theme);
+    const seen = await colours();
+    for (const [sev, { logs, trace }] of Object.entries(seen)) expect(trace, `${theme} ${sev}`).toBe(logs);
+    expect(blue(seen.info.trace), `${theme} info ${seen.info.trace}`).toBe(true);
+  }
+  await panel(page).locator('#traceLogsFilter').focus();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(headerToggle(page)).toBeFocused();
+});
+
 test('mocked: many logs, truncated: the notice, paging, trace-level logs and the span column', async ({ page }) => {
   const services = ['frontend', 'checkout', 'inventory', 'payments'];
   const records = Array.from({ length: 1000 }, (_, i) => logRecord({

@@ -274,6 +274,109 @@ test('a trace detail URL keeps its search context for back to search, even on a 
   await expect(chips(page)).toHaveCount(1);
 });
 
+test('the back arrow returns to the very search entry a trace was opened from: no new entry, Back / Forward stay coherent', async ({ page }) => {
+  const searches = await mockSearches(page);
+  const query = 'from=now-2h&to=now&status=Error';
+  await page.goto(`/observability/traces?${query}`);
+  await waitResults(page);
+  const searchUrl = page.url();
+  const length = () => page.evaluate(() => window.history.length);
+  const start = await length();
+  // Open a trace from the results, then pick a span in its spans table (a
+  // second entry of the trace).
+  await page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"]`).first().click();
+  await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(length).toBe(start + 1);
+  await page.evaluate(() => { const select = document.getElementById('traceViewSelect'); select.value = 'spans'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.locator('#traceAltView [data-table-span]').nth(1).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('span')).not.toBeNull();
+  await expect.poll(length).toBe(start + 2);
+  // The arrow goes back two entries, to the search itself.
+  const before = searches.length;
+  await page.locator('#traceBackButton').click();
+  await expect(page.locator('#tracesSearchView')).toBeVisible();
+  await expect.poll(() => page.url()).toBe(searchUrl);
+  expect(await length()).toBe(start + 2);
+  await expect(chips(page)).toHaveCount(0);
+  expect(searches.length).toBe(before);
+  // Forward walks the trace's entries again, Back returns to the search.
+  await page.goForward();
+  await expect(page.locator('#traceDetail')).toBeVisible();
+  await expect.poll(() => new URL(page.url()).searchParams.get('span')).toBeNull();
+  await page.goForward();
+  await expect.poll(() => new URL(page.url()).searchParams.get('span')).not.toBeNull();
+  await page.goBack();
+  await page.goBack();
+  await expect(page.locator('#tracesSearchView')).toBeVisible();
+  await expect.poll(() => page.url()).toBe(searchUrl);
+  // A trace opened on its own (a link, a new tab) has no search entry
+  // behind it: the arrow adds one, and Back returns to the trace.
+  await page.goto(`/observability/traces/${FIRST.trace_id}?${query}`);
+  await expect(page.locator('#traceCopyJsonButton')).toBeEnabled({ timeout: 30_000 });
+  const direct = await length();
+  await page.locator('#traceBackButton').click();
+  await waitResults(page);
+  await expect.poll(length).toBe(direct + 1);
+  expect(new URL(page.url()).pathname).toMatch(/\/traces$/);
+  expect(new URL(page.url()).searchParams.get('status')).toBe('Error');
+  await page.goBack();
+  await expect(page.locator('#traceDetail')).toBeVisible();
+});
+
+test('a trace that does not exist: a not-found state with Back to search and a wider search, no raw error code', async ({ page }) => {
+  const searches = await mockSearches(page);
+  const missing = 'deadbeefdeadbeefdeadbeefdeadbeef';
+  await page.route(`**/api/traces/trace?**trace_id=${missing}**`, (route) => route.fulfill({ status: 404, json: { error_code: 'trace_not_found', message: 'Trace was not found in the configured time scope.' } }));
+  await page.goto(`/observability/traces/${missing}?from=now-2h&to=now`);
+  const state = page.locator('#traceWaterfall [data-trace-unavailable-state="trace_not_found"]');
+  await expect(state).toBeVisible({ timeout: 30_000 });
+  await expect(state.locator('strong')).toHaveText('Trace not found');
+  await expect(page.locator('#tracesError')).toBeHidden();
+  await expect(page.locator('#traceDetail')).not.toContainText('trace_not_found');
+  await expect(page.locator('#traceDetail')).not.toContainText('Select a trace');
+  await expect(page.locator('#traceDetail')).not.toContainText('No spans.');
+  await expect(page.locator('#traceDetailTitle')).toContainText(missing);
+  await expect(page.locator('#traceViewBar')).toBeHidden();
+  // A wider search: the same filters over twice the range.
+  await state.getByRole('button', { name: 'Search a wider time range' }).click();
+  await waitResults(page);
+  await expect.poll(() => Number(lastSearch(searches).get('end_ms')) - Number(lastSearch(searches).get('start_ms'))).toBe(4 * 3600_000);
+  // Back: the not-found trace again; Back to search: the trace's own search.
+  await page.goBack();
+  await expect(state).toBeVisible();
+  await state.getByRole('button', { name: 'Back to search' }).click();
+  await waitResults(page);
+  expect(Number(lastSearch(searches).get('end_ms')) - Number(lastSearch(searches).get('start_ms'))).toBe(2 * 3600_000);
+});
+
+test('a trace that fails to load and a failed search say so in a sentence, without the error code, with Retry', async ({ page }) => {
+  await mockSearches(page);
+  let failTrace = true;
+  await page.route('**/api/traces/trace?**', (route) => (failTrace
+    ? route.fulfill({ status: 503, json: { error_code: 'trace_source_unavailable', message: 'ClickHouse did not answer in time.' } })
+    : route.fallback()));
+  await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-2h&to=now`);
+  const state = page.locator('#traceWaterfall [data-trace-unavailable-state="trace_source_unavailable"]');
+  await expect(state).toContainText('ClickHouse did not answer in time.', { timeout: 30_000 });
+  await expect(state).not.toContainText('trace_source_unavailable');
+  failTrace = false;
+  await state.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
+
+  let failSearch = true;
+  await page.route('**/api/traces/search?**', (route) => (failSearch
+    ? route.fulfill({ status: 503, json: { error_code: 'trace_search_failed', message: 'Too many simultaneous queries.' } })
+    : route.fallback()));
+  await page.locator('#traceBackButton').click();
+  const strip = page.locator('#tracesError');
+  await expect(strip).toHaveText(/Too many simultaneous queries\./, { timeout: 30_000 });
+  await expect(strip).not.toContainText('trace_search_failed');
+  failSearch = false;
+  await strip.getByRole('button', { name: 'Retry' }).click();
+  await waitResults(page);
+  await expect(strip).toBeHidden();
+});
+
 test('facets: keys and values, include / exclude, pins, load more and key search', async ({ page }) => {
   await page.addInitScript(() => {
     try {
