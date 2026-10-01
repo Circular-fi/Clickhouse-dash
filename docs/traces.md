@@ -214,6 +214,55 @@ Measured on the local fixture (about 2.0 B spans, 7 days), through the API on th
 | deltas, 24-hour box | 494 ms | 6 × 5-minute slices |
 | deltas, 7-day box | 593 ms | 6 × 5-minute slices |
 
+## Services view
+
+The Services tab sits between *Search* and *Service map* in the one tab registry of `app_trace_tabs.js` (`register({ id, label, order, panelId, install, onSearch, onShow, onHide, available, params, writeParams, applyParams })`: `available(meta)` hides a tab /api/traces/meta does not enable, `params` lists a tab's view-only URL parameters, left out of the search key). The selected tab is in the URL (`?tab=services`) next to the search parameters, and every tab shares the search bar: the time range, the status / service / operation pickers and the filter chips apply to the Services view as well. The view needs `traces.analytics = true` (it is a span aggregation like the analytics charts).
+
+After HyperDX's services dashboard, the view shows RED metrics of each service's **entry spans**: `SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = ''` (the OTel exporter writes `Server` / `Consumer`; the fixture has `Server` roots and `Consumer` children). *Root spans* (`ParentSpanId = ''`) is the cheaper alternative (`svc_scope=root`). The search filters describe these spans themselves; `min_duration_ms` / `max_duration_ms` bound the span's own `Duration`.
+
+- The table lists per service the rate (entry spans per second), the error share (`StatusCode = 'Error'`), P50 / P95 / P99 of `Duration`, the share of the total time (`sum(Duration)`) and sparklines of the rate (errors in red) and of the P95; every column sorts (`svc_sort=<column>:<asc|desc>`, default total time descending).
+- A row opens the service drawer (`svc=<name>`, Back / Forward and Escape close it): request rate, error rate and P50 / P95 / P99 latency charts with release markers, the releases list, the most time-consuming endpoints (service + `SpanName`, by `sum(Duration)`), the slowest spans (open their trace) and the database statements.
+- An endpoint opens the Search tab with its service and operation; a P99 value (table, drawer, endpoints) searches that service (and operation) with the duration chip set to `≥ P99` (`min_duration_ms`, the same chip as the heatmap's: a trace duration filter in Search, a bound on the entry span's own `Duration` in Services).
+- Estimated answers carry a `≈ Estimated from N% of the window` badge and a *Compute exactly* button (`svc_exact=1`); an answer stopped by the time budget says *Partial*.
+
+`GET /api/traces/services` takes the search filters, `bucket_origin_ms` / `align_buckets` (the analytics count grid: ~60 buckets per range), `scope=entry|root`, `exact=1` and `detail=<service>`. One scan groups t-digest states by service, bucket and endpoint; the outer `GROUPING SETS` merge them into service totals, service buckets and endpoint totals:
+
+```sql
+SELECT grouping(b, op), svc, b, op, sum(c), sum(e), quantilesTDigestMerge(0.5, 0.95, 0.99)(st), sum(s) FROM (
+  SELECT ServiceName AS svc, <origin> + intDiv(toUnixTimestamp64Milli(Timestamp) - <origin>, <bucket>) * <bucket> AS b,
+         SpanName AS op,  -- '' outside the drill-down
+         count() AS c, countIf(StatusCode = 'Error') AS e,
+         quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS st, sum(Duration) AS s
+  FROM otel.otel_traces
+  PREWHERE <window or time slices> AND <entry spans>
+  WHERE <allowlist> <filters> [AND ServiceName = <detail>]
+  GROUP BY svc, b, op)
+GROUP BY GROUPING SETS ((svc), (svc, b), (svc, op))
+SETTINGS max_execution_time = 25, timeout_overflow_mode = 'break',
+         max_rows_to_group_by = 200000, group_by_overflow_mode = 'any'
+```
+
+The primary key `(ServiceName, SpanName, toDateTime(Timestamp))` makes a drill-down read only that service's granules. Before the scan, `EXPLAIN ESTIMATE` (index only, a few ms) sizes the window: above 150 M rows the window is **sampled by time** — one slice per chart bucket at a stable golden-ratio offset inside it, sized to read about 50 M rows (at least 1 min) — and counts are scaled back by the sampled share (per bucket for the series, per window for the totals); percentiles come from the sampled spans. `exact=1` reads the whole window (still bounded by the 25 s budget, then `partial: true`). The drill-down adds the 20 slowest entry spans of the same (sampled) window (`ORDER BY Duration DESC LIMIT 20`) and releases (after HyperDX's release annotations): the first `Timestamp` of each `ResourceAttributes['service.version']` of the service in the whole window, read with the bloom filter key index and the facet caps (200 M rows read, `estimated` when stopped).
+
+`GET /api/traces/services/db` (HyperDX's database tab) groups spans of any kind carrying `db.query.text` or `db.statement` by `coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])` and service: count, errors, `sum(Duration)`, P95 and `db.system.name` / `db.system`, the 50 most time-consuming statements, with the facet-style caps (200 M rows read, 100 k groups, 5 s; `estimated` when a cap stopped it). It needs a `Map` span attribute column (`supported: false` otherwise). The local fixture has neither database attributes nor `service.version`, so both are empty there (the UI tests mock them).
+
+Measured through the API on the local fixture (about 2.0 B spans over 7 days, densest day 565 M spans, 23 M spans in the measured hour; medians of three, ClickHouse shared with other test runs, load average ~35):
+
+| Request | Median | Note |
+| --- | --- | --- |
+| all services, 1 h | 0.60 s (0.1 s idle) | exact, 23 M rows |
+| one service's detail, 1 h | 0.72 s | exact, with slowest spans and releases |
+| all services, densest 24 h | 0.68 s | sampled: 8.8 % of the window |
+| all services, densest 24 h, `exact=1` | 2.23 s | 565 M rows |
+| root spans, densest 24 h | 0.52 s | sampled |
+| one service's detail, 24 h | 1.38 s | exact, 49 M rows |
+| all services, 7 days | 0.90 s | sampled: 2.5 % of the window |
+| one service's detail, 7 days | 2.92 s | sampled: 30 % (172 M rows) |
+| all services, 7 days, `exact=1` | 14.2 s | 2.0 B rows |
+| database statements, 1 h / 7 days | 0.08 s / 0.16 s | the key index skips every granule |
+
+On the densest day the sampled span counts were within 1.5 % of the exact ones (the backend tests allow 15 % on the week).
+
 ## Trace detail rendering
 
 The detail page derives the span tree, trace bounds, per-service counts, start-ordered overview bars and parsed event markers once per loaded trace. Opening or closing a span inspector and folding or unfolding a branch patch only the affected rows; service filters and range changes re-render the waterfall from the cached data. Waterfall controls use delegated listeners on the persistent container. The query-analysis trace viewer mounts rows lazily: only rows visible under the initial fold are built, and a branch mounts its children the first time it is expanded.

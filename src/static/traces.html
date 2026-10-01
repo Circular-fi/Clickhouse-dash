@@ -119,6 +119,7 @@
       <section id="tracesSearchView" class="traceSearchView">
         <div id="tracesTabs" class="traceTabs" role="tablist" aria-label="Trace views">
           <button type="button" class="traceTabs__tab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
+          <button type="button" class="traceTabs__tab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1" aria-controls="traceServicesView">Services</button>
           <button type="button" class="traceTabs__tab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1" aria-controls="traceMapView">Service map</button>
         </div>
         <form id="tracesForm" class="traceSearchBar" autocomplete="off">
@@ -249,6 +250,8 @@
         </section>
         </div>
         </div>
+
+        <section id="traceServicesView" class="traceTabView traceTabView--services" role="tabpanel" aria-labelledby="tracesTab-services" hidden></section>
 
         <section id="traceMapView" class="traceMap" role="tabpanel" aria-labelledby="tracesTab-map" hidden>
           <div class="traceMap__toolbar">

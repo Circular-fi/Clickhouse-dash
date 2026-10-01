@@ -15,7 +15,7 @@
   });
   const start = async () => {
     window.ChDash = window.ChDash || {};
-    for (const name of ["app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_map.js", "app_trace_heatmap.js"]) await load(name);
+    for (const name of ["app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_trace_map.js", "app_trace_heatmap.js"]) await load(name);
     window.ChDash.ui?.init?.();
     window.ChDash.traces?.init?.();
   };

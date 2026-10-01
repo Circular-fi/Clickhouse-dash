@@ -2,6 +2,7 @@
 #include "time_util.hpp"
 
 #include "api_error.hpp"
+#include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
@@ -2335,6 +2336,510 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
     w.Key("target"); w.String(edge.target.c_str());
     write_service_map_stats(w, edge.stats, scale, "calls");
     w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+namespace {
+
+// --- Services view -----------------------------------------------------------
+// After HyperDX's ServicesDashboardPage: RED metrics (rate, errors, duration)
+// of each service's entry spans. Entry spans are the spans that receive work:
+// SpanKind Server or Consumer (the OTel exporter writes 'Server', the proto
+// enum spelling is 'SPAN_KIND_SERVER'), or a root span of any kind. The span
+// filters of the search (service, operation, status, tags and their
+// negations) describe these spans themselves; min / max_duration_ms bound the
+// span's own Duration. The primary key starts with (ServiceName, SpanName),
+// so a drill-down into one service reads only that service's granules.
+//
+// Cost: one pass over the window reading ServiceName, SpanName, SpanKind,
+// ParentSpanId, StatusCode, Duration and Timestamp. On the ~2 B span fixture
+// (up to 23 M spans per hour) one hour of all services takes ~0.3 s and its
+// densest day ~3.6 s, a week ~15-30 s. A window estimated (EXPLAIN ESTIMATE,
+// index only) above kServicesExactRows is therefore sampled by time: one
+// slice per chart bucket, at a stable pseudo-random offset inside it, sized
+// to read about kServicesSampleRows; counts are scaled back by the sampled
+// share of the window and the answer is marked estimated. exact=1 asks for
+// the whole window; the time budget still stops it (marked partial).
+constexpr const char* kServiceEntrySpans =
+    "(SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
+constexpr const char* kServiceRootSpans = "ParentSpanId = ''";
+constexpr uint64_t kServicesExactRows = 150000000;
+constexpr uint64_t kServicesSampleRows = 50000000;
+constexpr int64_t kServicesMinSliceMs = 60 * 1000;
+constexpr int kServicesTimeBudgetSeconds = 25;
+constexpr uint64_t kServicesGroupByCap = 200000;
+constexpr size_t kServicesMaxEndpoints = 100;
+constexpr size_t kServicesSlowestSpans = 20;
+constexpr size_t kServicesMaxReleases = 50;
+constexpr uint64_t kServicesReleaseReadRowsCap = 200000000;
+constexpr size_t kServicesMaxStatements = 50;
+constexpr uint64_t kServicesDbReadRowsCap = 200000000;
+constexpr size_t kServicesMaxDetailBytes = 1024;
+
+// The front half shared by /api/traces/services and /api/traces/services/db.
+struct ServicesScope {
+  std::string source_host_id;
+  const HostSpec* host = nullptr;
+  int64_t start_ms = 0, end_ms = 0;
+  std::string detail;           // the drilled-down service, or empty
+  std::string span_scope;       // "entry" or "root"
+  std::string where;            // " AND ..." after the allowlist predicate
+  AttributeColumns columns;
+};
+
+bool services_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
+                    httplib::Response& res, ServicesScope* scope, std::shared_ptr<clickhouse::Client>* client) {
+  if (!cfg.traces.enabled) { json_error(res, 404, "traces_disabled", "Trace Explorer is disabled."); return false; }
+  if (!cfg.traces.analytics) {
+    json_error(res, 404, "trace_analytics_disabled", "Trace analytics (and the services view) are disabled by configuration.");
+    return false;
+  }
+  std::string message;
+  if (feature_param_rejected(cfg.traces, req, &message)) { json_error(res, 400, "trace_filter_disabled", message); return false; }
+  scope->host = trace_host(cfg, req, &scope->source_host_id);
+  if (!scope->host) { json_error(res, 404, "unknown_host", "Trace source host is not configured."); return false; }
+  if (!trace_time_range(cfg.traces, req, &scope->start_ms, &scope->end_ms, &message)) {
+    json_error(res, 400, "invalid_trace_range", message);
+    return false;
+  }
+  scope->span_scope = req.has_param("scope") && !req.get_param_value("scope").empty() ? req.get_param_value("scope") : "entry";
+  if (scope->span_scope != "entry" && scope->span_scope != "root") {
+    json_error(res, 400, "invalid_trace_filter", "scope must be entry or root.");
+    return false;
+  }
+  scope->detail = req.has_param("detail") ? req.get_param_value("detail") : std::string{};
+  if (scope->detail.size() > kServicesMaxDetailBytes) {
+    json_error(res, 400, "invalid_trace_filter", "detail is limited to 1024 bytes.");
+    return false;
+  }
+  if (!scope->detail.empty() && !cfg.traces.features.service_filter) {
+    json_error(res, 400, "trace_filter_disabled", "service filter is disabled by traces.features");
+    return false;
+  }
+  const double min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  const double max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, 24.0 * 60.0 * 60.0 * 1000.0);
+  if (max_duration_ms > 0.0 && min_duration_ms > max_duration_ms) {
+    json_error(res, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+    return false;
+  }
+  TraceFilterSpec filters;
+  if (!parse_trace_filters(req, &filters, &message)) { json_error(res, 400, "invalid_trace_filter", message); return false; }
+  *client = acquire_trace_client(cfg, *scope->host, pool, &message);
+  if (!*client) {
+    json_error(res, 503, "trace_source_unavailable", message.empty() ? "Cannot connect to trace ClickHouse source." : message);
+    return false;
+  }
+  std::string span_filters, filter_code;
+  if (!trace_filters_sql(**client, *scope->host, cfg.traces, filters, &span_filters, &filter_code, &message)) {
+    json_error(res, 400, filter_code, message);
+    return false;
+  }
+  scope->where = span_filters;
+  if (!scope->detail.empty()) scope->where += " AND ServiceName = " + quote_string(scope->detail);
+  if (min_duration_ms > 0.0) scope->where += " AND Duration >= " + std::to_string(std::llround(min_duration_ms * 1000000.0));
+  if (max_duration_ms > 0.0) scope->where += " AND Duration <= " + std::to_string(std::llround(max_duration_ms * 1000000.0));
+  scope->columns = trace_attribute_columns(**client, *scope->host, cfg.traces);
+  return true;
+}
+
+// The time predicate of a services query: the whole window, or one slice per
+// bucket of the chart grid (see above). scale_for(bucket) turns a bucket's
+// sampled counts into window counts; `factor` does it for window totals.
+struct ServicesWindow {
+  bool sampled = false;
+  uint64_t estimated_rows = 0;
+  int64_t sampled_ms = 0;
+  double factor = 1.0;
+  std::string time_sql;
+  std::map<int64_t, double> bucket_scale;
+  double scale_for(int64_t bucket) const {
+    const auto it = bucket_scale.find(bucket);
+    return it == bucket_scale.end() ? 1.0 : it->second;
+  }
+};
+
+uint64_t estimate_window_rows(clickhouse::Client& client, const std::string& from_where) {
+  uint64_t rows = 0;
+  client.Select("EXPLAIN ESTIMATE SELECT 1" + from_where, [&](const clickhouse::Block& block) {
+    for (size_t row = 0; row < block.GetRowCount(); ++row) {
+      if (block.GetColumnCount() >= 4) rows += ch_block_u64_at(block, 3, row);
+    }
+  });
+  return rows;
+}
+
+ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_ms, int64_t origin_ms,
+                               uint64_t estimated_rows, bool exact) {
+  ServicesWindow out;
+  out.estimated_rows = estimated_rows;
+  out.time_sql = trace_time_predicate(start_ms, end_ms);
+  out.sampled_ms = end_ms - start_ms;
+  if (exact || estimated_rows <= kServicesExactRows) return out;
+  const double fraction = static_cast<double>(kServicesSampleRows) / static_cast<double>(estimated_rows);
+  const int64_t slice_ms = std::max<int64_t>(kServicesMinSliceMs, static_cast<int64_t>(std::llround(bucket_ms * fraction / 1000.0)) * 1000);
+  if (slice_ms * 2 > bucket_ms) return out;
+  const int64_t offset = start_ms - origin_ms;
+  int64_t bucket = origin_ms + (offset >= 0 ? offset / bucket_ms : -((-offset + bucket_ms - 1) / bucket_ms)) * bucket_ms;
+  std::string terms;
+  int64_t sampled = 0;
+  for (; bucket < end_ms; bucket += bucket_ms) {
+    const int64_t lo = std::max(bucket, start_ms), hi = std::min(bucket + bucket_ms, end_ms);
+    if (hi <= lo) continue;
+    const int64_t length = std::min(slice_ms, hi - lo);
+    // Golden-ratio offsets: spread over the bucket, stable for a given grid.
+    const double phase = std::fmod(static_cast<double>(bucket / bucket_ms) * 0.6180339887498949, 1.0);
+    const int64_t at = lo + static_cast<int64_t>(std::floor(std::fabs(phase) * static_cast<double>(hi - lo - length)));
+    if (!terms.empty()) terms += " OR ";
+    terms += "(Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(at) + ") AND Timestamp < fromUnixTimestamp64Milli(" +
+             std::to_string(at + length) + "))";
+    out.bucket_scale[bucket] = static_cast<double>(hi - lo) / static_cast<double>(length);
+    sampled += length;
+  }
+  if (terms.empty() || sampled <= 0) return out;
+  out.sampled = true;
+  out.sampled_ms = sampled;
+  out.factor = static_cast<double>(end_ms - start_ms) / static_cast<double>(sampled);
+  out.time_sql = "(" + terms + ")";
+  return out;
+}
+
+std::string services_settings_sql() {
+  return " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) +
+         ", timeout_overflow_mode = 'break', max_rows_to_group_by = " + std::to_string(kServicesGroupByCap) +
+         ", group_by_overflow_mode = 'any'";
+}
+
+struct ServiceStats {
+  uint64_t spans = 0, errors = 0;
+  double total_ns = 0;
+  uint64_t p50 = 0, p95 = 0, p99 = 0;
+};
+
+uint64_t scaled_count(uint64_t value, double factor) {
+  return static_cast<uint64_t>(std::llround(static_cast<double>(value) * factor));
+}
+
+void write_service_stats(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::string& name, const ServiceStats& s, double factor) {
+  w.StartArray();
+  w.String(name.c_str());
+  w.Uint64(scaled_count(s.spans, factor));
+  w.Uint64(scaled_count(s.errors, factor));
+  w.Uint64(s.p50); w.Uint64(s.p95); w.Uint64(s.p99);
+  w.Uint64(static_cast<uint64_t>(std::llround(s.total_ns * factor)));
+  w.EndArray();
+}
+
+} // namespace
+
+// Per service (and, with detail=<service>, per endpoint = SpanName of that
+// service): entry-span rate, errors, p50 / p95 / p99 Duration and total time
+// (sum of Duration), plus the same per chart bucket (sparklines and the RED
+// charts). The detail drill-down also lists the slowest entry spans and the
+// first time each ResourceAttributes['service.version'] was seen (release
+// markers).
+void Server::handle_traces_services(const httplib::Request& req, httplib::Response& res) {
+  const auto request_started = std::chrono::steady_clock::now();
+  ServicesScope scope;
+  std::shared_ptr<clickhouse::Client> client;
+  if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+  const std::string visibility = service_allowlist_predicate(cfg_.traces);
+  const std::string span_kind = scope.span_scope == "root" ? kServiceRootSpans : kServiceEntrySpans;
+  const bool detail = !scope.detail.empty();
+
+  // The count chart grid of /api/traces/analytics (same bucket sizes and
+  // bucket_origin_ms anchoring, align_buckets widens to whole buckets).
+  const int64_t bucket_ms = static_cast<int64_t>(choose_trace_bucket_seconds(scope.end_ms - scope.start_ms)) * 1000;
+  int64_t bucket_origin_ms = 0;
+  parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms);
+  const int64_t origin_ms = ((bucket_origin_ms % bucket_ms) + bucket_ms) % bucket_ms;
+  const auto grid_floor = [&](int64_t t) {
+    const int64_t offset = t - origin_ms;
+    return origin_ms + (offset >= 0 ? offset / bucket_ms : -((-offset + bucket_ms - 1) / bucket_ms)) * bucket_ms;
+  };
+  const bool align_buckets = req.has_param("align_buckets") && req.get_param_value("align_buckets") == "1";
+  const int64_t range_start = align_buckets ? grid_floor(scope.start_ms) : scope.start_ms;
+  const int64_t range_end = align_buckets ? grid_floor(scope.end_ms + bucket_ms - 1) : scope.end_ms;
+  const bool exact = req.has_param("exact") && req.get_param_value("exact") == "1";
+  // The span kind test joins the time range in PREWHERE: it drops most rows
+  // before Duration, StatusCode and the filter columns are read.
+  const std::string kind_and_where = " AND " + span_kind + " WHERE " + visibility + scope.where;
+
+  uint64_t estimated_rows = 0;
+  uint64_t estimate_ms = 0;
+  try {
+    const auto started = std::chrono::steady_clock::now();
+    estimated_rows = estimate_window_rows(*client, " FROM " + table + " PREWHERE " +
+                                                   trace_time_predicate(scope.start_ms, scope.end_ms) + kind_and_where);
+    estimate_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count());
+  } catch (const std::exception&) {
+    // Without an estimate the window is read whole (still time-bounded).
+    if (client_pool_) client_pool_->invalidate(client);
+    std::string error;
+    client = acquire_trace_client(cfg_, *scope.host, client_pool_, &error);
+    if (!client) return json_error(res, 503, "trace_source_unavailable", error.empty() ? "Cannot connect to trace ClickHouse source." : error);
+  }
+  const ServicesWindow window = services_window(scope.start_ms, scope.end_ms, bucket_ms, origin_ms, estimated_rows, exact);
+  const std::string from = " FROM " + table + " PREWHERE " + window.time_sql + kind_and_where;
+
+  const std::string bucket_sql = std::to_string(origin_ms) + " + intDiv(toUnixTimestamp64Milli(Timestamp) - " +
+      std::to_string(origin_ms) + ", " + std::to_string(bucket_ms) + ") * " + std::to_string(bucket_ms);
+  // One scan grouped by (service, bucket[, endpoint]) into t-digest states;
+  // the outer GROUPING SETS merge them into service totals, service buckets
+  // and endpoint totals. grouping(b, op): 3 service, 1 bucket, 2 endpoint (a
+  // single '' endpoint per service outside the drill-down, ignored).
+  const std::string inner =
+      "SELECT ServiceName AS svc, " + bucket_sql + " AS b, " + (detail ? "SpanName" : "''") + " AS op, count() AS c, "
+      "countIf(StatusCode = 'Error') AS e, quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS st, sum(Duration) AS s" +
+      from + " GROUP BY svc, b, op";
+  const std::string sql =
+      "SELECT toString(grouping(b, op)), toString(svc), toString(b), toString(op), toString(sum(c)), toString(sum(e)), "
+      "arrayStringConcat(arrayMap(x -> toString(toUInt64(x)), quantilesTDigestMerge(0.5, 0.95, 0.99)(st)), ','), "
+      "toString(sum(s)) FROM (" + inner +
+      ") GROUP BY GROUPING SETS ((svc), (svc, b), (svc, op))" + services_settings_sql();
+
+  std::map<std::string, ServiceStats> services;
+  std::map<std::string, std::map<int64_t, ServiceStats>> series;
+  std::map<std::string, ServiceStats> endpoints;
+  BoundedRead read;
+  try {
+    read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
+      for (size_t row = 0; row < block.GetRowCount(); ++row) {
+        ServiceStats stats;
+        stats.spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
+        stats.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
+        const auto quantiles = split_char(ch_block_text_at(block, 6, row), ',');
+        if (quantiles.size() >= 3) {
+          stats.p50 = static_cast<uint64_t>(std::stoull(quantiles[0]));
+          stats.p95 = static_cast<uint64_t>(std::stoull(quantiles[1]));
+          stats.p99 = static_cast<uint64_t>(std::stoull(quantiles[2]));
+        }
+        stats.total_ns = std::stod(ch_block_text_at(block, 7, row));
+        const int set = std::stoi(ch_block_text_at(block, 0, row));
+        const std::string service = ch_block_text_at(block, 1, row);
+        if (set == 3) services[service] = stats;
+        else if (set == 1) series[service][std::stoll(ch_block_text_at(block, 2, row))] = stats;
+        else if (set == 2 && detail) endpoints[ch_block_text_at(block, 3, row)] = stats;
+      }
+    });
+  } catch (const std::exception& e) {
+    if (client_pool_) client_pool_->invalidate(client);
+    return json_error(res, 503, "trace_services_failed", e.what());
+  }
+  // Only the time budget stops this read (skip indexes and the slices make
+  // read_rows fall short of total_rows without any cap).
+  const bool partial = read.elapsed_ms + 250 >= static_cast<uint64_t>(kServicesTimeBudgetSeconds) * 1000;
+
+  // Detail: the slowest entry spans of the (sampled) window, and releases.
+  struct SlowSpan { std::string trace_id, span_id, operation, status; int64_t start_ms = 0; uint64_t duration_ns = 0; };
+  std::vector<SlowSpan> slowest;
+  struct Release { std::string version; int64_t first_ms = 0; uint64_t spans = 0; };
+  std::vector<Release> releases;
+  bool releases_supported = false, releases_estimated = false;
+  uint64_t slowest_ms = 0, releases_ms = 0;
+  if (detail) {
+    try {
+      const auto started = std::chrono::steady_clock::now();
+      client->Select(
+          "SELECT TraceId, SpanId, toString(SpanName), toString(toUnixTimestamp64Milli(Timestamp)), toString(Duration), "
+          "toString(StatusCode)" + from + " ORDER BY Duration DESC LIMIT " + std::to_string(kServicesSlowestSpans) +
+          " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) + ", timeout_overflow_mode = 'break'",
+          [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              slowest.push_back(SlowSpan{ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row),
+                                         ch_block_text_at(block, 2, row), ch_block_text_at(block, 5, row),
+                                         std::stoll(ch_block_text_at(block, 3, row)),
+                                         static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)))});
+            }
+          });
+      slowest_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started).count());
+    } catch (const std::exception& e) {
+      if (client_pool_) client_pool_->invalidate(client);
+      return json_error(res, 503, "trace_services_failed", e.what());
+    }
+    // Releases (HyperDX useReleaseAnnotations): the first span of each
+    // service.version in the whole window, any span kind. The key's bloom
+    // filter index skips granules without it; a read cap bounds the rest.
+    releases_supported = scope.columns.resource();
+    if (releases_supported) {
+      try {
+        const std::string version = "ResourceAttributes['service.version']";
+        const BoundedRead release_read = bounded_select(
+            *client,
+            "SELECT " + version + " AS v, toString(toUnixTimestamp64Milli(min(Timestamp))), toString(count()) FROM " + table +
+                " PREWHERE " + trace_time_predicate(scope.start_ms, scope.end_ms) + " AND ServiceName = " + quote_string(scope.detail) +
+                " WHERE " + visibility + " AND mapContains(ResourceAttributes, 'service.version') AND " + version +
+                " != '' GROUP BY v ORDER BY min(Timestamp) LIMIT " + std::to_string(kServicesMaxReleases) +
+                facet_settings_sql(kServicesReleaseReadRowsCap, true),
+            [&](const clickhouse::Block& block) {
+              for (size_t row = 0; row < block.GetRowCount(); ++row) {
+                releases.push_back(Release{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row)),
+                                           static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)))});
+              }
+            });
+        releases_estimated = release_read.read_rows >= kServicesReleaseReadRowsCap || timed_out(release_read);
+        releases_ms = release_read.elapsed_ms;
+      } catch (const std::exception&) {
+        // Markers are decoration: a failure leaves them out.
+        if (client_pool_) client_pool_->invalidate(client);
+        releases.clear();
+        releases_estimated = true;
+      }
+    }
+  }
+
+  std::vector<std::pair<std::string, ServiceStats>> endpoint_rows(endpoints.begin(), endpoints.end());
+  std::sort(endpoint_rows.begin(), endpoint_rows.end(), [](const auto& a, const auto& b) {
+    if (a.second.total_ns != b.second.total_ns) return a.second.total_ns > b.second.total_ns;
+    return a.first < b.first;
+  });
+
+  const uint64_t total_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - request_started).count());
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("scope"); w.String(scope.span_scope.c_str());
+  w.Key("span_predicate"); w.String(span_kind.c_str());
+  w.Key("detail"); w.String(scope.detail.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(range_start); w.Int64(range_end); w.EndArray();
+  w.Key("window"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
+  w.Key("bucket_ms"); w.Int64(bucket_ms);
+  w.Key("bucket_origin_ms"); w.Int64(origin_ms);
+  w.Key("estimated"); w.Bool(window.sampled);
+  w.Key("sample_fraction"); w.Double(window.sampled ? static_cast<double>(window.sampled_ms) / static_cast<double>(scope.end_ms - scope.start_ms) : 1.0);
+  w.Key("estimated_rows"); w.Uint64(window.estimated_rows);
+  w.Key("exact_rows_limit"); w.Uint64(kServicesExactRows);
+  w.Key("partial"); w.Bool(partial);
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("estimate"); w.Uint64(estimate_ms);
+  w.Key("services"); w.Uint64(read.elapsed_ms);
+  w.Key("slowest"); w.Uint64(slowest_ms);
+  w.Key("releases"); w.Uint64(releases_ms);
+  w.Key("total"); w.Uint64(total_ms);
+  w.EndObject();
+  w.Key("columns"); w.StartArray();
+  for (const char* col : {"service", "spans", "errors", "p50_ns", "p95_ns", "p99_ns", "total_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("services"); w.StartArray();
+  for (const auto& [name, stats] : services) write_service_stats(w, name, stats, window.factor);
+  w.EndArray();
+  w.Key("series_columns"); w.StartArray();
+  for (const char* col : {"bucket_ms", "spans", "errors", "p50_ns", "p95_ns", "p99_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("series"); w.StartObject();
+  for (const auto& [name, buckets] : series) {
+    w.Key(name.c_str());
+    w.StartArray();
+    for (const auto& [bucket, stats] : buckets) {
+      const double scale = window.sampled ? window.scale_for(bucket) : 1.0;
+      w.StartArray(); w.Int64(bucket); w.Uint64(scaled_count(stats.spans, scale)); w.Uint64(scaled_count(stats.errors, scale));
+      w.Uint64(stats.p50); w.Uint64(stats.p95); w.Uint64(stats.p99); w.EndArray();
+    }
+    w.EndArray();
+  }
+  w.EndObject();
+  if (detail) {
+    w.Key("endpoints_truncated"); w.Bool(endpoint_rows.size() > kServicesMaxEndpoints);
+    w.Key("endpoints"); w.StartArray();
+    for (size_t i = 0; i < endpoint_rows.size() && i < kServicesMaxEndpoints; ++i) {
+      write_service_stats(w, endpoint_rows[i].first, endpoint_rows[i].second, window.factor);
+    }
+    w.EndArray();
+    w.Key("slowest_columns"); w.StartArray();
+    for (const char* col : {"trace_id", "span_id", "operation", "start_ms", "duration_ns", "status"}) w.String(col);
+    w.EndArray();
+    w.Key("slowest"); w.StartArray();
+    for (const auto& span : slowest) {
+      w.StartArray(); w.String(span.trace_id.c_str()); w.String(span.span_id.c_str()); w.String(span.operation.c_str());
+      w.Int64(span.start_ms); w.Uint64(span.duration_ns); w.String(span.status.c_str()); w.EndArray();
+    }
+    w.EndArray();
+    w.Key("releases_supported"); w.Bool(releases_supported);
+    w.Key("releases_estimated"); w.Bool(releases_estimated);
+    w.Key("releases"); w.StartArray();
+    for (const auto& release : releases) {
+      w.StartArray(); w.String(release.version.c_str()); w.Int64(release.first_ms); w.Uint64(release.spans); w.EndArray();
+    }
+    w.EndArray();
+  }
+  w.EndObject();
+  res.status = 200;
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// Database statements (HyperDX DatabaseTab): spans carrying db.query.text
+// (current semconv) or db.statement (older), grouped by statement text:
+// count, total time, p95 Duration, per service. Any span kind (database calls
+// are Client spans). The keys' bloom filter index skips granules without
+// them; a read cap, a GROUP BY cap and the time budget bound the rest and
+// mark the answer estimated.
+void Server::handle_traces_services_db(const httplib::Request& req, httplib::Response& res) {
+  ServicesScope scope;
+  std::shared_ptr<clickhouse::Client> client;
+  if (!services_scope(cfg_, client_pool_, req, res, &scope, &client)) return;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  const bool supported = scope.columns.span();
+  struct Statement { std::string service, statement, system; uint64_t spans = 0, errors = 0, p95 = 0; double total_ns = 0; };
+  std::vector<Statement> rows;
+  BoundedRead read;
+  if (supported) {
+    const std::string table = qualified(cfg_.traces.database, cfg_.traces.table);
+    const std::string statement =
+        "coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])";
+    const std::string sql =
+        "SELECT toString(ServiceName), " + statement + " AS stmt, "
+        "any(coalesce(nullif(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])), toString(count()), "
+        "toString(countIf(StatusCode = 'Error')), toString(sum(Duration)), toString(toUInt64(quantileTDigest(0.95)(Duration))) FROM " +
+        table + " PREWHERE " + trace_time_predicate(scope.start_ms, scope.end_ms) +
+        " WHERE " + service_allowlist_predicate(cfg_.traces) + scope.where +
+        " AND (mapContains(SpanAttributes, 'db.query.text') OR mapContains(SpanAttributes, 'db.statement')) AND stmt != ''"
+        " GROUP BY ServiceName, stmt ORDER BY sum(Duration) DESC LIMIT " + std::to_string(kServicesMaxStatements) +
+        facet_settings_sql(kServicesDbReadRowsCap, true);
+    try {
+      read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          rows.push_back(Statement{ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row),
+                                   static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row))),
+                                   static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row))),
+                                   static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row))),
+                                   std::stod(ch_block_text_at(block, 5, row))});
+        }
+      });
+    } catch (const std::exception& e) {
+      if (client_pool_) client_pool_->invalidate(client);
+      return json_error(res, 503, "trace_services_failed", e.what());
+    }
+  }
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
+  w.Key("supported"); w.Bool(supported);
+  w.Key("detail"); w.String(scope.detail.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(scope.start_ms); w.Int64(scope.end_ms); w.EndArray();
+  // Estimated only when a cap stopped the read (the bloom filter index makes
+  // read_rows fall short of total_rows without one).
+  w.Key("estimated"); w.Bool(read.read_rows >= kServicesDbReadRowsCap || timed_out(read));
+  w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(read.elapsed_ms); w.EndObject();
+  w.Key("columns"); w.StartArray();
+  for (const char* col : {"service", "statement", "db_system", "spans", "errors", "total_ns", "p95_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("statements"); w.StartArray();
+  for (const auto& row : rows) {
+    w.StartArray(); w.String(row.service.c_str()); w.String(row.statement.c_str()); w.String(row.system.c_str());
+    w.Uint64(row.spans); w.Uint64(row.errors); w.Uint64(static_cast<uint64_t>(std::llround(row.total_ns))); w.Uint64(row.p95);
+    w.EndArray();
   }
   w.EndArray();
   w.EndObject();

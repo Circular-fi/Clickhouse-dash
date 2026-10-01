@@ -16466,3 +16466,157 @@ html[data-theme="light"] {
   .traceDeltaPanel { margin: 8px 8px 0; }
   .traceHeatLegend__hint { display: none; }
 }
+
+.traceSearchBody[hidden],
+.traceTabView[hidden] { display: none !important; }
+/* The Services tab (app_trace_services.js): first paint from ?tab=services. */
+html.chdash-trace-tab-services .traceSearchField--limit { display: none; }
+html.chdash-trace-tab-services .traceSearchBody { display: none; }
+html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !important; }
+
+/* Services view (app_trace_services.js) */
+.traceTabView--services { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; }
+.traceSvc { position: relative; min-width: 0; padding: 0 12px 16px; }
+.traceSvc.is-loading .traceSvc__table { opacity: .6; transition: opacity .15s; }
+.traceSvc__toolbar {
+  min-height: 38px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.traceSvc__toolbar h2 { margin: 0; font-size: 13px; font-weight: 650; }
+.traceSvc__meta { color: var(--muted); font-size: 11px; }
+.traceSvc__status { flex: 1 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.traceSvc__error { margin: 8px 0 0; color: var(--traceError); font-size: 12px; }
+.traceSvcBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.traceSvcBadge--estimated { border-color: color-mix(in srgb, var(--traceWarn) 55%, var(--border)); color: color-mix(in srgb, var(--traceWarn) 75%, var(--text)); background: color-mix(in srgb, var(--traceWarn) 10%, transparent); }
+.traceSvcBadge--partial { border-color: color-mix(in srgb, var(--traceError) 55%, var(--border)); color: var(--traceError); }
+.traceSvcAction {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 4px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.traceSvcAction:hover { border-color: var(--accentBorder); }
+.traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible, .traceSvcScope__option:focus-visible,
+.traceSvcRow:focus-visible, .traceSvcDetail__close:focus-visible, .traceSvcSlowest__link:focus-visible { outline: none; box-shadow: var(--ring); }
+.traceSvcScope { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--buttonBorder); border-radius: 6px; background: var(--inputBg); }
+.traceSvcScope__option {
+  height: 21px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.traceSvcScope__option.is-active { color: var(--text); border-color: var(--accentBorder); background: color-mix(in srgb, var(--accentBorder) 14%, transparent); }
+.traceSvc__table { min-width: 0; overflow-x: auto; }
+.traceSvc__table > .tracesEmpty { min-height: 160px; display: grid; place-items: center; }
+.traceSvcTable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.traceSvcTable th, .traceSvcTable td { padding: 5px 8px; border-bottom: 1px solid var(--rowDivider); text-align: left; white-space: nowrap; }
+.traceSvcTable thead th { position: sticky; top: 0; z-index: 1; padding-top: 7px; padding-bottom: 5px; background: var(--bg); color: var(--muted); font-size: 10.5px; font-weight: 650; }
+.traceSvcTable .is-num { text-align: right; }
+.traceSvcTable td.has-errors, .traceSvcStat.has-errors b { color: var(--traceError); }
+.traceSvcSort { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.traceSvcSort:hover, .traceSvcSort.is-active { color: var(--text); }
+.traceSvcSort__dir { font-size: 8px; }
+.traceSvcRow { cursor: pointer; }
+.traceSvcRow:hover { background: var(--rowHover); }
+.traceSvcRow.is-selected { background: color-mix(in srgb, var(--accentBorder) 12%, transparent); }
+.traceSvcRow__name { max-width: 280px; font-weight: 650; }
+.traceSvcRow__cell, .traceSvcDetail__head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.traceSvcRow__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.traceSvcDot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 2px; background: var(--trace-service-color, var(--muted)); }
+.traceSvcShare { position: relative; min-width: 96px; width: 200px; }
+.traceSvcShare__bar { position: absolute; left: 8px; right: 8px; bottom: 4px; height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--trace-service-color, var(--accentBorder)) var(--share), color-mix(in srgb, var(--muted) 16%, transparent) var(--share)); }
+.traceSvcShare__text { position: relative; }
+.traceSvcTrend { width: 118px; padding-top: 2px !important; padding-bottom: 2px !important; }
+.traceSvcSpark { display: block; width: 112px; height: 24px; overflow: visible; }
+.traceSvcSpark__line { fill: none; stroke: var(--trace-service-color, var(--accentBorder)); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.traceSvcSpark--p95 .traceSvcSpark__line { stroke: #f58518; }
+.traceSvcSpark__errors { fill: none; stroke: var(--traceError); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.traceSvcLink { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }
+
+/* Service detail: a drawer over the table (HyperDX side panels). */
+.traceSvcDetail {
+  position: fixed;
+  top: 59px;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: min(780px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--panelBg);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, .22);
+}
+.traceSvcDetail[hidden] { display: none; }
+.traceSvcDetail__head { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.traceSvcDetail__head h3 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.traceSvcDetail__close { width: 26px; height: 26px; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.traceSvcDetail__close:hover { color: var(--text); border-color: var(--border); }
+.traceSvcStats { flex: 0 0 auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
+.traceSvcStat { display: flex; flex-direction: column; gap: 3px; padding: 7px 10px; background: var(--panelBg); min-width: 0; }
+.traceSvcStat span { color: var(--muted); font-size: 10px; }
+.traceSvcStat b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.traceSvcDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px 18px; }
+.traceSvcNote { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: color-mix(in srgb, var(--traceWarn) 75%, var(--text)); font-size: 11.5px; }
+.traceSvcCharts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.traceSvcChart { min-height: 158px; }
+.traceSvcChart > .tracesEmpty { min-height: 140px; }
+.traceSvcChart__svg { height: 150px; }
+.traceSvcBar { fill: color-mix(in srgb, var(--trace-service-color, var(--accentBorder)) 70%, transparent); }
+.traceSvcBar--error { fill: var(--traceError); }
+.traceSvcLine { stroke-width: 1.6; }
+.traceSvcLine--error { stroke: var(--traceError); }
+.traceSvcHover { stroke: var(--muted); stroke-width: 1; opacity: 0; }
+.traceSvcHover.is-active { opacity: .6; }
+.traceSvcRelease line { stroke: var(--accentBorder); stroke-width: 1; stroke-dasharray: 3 3; }
+.traceSvcRelease text { fill: var(--accentBorder); font: 600 9px Arial, Helvetica, sans-serif; }
+.traceSvcDetail__head + .traceSvcStats + .traceSvcDetail__body .traceAnalyticsCard > header .traceChartLegend--quantiles span { font-size: 9.5px; }
+.traceSvcSection { margin-top: 14px; }
+.traceSvcSection h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; }
+.traceSvcEmpty { padding: 6px 0; color: var(--muted); font-size: 11.5px; }
+.traceSvcTable--compact th, .traceSvcTable--compact td { padding: 4px 6px; }
+.traceSvcTable--compact thead th { background: var(--panelBg); }
+.traceSvcTable--compact tbody th { max-width: 260px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.traceSvcDb__stmt { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.traceSvcSlowest { margin: 0; padding: 0; list-style: none; }
+.traceSvcSlowest li { border-bottom: 1px solid var(--rowDivider); }
+.traceSvcSlowest__link { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 5px 4px; color: inherit; font-size: 12px; text-decoration: none; }
+.traceSvcSlowest__link:hover { background: var(--rowHover); }
+.traceSvcSlowest__duration { text-align: right; font-variant-numeric: tabular-nums; }
+.traceSvcSlowest__op { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traceSvcSlowest__error { color: var(--traceError); font-size: 10px; font-weight: 700; }
+.traceSvcSlowest__time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.traceSvcSlowest code { color: var(--muted); font-size: 10.5px; }
+.traceSvcReleases { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.traceSvcReleases li { display: inline-flex; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; }
+.traceSvcReleases li span { color: var(--muted); }
+.traceSvcReleases li.traceSvcEmpty { border: 0; padding: 0; }
+@media (max-width: 900px) {
+  .traceSvcStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .traceSvcTrend { display: none; }
+}

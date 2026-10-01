@@ -7,10 +7,16 @@
   // calls writeParams / applyParams), and the Search button runs the selected
   // tab's search.
   //
-  //   register({ id, label, order, panelId, onSearch(filters, options), onShow(), onHide() })
+  //   register({ id, label, order, panelId, install(ctx), onSearch(filters, options), onShow(), onHide(),
+  //              available(meta), params, writeParams(params), applyParams(params, { initial }) })
   //
   // onSearch replaces the result list search while the tab is selected;
   // onShow runs when the tab becomes visible from a click or Back / Forward.
+  // available(meta) false hides the tab (/api/traces/meta decides, e.g. the
+  // Services view needs traces.analytics). params lists the tab's own URL
+  // parameters that only change what it shows (not a new search: they are
+  // left out of the search key); writeParams / applyParams write and read the
+  // tab's URL state while it is selected.
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -18,10 +24,12 @@
   const tabs = [{ id: SEARCH_TAB, label: "Search", order: 0, panelSelector: ".traceSearchBody" }];
   let current = SEARCH_TAB;
   let ctx = null;
+  let meta = null;
 
   const byId = (id) => document.getElementById(id);
   const find = (id) => tabs.find((tab) => tab.id === id) || null;
-  const valid = (id) => (find(id) ? id : SEARCH_TAB);
+  const available = (tab) => !!tab && (!meta || typeof tab.available !== "function" || tab.available(meta) !== false);
+  const valid = (id) => (available(find(id)) ? id : SEARCH_TAB);
 
   function panelOf(tab) {
     if (tab.panelId) return byId(tab.panelId);
@@ -41,8 +49,9 @@
   function render() {
     const bar = byId("tracesTabs");
     if (!bar) return;
-    bar.hidden = tabs.length < 2;
-    bar.innerHTML = tabs.map((tab) => {
+    const shown = tabs.filter(available);
+    bar.hidden = shown.length < 2;
+    bar.innerHTML = shown.map((tab) => {
       const selected = tab.id === current;
       return `<button type="button" class="traceTabs__tab${selected ? " is-active" : ""}" role="tab" id="tracesTab-${tab.id}" data-trace-tab="${tab.id}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}"${tab.panelId ? ` aria-controls="${tab.panelId}"` : ""}>${ctx ? ctx.esc(tab.label) : tab.label}</button>`;
     }).join("");
@@ -82,11 +91,33 @@
   // tab (app_traces.js backToSearch); another tab refreshes if it is stale.
   function applyParams(params, { initial = false } = {}) {
     const changed = show(params.get("tab") || SEARCH_TAB);
+    find(current)?.applyParams?.(params, { initial });
     if (changed && !initial && current !== SEARCH_TAB) queueMicrotask(() => activate(current));
   }
 
   function writeParams(params) {
     if (current !== SEARCH_TAB) params.set("tab", current);
+    find(current)?.writeParams?.(params);
+  }
+
+  // /api/traces/meta answered: hide the tabs it does not enable (a selected
+  // one falls back to Search).
+  function onMeta(value) {
+    meta = value || null;
+    if (current !== SEARCH_TAB && !available(find(current))) {
+      show(SEARCH_TAB);
+      ns.traceSearch?.writeUrl?.("replace");
+    }
+    render();
+  }
+
+  // Every tab's view-only URL parameters (left out of the search key).
+  function viewParams() {
+    return tabs.flatMap((tab) => tab.params || []);
+  }
+
+  function hasParams(params) {
+    return params.has("tab") || viewParams().some((name) => params.has(name));
   }
 
   // The selected tab's search, or null for the result list.
@@ -98,8 +129,9 @@
     const target = event.target instanceof Element ? event.target.closest("[data-trace-tab]") : null;
     if (!target || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
     event.preventDefault();
-    const at = tabs.findIndex((tab) => tab.id === target.getAttribute("data-trace-tab"));
-    const next = tabs[(at + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+    const shown = tabs.filter(available);
+    const at = shown.findIndex((tab) => tab.id === target.getAttribute("data-trace-tab"));
+    const next = shown[(at + (event.key === "ArrowRight" ? 1 : -1) + shown.length) % shown.length];
     select(next.id);
     byId(`tracesTab-${next.id}`)?.focus();
   }
@@ -123,6 +155,9 @@
     applyParams,
     writeParams,
     activeSearch,
+    onMeta,
+    viewParams,
+    hasParams,
     current: () => current,
     context: () => ctx,
   };

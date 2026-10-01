@@ -104,8 +104,10 @@ test('the Service map tab lives in the URL and sends the search filters', async 
   await expect(page.locator('#traceMapView')).toBeHidden();
   await page.goForward();
   await expect(page.locator('#traceMapView')).toBeVisible();
-  // Keyboard: arrows move between tabs.
+  // Keyboard: arrows move between tabs (Search | Services | Service map).
   await tab.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#tracesTab-services')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('ArrowLeft');
   await expect(page.locator('#tracesTab-search')).toHaveAttribute('aria-selected', 'true');
 });

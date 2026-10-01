@@ -242,6 +242,25 @@
     return getJson(`api/traces/facet_values?${traceQuery(hostId, filters).toString()}`);
   }
 
+  // Services view (RED metrics of entry spans): the search filters plus
+  // detail (one service's drill-down), scope (entry | root) and exact.
+  function traceServicesQuery(hostId, filters = {}) {
+    const query = traceQuery(hostId, filters);
+    for (const key of ["detail", "exact"]) {
+      const value = filters?.[key];
+      if (value != null && String(value) !== "") query.set(key, String(value));
+    }
+    return query;
+  }
+
+  async function getTraceServices(hostId, filters = {}) {
+    return getJson(`api/traces/services?${traceServicesQuery(hostId, filters).toString()}`);
+  }
+
+  async function getTraceServicesDb(hostId, filters = {}) {
+    return getJson(`api/traces/services/db?${traceServicesQuery(hostId, filters).toString()}`);
+  }
+
   async function getTrace(hostId, traceId) {
     if (!traceId) throw new Error("No trace selected.");
     const query = new URLSearchParams({ trace_id: String(traceId) });
@@ -418,5 +437,6 @@
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,
+    getTraceServices, getTraceServicesDb,
   };
 })();

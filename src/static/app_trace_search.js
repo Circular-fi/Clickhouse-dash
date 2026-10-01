@@ -307,6 +307,7 @@
     params.delete("results");
     params.delete("tab");
     params.delete("duration_view");
+    for (const name of ns.traceTabs?.viewParams?.() || []) params.delete(name);
     return params.toString();
   }
 
@@ -327,7 +328,7 @@
   }
 
   function hasSearchParams(params) {
-    return SEARCH_PARAMS.some((name) => params.has(name));
+    return SEARCH_PARAMS.some((name) => params.has(name)) || !!ns.traceTabs?.hasParams?.(params);
   }
 
   // Controls, range and chips from URL parameters (the search page or a
@@ -353,6 +354,9 @@
     wantSelect(dom.tracesService, service);
     wantSelect(dom.tracesOperation, operation);
     ctx.refreshServiceOperationOptions();
+    // Back / Forward restore the entry's own choice (none included).
+    setSelect(dom.tracesService, service);
+    setSelect(dom.tracesOperation, operation);
     const limit = params.get("limit") || "50";
     if (selectHas(dom.tracesLimit, limit)) setSelect(dom.tracesLimit, limit);
     const sort = params.get("sort") || "recent";
@@ -832,6 +836,21 @@
     search.prefillTagKey = JSON.stringify(params || {});
   }
 
+  // A search for one service / operation (and optionally traces lasting at
+  // least minDurationMs: the duration chip, min_duration_ms), e.g. from the
+  // Services view; other filters stay.
+  function applySearch({ service = "", operation = "", minDurationMs = 0 } = {}) {
+    const { dom } = ctx;
+    wantSelect(dom.tracesService, service);
+    wantSelect(dom.tracesOperation, operation);
+    ctx.refreshServiceOperationOptions();
+    setSelect(dom.tracesService, service);
+    setSelect(dom.tracesOperation, operation);
+    search.chips = search.chips.filter((chip) => !(chip.kind === "service" && chip.value === service) && !(chip.kind === "operation" && chip.value === operation));
+    const ms = Number(minDurationMs);
+    setDuration(ms > 0 ? { min: Math.round(ms * 1000) / 1000, max: 0 } : null);
+  }
+
   function resetFacets() {
     ++facets.seq;
     facets.filters = null;
@@ -855,6 +874,7 @@
     hasSearchParams: () => hasSearchParams(new URLSearchParams(window.location.search)),
     onSearched: (filters) => { void loadFacets(filters); },
     resetFacets,
+    applySearch,
     prefillTagParams,
     prefillTagsChanged,
     notePrefillTags,

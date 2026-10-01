@@ -150,3 +150,92 @@ export async function mockTraceFacets(page) {
   });
   return seen;
 }
+
+// Services view (/api/traces/services and /services/db): four services with
+// per-minute series; the drill-down adds endpoints, slowest spans (synthetic
+// traces, so opening one loads its mocked detail) and two releases. The OTel
+// fixture has no service.version nor db.* attributes, hence the mocks.
+export const SYNTHETIC_SERVICES = [
+  // name, spans, errors, p50 ms, p95 ms, p99 ms, total time weight
+  ['checkout', 36000, 720, 40, 180, 420, 9],
+  ['frontend', 72000, 72, 12, 60, 95, 6],
+  ['orders', 18000, 0, 25, 70, 140, 3],
+  ['auth', 9000, 450, 5, 30, 800, 1],
+];
+
+export function syntheticServices(params, { estimated = false, releases = true } = {}) {
+  const start = Number(params.get('start_ms'));
+  const end = Number(params.get('end_ms'));
+  const bucket = 60_000;
+  const detail = params.get('detail') || '';
+  const services = params.getAll('service');
+  const pick = SYNTHETIC_SERVICES.filter(([name]) => (!detail || name === detail) && (!services.length || services.includes(name)));
+  const seconds = (end - start) / 1000;
+  const rows = pick.map(([name, spans, errors, p50, p95, p99, weight]) => [name, spans, errors, p50 * MS, p95 * MS, p99 * MS, weight * seconds * 1e9]);
+  const series = {};
+  for (const [name, spans, errors, p50, p95, p99] of pick) {
+    const points = [];
+    const count = Math.max(1, Math.round((end - start) / bucket));
+    for (let t = Math.floor(start / bucket) * bucket, i = 0; t < end; t += bucket, i += 1) {
+      const wave = 1 + 0.3 * Math.sin(i / 4);
+      points.push([t, Math.round((spans / count) * wave), i % 7 === 0 ? Math.round((errors / count) * 7) : 0, p50 * MS, Math.round(p95 * MS * wave), Math.round(p99 * MS * wave)]);
+    }
+    series[name] = points;
+  }
+  const payload = {
+    v: 1, source_host_id: 'local', scope: params.get('scope') || 'entry', detail,
+    range: [start, end], window: [start, end], bucket_ms: bucket, bucket_origin_ms: 0,
+    estimated, sample_fraction: estimated ? 0.1 : 1, estimated_rows: estimated ? 900000000 : 1000000, exact_rows_limit: 150000000,
+    partial: false, timing_ms: { estimate: 1, services: 12, slowest: 0, releases: 0, total: 14 },
+    columns: ['service', 'spans', 'errors', 'p50_ns', 'p95_ns', 'p99_ns', 'total_ns'], services: rows,
+    series_columns: ['bucket_ms', 'spans', 'errors', 'p50_ns', 'p95_ns', 'p99_ns'], series,
+  };
+  if (detail) {
+    const [, spans, errors, p50, p95, p99] = pick[0] || [detail, 0, 0, 0, 0, 0];
+    payload.endpoints_truncated = false;
+    payload.endpoints = [
+      ['POST /checkout', Math.round(spans * 0.6), Math.round(errors * 0.8), p50 * MS, p95 * MS, p99 * MS, 6 * seconds * 1e9],
+      ['GET /cart', Math.round(spans * 0.4), Math.round(errors * 0.2), p50 * MS / 2, p95 * MS / 2, p99 * MS / 2, 2 * seconds * 1e9],
+    ];
+    payload.slowest_columns = ['trace_id', 'span_id', 'operation', 'start_ms', 'duration_ns', 'status'];
+    payload.slowest = [
+      [SYNTHETIC_TRACES[0].trace_id, '0000000000000001', 'POST /checkout', end - 5 * 60_000, 2400 * MS, 'Error'],
+      [SYNTHETIC_TRACES[1].trace_id, '0000000000000001', 'GET /cart', end - 10 * 60_000, 1900 * MS, 'Ok'],
+    ];
+    payload.releases_supported = true;
+    payload.releases_estimated = false;
+    payload.releases = releases ? [['1.4.0', start + 20 * 60_000, 1200], ['1.5.0-rc.1', start + 40 * 60_000, 800]] : [];
+  }
+  return payload;
+}
+
+export const SYNTHETIC_DB_STATEMENTS = [
+  ['checkout', 'SELECT * FROM carts WHERE user_id = ?', 'postgresql', 5400, 3, 812 * 1e9, 48 * MS],
+  ['checkout', 'INSERT INTO orders (id, total) VALUES (?, ?)', 'postgresql', 900, 0, 95 * 1e9, 210 * MS],
+];
+
+// Mocks both services endpoints; returns the requests seen (URLSearchParams).
+export async function mockTraceServices(page, { estimated = false, releases = true, statements = SYNTHETIC_DB_STATEMENTS, dbSupported = true } = {}) {
+  const seen = { services: [], db: [] };
+  // The service / operation pickers list the synthetic pairs.
+  await page.route('**/api/traces/prefill?**', (route) => route.fulfill({ json: {
+    v: 1, source_host_id: 'local', truncated: false, tag_filtered: false,
+    pairs: SYNTHETIC_SERVICES.flatMap(([name]) => [[name, 'POST /checkout'], [name, 'GET /cart']]),
+  } }));
+  await page.route('**/api/traces/services?**', (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    seen.services.push(params);
+    return route.fulfill({ json: syntheticServices(params, { estimated: estimated && params.get('exact') !== '1', releases }) });
+  });
+  await page.route('**/api/traces/services/db?**', (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    seen.db.push(params);
+    const detail = params.get('detail') || '';
+    return route.fulfill({ json: {
+      v: 1, source_host_id: 'local', supported: dbSupported, detail, range: [Number(params.get('start_ms')), Number(params.get('end_ms'))],
+      estimated: false, timing_ms: { query: 3 }, columns: ['service', 'statement', 'db_system', 'spans', 'errors', 'total_ns', 'p95_ns'],
+      statements: dbSupported ? statements.filter((row) => !detail || row[0] === detail) : [],
+    } });
+  });
+  return seen;
+}

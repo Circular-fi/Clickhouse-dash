@@ -3287,6 +3287,7 @@
     try {
       const meta = await api.getTracesMeta(currentHost());
       model.meta = meta;
+      ns.traceTabs?.onMeta?.(meta);
       if (meta && meta.schema_ok === false) showError(`Trace table ${meta.database}.${meta.table} is missing one or more required OpenTelemetry columns.`);
       else showError("");
       renderSource();
@@ -3695,6 +3696,9 @@
     });
     ns.traceTabs?.install?.({
       model, dom, api, esc, route, currentHost, serviceColor, registerServiceColors, formatDuration, showError,
+      copyText, loadTrace, spanTraceUrl, localMidnight,
+      // Chart helpers of the result list charts (the Services view's RED charts).
+      chart: { CHART_HEIGHT, chartWidth, timeAxisSvg, attachChartTooltips, chartMessage, countAxis, durationAxis, labelWidthPx, bucketRangeLabel },
       runSearch: (options) => search(options),
       // The result list tab is shown again: search when it is stale.
       showSearch: () => {
