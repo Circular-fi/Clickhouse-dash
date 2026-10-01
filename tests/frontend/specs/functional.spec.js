@@ -1500,7 +1500,7 @@ test('traces: time range, status and result pickers have their final style at fi
     })), ids);
 
     await page.goto('/traces', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
+    await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style(\.[a-z]+)?\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
     // No application script has run yet: this is the page as first painted.
     expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
     const firstPaint = await snapshot(pickers);

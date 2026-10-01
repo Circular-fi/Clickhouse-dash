@@ -24,7 +24,7 @@
         // Written by the parser, not appended: a script-appended <link> does not
         // block rendering, so the shell would first paint unstyled (native
         // selects, plain buttons) and restyle once style.css lands.
-        var cssHref = window.__chdashUrl("static/style.css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        var cssHref = window.__chdashUrl("static/style.metrics.css").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
         document.write('<link rel="stylesheet" href="' + cssHref + '">');
         var favicon = document.createElement("link");
         favicon.rel = "icon"; favicon.type = "image/svg+xml";
