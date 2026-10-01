@@ -263,8 +263,10 @@ body {
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  /* no-repeat: a repeated gradient is drawn by tiling a bitmap of the whole
+     panel (16 MB for a results panel); a single one is drawn directly. */
   background:
-    linear-gradient(180deg, rgb(26 52 152 / 7%), transparent 2rem), var(--panelBg);
+    linear-gradient(180deg, rgb(26 52 152 / 7%), transparent 2rem) no-repeat, var(--panelBg);
   box-shadow: var(--shadow1);
   padding: 0.9rem;
   min-width: 0;
