@@ -15,7 +15,7 @@ async function logsWindow(request, minutes = 30) {
 }
 
 function logsUrl(win, extra = '') {
-  return `/logs?from=${encodeURIComponent(win.from)}&to=${encodeURIComponent(win.to)}${extra}`;
+  return `/observability/logs?from=${encodeURIComponent(win.from)}&to=${encodeURIComponent(win.to)}${extra}`;
 }
 
 const rows = (page) => page.locator('#logsTableRows .logsRow[data-row-id]');
@@ -107,7 +107,7 @@ test('logs: dragging over the histogram zooms the time range', async ({ page, re
   expect(to - from).toBeLessThan(6 * 60_000);
   expect(from).toBeGreaterThanOrEqual(win.start - 1000);
   await expect.poll(total).toBeLessThan(before);
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).not.toContainText('Last');
+  await expect(page.locator('#logsWorkspace .tracePicker--range .tracePicker__button')).not.toContainText('Last');
   // The newest shown row lies inside the zoomed range.
   const newest = await rows(page).first().getAttribute('data-row-id');
   const ms = Number(newest.split('-')[0].slice(0, -6));
@@ -167,19 +167,28 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect.poll(() => param(page, 'q')).toEqual([]);
   await expect(page.locator('#logsQuery')).toHaveValue('');
 
-  // Open trace links to the trace page with the span focused.
+  // Open trace links to the Traces view with the span focused.
   await rows(page).first().click();
   const traceId = (await panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^TraceId$/ }) }).locator('.logsField__value').innerText()).trim();
   const spanId = (await panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^SpanId$/ }) }).locator('.logsField__value').innerText()).trim();
   const open = page.locator('#logsOpenTrace');
   await expect(open).toBeVisible();
-  await expect(open).toHaveAttribute('href', new RegExp(`/traces/${traceId}\\?span=${spanId}$`));
+  await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
   // Escape closes the panel.
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await rows(page).first().click();
+  // The Traces view opens in place (no reload), with the logs time range.
+  await page.evaluate(() => { window.__sameDocument = true; });
   await open.click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${traceId}\\?span=${spanId}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&from=`));
+  await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#logsWorkspace')).toBeHidden();
+  expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
+  // Back returns to the record list as it was.
+  await page.goBack();
+  await expect(page.locator('#logsWorkspace')).toBeVisible();
+  await expect(rows(page).first()).toBeVisible();
 });
 
 test('logs: surrounding context presets', async ({ page, request }) => {
@@ -278,7 +287,7 @@ test('logs: live tail prepends newer records', async ({ page }) => {
         mode: after ? 'tail' : 'page', tail_gap: false, windows: [], text_search: { active: false } }),
     });
   });
-  await page.goto('/logs?from=now-15m&to=now');
+  await page.goto('/observability/logs?from=now-15m&to=now');
   await expect(rows(page)).toHaveCount(3, { timeout: 30_000 });
   await page.locator('#logsLiveButton').click();
   await expect(page.locator('#logsLiveButton')).toHaveAttribute('aria-pressed', 'true');
@@ -297,7 +306,7 @@ test('logs: an empty range offers the newest data, errors are shown', async ({ p
   const meta = await (await request.get('/api/logs/meta')).json();
   test.skip(!meta.time_bounds, 'no logs');
   test.skip(Date.now() - meta.time_bounds.max_ms < 20 * 60000, 'the fixture reaches the default range');
-  await page.goto('/logs');
+  await page.goto('/observability/logs');
   await expect(page.locator('#logsTableMessage')).toContainText('No logs match', { timeout: 30_000 });
   await page.locator('[data-jump-latest]').click();
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
@@ -310,24 +319,23 @@ test('logs: an empty range offers the newest data, errors are shown', async ({ p
   await expect(page.locator('#logsTableMessage')).toContainText('Search failed');
 });
 
-test('logs: the page switcher reaches the logs page and back', async ({ page, request }) => {
+test('logs: the page switcher reaches the Observability page, whose Logs tab opens the logs view', async ({ page, request }) => {
   const version = await (await request.get('/api/version')).json();
   test.skip(!version.features?.logs?.enabled, 'logs disabled');
   await page.goto('/query');
   await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#navLogsButton')).toBeVisible();
-  await page.locator('#navLogsButton').click();
-  await expect(page).toHaveURL(/\/logs(\?|$)/);
-  await expect(page.locator('#pageSelectButton')).toHaveText('Logs');
+  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Explorer', 'Observability']);
+  await page.locator('#navObservabilityButton').click();
+  await expect(page).toHaveURL(/\/observability\/(traces|logs|metrics)(\?|$)/);
+  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await page.locator('#obsTab-logs').click();
+  await expect(page).toHaveURL(/\/observability\/logs(\?|$)/);
+  await expect(page.locator('#logsWorkspace')).toBeVisible();
+  await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-selected', 'true');
   await page.locator('#pageSelectButton').click();
-  // Every other enabled page (Metrics too when metrics are enabled).
-  const metricsOn = (await (await page.request.get('/api/version')).json()).features?.metrics?.enabled === true;
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'Traces', ...(metricsOn ? ['Metrics'] : [])]);
-  await page.locator('#navTracesButton').click();
-  await expect(page).toHaveURL(/\/traces$/);
-  await page.locator('#pageSelectButton').click();
-  await page.locator('#navLogsButton').click();
-  await expect(page).toHaveURL(/\/logs(\?|$)/);
+  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer']);
+  await page.locator('#navQueryButton').click();
+  await expect(page).toHaveURL(/\/query$/);
   // The availability is cached for the next first paint.
   const nav = await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.pageNav.v1')));
   expect(nav.logs).toBe(true);

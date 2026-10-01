@@ -382,7 +382,7 @@
     if (dom.traceDetail) dom.traceDetail.hidden = !detail;
     document.body.classList.toggle("is-trace-detail", !!detail);
     // An open trace names the tab after itself (renderTraceHeader).
-    if (!detail) document.title = TRACES_PAGE_TITLE;
+    if (!detail && ownsUrl()) document.title = TRACES_PAGE_TITLE;
   }
 
   // Like Jaeger's ColorGenerator: a service takes the next palette colour the
@@ -2052,13 +2052,13 @@
       if (dom.traceServiceFilters) dom.traceServiceFilters.innerHTML = "";
       if (dom.traceOverview) dom.traceOverview.innerHTML = "";
       ns.traceInsights?.renderHighlights(null);
-      document.title = TRACES_PAGE_TITLE;
+      if (ownsUrl()) document.title = TRACES_PAGE_TITLE;
       return;
     }
     const cache = activeTraceCache();
     const bounds = cache.bounds;
     const root = spans.find((s) => !parentSpanId(s)) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
-    document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
+    if (ownsUrl()) document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
     if (dom.traceDetailTitle) {
       const filterable = (field, value, text) => (value
         ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`

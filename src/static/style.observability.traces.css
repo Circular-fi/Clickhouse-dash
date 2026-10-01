@@ -6717,6 +6717,23 @@ html[data-theme="light"] {
   cursor: pointer;
 }
 .traceLogsPanel__bar > .traceLogsPanel__title + .traceLogsPanel__close { margin-left: auto; }
+.traceLogsPanel__open {
+  flex: 0 0 auto;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 5px;
+  background: var(--buttonBg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.traceLogsPanel__open:hover,
+.traceLogsPanel__open:focus-visible { border-color: var(--buttonBorderHover); outline: none; }
 .traceLogsPanel__close:hover,
 .traceLogsPanel__close:focus-visible { color: var(--text); outline: none; }
 .traceLogsPanel__notice {

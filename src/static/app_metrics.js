@@ -1343,7 +1343,8 @@
 
   let resizeRaf = 0;
   function onResize() {
-    if (resizeRaf) return;
+    // Hidden (another Observability view): the charts redraw when it shows again.
+    if (resizeRaf || !ownsUrl()) return;
     resizeRaf = requestAnimationFrame(() => {
       resizeRaf = 0;
       for (const panel of model.panels) drawChart(panel);

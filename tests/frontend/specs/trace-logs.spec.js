@@ -83,7 +83,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   test.skip(!fixture, 'OTel logs fixture is not available');
   const { traceId, spans, logs, perSpan, busiest } = fixture;
 
-  await page.goto(`/traces/${traceId}`);
+  await page.goto(`/observability/traces/${traceId}`);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(spans.length, { timeout: 30_000 });
   await expect(headerToggle(page).locator('[data-trace-logs-count]')).toHaveText(String(logs.length), { timeout: 30_000 });
   const errors = logs.filter((r) => r.severity_text === 'ERROR').length;
@@ -176,6 +176,18 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await expect(card.locator('[data-span-section="logs"]')).toHaveAttribute('open', '');
   await expect(card.locator(`.traceLog.is-target[data-log-index="${index}"]`)).toBeVisible();
   await expect(spanRow(page, busiest)).toHaveClass(/is-deep-linked/);
+
+  // Open in Logs: the Logs view, in place, on this trace and its log window; Back returns.
+  await page.evaluate(() => { window.__sameDocument = true; });
+  await panel(page).locator('[data-trace-logs-open]').click();
+  await expect(page).toHaveURL(new RegExp(`/observability/logs\\?from=.+&trace_id=${traceId}`));
+  await expect(page.locator('#logsWorkspace')).toBeVisible();
+  await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
+  // Every listed record belongs to the trace.
+  await expect(page.locator('#logsChips')).toContainText(traceId.slice(0, 8));
+  expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
+  await page.goBack();
+  await expect(page.locator('#traceDetail')).toBeVisible();
   testInfo.annotations.push({ type: 'trace', description: `${traceId}: ${logs.length} logs` });
 });
 
@@ -226,7 +238,7 @@ const json = (route, body, status = 200) => route.fulfill({ status, contentType:
 
 async function openMocked(page, trace = TRACE) {
   await routeTrace(page, trace);
-  await page.goto(`/traces/${trace.trace_id}`);
+  await page.goto(`/observability/traces/${trace.trace_id}`);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(trace.spans.length, { timeout: 20_000 });
 }
 

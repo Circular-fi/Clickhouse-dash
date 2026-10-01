@@ -110,7 +110,7 @@ async function mockTraces(page) {
 
 async function openTrace(page, query = '') {
   await mockTraces(page);
-  await page.goto(`/traces/${TRACE_ID}${query}`);
+  await page.goto(`/observability/traces/${TRACE_ID}${query}`);
   await expect(page.locator('#traceDetail')).toBeVisible();
 }
 
@@ -314,11 +314,11 @@ test('span inspector: references list links, the parent and linked-from spans', 
 
   // Another trace: "Open linked trace" loads it focused on the linked span.
   await items.nth(1).getByRole('link', { name: 'Open linked trace' }).click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${OTHER_TRACE_ID}\\?span=${OTHER_SPAN_ID}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${OTHER_TRACE_ID}\\?span=${OTHER_SPAN_ID}$`));
   await expect(row(page, OTHER_SPAN_ID)).toHaveClass(/is-deep-linked/);
   await expect(inspector(page, OTHER_SPAN_ID)).toBeVisible();
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}\\?span=${ID.B}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?span=${ID.B}$`));
   await expect(inspector(page, ID.B)).toBeVisible();
 });
 
@@ -348,7 +348,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
   await identity.locator(`[data-copy-span-field="${ID.B}"]`).click();
   await expect.poll(() => lastCopy(page)).toBe(ID.B);
   await identity.getByRole('button', { name: 'Copy deep link' }).click();
-  await expect.poll(() => lastCopy(page)).toMatch(new RegExp(`/traces/${TRACE_ID}\\?span=${ID.D}$`));
+  await expect.poll(() => lastCopy(page)).toMatch(new RegExp(`/observability/traces/${TRACE_ID}\\?span=${ID.D}$`));
   const deepLink = await lastCopy(page);
   expect(new URL(deepLink).origin).toBe(new URL(page.url()).origin);
 
@@ -358,7 +358,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
   expect(new URL(page.url()).searchParams.get('span')).toBe(null);
 
   // Opening the deep link: the span's inspector is open, scrolled to, highlighted.
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await page.goto(deepLink);
   await expect(row(page, ID.D)).toHaveClass(/is-deep-linked/);
   await expect(inspector(page, ID.D)).toBeVisible();
@@ -469,7 +469,7 @@ test('trace spans table: sort, filter, and a row click focuses the span in the t
   await pickView(page, 'Trace Spans Table');
   await table.locator(`tr[data-table-span="${ID.F}"]`).click();
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}\\?span=${ID.F}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?span=${ID.F}$`));
   await expect(row(page, ID.F)).toHaveClass(/is-deep-linked/);
   await expect(inspector(page, ID.F)).toBeVisible();
   await expect(page.locator('#traceViewSelect')).toHaveValue('timeline');
@@ -543,19 +543,19 @@ test('trace view persists in the URL and in localStorage; timeline by default', 
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(page.locator('#traceAltView')).toBeHidden();
   await pickView(page, 'Trace Graph');
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}\\?view=graph$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?view=graph$`));
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('graph');
   await page.reload();
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
   await expect(page.locator('#traceViewBar .traceViewBar__picker .tracePicker__button')).toHaveText('Trace Graph');
   // Without ?view=, the stored view opens (and shows in the URL).
-  await page.goto(`/traces/${TRACE_ID}`);
+  await page.goto(`/observability/traces/${TRACE_ID}`);
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
   await expect(page).toHaveURL(/\?view=graph$/);
   // ?view= wins over the stored one; a deep link opens the timeline.
-  await page.goto(`/traces/${TRACE_ID}?view=statistics`);
+  await page.goto(`/observability/traces/${TRACE_ID}?view=statistics`);
   await expect(page.locator('#traceAltView .traceStats')).toBeVisible();
-  await page.goto(`/traces/${TRACE_ID}?span=${ID.C}`);
+  await page.goto(`/observability/traces/${TRACE_ID}?span=${ID.C}`);
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(inspector(page, ID.C)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('statistics');
@@ -566,19 +566,19 @@ test('trace view persists in the URL and in localStorage; timeline by default', 
   await pickView(page, 'Trace Flamegraph');
   await pickView(page, 'Trace Timeline');
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('timeline');
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}$`));
-  await page.goto(`/traces/${TRACE_ID}`);
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}$`));
+  await page.goto(`/observability/traces/${TRACE_ID}`);
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}$`));
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
 });
 
 test('trace views: no horizontal page overflow and readable in both themes', async ({ page }) => {
   for (const theme of ['dark', 'light']) {
     await mockTraces(page);
-    await page.goto('/traces');
+    await page.goto('/observability/traces');
     await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
     for (const [name, query] of [['timeline', '?view=timeline'], ['statistics', '?view=statistics'], ['spans', '?view=spans'], ['flamegraph', '?view=flamegraph'], ['graph', '?view=graph']]) {
-      await page.goto(`/traces/${TRACE_ID}${query}`);
+      await page.goto(`/observability/traces/${TRACE_ID}${query}`);
       await expect(page.locator('#traceDetail')).toBeVisible();
       if (name === 'timeline') {
         await openSpan(page, ID.A);

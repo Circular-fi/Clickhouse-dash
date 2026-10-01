@@ -59,7 +59,7 @@ const mapNode = (page, service) => page.locator(`#traceMapSvg .traceMapNode[aria
 const mapEdge = (page, source, target) => page.locator(`#traceMapSvg .traceMapEdge[aria-label^="${source} calls ${target}:"]`);
 
 async function openMap(page, query = '') {
-  await page.goto(`/traces?tab=map${query ? `&${query}` : ''}`);
+  await page.goto(`/observability/traces?tab=map${query ? `&${query}` : ''}`);
   await expect(page.locator('#traceMapSvg .traceMapNode')).toHaveCount(MAP.nodes.length, { timeout: 30_000 });
 }
 
@@ -67,7 +67,7 @@ test('the Service map tab lives in the URL and sends the search filters', async 
   const searches = await mockTraceResults(page);
   await mockTraceFacets(page);
   const maps = await mockMap(page);
-  await page.goto('/traces?from=now-2h&to=now&status=Error&tag=span%3Ahttp.method%3DGET&service_not=cron');
+  await page.goto('/observability/traces?from=now-2h&to=now&status=Error&tag=span%3Ahttp.method%3DGET&service_not=cron');
   await expect(page.locator('#tracesResults .traceResultItem').first()).toBeVisible({ timeout: 30_000 });
   const tab = page.locator('#tracesTab-map');
   await expect(tab).toHaveAttribute('aria-selected', 'false');
@@ -280,7 +280,7 @@ test('loading, empty, services-only and error states', async ({ page }) => {
     if (mode === 'nodes') return route.fulfill({ json: { ...MAP, nodes: [node('solo', 10, 0, 3)], edges: [], sampled: false, sample_factor: 1 } });
     return route.fulfill({ status: 503, json: { error_code: 'trace_service_map_failed', message: 'Timeout exceeded: elapsed 30 seconds' } });
   });
-  await page.goto('/traces?tab=map');
+  await page.goto('/observability/traces?tab=map');
   await expect(page.locator('#traceMapState')).toContainText('Loading service map', { timeout: 30_000 });
   await expect(page.locator('#traceMapView')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#traceMapState')).toContainText('No services in this time range', { timeout: 10_000 });
@@ -302,7 +302,7 @@ test('service map: no page overflow and readable in both themes', async ({ page 
   await mockTraceResults(page);
   await mockMap(page);
   for (const theme of ['dark', 'light']) {
-    await page.goto('/traces');
+    await page.goto('/observability/traces');
     await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
     await openMap(page);
     await mapNode(page, 'checkout').locator('.traceMapNode__dot').click();
@@ -330,7 +330,7 @@ test('service map smoke on the OTel fixture', async ({ page, request }) => {
   expect(probe.ok()).toBe(true);
   const body = await probe.json();
   test.skip(!body.nodes?.length, 'OTel fixture has no spans on 2026-09-18');
-  await page.goto('/traces?tab=map&from=2026-09-18%2010%3A00%3A00&to=2026-09-18%2011%3A00%3A00');
+  await page.goto('/observability/traces?tab=map&from=2026-09-18%2010%3A00%3A00&to=2026-09-18%2011%3A00%3A00');
   await expect(page.locator('#traceMapSvg .traceMapNode').first()).toBeVisible({ timeout: 60_000 });
   const nodes = await page.locator('#traceMapSvg .traceMapNode').count();
   expect(nodes).toBe(body.nodes.length);

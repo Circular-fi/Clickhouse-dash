@@ -200,8 +200,9 @@
     ctl.seen[view] = { rangeRev: ctl.shared.rangeRev, serviceRev: ctl.shared.serviceRev };
   }
 
-  // The URL `view` opens on: its last URL (or `explicit`) with the shared
-  // context it has not shown yet.
+  // The URL `view` opens on: its last URL with the shared context it has not
+  // shown yet. A link (`explicit`) names what it shows: it only gets the
+  // shared range, when it has none.
   function targetUrl(view, explicit) {
     const url = new URL(explicit || ctl.urls[view] || viewRoute(view), window.location.href);
     const seen = ctl.seen[view] || { rangeRev: 0, serviceRev: 0 };
@@ -210,6 +211,10 @@
       range: shared.range && shared.rangeRev > seen.rangeRev ? { ...shared.range } : null,
       service: shared.service != null && shared.serviceRev > seen.serviceRev ? shared.service : null,
     };
+    if (explicit) {
+      context.service = null;
+      if (url.searchParams.has("from") || url.searchParams.has("to")) context.range = null;
+    }
     if (context.range || context.service != null) viewModule(view)?.applyContext?.(url.searchParams, context);
     markSeen(view);
     return `${url.pathname}${url.search}${url.hash}`;

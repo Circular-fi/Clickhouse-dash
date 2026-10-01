@@ -50,7 +50,7 @@ function metricsUrl(params) {
     if (Array.isArray(value)) for (const item of value) search.append(key, item);
     else if (value != null) search.set(key, value);
   }
-  return `/metrics?${search.toString()}`;
+  return `/observability/metrics?${search.toString()}`;
 }
 
 async function waitForChart(page, panel = page.locator('.metricsPanel').first()) {
@@ -65,7 +65,8 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await page.goto(metricsUrl(range));
   const catalog = page.locator('#metricsCatalog');
   await expect(catalog.locator('.metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#pageSelectButton')).toHaveText('Metrics');
+  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#obsTab-metrics')).toHaveAttribute('aria-selected', 'true');
   const api = catalog.locator('.metricsCatalog__service', { has: page.locator('[data-service-toggle="api_service"]') });
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--histogram')).toHaveText('hist');
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--unit')).toHaveText('s');
@@ -233,7 +234,7 @@ test('metrics: an exemplar dot opens its trace with the span selected', async ({
   await expect(panel.locator('.metricsChart__tooltip')).toContainText('Exemplar');
   await expect(panel.locator('.metricsChart__tooltip')).toContainText(traceId);
   await exemplar.click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${traceId}\\?span=${spanId}`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
   // The deep-linked span is opened inline in the timeline, with its id.
   await expect(page.locator('#traceWaterfall')).toContainText(spanId, { timeout: 30_000 });

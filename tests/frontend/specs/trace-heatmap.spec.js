@@ -101,7 +101,7 @@ const chips = (page) => page.locator('#tracesFilterChips .traceFilterChip');
 const last = (list) => list[list.length - 1];
 
 async function openHeatmap(page, query = 'duration_view=heatmap') {
-  await page.goto(`/traces?${query}`);
+  await page.goto(`/observability/traces?${query}`);
   await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
 }
 
@@ -134,7 +134,7 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
     const json = syntheticAnalytics(Number(params.get('start_ms')), Number(params.get('end_ms')));
     return route.fulfill({ json: params.get('charts') === 'counts' ? { ...json, charts: ['counts'], duration_quantiles: [] } : json });
   });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await expect(page.locator('#traceDurationChart .traceChartLegend--quantiles')).toBeVisible({ timeout: 30_000 });
   const toggle = page.locator('[data-duration-view="heatmap"]');
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -155,7 +155,7 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
   expect(durationsBefore).toBe(1);
   await page.reload();
   await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await expect(heatCells(page).first()).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => new URL(page.url()).searchParams.get('duration_view')).toBe('heatmap');
   // The heatmap mode skips the percentiles request.
@@ -169,7 +169,7 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
   expect(durations()).toBe(durationsBefore + 1);
   // An explicit URL wins over the remembered mode.
   await openHeatmap(page);
-  await page.goto('/traces?duration_view=percentiles');
+  await page.goto('/observability/traces?duration_view=percentiles');
   await expect(page.locator('[data-duration-view="percentiles"]')).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => localStorage.removeItem('chdash.traceDurationView.v1'));
 });
@@ -308,7 +308,7 @@ test('"Search traces in this box" sets the range and the duration filter', async
   await expect.poll(() => seen.searches.length).toBeGreaterThan(count);
   expect(last(seen.searches).has('min_duration_ms')).toBe(false);
   // A reload restores the duration filter from the URL.
-  await page.goto(`/traces?duration_view=heatmap&min_duration_ms=250&max_duration_ms=900`);
+  await page.goto(`/observability/traces?duration_view=heatmap&min_duration_ms=250&max_duration_ms=900`);
   await expect(page.locator('#tracesFilterChips .traceFilterChip--duration')).toContainText('250 ms – 900 ms');
   await expect.poll(() => last(seen.searches).get('max_duration_ms')).toBe('900');
 });
@@ -398,7 +398,7 @@ test('heatmap + comparison: screenshots in both themes, no page overflow', async
   for (const theme of ['dark', 'light']) {
     for (const width of [1280, 1920]) {
       await page.setViewportSize({ width, height: width === 1280 ? 800 : 1080 });
-      await page.goto('/traces');
+      await page.goto('/observability/traces');
       await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
       await openHeatmap(page);
       expect(await page.evaluate(() => document.documentElement.dataset.themeMode)).toBe(theme);

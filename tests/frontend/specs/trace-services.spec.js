@@ -28,7 +28,7 @@ const drawer = (page) => page.locator('#traceSvcDetail');
 const last = (list) => list[list.length - 1];
 
 async function openServices(page, query = '') {
-  await page.goto(`/traces?tab=services${query ? `&${query}` : ''}`);
+  await page.goto(`/observability/traces?tab=services${query ? `&${query}` : ''}`);
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
 }
 
@@ -120,7 +120,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await drawer(page).locator('.traceSvcSlowest__link').first().click();
   await expect(page.locator('#traceDetail')).toBeVisible();
   // The trace URL is pushed once the trace has loaded.
-  await expect.poll(() => new URL(page.url()).pathname).toContain(`/traces/${SYNTHETIC_TRACES[0].trace_id}`);
+  await expect.poll(() => new URL(page.url()).pathname).toContain(`/observability/traces/${SYNTHETIC_TRACES[0].trace_id}`);
   await page.goBack();
   await expect(drawer(page)).toBeVisible();
   await expect(page.locator('#tracesTabs [data-trace-tab="services"]')).toHaveAttribute('aria-selected', 'true');

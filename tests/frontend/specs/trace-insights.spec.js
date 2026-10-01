@@ -138,7 +138,7 @@ async function mockTraces(page) {
 
 async function openTrace(page, query = '') {
   await mockTraces(page);
-  await page.goto(`/traces/${TRACE_ID}${query}`);
+  await page.goto(`/observability/traces/${TRACE_ID}${query}`);
   await expect(page.locator('#traceDetail')).toBeVisible();
 }
 
@@ -309,7 +309,7 @@ test('exceptions: an unparseable stack is preformatted text', async ({ page }) =
   ] })];
   await page.route((url) => url.pathname.endsWith('/api/traces/trace'), (route) => route.fulfill({ status: 200, contentType: 'application/json',
     body: JSON.stringify({ source_host_id: 'local', trace_id: TRACE_ID, range_source: 'trace_index', truncated: false, spans }) }));
-  await page.goto(`/traces/${TRACE_ID}?span=${ID.R}`);
+  await page.goto(`/observability/traces/${TRACE_ID}?span=${ID.R}`);
   const section = inspector(page, ID.R).locator('[data-span-section="exception"]');
   await expect(section.locator('.traceStack__meta')).toHaveText('Stack trace');
   await expect(section.locator('.traceStack__raw')).toHaveText('first line\n  second line');
@@ -342,7 +342,7 @@ test('highlighted attributes follow traces.highlighted_attributes from /api/trac
   await expect(chips.locator('.traceHighlight__key')).toHaveText(['host.name', 'user.id']);
   await expect(chips.locator('.traceHighlight__value')).toHaveText(['billing-7', 'u-42']);
   // A trace without any of the keys hides the row.
-  await page.goto(`/traces/${OTHER_TRACE_ID}`);
+  await page.goto(`/observability/traces/${OTHER_TRACE_ID}`);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(2);
   await expect(page.locator('#traceHighlights')).toBeHidden();
 });
@@ -395,7 +395,7 @@ test('linked from other traces: loaded when References opens, open linked trace 
   await expect(sRefs.locator('[data-linked-from-empty]')).toContainText('±60 min around this trace');
 
   await item.getByRole('link', { name: 'Open linked trace' }).click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${OTHER_TRACE_ID}\\?span=${OTHER_SPAN_ID}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${OTHER_TRACE_ID}\\?span=${OTHER_SPAN_ID}$`));
   await expect(row(page, OTHER_SPAN_ID)).toHaveClass(/is-deep-linked/);
   await expect(inspector(page, OTHER_SPAN_ID)).toBeVisible();
 });
@@ -505,10 +505,10 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   const target = rows.nth(0);
   const spanId = await target.getAttribute('data-context-span');
   await target.click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${OTHER_TRACE_ID}\\?span=${spanId}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${OTHER_TRACE_ID}\\?span=${spanId}$`));
   await expect(panel).toBeVisible();
   await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/traces/${TRACE_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}`));
   // Escape closes it and gives the focus back.
   await panel.focus();
   await page.keyboard.press('Escape');
@@ -543,7 +543,7 @@ test('surrounding context on a real fixture trace lists the spans around it', as
   const rows = search.ok() ? (await search.json()).rows || [] : [];
   test.skip(!rows.length, 'OTEL fixture has no traces near 2026-09-20');
   const traceId = rows[0][0];
-  await page.goto(`/traces/${traceId}`);
+  await page.goto(`/observability/traces/${traceId}`);
   const first = page.locator('#traceWaterfall .traceSpanRow[data-span-id]').first();
   await expect(first).toBeVisible();
   const spanId = await first.getAttribute('data-span-id');
@@ -568,9 +568,9 @@ test('span insights: screenshots in both themes, no page overflow', async ({ pag
     for (const width of [1280, 1920]) {
       await page.setViewportSize({ width, height: width === 1280 ? 800 : 1080 });
       await mockTraces(page);
-      await page.goto('/traces');
+      await page.goto('/observability/traces');
       await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
-      await page.goto(`/traces/${TRACE_ID}?span=${ID.P}`);
+      await page.goto(`/observability/traces/${TRACE_ID}?span=${ID.P}`);
       const card = inspector(page, ID.P);
       await expect(card.locator('[data-span-section="exception"]')).toBeVisible();
       await card.locator('[data-span-section="references"] > summary').click();

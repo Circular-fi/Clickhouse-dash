@@ -1426,7 +1426,7 @@ async function holdRequests(page, pattern) {
   };
 }
 
-for (const path of ['/query', '/explorer', '/traces']) {
+for (const path of ['/query', '/explorer', '/observability/traces']) {
   test(`${path}: the theme button shows the saved theme from the first paint, before any page script`, async ({ page }) => {
     await page.goto(path, { waitUntil: 'domcontentloaded' });
     for (const mode of ['light', 'dark']) {
@@ -1453,10 +1453,10 @@ for (const path of ['/query', '/explorer', '/traces']) {
   });
 }
 
-test('/traces: the analytics charts hold their place from the first paint, so the results never jump down', async ({ page }) => {
+test('/observability/traces: the analytics charts hold their place from the first paint, so the results never jump down', async ({ page }) => {
   test.setTimeout(90_000);
   // A first visit learns from /api/traces/meta that analytics are enabled.
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await expect(page.locator('#traceAnalyticsGrid')).toBeVisible({ timeout: 30_000 });
   const toolbarTop = () => page.evaluate(() => Math.round(document.querySelector('.traceSearchResults__toolbar').getBoundingClientRect().top));
   const api = await holdRequests(page, '**/api/**');
@@ -1487,8 +1487,8 @@ test('/traces: the analytics charts hold their place from the first paint, so th
   }
 });
 
-for (const path of ['/query', '/explorer', '/traces', '/logs', '/metrics']) {
-  test(`${path}: the Query / Explorer / Traces / Logs / Metrics switcher is painted with the shell, before any API answer`, async ({ page }) => {
+for (const path of ['/query', '/explorer', '/observability/traces', '/observability/logs', '/observability/metrics']) {
+  test(`${path}: the Query / Explorer / Observability switcher is painted with the shell, before any API answer`, async ({ page }) => {
     const api = await holdRequests(page, '**/api/**');
     try {
       const pageSelectBox = () => page.evaluate(() => {
@@ -1513,7 +1513,8 @@ for (const path of ['/query', '/explorer', '/traces', '/logs', '/metrics']) {
       expect(await pageSelectBox()).toEqual(early);
       // The open menu lists the other pages (the current one is implied).
       await page.locator('#pageSelectButton').click();
-      const others = ['query', 'explorer', 'traces', 'logs', 'metrics'].filter((name) => `/${name}` !== path);
+      const current = path.startsWith('/observability') ? 'observability' : path.slice(1);
+      const others = ['query', 'explorer', 'observability'].filter((name) => name !== current);
       await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(others.map((name) => name[0].toUpperCase() + name.slice(1)));
     } finally {
       await api.release();
@@ -1546,8 +1547,8 @@ test('traces: time range, status and result pickers have their final style at fi
       }];
     })), ids);
 
-    await page.goto('/traces', { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style(\.[a-z]+)?\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
+    await page.goto('/observability/traces', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style(\.[a-z]+)*\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
     // No application script has run yet: this is the page as first painted.
     expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
     const firstPaint = await snapshot(pickers);
@@ -1614,7 +1615,7 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
   const detailText = await detail.text();
   const detailSpans = JSON.parse(detailText).spans;
 
-  await page.goto(`/traces/${encodeURIComponent(traceId)}`);
+  await page.goto(`/observability/traces/${encodeURIComponent(traceId)}`);
   await expect(page.locator('#traceDetail')).toBeVisible();
   const spanRows = page.locator('#traceWaterfall .traceSpanRow');
   await expect(spanRows).toHaveCount(detailSpans.length, { timeout: 30_000 });
@@ -1754,7 +1755,7 @@ test('traces: each listed trace shows its services in the order of their first s
     return route.continue({ url: url.toString() });
   });
   const searched = page.waitForResponse((response) => response.url().includes('/api/traces/search?'), { timeout: 60_000 });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   const payload = await (await searched).json();
   expect(payload.rows.length).toBeGreaterThan(0);
 
@@ -1799,13 +1800,13 @@ const isSearch = (request) => new URL(request.url()).pathname.endsWith('/api/tra
 
 async function openTracesIdle(page) {
   const firstSearch = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await firstSearch;
   await page.waitForLoadState('networkidle');
 }
 
 async function openTimeRange(page) {
-  await page.locator('.tracePicker--range .tracePicker__button').click();
+  await page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button').click();
   const panel = page.locator('#tracesTimeRangePanel');
   await expect(panel).toBeVisible();
   await expect(page.locator('#tracesRangeStart')).toBeFocused();
@@ -1866,7 +1867,7 @@ test('traces: the calendar takes a start older than the max range, moves on to t
   expect(Number(params.end_ms)).toBe(endDay + DAY_MS - 1000);
   expect(params.align_buckets).toBe('0');
   await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} → ${utcDay(endDay)}`);
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText(`${utcDay(startDay)} → ${utcDay(endDay)}`);
   const payload = await (await answered).json();
   if (fixtureIsOld) {
     expect(payload.rows.length).toBeGreaterThan(0);
@@ -1922,7 +1923,7 @@ test('traces: From / To take relative expressions, and invalid or too wide range
   expect(Math.abs(Number(params.end_ms) - clock)).toBeLessThan(15_000);
   expect(params.align_buckets).toBe('1');
   await expect(panel).toBeHidden();
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 6 hours');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 6 hours');
 
   // Rounding: "now/d" From / To covers today.
   await openTimeRange(page);
@@ -1934,7 +1935,7 @@ test('traces: From / To take relative expressions, and invalid or too wide range
   const todayParams = searchParams(await today);
   expect(Number(todayParams.start_ms)).toBe(utcMidnight(Date.now()));
   expect(Number(todayParams.end_ms)).toBe(utcMidnight(Date.now()) + DAY_MS - 1);
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Today');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Time range · Today');
 });
 
 test('traces: quick ranges are searchable and only offer ranges within the max range', async ({ page }) => {
@@ -1963,7 +1964,7 @@ test('traces: quick ranges are searchable and only offer ranges within the max r
   const params = searchParams(await searched);
   expect(Number(params.end_ms) - Number(params.start_ms)).toBe(45 * 60_000);
   await expect(page.locator('#tracesTimeRangePanel')).toBeHidden();
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 45 minutes');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 45 minutes');
 
   await openTimeRange(page);
   const yesterday = page.waitForRequest(isSearch, { timeout: 60_000 });
@@ -1983,7 +1984,7 @@ test('traces: recently used ranges persist across reloads and apply in one click
   let answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
   await page.locator('#tracesCustomRangeApply').click();
   await answered;
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
   await openTimeRange(page);
   await page.locator('#tracesRangeStart').fill('now-2d');
   await page.locator('#tracesRangeEnd').fill('now-1d');
@@ -2002,7 +2003,7 @@ test('traces: recently used ranges persist across reloads and apply in one click
   const params = searchParams(await searched);
   expect(Number(params.start_ms)).toBe(Date.UTC(2026, 8, 14, 6, 0, 0));
   expect(Number(params.end_ms)).toBe(Date.UTC(2026, 8, 14, 18, 30, 0));
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 18:30');
   // Most recent first.
   await openTimeRange(page);
   await expect(recent).toHaveText(['2026-09-14 06:00 → 18:30', 'now-2d → now-1d']);
@@ -2011,7 +2012,7 @@ test('traces: recently used ranges persist across reloads and apply in one click
 test('traces: the time range panel works from the keyboard (Escape, calendar arrows, Enter)', async ({ page }) => {
   test.setTimeout(90_000);
   await openTracesIdle(page);
-  const button = page.locator('.tracePicker--range .tracePicker__button');
+  const button = page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button');
   await button.focus();
   await page.keyboard.press('Enter');
   const panel = page.locator('#tracesTimeRangePanel');
@@ -2099,7 +2100,7 @@ test('traces: shift and zoom out move the applied window like Grafana, within th
   await page.locator('#tracesRangeShiftForward').click();
   params = searchParams(await searched);
   expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 14, 6), Date.UTC(2026, 8, 14, 14)]);
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 14:00');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('2026-09-14 06:00 → 14:00');
   await page.waitForLoadState('networkidle');
   // Zooming out stops at the max range.
   await page.locator('#tracesRangeStart').fill('2026-09-10 00:00:00');
@@ -2243,7 +2244,7 @@ test('traces: a result shows its error span count next to its title and the head
 async function openSyntheticTraces(page, options = {}) {
   const searches = await mockTraceResults(page, options);
   const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await answered;
   await expect(page.locator('#tracesResults [data-trace-id]').first()).toBeVisible({ timeout: 30_000 });
   return searches;
@@ -2411,14 +2412,14 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   // A row (and Enter on a focused row) opens its trace.
   await page.locator('#tracesResults tr[data-trace-id="ffeeddccbbaa99887766554433221100"] [data-cell="spans"]').click();
   // The trace URL carries the search context (here the table view).
-  await expect(page).toHaveURL(/\/traces\/ffeeddccbbaa99887766554433221100(?:\?results=table)?$/);
+  await expect(page).toHaveURL(/\/observability\/traces\/ffeeddccbbaa99887766554433221100(?:\?results=table)?$/);
   await expect(page.locator('#traceDetail')).toBeVisible();
   await page.goBack();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
   const row = page.locator('#tracesResults tr[data-trace-id="00112233445566778899aabbccddeeff"]');
   await row.focus();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/traces\/00112233445566778899aabbccddeeff(?:\?results=table)?$/);
+  await expect(page).toHaveURL(/\/observability\/traces\/00112233445566778899aabbccddeeff(?:\?results=table)?$/);
 });
 
 test('traces: the duration chart plots the listed traces as dots over a padded duration axis, and a dot opens its trace', async ({ page }) => {
@@ -2473,7 +2474,7 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.up();
-  await expect(page).toHaveURL(new RegExp(`/traces/${target.trace_id}$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${target.trace_id}$`));
   await expect(page.locator('#traceDetail')).toBeVisible();
 });
 
@@ -2481,7 +2482,7 @@ test('traces: an empty result names the searched range and zooms out from there'
   test.setTimeout(90_000);
   const searches = await mockTraceResults(page, { traces: [] });
   const answered = page.waitForResponse((response) => isSearch(response.request()), { timeout: 60_000 });
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await answered;
   const empty = page.locator('#tracesResults [data-empty-results]');
   await expect(empty).toBeVisible();

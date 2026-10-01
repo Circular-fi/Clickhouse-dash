@@ -349,9 +349,9 @@ test('captures the inline result row details in the light theme', async ({ page 
 for (const theme of ['dark', 'light']) {
   test(`captures the traces time range panel (${theme})`, async ({ page }, testInfo) => {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
-    await page.goto('/traces');
+    await page.goto('/observability/traces');
     await page.waitForLoadState('networkidle');
-    const button = page.locator('.tracePicker--range .tracePicker__button');
+    const button = page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button');
     await button.click();
     const panel = page.locator('#tracesTimeRangePanel');
     await expect(panel).toBeVisible();
@@ -386,7 +386,7 @@ for (const theme of ['dark', 'light']) {
     }, theme);
     await mockTraceResults(page);
     await mockTraceFacets(page);
-    await page.goto('/traces?tag=span%3Ahttp.method%3DGET&tag_not=resource%3Adeployment.environment%3Dstaging&tag_exists=db.system&service_not=cron');
+    await page.goto('/observability/traces?tag=span%3Ahttp.method%3DGET&tag_not=resource%3Adeployment.environment%3Dstaging&tag_exists=db.system&service_not=cron');
     await expect(page.locator('#tracesResults .traceResultItem')).toHaveCount(SYNTHETIC_TRACES.length, { timeout: 30_000 });
     await expect(page.locator('#tracesFilterChips .traceFilterChip')).toHaveCount(4);
     const method = page.locator('#traceFacets .traceFacet[data-facet-key="http.method"]');
@@ -411,7 +411,7 @@ for (const theme of ['dark', 'light']) {
   test(`captures the traces search results as a list and as a table (${theme})`, async ({ page }, testInfo) => {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
     await mockTraceResults(page);
-    await page.goto('/traces');
+    await page.goto('/observability/traces');
     await expect(page.locator('#tracesResults .traceResultItem')).toHaveCount(SYNTHETIC_TRACES.length, { timeout: 30_000 });
     await expect(page.locator('#traceDurationChart .traceScatterDot')).toHaveCount(SYNTHETIC_TRACES.length);
     const noOverflow = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
@@ -433,10 +433,10 @@ for (const theme of ['dark', 'light']) {
 }
 
 test('traces search bar fits the viewport: nothing clipped, Search fully visible', async ({ page }) => {
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await page.locator('#tracesSearchButton').waitFor();
   const fit = await page.evaluate(() => {
-    const bar = document.querySelector('.traceSearchBar');
+    const bar = document.querySelector('#tracesForm');
     const button = document.getElementById('tracesSearchButton').getBoundingClientRect();
     const barBox = bar.getBoundingClientRect();
     return {
@@ -457,7 +457,7 @@ for (const theme of ['dark', 'light']) {
     const fmt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
     const end = Number(meta.time_bounds.max_ms);
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
-    await page.goto(`/logs?from=${encodeURIComponent(fmt(end - 30 * 60000))}&to=${encodeURIComponent(fmt(end + 1000))}`);
+    await page.goto(`/observability/logs?from=${encodeURIComponent(fmt(end - 30 * 60000))}&to=${encodeURIComponent(fmt(end + 1000))}`);
     const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
     await expect(rows.first()).toBeVisible({ timeout: 30_000 });
     await expect(page.locator('#logsHistogram rect.logsBar').first()).toBeVisible();

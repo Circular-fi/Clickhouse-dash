@@ -50,7 +50,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
   const searches = await mockSearches(page);
   const query = 'from=now-2h&to=now&status=Error&tag=span%3Ahttp.method%3DGET&tag_not=resource%3Adeployment.environment%3Dprod'
     + '&tag_exists=db.system&tag_missing=resource%3Ak8s.pod&service_not=cron&limit=20&sort=longest&results=table';
-  await page.goto(`/traces?${query}`);
+  await page.goto(`/observability/traces?${query}`);
   await waitResults(page);
   await expect(page.locator('#tracesResults table.traceTable')).toBeVisible();
   const first = lastSearch(searches);
@@ -66,7 +66,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
   await expect(chips(page).nth(0)).toHaveAttribute('title', 'span:http.method = GET');
   await expect(page.locator('#tracesStatus')).toHaveValue('Error');
   await expect(page.locator('#tracesSort')).toHaveValue('longest');
-  await expect(page.locator('.tracePicker--range .tracePicker__button')).toContainText('Last 2 hours');
+  await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toContainText('Last 2 hours');
   // The page-load search keeps its URL (no extra history entry).
   expect(new URL(page.url()).searchParams.getAll('tag')).toEqual(['span:http.method=GET']);
 
@@ -111,7 +111,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
 
 test('the Tag / Value inputs add chips with =, !=, exists and missing', async ({ page }) => {
   const searches = await mockSearches(page);
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await waitResults(page);
   const key = page.locator('#tracesTagKey');
   const value = page.locator('#tracesTagValue');
@@ -164,7 +164,7 @@ test('click-to-filter from the span inspector and the trace header returns to th
   const searches = await mockSearches(page);
   const trace = richTrace();
   await page.route((url) => url.pathname.endsWith('/api/traces/trace') && url.searchParams.get('trace_id') === FIRST.trace_id, (route) => route.fulfill({ json: trace }));
-  await page.goto('/traces?tag_exists=db.system');
+  await page.goto('/observability/traces?tag_exists=db.system');
   await waitResults(page);
   await page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"] .traceResult__wideTitle`).click();
   await expect(page.locator('#traceDetail')).toBeVisible();
@@ -227,7 +227,7 @@ test('click-to-filter from the span inspector and the trace header returns to th
 
 test('click-to-filter from the result list service pills; Escape closes the menu', async ({ page }) => {
   const searches = await mockSearches(page);
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await waitResults(page);
   const item = page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"]`);
   await item.locator('.traceSvcPill[data-service="checkout"]').click();
@@ -253,7 +253,7 @@ test('click-to-filter from the result list service pills; Escape closes the menu
 
 test('a trace detail URL keeps its search context for back to search, even on a fresh page', async ({ page }) => {
   const searches = await mockSearches(page);
-  await page.goto(`/traces/${FIRST.trace_id}?from=now-3h&to=now&tag=http.method%3DPOST&status=Error`);
+  await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-3h&to=now&tag=http.method%3DPOST&status=Error`);
   await expect(page.locator('#traceDetail')).toBeVisible();
   await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
   await page.locator('#traceBackButton').click();
@@ -286,7 +286,7 @@ test('facets: keys and values, include / exclude, pins, load more and key search
   });
   const searches = await mockSearches(page);
   const seen = await mockTraceFacets(page);
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   await waitResults(page);
   const panel = page.locator('#traceFacets');
   await expect(panel).toBeVisible();

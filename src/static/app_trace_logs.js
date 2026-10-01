@@ -369,6 +369,22 @@
     return `from ${w.margin_before_s} s before the trace to ${w.margin_after_s} s after it`;
   }
 
+  // The Logs view of the Observability page on this trace and its log window
+  // (app_observability.js follows the link in place).
+  function logsViewUrl(v) {
+    const w = v.payload?.window;
+    const traceId = String(ctx?.model?.activeTrace?.trace_id || "");
+    const from = Number(w?.from_s);
+    const to = Number(w?.to_s);
+    if (!traceId || !Number.isFinite(from) || !Number.isFinite(to) || !ns.timeRange || !ns.api) return "";
+    const params = new URLSearchParams({
+      from: ns.timeRange.formatDateTime(from * 1000),
+      to: ns.timeRange.formatDateTime((to + 1) * 1000),
+      trace_id: traceId,
+    });
+    return `${ns.api.resolveUrl("observability/logs")}?${params.toString()}`;
+  }
+
   function panelToolbarHtml(v) {
     const counts = severityCounts(v.records);
     const chips = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => {
@@ -379,9 +395,11 @@
     for (const record of v.records) services.set(record.service_name, (services.get(record.service_name) || 0) + 1);
     const options = [["", `ALL (${v.records.length})`], ...[...services.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([name, n]) => [name, `${name || "unknown"} (${n})`])];
     const serviceSelect = `<div class="themeSelect tracePicker traceLogsPanel__service"><select id="traceLogsService" class="tracePicker__native" data-field-label="Service" aria-label="Filter logs by service">${options.map(([value, label]) => `<option value="${esc(value)}"${value === v.filters.service ? " selected" : ""}>${esc(label)}</option>`).join("")}</select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Service · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div>`;
+    const logsUrl = logsViewUrl(v);
+    const openInLogs = logsUrl ? `<a class="traceLogsPanel__open" href="${esc(logsUrl)}" data-trace-logs-open title="Search these logs in the Logs view">Open in Logs</a>` : "";
     const elapsed = Number(v.payload?.elapsed_ms);
     const source = v.payload ? `${v.payload.database}.${v.payload.table}${Number.isFinite(elapsed) ? ` · ${elapsed} ms` : ""}` : "";
-    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span><button type="button" class="traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
+    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
   }
 
   function panelListHtml(v) {

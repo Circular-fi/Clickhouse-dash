@@ -49,7 +49,7 @@ function tracesUrl(range, extra = {}) {
     if (Array.isArray(value)) for (const item of value) params.append(key, item);
     else params.set(key, value);
   }
-  return `/traces?${params.toString()}`;
+  return `/observability/traces?${params.toString()}`;
 }
 
 // /api/traces/spans requests as URLSearchParams.
@@ -233,7 +233,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   const searchesBefore = requests.length;
   await panel(page).locator('[data-span-open-trace]').click();
   await expect(page.locator('#traceDetail')).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/traces/${traceId}\\?span=${spanId}&.*mode=spans`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&.*mode=spans`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
   // Back: the same spans, selection and panel, without searching again.
   await page.locator('#traceBackButton').click();
@@ -245,7 +245,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   // Browser Back from a trace opened again works the same way (the trace URL
   // is pushed once the trace has loaded).
   await panel(page).locator('[data-span-open-trace]').click();
-  await expect(page).toHaveURL(new RegExp(`/traces/${traceId}\\?span=${spanId}`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
   await page.goBack();
   await expect(page.locator('#tracesSearchView')).toBeVisible();

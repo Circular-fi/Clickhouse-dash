@@ -26,7 +26,7 @@ const rgb = (hex) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice
 
 async function openTrace(page, trace) {
   await routeTrace(page, trace);
-  await page.goto(`/traces/${trace.trace_id}`);
+  await page.goto(`/observability/traces/${trace.trace_id}`);
   await expect(page.locator('#traceDetail')).toBeVisible();
   if (trace.spans.length > 1000) {
     // Virtualised: the body holds every row's place, the DOM a window.
@@ -44,7 +44,7 @@ test('trace detail: services take Jaeger\'s palette in first-seen order, the sam
   const services = [...new Set(trace.spans.map((span) => span.service))].sort();
   await routeSearch(page, [trace]);
   await routeTrace(page, trace);
-  await page.goto('/traces');
+  await page.goto('/observability/traces');
   const result = page.locator(`#tracesResults [data-trace-id="${trace.trace_id}"]`);
   await expect(result).toBeVisible({ timeout: 20_000 });
   const listColors = await result.locator('[style*="--trace-service-color"]').evaluateAll((els) => Object.fromEntries(els.map((el) => [
