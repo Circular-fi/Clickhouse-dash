@@ -699,14 +699,29 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
     expect(await chart.evaluate((host) => host.scrollWidth - host.clientWidth)).toBeLessThanOrEqual(1);
   }
   await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/example-mobile-390.png` });
-  // High-density screens: the backing store follows devicePixelRatio.
+  // High-density screens: the backing store follows devicePixelRatio, with no
+  // resize to trigger the redraw (the chart's `resolution` media query does).
+  // Chromium's emulation re-evaluates media queries only when the viewport
+  // metrics change: an override that changes the scale factor alone sets
+  // devicePixelRatio without any change event or resize, which no real display
+  // change does. So the override also grows the viewport by 1 px in height,
+  // which leaves the plot width (and the resize observer) alone.
   await page.setViewportSize({ width: 1280, height: 900 });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 2, mobile: false });
-  await expect.poll(() => chart.evaluate((host) => {
+  const backing = () => chart.evaluate((host) => {
     const c = host.querySelector('canvas');
-    return c.width / c.getBoundingClientRect().width;
-  })).toBeCloseTo(2, 1);
+    const css = c.getBoundingClientRect().width;
+    const plot = host.querySelector('.chartCore__plot').clientWidth;
+    return { ratio: c.width / css, plot, fits: Math.abs(plot - css) <= 1, viewport: innerWidth, draws: Number(host.querySelector('.chartCore').dataset.draws) };
+  });
+  // The 1280 px redraw has landed before the scale factor changes.
+  await expect.poll(async () => { const b = await backing(); return b.viewport === 1280 && b.fits && b.ratio === 1; }).toBe(true);
+  const at1x = await backing();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 901, deviceScaleFactor: 2, mobile: false });
+  await expect.poll(async () => (await backing()).ratio).toBeCloseTo(2, 1);
+  const at2x = await backing();
+  expect(at2x.plot).toBe(at1x.plot);
+  expect(at2x.draws).toBeGreaterThan(at1x.draws);
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
 });
