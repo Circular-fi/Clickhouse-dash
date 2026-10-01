@@ -5,25 +5,27 @@
   // client-side chart drawn from the rows the panel already received (no
   // re-query). Each result panel (the main one and every multiquery panel)
   // owns one controller, so its view and chart settings live with the result.
+  //
+  // Rows are parsed once, incrementally, into typed columns (a streamed result
+  // only parses its new rows); the chart itself is drawn by the shared canvas
+  // engine (app_chart_core.js), loaded on the first Chart view.
   const ns = window.ChDash;
   if (!ns) return;
 
   const VIEW_STORE_KEY = "chdash.results.view";
-  const SVG_NS = "http://www.w3.org/2000/svg";
-  // Drawing budget: at most this many points per series reach the SVG. Larger
-  // results keep every row for the tooltip but draw a min/max envelope.
-  const MAX_DRAWN_POINTS = 2000;
-  const ENVELOPE_BUCKETS = 500;
   // Coloured series slots (--qchart-1..8); further groups fold into "Other".
   const MAX_SERIES = 8;
   const PLOT_HEIGHT = 300;
-  const MARGIN = { top: 12, right: 16, bottom: 30 };
-  const MIN_REBUILD_INTERVAL_MS = 200;
+  // Streaming: redraw at most every MIN_REBUILD_INTERVAL_MS, and never spend
+  // more than about a fifth of the main thread on it.
+  const MIN_REBUILD_INTERVAL_MS = 100;
+  const SYNC_KEY = "query-results";
+  const CORE_SCRIPT = "app_chart_core.js";
   const CHART_TYPES = [
-    ["line", "Line"],
-    ["area", "Stacked area"],
-    ["bar", "Bar"],
-    ["number", "Number"],
+    ["line", "Line", "One line per series"],
+    ["area", "Area", "Stacked areas: the series add up"],
+    ["bar", "Bars", "Bars: split values stack, Y columns stand side by side"],
+    ["number", "Number", "One big number per value (single-row results)"],
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
 
@@ -44,6 +46,31 @@
     } catch {
       // Storage may be unavailable (private mode); the panel keeps its view.
     }
+  }
+
+  // --- Chart engine (lazy) ---------------------------------------------------
+
+  const scriptBase = (() => {
+    const script = document.currentScript;
+    if (script && script.src) return script.src.replace(/[^/]*$/, "");
+    if (typeof window.__chdashUrl === "function") return new URL(window.__chdashUrl("static/"), window.location.href).toString();
+    return new URL("./static/", window.location.href).toString();
+  })();
+  let corePromise = null;
+
+  function loadCore() {
+    if (ns.chartCore) return Promise.resolve(ns.chartCore);
+    if (!corePromise) {
+      corePromise = new Promise((resolve, reject) => {
+        const el = document.createElement("script");
+        el.src = new URL(CORE_SCRIPT, scriptBase).toString();
+        el.async = true;
+        el.onload = () => (ns.chartCore ? resolve(ns.chartCore) : reject(new Error("chart engine missing")));
+        el.onerror = () => { corePromise = null; reject(new Error(`Failed to load ${CORE_SCRIPT}`)); };
+        document.head.appendChild(el);
+      });
+    }
+    return corePromise;
   }
 
   // --- Column types ---------------------------------------------------------
@@ -76,6 +103,12 @@
     return "category";
   }
 
+  // Short type name for the pickers: "DateTime", "UInt64", "Array(UInt64)".
+  function typeHint(type) {
+    const t = unwrapType(type);
+    return t.length > 24 ? `${t.slice(0, 23)}\u2026` : t;
+  }
+
   // --- Values ---------------------------------------------------------------
 
   function toNumber(value) {
@@ -91,6 +124,69 @@
 
   const ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/;
 
+  // Timestamps as the server writes them ("2026-10-01T09:27:06Z",
+  // "...06.123Z", "...06+02:00", or local "2026-10-01 09:27:06") parse with
+  // digit arithmetic: the date part is cached (rows usually share it), so no
+  // Date or RegExp runs per row. Anything else returns NaN (slow path).
+  const hourCache = new Map();
+  let lastPrefix = "";
+  let lastPrefixMs = 0;
+  let lastPrefixUtc = false;
+  const digit = (text, i) => text.charCodeAt(i) - 48;
+  const two = (text, i) => digit(text, i) * 10 + digit(text, i + 1);
+
+  function quickTimeText(text) {
+    let end = text.length;
+    if (end < 19 || text.charCodeAt(4) !== 45 || text.charCodeAt(7) !== 45 || text.charCodeAt(13) !== 58 || text.charCodeAt(16) !== 58) return NaN;
+    const sep = text.charCodeAt(10);
+    if (sep !== 32 && sep !== 84) return NaN;
+    let utc = false;
+    let offsetMs = 0;
+    const last = text.charCodeAt(end - 1);
+    if (last === 90) { utc = true; end -= 1; } else if (end >= 25 && text.charCodeAt(end - 3) === 58) {
+      const sign = text.charCodeAt(end - 6);
+      if (sign === 43 || sign === 45) {
+        utc = true;
+        offsetMs = (two(text, end - 5) * 60 + two(text, end - 2)) * 60000 * (sign === 45 ? -1 : 1);
+        end -= 6;
+      }
+    }
+    let frac = 0;
+    if (end > 19) {
+      if (text.charCodeAt(19) !== 46) return NaN;
+      let scale = 100;
+      for (let i = 20; i < end; i++) {
+        const d = digit(text, i);
+        if (d < 0 || d > 9) return NaN;
+        frac += d * scale;
+        scale /= 10;
+      }
+    }
+    const mm = two(text, 14), ss = two(text, 17);
+    if (!(mm >= 0 && mm < 60 && ss >= 0 && ss < 61)) return NaN;
+    // UTC: cache the day; local: cache the hour (offsets change on DST days).
+    const prefixLen = utc ? 10 : 13;
+    let base;
+    if (lastPrefixUtc === utc && lastPrefix.length === prefixLen && text.startsWith(lastPrefix)) base = lastPrefixMs;
+    else {
+      const key = text.slice(0, prefixLen);
+      const cacheKey = utc ? key : `L${key}`;
+      base = hourCache.get(cacheKey);
+      if (base === undefined) {
+        const y = Number(text.slice(0, 4)), mo = two(text, 5) - 1, d = two(text, 8);
+        base = utc ? Date.UTC(y, mo, d) : new Date(y, mo, d, two(text, 11)).getTime();
+        if (hourCache.size > 8192) hourCache.clear();
+        hourCache.set(cacheKey, base);
+      }
+      lastPrefix = key;
+      lastPrefixMs = base;
+      lastPrefixUtc = utc;
+    }
+    if (!(base === base)) return NaN;
+    const ms = utc ? base + two(text, 11) * 3600000 + mm * 60000 + ss * 1000 - offsetMs : base + mm * 60000 + ss * 1000;
+    return ms + frac;
+  }
+
   // Milliseconds since the epoch (fractional below a millisecond). A bare date
   // is a calendar day (local midnight), so it reads the same day everywhere.
   function toTimeMs(value, kind) {
@@ -99,6 +195,8 @@
       if (!Number.isFinite(value)) return NaN;
       return kind === "date" ? value * 86400000 : value * 1000;
     }
+    const quick = typeof value === "string" ? quickTimeText(value) : NaN;
+    if (quick === quick) return quick;
     const text = String(value).trim();
     const m = ISO_TIME.exec(text);
     if (!m) {
@@ -128,7 +226,823 @@
     return String(value);
   }
 
-  // --- Number formatting ----------------------------------------------------
+  // --- Typed columns, parsed incrementally from the panel's rows ------------
+
+  function growable(capacity = 1024) {
+    return { data: new Float64Array(capacity), length: 0 };
+  }
+
+  function pushValue(col, value) {
+    if (col.length === col.data.length) {
+      const next = new Float64Array(Math.max(1024, col.data.length * 2));
+      next.set(col.data);
+      col.data = next;
+    }
+    col.data[col.length++] = value;
+  }
+
+  // One store per result: each column the chart reads is parsed once, up to
+  // the rows received so far (rows only ever get appended).
+  function createStore() {
+    let rowsRef = null;
+    const columns = new Map(); // "kind:index" -> parsed column
+
+    function reset(rows) {
+      rowsRef = rows;
+      columns.clear();
+    }
+
+    function column(rows, index, kind, columnKindValue) {
+      if (rows !== rowsRef) reset(rows);
+      const key = `${kind}:${index}`;
+      let col = columns.get(key);
+      if (!col || col.parsed > rows.length) {
+        col = { kind, parsed: 0, values: growable(Math.max(1024, rows.length)), keys: null, keyIndex: null };
+        if (kind === "key") { col.keys = []; col.keyIndex = new Map(); }
+        columns.set(key, col);
+      }
+      const values = col.values;
+      for (let r = col.parsed; r < rows.length; r++) {
+        const row = rows[r];
+        let v;
+        if (!Array.isArray(row)) v = NaN;
+        else if (kind === "num") v = toNumber(row[index]);
+        else if (kind === "time") v = toTimeMs(row[index], columnKindValue);
+        else if (kind === "row") v = Number(row.__chdashRowIndex) || r + 1;
+        else {
+          const k = categoryKey(row[index]);
+          v = col.keyIndex.get(k);
+          if (v === undefined) {
+            v = col.keys.length;
+            col.keys.push(k);
+            col.keyIndex.set(k, v);
+          }
+        }
+        pushValue(values, v);
+      }
+      col.parsed = rows.length;
+      return col;
+    }
+
+    return { column, reset: () => reset(null) };
+  }
+
+  // --- Configuration --------------------------------------------------------
+
+  function metaSignature(columns, types) {
+    return JSON.stringify([columns, types]);
+  }
+
+  function autoX(kinds) {
+    let x = kinds.findIndex((kind) => kind === "time" || kind === "date");
+    if (x < 0) {
+      const numeric = kinds.filter((kind) => kind === "number").length;
+      if (kinds[0] === "number" && numeric >= 2) x = 0;
+      else if (kinds[0] === "string") x = 0;
+      else x = -1;
+    }
+    return x;
+  }
+
+  function defaultConfig(meta) {
+    const { kinds } = meta;
+    const x = autoX(kinds);
+    const series = [];
+    for (let i = 0; i < kinds.length; i++) if (kinds[i] === "number" && i !== x && series.length < MAX_SERIES) series.push(i);
+    // A time series with a label column is usually the long form of
+    // GROUP BY time, label: one line per label.
+    let group = -1;
+    if (x >= 0 && axisKindOf(kinds[x]) === "time") {
+      group = kinds.findIndex((kind, i) => kind === "string" && i !== x);
+    }
+    return { x, xAuto: true, series, group, type: "line", typeAuto: true };
+  }
+
+  function normalizeConfig(cfg, meta) {
+    const { kinds } = meta;
+    const valid = (i) => Number.isInteger(i) && i >= 0 && i < kinds.length;
+    if (cfg.xAuto) cfg.x = autoX(kinds);
+    if (cfg.x !== -1 && !valid(cfg.x)) cfg.x = -1;
+    cfg.series = cfg.series.filter((i, pos, all) => valid(i) && i !== cfg.x && kinds[i] === "number" && all.indexOf(i) === pos).slice(0, MAX_SERIES);
+    if (cfg.group !== -1 && (!valid(cfg.group) || cfg.group === cfg.x || cfg.series.includes(cfg.group))) cfg.group = -1;
+    if (cfg.typeAuto) {
+      const xKind = cfg.x < 0 ? "index" : axisKindOf(kinds[cfg.x]);
+      cfg.type = xKind === "category" ? "bar" : "line";
+    }
+    return cfg;
+  }
+
+  // --- Model: typed columns -> ascending x and one value array per line -----
+
+  function slotColor(slot) {
+    return slot < 0 ? "var(--qchart-other)" : `var(--qchart-${(slot % MAX_SERIES) + 1})`;
+  }
+
+  function buildModel(cfg, meta, rows, store) {
+    const { kinds, columns } = meta;
+    const xi = cfg.x;
+    const xKind = xi < 0 ? "index" : axisKindOf(kinds[xi]);
+    const xColumnKind = xi < 0 ? "" : kinds[xi];
+    const n = rows.length;
+    const xCol = xi < 0 ? store.column(rows, -1, "row")
+      : xKind === "time" ? store.column(rows, xi, "time", xColumnKind)
+        : xKind === "number" ? store.column(rows, xi, "num") : store.column(rows, xi, "key");
+    const X = xCol.values.data;
+    const series = cfg.series.slice();
+    const seriesCols = series.map((col) => store.column(rows, col, "num").values.data);
+    const gi = series.length ? cfg.group : -1;
+    const groupCol = gi >= 0 ? store.column(rows, gi, "key") : null;
+    const model = {
+      xKind,
+      xColumnKind,
+      xLabel: xi < 0 ? "Row" : String(columns[xi]),
+      xs: null,
+      categories: xKind === "category" ? xCol.keys.slice() : [],
+      lines: [],
+      rowCount: n,
+      skipped: 0,
+      summed: false,
+      foldedGroups: 0,
+      subMillisecond: false,
+    };
+
+    // Lines: one per series column, or per series column and kept group.
+    let groupSlotOf = null; // group code -> slot (kept groups), else Other
+    let groupCount = 0;
+    let hasOther = false;
+    if (groupCol) {
+      const codes = groupCol.values.data;
+      const keys = groupCol.keys;
+      const totals = new Float64Array(keys.length);
+      const s0 = seriesCols[0];
+      for (let r = 0; r < n; r++) {
+        const v = s0[r];
+        if (v === v) totals[codes[r]] += Math.abs(v);
+      }
+      const topN = Math.max(1, Math.floor(MAX_SERIES / series.length));
+      const ranked = keys.map((key, code) => code).sort((a, b) => totals[b] - totals[a] || a - b);
+      // Colours follow the group's first appearance, not its rank.
+      const kept = ranked.slice(0, topN).sort((a, b) => a - b);
+      model.foldedGroups = Math.max(0, ranked.length - kept.length);
+      hasOther = model.foldedGroups > 0;
+      groupCount = kept.length;
+      groupSlotOf = new Int32Array(keys.length).fill(-1);
+      kept.forEach((code, slot) => { groupSlotOf[code] = slot; });
+      series.forEach((col, j) => {
+        kept.forEach((code, g) => {
+          const key = keys[code];
+          model.lines.push({ id: `${col}\u0001${key}`, label: series.length > 1 ? `${columns[col]} \u00b7 ${key}` : key, slot: j * groupCount + g, seriesIndex: j });
+        });
+        if (hasOther) model.lines.push({ id: `${col}\u0001\u0002other`, label: series.length > 1 ? `${columns[col]} \u00b7 Other` : "Other", slot: -1, seriesIndex: j });
+      });
+    } else {
+      series.forEach((col, j) => model.lines.push({ id: String(col), label: String(columns[col]), slot: j, seriesIndex: j }));
+    }
+    const perSeries = groupCol ? groupCount + (hasOther ? 1 : 0) : 1;
+
+    // Direct path: one row per x, already ascending (ORDER BY x, numbers(),
+    // GROUP BY with ORDER BY): the parsed columns are the drawn arrays.
+    if (!groupCol && xKind !== "category") {
+      let increasing = n > 0;
+      for (let r = 0; r < n && increasing; r++) if (!(X[r] === X[r]) || (r > 0 && !(X[r] > X[r - 1]))) increasing = false;
+      if (increasing) {
+        model.xs = X.subarray(0, n);
+        model.lines.forEach((line, j) => { line.values = seriesCols[j].subarray(0, n); line.nulls = null; });
+        if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
+        return model;
+      }
+    }
+
+    // General path: rows sorted by x (stable), equal x merged (values summed),
+    // a NULL kept apart from a missing row (lines break at NULL, connect over
+    // missing rows).
+    let order;
+    let valid = 0;
+    const ordered = new Uint32Array(n);
+    for (let r = 0; r < n; r++) {
+      if (X[r] === X[r]) ordered[valid++] = r;
+      else model.skipped++;
+    }
+    order = ordered.subarray(0, valid);
+    if (xKind !== "category") {
+      let sorted = true;
+      for (let k = 1; k < valid; k++) if (X[order[k]] < X[order[k - 1]]) { sorted = false; break; }
+      if (!sorted) order = Uint32Array.from(order).sort((a, b) => X[a] - X[b] || a - b);
+    }
+    let u;
+    let slotOf;
+    if (xKind === "category") {
+      u = xCol.keys.length;
+      slotOf = (r) => X[r];
+    } else {
+      // Unique x positions along the order.
+      const pos = new Uint32Array(n);
+      const xsTmp = new Float64Array(valid);
+      u = 0;
+      for (let k = 0; k < valid; k++) {
+        const r = order[k];
+        if (u === 0 || X[r] !== xsTmp[u - 1]) xsTmp[u++] = X[r];
+        pos[r] = u - 1;
+      }
+      model.xs = xsTmp.slice(0, u);
+      slotOf = (r) => pos[r];
+    }
+    if (xKind === "category") {
+      model.xs = new Float64Array(u);
+      for (let i = 0; i < u; i++) model.xs[i] = i;
+    }
+    const codes = groupCol ? groupCol.values.data : null;
+    const values = model.lines.map(() => new Float64Array(u).fill(NaN));
+    const nulls = model.lines.map(() => new Uint8Array(u));
+    const S = series.length;
+    for (let k = 0; k < valid; k++) {
+      const r = order[k];
+      const idx = slotOf(r);
+      let offset = 0;
+      if (codes) {
+        const slot = groupSlotOf[codes[r]];
+        offset = slot < 0 ? groupCount : slot;
+      }
+      for (let j = 0; j < S; j++) {
+        const v = seriesCols[j][r];
+        const li = j * perSeries + offset;
+        const column = values[li];
+        const current = column[idx];
+        if (!(v === v)) {
+          if (!(current === current)) nulls[li][idx] = 1;
+          continue;
+        }
+        if (current === current) { column[idx] = current + v; model.summed = true; } else { column[idx] = v; nulls[li][idx] = 0; }
+      }
+    }
+    model.lines.forEach((line, li) => { line.values = values[li]; line.nulls = nulls[li]; });
+    if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
+    return model;
+  }
+
+  function hasSubMillisecond(xs) {
+    const step = Math.max(1, Math.floor(xs.length / 2000));
+    for (let i = 0; i < xs.length; i += step) if (xs[i] % 1 !== 0) return true;
+    return false;
+  }
+
+  // --- Controller -----------------------------------------------------------
+
+  function createController({ getData, viewRoot, onViewChange = null, toggleClassName = "" } = {}) {
+    const toggleEl = document.createElement("div");
+    toggleEl.className = `resultsViewToggle ${toggleClassName}`.trim();
+    toggleEl.setAttribute("role", "group");
+    toggleEl.setAttribute("aria-label", "Result view");
+    toggleEl.hidden = true;
+    const tableBtn = document.createElement("button");
+    tableBtn.type = "button";
+    tableBtn.className = "resultsViewToggle__opt";
+    tableBtn.dataset.view = "table";
+    tableBtn.textContent = "Table";
+    const chartBtn = document.createElement("button");
+    chartBtn.type = "button";
+    chartBtn.className = "resultsViewToggle__opt";
+    chartBtn.dataset.view = "chart";
+    chartBtn.textContent = "Chart";
+    toggleEl.append(tableBtn, chartBtn);
+
+    const hostEl = document.createElement("div");
+    hostEl.className = "queryChart";
+    hostEl.innerHTML = `
+      <div class="queryChart__toolbar">
+        <div class="queryChart__types" role="group" aria-label="Chart type"></div>
+        <label class="queryChart__field" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
+          <span class="queryChart__fieldLabel">X axis</span>
+          <select class="queryChart__select queryChart__x" aria-label="X axis column"></select>
+        </label>
+        <div class="queryChart__field queryChart__seriesField" title="Numeric columns drawn as series on the vertical axis.">
+          <span class="queryChart__fieldLabel">Y values</span>
+          <button type="button" class="queryChart__select queryChart__seriesButton" aria-haspopup="true" aria-expanded="false" aria-label="Y value columns"></button>
+          <div class="queryChart__seriesMenu" role="group" aria-label="Y value columns" hidden></div>
+        </div>
+        <label class="queryChart__field" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
+          <span class="queryChart__fieldLabel">Split by</span>
+          <select class="queryChart__select queryChart__group" aria-label="Split by column"></select>
+        </label>
+        <span class="queryChart__note"></span>
+      </div>
+      <div class="queryChart__range" hidden>
+        <span class="queryChart__rangeText"></span>
+        <span class="queryChart__rangeHint">Drag to zoom \u00b7 double-click to reset</span>
+        <button type="button" class="queryChart__resetZoom" hidden title="Show the whole x range again (or double-click the plot)">Reset zoom</button>
+      </div>
+      <div class="queryChart__stage">
+        <div class="queryChart__message" hidden></div>
+        <div class="queryChart__numbers" hidden></div>
+      </div>`;
+    const typesEl = hostEl.querySelector(".queryChart__types");
+    const xSelect = hostEl.querySelector(".queryChart__x");
+    const seriesButton = hostEl.querySelector(".queryChart__seriesButton");
+    const seriesMenu = hostEl.querySelector(".queryChart__seriesMenu");
+    const groupSelect = hostEl.querySelector(".queryChart__group");
+    const noteEl = hostEl.querySelector(".queryChart__note");
+    const rangeEl = hostEl.querySelector(".queryChart__range");
+    const rangeText = hostEl.querySelector(".queryChart__rangeText");
+    const resetZoomBtn = hostEl.querySelector(".queryChart__resetZoom");
+    const stageEl = hostEl.querySelector(".queryChart__stage");
+    const messageEl = hostEl.querySelector(".queryChart__message");
+    const numbersEl = hostEl.querySelector(".queryChart__numbers");
+    const typeButtons = new Map();
+    for (const [type, label, title] of CHART_TYPES) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "queryChart__type";
+      btn.dataset.type = type;
+      btn.dataset.title = title;
+      btn.title = title;
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        if (btn.disabled || !cfg) return;
+        cfg.type = type;
+        cfg.typeAuto = false;
+        rememberConfig();
+        syncToolbar();
+        render();
+      });
+      typeButtons.set(type, btn);
+      typesEl.appendChild(btn);
+    }
+
+    let meta = null; // { columns, types, kinds, signature }
+    let cfg = null;
+    let lastCfg = null; // kept across results with the same columns and types
+    let chosenView = readStoredView();
+    let effective = "table";
+    let model = null;
+    let dirty = true;
+    let rebuildTimer = 0;
+    let renderRaf = 0;
+    let lastCostMs = 0;
+    let lastBuildAt = 0;
+    const hidden = new Set();
+    let destroyed = false;
+    let chart = null;
+    let store = createStore();
+    // Until the terminal event a one-row result may still grow: the Number
+    // view is only chosen once the stream is done (like the vertical table).
+    let streamDone = false;
+
+    function chartable() {
+      return !!(meta && meta.kinds.some((kind) => kind === "number"));
+    }
+
+    function applyView() {
+      const next = chosenView === "chart" && chartable() ? "chart" : "table";
+      const can = chartable();
+      toggleEl.hidden = !meta;
+      chartBtn.disabled = !can;
+      chartBtn.title = can ? "Chart the received rows" : NO_NUMERIC_TITLE;
+      toggleEl.title = can ? "" : NO_NUMERIC_TITLE;
+      tableBtn.setAttribute("aria-pressed", String(next === "table"));
+      chartBtn.setAttribute("aria-pressed", String(next === "chart"));
+      toggleEl.dataset.view = next;
+      const changed = next !== effective;
+      effective = next;
+      if (viewRoot) viewRoot.classList.toggle("is-chartView", next === "chart");
+      if (next === "chart") {
+        syncToolbar();
+        scheduleRender({ immediate: true });
+      } else {
+        closeSeriesMenu();
+        if (chart) chart.release();
+      }
+      if (changed && typeof onViewChange === "function") onViewChange(next);
+    }
+
+    function setView(view) {
+      chosenView = view === "chart" ? "chart" : "table";
+      storeView(chosenView);
+      applyView();
+    }
+
+    tableBtn.addEventListener("click", () => setView("table"));
+    chartBtn.addEventListener("click", () => { if (!chartBtn.disabled) setView("chart"); });
+    // Fetch the engine as soon as a chart is likely.
+    const prefetch = () => { if (chartable()) loadCore().catch(() => {}); };
+    chartBtn.addEventListener("pointerenter", prefetch);
+    chartBtn.addEventListener("focus", prefetch);
+
+    // --- toolbar ---
+
+    function syncToolbar() {
+      if (!meta || !cfg) return;
+      const { kinds, columns, types } = meta;
+      const auto = autoX(kinds);
+      const autoName = auto < 0 ? "row number" : columns[auto];
+      const xOptions = [`<option value="auto">Auto (${esc(autoName)})</option>`, `<option value="-1">Row number</option>`];
+      kinds.forEach((kind, i) => {
+        xOptions.push(`<option value="${i}">${esc(columns[i])} \u00b7 ${esc(typeHint(types[i]))}</option>`);
+      });
+      xSelect.innerHTML = xOptions.join("");
+      xSelect.value = cfg.xAuto ? "auto" : String(cfg.x);
+      xSelect.dataset.column = String(cfg.x);
+      xSelect.title = cfg.x < 0 ? "Row number" : `${columns[cfg.x]} (${types[cfg.x]})`;
+
+      const options = [];
+      kinds.forEach((kind, i) => {
+        if (i === cfg.x) return;
+        if (kind === "number") {
+          const checked = cfg.series.includes(i);
+          const disabled = !checked && cfg.series.length >= MAX_SERIES;
+          options.push(`<label class="queryChart__seriesOpt"${disabled ? ` title="At most ${MAX_SERIES} series"` : ""}><input type="checkbox" value="${i}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}><span>${esc(columns[i])}</span><small>${esc(typeHint(types[i]))}</small></label>`);
+        } else {
+          options.push(`<label class="queryChart__seriesOpt is-unavailable" title="${esc(`${columns[i]} is ${types[i]}: only numeric columns can be drawn as Y values`)}"><input type="checkbox" disabled><span>${esc(columns[i])}</span><small>${esc(typeHint(types[i]))} \u00b7 not numeric</small></label>`);
+        }
+      });
+      seriesMenu.innerHTML = options.length ? options.join("") : `<span class="queryChart__seriesEmpty">No other column</span>`;
+      const names = cfg.series.map((i) => meta.columns[i]);
+      seriesButton.textContent = names.length ? names.join(", ") : "None";
+      seriesButton.title = names.length ? names.join(", ") : "Pick at least one numeric column";
+
+      const groupOptions = [`<option value="-1">None</option>`];
+      kinds.forEach((kind, i) => {
+        if (i === cfg.x || cfg.series.includes(i) || kind === "other") return;
+        groupOptions.push(`<option value="${i}">${esc(columns[i])} \u00b7 ${esc(typeHint(types[i]))}</option>`);
+      });
+      groupSelect.innerHTML = groupOptions.join("");
+      groupSelect.value = String(cfg.group);
+
+      syncTypeButtons(currentRows().length);
+    }
+
+    function effectiveType(rowCount) {
+      if (!cfg) return "line";
+      if (rowCount === 1 && streamDone && (cfg.typeAuto || cfg.type === "number")) return "number";
+      if (cfg.type === "number") return "line";
+      return cfg.type;
+    }
+
+    function syncTypeButtons(rowCount) {
+      const type = effectiveType(rowCount);
+      for (const [key, btn] of typeButtons) {
+        if (key === "number") {
+          btn.disabled = !(rowCount === 1 && streamDone);
+          btn.title = btn.disabled ? "Number needs a single-row result" : btn.dataset.title;
+        }
+        btn.setAttribute("aria-pressed", String(key === type));
+      }
+      hostEl.dataset.chartType = type;
+    }
+
+    xSelect.addEventListener("change", () => {
+      if (!cfg) return;
+      if (xSelect.value === "auto") {
+        cfg.xAuto = true;
+        cfg.x = autoX(meta.kinds);
+      } else {
+        const x = Number(xSelect.value);
+        cfg.xAuto = false;
+        cfg.x = Number.isInteger(x) ? x : -1;
+      }
+      if (cfg.group === cfg.x) cfg.group = -1;
+      cfg.series = cfg.series.filter((i) => i !== cfg.x);
+      if (!cfg.series.length) {
+        const first = meta.kinds.findIndex((kind, i) => kind === "number" && i !== cfg.x);
+        if (first >= 0) cfg.series = [first];
+      }
+      normalizeConfig(cfg, meta);
+      configChanged({ resetZoom: true });
+    });
+
+    groupSelect.addEventListener("change", () => {
+      if (!cfg) return;
+      const g = Number(groupSelect.value);
+      cfg.group = Number.isInteger(g) ? g : -1;
+      normalizeConfig(cfg, meta);
+      configChanged();
+    });
+
+    seriesMenu.addEventListener("change", (ev) => {
+      const input = ev.target;
+      if (!(input instanceof HTMLInputElement) || !cfg) return;
+      const col = Number(input.value);
+      if (input.checked) {
+        if (!cfg.series.includes(col) && cfg.series.length < MAX_SERIES) cfg.series.push(col);
+      } else cfg.series = cfg.series.filter((i) => i !== col);
+      cfg.series.sort((a, b) => a - b);
+      normalizeConfig(cfg, meta);
+      configChanged({ keepMenu: true });
+      const again = seriesMenu.querySelector(`input[value="${col}"]`);
+      if (again) again.focus({ preventScroll: true });
+    });
+
+    let onDocPointer = null;
+    let onDocKey = null;
+    function closeSeriesMenu() {
+      if (seriesMenu.hidden) return;
+      seriesMenu.hidden = true;
+      seriesButton.setAttribute("aria-expanded", "false");
+      if (onDocPointer) document.removeEventListener("pointerdown", onDocPointer, true);
+      if (onDocKey) document.removeEventListener("keydown", onDocKey, true);
+      onDocPointer = onDocKey = null;
+    }
+    function openSeriesMenu() {
+      seriesMenu.hidden = false;
+      seriesButton.setAttribute("aria-expanded", "true");
+      onDocPointer = (ev) => {
+        if (!(ev.target instanceof Node) || !seriesMenu.parentElement.contains(ev.target)) closeSeriesMenu();
+      };
+      onDocKey = (ev) => {
+        if (ev.key === "Escape") { closeSeriesMenu(); seriesButton.focus(); }
+      };
+      document.addEventListener("pointerdown", onDocPointer, true);
+      document.addEventListener("keydown", onDocKey, true);
+      const first = seriesMenu.querySelector("input:not(:disabled)");
+      if (first) first.focus({ preventScroll: true });
+    }
+    seriesButton.addEventListener("click", () => {
+      if (seriesMenu.hidden) openSeriesMenu(); else closeSeriesMenu();
+    });
+
+    resetZoomBtn.addEventListener("click", () => { if (chart) chart.resetZoom(); });
+
+    function rememberConfig() {
+      lastCfg = cfg ? { ...cfg, series: cfg.series.slice(), signature: meta.signature } : null;
+    }
+
+    function configChanged({ keepMenu = false, resetZoom = false } = {}) {
+      rememberConfig();
+      dirty = true;
+      if (resetZoom && chart) chart.update({ zoom: null });
+      if (!keepMenu) closeSeriesMenu();
+      syncToolbar();
+      scheduleRender({ immediate: true });
+    }
+
+    // --- data flow ---
+
+    function currentRows() {
+      const data = typeof getData === "function" ? getData() : null;
+      return data && Array.isArray(data.rows) ? data.rows : [];
+    }
+
+    function setMeta(columns, types) {
+      const cols = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
+      const tys = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
+      const signature = metaSignature(cols, tys);
+      meta = { columns: cols, types: tys, kinds: tys.map(columnKind), signature };
+      if (lastCfg && lastCfg.signature === signature) {
+        cfg = normalizeConfig({ ...lastCfg, series: lastCfg.series.slice() }, meta);
+      } else {
+        cfg = normalizeConfig(defaultConfig(meta), meta);
+        hidden.clear();
+      }
+      // A new result starts from the last view chosen anywhere.
+      chosenView = readStoredView();
+      streamDone = false;
+      model = null;
+      store = createStore();
+      dirty = true;
+      if (chart) chart.update({ zoom: null });
+      hostEl.dataset.chartType = cfg.type;
+      if (chosenView === "chart") prefetch();
+      applyView();
+    }
+
+    function rowsChanged() {
+      dirty = true;
+      if (effective !== "chart") return;
+      scheduleRender();
+    }
+
+    function done() {
+      streamDone = true;
+      dirty = true;
+      syncToolbar();
+      if (effective === "chart") scheduleRender({ immediate: true });
+    }
+
+    function reset() {
+      meta = null;
+      cfg = null;
+      model = null;
+      store = createStore();
+      dirty = true;
+      if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
+      if (renderRaf) { cancelAnimationFrame(renderRaf); renderRaf = 0; }
+      clearPlot();
+      applyView();
+    }
+
+    function scheduleRender({ immediate = false } = {}) {
+      if (destroyed || effective !== "chart") return;
+      if (immediate) {
+        if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
+        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
+        return;
+      }
+      if (rebuildTimer || renderRaf) return;
+      const interval = Math.max(MIN_REBUILD_INTERVAL_MS, lastCostMs * 5);
+      const wait = Math.max(0, lastBuildAt + interval - performance.now());
+      rebuildTimer = setTimeout(() => {
+        rebuildTimer = 0;
+        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
+      }, wait);
+    }
+
+    function setStage(mode) {
+      messageEl.hidden = mode !== "message";
+      numbersEl.hidden = mode !== "numbers";
+      if (chart) chart.root.hidden = mode !== "chart";
+      if (chart && mode !== "chart") chart.release();
+      rangeEl.hidden = mode !== "chart";
+      hostEl.dataset.stage = mode;
+    }
+
+    function clearPlot() {
+      setStage("none");
+      noteEl.textContent = "";
+      delete hostEl.dataset.pointsDrawn;
+    }
+
+    function showMessage(text) {
+      setStage("message");
+      messageEl.textContent = text;
+      noteEl.textContent = notChartedNote();
+      delete hostEl.dataset.pointsDrawn;
+    }
+
+    function render() {
+      if (destroyed || effective !== "chart" || !meta || !cfg) return;
+      const rows = currentRows();
+      syncTypeButtons(rows.length);
+      if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows\u2026"); return; }
+      if (!cfg.series.length) { showMessage("Select at least one numeric column in Y values."); return; }
+      const type = effectiveType(rows.length);
+      hostEl.dataset.chartType = type;
+      if (type === "number") { renderNumber(rows); return; }
+      if (!ns.chartCore) {
+        if (!chart) showMessage("Loading the chart\u2026");
+        loadCore().then(() => scheduleRender({ immediate: true }), () => showMessage("The chart engine failed to load."));
+        return;
+      }
+      const t0 = performance.now();
+      if (dirty || !model) {
+        const tm = performance.now();
+        model = buildModel(cfg, meta, rows, store);
+        hostEl.dataset.modelMs = (performance.now() - tm).toFixed(2);
+        dirty = false;
+      }
+      hostEl.dataset.xKind = model.xKind;
+      if (!model.xs.length) { showMessage(`No chartable rows: ${model.xLabel} has no usable values.`); return; }
+      renderPlot(type);
+      lastCostMs = performance.now() - t0;
+      lastBuildAt = performance.now();
+      hostEl.dataset.renderMs = lastCostMs.toFixed(2);
+    }
+
+    function renderNumber(rows) {
+      setStage("numbers");
+      const row = rows[0];
+      // One row: every charted value, the numeric X column included.
+      const cols = cfg.series.slice();
+      if (cfg.x >= 0 && meta.kinds[cfg.x] === "number" && !cols.includes(cfg.x)) cols.push(cfg.x);
+      cols.sort((a, b) => a - b);
+      const format = ns.chartCore ? ns.chartCore.formatValue : formatFullNumber;
+      numbersEl.innerHTML = cols.map((col) => {
+        const v = toNumber(Array.isArray(row) ? row[col] : NaN);
+        return `<div class="queryChart__number"><span class="queryChart__numberLabel">${esc(meta.columns[col])}</span><span class="queryChart__numberValue">${esc(v === v ? format(v) : "NULL")}</span></div>`;
+      }).join("");
+      noteEl.textContent = "1 row";
+      delete hostEl.dataset.pointsDrawn;
+    }
+
+    function notChartedNote() {
+      if (!meta || !cfg) return "";
+      const skipped = meta.kinds.map((kind, i) => (kind !== "number" && i !== cfg.x && i !== cfg.group ? i : -1)).filter((i) => i >= 0);
+      if (!skipped.length) return "";
+      const names = skipped.slice(0, 2).map((i) => meta.columns[i]).join(", ");
+      return `not numeric, not drawn: ${names}${skipped.length > 2 ? ` +${skipped.length - 2}` : ""}`;
+    }
+
+    function buildNote() {
+      const fmt = ns.chartCore.formatExact;
+      const parts = [`${fmt(model.rowCount)} row${model.rowCount === 1 ? "" : "s"}`];
+      const width = chart && chart.layout() ? chart.layout().plotW : 1000;
+      if (model.xs.length > width * 2) parts.push(`${fmt(model.xs.length)} points, min/max envelope per pixel`);
+      if (model.summed) parts.push(`rows sharing the same ${model.xLabel} are summed`);
+      if (model.foldedGroups) parts.push(`${model.foldedGroups} group${model.foldedGroups === 1 ? "" : "s"} folded into Other`);
+      if (model.skipped) parts.push(`${fmt(model.skipped)} row${model.skipped === 1 ? "" : "s"} without ${model.xLabel} skipped`);
+      const other = notChartedNote();
+      if (other) parts.push(other);
+      return parts.join(" \u00b7 ");
+    }
+
+    function rangeLabel(info) {
+      const core = ns.chartCore;
+      const xs = model.xs;
+      const zoomed = info && info.zoomed;
+      let lo = zoomed ? info.xLo : xs[0];
+      let hi = zoomed ? info.xHi : xs[xs.length - 1];
+      const label = esc(model.xLabel);
+      if (model.xKind === "category") {
+        const a = Math.max(0, Math.ceil(lo)), b = Math.min(xs.length - 1, Math.floor(hi));
+        const count = Math.max(0, b - a + 1);
+        return `<b>${label}</b> ${core.formatExact(count)} of ${core.formatExact(xs.length)} values${zoomed && count ? `: ${esc(model.categories[a])} \u2026 ${esc(model.categories[b])}` : ""}`;
+      }
+      if (model.xKind === "time") {
+        const digits = model.xColumnKind === "date" ? 0 : model.subMillisecond ? 6 : 3;
+        const text = (v) => (model.xColumnKind === "date" ? core.formatInstant(v, 0).slice(0, 10) : core.formatInstant(v, digits));
+        let to = text(hi);
+        const from = text(lo);
+        if (to.slice(0, 10) === from.slice(0, 10)) to = to.slice(11);
+        return `<b>${label}</b> ${esc(from)} \u2192 ${esc(to)} <span>${esc(core.formatDuration(hi - lo))} \u00b7 ${esc(core.utcOffsetText(lo))}</span>`;
+      }
+      if (zoomed) { lo = Number(lo.toPrecision(10)); hi = Number(hi.toPrecision(10)); }
+      return `<b>${label}</b> ${esc(core.formatExact(lo))} \u2192 ${esc(core.formatExact(hi))}`;
+    }
+
+    function onDraw(info) {
+      hostEl.dataset.pointsDrawn = String(info.points);
+      hostEl.dataset.zoomed = String(info.zoomed);
+      resetZoomBtn.hidden = !info.zoomed;
+      rangeEl.classList.toggle("is-zoomed", info.zoomed);
+      if (model && model.xs.length) rangeText.innerHTML = rangeLabel(info);
+    }
+
+    function renderPlot(type) {
+      const core = ns.chartCore;
+      const lines = model.lines;
+      const series = lines.map((line) => ({
+        id: line.id,
+        label: line.label,
+        color: slotColor(line.slot),
+        values: line.values,
+        nulls: line.nulls,
+        // Areas stack every line; bars stack the groups of one Y column and
+        // put the columns side by side (different measures never add up).
+        group: type === "area" ? 0 : line.seriesIndex,
+      }));
+      const data = {
+        xKind: model.xKind,
+        xs: model.xs,
+        categories: model.categories,
+        series,
+        type,
+        stack: type === "area" || type === "bar",
+        xLabel: model.xLabel,
+        xFractionDigits: model.subMillisecond ? 6 : 3,
+        xDateOnly: model.xColumnKind === "date",
+        hidden: Array.from(hidden),
+      };
+      setStage("chart");
+      if (!chart) {
+        chart = core.create(stageEl, {
+          ...data,
+          height: PLOT_HEIGHT,
+          syncKey: SYNC_KEY,
+          onDraw,
+          onHiddenChange: (next) => { hidden.clear(); for (const id of next) hidden.add(id); },
+        });
+      } else {
+        chart.root.hidden = false;
+        chart.update(data);
+      }
+      chart.root.setAttribute("aria-label", chartAriaLabel(type));
+      chart.root.setAttribute("role", "img");
+      noteEl.textContent = buildNote();
+    }
+
+    function chartAriaLabel(type) {
+      const names = model.lines.map((line) => line.label).join(", ");
+      const kind = type === "area" ? "Stacked area chart" : type === "bar" ? "Bar chart" : "Line chart";
+      return `${kind} of ${names} by ${model.xLabel}`;
+    }
+
+    function destroy() {
+      destroyed = true;
+      closeSeriesMenu();
+      if (rebuildTimer) clearTimeout(rebuildTimer);
+      if (renderRaf) cancelAnimationFrame(renderRaf);
+      rebuildTimer = 0;
+      renderRaf = 0;
+      if (chart) chart.destroy();
+      chart = null;
+      model = null;
+      store = createStore();
+    }
+
+    return {
+      toggleEl,
+      hostEl,
+      setMeta,
+      rowsChanged,
+      done,
+      reset,
+      destroy,
+      getView: () => effective,
+      setView,
+      getChart: () => chart,
+    };
+  }
+
+  // --- Axis helpers kept for app_metrics.js (SVG panels), until it draws with
+  // ns.chartCore like the Query chart ------------------------------------------
 
   const COMPACT_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
 
@@ -138,13 +1052,21 @@
     return { factor: 1, suffix: "" };
   }
 
+  // Decimals that write step exactly (2.5K needs one).
+  function stepDecimals(step) {
+    for (let d = 0; d < 8; d++) {
+      const scaled = Math.abs(step) * 10 ** d;
+      if (Math.abs(scaled - Math.round(scaled)) <= 1e-7 * Math.max(1, scaled)) return d;
+    }
+    return 8;
+  }
+
   // Axis labels share one unit and one decimal count, so ticks line up:
   // 0, 2.5K, 5K, 7.5K / 0.05, 0.10, 0.15.
   function formatTickNumber(value, step, unit) {
     if (value === 0) return "0";
     const { factor, suffix } = unit;
-    const scaledStep = Math.abs(step / factor);
-    const decimals = scaledStep > 0 ? Math.min(8, Math.max(0, Math.ceil(-Math.log10(scaledStep) - 1e-9))) : 0;
+    const decimals = stepDecimals(step / factor);
     const scaled = value / factor;
     const text = suffix
       ? scaled.toFixed(decimals)
@@ -191,8 +1113,6 @@
     return { min: start, max: end, step, values };
   }
 
-  // --- Time axis (browser-local time, like the Traces charts) --------------
-
   const SECOND_MS = 1000, MINUTE_MS = 60000, HOUR_MS = 3600000, DAY_MS = 86400000;
   const SUB_DAY_STEPS_MS = [
     1, 2, 5, 10, 20, 50, 100, 200, 500,
@@ -227,15 +1147,6 @@
     return `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
   };
 
-  // Full instant for tooltips: 2026-09-30 14:05:00 (milliseconds when the
-  // data has them).
-  function formatInstant(ms, withMillis) {
-    if (!Number.isFinite(ms)) return "\u2014";
-    const d = new Date(Math.floor(ms));
-    const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-    return `${date} ${clockLabel(d.getTime(), withMillis ? "milli" : "second")}`;
-  }
-
   function subDayTicks(startMs, endMs, stepMs) {
     const ticks = [];
     const day = new Date(localMidnight(startMs));
@@ -244,7 +1155,6 @@
       day.setDate(day.getDate() + 1);
       const next = day.getTime();
       if (stepMs >= HOUR_MS) {
-        // Wall-clock hours (00:00, 06:00, 12:00...), even on DST days.
         const base = new Date(midnight);
         for (let hour = 0; hour < 24; hour += stepMs / HOUR_MS) {
           const t = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hour).getTime();
@@ -325,1075 +1235,9 @@
     return [];
   }
 
-  // --- Configuration --------------------------------------------------------
-
-  function metaSignature(columns, types) {
-    return JSON.stringify([columns, types]);
-  }
-
-  function defaultConfig(meta) {
-    const { kinds } = meta;
-    const numeric = [];
-    for (let i = 0; i < kinds.length; i++) if (kinds[i] === "number") numeric.push(i);
-    let x = kinds.findIndex((kind) => kind === "time" || kind === "date");
-    if (x < 0) {
-      if (kinds[0] === "number" && numeric.length >= 2) x = 0;
-      else if (kinds[0] === "string") x = 0;
-      else x = -1;
-    }
-    const series = numeric.filter((i) => i !== x).slice(0, MAX_SERIES);
-    // A time series with a label column is usually the long form of
-    // GROUP BY time, label: one line per label.
-    let group = -1;
-    if (x >= 0 && axisKindOf(kinds[x]) === "time") {
-      group = kinds.findIndex((kind, i) => kind === "string" && i !== x);
-    }
-    return { x, series, group, type: "line", typeAuto: true };
-  }
-
-  function normalizeConfig(cfg, meta) {
-    const { kinds } = meta;
-    const valid = (i) => Number.isInteger(i) && i >= 0 && i < kinds.length;
-    if (cfg.x !== -1 && !valid(cfg.x)) cfg.x = -1;
-    cfg.series = cfg.series.filter((i, pos, all) => valid(i) && i !== cfg.x && kinds[i] === "number" && all.indexOf(i) === pos).slice(0, MAX_SERIES);
-    if (cfg.group !== -1 && (!valid(cfg.group) || cfg.group === cfg.x || cfg.series.includes(cfg.group))) cfg.group = -1;
-    if (cfg.typeAuto) {
-      const xKind = cfg.x < 0 ? "index" : axisKindOf(kinds[cfg.x]);
-      cfg.type = xKind === "category" ? "bar" : "line";
-    }
-    return cfg;
-  }
-
-  // --- Model: rows -> sorted x values and one value array per drawn line ----
-
-  function buildModel(cfg, meta, rows) {
-    const { kinds, columns } = meta;
-    const xi = cfg.x;
-    const xKind = xi < 0 ? "index" : axisKindOf(kinds[xi]);
-    const xColumnKind = xi < 0 ? "" : kinds[xi];
-    const series = cfg.series.slice();
-    const gi = cfg.group;
-    const lines = [];
-    let groupSlot = null;
-    let groupCount = 0;
-    let foldedGroups = 0;
-    let hasOther = false;
-
-    if (series.length && gi >= 0) {
-      const totals = new Map();
-      const s0 = series[0];
-      for (let r = 0; r < rows.length; r++) {
-        const row = rows[r];
-        if (!Array.isArray(row)) continue;
-        const key = categoryKey(row[gi]);
-        let entry = totals.get(key);
-        if (!entry) { entry = { key, total: 0, first: totals.size }; totals.set(key, entry); }
-        const v = toNumber(row[s0]);
-        if (v === v) entry.total += Math.abs(v);
-      }
-      const topN = Math.max(1, Math.floor(MAX_SERIES / series.length));
-      const ranked = Array.from(totals.values()).sort((a, b) => b.total - a.total || a.first - b.first);
-      // Colours follow the group's first appearance, not its rank.
-      const kept = ranked.slice(0, topN).sort((a, b) => a.first - b.first);
-      foldedGroups = Math.max(0, ranked.length - kept.length);
-      hasOther = foldedGroups > 0;
-      groupSlot = new Map(kept.map((entry, index) => [entry.key, index]));
-      groupCount = kept.length;
-      series.forEach((col, j) => {
-        kept.forEach((entry, g) => {
-          lines.push({ id: `${col}\u0001${entry.key}`, label: series.length > 1 ? `${columns[col]} · ${entry.key}` : entry.key, slot: j * groupCount + g, seriesIndex: j });
-        });
-        if (hasOther) lines.push({ id: `${col}\u0001\u0002other`, label: series.length > 1 ? `${columns[col]} · Other` : "Other", slot: -1, seriesIndex: j });
-      });
-    } else {
-      series.forEach((col, j) => lines.push({ id: String(col), label: String(columns[col]), slot: j, seriesIndex: j }));
-    }
-
-    const perSeries = groupSlot ? groupCount + (hasOther ? 1 : 0) : 1;
-    const xIndex = new Map();
-    const xsRaw = [];
-    const categories = [];
-    const cols = lines.map(() => []);
-    let skipped = 0;
-    let summed = false;
-    let subMillisecond = false;
-
-    for (let r = 0; r < rows.length; r++) {
-      const row = rows[r];
-      if (!Array.isArray(row)) continue;
-      let x;
-      if (xKind === "index") x = Number(row.__chdashRowIndex) || r + 1;
-      else if (xKind === "time") x = toTimeMs(row[xi], xColumnKind);
-      else if (xKind === "number") x = toNumber(row[xi]);
-      else {
-        const key = categoryKey(row[xi]);
-        x = xIndex.get(key);
-        if (x === undefined) {
-          x = categories.length;
-          categories.push(key);
-          xIndex.set(key, x);
-          xsRaw.push(x);
-          for (const c of cols) c.push(undefined);
-        }
-      }
-      if (!(x === x)) { skipped++; continue; }
-      let idx;
-      if (xKind === "category") idx = x;
-      else {
-        idx = xIndex.get(x);
-        if (idx === undefined) {
-          idx = xsRaw.length;
-          xIndex.set(x, idx);
-          xsRaw.push(x);
-          for (const c of cols) c.push(undefined);
-          if (xKind === "time" && !subMillisecond && x % 1000 !== 0) subMillisecond = true;
-        }
-      }
-      let offset = 0;
-      if (groupSlot) {
-        const slot = groupSlot.get(categoryKey(row[gi]));
-        offset = slot === undefined ? groupCount : slot;
-      }
-      // A cell is undefined (no row at this x: lines connect across it),
-      // null (a NULL value: lines break) or the value, summed when several
-      // rows share the x.
-      for (let j = 0; j < series.length; j++) {
-        const v = toNumber(row[series[j]]);
-        const column = cols[j * perSeries + offset];
-        const current = column[idx];
-        if (!(v === v)) {
-          if (current === undefined) column[idx] = null;
-          continue;
-        }
-        if (typeof current === "number") { column[idx] = current + v; summed = true; } else column[idx] = v;
-      }
-    }
-
-    const n = xsRaw.length;
-    let order = null;
-    if (xKind === "time" || xKind === "number") {
-      order = new Uint32Array(n);
-      for (let i = 0; i < n; i++) order[i] = i;
-      let sorted = true;
-      for (let i = 1; i < n; i++) if (xsRaw[i] < xsRaw[i - 1]) { sorted = false; break; }
-      if (!sorted) order.sort((a, b) => xsRaw[a] - xsRaw[b]);
-    }
-    const xs = new Float64Array(n);
-    for (let i = 0; i < n; i++) xs[i] = order ? xsRaw[order[i]] : xsRaw[i];
-    lines.forEach((line, li) => {
-      const values = new Float64Array(n);
-      const nulls = new Uint8Array(n);
-      const src = cols[li];
-      for (let i = 0; i < n; i++) {
-        const cell = order ? src[order[i]] : src[i];
-        if (typeof cell === "number") values[i] = cell;
-        else {
-          values[i] = NaN;
-          if (cell === null) nulls[i] = 1;
-        }
-      }
-      line.values = values;
-      line.nulls = nulls;
-    });
-
-    return {
-      xKind,
-      xColumnKind,
-      xLabel: xi < 0 ? "Row" : String(columns[xi]),
-      xs,
-      categories,
-      lines,
-      rowCount: rows.length,
-      skipped,
-      summed,
-      foldedGroups,
-      subMillisecond,
-    };
-  }
-
-  // --- Drawing helpers ------------------------------------------------------
-
-  const fmt = (value) => (Math.round(value * 10) / 10).toString();
-
-  // Path through (px[i], py(values[i])) with gaps at NaN. Past the drawing
-  // budget, each of ENVELOPE_BUCKETS pixel buckets keeps its first, lowest,
-  // highest and last point, so peaks survive downsampling.
-  function linePath(pxs, values, yOf, left, plotW, stats, nulls = null) {
-    const n = pxs.length;
-    let d = "";
-    let pen = false;
-    let drawn = 0;
-    const emit = (i) => {
-      d += `${pen ? "L" : "M"}${fmt(pxs[i])} ${fmt(yOf(values[i]))}`;
-      pen = true;
-      drawn++;
-    };
-    // Next index with a value or a NULL (rows missing at an x are skipped).
-    const nextCell = (i) => {
-      let j = i + 1;
-      while (j < n && !(values[j] === values[j]) && !(nulls && nulls[j])) j++;
-      return j;
-    };
-    if (n <= MAX_DRAWN_POINTS) {
-      for (let i = 0; i < n; i++) {
-        if (values[i] === values[i]) {
-          const wasPen = pen;
-          emit(i);
-          if (!wasPen) {
-            const j = nextCell(i);
-            if (j >= n || !(values[j] === values[j])) d += "h0";
-          }
-        } else if (!nulls || nulls[i]) pen = false;
-      }
-      stats.drawn = Math.max(stats.drawn, drawn);
-      return d;
-    }
-    const bucketW = plotW / ENVELOPE_BUCKETS;
-    let bucket = -1;
-    let first = -1, lo = -1, hi = -1, last = -1;
-    let gap = false;
-    const flush = () => {
-      if (first < 0) return;
-      const picks = [first, lo, hi, last].filter((v, i, all) => all.indexOf(v) === i).sort((a, b) => a - b);
-      for (const i of picks) emit(i);
-      first = lo = hi = last = -1;
-    };
-    for (let i = 0; i < n; i++) {
-      const v = values[i];
-      const b = Math.floor((pxs[i] - left) / bucketW);
-      if (!(v === v)) {
-        if (!nulls || nulls[i]) gap = true;
-        continue;
-      }
-      if (b !== bucket) {
-        flush();
-        if (gap) pen = false;
-        bucket = b;
-        first = lo = hi = last = i;
-      } else {
-        if (v < values[lo]) lo = i;
-        if (v > values[hi]) hi = i;
-        last = i;
-      }
-      gap = false;
-    }
-    flush();
-    stats.drawn = Math.max(stats.drawn, drawn);
-    return d;
-  }
-
-  function lowerBound(xs, value) {
-    let lo = 0, hi = xs.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (xs[mid] < value) lo = mid + 1; else hi = mid;
-    }
-    return lo;
-  }
-
-  function slotColor(slot) {
-    return slot < 0 ? "var(--qchart-other)" : `var(--qchart-${(slot % MAX_SERIES) + 1})`;
-  }
-
-  // --- Controller -----------------------------------------------------------
-
-  function createController({ getData, viewRoot, onViewChange = null, toggleClassName = "" } = {}) {
-    const toggleEl = document.createElement("div");
-    toggleEl.className = `resultsViewToggle ${toggleClassName}`.trim();
-    toggleEl.setAttribute("role", "group");
-    toggleEl.setAttribute("aria-label", "Result view");
-    toggleEl.hidden = true;
-    const tableBtn = document.createElement("button");
-    tableBtn.type = "button";
-    tableBtn.className = "resultsViewToggle__opt";
-    tableBtn.dataset.view = "table";
-    tableBtn.textContent = "Table";
-    const chartBtn = document.createElement("button");
-    chartBtn.type = "button";
-    chartBtn.className = "resultsViewToggle__opt";
-    chartBtn.dataset.view = "chart";
-    chartBtn.textContent = "Chart";
-    toggleEl.append(tableBtn, chartBtn);
-
-    const hostEl = document.createElement("div");
-    hostEl.className = "queryChart";
-    hostEl.innerHTML = `
-      <div class="queryChart__toolbar">
-        <div class="queryChart__types" role="group" aria-label="Chart type"></div>
-        <label class="queryChart__field"><span class="queryChart__fieldLabel">X</span><select class="queryChart__select queryChart__x" aria-label="X axis column"></select></label>
-        <div class="queryChart__field queryChart__seriesField">
-          <span class="queryChart__fieldLabel">Series</span>
-          <button type="button" class="queryChart__select queryChart__seriesButton" aria-haspopup="true" aria-expanded="false" aria-label="Series columns"></button>
-          <div class="queryChart__seriesMenu" role="group" aria-label="Series columns" hidden></div>
-        </div>
-        <label class="queryChart__field"><span class="queryChart__fieldLabel">Group by</span><select class="queryChart__select queryChart__group" aria-label="Group by column"></select></label>
-        <span class="queryChart__note"></span>
-      </div>
-      <div class="queryChart__plot">
-        <div class="queryChart__tooltip" role="status" hidden></div>
-      </div>
-      <div class="queryChart__legend" role="group" aria-label="Series"></div>`;
-    const typesEl = hostEl.querySelector(".queryChart__types");
-    const xSelect = hostEl.querySelector(".queryChart__x");
-    const seriesButton = hostEl.querySelector(".queryChart__seriesButton");
-    const seriesMenu = hostEl.querySelector(".queryChart__seriesMenu");
-    const groupSelect = hostEl.querySelector(".queryChart__group");
-    const noteEl = hostEl.querySelector(".queryChart__note");
-    const plotEl = hostEl.querySelector(".queryChart__plot");
-    const tooltipEl = hostEl.querySelector(".queryChart__tooltip");
-    const legendEl = hostEl.querySelector(".queryChart__legend");
-    const typeButtons = new Map();
-    for (const [type, label] of CHART_TYPES) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "queryChart__type";
-      btn.dataset.type = type;
-      btn.textContent = label;
-      btn.addEventListener("click", () => {
-        if (btn.disabled || !cfg) return;
-        cfg.type = type;
-        cfg.typeAuto = false;
-        syncToolbar();
-        render();
-      });
-      typeButtons.set(type, btn);
-      typesEl.appendChild(btn);
-    }
-
-    let meta = null; // { columns, types, kinds, signature }
-    let cfg = null;
-    let lastCfg = null; // kept across results with the same columns and types
-    let chosenView = readStoredView();
-    let effective = "table";
-    let model = null;
-    let dirty = true;
-    let rebuildTimer = 0;
-    let renderRaf = 0;
-    let lastBuildMs = 0;
-    let lastBuildAt = 0;
-    let lastWidth = 0;
-    const hidden = new Set();
-    let hover = null; // { pxs, xs, yOf... } of the last render, for the pointer
-    let lastPointer = null;
-    let destroyed = false;
-    // Until the terminal event a one-row result may still grow: the Number
-    // view is only chosen once the stream is done (like the vertical table).
-    let streamDone = false;
-
-    const resizeObserver = typeof ResizeObserver === "function"
-      ? new ResizeObserver(() => {
-        const width = Math.round(plotEl.clientWidth);
-        if (width && width !== lastWidth) scheduleRender();
-      })
-      : null;
-    if (resizeObserver) resizeObserver.observe(plotEl);
-
-    function chartable() {
-      return !!(meta && meta.kinds.some((kind) => kind === "number"));
-    }
-
-    function applyView() {
-      const next = chosenView === "chart" && chartable() ? "chart" : "table";
-      const can = chartable();
-      toggleEl.hidden = !meta;
-      chartBtn.disabled = !can;
-      chartBtn.title = can ? "Chart the received rows" : NO_NUMERIC_TITLE;
-      toggleEl.title = can ? "" : NO_NUMERIC_TITLE;
-      tableBtn.setAttribute("aria-pressed", String(next === "table"));
-      chartBtn.setAttribute("aria-pressed", String(next === "chart"));
-      toggleEl.dataset.view = next;
-      const changed = next !== effective;
-      effective = next;
-      if (viewRoot) viewRoot.classList.toggle("is-chartView", next === "chart");
-      if (next === "chart") {
-        syncToolbar();
-        scheduleRender({ immediate: true });
-      } else {
-        hideTooltip();
-        closeSeriesMenu();
-      }
-      if (changed && typeof onViewChange === "function") onViewChange(next);
-    }
-
-    function setView(view) {
-      chosenView = view === "chart" ? "chart" : "table";
-      storeView(chosenView);
-      applyView();
-    }
-
-    tableBtn.addEventListener("click", () => setView("table"));
-    chartBtn.addEventListener("click", () => { if (!chartBtn.disabled) setView("chart"); });
-
-    // --- toolbar ---
-
-    function columnOptionLabel(i) {
-      return `${meta.columns[i]}`;
-    }
-
-    function syncToolbar() {
-      if (!meta || !cfg) return;
-      const { kinds } = meta;
-      const xOptions = [`<option value="-1">Row #</option>`];
-      kinds.forEach((kind, i) => {
-        xOptions.push(`<option value="${i}">${esc(columnOptionLabel(i))}</option>`);
-      });
-      xSelect.innerHTML = xOptions.join("");
-      xSelect.value = String(cfg.x);
-
-      const candidates = [];
-      kinds.forEach((kind, i) => { if (kind === "number" && i !== cfg.x) candidates.push(i); });
-      seriesMenu.innerHTML = candidates.length
-        ? candidates.map((i) => {
-          const checked = cfg.series.includes(i);
-          const disabled = !checked && cfg.series.length >= MAX_SERIES;
-          return `<label class="queryChart__seriesOpt"><input type="checkbox" value="${i}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}><span>${esc(columnOptionLabel(i))}</span></label>`;
-        }).join("")
-        : `<span class="queryChart__seriesEmpty">No other numeric column</span>`;
-      const names = cfg.series.map((i) => meta.columns[i]);
-      seriesButton.textContent = names.length ? names.join(", ") : "None";
-      seriesButton.title = names.join(", ");
-
-      const groupOptions = [`<option value="-1">None</option>`];
-      kinds.forEach((kind, i) => {
-        if (i === cfg.x || cfg.series.includes(i) || kind === "other") return;
-        groupOptions.push(`<option value="${i}">${esc(columnOptionLabel(i))}</option>`);
-      });
-      groupSelect.innerHTML = groupOptions.join("");
-      groupSelect.value = String(cfg.group);
-
-      const rows = currentRows();
-      const type = effectiveType(rows.length);
-      for (const [key, btn] of typeButtons) {
-        const numberOnly = key === "number";
-        btn.disabled = numberOnly && !(rows.length === 1 && streamDone);
-        btn.title = btn.disabled ? "Number needs a single-row result" : "";
-        btn.setAttribute("aria-pressed", String(key === type));
-      }
-      hostEl.dataset.chartType = type;
-    }
-
-    function effectiveType(rowCount) {
-      if (!cfg) return "line";
-      if (rowCount === 1 && streamDone && (cfg.typeAuto || cfg.type === "number")) return "number";
-      if (cfg.type === "number") return "line";
-      return cfg.type;
-    }
-
-    xSelect.addEventListener("change", () => {
-      if (!cfg) return;
-      const x = Number(xSelect.value);
-      cfg.x = Number.isInteger(x) ? x : -1;
-      if (cfg.group === cfg.x) cfg.group = -1;
-      cfg.series = cfg.series.filter((i) => i !== cfg.x);
-      if (!cfg.series.length) {
-        const first = meta.kinds.findIndex((kind, i) => kind === "number" && i !== cfg.x);
-        if (first >= 0) cfg.series = [first];
-      }
-      normalizeConfig(cfg, meta);
-      configChanged();
-    });
-
-    groupSelect.addEventListener("change", () => {
-      if (!cfg) return;
-      const g = Number(groupSelect.value);
-      cfg.group = Number.isInteger(g) ? g : -1;
-      normalizeConfig(cfg, meta);
-      configChanged();
-    });
-
-    seriesMenu.addEventListener("change", (ev) => {
-      const input = ev.target;
-      if (!(input instanceof HTMLInputElement) || !cfg) return;
-      const col = Number(input.value);
-      if (input.checked) {
-        if (!cfg.series.includes(col) && cfg.series.length < MAX_SERIES) cfg.series.push(col);
-      } else cfg.series = cfg.series.filter((i) => i !== col);
-      cfg.series.sort((a, b) => a - b);
-      normalizeConfig(cfg, meta);
-      configChanged({ keepMenu: true });
-      const again = seriesMenu.querySelector(`input[value="${col}"]`);
-      if (again) again.focus({ preventScroll: true });
-    });
-
-    let onDocPointer = null;
-    let onDocKey = null;
-    function closeSeriesMenu() {
-      if (seriesMenu.hidden) return;
-      seriesMenu.hidden = true;
-      seriesButton.setAttribute("aria-expanded", "false");
-      if (onDocPointer) document.removeEventListener("pointerdown", onDocPointer, true);
-      if (onDocKey) document.removeEventListener("keydown", onDocKey, true);
-      onDocPointer = onDocKey = null;
-    }
-    function openSeriesMenu() {
-      seriesMenu.hidden = false;
-      seriesButton.setAttribute("aria-expanded", "true");
-      onDocPointer = (ev) => {
-        if (!(ev.target instanceof Node) || !seriesMenu.parentElement.contains(ev.target)) closeSeriesMenu();
-      };
-      onDocKey = (ev) => {
-        if (ev.key === "Escape") { closeSeriesMenu(); seriesButton.focus(); }
-      };
-      document.addEventListener("pointerdown", onDocPointer, true);
-      document.addEventListener("keydown", onDocKey, true);
-      const first = seriesMenu.querySelector("input:not(:disabled)");
-      if (first) first.focus({ preventScroll: true });
-    }
-    seriesButton.addEventListener("click", () => {
-      if (seriesMenu.hidden) openSeriesMenu(); else closeSeriesMenu();
-    });
-
-    function configChanged({ keepMenu = false } = {}) {
-      lastCfg = cfg ? { ...cfg, series: cfg.series.slice(), signature: meta.signature } : null;
-      dirty = true;
-      if (!keepMenu) closeSeriesMenu();
-      syncToolbar();
-      scheduleRender({ immediate: true });
-    }
-
-    // --- data flow ---
-
-    function currentRows() {
-      const data = typeof getData === "function" ? getData() : null;
-      return data && Array.isArray(data.rows) ? data.rows : [];
-    }
-
-    function setMeta(columns, types) {
-      const cols = Array.isArray(columns) ? columns.map((c) => String(c ?? "")) : [];
-      const tys = Array.isArray(types) ? types.map((t) => String(t ?? "")) : [];
-      const signature = metaSignature(cols, tys);
-      meta = { columns: cols, types: tys, kinds: tys.map(columnKind), signature };
-      if (lastCfg && lastCfg.signature === signature) {
-        cfg = normalizeConfig({ ...lastCfg, series: lastCfg.series.slice() }, meta);
-      } else {
-        cfg = normalizeConfig(defaultConfig(meta), meta);
-        hidden.clear();
-      }
-      // A new result starts from the last view chosen anywhere.
-      chosenView = readStoredView();
-      streamDone = false;
-      model = null;
-      dirty = true;
-      hostEl.dataset.chartType = cfg.type;
-      applyView();
-    }
-
-    function rowsChanged() {
-      dirty = true;
-      if (effective !== "chart") return;
-      scheduleRender();
-    }
-
-    function done() {
-      streamDone = true;
-      dirty = true;
-      if (effective !== "chart") {
-        syncToolbar();
-        return;
-      }
-      syncToolbar();
-      scheduleRender({ immediate: true });
-    }
-
-    function reset() {
-      meta = null;
-      cfg = null;
-      model = null;
-      dirty = true;
-      if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
-      if (renderRaf) { cancelAnimationFrame(renderRaf); renderRaf = 0; }
-      clearPlot();
-      applyView();
-    }
-
-    function scheduleRender({ immediate = false } = {}) {
-      if (destroyed || effective !== "chart") return;
-      if (immediate) {
-        if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = 0; }
-        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
-        return;
-      }
-      if (rebuildTimer || renderRaf) return;
-      // Streaming: rebuild at most every MIN_REBUILD_INTERVAL_MS, and never
-      // spend more than about a fifth of the main thread on it.
-      const interval = Math.max(MIN_REBUILD_INTERVAL_MS, lastBuildMs * 5);
-      const wait = Math.max(0, lastBuildAt + interval - performance.now());
-      rebuildTimer = setTimeout(() => {
-        rebuildTimer = 0;
-        if (!renderRaf) renderRaf = requestAnimationFrame(() => { renderRaf = 0; render(); });
-      }, wait);
-    }
-
-    function clearPlot() {
-      hover = null;
-      hideTooltip();
-      for (const el of Array.from(plotEl.children)) if (el !== tooltipEl) el.remove();
-      legendEl.innerHTML = "";
-      noteEl.textContent = "";
-      delete hostEl.dataset.pointsDrawn;
-    }
-
-    function showMessage(text) {
-      clearPlot();
-      const msg = document.createElement("div");
-      msg.className = "queryChart__message";
-      msg.textContent = text;
-      plotEl.appendChild(msg);
-    }
-
-    function render() {
-      if (destroyed || effective !== "chart" || !meta || !cfg) return;
-      const width = Math.round(plotEl.clientWidth);
-      if (!width) return; // collapsed panel: the resize observer redraws
-      lastWidth = width;
-      const rows = currentRows();
-      if (dirty || !model) {
-        const t0 = performance.now();
-        model = buildModel(cfg, meta, rows);
-        lastBuildMs = performance.now() - t0;
-        lastBuildAt = performance.now();
-        dirty = false;
-      }
-      syncTypeButtons(rows.length);
-      if (!rows.length) { showMessage(streamDone ? "No rows to chart." : "Waiting for rows\u2026"); return; }
-      if (!cfg.series.length) { showMessage("Select at least one numeric series."); return; }
-      const type = effectiveType(rows.length);
-      hostEl.dataset.chartType = type;
-      hostEl.dataset.xKind = model.xKind;
-      if (type === "number") { renderNumber(rows); return; }
-      if (!model.xs.length) { showMessage(`No chartable rows: ${model.xLabel} has no usable values.`); return; }
-      renderPlot(type, width);
-    }
-
-    function syncTypeButtons(rowCount) {
-      const type = effectiveType(rowCount);
-      for (const [key, btn] of typeButtons) {
-        if (key === "number") {
-          btn.disabled = !(rowCount === 1 && streamDone);
-          btn.title = btn.disabled ? "Number needs a single-row result" : "";
-        }
-        btn.setAttribute("aria-pressed", String(key === type));
-      }
-    }
-
-    function renderNumber(rows) {
-      clearPlot();
-      const row = rows[0];
-      const tiles = document.createElement("div");
-      tiles.className = "queryChart__numbers";
-      // One row: every charted value, the numeric X column included.
-      const cols = cfg.series.slice();
-      if (cfg.x >= 0 && meta.kinds[cfg.x] === "number" && !cols.includes(cfg.x)) cols.push(cfg.x);
-      cols.sort((a, b) => a - b);
-      for (const col of cols) {
-        const v = toNumber(Array.isArray(row) ? row[col] : NaN);
-        const tile = document.createElement("div");
-        tile.className = "queryChart__number";
-        tile.innerHTML = `<span class="queryChart__numberLabel">${esc(meta.columns[col])}</span><span class="queryChart__numberValue">${esc(v === v ? formatFullNumber(v) : "NULL")}</span>`;
-        tiles.appendChild(tile);
-      }
-      plotEl.appendChild(tiles);
-      noteEl.textContent = "1 row";
-    }
-
-    function buildNote() {
-      const parts = [`${model.rowCount.toLocaleString("en-US")} row${model.rowCount === 1 ? "" : "s"}`];
-      if (model.xs.length > MAX_DRAWN_POINTS) parts.push(`${model.xs.length.toLocaleString("en-US")} points, drawn as a min/max envelope`);
-      if (model.summed) parts.push(`rows sharing the same ${model.xLabel} are summed`);
-      if (model.foldedGroups) parts.push(`${model.foldedGroups} group${model.foldedGroups === 1 ? "" : "s"} folded into Other`);
-      if (model.skipped) parts.push(`${model.skipped.toLocaleString("en-US")} row${model.skipped === 1 ? "" : "s"} without ${model.xLabel} skipped`);
-      return parts.join(" · ");
-    }
-
-    function renderPlot(type, width) {
-      const { xs, lines, xKind } = model;
-      const n = xs.length;
-      const visible = lines.filter((line) => !hidden.has(line.id));
-      const stacked = type === "area" || type === "bar";
-
-      // Stacks: cumulative tops over the visible lines (NULL counts as 0).
-      // Areas stack every line; bars stack the groups of one series column
-      // and put the columns side by side (different measures never add up).
-      const tops = new Map();
-      const bases = new Map();
-      const seriesColumns = type === "bar" ? Array.from(new Set(visible.map((line) => line.seriesIndex))) : [0];
-      if (stacked) {
-        const stackState = new Map();
-        for (const line of visible) {
-          const stackKey = type === "bar" ? line.seriesIndex : 0;
-          if (!stackState.has(stackKey)) stackState.set(stackKey, { pos: new Float64Array(n), neg: new Float64Array(n) });
-          const state = stackState.get(stackKey);
-          const basePos = state.pos;
-          const baseNeg = state.neg;
-          const top = new Float64Array(n);
-          const base = new Float64Array(n);
-          const nextPos = new Float64Array(basePos);
-          const nextNeg = new Float64Array(baseNeg);
-          for (let i = 0; i < n; i++) {
-            const v = line.values[i];
-            const value = v === v ? v : 0;
-            if (type === "bar" && value < 0) {
-              base[i] = baseNeg[i];
-              top[i] = baseNeg[i] + value;
-              nextNeg[i] = top[i];
-            } else {
-              base[i] = basePos[i];
-              top[i] = basePos[i] + value;
-              nextPos[i] = top[i];
-            }
-          }
-          tops.set(line.id, top);
-          bases.set(line.id, base);
-          state.pos = nextPos;
-          state.neg = nextNeg;
-        }
-      }
-
-      let yMin = Infinity;
-      let yMax = -Infinity;
-      for (const line of visible) {
-        const arr = stacked ? tops.get(line.id) : line.values;
-        for (let i = 0; i < n; i++) {
-          const v = arr[i];
-          if (v === v) {
-            if (v < yMin) yMin = v;
-            if (v > yMax) yMax = v;
-          }
-        }
-      }
-      if (!(yMin <= yMax)) { yMin = 0; yMax = 1; }
-      if (stacked) {
-        yMin = Math.min(0, yMin);
-        yMax = Math.max(0, yMax);
-      } else if (yMin >= 0 && yMax - yMin > 0.25 * yMax) yMin = 0;
-      else if (yMax <= 0 && yMax - yMin > 0.25 * -yMin) yMax = 0;
-
-      const H = PLOT_HEIGHT;
-      const plotH = H - MARGIN.top - MARGIN.bottom;
-      const yTicks = niceTicks(yMin, yMax, Math.max(2, Math.min(8, Math.floor(plotH / 44))));
-      const yUnit = compactUnitFor(Math.max(Math.abs(yTicks.min), Math.abs(yTicks.max)));
-      const yLabels = yTicks.values.map((v) => formatTickNumber(v, yTicks.step, yUnit));
-      const left = Math.ceil(Math.max(28, ...yLabels.map(labelWidthPx)) + 10);
-      const W = width;
-      const plotW = Math.max(40, W - left - MARGIN.right);
-      const yOf = (v) => MARGIN.top + plotH - ((v - yTicks.min) / (yTicks.max - yTicks.min || 1)) * plotH;
-
-      // X scale.
-      let xOf;
-      let xTicksSvg = "";
-      let barWidth = 0;
-      const continuous = xKind !== "category";
-      let domainLo = n ? xs[0] : 0;
-      let domainHi = n ? xs[n - 1] : 1;
-      let minGap = Infinity;
-      if (continuous) {
-        for (let i = 1; i < n; i++) {
-          const gap = xs[i] - xs[i - 1];
-          if (gap > 0 && gap < minGap) minGap = gap;
-        }
-        if (domainHi === domainLo) {
-          const pad = xKind === "time" ? MINUTE_MS : Math.max(1, Math.abs(domainLo) * 0.1);
-          domainLo -= pad;
-          domainHi += pad;
-        } else if (type === "bar" && Number.isFinite(minGap)) {
-          // Bars are centred on their x: keep half a bar inside each edge.
-          const half = Math.max(minGap, (domainHi - domainLo) / Math.max(1, Math.floor(plotW / 3))) / 2;
-          domainLo -= half;
-          domainHi += half;
-        }
-        xOf = (x) => left + ((x - domainLo) / (domainHi - domainLo)) * plotW;
-        if (type === "bar") {
-          const gapPx = Number.isFinite(minGap) ? (minGap / (domainHi - domainLo)) * plotW : plotW / 2;
-          barWidth = Math.max(1, Math.min(48, gapPx * 0.8));
-        }
-        if (xKind === "time") {
-          xTicksSvg = timeAxisTicks(domainLo, domainHi, plotW).map(({ t, label }) => axisTickSvg(xOf(t), label, W, H)).join("");
-        } else {
-          const count = Math.max(2, Math.min(12, Math.floor(plotW / 90)));
-          const ticks = niceTicks(domainLo, domainHi, count, { integer: xKind === "index" });
-          const unit = compactUnitFor(Math.max(Math.abs(ticks.min), Math.abs(ticks.max)));
-          xTicksSvg = ticks.values
-            .filter((v) => v >= domainLo - 1e-9 && v <= domainHi + 1e-9)
-            .map((v) => axisTickSvg(xOf(v), formatTickNumber(v, ticks.step, unit), W, H)).join("");
-        }
-      } else {
-        const band = plotW / Math.max(1, n);
-        xOf = (i) => left + (i + 0.5) * band;
-        barWidth = Math.max(1, Math.min(60, band * 0.72));
-        const maxChars = 18;
-        const labels = model.categories.map((c) => (c.length > maxChars ? `${c.slice(0, maxChars - 1)}\u2026` : c));
-        const widest = labels.reduce((m, c) => Math.max(m, labelWidthPx(c)), 0);
-        const every = Math.max(1, Math.ceil((Math.min(widest, labelWidthPx("x".repeat(maxChars))) + 10) / band));
-        const parts = [];
-        for (let i = 0; i < n; i += every) parts.push(axisTickSvg(xOf(i), labels[i], W, H, model.categories[i]));
-        xTicksSvg = parts.join("");
-      }
-
-      const pxs = new Float64Array(n);
-      for (let i = 0; i < n; i++) pxs[i] = xOf(continuous ? xs[i] : i);
-
-      const grid = yTicks.values.map((v, i) => {
-        const y = fmt(yOf(v));
-        return `<line class="queryChart__grid${v === 0 ? " queryChart__grid--zero" : ""}" x1="${left}" x2="${left + plotW}" y1="${y}" y2="${y}"/>`
-          + `<text class="queryChart__tick" x="${left - 8}" y="${y}" dy="0.32em" text-anchor="end">${esc(yLabels[i])}</text>`;
-      }).join("");
-
-      const stats = { drawn: 0 };
-      const marks = [];
-      const barOffsets = new Map();
-      if (type === "bar") {
-        // One path per line; past the budget each pixel bucket keeps the
-        // index with the tallest stack.
-        const maxBars = Math.max(1, Math.min(MAX_DRAWN_POINTS, Math.floor(plotW / 3)));
-        let picks = null;
-        if (n > maxBars) {
-          picks = [];
-          const bucketW = plotW / maxBars;
-          let bucket = -1;
-          let best = -1;
-          let bestTotal = -Infinity;
-          for (let i = 0; i < n; i++) {
-            const b = Math.floor((pxs[i] - left) / bucketW);
-            let total = 0;
-            for (const line of visible) total += Math.abs(tops.get(line.id)[i] - bases.get(line.id)[i]);
-            if (b !== bucket) {
-              if (best >= 0) picks.push(best);
-              bucket = b;
-              best = i;
-              bestTotal = total;
-            } else if (total > bestTotal) { best = i; bestTotal = total; }
-          }
-          if (best >= 0) picks.push(best);
-          barWidth = Math.max(1, Math.min(barWidth || Infinity, bucketW * 0.8));
-        }
-        const indexes = picks || Array.from({ length: n }, (_, i) => i);
-        const clusterSize = Math.max(1, seriesColumns.length);
-        const subWidth = barWidth / clusterSize;
-        const drawWidth = clusterSize > 1 ? Math.max(1, subWidth - Math.min(2, subWidth * 0.15)) : barWidth;
-        for (const line of visible) {
-          const top = tops.get(line.id);
-          const base = bases.get(line.id);
-          const offset = (seriesColumns.indexOf(line.seriesIndex) - (clusterSize - 1) / 2) * subWidth;
-          barOffsets.set(line.id, offset);
-          let d = "";
-          let count = 0;
-          for (const i of indexes) {
-            if (top[i] === base[i]) continue;
-            const y1 = yOf(Math.max(top[i], base[i]));
-            const y2 = yOf(Math.min(top[i], base[i]));
-            d += `M${fmt(pxs[i] + offset - drawWidth / 2)} ${fmt(y1)}h${fmt(drawWidth)}V${fmt(y2)}h${fmt(-drawWidth)}Z`;
-            count++;
-          }
-          stats.drawn = Math.max(stats.drawn, count);
-          marks.push(`<path class="queryChart__bar" data-series="${esc(line.label)}" data-points="${count}" style="fill:${slotColor(line.slot)}" d="${d}"/>`);
-        }
-      } else if (type === "area") {
-        for (const line of visible) {
-          const lineStats = { drawn: 0 };
-          const topPath = linePath(pxs, tops.get(line.id), yOf, left, plotW, lineStats);
-          const baseStats = { drawn: 0 };
-          const basePath = linePath(pxs, bases.get(line.id), yOf, left, plotW, baseStats);
-          // Polygon: the top edge forward, then the base edge backward.
-          const back = reversePath(basePath);
-          const fill = topPath && back ? `${topPath}L${back.slice(1)}Z` : "";
-          stats.drawn = Math.max(stats.drawn, lineStats.drawn);
-          marks.push(`<path class="queryChart__area" style="fill:${slotColor(line.slot)}" d="${fill}"/>`
-            + `<path class="queryChart__line" data-series="${esc(line.label)}" data-points="${lineStats.drawn}" style="stroke:${slotColor(line.slot)}" d="${topPath}"/>`);
-        }
-      } else {
-        for (const line of visible) {
-          const lineStats = { drawn: 0 };
-          const d = linePath(pxs, line.values, yOf, left, plotW, lineStats, line.nulls);
-          stats.drawn = Math.max(stats.drawn, lineStats.drawn);
-          marks.push(`<path class="queryChart__line" data-series="${esc(line.label)}" data-points="${lineStats.drawn}" style="stroke:${slotColor(line.slot)}" d="${d}"/>`);
-          // Few points: mark each one, so isolated values stay visible.
-          if (n <= 60) {
-            let dots = "";
-            for (let i = 0; i < n; i++) if (line.values[i] === line.values[i]) dots += `<circle cx="${fmt(pxs[i])}" cy="${fmt(yOf(line.values[i]))}" r="2.6"/>`;
-            marks.push(`<g class="queryChart__dots" style="fill:${slotColor(line.slot)}">${dots}</g>`);
-          }
-        }
-      }
-
-      const svg = `<svg class="queryChart__svg" xmlns="${SVG_NS}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(chartAriaLabel(type))}">`
-        + `<g class="queryChart__axes">${grid}${xTicksSvg}</g>`
-        + `<line class="queryChart__baseline" x1="${left}" x2="${left + plotW}" y1="${MARGIN.top + plotH}" y2="${MARGIN.top + plotH}"/>`
-        + `<g class="queryChart__marks">${marks.join("")}</g>`
-        + `<g class="queryChart__hover" hidden><line class="queryChart__crosshair" x1="0" x2="0" y1="${MARGIN.top}" y2="${MARGIN.top + plotH}"/><g class="queryChart__hoverDots"></g></g>`
-        + `<rect class="queryChart__hit" x="${left}" y="${MARGIN.top}" width="${plotW}" height="${plotH}"/>`
-        + `</svg>`;
-      for (const el of Array.from(plotEl.children)) if (el !== tooltipEl) el.remove();
-      plotEl.insertAdjacentHTML("afterbegin", svg);
-      hostEl.dataset.pointsDrawn = String(stats.drawn);
-      hover = { pxs, left, plotW, top: MARGIN.top, plotH, yOf, visible, stacked, tops, type, barOffsets };
-      bindHover();
-      // A streaming redraw under the pointer keeps the tooltip on screen.
-      if (lastPointer && !tooltipEl.hidden) showHover(lastPointer.x, lastPointer.y);
-      renderLegend();
-      noteEl.textContent = buildNote();
-    }
-
-    function chartAriaLabel(type) {
-      const names = model.lines.map((line) => line.label).join(", ");
-      const kind = type === "area" ? "Stacked area chart" : type === "bar" ? "Bar chart" : "Line chart";
-      return `${kind} of ${names} by ${model.xLabel}`;
-    }
-
-    function axisTickSvg(x, label, W, H, fullLabel = null) {
-      const half = labelWidthPx(label) / 2;
-      const anchor = x - half < 2 ? "start" : x + half > W - 2 ? "end" : "middle";
-      const tx = anchor === "start" ? Math.max(2, x - 4) : anchor === "end" ? Math.min(W - 2, x + 4) : x;
-      const baseY = H - MARGIN.bottom;
-      const title = fullLabel != null && fullLabel !== label ? `<title>${esc(fullLabel)}</title>` : "";
-      return `<line class="queryChart__tickMark" x1="${fmt(x)}" x2="${fmt(x)}" y1="${baseY}" y2="${baseY + 4}"/>`
-        + `<text class="queryChart__tick queryChart__xTick" x="${fmt(tx)}" y="${baseY + 17}" text-anchor="${anchor}">${esc(label)}${title}</text>`;
-    }
-
-    // "M1 2L3 4L5 6" -> "M5 6L3 4L1 2" (single run; area bases never gap).
-    function reversePath(d) {
-      if (!d) return "";
-      const points = d.replace(/h0/g, "").split(/[ML]/).filter(Boolean);
-      return `M${points.reverse().join("L")}`;
-    }
-
-    function renderLegend() {
-      legendEl.innerHTML = "";
-      if (!model || model.lines.length < 2) return;
-      for (const line of model.lines) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "queryChart__legendItem";
-        const on = !hidden.has(line.id);
-        btn.setAttribute("aria-pressed", String(on));
-        btn.title = on ? `Hide ${line.label}` : `Show ${line.label}`;
-        btn.innerHTML = `<i style="background:${slotColor(line.slot)}"></i><span>${esc(line.label)}</span>`;
-        btn.addEventListener("click", () => {
-          if (hidden.has(line.id)) hidden.delete(line.id); else hidden.add(line.id);
-          render();
-          const again = legendEl.querySelector(`.queryChart__legendItem:nth-child(${model.lines.indexOf(line) + 1})`);
-          if (again) again.focus({ preventScroll: true });
-        });
-        legendEl.appendChild(btn);
-      }
-    }
-
-    // --- hover ---
-
-    function hideTooltip() {
-      tooltipEl.hidden = true;
-      const layer = plotEl.querySelector(".queryChart__hover");
-      if (layer) layer.setAttribute("hidden", "");
-    }
-
-    function nearestIndex(px) {
-      const { pxs } = hover;
-      const n = pxs.length;
-      if (!n) return -1;
-      const i = lowerBound(pxs, px);
-      if (i <= 0) return 0;
-      if (i >= n) return n - 1;
-      return px - pxs[i - 1] <= pxs[i] - px ? i - 1 : i;
-    }
-
-    function xLabelAt(i) {
-      if (model.xKind === "category") return model.categories[i];
-      const x = model.xs[i];
-      if (model.xKind === "time") return model.xColumnKind === "date" ? formatInstant(x, false).slice(0, 10) : formatInstant(x, model.subMillisecond);
-      if (model.xKind === "index") return `Row ${x}`;
-      return formatFullNumber(x);
-    }
-
-    function showHover(clientX, clientY) {
-      if (!hover || !model) return;
-      const svg = plotEl.querySelector("svg");
-      if (!svg) return;
-      const box = svg.getBoundingClientRect();
-      const px = clientX - box.left;
-      const i = nearestIndex(px);
-      if (i < 0) return;
-      const x = hover.pxs[i];
-      const layer = svg.querySelector(".queryChart__hover");
-      const cross = layer.querySelector(".queryChart__crosshair");
-      cross.setAttribute("x1", fmt(x));
-      cross.setAttribute("x2", fmt(x));
-      let dots = "";
-      const rowsHtml = [];
-      let total = 0;
-      let anyValue = false;
-      for (const line of hover.visible) {
-        const v = line.values[i];
-        const has = v === v;
-        const y = hover.stacked ? hover.tops.get(line.id)[i] : v;
-        const dx = hover.barOffsets.get(line.id) || 0;
-        if (has && y === y) dots += `<circle cx="${fmt(x + dx)}" cy="${fmt(hover.yOf(y))}" r="3.5" style="fill:${slotColor(line.slot)}"/>`;
-        if (has) { total += v; anyValue = true; }
-        if (!has && !line.nulls[i]) continue; // no row for this line at this x
-        const text = has ? formatFullNumber(v) : "NULL";
-        rowsHtml.push(`<span class="queryChart__tipRow${has ? "" : " is-empty"}"><i style="background:${slotColor(line.slot)}"></i><em>${esc(line.label)}</em><b>${esc(text)}</b></span>`);
-      }
-      if (hover.stacked && hover.visible.length > 1 && anyValue) {
-        rowsHtml.push(`<span class="queryChart__tipRow queryChart__tipRow--total"><i></i><em>Total</em><b>${esc(formatFullNumber(total))}</b></span>`);
-      }
-      if (!rowsHtml.length) rowsHtml.push(`<span class="queryChart__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
-      layer.querySelector(".queryChart__hoverDots").innerHTML = dots;
-      layer.removeAttribute("hidden");
-      tooltipEl.innerHTML = `<strong>${esc(xLabelAt(i))}</strong>${rowsHtml.join("")}`;
-      tooltipEl.hidden = false;
-      tooltipEl.dataset.index = String(i);
-      const tipW = tooltipEl.offsetWidth;
-      const tipH = tooltipEl.offsetHeight;
-      const plotBox = plotEl.getBoundingClientRect();
-      const offsetX = box.left - plotBox.left;
-      let leftPos = offsetX + x + 14;
-      if (leftPos + tipW > plotEl.clientWidth - 4) leftPos = offsetX + x - 14 - tipW;
-      leftPos = Math.max(4, leftPos);
-      let topPos = clientY - plotBox.top - tipH / 2;
-      topPos = Math.max(0, Math.min(topPos, Math.max(0, PLOT_HEIGHT - tipH)));
-      tooltipEl.style.left = `${Math.round(leftPos)}px`;
-      tooltipEl.style.top = `${Math.round(topPos)}px`;
-    }
-
-    function bindHover() {
-      const hit = plotEl.querySelector(".queryChart__hit");
-      if (!hit) return;
-      const track = (ev) => {
-        lastPointer = { x: ev.clientX, y: ev.clientY };
-        showHover(ev.clientX, ev.clientY);
-      };
-      hit.addEventListener("pointermove", track);
-      hit.addEventListener("pointerdown", track);
-      hit.addEventListener("pointerleave", () => {
-        lastPointer = null;
-        hideTooltip();
-      });
-    }
-
-    function destroy() {
-      destroyed = true;
-      closeSeriesMenu();
-      if (resizeObserver) resizeObserver.disconnect();
-      if (rebuildTimer) clearTimeout(rebuildTimer);
-      if (renderRaf) cancelAnimationFrame(renderRaf);
-      rebuildTimer = 0;
-      renderRaf = 0;
-      model = null;
-    }
-
-    return {
-      toggleEl,
-      hostEl,
-      setMeta,
-      rowsChanged,
-      done,
-      reset,
-      destroy,
-      getView: () => effective,
-      setView,
-    };
-  }
-
   ns.queryChart = {
     createController,
+    loadCore,
     // Exposed for reuse and tests.
     columnKind,
     toTimeMs,

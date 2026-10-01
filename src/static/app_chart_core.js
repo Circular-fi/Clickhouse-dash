@@ -1,0 +1,1584 @@
+(() => {
+  "use strict";
+
+  // Shared canvas chart engine (uPlot-style): columnar Float64Array data,
+  // per-pixel min/max decimation, two stacked canvases (the plot, redrawn on
+  // data / size / zoom / theme changes, and a cursor overlay redrawn on every
+  // pointer move), a DOM tooltip and legend. One engine for every chart of the
+  // app: the Query result chart uses it first; the other charts move onto it
+  // one by one (see each consumer for its migration notes).
+  //
+  //   const chart = ns.chartCore.create(hostEl, {
+  //     xKind: "time" | "number" | "index" | "category",
+  //     xs: Float64Array,                 // ascending; category: 0..n-1
+  //     categories: ["a", "b"],          // category axis labels
+  //     series: [{ id, label, color, values: Float64Array, nulls: Uint8Array | null, group }],
+  //     type: "line" | "area" | "bar" | "points",
+  //     stack: false,                     // area / bar: cumulative per group
+  //   });
+  //   chart.setData({ ... }), chart.update({ type, stack }), chart.setZoom(lo, hi),
+  //   chart.resetZoom(), chart.setHidden(ids), chart.destroy().
+  //
+  // values[i] is NaN when series has no value at xs[i]. nulls[i] = 1 marks a
+  // NULL (the line breaks there); a NaN without the flag is a missing row and
+  // the line connects across it. nulls === null means every NaN breaks.
+  const ns = window.ChDash;
+  if (!ns) return;
+
+  const DEFAULT_HEIGHT = 300;
+  const FONT_SIZE = 11;
+  const Y_TICK_SPACE = 34;
+  const X_TICK_GAP = 22;
+  const PAD_TOP = 10;
+  const PAD_RIGHT = 14;
+  const TICK_LEN = 4;
+  const DRAG_MIN_PX = 4;
+  const POINTS_AUTO_SPACING = 12;
+  const MAX_CATEGORY_CHARS = 18;
+  const LEGEND_STORE_KEY = "chdash.chart.legendMode";
+
+  // --- Numbers ----------------------------------------------------------------
+
+  const COMPACT_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
+
+  function compactUnitFor(maxAbs) {
+    for (const [factor, suffix] of COMPACT_UNITS) if (maxAbs >= (factor === 1e3 ? 1e4 : factor)) return { factor, suffix };
+    return { factor: 1, suffix: "" };
+  }
+
+  // Decimals that write step exactly: 2.5 -> 1, 0.25 -> 2, 500 -> 0.
+  function decimalsFor(step) {
+    const abs = Math.abs(step);
+    if (!(abs > 0) || !Number.isFinite(abs)) return 0;
+    for (let d = 0; d < 10; d++) {
+      const scaled = abs * 10 ** d;
+      if (Math.abs(scaled - Math.round(scaled)) <= 1e-7 * Math.max(1, scaled)) return d;
+    }
+    return 10;
+  }
+
+  function groupThousands(intText) {
+    return intText.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  // Ticks share one unit and one decimal count: 0, 2.5K, 5K, 7.5K.
+  function formatTick(value, step, unit) {
+    if (value === 0) return "0";
+    const scaled = value / unit.factor;
+    const text = scaled.toFixed(decimalsFor(step / unit.factor));
+    const [whole, frac] = text.split(".");
+    const out = `${unit.suffix ? whole : groupThousands(whole)}${frac ? `.${frac}` : ""}`;
+    return `${/^-0(?:\.0*)?$/.test(out) ? "0" : out}${unit.suffix}`;
+  }
+
+  // Exact value: every digit JavaScript round-trips, grouped (12,345.678901).
+  function formatExact(value) {
+    if (!Number.isFinite(value)) return "NULL";
+    const abs = Math.abs(value);
+    if (abs !== 0 && (abs < 1e-6 || abs >= 1e21)) return String(value);
+    const text = String(value);
+    const neg = text[0] === "-";
+    const [whole, frac] = (neg ? text.slice(1) : text).split(".");
+    return `${neg ? "-" : ""}${groupThousands(whole)}${frac ? `.${frac}` : ""}`;
+  }
+
+  // Readable value: integers grouped, fractions to 12 significant digits.
+  function formatValue(value) {
+    if (!Number.isFinite(value)) return "NULL";
+    if (Number.isInteger(value)) return formatExact(value);
+    const abs = Math.abs(value);
+    if (abs !== 0 && (abs < 1e-6 || abs >= 1e15)) return value.toPrecision(6);
+    return formatExact(Number(value.toPrecision(12)));
+  }
+
+  function niceStep(rawStep) {
+    if (!(rawStep > 0) || !Number.isFinite(rawStep)) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+    const normalized = rawStep / magnitude;
+    const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+    return nice * magnitude;
+  }
+
+  // Round tick values inside [lo, hi] (the domain itself is not snapped).
+  function linearTicks(lo, hi, targetCount, integer = false) {
+    let step = niceStep((hi - lo) / Math.max(1, targetCount));
+    if (integer) step = Math.max(1, Math.round(step));
+    const values = [];
+    const first = Math.ceil(lo / step - 1e-9);
+    for (let k = first; k * step <= hi + step * 1e-9 && values.length < 100; k++) {
+      const v = k * step;
+      values.push(Math.abs(v) < step * 1e-9 ? 0 : Number(v.toPrecision(12)));
+    }
+    return { step, values };
+  }
+
+  // --- Time (browser-local, like every chart of the app) -----------------------
+
+  const SECOND_MS = 1000, MINUTE_MS = 60000, HOUR_MS = 3600000, DAY_MS = 86400000;
+  const SUB_DAY_STEPS_MS = [
+    1, 2, 5, 10, 20, 50, 100, 200, 500,
+    SECOND_MS, 2 * SECOND_MS, 5 * SECOND_MS, 10 * SECOND_MS, 15 * SECOND_MS, 30 * SECOND_MS,
+    MINUTE_MS, 2 * MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS,
+    HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS,
+  ];
+  const DAY_STEPS = [1, 2, 7, 14];
+  const MONTH_STEPS = [1, 2, 3, 6];
+  const YEAR_STEPS = [1, 2, 5, 10, 20, 50, 100, 1000];
+  const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad2 = (v) => String(v).padStart(2, "0");
+  const pad3 = (v) => String(v).padStart(3, "0");
+
+  function localMidnight(ms) {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function dateText(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+
+  // 2026-09-30 14:05:00.000; fractionDigits 6 adds the microseconds.
+  function formatInstant(ms, fractionDigits = 3) {
+    if (!Number.isFinite(ms)) return "\u2014";
+    const whole = Math.floor(ms);
+    const d = new Date(whole);
+    let text = `${dateText(whole)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+    if (fractionDigits > 0) {
+      text += `.${pad3(d.getMilliseconds())}`;
+      if (fractionDigits > 3) text += String(Math.round((ms - whole) * 1000)).padStart(3, "0").slice(0, fractionDigits - 3);
+    }
+    return text;
+  }
+
+  function formatDuration(ms) {
+    if (!(ms >= 0)) return "";
+    if (ms < 1) return `${formatValue(Number((ms * 1000).toPrecision(4)))} \u00b5s`;
+    if (ms < SECOND_MS) return `${formatValue(Number(ms.toPrecision(4)))} ms`;
+    const parts = [];
+    let rest = Math.round(ms);
+    const units = [[DAY_MS, "d"], [HOUR_MS, "h"], [MINUTE_MS, "m"], [SECOND_MS, "s"]];
+    for (const [size, suffix] of units) {
+      if (rest >= size || (suffix === "s" && !parts.length)) {
+        const count = suffix === "s" ? rest / size : Math.floor(rest / size);
+        parts.push(suffix === "s" && !Number.isInteger(count) && parts.length === 0 ? `${count.toFixed(3).replace(/0+$/, "")}s` : `${Math.floor(count)}${suffix}`);
+        rest -= Math.floor(count) * size;
+      }
+      if (parts.length === 2) break;
+    }
+    return parts.join(" ");
+  }
+
+  function utcOffsetText(ms) {
+    const minutes = -new Date(Number.isFinite(ms) ? ms : Date.now()).getTimezoneOffset();
+    if (minutes === 0) return "UTC";
+    const sign = minutes < 0 ? "-" : "+";
+    const abs = Math.abs(minutes);
+    return `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
+  }
+
+  function subDayTicks(startMs, endMs, stepMs) {
+    const ticks = [];
+    const day = new Date(localMidnight(startMs));
+    for (let guard = 0; day.getTime() <= endMs && guard < 4000; guard++) {
+      const midnight = day.getTime();
+      day.setDate(day.getDate() + 1);
+      const next = day.getTime();
+      if (stepMs >= HOUR_MS) {
+        // Wall-clock hours (00:00, 06:00, 12:00...), even on DST days.
+        const base = new Date(midnight);
+        for (let hour = 0; hour < 24; hour += stepMs / HOUR_MS) {
+          const t = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hour).getTime();
+          if (t >= startMs && t <= endMs && (!ticks.length || ticks[ticks.length - 1] < t)) ticks.push(t);
+        }
+        continue;
+      }
+      const first = midnight + Math.ceil(Math.max(0, startMs - midnight) / stepMs) * stepMs;
+      for (let t = first; t < next && t <= endMs && ticks.length < 400; t += stepMs) ticks.push(t);
+    }
+    return ticks;
+  }
+
+  function dayTicks(startMs, endMs, everyDays) {
+    const ticks = [];
+    const day = new Date(localMidnight(startMs));
+    for (let guard = 0; day.getTime() <= endMs && guard < 5000; guard++, day.setDate(day.getDate() + 1)) {
+      const t = day.getTime();
+      const dayNumber = Math.round(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / DAY_MS);
+      if (t >= startMs && dayNumber % everyDays === 0) ticks.push(t);
+    }
+    return ticks;
+  }
+
+  function monthTicks(startMs, endMs, everyMonths) {
+    const ticks = [];
+    const start = new Date(startMs);
+    const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    for (let guard = 0; cursor.getTime() <= endMs && guard < 5000; guard++, cursor.setMonth(cursor.getMonth() + 1)) {
+      const t = cursor.getTime();
+      if (t >= startMs && (cursor.getFullYear() * 12 + cursor.getMonth()) % everyMonths === 0) ticks.push(t);
+    }
+    return ticks;
+  }
+
+  function yearTicks(startMs, endMs, everyYears) {
+    const ticks = [];
+    const first = new Date(startMs).getFullYear();
+    for (let y = first; y <= first + 100000 && ticks.length < 200; y++) {
+      const t = new Date(y, 0, 1).getTime();
+      if (t > endMs) break;
+      if (t >= startMs && y % everyYears === 0) ticks.push(t);
+    }
+    return ticks;
+  }
+
+  function clockText(ms, unit) {
+    const d = new Date(ms);
+    const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    if (unit === "minute") return hm;
+    const hms = `${hm}:${pad2(d.getSeconds())}`;
+    return unit === "second" ? hms : `${hms}.${pad3(d.getMilliseconds())}`;
+  }
+
+  const dayLabel = (ms) => {
+    const d = new Date(ms);
+    return `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+  };
+
+  // Calendar-aligned ticks, the smallest step whose labels keep apart, like
+  // Grafana: each tick has a label and, where the larger unit changes (and on
+  // the first tick), a context line (the date under clock times, the year
+  // under days) so every position reads unambiguously.
+  function timeTicks(startMs, endMs, plotWidthPx, measure) {
+    const span = Math.max(1e-3, endMs - startMs);
+    const width = Math.max(60, plotWidthPx);
+    const fits = (count, sample) => count <= 80 && width / Math.max(1, count) >= measure(sample) + X_TICK_GAP;
+    const withContext = (ticks, labelOf, contextOf) => {
+      let lastContext = "";
+      return ticks.map((t) => {
+        const context = contextOf(t);
+        const out = { v: t, label: labelOf(t), context: context !== lastContext ? context : "" };
+        lastContext = context;
+        return out;
+      });
+    };
+    for (const step of SUB_DAY_STEPS_MS) {
+      const unit = step < SECOND_MS ? "milli" : step < MINUTE_MS ? "second" : "minute";
+      const sample = unit === "milli" ? "00:00:00.000" : unit === "second" ? "00:00:00" : "00:00";
+      if (!fits(span / step, sample)) continue;
+      return withContext(subDayTicks(startMs, endMs, step), (t) => clockText(t, unit), (t) => `${dayLabel(t)} ${new Date(t).getFullYear()}`);
+    }
+    for (const days of DAY_STEPS) {
+      if (!fits(span / (days * DAY_MS), "Sep 30")) continue;
+      return withContext(dayTicks(startMs, endMs, days), dayLabel, (t) => String(new Date(t).getFullYear()));
+    }
+    const monthMs = 30.44 * DAY_MS;
+    for (const months of MONTH_STEPS) {
+      if (!fits(span / (months * monthMs), "Sep")) continue;
+      return withContext(monthTicks(startMs, endMs, months), (t) => MONTH_NAMES[new Date(t).getMonth()], (t) => String(new Date(t).getFullYear()));
+    }
+    for (const years of YEAR_STEPS) {
+      if (!fits(span / (years * 365.25 * DAY_MS), "2026") && years !== YEAR_STEPS[YEAR_STEPS.length - 1]) continue;
+      return yearTicks(startMs, endMs, years).map((t) => ({ v: t, label: String(new Date(t).getFullYear()), context: "" }));
+    }
+    return [];
+  }
+
+  // --- Colours ----------------------------------------------------------------
+
+  function parseColor(text) {
+    const value = String(text || "").trim();
+    let m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/.exec(value);
+    if (m) {
+      const a = m[4] == null ? 1 : m[4].endsWith("%") ? Number(m[4].slice(0, -1)) / 100 : Number(m[4]);
+      return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a };
+    }
+    m = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\s*\)$/.exec(value);
+    if (m) return { r: Number(m[1]) * 255, g: Number(m[2]) * 255, b: Number(m[3]) * 255, a: m[4] == null ? 1 : Number(m[4]) };
+    m = /^#([0-9a-f]{6})$/i.exec(value);
+    if (m) {
+      const n = parseInt(m[1], 16);
+      return { r: n >> 16, g: (n >> 8) & 255, b: n & 255, a: 1 };
+    }
+    return { r: 128, g: 128, b: 128, a: 1 };
+  }
+
+  const rgba = (c, alpha = 1) => `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${+(c.a * alpha).toFixed(3)})`;
+  const luminance = (c) => (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
+
+  // --- Shared state: theme changes and the cursor sync groups -----------------
+
+  const live = new Set();
+  const syncGroups = new Map();
+  let themeWatch = null;
+
+  function watchTheme() {
+    if (themeWatch) return;
+    const invalidate = () => { for (const chart of live) chart.themeChanged(); };
+    const observer = new MutationObserver(invalidate);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+    const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    if (media && media.addEventListener) media.addEventListener("change", invalidate);
+    themeWatch = { observer, media, invalidate };
+  }
+
+  function lowerBound(xs, value, lo = 0, hi = xs.length) {
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid] < value) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
+  function upperBound(xs, value, lo = 0, hi = xs.length) {
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid] <= value) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
+  const esc = (value) => String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  function readLegendMode() {
+    try { return window.localStorage.getItem(LEGEND_STORE_KEY) === "table" ? "table" : "list"; } catch { return "list"; }
+  }
+
+  function storeLegendMode(mode) {
+    try { window.localStorage.setItem(LEGEND_STORE_KEY, mode); } catch { /* the chart keeps its mode */ }
+  }
+
+  // --- Chart ------------------------------------------------------------------
+
+  function create(host, initial = {}) {
+    const root = document.createElement("div");
+    root.className = "chartCore";
+    root.innerHTML = `
+      <div class="chartCore__plot">
+        <canvas class="chartCore__canvas" aria-hidden="true"></canvas>
+        <canvas class="chartCore__canvas chartCore__overlay" tabindex="0" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends"></canvas>
+        <div class="chartCore__tooltip" role="status" hidden></div>
+        <i class="chartCore__probe" aria-hidden="true"></i>
+      </div>
+      <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
+    host.appendChild(root);
+    const plotEl = root.querySelector(".chartCore__plot");
+    const [baseCanvas, overCanvas] = root.querySelectorAll("canvas");
+    const tooltipEl = root.querySelector(".chartCore__tooltip");
+    const probe = root.querySelector(".chartCore__probe");
+    const legendEl = root.querySelector(".chartCore__legend");
+    const baseCtx = baseCanvas.getContext("2d");
+    const overCtx = overCanvas.getContext("2d");
+
+    const opts = {
+      height: DEFAULT_HEIGHT,
+      xKind: "number",
+      xs: new Float64Array(0),
+      categories: [],
+      series: [],
+      type: "line",
+      stack: false,
+      xLabel: "",
+      xFractionDigits: 3,
+      xDateOnly: false,
+      tooltip: "all",
+      legend: true,
+      syncKey: "",
+      onZoom: null,
+      onHiddenChange: null,
+      tooltipFooter: null,
+      ...initial,
+    };
+    let hidden = new Set(initial.hidden || []);
+    let highlight = null;
+    let legendMode = readLegendMode();
+    let zoom = null; // [lo, hi] in x units
+    let theme = null;
+    let layout = null;
+    let stacks = null; // Map id -> { top, base } for the visible series
+    let cursor = null; // { px, py } css px in the plot canvas
+    let cursorIndex = -1;
+    let syncedX = null;
+    let drag = null;
+    let sizeW = 0;
+    let dpr = window.devicePixelRatio || 1;
+    let drawRaf = 0;
+    let overRaf = 0;
+    let released = false;
+    let destroyed = false;
+    let tooltipKey = "";
+    let tooltipSize = { w: 0, h: 0 };
+    let stats = { points: 0, series: 0, ms: 0 };
+
+    plotEl.style.height = `${opts.height}px`;
+
+    // --- theme -------------------------------------------------------------
+
+    function color(value) {
+      probe.style.color = "";
+      probe.style.color = value;
+      return parseColor(getComputedStyle(probe).color);
+    }
+
+    function readTheme() {
+      const style = getComputedStyle(root);
+      const text = color("var(--text)");
+      const muted = color("var(--muted)");
+      const panel = color("var(--panel, #0f1623)");
+      const dark = luminance(panel) < 0.5;
+      const family = style.fontFamily || "system-ui, sans-serif";
+      const seriesColors = new Map();
+      for (const s of opts.series) seriesColors.set(s.id, color(s.color || "var(--qchart-1)"));
+      return {
+        dark,
+        text,
+        muted,
+        panel,
+        font: `500 ${FONT_SIZE}px ${family}`,
+        fontBold: `650 ${FONT_SIZE}px ${family}`,
+        // Grafana: hairline grids at 9% of the text colour.
+        grid: dark ? "rgba(240, 250, 255, 0.09)" : "rgba(0, 10, 23, 0.09)",
+        axis: rgba(muted, 0.55),
+        label: rgba(muted, 1),
+        cross: rgba(text, 0.55),
+        select: rgba(color("var(--accentBorder, #2563eb)"), 0.16),
+        selectEdge: rgba(color("var(--accentBorder, #2563eb)"), 0.7),
+        seriesColors,
+      };
+    }
+
+    function seriesColor(s) {
+      if (!theme.seriesColors.has(s.id)) theme.seriesColors.set(s.id, color(s.color || "var(--qchart-1)"));
+      return theme.seriesColors.get(s.id);
+    }
+
+    // --- data ----------------------------------------------------------------
+
+    const visibleSeries = () => opts.series.filter((s) => !hidden.has(s.id));
+    const isStacked = () => opts.stack && (opts.type === "area" || opts.type === "bar");
+
+    // Cumulative tops / bases of the visible series (NULL counts as 0). Bars
+    // stack positive values up and negative ones down; areas just add up.
+    function computeStacks() {
+      if (!isStacked()) { stacks = null; return; }
+      const n = opts.xs.length;
+      const state = new Map();
+      stacks = new Map();
+      for (const s of visibleSeries()) {
+        const key = s.group == null ? "" : String(s.group);
+        if (!state.has(key)) state.set(key, { pos: new Float64Array(n), neg: opts.type === "bar" ? new Float64Array(n) : null });
+        const st = state.get(key);
+        const top = new Float64Array(n);
+        const base = new Float64Array(n);
+        const values = s.values;
+        for (let i = 0; i < n; i++) {
+          const v = values[i];
+          const value = v === v ? v : 0;
+          if (st.neg && value < 0) {
+            base[i] = st.neg[i];
+            top[i] = st.neg[i] + value;
+            st.neg[i] = top[i];
+          } else {
+            base[i] = st.pos[i];
+            top[i] = st.pos[i] + value;
+            st.pos[i] = top[i];
+          }
+        }
+        stacks.set(s.id, { top, base });
+      }
+    }
+
+    function fullDomain() {
+      const xs = opts.xs;
+      const n = xs.length;
+      if (opts.xKind === "category") return [-0.5, Math.max(0.5, n - 0.5)];
+      let lo = n ? xs[0] : 0;
+      let hi = n ? xs[n - 1] : 1;
+      if (hi === lo) {
+        const pad = opts.xKind === "time" ? MINUTE_MS : Math.max(1, Math.abs(lo) * 0.1);
+        lo -= pad;
+        hi += pad;
+      } else if (opts.type === "bar" && n > 1) {
+        // Bars are centred on their x: half a bar fits inside each edge.
+        const gap = minGap(0, n);
+        const half = Math.max(gap, (hi - lo) / 400) / 2;
+        lo -= half;
+        hi += half;
+      }
+      return [lo, hi];
+    }
+
+    function minGap(i0, i1) {
+      const xs = opts.xs;
+      let gap = Infinity;
+      for (let i = i0 + 1; i < i1; i++) {
+        const g = xs[i] - xs[i - 1];
+        if (g > 0 && g < gap) gap = g;
+      }
+      return Number.isFinite(gap) ? gap : 1;
+    }
+
+    // --- layout ----------------------------------------------------------------
+
+    // Label widths at the axis font, cached (tick labels repeat on redraws).
+    const widths = new Map();
+    function measure(text) {
+      let w = widths.get(text);
+      if (w === undefined) {
+        baseCtx.font = theme.font;
+        w = baseCtx.measureText(text).width;
+        if (widths.size > 2000) widths.clear();
+        widths.set(text, w);
+      }
+      return w;
+    }
+
+    // Min / max of a value array over [v0, v1), kept while the array and the
+    // range stay the same (redraws on hover-free changes, resizes, themes).
+    const extents = new WeakMap();
+    function extent(a, v0, v1) {
+      const cached = extents.get(a);
+      if (cached && cached.v0 === v0 && cached.v1 === v1) return cached;
+      let min = Infinity, max = -Infinity;
+      for (let i = v0; i < v1; i++) {
+        const v = a[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const out = { v0, v1, min, max };
+      extents.set(a, out);
+      return out;
+    }
+
+    function computeLayout(width) {
+      const xs = opts.xs;
+      const n = xs.length;
+      const [fullLo, fullHi] = fullDomain();
+      let [xLo, xHi] = zoom || [fullLo, fullHi];
+      if (!(xHi > xLo)) [xLo, xHi] = [fullLo, fullHi];
+      // Visible indexes (one point beyond each edge so lines leave the plot).
+      let i0 = opts.xKind === "category" ? Math.max(0, Math.ceil(xLo)) : lowerBound(xs, xLo);
+      let i1 = opts.xKind === "category" ? Math.min(n, Math.floor(xHi) + 1) : upperBound(xs, xHi);
+      const v0 = i0, v1 = i1;
+      if (opts.type !== "bar" && opts.xKind !== "category") { i0 = Math.max(0, i0 - 1); i1 = Math.min(n, i1 + 1); }
+
+      // Y domain over the visible points.
+      let yMin = Infinity, yMax = -Infinity;
+      const vis = visibleSeries();
+      for (const s of vis) {
+        const st = stacks && stacks.get(s.id);
+        for (const a of st ? [st.top, st.base] : [s.values]) {
+          const e = extent(a, v0, v1);
+          if (e.min < yMin) yMin = e.min;
+          if (e.max > yMax) yMax = e.max;
+        }
+      }
+      if (!(yMin <= yMax)) { yMin = 0; yMax = 1; }
+      const pinned = isStacked() || opts.type === "bar";
+      if (pinned) { yMin = Math.min(0, yMin); yMax = Math.max(0, yMax); }
+      else if (yMin >= 0 && yMax - yMin > 0.25 * yMax) yMin = 0;
+      else if (yMax <= 0 && yMax - yMin > 0.25 * -yMin) yMax = 0;
+      if (yMax === yMin) {
+        const pad = yMin === 0 ? 1 : Math.abs(yMin) * 0.1;
+        yMin -= pad; yMax += pad;
+      } else {
+        const pad = (yMax - yMin) * 0.06;
+        if (yMax !== 0 || !pinned) yMax += pad;
+        if (yMin !== 0) yMin -= pad;
+      }
+
+      const xTwoLines = opts.xKind === "time" && !opts.xDateOnly;
+      const bottom = xTwoLines ? 34 : 22;
+      const plotH = Math.max(40, opts.height - PAD_TOP - bottom);
+      const yt = linearTicks(yMin, yMax, Math.max(2, Math.floor(plotH / Y_TICK_SPACE)));
+      const yUnit = compactUnitFor(Math.max(Math.abs(yMin), Math.abs(yMax)));
+      const yLabels = yt.values.map((v) => formatTick(v, yt.step, yUnit));
+      let labelW = 0;
+      for (const l of yLabels) labelW = Math.max(labelW, measure(l));
+      const left = Math.ceil(Math.max(24, labelW) + 12);
+      const plotW = Math.max(40, width - left - PAD_RIGHT);
+      const ky = plotH / (yMax - yMin);
+      const kx = plotW / (xHi - xLo);
+      const L = {
+        width, height: opts.height, left, top: PAD_TOP, plotW, plotH, bottom,
+        xLo, xHi, yMin, yMax, kx, ky, i0, i1, v0, v1,
+        yTicks: yt.values.map((v, k) => ({ v, label: yLabels[k] })), yStep: yt.step,
+        xOf: (x) => left + (x - xLo) * kx,
+        yOf: (y) => PAD_TOP + plotH - (y - yMin) * ky,
+        xAt: (px) => xLo + (px - left) / kx,
+        yAt: (py) => yMin + (PAD_TOP + plotH - py) / ky,
+      };
+      L.xTicks = xTicks(L);
+      return L;
+    }
+
+    function xTicks(L) {
+      const { xLo, xHi, plotW } = L;
+      if (opts.xKind === "time") {
+        if (opts.xDateOnly) {
+          return timeTicks(xLo, xHi, plotW, measure).filter((t) => localMidnight(t.v) === t.v).map((t) => ({ v: t.v, label: dayLabel(t.v), context: "" }));
+        }
+        return timeTicks(xLo, xHi, plotW, measure);
+      }
+      if (opts.xKind === "category") {
+        const n = opts.xs.length;
+        const labels = [];
+        const lo = Math.max(0, Math.ceil(xLo)), hi = Math.min(n - 1, Math.floor(xHi));
+        const band = plotW / Math.max(1, xHi - xLo);
+        let widest = 0;
+        const short = (i) => { const c = String(opts.categories[i] ?? ""); return c.length > MAX_CATEGORY_CHARS ? `${c.slice(0, MAX_CATEGORY_CHARS - 1)}\u2026` : c; };
+        for (let i = lo; i <= hi && i - lo < 400; i++) widest = Math.max(widest, measure(short(i)));
+        const every = Math.max(1, Math.ceil((widest + 10) / band));
+        for (let i = lo; i <= hi; i += every) labels.push({ v: i, label: short(i), context: "" });
+        return labels;
+      }
+      const sample = formatValue(Math.max(Math.abs(xLo), Math.abs(xHi)));
+      const count = Math.max(2, Math.min(14, Math.floor(plotW / (measure(sample) + 36))));
+      const t = linearTicks(xLo, xHi, count, opts.xKind === "index");
+      const unit = compactUnitFor(Math.max(Math.abs(xLo), Math.abs(xHi)));
+      return t.values.map((v) => ({ v, label: formatTick(v, t.step, unit), context: "" }));
+    }
+
+    // --- canvases --------------------------------------------------------------
+
+    function sizeCanvas(canvas, ctx, w, h) {
+      const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw;
+        canvas.height = bh;
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Snap a css coordinate to the device pixel grid so 1px lines stay crisp.
+    const crisp = (v) => (Math.round(v * dpr) + 0.5) / dpr;
+
+    function draw() {
+      drawRaf = 0;
+      if (destroyed) return;
+      const width = Math.floor(plotEl.clientWidth);
+      if (!width) return; // hidden: the resize observer draws on show
+      const t0 = performance.now();
+      released = false;
+      sizeW = width;
+      dpr = window.devicePixelRatio || 1;
+      if (!theme) theme = readTheme();
+      if (stacks === undefined || stacks === null) computeStacks();
+      layout = computeLayout(width);
+      sizeCanvas(baseCanvas, baseCtx, width, opts.height);
+      // The cursor canvas gets its backing store on the first hover only.
+      if (overCanvas.width) sizeCanvas(overCanvas, overCtx, width, opts.height);
+      else { overCanvas.style.width = `${width}px`; overCanvas.style.height = `${opts.height}px`; }
+      const ctx = baseCtx;
+      ctx.clearRect(0, 0, width, opts.height);
+      drawAxes(ctx, layout);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(layout.left, layout.top - 1, layout.plotW, layout.plotH + 2);
+      ctx.clip();
+      let points = 0;
+      const vis = visibleSeries();
+      const perSeries = {};
+      if (opts.type === "bar") points = drawBars(ctx, layout, vis, perSeries);
+      else {
+        for (const s of vis) {
+          const drawn = drawSeries(ctx, layout, s);
+          perSeries[s.label] = { points: drawn, runs: runs.length };
+          points = Math.max(points, drawn);
+        }
+      }
+      ctx.restore();
+      stats = { points, series: vis.length, perSeries, ms: performance.now() - t0 };
+      publish();
+      drawOverlay();
+      renderLegend();
+    }
+
+    function publish() {
+      const L = layout;
+      root.dataset.pointsDrawn = String(stats.points);
+      root.dataset.seriesDrawn = String(stats.series);
+      root.dataset.xMin = String(L.xLo);
+      root.dataset.xMax = String(L.xHi);
+      root.dataset.yMin = String(L.yMin);
+      root.dataset.yMax = String(L.yMax);
+      root.dataset.zoomed = String(!!zoom);
+      root.dataset.drawMs = stats.ms.toFixed(2);
+      root.dataset.type = opts.type;
+      // Test and debugging hooks: what each series drew and where the plot is.
+      root.dataset.seriesStats = JSON.stringify(stats.perSeries);
+      root.dataset.draws = String((Number(root.dataset.draws) || 0) + 1);
+      root.dataset.plot = `${L.left} ${L.top} ${L.plotW} ${L.plotH}`;
+      if (typeof opts.onDraw === "function") opts.onDraw({ ...stats, xLo: L.xLo, xHi: L.xHi, zoomed: !!zoom });
+    }
+
+    function drawAxes(ctx, L) {
+      const { left, top, plotW, plotH } = L;
+      ctx.lineWidth = 1 / dpr;
+      ctx.strokeStyle = theme.grid;
+      ctx.beginPath();
+      for (const t of L.yTicks) {
+        const y = crisp(L.yOf(t.v));
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + plotW, y);
+      }
+      for (const t of L.xTicks) {
+        const x = crisp(L.xOf(t.v));
+        if (x < left - 0.5 || x > left + plotW + 0.5) continue;
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, top + plotH);
+      }
+      ctx.stroke();
+      // Zero line and baseline.
+      ctx.strokeStyle = theme.axis;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const base = crisp(top + plotH);
+      ctx.moveTo(left, base);
+      ctx.lineTo(left + plotW, base);
+      if (L.yMin < 0 && L.yMax > 0) {
+        const z = crisp(L.yOf(0));
+        ctx.moveTo(left, z);
+        ctx.lineTo(left + plotW, z);
+      }
+      for (const t of L.xTicks) {
+        const x = crisp(L.xOf(t.v));
+        if (x < left - 0.5 || x > left + plotW + 0.5) continue;
+        ctx.moveTo(x, base);
+        ctx.lineTo(x, base + TICK_LEN);
+      }
+      ctx.stroke();
+
+      ctx.font = theme.font;
+      ctx.fillStyle = theme.label;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "right";
+      for (const t of L.yTicks) ctx.fillText(t.label, left - 8, L.yOf(t.v));
+      ctx.textBaseline = "top";
+      const y1 = top + plotH + TICK_LEN + 3;
+      let lastRight = -Infinity;
+      for (const t of L.xTicks) {
+        const x = L.xOf(t.v);
+        if (x < left - 0.5 || x > left + plotW + 0.5) continue;
+        const w = measure(t.label);
+        let cx = Math.max(w / 2 + 1, Math.min(L.width - w / 2 - 1, x));
+        if (cx - w / 2 < lastRight + 6) continue;
+        ctx.textAlign = "center";
+        ctx.fillStyle = theme.label;
+        ctx.fillText(t.label, cx, y1);
+        lastRight = cx + w / 2;
+        if (t.context) {
+          const cw = measure(t.context);
+          cx = Math.max(cw / 2 + 1, Math.min(L.width - cw / 2 - 1, x));
+          ctx.font = theme.fontBold;
+          ctx.fillStyle = rgba(theme.text, 0.8);
+          ctx.fillText(t.context, cx, y1 + 14);
+          ctx.font = theme.font;
+          lastRight = Math.max(lastRight, cx + cw / 2);
+        }
+      }
+    }
+
+    function alphaFor(s) {
+      return highlight && highlight !== s.id ? 0.18 : 1;
+    }
+
+    // Vertices of the series being drawn, reused across series and draws:
+    // vx / vy the line, vb the stack base under it, runs the index where each
+    // unbroken run starts (lines break at NULLs).
+    let vx = new Float64Array(4096), vy = new Float64Array(4096), vb = new Float64Array(4096);
+    let vCount = 0;
+    let decimated = false;
+    const runs = [];
+    function vertex(x, y, b) {
+      if (vCount === vx.length) {
+        const grow = (a) => { const next = new Float64Array(a.length * 2); next.set(a); return next; };
+        vx = grow(vx); vy = grow(vy); vb = grow(vb);
+      }
+      vx[vCount] = x; vy[vCount] = y; vb[vCount] = b;
+      vCount++;
+    }
+
+    // One line through the visible points, as vertices. Past two points per
+    // device-pixel column, each column keeps its first, lowest, highest and
+    // last value (one vertical stroke; base: false) so every peak survives at
+    // any zoom, or its highest point and the matching base (base: an array,
+    // for stacked areas): drawing costs O(points) arithmetic but only O(width)
+    // canvas calls.
+    function trace(L, ys, nulls, base) {
+      const xs = opts.xs;
+      const { i0, i1, left, plotW, kx, ky, xLo, yMin } = L;
+      const category = opts.xKind === "category";
+      const bottom = L.top + L.plotH;
+      const breakAll = !nulls;
+      vCount = 0;
+      runs.length = 0;
+      decimated = i1 - i0 > plotW * 2;
+      let pen = false;
+      const start = () => { if (!pen) { runs.push(vCount); pen = true; } };
+      if (!decimated) {
+        for (let i = i0; i < i1; i++) {
+          const v = ys[i];
+          if (v !== v) {
+            if (breakAll || nulls[i]) pen = false;
+            continue;
+          }
+          start();
+          vertex(left + ((category ? i : xs[i]) - xLo) * kx, bottom - (v - yMin) * ky, base ? bottom - (base[i] - yMin) * ky : 0);
+        }
+        return;
+      }
+      let col = -Infinity;
+      let fy = 0, lo = 0, hi = 0, ly = 0, cx = 0, by = 0;
+      let has = false;
+      const flush = () => {
+        if (!has) return;
+        start();
+        if (base) vertex(cx, lo, by);
+        else {
+          vertex(cx, fy, 0);
+          if (lo !== fy) vertex(cx, lo, 0);
+          if (hi !== lo) vertex(cx, hi, 0);
+          if (ly !== hi) vertex(cx, ly, 0);
+        }
+        has = false;
+      };
+      for (let i = i0; i < i1; i++) {
+        const v = ys[i];
+        if (v !== v) {
+          if (breakAll || nulls[i]) { flush(); pen = false; }
+          continue;
+        }
+        const x = left + ((category ? i : xs[i]) - xLo) * kx;
+        const c = Math.floor(x * dpr);
+        const y = bottom - (v - yMin) * ky;
+        if (c !== col) {
+          flush();
+          col = c;
+          cx = (c + 0.5) / dpr;
+          fy = lo = hi = ly = y;
+          if (base) by = bottom - (base[i] - yMin) * ky;
+          has = true;
+        } else {
+          if (y < lo) { lo = y; if (base) by = bottom - (base[i] - yMin) * ky; }
+          if (y > hi) hi = y;
+          ly = y;
+        }
+      }
+      flush();
+    }
+
+    const runEnd = (r) => (r + 1 < runs.length ? runs[r + 1] : vCount);
+
+    function pathLine(ctx) {
+      ctx.beginPath();
+      for (let r = 0; r < runs.length; r++) {
+        const a = runs[r], b = runEnd(r);
+        ctx.moveTo(vx[a], vy[a]);
+        for (let k = a + 1; k < b; k++) ctx.lineTo(vx[k], vy[k]);
+      }
+    }
+
+    // Closed shapes between the line and its base (an array, or one y).
+    function pathFill(ctx, baseY) {
+      ctx.beginPath();
+      for (let r = 0; r < runs.length; r++) {
+        const a = runs[r], b = runEnd(r);
+        if (b - a < 2) continue;
+        ctx.moveTo(vx[a], vy[a]);
+        for (let k = a + 1; k < b; k++) ctx.lineTo(vx[k], vy[k]);
+        if (baseY == null) for (let k = b - 1; k >= a; k--) ctx.lineTo(vx[k], vb[k]);
+        else { ctx.lineTo(vx[b - 1], baseY); ctx.lineTo(vx[a], baseY); }
+        ctx.closePath();
+      }
+    }
+
+    function drawSeries(ctx, L, s) {
+      const c = seriesColor(s);
+      const alpha = alphaFor(s);
+      const type = opts.type;
+      const nulls = s.nulls || null;
+      const st = stacks && stacks.get(s.id);
+      if (type === "area" && st) {
+        // Fill between this series' top and its base, then stroke the top.
+        trace(L, st.top, null, st.base);
+        pathFill(ctx, null);
+        ctx.fillStyle = rgba(c, 0.3 * alpha);
+        ctx.fill();
+        pathLine(ctx);
+        ctx.strokeStyle = rgba(c, alpha);
+        ctx.lineWidth = 1.25;
+        ctx.lineJoin = "round";
+        ctx.stroke();
+        return vCount;
+      }
+      const count = L.v1 - L.v0;
+      const showPoints = type === "points" || (type === "line" && count > 0 && count <= L.plotW / POINTS_AUTO_SPACING);
+      let drawn = 0;
+      if (type === "line") {
+        trace(L, s.values, nulls, null);
+        drawn = vCount;
+        // Grafana's "opacity" gradient: a light wash under each line.
+        if (opts.fill !== false && visibleSeries().length === 1) {
+          const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
+          const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
+          grad.addColorStop(0, rgba(c, 0.14 * alpha));
+          grad.addColorStop(1, rgba(c, 0));
+          pathFill(ctx, baseY);
+          ctx.fillStyle = grad;
+          ctx.fill();
+        }
+        pathLine(ctx);
+        ctx.strokeStyle = rgba(c, alpha);
+        ctx.lineWidth = 1.5;
+        // Round joins only where angles show: a decimated line is mostly
+        // vertical strokes, which rasterise much cheaper with bevels.
+        ctx.lineJoin = decimated ? "bevel" : "round";
+        ctx.lineCap = decimated ? "butt" : "round";
+        ctx.stroke();
+        // Isolated values (a run of one point between NULLs) still show.
+        if (!showPoints) {
+          ctx.beginPath();
+          let singles = 0;
+          for (let r = 0; r < runs.length; r++) {
+            const a = runs[r];
+            if (runEnd(r) - a !== 1) continue;
+            ctx.moveTo(vx[a] + 2.2, vy[a]);
+            ctx.arc(vx[a], vy[a], 2.2, 0, Math.PI * 2);
+            singles++;
+          }
+          if (singles) { ctx.fillStyle = rgba(c, alpha); ctx.fill(); }
+        }
+      }
+      if (showPoints) {
+        const xs = opts.xs;
+        const category = opts.xKind === "category";
+        ctx.beginPath();
+        let dots = 0;
+        for (let i = L.v0; i < L.v1 && dots < 20000; i++) {
+          const v = s.values[i];
+          if (v !== v) continue;
+          const x = L.xOf(category ? i : xs[i]);
+          const y = L.yOf(v);
+          ctx.moveTo(x + 2.6, y);
+          ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+          dots++;
+        }
+        ctx.fillStyle = rgba(c, alpha);
+        ctx.fill();
+        if (type === "points") drawn = dots;
+      }
+      return drawn;
+    }
+
+    // Bars centred on x; groups side by side, a group's series stacked.
+    // Past one bar per 3px, each slot keeps its tallest stack.
+    const barOffsets = new Map();
+    function drawBars(ctx, L, vis, perSeries) {
+      barOffsets.clear();
+      const xs = opts.xs;
+      const { v0, v1, plotW } = L;
+      const n = v1 - v0;
+      if (!n || !vis.length) return 0;
+      const groups = [];
+      for (const s of vis) {
+        const key = isStacked() ? (s.group == null ? "" : String(s.group)) : s.id;
+        if (!groups.includes(key)) groups.push(key);
+      }
+      let slotPx;
+      if (opts.xKind === "category") slotPx = L.kx;
+      else slotPx = n > 1 ? minGap(v0, v1) * L.kx : plotW / 2;
+      const maxBars = Math.max(1, Math.floor(plotW / 3));
+      let picks = null;
+      if (n > maxBars) {
+        picks = [];
+        const bucketW = plotW / maxBars;
+        let bucket = -1, best = -1, bestTotal = -Infinity;
+        for (let i = v0; i < v1; i++) {
+          const b = Math.floor((L.xOf(opts.xKind === "category" ? i : xs[i]) - L.left) / bucketW);
+          let total = 0;
+          for (const s of vis) {
+            const st = stacks && stacks.get(s.id);
+            const v = st ? st.top[i] - st.base[i] : s.values[i];
+            if (v === v) total += Math.abs(v);
+          }
+          if (b !== bucket) {
+            if (best >= 0) picks.push(best);
+            bucket = b; best = i; bestTotal = total;
+          } else if (total > bestTotal) { best = i; bestTotal = total; }
+        }
+        if (best >= 0) picks.push(best);
+        slotPx = Math.min(slotPx, bucketW);
+      }
+      const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * 0.72));
+      const clusterW = barW / groups.length;
+      const drawW = groups.length > 1 ? Math.max(1, clusterW - Math.min(2, clusterW * 0.15)) : barW;
+      let drawnMax = 0;
+      for (const s of vis) {
+        const c = seriesColor(s);
+        const st = stacks && stacks.get(s.id);
+        const offset = (groups.indexOf(isStacked() ? (s.group == null ? "" : String(s.group)) : s.id) - (groups.length - 1) / 2) * clusterW;
+        ctx.beginPath();
+        let count = 0;
+        const each = (i) => {
+          const top = st ? st.top[i] : s.values[i];
+          const bottom = st ? st.base[i] : 0;
+          if (!(top === top) || top === bottom) return;
+          const x = L.xOf(opts.xKind === "category" ? i : xs[i]) + offset - drawW / 2;
+          const yTop = L.yOf(Math.max(top, bottom));
+          const yBottom = L.yOf(Math.min(top, bottom));
+          ctx.rect(x, yTop, drawW, Math.max(1 / dpr, yBottom - yTop));
+          count++;
+        };
+        if (picks) for (const i of picks) each(i); else for (let i = v0; i < v1; i++) each(i);
+        ctx.fillStyle = rgba(c, 0.82 * alphaFor(s));
+        ctx.fill();
+        drawnMax = Math.max(drawnMax, count);
+        perSeries[s.label] = { points: count, runs: count ? 1 : 0 };
+        barOffsets.set(s.id, offset);
+      }
+      return drawnMax;
+    }
+
+    // --- cursor overlay ------------------------------------------------------------
+
+    function nearestIndex(px) {
+      const L = layout;
+      const xs = opts.xs;
+      const n = xs.length;
+      if (!n) return -1;
+      if (opts.xKind === "category") return Math.max(0, Math.min(n - 1, Math.round(L.xAt(px))));
+      const x = L.xAt(px);
+      const i = lowerBound(xs, x);
+      if (i <= 0) return 0;
+      if (i >= n) return n - 1;
+      return x - xs[i - 1] <= xs[i] - x ? i - 1 : i;
+    }
+
+    function xReadout(i) {
+      if (opts.xKind === "category") return String(opts.categories[i] ?? "");
+      const x = opts.xs[i];
+      if (opts.xKind === "time") return opts.xDateOnly ? dateText(x) : formatInstant(x, opts.xFractionDigits);
+      if (opts.xKind === "index") return `Row ${formatExact(x)}`;
+      return formatExact(x);
+    }
+
+    function scheduleOverlay() {
+      if (!overRaf) overRaf = requestAnimationFrame(() => { overRaf = 0; drawOverlay(); });
+    }
+
+    function badge(ctx, text, x, y, align, bounds) {
+      ctx.font = theme.fontBold;
+      const w = ctx.measureText(text).width + 10;
+      const h = 17;
+      let bx = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
+      bx = Math.max(bounds[0], Math.min(bounds[1] - w, bx));
+      ctx.fillStyle = rgba(theme.text, 0.92);
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, y, w, h, 3); else ctx.rect(bx, y, w, h);
+      ctx.fill();
+      ctx.fillStyle = rgba(theme.panel, 1);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, bx + 5, y + h / 2 + 0.5);
+    }
+
+    function drawOverlay() {
+      if (!layout || released) return;
+      const ctx = overCtx;
+      const L = layout;
+      const needed = !!((drag && drag.active) || (cursor && cursorIndex >= 0) || syncedX != null);
+      if (!overCanvas.width) {
+        if (!needed) return;
+        sizeCanvas(overCanvas, overCtx, L.width, L.height);
+      }
+      ctx.clearRect(0, 0, L.width, L.height);
+      if (drag && drag.active) {
+        const a = Math.max(L.left, Math.min(drag.x0, drag.x1));
+        const b = Math.min(L.left + L.plotW, Math.max(drag.x0, drag.x1));
+        ctx.fillStyle = theme.select;
+        ctx.fillRect(a, L.top, b - a, L.plotH);
+        ctx.strokeStyle = theme.selectEdge;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(crisp(a), L.top); ctx.lineTo(crisp(a), L.top + L.plotH);
+        ctx.moveTo(crisp(b), L.top); ctx.lineTo(crisp(b), L.top + L.plotH);
+        ctx.stroke();
+        const lo = L.xAt(a), hi = L.xAt(b);
+        const fmt = (v) => (opts.xKind === "time" ? formatInstant(v, opts.xFractionDigits).slice(11) : formatValue(Number(v.toPrecision(8))));
+        if (opts.xKind !== "category") badge(ctx, `${fmt(lo)} \u2013 ${fmt(hi)}`, (a + b) / 2, L.top + 4, "center", [L.left, L.left + L.plotW]);
+      }
+      const i = cursorIndex;
+      if (cursor && i >= 0) {
+        const xv = opts.xKind === "category" ? i : opts.xs[i];
+        const x = L.xOf(xv);
+        ctx.strokeStyle = theme.cross;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(crisp(x), L.top);
+        ctx.lineTo(crisp(x), L.top + L.plotH);
+        const py = Math.max(L.top, Math.min(L.top + L.plotH, cursor.py));
+        ctx.moveTo(L.left, crisp(py));
+        ctx.lineTo(L.left + L.plotW, crisp(py));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Points on every visible series at that x.
+        for (const s of visibleSeries()) {
+          const st = stacks && stacks.get(s.id);
+          const v = st ? st.top[i] : s.values[i];
+          if (!(v === v) || !(s.values[i] === s.values[i])) continue;
+          const dx = opts.type === "bar" ? (barOffsets.get(s.id) || 0) : 0;
+          const y = L.yOf(v);
+          if (y < L.top - 1 || y > L.top + L.plotH + 1) continue;
+          ctx.beginPath();
+          ctx.arc(x + dx, y, s.id === cursor.nearest ? 4.5 : 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = rgba(seriesColor(s), 1);
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = rgba(theme.panel, 1);
+          ctx.stroke();
+        }
+        // Exact readouts on both axes.
+        badge(ctx, xReadout(i), x, L.top + L.plotH + 2, "center", [0, L.width]);
+        const yv = L.yAt(py);
+        const yd = Math.min(10, decimalsFor(L.yStep) + 2);
+        badge(ctx, formatExact(Number(yv.toFixed(yd))), L.left - 3, py - 8.5, "right", [0, L.left - 2]);
+        root.dataset.cursorIndex = String(i);
+        root.dataset.cursorX = xReadout(i);
+        root.dataset.cursorPx = String(Math.round(x * 100) / 100);
+      } else if (syncedX != null && opts.xKind !== "category") {
+        const x = L.xOf(syncedX);
+        if (x >= L.left && x <= L.left + L.plotW) {
+          ctx.strokeStyle = theme.cross;
+          ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(crisp(x), L.top);
+          ctx.lineTo(crisp(x), L.top + L.plotH);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      if (!cursor) {
+        delete root.dataset.cursorIndex;
+        delete root.dataset.cursorX;
+        delete root.dataset.cursorPx;
+      }
+    }
+
+    // --- tooltip ------------------------------------------------------------------
+
+    function nearestSeries(i, py) {
+      let best = null, bestD = Infinity;
+      for (const s of visibleSeries()) {
+        const st = stacks && stacks.get(s.id);
+        const v = st ? st.top[i] : s.values[i];
+        if (!(v === v) || !(s.values[i] === s.values[i])) continue;
+        const d = Math.abs(layout.yOf(v) - py);
+        if (d < bestD) { bestD = d; best = s.id; }
+      }
+      return best;
+    }
+
+    function renderTooltip() {
+      if (!cursor || cursorIndex < 0 || opts.tooltip === "none") { tooltipEl.hidden = true; tooltipKey = ""; return; }
+      const i = cursorIndex;
+      const key = `${i}|${cursor.nearest}|${opts.tooltip}`;
+      if (key !== tooltipKey) {
+        tooltipKey = key;
+        const rows = [];
+        let total = 0, any = false;
+        for (const s of visibleSeries()) {
+          if (opts.tooltip === "single" && s.id !== cursor.nearest) continue;
+          const v = s.values[i];
+          const has = v === v;
+          const isNull = !has && (s.nulls === null || s.nulls === undefined || s.nulls[i]);
+          if (!has && !isNull) continue; // no row for this series at this x
+          if (has) { total += v; any = true; }
+          const c = seriesColor(s);
+          const text = has ? (typeof opts.formatValue === "function" ? opts.formatValue(v, s) : formatValue(v)) : "NULL";
+          rows.push(`<span class="chartCore__tipRow${has ? "" : " is-empty"}${s.id === cursor.nearest ? " is-nearest" : ""}"><i style="background:${rgba(c)}"></i><em>${esc(s.label)}</em><b>${esc(text)}</b></span>`);
+        }
+        if (isStacked() && opts.tooltip !== "single" && rows.length > 1 && any) {
+          rows.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(formatValue(total))}</b></span>`);
+        }
+        if (!rows.length) rows.push(`<span class="chartCore__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
+        const footer = typeof opts.tooltipFooter === "function" ? opts.tooltipFooter(i) : "";
+        tooltipEl.innerHTML = `<strong>${esc(xReadout(i))}</strong>${rows.join("")}${footer ? `<small>${esc(footer)}</small>` : ""}`;
+        tooltipEl.dataset.index = String(i);
+        tooltipEl.hidden = false;
+        tooltipSize = { w: tooltipEl.offsetWidth, h: tooltipEl.offsetHeight };
+      }
+      tooltipEl.hidden = false;
+      const L = layout;
+      const x = L.xOf(opts.xKind === "category" ? i : opts.xs[i]);
+      let lx = x + 16;
+      if (lx + tooltipSize.w > L.width - 4) lx = x - 16 - tooltipSize.w;
+      lx = Math.max(4, lx);
+      const ty = Math.max(0, Math.min(L.height - tooltipSize.h, cursor.py - tooltipSize.h / 2));
+      tooltipEl.style.transform = `translate(${Math.round(lx)}px, ${Math.round(ty)}px)`;
+    }
+
+    // --- pointer --------------------------------------------------------------------
+
+    function localPoint(ev) {
+      const box = overCanvas.getBoundingClientRect();
+      return { px: ev.clientX - box.left, py: ev.clientY - box.top };
+    }
+
+    function inPlot(p) {
+      const L = layout;
+      return L && p.px >= L.left - 2 && p.px <= L.left + L.plotW + 2 && p.py >= L.top - 2 && p.py <= L.top + L.plotH + 2;
+    }
+
+    function moveCursor(p) {
+      if (!layout || !opts.xs.length) return;
+      if (!inPlot(p) && !(drag && drag.active)) { leaveCursor(); return; }
+      const px = Math.max(layout.left, Math.min(layout.left + layout.plotW, p.px));
+      cursorIndex = nearestIndex(px);
+      cursor = { px, py: p.py, nearest: cursorIndex >= 0 ? nearestSeries(cursorIndex, p.py) : null };
+      if (drag) {
+        drag.x1 = px;
+        if (!drag.active && Math.abs(drag.x1 - drag.x0) >= DRAG_MIN_PX) drag.active = true;
+      }
+      if (drag && drag.active) tooltipEl.hidden = true; else renderTooltip();
+      scheduleOverlay();
+      broadcast(cursorIndex >= 0 && opts.xKind !== "category" ? opts.xs[cursorIndex] : null);
+    }
+
+    function leaveCursor() {
+      if (!cursor && tooltipEl.hidden) return;
+      cursor = null;
+      cursorIndex = -1;
+      tooltipEl.hidden = true;
+      tooltipKey = "";
+      scheduleOverlay();
+      broadcast(null);
+    }
+
+    function broadcast(x) {
+      if (!opts.syncKey) return;
+      const group = syncGroups.get(opts.syncKey);
+      if (!group) return;
+      for (const other of group) if (other !== api && other.xKind() === opts.xKind) other.syncCursor(x);
+    }
+
+    let pendingMove = null;
+    let moveRaf = 0;
+    overCanvas.addEventListener("pointermove", (ev) => {
+      pendingMove = localPoint(ev);
+      if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; if (pendingMove) moveCursor(pendingMove); });
+    });
+    overCanvas.addEventListener("pointerleave", () => {
+      if (drag) return;
+      pendingMove = null;
+      leaveCursor();
+    });
+    overCanvas.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0 || !layout) return;
+      const p = localPoint(ev);
+      if (!inPlot(p)) return;
+      moveCursor(p);
+      if (opts.zoomable === false || opts.xs.length < 2) return;
+      drag = { x0: Math.max(layout.left, Math.min(layout.left + layout.plotW, p.px)), x1: p.px, active: false, id: ev.pointerId };
+      try { overCanvas.setPointerCapture(ev.pointerId); } catch { /* capture is optional */ }
+    });
+    const endDrag = (ev, commit) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      try { overCanvas.releasePointerCapture(d.id); } catch { /* already released */ }
+      if (commit && d.active && layout) {
+        const a = Math.min(d.x0, d.x1), b = Math.max(d.x0, d.x1);
+        if (b - a >= DRAG_MIN_PX) {
+          let lo = layout.xAt(a), hi = layout.xAt(b);
+          if (opts.xKind === "category") { lo = Math.floor(lo + 0.5) - 0.5; hi = Math.ceil(hi - 0.5) + 0.5; }
+          setZoom(lo, hi, true);
+          return;
+        }
+      }
+      scheduleOverlay();
+      if (ev && ev.type === "pointerup") {
+        const p = localPoint(ev);
+        if (inPlot(p)) moveCursor(p); else leaveCursor();
+      }
+    };
+    overCanvas.addEventListener("pointerup", (ev) => endDrag(ev, true));
+    overCanvas.addEventListener("pointercancel", (ev) => endDrag(ev, false));
+    overCanvas.addEventListener("lostpointercapture", () => { if (drag) endDrag(null, false); });
+    overCanvas.addEventListener("dblclick", (ev) => {
+      ev.preventDefault();
+      if (zoom) resetZoom(true);
+    });
+    const onKey = (ev) => {
+      if (ev.key === "Escape" && drag) { drag = null; scheduleOverlay(); }
+    };
+    // Keyboard cursor: the readouts point by point, without a mouse.
+    overCanvas.addEventListener("keydown", (ev) => {
+      if (!layout || !opts.xs.length) return;
+      const L = layout;
+      const last = Math.min(opts.xs.length, L.v1) - 1;
+      const first = Math.min(L.v0, last);
+      let i = cursorIndex >= 0 ? cursorIndex : first - 1;
+      if (ev.key === "ArrowRight") i += ev.shiftKey ? 10 : 1;
+      else if (ev.key === "ArrowLeft") i -= ev.shiftKey ? 10 : 1;
+      else if (ev.key === "Home") i = first;
+      else if (ev.key === "End") i = last;
+      else if (ev.key === "Escape") { leaveCursor(); return; }
+      else return;
+      ev.preventDefault();
+      i = Math.max(first, Math.min(last, i));
+      const px = L.xOf(opts.xKind === "category" ? i : opts.xs[i]);
+      const s = visibleSeries().find((x) => x.values[i] === x.values[i]);
+      const st = s && stacks && stacks.get(s.id);
+      const py = s ? L.yOf(st ? st.top[i] : s.values[i]) : L.top + L.plotH / 2;
+      moveCursor({ px, py });
+    });
+    overCanvas.addEventListener("blur", () => { if (!drag) leaveCursor(); });
+    document.addEventListener("keydown", onKey, true);
+
+    // --- legend (Grafana: click isolates, Ctrl / Cmd+click toggles) ---------------------
+
+    function calcs(s) {
+      const L = layout;
+      let min = Infinity, max = -Infinity, sum = 0, count = 0, last = NaN;
+      const a = L ? L.v0 : 0, b = L ? L.v1 : s.values.length;
+      for (let i = a; i < b; i++) {
+        const v = s.values[i];
+        if (v !== v) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v;
+        count++;
+        last = v;
+      }
+      return count ? { min, max, mean: sum / count, last } : { min: NaN, max: NaN, mean: NaN, last: NaN };
+    }
+
+    function legendItemHtml(s, index) {
+      const on = !hidden.has(s.id);
+      const c = rgba(seriesColor(s));
+      const title = `${s.label}\nClick: show only this series (again: show all)\nCtrl / Cmd+click: show or hide it`;
+      return `<button type="button" class="chartCore__legendItem" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span></button>`;
+    }
+
+    function renderLegend() {
+      if (!opts.legend || !opts.series.length) { legendEl.innerHTML = ""; legendEl.hidden = true; return; }
+      legendEl.hidden = false;
+      legendEl.dataset.mode = legendMode;
+      const modeBtn = `<button type="button" class="chartCore__legendMode" aria-pressed="${legendMode === "table"}" title="${legendMode === "table" ? "Show the legend as a list" : "Show min / max / mean / last per series"}">${legendMode === "table" ? "List" : "Values"}</button>`;
+      if (legendMode === "table") {
+        const fmt = (v) => (v === v ? (typeof opts.formatValue === "function" ? opts.formatValue(v) : formatValue(v)) : "\u2014");
+        const rows = opts.series.map((s, index) => {
+          const c = calcs(s);
+          return `<tr><th scope="row">${legendItemHtml(s, index)}</th><td>${esc(fmt(c.min))}</td><td>${esc(fmt(c.max))}</td><td>${esc(fmt(c.mean))}</td><td>${esc(fmt(c.last))}</td></tr>`;
+        }).join("");
+        legendEl.innerHTML = `<div class="chartCore__legendTableWrap"><table class="chartCore__legendTable"><thead><tr><th scope="col">Series</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">Mean</th><th scope="col">Last</th></tr></thead><tbody>${rows}</tbody></table></div>${modeBtn}`;
+      } else {
+        legendEl.innerHTML = `<div class="chartCore__legendList">${opts.series.map(legendItemHtml).join("")}</div>${modeBtn}`;
+      }
+    }
+
+    function setHiddenInternal(next, focusIndex) {
+      hidden = next;
+      stacks = null;
+      tooltipKey = "";
+      if (typeof opts.onHiddenChange === "function") opts.onHiddenChange(new Set(hidden));
+      draw();
+      if (focusIndex != null) {
+        const again = legendEl.querySelector(`.chartCore__legendItem[data-index="${focusIndex}"]`);
+        if (again) again.focus({ preventScroll: true });
+      }
+    }
+
+    legendEl.addEventListener("click", (ev) => {
+      const mode = ev.target.closest(".chartCore__legendMode");
+      if (mode) {
+        legendMode = legendMode === "table" ? "list" : "table";
+        storeLegendMode(legendMode);
+        renderLegend();
+        const again = legendEl.querySelector(".chartCore__legendMode");
+        if (again) again.focus({ preventScroll: true });
+        return;
+      }
+      const item = ev.target.closest(".chartCore__legendItem");
+      if (!item) return;
+      const index = Number(item.dataset.index);
+      const s = opts.series[index];
+      if (!s) return;
+      const ids = opts.series.map((x) => x.id);
+      const next = new Set(hidden);
+      if (ev.ctrlKey || ev.metaKey) {
+        if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+        if (next.size === ids.length) next.delete(s.id);
+      } else {
+        const isolated = !hidden.has(s.id) && hidden.size === ids.length - 1;
+        next.clear();
+        if (!isolated) for (const id of ids) if (id !== s.id) next.add(id);
+      }
+      setHiddenInternal(next, index);
+    });
+    legendEl.addEventListener("pointerover", (ev) => {
+      const item = ev.target.closest(".chartCore__legendItem");
+      const s = item ? opts.series[Number(item.dataset.index)] : null;
+      const next = s && !hidden.has(s.id) && visibleSeries().length > 1 ? s.id : null;
+      if (next !== highlight) { highlight = next; scheduleDraw(); }
+    });
+    legendEl.addEventListener("pointerleave", () => {
+      if (highlight) { highlight = null; scheduleDraw(); }
+    });
+
+    // --- zoom --------------------------------------------------------------------------
+
+    function setZoom(lo, hi, fromUser = false) {
+      const [fullLo, fullHi] = fullDomain();
+      let a = Math.max(fullLo, Math.min(lo, hi));
+      let b = Math.min(fullHi, Math.max(lo, hi));
+      if (!(b > a)) return;
+      if (a <= fullLo && b >= fullHi) { resetZoom(fromUser); return; }
+      zoom = [a, b];
+      tooltipKey = "";
+      draw();
+      if (cursor) moveCursor(cursor);
+      if (typeof opts.onZoom === "function") opts.onZoom([a, b], fromUser);
+    }
+
+    function resetZoom(fromUser = false) {
+      if (!zoom) return;
+      zoom = null;
+      tooltipKey = "";
+      draw();
+      if (typeof opts.onZoom === "function") opts.onZoom(null, fromUser);
+    }
+
+    // --- lifecycle -------------------------------------------------------------------------
+
+    function scheduleDraw() {
+      if (!drawRaf && !destroyed) drawRaf = requestAnimationFrame(draw);
+    }
+
+    let lastObservedWidth = 0;
+    const resizeObserver = typeof ResizeObserver === "function"
+      ? new ResizeObserver((entries) => {
+        const width = Math.floor(entries[entries.length - 1].contentRect.width);
+        if (width === lastObservedWidth) return;
+        lastObservedWidth = width;
+        if (!width) { release(); return; }
+        if (width !== sizeW || released) scheduleDraw();
+      })
+      : null;
+    if (resizeObserver) resizeObserver.observe(plotEl);
+
+    let dprQuery = null;
+    const onDpr = () => { watchDpr(); scheduleDraw(); };
+    function watchDpr() {
+      if (dprQuery) dprQuery.removeEventListener("change", onDpr);
+      dprQuery = window.matchMedia ? window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`) : null;
+      if (dprQuery && dprQuery.addEventListener) dprQuery.addEventListener("change", onDpr);
+    }
+    watchDpr();
+
+    // A hidden chart gives its canvas memory back; it redraws when shown.
+    function release() {
+      if (released) return;
+      released = true;
+      for (const canvas of [baseCanvas, overCanvas]) { canvas.width = 0; canvas.height = 0; }
+      sizeW = 0;
+      leaveCursor();
+    }
+
+    function setData(next = {}) {
+      Object.assign(opts, next);
+      if (next.hidden) hidden = new Set(next.hidden);
+      if (next.height) plotEl.style.height = `${opts.height}px`;
+      if ("zoom" in next) zoom = next.zoom;
+      // Keep a zoom while it still overlaps the data (streaming results).
+      if (zoom) {
+        const [lo, hi] = fullDomain();
+        if (zoom[1] <= lo || zoom[0] >= hi) zoom = null;
+      }
+      stacks = null;
+      if (theme) for (const s of opts.series) if (!theme.seriesColors.has(s.id)) theme.seriesColors.set(s.id, color(s.color || "var(--qchart-1)"));
+      tooltipKey = "";
+      if (cursorIndex >= opts.xs.length) leaveCursor();
+      draw();
+      if (cursor) moveCursor(cursor);
+    }
+
+    function themeChanged() {
+      theme = null;
+      widths.clear();
+      tooltipKey = "";
+      scheduleDraw();
+    }
+
+    function destroy() {
+      destroyed = true;
+      live.delete(api);
+      if (opts.syncKey && syncGroups.has(opts.syncKey)) syncGroups.get(opts.syncKey).delete(api);
+      if (resizeObserver) resizeObserver.disconnect();
+      if (dprQuery) dprQuery.removeEventListener("change", onDpr);
+      document.removeEventListener("keydown", onKey, true);
+      if (drawRaf) cancelAnimationFrame(drawRaf);
+      if (overRaf) cancelAnimationFrame(overRaf);
+      if (moveRaf) cancelAnimationFrame(moveRaf);
+      release();
+      root.remove();
+    }
+
+    const api = {
+      root,
+      setData,
+      update: setData,
+      setZoom: (lo, hi) => setZoom(lo, hi, false),
+      resetZoom: () => resetZoom(false),
+      getZoom: () => (zoom ? zoom.slice() : null),
+      setHidden: (ids) => setHiddenInternal(new Set(ids)),
+      getHidden: () => new Set(hidden),
+      redraw: scheduleDraw,
+      release,
+      destroy,
+      themeChanged,
+      xKind: () => opts.xKind,
+      syncCursor(x) {
+        if (cursor) return;
+        syncedX = x;
+        if (x == null) delete root.dataset.syncX; else root.dataset.syncX = String(x);
+        scheduleOverlay();
+      },
+      stats: () => ({ ...stats }),
+      layout: () => layout,
+    };
+    live.add(api);
+    watchTheme();
+    if (opts.syncKey) {
+      if (!syncGroups.has(opts.syncKey)) syncGroups.set(opts.syncKey, new Set());
+      syncGroups.get(opts.syncKey).add(api);
+    }
+    draw();
+    return api;
+  }
+
+  ns.chartCore = {
+    create,
+    // Scales and formats, shared with the charts that draw their own marks.
+    timeTicks,
+    linearTicks,
+    niceStep,
+    compactUnitFor,
+    formatTick,
+    formatExact,
+    formatValue,
+    formatInstant,
+    formatDuration,
+    utcOffsetText,
+    decimalsFor,
+    lowerBound,
+    upperBound,
+  };
+})();
