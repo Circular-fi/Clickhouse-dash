@@ -1813,13 +1813,18 @@ html.chdash-page-select-hidden .pageSelect {
 .tracesSearchButton { height: 32px; min-height: 32px; padding: 0 12px; white-space: nowrap; }
 .tracesError {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid color-mix(in srgb, #ef4444 32%, var(--border));
   background: var(--error-bg);
   color: color-mix(in srgb, #ef4444 70%, var(--text));
   font-size: .76rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
+.tracesError[hidden] { display: none; }
+.tracesError__text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.tracesError__retry { flex: 0 0 auto; }
 .tracesResults {
   min-height: 0;
   flex: 1 1 auto;
@@ -4868,6 +4873,26 @@ html[data-theme="light"] { --traceWarn: #b56200; }
 .tracesEmpty--search strong { color: var(--text); font-size: 13px; }
 .tracesEmpty--search span { font-size: 11.5px; }
 .tracesEmpty__zoom { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; }
+.tracesEmpty.traceUnavailable {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 48px 16px;
+  text-align: center;
+}
+.traceUnavailable strong { color: var(--text); font-size: 14px; }
+.traceUnavailable span { font-size: 12px; line-height: 1.45; }
+.traceUnavailable__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+.traceDetailPane.is-unavailable .traceServiceFilters,
+.traceDetailPane.is-unavailable .traceOverview,
+.traceDetailPane.is-unavailable .traceHighlights,
+.traceDetailPane.is-unavailable .traceViewBar,
+.traceDetailPane.is-unavailable .traceCopySplit,
+.traceDetailPane.is-unavailable .traceAltView { display: none !important; }
+.traceDetailPane.is-unavailable .traceTimelineFrame { display: block !important; }
+.tracePageHeader__title code.tracePageHeader__id { font-size: 11px; }
 .tracesEmpty__zoom svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 .tracesResults--table { border-top: 0; }
 .traceTableWrap { margin-top: 8px; }
@@ -6310,10 +6335,10 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceSearchMain { flex: 1 1 auto; min-width: 0; }
 .traceFacets {
   position: sticky;
-  top: 58px;
+  top: calc(var(--trace-bar-h, 0px) + 8px);
   flex: 0 0 248px;
   width: 248px;
-  max-height: calc(100vh - 112px);
+  max-height: calc(100dvh - var(--shell-top, 0px) - var(--trace-bar-h, 0px) - 20px);
   display: flex;
   flex-direction: column;
   margin: 8px 0 12px 12px;
@@ -6478,36 +6503,13 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   }
 }
 :root {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-error: var(--trace-error);
-  --trace-log-warn: var(--trace-warning);
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --trace-log-fatal: #b4235a;
-    --trace-log-info: #1a7f37;
-    --trace-log-debug: #0969da;
-    --trace-log-trace: #6e7781;
-    --trace-log-unset: #6e7781;
-  }
-}
-html[data-theme="dark"] {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-html[data-theme="light"] {
-  --trace-log-fatal: #b4235a;
-  --trace-log-info: #1a7f37;
-  --trace-log-debug: #0969da;
-  --trace-log-trace: #6e7781;
-  --trace-log-unset: #6e7781;
+  --trace-log-fatal: var(--log-sev-fatal);
+  --trace-log-error: var(--log-sev-error);
+  --trace-log-warn: var(--log-sev-warn);
+  --trace-log-info: var(--log-sev-info);
+  --trace-log-debug: var(--log-sev-debug);
+  --trace-log-trace: var(--log-sev-trace);
+  --trace-log-unset: var(--log-sev-trace);
 }
 [data-sev="fatal"] { --trace-log-color: var(--trace-log-fatal); }
 [data-sev="error"] { --trace-log-color: var(--trace-log-error); }
@@ -6903,30 +6905,38 @@ html[data-theme="light"] {
 }
 .traceSpanLogs__list .traceLog:last-child { border-bottom: 0; }
 :root {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 @media (prefers-color-scheme: light) {
   :root {
+    --log-sev-fatal: #b4235a;
     --log-sev-error: #dc2626;
     --log-sev-warn: #d97706;
     --log-sev-info: #2563eb;
     --log-sev-debug: #64748b;
+    --log-sev-trace: #8c959f;
   }
 }
 html[data-theme="dark"] {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 html[data-theme="light"] {
+  --log-sev-fatal: #b4235a;
   --log-sev-error: #dc2626;
   --log-sev-warn: #d97706;
   --log-sev-info: #2563eb;
   --log-sev-debug: #64748b;
+  --log-sev-trace: #8c959f;
 }
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
@@ -7732,7 +7742,7 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   text-align: center;
   pointer-events: none;
 }
-.metricsChart__state--error { color: color-mix(in srgb, #ef4444 72%, var(--text)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.metricsChart__state--error { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 8px; color: color-mix(in srgb, #ef4444 72%, var(--text)); font-size: 12px; pointer-events: auto; }
 .metricsChart__state--loading::after {
   content: "";
   display: block;
@@ -8160,7 +8170,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }
 .traceSvcDetail {
   position: fixed;
-  top: 59px;
+  top: calc(var(--shell-top, 0px) + var(--trace-bar-h, 0px));
   right: 0;
   bottom: 0;
   z-index: 30;
@@ -8324,7 +8334,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 }
 .traceSpanPanel {
   position: fixed;
-  top: var(--trace-span-panel-top, 56px);
+  /* Under the page chrome and the sticky search bar (app_observability.js,
+     app_traces.js measure both). */
+  top: calc(var(--shell-top, 0px) + var(--trace-bar-h, 0px));
   right: 0;
   bottom: 0;
   z-index: 40;
@@ -8384,6 +8396,63 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanPanel__card.traceInspector { max-height: none; min-height: 0; margin: 0; overflow: visible; border: 0; background: transparent; }
 .traceSpanPanel__status { padding: 12px 0; color: var(--muted); font-size: 12px; }
 .traceSpanPanel__status.is-error { color: #ef4444; }
+@media (max-width: 1100px) {
+  .traceSpanPanel,
+  .traceSvcDetail { top: var(--shell-top, 0px); }
+}
+@media (min-width: 761px) and (max-width: 1100px) {
+  .traceFacets { top: 8px; max-height: calc(100dvh - var(--shell-top, 0px) - 20px); }
+}
+@media (max-width: 820px) {
+  .traceSpanPanel,
+  .traceSvcDetail,
+  .logsSidePanel {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 45;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    height: min(80dvh, calc(100dvh - var(--shell-top, 0px) - 16px));
+    border: 0;
+    border-top: 1px solid var(--borderStrong);
+    border-radius: 12px 12px 0 0;
+    overflow: hidden;
+    background: var(--panelBg);
+    box-shadow: 0 -14px 36px rgba(0, 0, 0, .32);
+  }
+  .traceSpanPanel__head,
+  .traceSvcDetail__head,
+  .logsSidePanel__header { position: relative; padding-top: 16px; }
+  .traceSpanPanel__head::before,
+  .traceSvcDetail__head::before,
+  .logsSidePanel__header::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: calc(50% - 18px);
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--borderStrong);
+  }
+  .traceSpanPanel__nav,
+  .traceSpanPanel__close,
+  .traceSvcDetail__close,
+  .logsSidePanel__close { width: 32px; height: 32px; }
+  .traceKv__actions {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    float: none;
+    margin: 0;
+    padding-left: 6px;
+    background: var(--panelBg);
+  }
+}
 .traceSpanColumns {
   position: fixed;
   z-index: 60;

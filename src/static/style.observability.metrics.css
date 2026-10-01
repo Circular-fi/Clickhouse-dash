@@ -1488,13 +1488,16 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .tracesError {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px;
   border-bottom: 1px solid color-mix(in srgb, #ef4444 32%, var(--border));
   background: var(--error-bg);
   color: color-mix(in srgb, #ef4444 70%, var(--text));
   font-size: .76rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
+.tracesError[hidden] { display: none; }
 @media (max-width: 900px) {
   .tracesWorkspace { padding: 8px; }
 }
@@ -2588,10 +2591,10 @@ html[data-theme="light"] {
 }
 .traceFacets {
   position: sticky;
-  top: 58px;
+  top: calc(var(--trace-bar-h, 0px) + 8px);
   flex: 0 0 248px;
   width: 248px;
-  max-height: calc(100vh - 112px);
+  max-height: calc(100dvh - var(--shell-top, 0px) - var(--trace-bar-h, 0px) - 20px);
   display: flex;
   flex-direction: column;
   margin: 8px 0 12px 12px;
@@ -2619,36 +2622,13 @@ html.chdash-trace-facets-collapsed .traceFacets { flex-basis: 32px; width: 32px;
   }
 }
 :root {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-error: var(--trace-error);
-  --trace-log-warn: var(--trace-warning);
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --trace-log-fatal: #b4235a;
-    --trace-log-info: #1a7f37;
-    --trace-log-debug: #0969da;
-    --trace-log-trace: #6e7781;
-    --trace-log-unset: #6e7781;
-  }
-}
-html[data-theme="dark"] {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-html[data-theme="light"] {
-  --trace-log-fatal: #b4235a;
-  --trace-log-info: #1a7f37;
-  --trace-log-debug: #0969da;
-  --trace-log-trace: #6e7781;
-  --trace-log-unset: #6e7781;
+  --trace-log-fatal: var(--log-sev-fatal);
+  --trace-log-error: var(--log-sev-error);
+  --trace-log-warn: var(--log-sev-warn);
+  --trace-log-info: var(--log-sev-info);
+  --trace-log-debug: var(--log-sev-debug);
+  --trace-log-trace: var(--log-sev-trace);
+  --trace-log-unset: var(--log-sev-trace);
 }
 [data-sev="fatal"] { --trace-log-color: var(--trace-log-fatal); }
 [data-sev="error"] { --trace-log-color: var(--trace-log-error); }
@@ -2658,30 +2638,38 @@ html[data-theme="light"] {
 [data-sev="trace"] { --trace-log-color: var(--trace-log-trace); }
 [data-sev="unset"] { --trace-log-color: var(--trace-log-unset); }
 :root {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 @media (prefers-color-scheme: light) {
   :root {
+    --log-sev-fatal: #b4235a;
     --log-sev-error: #dc2626;
     --log-sev-warn: #d97706;
     --log-sev-info: #2563eb;
     --log-sev-debug: #64748b;
+    --log-sev-trace: #8c959f;
   }
 }
 html[data-theme="dark"] {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 html[data-theme="light"] {
+  --log-sev-fatal: #b4235a;
   --log-sev-error: #dc2626;
   --log-sev-warn: #d97706;
   --log-sev-info: #2563eb;
   --log-sev-debug: #64748b;
+  --log-sev-trace: #8c959f;
 }
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 html[data-obs-view="logs"] .tracePicker--range .tracePicker__menu {
@@ -3041,7 +3029,7 @@ html[data-obs-view="metrics"] .tracePicker--range .tracePicker__menu {
   text-align: center;
   pointer-events: none;
 }
-.metricsChart__state--error { color: color-mix(in srgb, #ef4444 72%, var(--text)); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.metricsChart__state--error { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 8px; color: color-mix(in srgb, #ef4444 72%, var(--text)); font-size: 12px; pointer-events: auto; }
 .metricsChart__state--loading::after {
   content: "";
   display: block;
@@ -3084,6 +3072,9 @@ html[data-theme="light"] {
 }
 @keyframes traceDeltaSpin { to { transform: rotate(360deg); } }
 @keyframes traceSpanSpin { to { transform: rotate(360deg); } }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .traceFacets { top: 8px; max-height: calc(100dvh - var(--shell-top, 0px) - 20px); }
+}
 :root {
   --exd-ok: #34d399;
   --exd-warn: #fbbf24;

@@ -5211,36 +5211,13 @@ html[data-theme="light"] {
   to { background-color: color-mix(in srgb, var(--accentBorder) 14%, transparent); }
 }
 :root {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-error: var(--trace-error);
-  --trace-log-warn: var(--trace-warning);
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --trace-log-fatal: #b4235a;
-    --trace-log-info: #1a7f37;
-    --trace-log-debug: #0969da;
-    --trace-log-trace: #6e7781;
-    --trace-log-unset: #6e7781;
-  }
-}
-html[data-theme="dark"] {
-  --trace-log-fatal: #ff5f8a;
-  --trace-log-info: #3fb950;
-  --trace-log-debug: #58a6ff;
-  --trace-log-trace: #8d96a0;
-  --trace-log-unset: #8d96a0;
-}
-html[data-theme="light"] {
-  --trace-log-fatal: #b4235a;
-  --trace-log-info: #1a7f37;
-  --trace-log-debug: #0969da;
-  --trace-log-trace: #6e7781;
-  --trace-log-unset: #6e7781;
+  --trace-log-fatal: var(--log-sev-fatal);
+  --trace-log-error: var(--log-sev-error);
+  --trace-log-warn: var(--log-sev-warn);
+  --trace-log-info: var(--log-sev-info);
+  --trace-log-debug: var(--log-sev-debug);
+  --trace-log-trace: var(--log-sev-trace);
+  --trace-log-unset: var(--log-sev-trace);
 }
 [data-sev="fatal"] { --trace-log-color: var(--trace-log-fatal); }
 [data-sev="error"] { --trace-log-color: var(--trace-log-error); }
@@ -5250,30 +5227,38 @@ html[data-theme="light"] {
 [data-sev="trace"] { --trace-log-color: var(--trace-log-trace); }
 [data-sev="unset"] { --trace-log-color: var(--trace-log-unset); }
 :root {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 @media (prefers-color-scheme: light) {
   :root {
+    --log-sev-fatal: #b4235a;
     --log-sev-error: #dc2626;
     --log-sev-warn: #d97706;
     --log-sev-info: #2563eb;
     --log-sev-debug: #64748b;
+    --log-sev-trace: #8c959f;
   }
 }
 html[data-theme="dark"] {
+  --log-sev-fatal: #ff5f8a;
   --log-sev-error: #f87171;
   --log-sev-warn: #fbbf24;
   --log-sev-info: #60a5fa;
   --log-sev-debug: #8b95a5;
+  --log-sev-trace: #6e7681;
 }
 html[data-theme="light"] {
+  --log-sev-fatal: #b4235a;
   --log-sev-error: #dc2626;
   --log-sev-warn: #d97706;
   --log-sev-info: #2563eb;
   --log-sev-debug: #64748b;
+  --log-sev-trace: #8c959f;
 }
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 @keyframes logsPulse { 50% { opacity: .45; } }

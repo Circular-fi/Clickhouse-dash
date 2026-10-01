@@ -40,13 +40,21 @@
 
   // ------------------------------------------------------------ formatting
 
-  function rateText(perSecond) {
+  // A failed request's Retry: "list", "detail" or "db" (onClick).
+  const RETRY = (what) => `<button type="button" class="button button--small" data-svc-retry="${what}">Retry</button>`;
+
+  // A request rate in the largest unit it reaches 1 in: 2.4/s, 29/min, 6/h.
+  const RATE_UNITS = [{ per: 1, suffix: "/s", word: "second" }, { per: 60, suffix: "/min", word: "minute" }, { per: 3600, suffix: "/h", word: "hour" }];
+  function rateUnit(perSecond) {
     const value = Number(perSecond);
-    if (!Number.isFinite(value) || value <= 0) return "0/s";
-    if (value >= 1) return `${compact(value)}/s`;
-    const perMinute = value * 60;
-    if (perMinute >= 1) return `${compact(perMinute)}/min`;
-    return `${compact(perMinute * 60)}/h`;
+    if (!Number.isFinite(value) || value <= 0) return RATE_UNITS[0];
+    return RATE_UNITS.find((unit) => value * unit.per >= 1) || RATE_UNITS[RATE_UNITS.length - 1];
+  }
+
+  function rateText(perSecond, unit = rateUnit(perSecond)) {
+    const value = Number(perSecond);
+    if (!Number.isFinite(value) || value <= 0) return `0${unit.suffix}`;
+    return `${compact(value * unit.per)}${unit.suffix}`;
   }
 
   function compact(value) {
@@ -64,6 +72,18 @@
     if (!n) return "0%";
     if (n < 0.01) return "<0.01%";
     return `${n >= 10 ? n.toFixed(1) : n.toFixed(2)}%`.replace(/\.0+%$/, "%");
+  }
+
+  // Axis ticks of a detail chart (app_chart_core.js yAxis): round values in
+  // [0, max], each labelled by the table's own formatter, so the axis, the
+  // cursor readout, the tooltip and the table share one unit and precision
+  // ("29/min" in the table against "20/min, 40/min"; "1.21%" against
+  // "0.50%, 1%, 1.50%").
+  function unitAxis(yMax, label) {
+    const ticks = ns.chartCore.linearTicks(0, yMax > 0 ? yMax : 1, 4);
+    const top = ticks.values[ticks.values.length - 1];
+    const max = top < yMax ? yMax : top;
+    return { min: 0, max, step: ticks.step, ticks: ticks.values.map((v) => ({ v, label: label(v) })) };
   }
 
   // Seconds of the window a payload describes.
@@ -262,7 +282,7 @@
       </tr>`;
     }).join("");
     return `<table class="traceSvcTable" aria-label="Services">
-      <thead><tr>${headerCell("name", "Service", "Sort by service name", false)}${headerCell("rate", "Requests", "Entry spans per second")}${headerCell("errors", "Errors", "Share of entry spans with StatusCode Error")}${headerCell("p50", "P50", "Median entry span duration")}${headerCell("p95", "P95", "95th percentile entry span duration")}${headerCell("p99", "P99", "99th percentile entry span duration; click one to search slower traces")}${headerCell("time", "Time share", "Share of the total time spent in entry spans (sum of Duration)", false)}<th scope="col" class="traceSvcTrend">Requests trend</th><th scope="col" class="traceSvcTrend">P95 trend</th></tr></thead>
+      <thead><tr>${headerCell("name", "Service", "Sort by service name", false)}${headerCell("rate", "Requests", "Entry spans per second, minute or hour: the largest unit the rate reaches 1 in")}${headerCell("errors", "Errors", "Share of entry spans with StatusCode Error")}${headerCell("p50", "P50", "Median entry span duration")}${headerCell("p95", "P95", "95th percentile entry span duration")}${headerCell("p99", "P99", "99th percentile entry span duration; click one to search slower traces")}${headerCell("time", "Time share", "Share of the total time spent in entry spans (sum of Duration)", false)}<th scope="col" class="traceSvcTrend">Requests trend</th><th scope="col" class="traceSvcTrend">P95 trend</th></tr></thead>
       <tbody>${body}</tbody></table>`;
   }
 
@@ -292,7 +312,7 @@
     const timing = payload?.timing_ms?.total != null ? ` · ${(Number(payload.timing_ms.total) / 1000).toFixed(2)} s` : "";
     const meta = payload ? `${view.scope === "root" ? "root spans" : "entry spans"} · ${bucket} buckets${timing}` : "";
     let body;
-    if (view.error && !payload) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(view.error)}</div>`;
+    if (view.error && !payload) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(view.error)} ${RETRY("list")}</div>`;
     else if (!payload) body = `<div class="tracesEmpty">${view.loading ? "Loading services\u2026" : "Search to load services."}</div>`;
     else if (!count) body = `<div class="tracesEmpty">No ${view.scope === "root" ? "root" : "entry"} spans match in this range.</div>`;
     else body = tableHtml(rows);
@@ -338,12 +358,10 @@
         const scale = chart.durationAxis(yMin, yMax, 5);
         return { min: scale.axisMin, max: scale.axisMax, ticks: scale.values.map((t) => ({ v: t.value, label: t.label })) };
       };
-    } else if (axis === "percent") {
-      yAxis = (yMin, yMax) => {
-        const ticks = ns.chartCore.linearTicks(0, Math.max(1, Math.ceil(yMax)), 4);
-        const max = ticks.values[ticks.values.length - 1] < yMax ? yMax : ticks.values[ticks.values.length - 1];
-        return { min: 0, max, step: ticks.step, ticks: ticks.values.map((v) => ({ v, label: `${v}%` })) };
-      };
+    } else {
+      // "rate" (values already in the table's rate unit) and "percent": the
+      // axis labels are what the readouts print.
+      yAxis = (yMin, yMax) => unitAxis(yMax, format);
     }
     const byIndex = new Map(points.map((p, k) => [grid.slot[k], p]));
     chart.mountChart(container, "service", {
@@ -352,7 +370,7 @@
       yAxis, annotations: releases,
       xReadout: (i) => chart.bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
       formatValue: (v) => format(v),
-      formatY: axis === "count" ? null : (v) => format(Math.max(0, v)),
+      formatY: (v) => format(Math.max(0, v)),
       tooltipFooter: footer ? (i) => { const p = byIndex.get(i); return p ? footer(p) : ""; } : null,
       onZoom: (range, fromUser) => { if (fromUser && range) chart.zoomSearchRange(range); },
     });
@@ -374,12 +392,16 @@
     const bucketSeconds = bucketMs / 1000;
     const releases = (payload.releases || []).map((r) => ({ label: String(r[0]), x: Number(r[1]), title: `Release ${r[0]}: first span ${new Date(Number(r[1])).toLocaleString()}`, className: "traceSvcRelease" }));
     const spansText = (p) => `${Math.round(p.spans).toLocaleString()} spans${p.errors ? `, ${Math.round(p.errors).toLocaleString()} errors` : ""}`;
+    // The rate chart counts in the unit of the service's Requests figure
+    // (table row and detail header): 29/min there, a per-minute axis here.
+    const unit = rateUnit(detailRow(payload, view.detailName)?.rate);
+    const perUnit = unit.per / bucketSeconds;
     const rate = panel.querySelector('[data-svc-chart="rate"]');
     if (rate) detailChart(rate, {
-      start, end, bucketMs, points, type: "bar", axis: "count", releases, footer: spansText, format: rateText,
+      start, end, bucketMs, points, type: "bar", axis: "rate", releases, footer: spansText, format: (v) => rateText(v / unit.per, unit),
       series: [
-        { id: "ok", label: "Successful", color: ctx.serviceColor(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) / bucketSeconds },
-        { id: "errors", label: "Errors", color: "var(--traceError)", value: (p) => p.errors / bucketSeconds },
+        { id: "ok", label: "Successful", color: ctx.serviceColor(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
+        { id: "errors", label: "Errors", color: "var(--traceError)", value: (p) => p.errors * perUnit },
       ],
     });
     const errors = panel.querySelector('[data-svc-chart="errors"]');
@@ -430,7 +452,7 @@
   function dbHtml() {
     const db = view.db;
     if (db.loading && !db.payload) return '<div class="traceSvcEmpty">Loading database statements\u2026</div>';
-    if (db.error) return `<div class="traceSvcEmpty traceChartError" role="alert">${esc(db.error)}</div>`;
+    if (db.error) return `<div class="traceSvcEmpty traceChartError" role="alert">${esc(db.error)} ${RETRY("db")}</div>`;
     const payload = db.payload;
     if (!payload) return "";
     if (payload.supported === false) return '<div class="traceSvcEmpty">Span attributes are not stored as a Map column (or are disabled): database statements are unavailable.</div>';
@@ -444,6 +466,11 @@
     }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcEmpty">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
   }
 
+  // The selected service's totals row of a detail payload (rates included).
+  function detailRow(payload, name) {
+    return payload ? withRates((payload.services || []).map(statsRow), payload).find((r) => r.name === name) || null : null;
+  }
+
   function renderDetail() {
     const panel = root?.querySelector("#traceSvcDetail");
     if (!panel) return;
@@ -454,19 +481,19 @@
     if (!name) { panel.innerHTML = ""; return; }
     const detail = view.detail;
     const payload = detail.payload;
-    const row = payload ? withRates((payload.services || []).map(statsRow), payload).find((r) => r.name === name) : null;
+    const row = detailRow(payload, name);
     const stat = (labelText, value, extra = "") => `<div class="traceSvcStat${extra}"><span>${esc(labelText)}</span><b>${value}</b></div>`;
     const stats = row
       ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), row.errors ? " has-errors" : "") + stat("P50", esc(fmt(row.p50))) + stat("P95", esc(fmt(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt(row.total)))
       : "";
     let body;
-    if (detail.error) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(detail.error)}</div>`;
+    if (detail.error) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(detail.error)} ${RETRY("detail")}</div>`;
     else if (!payload) body = '<div class="tracesEmpty">Loading service\u2026</div>';
     else if (!row) body = '<div class="tracesEmpty">No entry spans of this service match in this range.</div>';
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(percentText(Number(payload.sample_fraction || 1) * 100))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">
-          <article class="traceAnalyticsCard"><header><strong>Requests</strong><span>entry spans per second · errors in red</span></header><div class="traceChart traceSvcChart" data-svc-chart="rate"></div></article>
+          <article class="traceAnalyticsCard"><header><strong>Requests</strong><span>${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word} · errors in red</span></header><div class="traceChart traceSvcChart" data-svc-chart="rate"></div></article>
           <article class="traceAnalyticsCard"><header><strong>Error rate</strong><span>% of entry spans with status Error</span></header><div class="traceChart traceSvcChart" data-svc-chart="errors"></div></article>
           <article class="traceAnalyticsCard"><header><strong>Latency</strong><span class="traceChartLegend--quantiles"><span class="p50">P50</span> <span class="p95">P95</span> <span class="p99">P99</span></span></header><div class="traceChart traceSvcChart" data-svc-chart="latency"></div></article>
         </div>
@@ -502,6 +529,13 @@
     if (view.detailName) void loadDetail();
   }
 
+  // The drawer's × and Escape: focus goes back to the service's row.
+  function closeDetail() {
+    const name = view.detailName;
+    openDetail("");
+    if (name) root?.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
+  }
+
   function searchFor(spec) {
     ns.traceSearch?.applySearch?.(spec);
     ns.traceTabs.select("search");
@@ -525,6 +559,15 @@
       if (value !== view.scope) { view.scope = value; void ctx.runSearch({ url: "push" }); }
       return;
     }
+    const retry = target.closest("[data-svc-retry]")?.getAttribute("data-svc-retry");
+    if (retry === "list" && view.filters) { void run(view.filters, { force: true }); return; }
+    if (retry === "detail") { view.detail.key = ""; void loadDetail(); return; }
+    if (retry === "db" && view.filters && view.detailName) {
+      view.db.key = "";
+      void loadDb({ ...requestFilters(view.filters), detail: view.detailName });
+      renderDetail();
+      return;
+    }
     if (target.closest("[data-svc-exact]")) { view.exact = true; void ctx.runSearch({ url: "push" }); return; }
     if (target.closest("[data-svc-sampled]")) { view.exact = false; void ctx.runSearch({ url: "push" }); return; }
     const p99 = target.closest("[data-svc-p99]");
@@ -537,7 +580,7 @@
     if (operation) { searchFor({ service: view.detailName, operation: operation.getAttribute("data-svc-operation-search") || "" }); return; }
     const searchButton = target.closest("[data-svc-search]");
     if (searchButton) { searchFor({ service: searchButton.getAttribute("data-svc-search") || "" }); return; }
-    if (target.closest("[data-svc-close]")) { openDetail(""); return; }
+    if (target.closest("[data-svc-close]")) { closeDetail(); return; }
     const trace = target.closest("[data-svc-trace]");
     if (trace) {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
@@ -555,11 +598,11 @@
 
   function onKeydown(event) {
     const target = event.target instanceof Element ? event.target : null;
-    if (event.key === "Escape" && view.detailName && root && !root.hidden) {
+    if (event.key === "Escape" && view.detailName && root && !root.hidden && !event.defaultPrevented
+      && (!ns.observability || ns.observability.isActive("traces"))
+      && !document.querySelector(".tracePicker.themeSelect--open, .traceSearchBar [aria-expanded='true']")) {
       event.preventDefault();
-      const name = view.detailName;
-      openDetail("");
-      root.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
+      closeDetail();
       return;
     }
     const row = target?.closest?.("[data-svc-row]");

@@ -60,7 +60,8 @@
     mutate(url.searchParams);
     const next = `${url.pathname}${url.search}${url.hash}`;
     if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
-    if (push) window.history.pushState(window.history.state, "", next);
+    // A pushed view keeps the count of steps back to the search (app_traces.js).
+    if (push) window.history.pushState(ns.traces?.detailEntryState ? ns.traces.detailEntryState(window.history.state) : window.history.state, "", next);
     else window.history.replaceState(window.history.state, "", next);
   }
 
@@ -769,10 +770,16 @@
     const onDocClick = (event) => {
       if (popover && event.target instanceof Node && !popover.contains(event.target) && !event.target.closest?.(".traceSpanEventMarker")) closeEventPopover();
     };
-    const onKey = (event) => { if (event.key === "Escape") closeEventPopover(); };
+    // Escape and the close button give focus back to the marker (or its row).
+    const closeToMarker = () => {
+      closeEventPopover();
+      const back = marker.tabIndex >= 0 && document.contains(marker) ? marker : row;
+      if (back && document.contains(back)) back.focus({ preventScroll: true });
+    };
+    const onKey = (event) => { if (event.key === "Escape") closeToMarker(); };
     const onScroll = (event) => { if (popover && !(event.target instanceof Node && popover.contains(event.target))) closeEventPopover(); };
     popover.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-event-popover-close]")) { closeEventPopover(); return; }
+      if (event.target instanceof Element && event.target.closest("[data-event-popover-close]")) { closeToMarker(); return; }
       ctx.spanDetailClick(event);
     });
     document.addEventListener("click", onDocClick, true);

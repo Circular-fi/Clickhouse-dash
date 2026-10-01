@@ -681,7 +681,7 @@
 
   function facetValuesHtml(scope, key, entry, estimated) {
     if (entry.loading && !entry.values) return '<div class="traceFacet__status">Loading values\u2026</div>';
-    if (entry.error) return `<div class="traceFacet__status is-error" role="alert">${esc(entry.error)}</div>`;
+    if (entry.error) return `<div class="traceFacet__status is-error" role="alert">${esc(entry.error)} <button type="button" class="traceMiniButton" data-facet-retry>Retry</button></div>`;
     const values = [...(entry.values || [])];
     // Values filtered on stay listed (checked) even outside the top values.
     for (const chip of search.chips) {
@@ -727,7 +727,7 @@
       meta.classList.toggle("is-estimated", facets.estimated);
     }
     if (!facets.supported) { list.innerHTML = '<div class="traceFacets__empty">Attributes are not stored as Map columns.</div>'; return; }
-    if (facets.error) { list.innerHTML = `<div class="traceFacets__empty is-error" role="alert">${esc(facets.error)}</div>`; return; }
+    if (facets.error) { list.innerHTML = `<div class="traceFacets__empty is-error" role="alert">${esc(facets.error)} <button type="button" class="traceMiniButton" data-facets-retry>Retry</button></div>`; return; }
     if (!facets.filters) { list.innerHTML = '<div class="traceFacets__empty">Search to discover attributes.</div>'; return; }
     const query = facets.query.trim().toLowerCase();
     const matches = (item) => !query || item.key.toLowerCase().includes(query);
@@ -754,6 +754,7 @@
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     if (target.closest("[data-facet-more-keys]")) { facets.shown += KEYS_PAGE; renderFacets(); return; }
+    if (target.closest("[data-facets-retry]")) { if (facets.filters) void loadFacets(facets.filters); return; }
     const facet = facetOf(target);
     if (!facet) return;
     const id = facetId(facet.scope, facet.key);
@@ -773,6 +774,7 @@
       renderFacets();
       return;
     }
+    if (target.closest("[data-facet-retry]")) { void loadValues(facet.scope, facet.key); return; }
     if (target.closest("[data-facet-more-values]")) {
       const entry = facets.expanded.get(id);
       if (!entry) return;

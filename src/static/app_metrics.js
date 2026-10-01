@@ -396,7 +396,7 @@
       return;
     }
     if (model.catalogError) {
-      root.innerHTML = `<div class="metricsEmpty metricsEmpty--error">${esc(model.catalogError)}</div>`;
+      root.innerHTML = `<div class="metricsEmpty metricsEmpty--error" role="alert"><p>${esc(model.catalogError)}</p><button type="button" class="button button--small" data-metrics-retry="catalog">Retry</button></div>`;
       if (summary) summary.textContent = "Catalog unavailable";
       return;
     }
@@ -469,6 +469,7 @@
   }
 
   function onCatalogClick(event) {
+    if (event.target.closest("[data-metrics-retry=\"catalog\"]")) { void loadCatalog(); return; }
     const jump = event.target.closest("[data-jump-to-data]");
     if (jump) { jumpToData(Number(jump.dataset.jumpToData)); return; }
     const toggle = event.target.closest("[data-service-toggle]");
@@ -735,6 +736,9 @@
     el.addEventListener("pointerdown", () => setActive(panel));
     el.addEventListener("focusin", () => setActive(panel));
     el.querySelector(".metricsPanel__remove").addEventListener("click", () => removePanel(panel));
+    el.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
+    });
 
     const aggPicker = el.querySelector(".metricsPicker--agg");
     aggPicker.querySelector(".tracePicker__button").addEventListener("click", (event) => {
@@ -906,7 +910,7 @@
     } else if (panel.error) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--error";
-      stateEl.textContent = panel.error;
+      stateEl.innerHTML = `<span>${esc(panel.error)}</span> <button type="button" class="button button--small" data-metrics-retry="panel">Retry</button>`;
     } else if (data && !(data.series || []).length) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--empty";
@@ -1272,7 +1276,13 @@
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
       for (const root of [...openPickers]) if (!root.contains(event.target) && !path.includes(root)) closePicker(root);
     });
-    document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePickers(); });
+    // Escape closes the open pickers of this view only (the others have their own).
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !openPickers.size || (ns.observability && !ns.observability.isActive("metrics"))) return;
+      const inside = [...openPickers].find((root) => root.contains(document.activeElement));
+      closePickers();
+      inside?.querySelector(".tracePicker__button")?.focus({ preventScroll: true });
+    });
     window.addEventListener("chdash:host-changed", () => {
       started = true;
       if (!ownsUrl()) { reloadWhenShown = true; return; }

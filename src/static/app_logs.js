@@ -521,11 +521,28 @@
 
   // --- Errors and status -----------------------------------------------------------
 
-  function showError(message) {
+  // A failed step's Retry (onRetryClick): "search", "more", "histogram",
+  // "patterns", "context" or "meta".
+  const LOGS_RETRY = (what) => `<button type="button" class="button button--small logsRetry" data-logs-retry="${what}">Retry</button>`;
+
+  // The error strip: a sentence (app_observability.js strips the API's error
+  // codes) and, for a step that can run again, Retry.
+  function showError(message, retry = "") {
     const box = $("logsError");
     if (!box) return;
-    box.textContent = message || "";
+    box.innerHTML = message ? `<span class="tracesError__text">${esc(message)}</span>${retry ? LOGS_RETRY(retry) : ""}` : "";
     box.hidden = !message;
+  }
+
+  function onRetryClick(event) {
+    const what = event.target instanceof Element ? event.target.closest("[data-logs-retry]")?.getAttribute("data-logs-retry") : "";
+    if (!what) return;
+    if (what === "search") void search({ push: false });
+    else if (what === "more") { showError(""); void loadMore(); }
+    else if (what === "histogram" && model.lastSearch) void loadHistogram(model.lastSearch);
+    else if (what === "patterns") { model.patternsKey = ""; void loadPatterns(); }
+    else if (what === "context") void loadContext();
+    else if (what === "meta") { showError(""); void reloadForHost(); }
   }
 
   function setStatus(text) {
@@ -622,7 +639,7 @@
       model.exhausted = !model.nextCursor;
       model.lastPayload = payload;
     } catch (error) {
-      if (seq === model.seq.search) showError(error.message);
+      if (seq === model.seq.search) showError(error.message, "more");
     } finally {
       if (seq === model.seq.search) {
         model.loadingMore = false;
@@ -722,7 +739,7 @@
     }
     if (message === "error") {
       messageBox.hidden = false;
-      messageBox.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Search failed.</strong><p>${esc(error)}</p></div>`;
+      messageBox.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Search failed.</strong><p>${esc(error)}</p>${LOGS_RETRY("search")}</div>`;
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
@@ -914,7 +931,7 @@
       box.appendChild(note);
     }
     note.className = `logsHistogram__placeholder${isError ? " is-error" : ""}`;
-    note.textContent = text;
+    note.innerHTML = `${esc(text)}${isError ? ` ${LOGS_RETRY("histogram")}` : ""}`;
     note.hidden = false;
   }
 
@@ -1081,7 +1098,7 @@
       return;
     }
     if (model.patternsError) {
-      box.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Patterns failed.</strong><p>${esc(model.patternsError)}</p></div>`;
+      box.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Patterns failed.</strong><p>${esc(model.patternsError)}</p>${LOGS_RETRY("patterns")}</div>`;
       return;
     }
     const p = model.patterns;
@@ -1170,9 +1187,14 @@
     model.selectedId = "";
     model.side.row = null;
     const panel = $("logsSidePanel");
+    // Focus inside the panel (its close button, a tab, Escape there) goes
+    // back to the record table, whose arrow keys move through the records.
+    const active = document.activeElement;
+    const refocus = !!panel && !panel.hidden && (!active || active === document.body || panel.contains(active));
     if (panel) panel.hidden = true;
     document.querySelector(".logsBody")?.classList.remove("has-side");
     renderWindow(true);
+    if (refocus) $("logsTable")?.focus({ preventScroll: true });
   }
 
   const ACTION_ICONS = {
@@ -1340,7 +1362,7 @@
     const box = $("logsContextRows");
     if (!box || model.side.tab !== "context") return;
     if (model.side.contextLoading && !model.side.context) { box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading surrounding logs\u2026</div>'; return; }
-    if (model.side.contextError) { box.innerHTML = `<div class="logsEmpty logsEmpty--error">${esc(model.side.contextError)}</div>`; return; }
+    if (model.side.contextError) { box.innerHTML = `<div class="logsEmpty logsEmpty--error"><p>${esc(model.side.contextError)}</p>${LOGS_RETRY("context")}</div>`; return; }
     const ctx = model.side.context;
     if (!ctx) { box.innerHTML = ""; return; }
     const rows = ctx.rows || [];
@@ -1396,7 +1418,9 @@
       renderWindow(true);
     });
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !$("logsSidePanel")?.hidden && !document.querySelector(".tracePicker.themeSelect--open")) closeSidePanel();
+      if (event.key !== "Escape" || $("logsSidePanel")?.hidden || document.querySelector(".tracePicker.themeSelect--open")) return;
+      if (ns.observability && !ns.observability.isActive("logs")) return;
+      closeSidePanel();
     });
   }
 
@@ -1530,7 +1554,7 @@
   async function reloadForHost() {
     await loadMeta();
     if (model.metaError) {
-      showError(model.metaError);
+      showError(model.metaError, model.meta ? "" : "meta");
       renderTable();
       return;
     }
@@ -1595,6 +1619,7 @@
     initHistogram();
     initPatterns();
     initSidePanel();
+    $("logsWorkspace")?.addEventListener("click", onRetryClick);
     syncControls();
     setTab(model.tab, { push: false });
 

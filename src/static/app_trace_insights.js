@@ -612,7 +612,7 @@
     const filterLabel = CONTEXT_FILTERS.find(([value]) => value === context.filter)?.[1] || "";
     const windowLabel = CONTEXT_WINDOWS.find(([ms]) => ms === context.windowMs)?.[1] || "";
     const status = context.error
-      ? `<p class="traceContextPanel__error" role="alert">${esc(context.error)}</p>`
+      ? `<p class="traceContextPanel__error" role="alert">${esc(context.error)} <button type="button" class="button button--small" data-context-retry>Retry</button></p>`
       : context.loading === "around"
         ? '<p class="traceContextPanel__status" role="status">Loading spans\u2026</p>'
         : context.rows.length
@@ -662,6 +662,7 @@
     }
     const more = target.closest("[data-context-more]");
     if (more) { void loadContext(String(more.getAttribute("data-context-more"))); return; }
+    if (target.closest("[data-context-retry]")) { void loadContext("around"); return; }
     const row = target.closest("tr[data-context-span]");
     if (row) openContextRow(row);
   }

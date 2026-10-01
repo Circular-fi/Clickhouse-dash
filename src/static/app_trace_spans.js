@@ -543,9 +543,8 @@
     if (!row) return;
     state.panelOpen = true;
     const panel = panelEl();
-    // Below the sticky search bar, which stays usable while the panel is open.
-    const bar = ctx.dom.tracesForm || document.querySelector(".appHeader");
-    panel.style.setProperty("--trace-span-panel-top", `${Math.max(0, Math.round(bar ? bar.getBoundingClientRect().bottom : 0))}px`);
+    // Its place is CSS: under the sticky search bar (--shell-top +
+    // --trace-bar-h), a bottom sheet on narrow windows.
     panel.hidden = false;
     panel.dataset.spanIndex = String(index);
     renderPanel(row);

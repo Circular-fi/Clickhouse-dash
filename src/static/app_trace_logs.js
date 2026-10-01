@@ -688,10 +688,25 @@
     row.click();
   }
 
+  // The panel's × and Escape in it close it and give focus back to the
+  // header's Logs button that opened it.
+  function closePanelToToggle() {
+    togglePanel(false);
+    document.querySelector("#traceDetailHeader [data-trace-logs-toggle]")?.focus({ preventScroll: true });
+  }
+
+  function onPanelKeydown(event) {
+    if (event.key !== "Escape" || event.defaultPrevented || !view.panelOpen) return;
+    // A filter with text: Escape clears it first (the search field's own key).
+    if (event.target instanceof HTMLInputElement && event.target.type === "search" && event.target.value) return;
+    event.preventDefault();
+    closePanelToToggle();
+  }
+
   function onPanelClick(event) {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
-    if (target.closest("[data-trace-logs-toggle]")) { togglePanel(false); return; }
+    if (target.closest("[data-trace-logs-toggle]")) { closePanelToToggle(); return; }
     if (target.closest("[data-trace-logs-retry]")) { void load(ctx.model.activeTrace); return; }
     if (target.closest("[data-trace-logs-clear]")) {
       view.filters = { severities: new Set(), service: "", text: "" };
@@ -716,6 +731,7 @@
     // Capture phase: before the row's own click (which toggles the inspector).
     waterfall?.addEventListener("click", onWaterfallClick, true);
     waterfall?.addEventListener("keydown", onKeydown, true);
+    byId("traceLogsPanel")?.addEventListener("keydown", onPanelKeydown);
     const panel = byId("traceLogsPanel");
     panel?.addEventListener("click", onPanelClick);
     panel?.addEventListener("keydown", onKeydown, true);

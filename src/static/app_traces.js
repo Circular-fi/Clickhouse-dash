@@ -26,6 +26,8 @@
     // Deep link (?span=): the span to focus once its trace is loaded, and the
     // highlighted span.
     pendingSpanId: "",
+    // The open trace could not be loaded: { id, code, text } (unavailableHtml).
+    traceError: null,
     focusedSpanId: "",
     openSpanIds: new Set(),
     // Inspector sections a span has open (Jaeger's DetailState), so that a
@@ -280,10 +282,42 @@
 
   function currentHost() { return state.selectedHostId || ""; }
 
-  function showError(message) {
+  // The error strip above the view: a sentence (app_observability.js strips
+  // the API's error codes) and, when the failed step can run again, Retry.
+  let errorRetry = null;
+  function showError(message, retry = null) {
     if (!dom.tracesError) return;
-    dom.tracesError.hidden = !message;
-    dom.tracesError.textContent = message || "";
+    const text = message instanceof Error ? message.message : String(message || "");
+    dom.tracesError.hidden = !text;
+    dom.tracesError.setAttribute("role", "alert");
+    errorRetry = text && typeof retry === "function" ? retry : null;
+    dom.tracesError.innerHTML = text
+      ? `<span class="tracesError__text">${esc(text)}</span>${errorRetry ? '<button type="button" class="button button--small tracesError__retry" data-traces-error-retry>Retry</button>' : ""}`
+      : "";
+  }
+
+  // The search bar's height as --trace-bar-h on the root element, in px (it
+  // wraps to 2 or more rows on narrower windows): the drawers of the Search
+  // and Services tabs open under it and the facets sidebar sticks under it,
+  // below --shell-top (app_observability.js).
+  function trackSearchBarHeight() {
+    const bar = dom.tracesForm;
+    if (!bar) return;
+    const root = document.documentElement;
+    const update = () => {
+      // A hidden bar (the trace detail) keeps the last height.
+      const height = bar.offsetHeight;
+      if (height > 0) root.style.setProperty("--trace-bar-h", `${height}px`);
+    };
+    update();
+    if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(bar);
+  }
+
+  function onErrorClick(event) {
+    if (!(event.target instanceof Element) || !event.target.closest("[data-traces-error-retry]") || !errorRetry) return;
+    const retry = errorRetry;
+    showError("");
+    retry();
   }
 
   function traceIdFromPath() {
@@ -768,10 +802,12 @@
     void applyCustomRange({ from: format(from), to: format(to) }, "chart");
   }
 
-  function chartMessage(container, text, isError = false) {
+  // retry: "analytics" or "durations" adds a Retry button (handled by the
+  // search view's click listener, init).
+  function chartMessage(container, text, isError = false, retry = "") {
     if (!container) return;
     unmountChart(container);
-    container.innerHTML = `<div class="tracesEmpty${isError ? " traceChartError" : ""}"${isError ? ' role="alert"' : ""}>${esc(text)}</div>`;
+    container.innerHTML = `<div class="tracesEmpty${isError ? " traceChartError" : ""}"${isError ? ' role="alert"' : ""}>${esc(text)}${retry ? ` <button type="button" class="traceMiniButton" data-chart-retry="${esc(retry)}">Retry</button>` : ""}</div>`;
   }
 
   // Bucket starts on a regular grid from the first to the last bucket, the
@@ -841,7 +877,7 @@
     if (ns.traceHeatmap?.active?.()) { ns.traceHeatmap.render(); return; }
     const a = model.analytics;
     if (a && !a.has_durations) {
-      if (model.durationsError) chartMessage(container, model.durationsError, true);
+      if (model.durationsError) chartMessage(container, model.durationsError, true, "durations");
       else chartMessage(container, "Computing duration percentiles\u2026");
       if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = "P50 / P90 / P95 / P99";
       return;
@@ -945,8 +981,8 @@
       return;
     }
     if (model.analyticsError && !model.analytics) {
-      chartMessage(dom.traceServiceChart, model.analyticsError, true);
-      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, model.analyticsError, true);
+      chartMessage(dom.traceServiceChart, model.analyticsError, true, "analytics");
+      if (heatmap) renderDurationChart(); else chartMessage(dom.traceDurationChart, model.analyticsError, true, "analytics");
       return;
     }
     if (!model.analytics) {
@@ -1882,8 +1918,14 @@
     if (dom.traceCopyJsonButton) dom.traceCopyJsonButton.disabled = !spans.length;
     if (dom.traceCopyMenuButton) dom.traceCopyMenuButton.disabled = !spans.length;
     if (!spans.length) closeTraceCopyMenu({ immediate: true });
+    dom.traceDetail?.classList.toggle("is-unavailable", !spans.length && !!model.traceError);
     if (!spans.length) {
-      if (dom.traceDetailTitle) dom.traceDetailTitle.innerHTML = '<strong>Trace</strong><span>Select a trace to inspect its spans.</span>';
+      const failed = model.traceError;
+      if (dom.traceDetailTitle) {
+        dom.traceDetailTitle.innerHTML = failed
+          ? `<strong>Trace</strong><code class="tracePageHeader__id" title="Trace ID">${esc(failed.id)}</code>`
+          : '<strong>Trace</strong><span>Select a trace to inspect its spans.</span>';
+      }
       if (dom.traceDetailStats) dom.traceDetailStats.innerHTML = "";
       if (dom.traceServiceFilters) dom.traceServiceFilters.innerHTML = "";
       if (dom.traceOverview) dom.traceOverview.innerHTML = "";
@@ -2044,7 +2086,7 @@
     if (!dom.traceWaterfall) return;
     const cache = activeTraceCache();
     const spans = cache.spans;
-    if (!spans.length) { dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">No spans.</div>'; return; }
+    if (!spans.length) { dom.traceWaterfall.innerHTML = model.traceError ? unavailableHtml(model.traceError) : '<div class="tracesEmpty">No spans.</div>'; return; }
     const ctx = waterfallContext(cache);
     const rows = visibleNodes(cache).filter((node) => waterfallRowShown(node, ctx));
     dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
@@ -2708,7 +2750,13 @@
     requestAnimationFrame(() => split.classList.add("is-open"));
     try { menu.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
     const onDocClick = (ev) => { if (ev.target instanceof Node && !split.contains(ev.target)) closeTraceCopyMenu(); };
-    const onKey = (ev) => { if (ev.key === "Escape") closeTraceCopyMenu({ immediate: true }); };
+    // Escape closes it and gives focus back to its toggle.
+    const onKey = (ev) => {
+      if (ev.key !== "Escape") return;
+      const inside = menu.contains(document.activeElement);
+      closeTraceCopyMenu({ immediate: true });
+      if (inside || document.activeElement === document.body) dom.traceCopyMenuButton?.focus({ preventScroll: true });
+    };
     document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onKey);
     traceCopyMenuCleanup = () => {
@@ -3108,7 +3156,7 @@
     ns.traceViews?.markFocusedSpan?.();
     if ((push || replace) && ownsUrl()) {
       const url = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
-      if (push) window.history.pushState({ traceId: model.activeTrace?.trace_id, spanId: id }, "", url);
+      if (push) window.history.pushState(detailEntryState({ traceId: model.activeTrace?.trace_id, spanId: id }), "", url);
       else window.history.replaceState(window.history.state, "", url);
     }
     if (scroll) {
@@ -3143,7 +3191,7 @@
       syncFilterFeatures();
       return meta;
     } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
+      showError(error, () => { void reloadForHost(); });
       renderSource();
       throw error;
     }
@@ -3205,7 +3253,7 @@
         updateOperationOptions();
         if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Use a narrower service / operation filter if the desired value is outside the discovered combinations.");
       } catch (error) {
-        if (seq === model.prefillSeq) showError(error instanceof Error ? error.message : String(error));
+        if (seq === model.prefillSeq) showError(error, () => { void prefill({ force: true }); });
       }
     })();
     model.prefillPromise = run;
@@ -3413,7 +3461,7 @@
       model.analytics = null;
       model.analyticsLoading = false;
       renderResults();
-      showError(error instanceof Error ? error.message : String(error));
+      showError(error, () => { void search({ url: "none" }); });
     } finally {
       if (seq === model.searchSeq) setButtonLoading(dom.tracesSearchButton, false);
     }
@@ -3425,11 +3473,18 @@
     const seq = ++model.detailSeq;
     const pendingSpanId = model.pendingSpanId;
     model.pendingSpanId = "";
+    model.traceError = null;
     showError("");
     setView(true);
+    dom.traceDetail?.classList.remove("is-unavailable");
     if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace\u2026</div>';
     if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.innerHTML = ""; }
     void ns.traceLogs?.load?.(null);
+    // The entry is pushed once the answer is in (the search stays the current
+    // entry while it loads), whether the trace was found or not.
+    const pushEntry = () => {
+      if (push && ownsUrl()) window.history.pushState(detailEntryState({ traceId: id }), "", spanTraceUrl(id, pendingSpanId));
+    };
     try {
       const trace = await api.getTrace(currentHost(), id);
       if (seq !== model.detailSeq) return;
@@ -3442,7 +3497,7 @@
       model.disabledServices.clear();
       model.collapsed.clear();
       registerServiceColors((trace?.spans || []).map((span) => span.service_name));
-      if (push && ownsUrl()) window.history.pushState({ traceId: id }, "", spanTraceUrl(id, pendingSpanId));
+      pushEntry();
       renderTrace();
       ns.traceViews?.applyLocation?.();
       // Logs load after the trace is on screen, never before.
@@ -3455,12 +3510,78 @@
       model.traceViewRange = [0, 1];
       model.disabledServices.clear();
       model.collapsed.clear();
+      // The detail pane says what happened (unavailableHtml), not the strip.
+      model.traceError = { id, code: String(error?.code || ""), text: error instanceof Error ? error.message : String(error) };
+      pushEntry();
       renderTrace();
-      showError(error instanceof Error ? error.message : String(error));
+      ns.traceViews?.applyLocation?.();
     }
   }
 
+  // The detail pane of a trace that could not be loaded: what happened in a
+  // sentence and what to do next, instead of an empty trace header.
+  function unavailableHtml(failed) {
+    const missing = failed.code === "trace_not_found";
+    const invalid = failed.code === "invalid_trace_id" || failed.code === "missing_trace_id";
+    const zoom = dom.tracesRangeZoomOut;
+    const actions = [
+      '<button type="button" class="button button--small button--primary" data-trace-unavailable="back">Back to search</button>',
+      missing && zoom && !zoom.disabled ? '<button type="button" class="button button--small" data-trace-unavailable="wider">Search a wider time range</button>' : "",
+      !missing && !invalid ? '<button type="button" class="button button--small" data-trace-unavailable="retry">Retry</button>' : "",
+    ].join("");
+    const title = missing ? "Trace not found" : invalid ? "Not a trace ID" : "The trace could not be loaded";
+    const text = missing
+      ? "No span with this trace ID is stored. The trace may be older than the data kept, not ingested yet, or recorded on another host."
+      : invalid ? "A trace ID is 32 hexadecimal characters (16 bytes)." : failed.text;
+    return `<div class="tracesEmpty traceUnavailable" data-trace-unavailable-state="${esc(failed.code || "error")}" role="${missing || invalid ? "status" : "alert"}">
+        <strong>${esc(title)}</strong>
+        <span>${esc(text)}</span>
+        <div class="traceUnavailable__actions">${actions}</div>
+      </div>`;
+  }
+
+  function onUnavailableClick(event) {
+    const action = event.target instanceof Element ? event.target.closest("[data-trace-unavailable]")?.getAttribute("data-trace-unavailable") : "";
+    if (!action || !model.traceError) return;
+    const id = model.traceError.id;
+    if (action === "back") returnToSearch();
+    else if (action === "retry") void loadTrace(id, { push: false });
+    else if (action === "wider") {
+      // The search of this trace's context, its range zoomed out (a new entry).
+      model.traceError = null;
+      dom.traceDetail?.classList.remove("is-unavailable");
+      dom.tracesRangeZoomOut?.click();
+    }
+  }
+
+  // History entries of an open trace count the steps back to the search entry
+  // it was opened from (state.searchBack): a trace opened from the results is
+  // 1 step away, a span or view picked in it (a pushed entry) one more, a
+  // linked trace opened from it one more again. A direct link or a new tab
+  // has no such entry (no searchBack).
+  function detailEntryState(state) {
+    const steps = traceIdFromPath() ? Number(window.history.state?.searchBack) || 0 : 1;
+    const next = { ...(state || {}) };
+    delete next.searchBack;
+    if (steps > 0 && ownsUrl()) next.searchBack = traceIdFromPath() ? steps + 1 : 1;
+    return next;
+  }
+
+  // The back arrow (#traceBackButton) and "Back to search": back to the very
+  // search entry the trace came from, so Back / Forward stay one list of
+  // pages, else a new entry for the trace's search context.
+  function returnToSearch() {
+    const steps = Number(window.history.state?.searchBack) || 0;
+    if (steps > 0 && ownsUrl() && traceIdFromPath()) {
+      window.history.go(-steps);
+      return;
+    }
+    backToSearch({ push: true });
+  }
+
   function backToSearch({ push = true } = {}) {
+    model.traceError = null;
+    dom.traceDetail?.classList.remove("is-unavailable");
     model.activeTrace = null;
     model.activeSpanId = null;
     model.focusedSpanId = "";
@@ -3619,13 +3740,21 @@
     // carrying its search context).
     ns.traceSearch?.applyLocation?.({ initial: true });
     dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
+    trackSearchBarHeight();
     dom.tracesSort?.addEventListener("change", () => {
       renderResults();
       if (!traceIdFromPath()) ns.traceSearch?.writeUrl?.("replace");
     });
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
-    dom.traceBackButton?.addEventListener("click", () => backToSearch({ push: true }));
+    dom.traceBackButton?.addEventListener("click", () => returnToSearch());
+    dom.tracesError?.addEventListener("click", onErrorClick);
+    dom.tracesSearchView?.addEventListener("click", (event) => {
+      const retry = event.target instanceof Element ? event.target.closest("[data-chart-retry]")?.getAttribute("data-chart-retry") : "";
+      if (retry === "durations") void loadDurations();
+      else if (retry === "analytics" && model.analyticsFilters) void loadAnalytics(model.analyticsFilters);
+    });
+    dom.traceDetail?.addEventListener("click", onUnavailableClick);
     dom.traceCopyJsonButton?.addEventListener("click", () => { void copyTraceJson(); });
     dom.traceCopyMenuButton?.addEventListener("click", () => {
       if (dom.traceCopyMenu?.hidden) openTraceCopyMenu();
@@ -3658,5 +3787,5 @@
 
   // renderAnalytics (redraw the charts from the model) and scatterDots (the
   // scatter as drawn) are test and benchmark hooks.
-  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, renderAnalytics, scatterDots };
+  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, returnToSearch, detailEntryState, renderAnalytics, scatterDots };
 })();

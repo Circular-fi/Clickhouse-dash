@@ -393,12 +393,75 @@
     window.addEventListener("chdash:features-changed", onFeatures);
   }
 
+  // The page chrome above a view (the header and the #obsNav row, both of
+  // which wrap on narrow windows) as --shell-top on the root element, in px:
+  // the views' drawers and bottom sheets start under it rather than under a
+  // literal offset that a wrapped header outgrows.
+  function trackShellTop() {
+    const root = document.documentElement;
+    const header = document.querySelector("body > .appHeader");
+    const nav = document.getElementById("obsNav");
+    const update = () => {
+      const bottom = Math.max(0, ...[header, nav].filter((el) => el && !el.hidden).map((el) => el.getBoundingClientRect().bottom));
+      const value = `${Math.round(bottom)}px`;
+      if (root.style.getPropertyValue("--shell-top") !== value) root.style.setProperty("--shell-top", value);
+    };
+    update();
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(update);
+      for (const el of [header, nav]) if (el) observer.observe(el);
+    }
+    window.addEventListener("resize", update);
+  }
+
+  // A view's message for a failed request: the server's own sentence, without
+  // the "error_code: " prefix of app_api.js's Error text (the Query page's
+  // error panel shows the code; a reader of a chart or a list has no use for
+  // it). The code stays on error.code, the original text on error.rawMessage.
+  const ERROR_TEXT = {
+    network_error: "The server could not be reached. Check the connection and retry.",
+    invalid_api_response: "The server sent an unexpected response. Retry, or reload the page.",
+  };
+  function errorText(error, fallback = "The request failed.") {
+    const code = String(error?.code || error?.payload?.error_code || "");
+    if (ERROR_TEXT[code]) return ERROR_TEXT[code];
+    let text = String(error?.payload?.message ?? (error instanceof Error ? error.message : error ?? "")).trim();
+    // An Error from app_api.js reads "code: message"; a plain one may too.
+    if (code && text.toLowerCase().startsWith(`${code.toLowerCase()}:`)) text = text.slice(code.length + 1).trim();
+    else if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+: /.test(text)) text = text.replace(/^[a-z][a-z0-9_]*: /, "");
+    return text || fallback;
+  }
+
+  // Every request of the page's API client rejects with that message, so each
+  // view (and every module of the Traces view, the service map included)
+  // shows a sentence rather than "trace_not_found: Trace was not found...".
+  function humanizeApiErrors(api) {
+    if (!api || api.__humanErrors) return;
+    for (const [name, fn] of Object.entries(api)) {
+      if (typeof fn !== "function" || name === "resolveUrl") continue;
+      api[name] = function (...args) {
+        const out = fn.apply(this, args);
+        if (!out || typeof out.then !== "function") return out;
+        return out.catch((error) => {
+          if (error instanceof Error && error.code && error.rawMessage == null) {
+            error.rawMessage = error.message;
+            error.message = errorText(error);
+          }
+          throw error;
+        });
+      };
+    }
+    Object.defineProperty(api, "__humanErrors", { value: true });
+  }
+
   async function start() {
-    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, featuresKnown: false, VIEWS, VIEW_MODULES };
+    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, featuresKnown: false, VIEWS, VIEW_MODULES };
+    trackShellTop();
     const named = viewFromPath(window.location.pathname);
     const view = named && enabledViews().includes(named) ? named : defaultView();
     detachViews(view);
     await loadModules(COMMON_MODULES);
+    humanizeApiErrors(window.ChDash.api);
     const early = String(document.documentElement.dataset.obsView || "");
     styled.add(VIEWS.includes(early) ? early : VIEWS[0]);
     bindShell();
