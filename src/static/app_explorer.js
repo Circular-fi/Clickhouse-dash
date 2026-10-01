@@ -1972,12 +1972,10 @@
     selectTable(database, table, false, { graphOrigin: true });
   }
 
-  // Graph side panel "Open card": the table card, reached the way the tree
-  // reaches it (Browse + selectTable).
+  // Graph side panel "Open card": the table card's default route
+  // (/explorer/<db>/<table>/columns?view=browse), as a deep link would open it.
   function openTableCardFromGraph(database, table) {
-    if (model.section !== "tables") setSection("tables");
-    setMode("list");
-    void selectTable(database, table, false, { historyMode: "push" });
+    openStorageRoute(database, table);
   }
 
   function init() {
