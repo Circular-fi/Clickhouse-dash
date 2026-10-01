@@ -22,14 +22,15 @@
   };
 
   // Modules a page shell never runs: Query has no Explorer graph or storage
-  // treemap; Explorer has no editor, Run controls, downloads, profiling modal
-  // or result charts (app_query_chart.js loads app_chart_core.js on the first
-  // Chart view).
+  // treemap; Explorer has no editor, Run controls, downloads, profiling modal,
+  // result charts (app_query_chart.js loads app_chart_core.js on the first
+  // Chart view) or query library (app_ui.js loads app_query_library.js when
+  // the Query sidebar is first shown).
   // Every module the page loads costs its source, compiled code and the
   // stylesheet rules it can use (tools/build_page_css.py reads this list).
   const PAGE_SKIPPED_MODULES = {
     query: ["app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"],
-    explorer: ["app_autocomplete.js", "app_query_chart.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js"],
+    explorer: ["app_autocomplete.js", "app_query_chart.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js", "app_query_library.js"],
   };
   const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);
 

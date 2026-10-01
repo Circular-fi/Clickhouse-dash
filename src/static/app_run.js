@@ -251,7 +251,9 @@
     if (!Number.isFinite(n)) return "-";
     const sign = n < 0 ? "-" : "";
     let v = Math.abs(n);
-    if (v < mul) return `${sign}${v.toFixed(fixed)}${baseUnit}`;
+    // Whole values below the first unit (row counts, bytes) print without
+    // decimals: "236", "80B"; rates and scaled values keep two.
+    if (v < mul) return `${sign}${Number.isInteger(v) ? String(v) : v.toFixed(fixed)}${baseUnit}`;
     let u = -1;
     while (v >= mul && u < units.length - 1) {
       v /= mul;
@@ -540,7 +542,7 @@
   }
 
   function setQueryIdText(queryId) {
-    util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : "#-");
+    util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : "-");
   }
 
   // Prevent out-of-order SSE/UI updates from regressing the status text.
@@ -580,6 +582,53 @@
 
     state.queryStatusText = next;
     util.setText(dom.queryStatusText, next || "-");
+    setPanelRunState(runStateFor(next));
+  }
+
+  function runStateFor(status) {
+    const s = String(status || "").toLowerCase();
+    if (s.startsWith("running") || s === "connected" || s === "canceling") return "running";
+    if (s === "error") return "error";
+    if (s === "canceled") return "canceled";
+    if (s === "done" || s === "finished" || s === "limit reached") return "ok";
+    return "idle";
+  }
+
+  // History: each run is recorded when it starts (storage.addHistoryEntry);
+  // its outcome is added once it ended, and sent to the server History when
+  // the query library keeps it there (features.query_library.history_store).
+  function historyStatusFor(status) {
+    const s = runStateFor(status);
+    if (s === "ok") return "ok";
+    if (s === "canceled") return "cancelled";
+    return "error";
+  }
+
+  function recordRunOutcome(run) {
+    if (!run || !run.tsMs) return;
+    const outcome = {
+      status: historyStatusFor(state.queryStatusText),
+      elapsed_ms: Math.max(0, Math.round(Number.isFinite(run.elapsedMs) ? run.elapsedMs : Date.now() - run.startedAt)),
+      rows: Math.max(0, Math.trunc(Number(run.rows) || 0)),
+    };
+    const errorText = String(run.error || (results && typeof results.getErrorText === "function" ? results.getErrorText() : "") || "");
+    if (outcome.status === "error" && errorText) outcome.error = errorText.slice(0, 2048);
+    storage.completeHistoryEntry(run.tsMs, run.sql, outcome);
+    const entry = { sql: run.sql, host_id: run.hostId || null, ran_at_ms: run.tsMs, ...outcome };
+    const library = state.features && state.features.query_library;
+    const toServer = !!(library && library.enabled && library.history_store === "server");
+    const notify = (detail) => {
+      try {
+        window.dispatchEvent(new CustomEvent("chdash:query-history", { detail }));
+      } catch (_) {}
+    };
+    if (!toServer) {
+      notify({ entry, store: "browser" });
+      return;
+    }
+    api.postJson("api/query-library/history", entry)
+      .then((response) => notify({ entry: { ...entry, id: response && response.id }, store: "server", revision: response && response.revision }))
+      .catch(() => notify({ entry, store: "browser", failed: true }));
   }
 
   function closeActiveStream() {
@@ -1500,17 +1549,47 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     return s === "error" || s === "canceled" || s === "cancelled";
   }
 
+  // "N rows" / "1 row" with the app-wide integer format.
+  function countLabel(n, singular, plural = `${singular}s`) {
+    const v = Number(n) || 0;
+    return `${util.formatInt(v)} ${v === 1 ? singular : plural}`;
+  }
+
+  // Result header and multiquery panel summary, in the app-wide formats
+  // (util.formatInt / formatSeconds / formatBytes): "236 rows · 5 columns ·
+  // 4ms · read 236 rows, 15.2 KB".
   function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, truncated }) {
     const parts = [];
-    parts.push(statusLabel(status));
-    if (elapsedSeconds != null) parts.push(util.formatSeconds(elapsedSeconds));
-    if (outRows != null && outCols != null) parts.push(`${outRows} row${outRows > 1 ? 's' : ''} ${outCols} column${outCols > 1 ? 's' : ''}`);
-    if (readRows != null) parts.push(`${formatRows(readRows)} rows`);
-    if (readBytes != null) parts.push(`${formatBytesShort(readBytes)}`);
+    if (status) parts.push(statusLabel(status));
+    if (outRows != null) parts.push(`${countLabel(outRows, "row")}${truncated ? " (preview)" : ""}`);
+    if (outCols != null) parts.push(countLabel(outCols, "column"));
+    if (elapsedSeconds != null && Number.isFinite(elapsedSeconds)) parts.push(util.formatSeconds(elapsedSeconds));
+    const read = [];
+    if (readRows != null && Number(readRows) > 0) read.push(countLabel(readRows, "row"));
+    if (readBytes != null && Number(readBytes) > 0) read.push(util.formatBytes(readBytes));
+    if (read.length) parts.push(`read ${read.join(", ")}`);
 
     if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${formatPercentFromCenti(cpuMaxCenti)}`);
-    if (memMax != null && memMax > 0) parts.push(`max RAM ${formatBytesShort(memMax)}`);
-    return parts.join(" · ");
+    if (memMax != null && memMax > 0) parts.push(`max RAM ${util.formatBytes(memMax)}`);
+    return parts.join(" \u00b7 ");
+  }
+
+  // The single-query result header: rows and columns received, elapsed time and
+  // what the server read. Hidden until a run produced a terminal state.
+  function setResultSummary(text) {
+    const el = dom.resultSummaryText;
+    if (!el) return;
+    el.textContent = text || "";
+    el.hidden = !text;
+    if (dom.resultColumnsText) dom.resultColumnsText.classList.toggle("is-summarized", !!text);
+  }
+
+  // Running state on the editor panel: the toolbar, editor border and status
+  // chip follow it (style.css "Query page revamp").
+  function setPanelRunState(stateName) {
+    const panel = dom.queryTextArea ? dom.queryTextArea.closest(".panel--query") : null;
+    if (!panel) return;
+    panel.dataset.runState = stateName || "idle";
   }
 
   async function runOneStatement(statement, sink, ctx = null, runMode = "normal") {
@@ -1567,6 +1646,9 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     }
 
     state.suppressResultsVisibility = !!downloadKind;
+    const runStartedAt = Date.now();
+    let historyRun = null;
+    setResultSummary("");
     results.clearResultsStack();
     results.clearLiveResults();
     if (downloadKind) results.setResultsVisible(false);
@@ -1656,8 +1738,11 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
 
+      historyRun = { tsMs: Date.now(), startedAt: runStartedAt, sql: trimmed, hostId, rows: 0, elapsedMs: NaN, error: "" };
+      // The address bar links to what ran (?sql= / ?saved=).
+      if (!downloadKind) ui?.syncQueryUrl?.(dom.queryTextArea ? dom.queryTextArea.value : trimmed);
       storage.addHistoryEntry({
-        ts_ms: Date.now(),
+        ts_ms: historyRun.tsMs,
         host_id: hostId,
         sql_raw: trimmed,
         sql_formatted: dom.queryTextArea ? dom.queryTextArea.value : trimmed,
@@ -1665,6 +1750,23 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
       if (statements.length === 1) {
         const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode);
+        {
+          const done = out && out.done ? out.done : {};
+          const rows = results.getRowCount();
+          historyRun.rows = rows;
+          if (done.elapsed_seconds != null) historyRun.elapsedMs = Number(done.elapsed_seconds) * 1000;
+          const terminal = String(done.status || "done").toLowerCase();
+          if (!statusIsStopping(terminal) && !downloadKind) {
+            setResultSummary(buildCompactMeta({
+              outRows: rows,
+              outCols: results.getColCount(),
+              elapsedSeconds: done.elapsed_seconds != null ? Number(done.elapsed_seconds) : null,
+              readRows: Number(done.read_rows) > 0 ? Number(done.read_rows) : out?.agg?.lastReadRows,
+              readBytes: Number(done.read_bytes) > 0 ? Number(done.read_bytes) : out?.agg?.lastReadBytes,
+              truncated: !!done.result_truncated || terminal === "result_limit_reached",
+            }));
+          }
+        }
         if (analysis && typeof analysis.setContext === "function" && out && out.queryId && out.analysisAvailable) {
           analysis.setContext({ hostId, queryId: out.queryId, runMode });
         }
@@ -1757,6 +1859,13 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         else if (batchFinalStatus !== "error" && batchFinalStatus !== "canceled") batchFinalStatus = "done";
         const outRows = perQuerySink && perQuerySink.getRowCount ? perQuerySink.getRowCount() : results.getRowCount();
         const outCols = perQuerySink && perQuerySink.getColumnCount ? perQuerySink.getColumnCount() : results.getColCount();
+        if (historyRun) {
+          historyRun.rows += Number(outRows) || 0;
+          if (done && done.elapsed_seconds != null) historyRun.elapsedMs = (Number.isFinite(historyRun.elapsedMs) ? historyRun.elapsedMs : 0) + Number(done.elapsed_seconds) * 1000;
+          if (!historyRun.error && done && String(done.status || "").toLowerCase() === "error") {
+            historyRun.error = perQuerySink && typeof perQuerySink.getErrorText === "function" ? perQuerySink.getErrorText() : "";
+          }
+        }
 
         const readRows = done && Number(done.read_rows) > 0 ? Number(done.read_rows) : agg.lastReadRows;
         const readBytes = done && Number(done.read_bytes) > 0 ? Number(done.read_bytes) : agg.lastReadBytes;
@@ -1841,6 +1950,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         showFormatFailure(err);
       } else {
         const msg = err instanceof Error ? err.message : String(err);
+        if (historyRun && !historyRun.error) historyRun.error = msg;
         // No per-query sink available here; show globally.
         results.setError(msg);
         results.setStatus("error");
@@ -1855,6 +1965,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       state.suppressResultsVisibility = false;
       if (downloadKind && !downloadRunFailed) results.setResultsVisible(false);
       setBusy({ running: false, formatting: false, batch: false });
+      recordRunOutcome(historyRun);
     }
   }
 
@@ -1921,6 +2032,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       results.clearLiveResults();
       results.setResultsVisible(false);
       resetMetrics();
+      setResultSummary("");
       setQueryIdText(null);
       setQueryStatusText("-", { force: true });
       updateActionButtons();

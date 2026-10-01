@@ -66,10 +66,10 @@
         root.classList.toggle("chdash-copy-button-hidden", copyHidden);
         root.classList.toggle("chdash-line-numbers-hidden", lineHidden);
 
-        // The editor size is stored in sessionStorage by the resize observer. Apply
-        // it as a CSS variable before style.css is parsed so the editor does not
-        // jump after app_ui.js starts.
-        var editorHeightRaw = sessionStorage.getItem("chdash.editorHeight.v1");
+        // The editor / results split is remembered (localStorage; older builds
+        // kept it per tab in sessionStorage). Apply it as a CSS variable before
+        // style.css is parsed so the editor does not jump after app_ui.js starts.
+        var editorHeightRaw = localStorage.getItem("chdash.editorHeight.v1") || sessionStorage.getItem("chdash.editorHeight.v1");
         var editorHeight = editorHeightRaw == null ? NaN : Number(editorHeightRaw);
         if (Number.isFinite(editorHeight) && editorHeight > 0) {
           var roundedEditorHeight = Math.round(editorHeight);
@@ -179,7 +179,10 @@
           id="queryTextArea"
           class="editorInput"
           spellcheck="false"
+          aria-label="SQL editor"
+          aria-describedby="queryEditorKeysHint"
           placeholder="Write a ClickHouse query (all statements allowed)"></textarea>
+        <span id="queryEditorKeysHint" class="srOnly">Tab indents. Press Escape, then Tab, to leave the editor. Control+Enter runs the query.</span>
         <div class="editorResizeHandle" role="separator" aria-orientation="horizontal" aria-label="Resize query editor" title="Drag to resize query editor"><span aria-hidden="true"></span></div>
         <button id="editorCopyButton" class="editorCopyButton" type="button" aria-label="Copy query" title="Copy query">
           <span class="editorCopyButton__icon" aria-hidden="true"></span>
@@ -307,23 +310,16 @@
               </button>
             </div>
           </div>
-          <div id="queryLibrary" class="themeSelect queryLibrary" aria-label="Query actions">
-            <button
-              id="queryLibraryButton"
-              class="button themeSelect__button queryLibrary__button"
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded="false">Queries</button>
-            <div id="queryLibraryMenu" class="runMenu queryLibraryMenu" role="dialog" aria-label="Query actions" tabindex="-1" hidden>
-              <div class="queryLibraryMenu__tabs" role="tablist" aria-label="Query actions">
-                <button id="queryLibraryTabSaved" class="queryLibraryMenu__tab" type="button" role="tab" data-mode="saved" aria-selected="true">Saved</button>
-                <button id="queryLibraryTabHistory" class="queryLibraryMenu__tab" type="button" role="tab" data-mode="history" aria-selected="false">History</button>
-              </div>
-              <div id="queryLibraryContent" class="queryLibraryMenu__content"></div>
-            </div>
-          </div>
-          <!-- Format: an icon button between Queries and the run settings cog. -->
+          <span id="runShortcutHint" class="queryActions__hint" aria-hidden="true"><kbd>Ctrl</kbd><kbd>&#8629;</kbd></span>
+          <!-- Format: an icon button between Run and the query library. -->
           <button id="formatButton" class="formatButton" type="button" aria-label="Format SQL" title="Format SQL"><span class="formatButton__icon" aria-hidden="true"></span></button>
+          <!-- Query library: saved queries (folders) and History, in a panel
+               anchored to this icon button. The panel is filled the first
+               time it opens (tabs: app_ui.js; views: app_query_library.js). -->
+          <div id="queryLibrary" class="queryLibrary">
+            <button id="queryLibraryButton" class="formatButton queryLibraryButton" type="button" aria-label="Query library" title="Query library" aria-haspopup="dialog" aria-expanded="false" aria-controls="queryLibraryMenu"><span class="queryLibraryButton__icon" aria-hidden="true"></span></button>
+            <div id="queryLibraryMenu" class="queryLibraryPanel" role="dialog" aria-label="Query library" tabindex="-1" hidden></div>
+          </div>
 
           <div id="runSettings" class="themeSelect runSettings" aria-label="Run settings">
             <button id="runSettingsButton" class="runSettings__button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Run settings" title="Run settings"><span class="editorAutocompleteControl__gear" aria-hidden="true"></span></button>
@@ -427,7 +423,8 @@
       <div class="panel__header">
         <div class="panel__title">Results</div>
         <div class="panel__meta">
-          <span class="metaItem" id="resultColumnsText">-</span>
+          <span class="metaItem resultsSummary" id="resultSummaryText" hidden></span>
+          <span class="metaItem" id="resultColumnsText"></span>
           <button id="analyzeQueryButton" class="button button--small" type="button" hidden>Profiling</button>
           <div id="copySplit" class="runSplit copySplit">
             <div class="runSplit__buttons">
@@ -463,6 +460,12 @@
           <tbody id="resultTableBody"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- Shown while there is no result: what the editor can do. -->
+    <section id="queryEmptyState" class="queryEmptyState" aria-label="Getting started">
+      <div class="queryEmptyState__title">Run a query to see its results here</div>
+      <p class="queryEmptyState__keys"><span class="queryKbd--mod">Ctrl</span>+Enter runs &#183; <span class="queryKbd--mod">Ctrl</span>+Space completes &#183; <span class="queryKbd--mod">Ctrl</span>+S saves to the library &#183; Esc then Tab leaves the editor</p>
     </section>
   </main>
 

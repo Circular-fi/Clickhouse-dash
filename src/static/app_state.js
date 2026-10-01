@@ -18,6 +18,8 @@
   const HISTORY_MAX_ENTRIES = 50;
   const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
   const HISTORY_MAX_SQL_BYTES = 256 * 1024;
+  const HISTORY_MAX_ERROR_CHARS = 2048;
+  const HISTORY_STATUSES = ["ok", "error", "cancelled"];
 
   const safeRead = (key) => {
     try {
@@ -83,12 +85,18 @@
     if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
     const sqlRaw = entry.sql_raw.slice(0, HISTORY_MAX_SQL_BYTES);
     const formattedSource = typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw;
-    return {
+    const out = {
       ts_ms: entry.ts_ms,
       sql_raw: sqlRaw,
       sql_formatted: formattedSource.slice(0, HISTORY_MAX_SQL_BYTES),
       host_id: entry.host_id == null ? null : String(entry.host_id),
     };
+    // Outcome of the run, once it ended (older entries have none).
+    if (HISTORY_STATUSES.includes(entry.status)) out.status = entry.status;
+    if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms >= 0) out.elapsed_ms = entry.elapsed_ms;
+    if (Number.isFinite(entry.rows) && entry.rows >= 0) out.rows = Math.trunc(entry.rows);
+    if (typeof entry.error === "string" && entry.error) out.error = entry.error.slice(0, HISTORY_MAX_ERROR_CHARS);
+    return out;
   };
 
   const boundedHistory = (items) => {
@@ -98,7 +106,8 @@
       const itemBytes = String(item.sql_raw || "").length * 2
         + String(item.sql_formatted || "").length * 2
         + String(item.host_id || "").length * 2
-        + 96;
+        + String(item.error || "").length * 2
+        + 160;
       if (out.length && estimatedBytes + itemBytes > HISTORY_MAX_BYTES) break;
       estimatedBytes += itemBytes;
       out.push(item);
@@ -215,6 +224,18 @@
       storage.saveHistory(deduped);
     },
 
+    // A run's History entry is written when it starts; its outcome (status,
+    // elapsed time, rows, error) is added when it ends.
+    completeHistoryEntry(tsMs, sqlRaw, outcome) {
+      const items = storage.loadHistory();
+      const sqlKey = String(sqlRaw || "").slice(0, HISTORY_MAX_SQL_BYTES);
+      const target = items.find((it) => it.ts_ms === tsMs && it.sql_raw === sqlKey);
+      if (!target || !outcome || typeof outcome !== "object") return false;
+      Object.assign(target, normalizeHistoryEntry({ ...target, ...outcome }));
+      storage.saveHistory(items);
+      return true;
+    },
+
     loadSavedQueries() {
       const arr = safeReadJson(SAVED_QUERIES_STORAGE_KEY, []);
       if (!Array.isArray(arr)) return [];
@@ -255,8 +276,11 @@
       return EDITOR_HEIGHT_PREFIX;
     },
 
+    // The editor / results split is remembered across sessions; older builds
+    // kept it per tab (sessionStorage), still read as a fallback.
     loadEditorHeight(hostId) {
-      const raw = safeReadSession(storage.editorHeightKey(hostId));
+      const key = storage.editorHeightKey(hostId);
+      const raw = safeRead(key) || safeReadSession(key);
       const v = raw != null ? Number(raw) : NaN;
       return Number.isFinite(v) && v > 0 ? v : null;
     },
@@ -264,6 +288,7 @@
     saveEditorHeight(hostId, heightPx) {
       const v = Number(heightPx);
       if (!Number.isFinite(v) || v <= 0) return;
+      safeWrite(storage.editorHeightKey(hostId), String(Math.round(v)));
       safeWriteSession(storage.editorHeightKey(hostId), String(Math.round(v)));
     },
 
@@ -335,7 +360,10 @@
       traces: { enabled: false },
       logs: { enabled: false },
       metrics: { enabled: false },
+      // features.query_library of /api/version (off: the browser library).
+      query_library: { enabled: false, writable: false, history_store: "browser" },
     },
+    featuresLoaded: false,
     suppressResultsVisibility: false,
 
     runOptAutoFormat: runOpts.autoFormat,

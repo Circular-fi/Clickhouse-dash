@@ -30,6 +30,25 @@ query_library {
 
 `/api/version` reports `features.query_library = {"enabled", "writable", "history_store"}`. `writable` is the effective state: it is false when `writable = false` and while the file has a load error. With the feature disabled it reports `{"enabled": false, "writable": false, "history_store": "browser"}`.
 
+## In the Query page
+
+The book button of the Query toolbar (between Format and the run settings cog) opens the query library panel, with two tabs:
+
+- **Saved**: a folder tree (nested folders, saved queries with a description and tags), searched across names, descriptions, tags and SQL. Hovering a query shows its description and highlighted SQL. A click opens it in the editor; Ctrl/Cmd+click (or *Add as a new statement*) appends it as another statement, turning multiquery on. Folders and queries are created, renamed or edited (name, description, folder, tags, SQL from the editor), moved (drag and drop, or *Move to...*) and deleted; deleting a non-empty folder asks first and deletes everything in it.
+- **History**: the runs grouped by day, with status (ok / error / cancelled), elapsed time, rows and host; search, run again, *Save to library* and *Clear*.
+
+Ctrl/Cmd+S saves the editor to the library (or updates the saved query the editor holds). The panel is fully keyboard driven: arrows, Home / End and type-ahead in the tree, Left / Right to collapse and expand, Enter to open, F2 to edit, Delete, Shift+F10 for the item menu, `/` for the search, Escape to close.
+
+| Mode | Library | History |
+| --- | --- | --- |
+| `enabled = false` | this browser, `localStorage["chdash.queryLibrary.v2"]` (created once from the flat `chdash.savedQueries.v1` list, which is left as it was); always editable | `localStorage["chdash.queryHistory.v1"]` |
+| `enabled = true` | the server file through `/api/query-library` | per `history.store` |
+| `writable = false` | shown with a *Read-only library* badge; every create / edit / move / delete control is hidden | no Clear, no per-entry removal |
+
+In server mode every folder / query change sends `If-Match: <revision>`; on a 409 conflict the panel reloads the library and retries once, then tells the user. When the server library is editable and the browser has queries of its own, the panel offers once to *Import my browser queries* (`POST /api/query-library/import`).
+
+The page address follows the editor: `?saved=<id>` while it holds a library query unchanged, else `?sql=<text>` of the last run (up to 4,000 characters). Opened in a new tab, the link fills the editor.
+
 ## Storage
 
 - One process owns the file: the library is kept in memory behind a mutex, and every request first compares the file's stat (device, inode, size, mtime) with the last one seen. An external change is reloaded before the request is served or a mutation is applied, and the revision moves forward so editors holding the old revision get a 409.
@@ -126,3 +145,4 @@ Errors are JSON objects carrying `error` (and the same value in `error_code`, li
 
 - `tests/native/query_library_test.cpp`: store unit tests (atomic write, tree rules, If-Match, history, read-only, malformed file and reload, import, size cap). Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`; `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances; see "Query library" in [`tests/README.md`](../tests/README.md).
+- `tests/frontend/specs/query-library.spec.js`: the Query page panel in browser mode (migration, folders, save / edit / move, search, preview, keyboard, History), in server mode against a mocked API (If-Match and conflict retry, read-only, import, server History), on a phone and in both themes. Its last test runs against a real writable instance when `QUERY_LIBRARY_BASE_URL` names one (as the Playwright container reaches it).

@@ -298,7 +298,8 @@
 
     setLiveBodyHold(preservedBodyScrollHeight);
 
-    if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "-");
+    // Empty until the result has columns (no stray "-" beside an error).
+    if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "");
     setError("");
     updateCopyButtonState();
 

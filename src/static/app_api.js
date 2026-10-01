@@ -455,7 +455,7 @@
     return getJson(`api/logs/${endpoint}?${query.toString()}`);
   }
 
-  ns.api = { resolveUrl, getJson,
+  ns.api = { resolveUrl, getJson, postJson,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerOpsActivity, getExplorerOpsKeeper,

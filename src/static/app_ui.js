@@ -26,6 +26,7 @@
       const resp = await fetch(api.resolveUrl("api/version"), { cache: "no-store" });
       if (!resp.ok) {
         dom.versionBadge.textContent = "meta: error";
+        markFeaturesLoaded();
         return;
       }
       const data = await resp.json();
@@ -53,6 +54,14 @@
       state.features.logs = { enabled: logs.enabled === true, body_search: String(logs.body_search || "token") };
       const metrics = data && data.features && data.features.metrics ? data.features.metrics : {};
       state.features.metrics = { enabled: metrics.enabled === true };
+      // Query library: off (or an older server) keeps the browser library.
+      const library = data && data.features && data.features.query_library ? data.features.query_library : {};
+      state.features.query_library = {
+        enabled: library.enabled === true,
+        writable: library.enabled === true && library.writable === true,
+        history_store: library.enabled === true && library.history_store === "server" ? "server" : "browser",
+      };
+      markFeaturesLoaded();
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
       const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
@@ -64,6 +73,15 @@
     } catch {
       dom.versionBadge.textContent = "meta: offline";
     }
+    markFeaturesLoaded();
+  }
+
+  // The library waits for /api/version to pick its storage; without an answer
+  // it stays in the browser.
+  function markFeaturesLoaded() {
+    if (state.featuresLoaded) return;
+    state.featuresLoaded = true;
+    window.dispatchEvent(new CustomEvent("chdash:features"));
   }
 
   function formatPingMsLabel(pingMs) {
@@ -668,377 +686,302 @@
     applyRunOptionsUi();
   }
 
-  function formatDateTime(tsMs) {
+  // Sets one Run settings option (the Library "Add as a new statement" turns
+  // multiquery on); a no-op when it already has that value.
+  function setRunOption(key, enabled) {
+    const current = {
+      autoFormat: state.runOptAutoFormat,
+      multiQuery: state.runOptMultiQuery,
+      executionStats: state.runOptExecutionStats,
+      flattenTuple: state.runOptFlattenTuple !== false,
+    }[key];
+    if (current === undefined || !!current === !!enabled) return;
+    toggleRunOption(key);
+  }
+
+  // --- Query library panel -----------------------------------------------------
+  // The toolbar book button opens a panel anchored to it, with two tabs:
+  // Saved (folders and saved queries) and History. query.html ships the panel
+  // shell; app_query_library.js renders both views and is loaded the first
+  // time the panel opens (or Ctrl+S is used): a page that never opens it costs
+  // no module.
+  const QUERY_LIBRARY_PREFS_KEY = "chdash.queryLibraryMenu.v1";
+  const QUERY_LIBRARY_SCRIPT = "app_query_library.js";
+  const scriptBase = (() => {
+    const script = document.currentScript;
+    if (script && script.src) return script.src.replace(/[^/]*$/, "");
+    if (typeof window.__chdashUrl === "function") return new URL(window.__chdashUrl("static/"), window.location.href).toString();
+    return new URL("./static/", window.location.href).toString();
+  })();
+  let queryLibraryPromise = null;
+  let queryLibraryTab = "saved";
+
+  function readQueryLibraryPrefs() {
     try {
-      const d = new Date(tsMs);
-      const yyyy = d.getFullYear();
-      const mo = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      const ss = String(d.getSeconds()).padStart(2, "0");
-      return `${yyyy}-${mo}-${dd} ${hh}:${mm}:${ss}`;
+      const value = JSON.parse(localStorage.getItem(QUERY_LIBRARY_PREFS_KEY) || "null");
+      return value && typeof value === "object" ? value : {};
     } catch {
-      return "";
+      return {};
     }
   }
 
-  function formatShortDateTime(tsMs) {
+  function writeQueryLibraryPrefs(patch) {
     try {
-      const d = new Date(tsMs);
-      const yyyy = d.getFullYear();
-      const mo = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      return `${yyyy}-${mo}-${dd} ${hh}:${mm}`;
+      localStorage.setItem(QUERY_LIBRARY_PREFS_KEY, JSON.stringify({ ...readQueryLibraryPrefs(), ...patch }));
     } catch {
-      return "";
+      return;
     }
   }
 
-  function formatInlineSqlPreview(sql, maxLen = 220) {
-    const text = String(sql || "").replace(/\s+/g, " ").trim();
-    if (!text) return "";
-    if (text.length <= maxLen) return text;
-    return `${text.slice(0, Math.max(0, maxLen - 1)).trimEnd()}\u2026`;
-  }
-
-  function trimLabel(text, maxLen) {
-    const value = String(text || "").trim();
-    if (!value) return "";
-    if (value.length <= maxLen) return value;
-    return `${value.slice(0, Math.max(0, maxLen - 1)).trimEnd()}\u2026`;
-  }
-
-  function normalizeSavedQueryName(name) {
-    return String(name || "").trim().toLocaleLowerCase();
-  }
-
-  function activateQueryLibraryItem(item) {
-    if (item.host_id) setSelectedHostId(String(item.host_id));
-    if (dom.queryTextArea) util.replaceTextAreaValue(dom.queryTextArea, String(item.sql_formatted || item.sql_raw || ""));
-    closeQueryLibraryMenu({ immediate: true });
-  }
-
-  function createQueryLibraryMeta(hostId, tsMs) {
-    const meta = document.createElement("div");
-    meta.className = "queryLibraryItem__meta";
-
-    if (hostId) {
-      const host = document.createElement("span");
-      host.className = "queryLibraryItem__host";
-      host.textContent = String(hostId);
-      meta.appendChild(host);
+  function isPhoneLayout() {
+    try {
+      return window.matchMedia("(max-width: 760px)").matches;
+    } catch {
+      return false;
     }
-
-    const date = document.createElement("span");
-    date.className = "queryLibraryItem__date";
-    date.textContent = formatShortDateTime(tsMs);
-    meta.appendChild(date);
-
-    return meta;
   }
 
-  function createQueryLibraryItem({ title, titleMaxLen = 44, hostId, tsMs, sql, sqlPreview, onActivate, onDelete, deleteLabel }) {
-    const row = document.createElement("div");
-    row.className = "queryLibraryItem";
+  function modifierKeyLabel() {
+    const platform = String(navigator.userAgentData?.platform || navigator.platform || "");
+    return /mac|iphone|ipad/i.test(platform) ? "\u2318" : "Ctrl";
+  }
 
-    const main = document.createElement("div");
-    main.className = "queryLibraryItem__main";
-    main.tabIndex = 0;
-    main.setAttribute("role", "button");
-
-    const header = document.createElement("div");
-    header.className = "queryLibraryItem__header";
-
-    const titleEl = document.createElement("div");
-    titleEl.className = "queryLibraryItem__title";
-    titleEl.textContent = trimLabel(title, titleMaxLen);
-
-    const right = document.createElement("div");
-    right.className = "queryLibraryItem__right";
-    right.appendChild(createQueryLibraryMeta(hostId, tsMs));
-
-    if (typeof onDelete === "function") {
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "queryLibraryItem__delete";
-      deleteBtn.title = "Delete saved query";
-      deleteBtn.setAttribute("aria-label", deleteLabel || "Delete saved query");
-      deleteBtn.textContent = "×";
-      deleteBtn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        onDelete();
+  function loadQueryLibrary() {
+    if (ns.queryLibrary) return Promise.resolve(ns.queryLibrary);
+    if (!queryLibraryPromise) {
+      queryLibraryPromise = new Promise((resolve, reject) => {
+        const el = document.createElement("script");
+        el.src = new URL(QUERY_LIBRARY_SCRIPT, scriptBase).toString();
+        el.onload = () => (ns.queryLibrary ? resolve(ns.queryLibrary) : reject(new Error(`${QUERY_LIBRARY_SCRIPT} did not register`)));
+        el.onerror = () => {
+          queryLibraryPromise = null;
+          reject(new Error(`Failed to load ${QUERY_LIBRARY_SCRIPT}`));
+        };
+        document.head.appendChild(el);
       });
-      right.appendChild(deleteBtn);
-    } else {
-      const spacer = document.createElement("span");
-      spacer.className = "queryLibraryItem__deleteSpacer";
-      spacer.setAttribute("aria-hidden", "true");
-      spacer.textContent = "×";
-      right.appendChild(spacer);
     }
-
-    const inlinePreview = String(sqlPreview || "").trim();
-
-    main.addEventListener("click", onActivate);
-    main.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter" && ev.key !== " ") return;
-      ev.preventDefault();
-      onActivate();
-    });
-
-    header.appendChild(titleEl);
-    header.appendChild(right);
-    main.appendChild(header);
-    if (inlinePreview) {
-      const sqlEl = document.createElement("div");
-      sqlEl.className = "queryLibraryItem__sql";
-      sqlEl.textContent = inlinePreview;
-      main.appendChild(sqlEl);
-    }
-    row.appendChild(main);
-
-    return row;
+    return queryLibraryPromise;
   }
 
-  let queryLibraryMode = "saved";
+  function withQueryLibrary(fn) {
+    return loadQueryLibrary().then(fn).catch((err) => {
+      console.error(err);
+      for (const view of [dom.queryLibraryViewSaved, dom.queryLibraryViewHistory]) {
+        if (view && !view.dataset.rendered) view.innerHTML = '<div class="qlEmpty qlEmpty--error">The query library could not be loaded.</div>';
+      }
+    });
+  }
 
   function isQueryLibraryOpen() {
-    return !!(dom.queryLibrary && dom.queryLibrary.classList.contains("is-open"));
+    return !!(dom.queryLibraryMenu && !dom.queryLibraryMenu.hidden);
   }
 
-  function focusQueryLibrarySaveInput() {
-    const input = dom.queryLibraryContent?.querySelector(".savePanel__input");
-    if (!input) return;
-    input.focus({ preventScroll: true });
-    if (typeof input.select === "function") input.select();
-  }
-
-  function closeQueryLibraryMenu({ immediate = false } = {}) {
-    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton) return;
-    dom.queryLibraryButton.setAttribute("aria-expanded", "false");
-    dom.queryLibrary.classList.remove("is-open");
-    if (immediate) {
-      dom.queryLibraryMenu.hidden = true;
+  // Below the button when there is room, above it otherwise; at most 70vh,
+  // right-aligned with the button. Phones show a bottom sheet (style.css).
+  function positionQueryLibrary() {
+    const panel = dom.queryLibraryMenu;
+    const button = dom.queryLibraryButton;
+    if (!panel || !button || panel.hidden) return;
+    if (isPhoneLayout()) {
+      for (const prop of ["left", "top", "bottom", "maxHeight"]) panel.style[prop] = "";
+      panel.dataset.side = "sheet";
       return;
     }
-    setTimeout(() => {
-      if (!isQueryLibraryOpen()) dom.queryLibraryMenu.hidden = true;
-    }, 160);
+    const rect = button.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const gap = 8;
+    const width = Math.min(panel.offsetWidth || 480, vw - 16);
+    const cap = Math.round(vh * 0.7);
+    const below = vh - rect.bottom - gap - 8;
+    const above = rect.top - gap - 8;
+    const side = below >= Math.min(cap, 420) || below >= above ? "below" : "above";
+    const height = Math.max(240, Math.min(cap, side === "below" ? below : above));
+    const left = Math.max(8, Math.min(vw - width - 8, rect.right - width));
+    panel.dataset.side = side;
+    panel.style.left = `${Math.round(left)}px`;
+    panel.style.maxHeight = `${Math.round(height)}px`;
+    if (side === "below") {
+      panel.style.top = `${Math.round(rect.bottom + gap)}px`;
+      panel.style.bottom = "";
+    } else {
+      panel.style.top = "";
+      panel.style.bottom = `${Math.round(vh - rect.top + gap)}px`;
+    }
   }
 
-  function renderHistoryContent(target) {
-    const items = storage.loadHistory();
-    target.innerHTML = "";
-
-    const wrap = document.createElement("div");
-    wrap.className = "queryLibraryPanel";
-
-    const list = document.createElement("div");
-    list.className = "queryLibraryList";
-
-    if (!items.length) {
-      const empty = document.createElement("div");
-      empty.className = "queryLibraryEmpty";
-      empty.textContent = "No history yet";
-      list.appendChild(empty);
-      wrap.appendChild(list);
-      target.appendChild(wrap);
-      return;
+  function setQueryLibraryTab(tab, { focus = false } = {}) {
+    const next = tab === "history" ? "history" : "saved";
+    queryLibraryTab = next;
+    const pairs = [["saved", dom.queryLibraryTabSaved, dom.queryLibraryViewSaved], ["history", dom.queryLibraryTabHistory, dom.queryLibraryViewHistory]];
+    for (const [name, tabEl, viewEl] of pairs) {
+      const on = name === next;
+      tabEl?.setAttribute("aria-selected", String(on));
+      if (tabEl) tabEl.tabIndex = on ? 0 : -1;
+      if (viewEl) viewEl.hidden = !on;
     }
-
-    for (const it of items) {
-      const sqlText = String(it.sql_formatted || it.sql_raw || "");
-      list.appendChild(createQueryLibraryItem({
-        title: formatInlineSqlPreview(sqlText, 108) || "Query",
-        titleMaxLen: 108,
-        hostId: it.host_id || "",
-        tsMs: it.ts_ms,
-        sql: sqlText,
-        sqlPreview: "",
-        onActivate: () => activateQueryLibraryItem(it),
-      }));
-    }
-
-    wrap.appendChild(list);
-    target.appendChild(wrap);
+    writeQueryLibraryPrefs({ tab: next });
+    if (!isQueryLibraryOpen()) return;
+    withQueryLibrary((lib) => {
+      lib.show(next);
+      if (focus) lib.focus(next);
+    });
   }
 
-  function renderSavedContent(target) {
-    target.innerHTML = "";
+  // The panel content (tabs, close button, the two views) is built the first
+  // time it opens: an idle page carries an empty panel only.
+  function buildQueryLibraryPanel() {
+    const panel = dom.queryLibraryMenu;
+    if (!panel || panel.dataset.built) return;
+    panel.dataset.built = "1";
+    panel.innerHTML = `
+      <div class="queryLibraryPanel__head">
+        <div class="queryLibraryPanel__tabs" role="tablist" aria-label="Query library">
+          <button id="queryLibraryTabSaved" class="queryLibraryPanel__tab" type="button" role="tab" data-tab="saved" aria-controls="queryLibraryViewSaved">Saved</button>
+          <button id="queryLibraryTabHistory" class="queryLibraryPanel__tab" type="button" role="tab" data-tab="history" aria-controls="queryLibraryViewHistory">History</button>
+        </div>
+        <button id="queryLibraryClose" class="closeCross queryLibraryPanel__close" type="button" aria-label="Close the query library" title="Close (Esc)">\u00d7</button>
+      </div>
+      <div id="queryLibraryViewSaved" class="queryLibraryPanel__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved"><div class="qlEmpty">Loading the library\u2026</div></div>
+      <div id="queryLibraryViewHistory" class="queryLibraryPanel__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden><div class="qlEmpty">Loading the history\u2026</div></div>`;
+    for (const id of ["queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
+      dom[id] = document.getElementById(id);
+    }
+    dom.queryLibraryClose?.addEventListener("click", () => closeQueryLibrary());
+    const tabs = [dom.queryLibraryTabSaved, dom.queryLibraryTabHistory].filter(Boolean);
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => setQueryLibraryTab(tab.dataset.tab));
+      tab.addEventListener("keydown", (ev) => {
+        const step = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
+        if (!step && ev.key !== "Home" && ev.key !== "End") return;
+        ev.preventDefault();
+        const index = tabs.indexOf(tab);
+        const next = ev.key === "Home" ? tabs[0] : ev.key === "End" ? tabs[tabs.length - 1] : tabs[(index + step + tabs.length) % tabs.length];
+        setQueryLibraryTab(next.dataset.tab);
+        next.focus();
+      });
+    }
+  }
 
-    const wrap = document.createElement("div");
-    wrap.className = "queryLibraryPanel";
+  function openQueryLibrary(tab = queryLibraryTab, { focus = true } = {}) {
+    const panel = dom.queryLibraryMenu;
+    if (!panel || !dom.queryLibraryButton) return Promise.resolve(null);
+    buildQueryLibraryPanel();
+    closeRunMenu({ immediate: true });
+    closeRunSettings({ immediate: true });
+    closeCopyMenu({ immediate: true });
+    panel.hidden = false;
+    dom.queryLibrary?.classList.add("is-open");
+    dom.queryLibraryButton.setAttribute("aria-expanded", "true");
+    setQueryLibraryTab(tab);
+    positionQueryLibrary();
+    // Focus moves into the panel at once (the views render when the module is in).
+    panel.focus({ preventScroll: true });
+    return withQueryLibrary(async (lib) => {
+      if (!isQueryLibraryOpen()) return lib;
+      await lib.show(queryLibraryTab);
+      positionQueryLibrary();
+      if (focus && isQueryLibraryOpen() && panel.contains(document.activeElement)) await lib.focus(queryLibraryTab);
+      return lib;
+    });
+  }
 
-    const form = document.createElement("div");
-    form.className = "savePanel";
+  function closeQueryLibrary({ restoreFocus = true } = {}) {
+    const panel = dom.queryLibraryMenu;
+    if (!panel || panel.hidden) return;
+    const hadFocus = panel.contains(document.activeElement);
+    panel.hidden = true;
+    dom.queryLibrary?.classList.remove("is-open");
+    dom.queryLibraryButton?.setAttribute("aria-expanded", "false");
+    ns.queryLibrary?.hidden?.();
+    if (restoreFocus && (hadFocus || document.activeElement === document.body)) dom.queryLibraryButton?.focus({ preventScroll: true });
+  }
 
-    const input = document.createElement("input");
-    input.className = "savePanel__input";
-    input.type = "text";
-    input.placeholder = "Search or save query\u2026";
-    input.autocomplete = "off";
-    input.spellcheck = false;
+  function toggleQueryLibrary() {
+    if (isQueryLibraryOpen()) closeQueryLibrary();
+    else openQueryLibrary();
+  }
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "button button--primary savePanel__button";
-    button.textContent = "Save";
+  function saveCurrentQuery() {
+    withQueryLibrary((lib) => lib.saveCurrent());
+  }
 
-    const list = document.createElement("div");
-    list.className = "queryLibraryList";
+  // Clicks inside the panel, its dialogs, item menus and previews keep it open.
+  function isInsideQueryLibrary(target) {
+    if (!(target instanceof Element)) return false;
+    return !!(dom.queryLibrary?.contains(target) || target.closest("dialog.qlDialog, .qlMenu, .qlPreview"));
+  }
 
-    const hasDuplicateSavedName = (name) => {
-      const normalizedName = normalizeSavedQueryName(name);
-      if (!normalizedName) return false;
-      return storage.loadSavedQueries().some((it) => normalizeSavedQueryName(it.name) === normalizedName);
-    };
+  // URL state of the Query page: ?saved=<id> while the editor holds a library
+  // query as saved, else ?sql=<text> of the last run (up to 4,000 characters),
+  // so the address bar is a link to the query. Read once at startup.
+  const QUERY_URL_MAX_SQL = 4000;
 
-    const renderSavedList = () => {
-      const savedItems = storage.loadSavedQueries();
-      const search = normalizeSavedQueryName(input.value);
-      list.innerHTML = "";
+  function syncQueryUrl(sqlText) {
+    if (document.body?.dataset.page !== "query" || !window.history?.replaceState) return;
+    const params = new URLSearchParams(window.location.search || "");
+    params.delete("sql");
+    params.delete("saved");
+    const text = String(sqlText ?? dom.queryTextArea?.value ?? "").trim();
+    const savedId = ns.queryLibrary?.openedId?.(text) || "";
+    if (savedId) params.set("saved", savedId);
+    else if (text && text.length <= QUERY_URL_MAX_SQL) params.set("sql", text);
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash || ""}`;
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash || ""}`) {
+      window.history.replaceState(window.history.state, "", next);
+    }
+  }
 
-      const filteredItems = search
-        ? savedItems.filter((it) => normalizeSavedQueryName(it.name).includes(search))
-        : savedItems;
+  // A link fills an empty editor; a reload keeps the tab's own draft.
+  function applyQueryUrl() {
+    if (document.body?.dataset.page !== "query" || !dom.queryTextArea) return;
+    if (String(dom.queryTextArea.value || "").trim()) return;
+    const params = new URLSearchParams(window.location.search || "");
+    const sqlText = params.get("sql");
+    const savedId = params.get("saved");
+    if (savedId) {
+      withQueryLibrary((lib) => lib.openSaved(savedId));
+    } else if (sqlText && sqlText.trim()) {
+      util.replaceTextAreaValue(dom.queryTextArea, sqlText);
+    }
+  }
 
-      if (!filteredItems.length) {
-        const empty = document.createElement("div");
-        empty.className = "queryLibraryEmpty";
-        empty.textContent = savedItems.length ? "No matching saved queries" : "No saved queries yet";
-        list.appendChild(empty);
+  function initQueryLibrary() {
+    if (!dom.queryLibraryButton || !dom.queryLibraryMenu) return;
+    const mod = modifierKeyLabel();
+    if (mod !== "Ctrl") {
+      for (const kbd of document.querySelectorAll("#runShortcutHint kbd:first-child, .queryKbd--mod")) kbd.textContent = mod;
+    }
+    if (dom.runButton) dom.runButton.title = `Run (${mod}+Enter)`;
+    queryLibraryTab = readQueryLibraryPrefs().tab === "history" ? "history" : "saved";
+
+    dom.queryLibraryButton.addEventListener("click", toggleQueryLibrary);
+
+    document.addEventListener("pointerdown", (ev) => {
+      if (isQueryLibraryOpen() && !isInsideQueryLibrary(ev.target)) closeQueryLibrary({ restoreFocus: false });
+    }, true);
+    document.addEventListener("keydown", (ev) => {
+      if (ev.defaultPrevented || ev.isComposing) return;
+      const key = String(ev.key || "").toLowerCase();
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && key === "s") {
+        if (document.querySelector("dialog[open]")) return;
+        ev.preventDefault();
+        saveCurrentQuery();
         return;
       }
-
-      for (const it of filteredItems) {
-        const sqlText = String(it.sql_formatted || it.sql_raw || "");
-        list.appendChild(createQueryLibraryItem({
-          title: String(it.name || "Untitled query"),
-          titleMaxLen: 34,
-          hostId: it.host_id || "",
-          tsMs: it.created_at_ms,
-          sql: sqlText,
-          sqlPreview: formatInlineSqlPreview(sqlText, 168),
-          onActivate: () => activateQueryLibraryItem(it),
-          onDelete: () => {
-            storage.deleteSavedQuery(it.name);
-            renderSavedList();
-            updateSaveState();
-          },
-          deleteLabel: `Delete ${it.name}`,
-        }));
+      if (ev.key === "Escape" && isQueryLibraryOpen() && !document.querySelector("dialog[open]")) {
+        ev.preventDefault();
+        closeQueryLibrary();
       }
-    };
-
-    const updateSaveState = () => {
-      const currentSql = String(dom.queryTextArea?.value || "").trim();
-      const name = String(input.value || "").trim();
-      button.disabled = !currentSql || !name || hasDuplicateSavedName(name);
-    };
-
-    const commitSave = () => {
-      const currentSql = String(dom.queryTextArea?.value || "").trim();
-      const name = String(input.value || "").trim();
-      if (!currentSql || !name || hasDuplicateSavedName(name)) return;
-      storage.addSavedQuery({
-        name,
-        created_at_ms: Date.now(),
-        host_id: state.selectedHostId || "",
-        sql_raw: currentSql,
-        sql_formatted: currentSql,
-      });
-      input.value = "";
-      renderSavedList();
-      updateSaveState();
-      requestAnimationFrame(focusQueryLibrarySaveInput);
-    };
-
-    input.addEventListener("input", () => {
-      renderSavedList();
-      updateSaveState();
     });
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter") return;
-      ev.preventDefault();
-      commitSave();
+    window.addEventListener("resize", positionQueryLibrary, { passive: true });
+    // The workspace scrolls under the toolbar: the panel follows its button.
+    dom.queryWorkspace?.addEventListener("scroll", positionQueryLibrary, { passive: true });
+    // A finished run is a new History entry.
+    window.addEventListener("chdash:query-history", () => {
+      if (ns.queryLibrary) ns.queryLibrary.historyChanged();
     });
-    button.addEventListener("click", commitSave);
-
-    form.appendChild(input);
-    form.appendChild(button);
-    wrap.appendChild(form);
-    wrap.appendChild(list);
-    target.appendChild(wrap);
-
-    renderSavedList();
-    updateSaveState();
-    requestAnimationFrame(focusQueryLibrarySaveInput);
-  }
-
-  function updateQueryLibraryMenuHeight() {
-    if (!dom.queryLibraryMenu || !dom.queryLibraryButton || dom.queryLibraryMenu.hidden) return;
-    const rect = dom.queryLibraryButton.getBoundingClientRect();
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const available = Math.max(0, Math.floor(viewportHeight - rect.bottom - 12));
-    dom.queryLibraryMenu.style.maxHeight = `${available}px`;
-  }
-
-  function renderQueryLibraryMenu() {
-    if (!dom.queryLibraryContent) return;
-
-    const tabs = [dom.queryLibraryTabSaved, dom.queryLibraryTabHistory];
-    for (const tab of tabs) {
-      if (!tab) continue;
-      const mode = tab.getAttribute("data-mode");
-      tab.setAttribute("aria-selected", String(mode === queryLibraryMode));
-    }
-
-    if (queryLibraryMode === "saved") {
-      renderSavedContent(dom.queryLibraryContent);
-      return;
-    }
-
-    renderHistoryContent(dom.queryLibraryContent);
-  }
-
-  function openQueryLibraryMenu(mode = queryLibraryMode) {
-    if (!dom.queryLibrary || !dom.queryLibraryMenu || !dom.queryLibraryButton) return;
-    queryLibraryMode = mode === "history" ? "history" : "saved";
-    renderQueryLibraryMenu();
-    dom.queryLibraryMenu.hidden = false;
-    updateQueryLibraryMenuHeight();
-    dom.queryLibraryButton.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => {
-      dom.queryLibrary.classList.add("is-open");
-      updateQueryLibraryMenuHeight();
-    });
-    dom.queryLibraryMenu.focus({ preventScroll: true });
-  }
-
-  function setQueryLibraryMode(mode) {
-    const next = mode === "history" ? "history" : "saved";
-    if (queryLibraryMode === next) return;
-    queryLibraryMode = next;
-    renderQueryLibraryMenu();
-    updateQueryLibraryMenuHeight();
-  }
-
-  function toggleQueryLibraryMenu(mode = queryLibraryMode) {
-    const next = mode === "history" ? "history" : "saved";
-    if (!dom.queryLibraryMenu) return;
-    if (dom.queryLibraryMenu.hidden) {
-      openQueryLibraryMenu(next);
-      return;
-    }
-    if (queryLibraryMode !== next) {
-      setQueryLibraryMode(next);
-      return;
-    }
-    closeQueryLibraryMenu();
   }
 
   function initEditorCopyButton() {
@@ -1157,9 +1100,21 @@
       return { start, end };
     };
 
+    // Tab indents inside the editor; Escape then Tab leaves it (keyboard users
+    // are never trapped). Escape that closed the autocomplete does not count.
+    let tabReleased = false;
     dom.queryTextArea.addEventListener("keydown", (e) => {
       const key = e.key;
       if (e.isComposing) return;
+      if (key === "Escape") {
+        tabReleased = !e.defaultPrevented;
+        return;
+      }
+      if (key === "Tab" && tabReleased && !e.defaultPrevented) {
+        tabReleased = false;
+        return;
+      }
+      if (key !== "Shift") tabReleased = false;
       if ((e.ctrlKey || e.metaKey) && key === "Enter") {
         e.preventDefault();
         const run = ns.run;
@@ -1521,9 +1476,6 @@
       if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
         if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
       }
-      if (dom.queryLibrary && dom.queryLibraryMenu && !dom.queryLibraryMenu.hidden) {
-        if (t instanceof Node && !dom.queryLibrary.contains(t)) closeQueryLibraryMenu();
-      }
     });
 
     document.addEventListener("keydown", (ev) => {
@@ -1534,23 +1486,11 @@
         closePageMenu({ immediate: true });
         closeRunSettings({ immediate: true });
         closeCopyMenu({ immediate: true });
-        closeQueryLibraryMenu({ immediate: true });
       }
     });
 
-    window.addEventListener("resize", () => {
-      if (!dom.queryLibraryMenu?.hidden) updateQueryLibraryMenuHeight();
-    });
-
-    dom.queryLibraryButton?.addEventListener("click", () => toggleQueryLibraryMenu());
-    dom.queryLibraryTabSaved?.addEventListener("click", () => {
-      if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("saved");
-      else setQueryLibraryMode("saved");
-    });
-    dom.queryLibraryTabHistory?.addEventListener("click", () => {
-      if (dom.queryLibraryMenu?.hidden) openQueryLibraryMenu("history");
-      else setQueryLibraryMode("history");
-    });
+    initQueryLibrary();
+    applyQueryUrl();
 
     if (dom.pageSelectButton) dom.pageSelectButton.addEventListener("click", togglePageMenu);
     // Observability (Traces, Logs, Metrics) is its own page: the Query and
@@ -1611,5 +1551,9 @@
     ctrl.clearError();
   }
 
-  ns.ui = { init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue, applyProductFeatures, applyRunOptionsUi, setEditorError, clearEditorError };
+  ns.ui = {
+    init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
+    applyProductFeatures, applyRunOptionsUi, setRunOption, setEditorError, clearEditorError,
+    loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, positionQueryLibrary, isPhoneLayout, modifierKeyLabel,
+  };
 })();
