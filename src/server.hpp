@@ -222,6 +222,9 @@ private:
   void handle_explorer_table(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_graph_definition(const httplib::Request& req, httplib::Response& res);
+  bool explorer_graph_snapshot(const httplib::Request& req, httplib::Response& res, const std::string& host_id,
+                               std::shared_ptr<const ExplorerGraph>& graph, bool& stale);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res);

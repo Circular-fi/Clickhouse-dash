@@ -1972,8 +1972,16 @@
     selectTable(database, table, false, { graphOrigin: true });
   }
 
+  // Graph side panel "Open card": the table card, reached the way the tree
+  // reaches it (Browse + selectTable).
+  function openTableCardFromGraph(database, table) {
+    if (model.section !== "tables") setSection("tables");
+    setMode("list");
+    void selectTable(database, table, false, { historyMode: "push" });
+  }
+
   function init() {
-    graph?.init({ openTable: openTableFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
+    graph?.init({ openTable: openTableFromGraph, openCard: openTableCardFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
     dom.navTracesButton?.addEventListener("click", () => window.location.assign(appRoute("/traces")));

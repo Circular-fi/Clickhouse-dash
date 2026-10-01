@@ -43,7 +43,11 @@ struct ExplorerGraphRequestScope {
   bool physical = false;
   bool include_system = false;
   bool include_non_storing = true;
+  // Per-node one-hop expansions on top of the global depth: (upstream, id).
+  std::vector<std::pair<bool, std::string>> expansions;
 };
+
+constexpr size_t kMaxGraphExpansions = 64;
 
 bool is_system_database(const std::string& database) {
   return database == "system" || database == "information_schema" || database == "INFORMATION_SCHEMA";
@@ -73,6 +77,15 @@ ExplorerGraphRequestScope read_graph_scope(const httplib::Request& req) {
   scope.physical = req.has_param("mode") && req.get_param_value("mode") == "physical";
   scope.include_system = req.has_param("include_system") && req.get_param_value("include_system") == "1";
   scope.include_non_storing = !req.has_param("include_non_storing") || req.get_param_value("include_non_storing") != "0";
+  // Repeated expand=up:table:db.t / expand=down:table:db.u parameters. Ids are
+  // only compared with ids of the authorized graph, so an unknown or hidden id
+  // is a no-op.
+  const size_t expand_count = std::min(req.get_param_value_count("expand"), kMaxGraphExpansions);
+  for (size_t i = 0; i < expand_count; ++i) {
+    const std::string item = req.get_param_value("expand", i);
+    if (item.rfind("up:", 0) == 0 && item.size() > 3) scope.expansions.emplace_back(true, item.substr(3));
+    else if (item.rfind("down:", 0) == 0 && item.size() > 5) scope.expansions.emplace_back(false, item.substr(5));
+  }
   return scope;
 }
 
@@ -121,6 +134,39 @@ ExplorerGraph scope_graph(
     return scope.include_system || !is_system_database(node.database);
   };
 
+  // Directed logical adjacency, filled only for a focused Lineage scope.
+  std::unordered_map<std::string, std::vector<std::string>> downstream;
+  std::unordered_map<std::string, std::vector<std::string>> upstream;
+  struct SemanticWalk { std::vector<std::string> neighbors; std::vector<std::string> intermediates; };
+  // One semantic hop from `start` in one direction. When non-storing objects
+  // are hidden, View/MV/Buffer nodes cost zero hops (same rule as depth) and
+  // are walked through; they are reported separately as intermediates.
+  auto semantic_walk = [&](const std::string& start, bool up) {
+    SemanticWalk walk;
+    const auto& links = up ? upstream : downstream;
+    std::unordered_set<std::string> seen{start};
+    std::vector<std::string> stack{start};
+    while (!stack.empty()) {
+      const std::string current = stack.back();
+      stack.pop_back();
+      const auto it = links.find(current);
+      if (it == links.end()) continue;
+      for (const auto& next : it->second) {
+        if (!seen.insert(next).second) continue;
+        const auto node_it = by_id.find(next);
+        if (node_it == by_id.end()) continue;
+        if (!scope.include_non_storing && is_non_storing_graph_node(*node_it->second)) {
+          walk.intermediates.push_back(next);
+          stack.push_back(next);
+        } else {
+          walk.neighbors.push_back(next);
+        }
+      }
+    }
+    return walk;
+  };
+  bool focused_lineage = false;
+
   std::unordered_set<std::string> included;
   if (!scope.focus_id.empty()) {
     const auto root_it = by_id.find(scope.focus_id);
@@ -135,6 +181,8 @@ ExplorerGraph scope_graph(
           if (!allowed_system(*from_it->second) || !allowed_system(*to_it->second)) continue;
           adjacency[edge.from].push_back(edge.to);
           adjacency[edge.to].push_back(edge.from);
+          downstream[edge.from].push_back(edge.to);
+          upstream[edge.to].push_back(edge.from);
         }
 
         // Depth is a user-visible semantic hop count. When non-storing objects
@@ -166,6 +214,25 @@ ExplorerGraph scope_graph(
           }
         }
         for (const auto& [id, _] : distance) included.insert(id);
+
+        // Per-node expansions add one semantic hop in one direction from an
+        // anchor that is itself shown. Applied to a fixed point so a chain of
+        // expansions (expand A, then the node it revealed) is order-free; an
+        // anchor that is no longer shown expands nothing.
+        if (!scope.expansions.empty()) {
+          bool grew = true;
+          for (size_t pass = 0; grew && pass <= scope.expansions.size(); ++pass) {
+            grew = false;
+            for (const auto& [up, anchor] : scope.expansions) {
+              if (!included.count(anchor)) continue;
+              // Hidden intermediates on the way are shipped for contraction.
+              const auto walk = semantic_walk(anchor, up);
+              for (const auto& id : walk.neighbors) if (included.insert(id).second) grew = true;
+              for (const auto& id : walk.intermediates) if (included.insert(id).second) grew = true;
+            }
+          }
+        }
+        focused_lineage = true;
       } else if (scope.physical && storage_enabled) {
         // Storage mode needs only the focused table, Buffer routes that feed or
         // drain it, and their physical descendants. Do not ship the unrelated
@@ -213,6 +280,18 @@ ExplorerGraph scope_graph(
 
   out.nodes.reserve(included.size());
   for (const auto& node : graph.nodes) if (included.count(node.id)) out.nodes.push_back(node);
+  if (focused_lineage) {
+    // Lets the browser draw a per-node "+N" only where something is left to
+    // expand, without shipping the next ring.
+    for (auto& node : out.nodes) {
+      if (node.layer != "logical") continue;
+      for (const bool up : {true, false}) {
+        uint64_t hidden = 0;
+        for (const auto& id : semantic_walk(node.id, up).neighbors) if (!included.count(id)) ++hidden;
+        (up ? node.hidden_upstream : node.hidden_downstream) = hidden;
+      }
+    }
+  }
   out.edges.reserve(graph.edges.size());
   for (const auto& edge : graph.edges) {
     if (included.count(edge.from) && included.count(edge.to)) out.edges.push_back(edge);
@@ -1097,97 +1176,16 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
 
 void Server::handle_explorer_graph(const httplib::Request& req, httplib::Response& res) {
   const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
-  if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
-  if (!is_host_healthy(health_.get(), host_id)) {
-    return json_error(res, 503, "host_unavailable", "Selected host is down.");
-  }
-
-  const uint64_t ts = now_ms();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
-  const std::string security_key = explorer_security_key(host_id);
-  const std::string list_key = security_key + std::string("\0catalog-list", 13);
-  const std::string catalog_key = security_key + std::string("\0catalog", 8);
-  const std::string graph_key = security_key + std::string("\0graph", 6);
-  const std::string functions_key = security_key + std::string("\0functions", 10);
-  const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
-  if (force_refresh) {
-    explorer_allowed_cache_.erase(security_key);
-    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>",
-    // so an exact erase of the bare prefix never matched any of them.
-    explorer_catalog_list_cache_.erase_prefix(list_key);
-    explorer_catalog_cache_.erase(catalog_key);
-    explorer_graph_cache_.erase(graph_key);
-    explorer_functions_cache_.erase(functions_key);
-  }
-
-  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
-      security_key, ts, ttl, 250,
-      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
-        std::string error;
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
-        if (!runner) { code = "runner_unavailable"; message = error; return false; }
-        try { value = discover_allowed_objects(*runner); return true; }
-        catch (const std::exception& e) { code = "acl_discovery_failed"; message = e.what(); return false; }
-      });
-  if (!allowed_result.has_value || !allowed_result.value) {
-    return json_error(
-        res, 503,
-        allowed_result.error_code.empty() ? "acl_unavailable" : allowed_result.error_code,
-        allowed_result.error_message.empty() ? "Unable to determine readable ClickHouse objects." : allowed_result.error_message);
-  }
-
-  auto catalog_result = explorer_catalog_cache_.get_or_refresh(
-      catalog_key, ts, ttl, 250,
-      [&](ExplorerCatalog& value, std::string& code, std::string& message) {
-        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-        std::string error;
-        auto system = acquire_explorer_client(client_pool_, uri, &error);
-        if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
-        if (!load_explorer_catalog(*system, *runner, *allowed_result.value, value, &error)) {
-          code = "explorer_catalog_failed"; message = error; return false;
-        }
-        return true;
-      });
-  if (!catalog_result.has_value || !catalog_result.value) {
-    return json_error(
-        res, 503,
-        catalog_result.error_code.empty() ? "explorer_unavailable" : catalog_result.error_code,
-        catalog_result.error_message.empty() ? "Explorer metadata is unavailable." : catalog_result.error_message);
-  }
-
-  auto graph_result = explorer_graph_cache_.get_or_refresh(
-      graph_key, ts, ttl, 250,
-      [&](ExplorerGraph& value, std::string& code, std::string& message) {
-        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-        std::string error;
-        auto system = acquire_explorer_client(client_pool_, uri, &error);
-        if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        if (!load_explorer_graph(*system, *allowed_result.value, *catalog_result.value, value, &error)) {
-          code = "explorer_graph_failed"; message = error; return false;
-        }
-        return true;
-      });
-  if (!graph_result.has_value || !graph_result.value) {
-    return json_error(
-        res, 503,
-        graph_result.error_code.empty() ? "explorer_graph_unavailable" : graph_result.error_code,
-        graph_result.error_message.empty() ? "Explorer graph is unavailable." : graph_result.error_message);
-  }
+  std::shared_ptr<const ExplorerGraph> graph;
+  bool stale = false;
+  if (!explorer_graph_snapshot(req, res, host_id, graph, stale)) return;
 
   const ExplorerGraphRequestScope request_scope = read_graph_scope(req);
   const ExplorerGraph scoped_graph = scope_graph(
-      *graph_result.value, request_scope, cfg_.explorer.lineage, cfg_.explorer.storage_topology);
+      *graph, request_scope, cfg_.explorer.lineage, cfg_.explorer.storage_topology);
   const bool scope_has_more = logical_scope_has_more(
-      *graph_result.value, request_scope, scoped_graph, cfg_.explorer.lineage);
-  const auto storage_available = logical_storage_available_ids(*graph_result.value);
+      *graph, request_scope, scoped_graph, cfg_.explorer.lineage);
+  const auto storage_available = logical_storage_available_ids(*graph);
 
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -1195,8 +1193,8 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
   w.Key("version"); w.Uint(1);
   w.Key("host_id"); w.String(host_id.c_str());
   w.Key("generated_at_ms"); w.Uint64(scoped_graph.generated_at_ms);
-  w.Key("stale"); w.Bool(graph_result.stale || catalog_result.stale || allowed_result.stale);
-  w.Key("metric_scope"); w.String(graph_result.value->metric_scope.c_str());
+  w.Key("stale"); w.Bool(stale);
+  w.Key("metric_scope"); w.String(graph->metric_scope.c_str());
   w.Key("refreshable_views_available"); w.Bool(scoped_graph.refreshable_views_available);
   w.Key("live_refresh_ms"); w.Int(cfg_.explorer.live_refresh_ms);
   w.Key("scope_mode"); w.String(request_scope.physical ? "physical" : "logical");
@@ -1216,7 +1214,11 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
     w.Key("engine"); w.String(node.engine.c_str());
     w.Key("label"); w.String(node.label.c_str());
     w.Key("health"); w.String(node.health.c_str());
-    if (node.layer == "logical") { w.Key("storage_available"); w.Bool(storage_available.count(node.id) != 0); }
+    if (node.layer == "logical") {
+      w.Key("storage_available"); w.Bool(storage_available.count(node.id) != 0);
+      w.Key("hidden_upstream"); w.Uint64(node.hidden_upstream);
+      w.Key("hidden_downstream"); w.Uint64(node.hidden_downstream);
+    }
     w.Key("topology_badge"); w.String(node.topology_badge.c_str());
     w.Key("rows"); write_optional_u64(w, node.rows);
     w.Key("logical_bytes"); write_optional_u64(w, node.logical_bytes);
@@ -1269,6 +1271,185 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
     w.EndObject();
   }
   w.EndArray();
+  w.EndObject();
+  res.set_header("Cache-Control", "private, no-store");
+  res.set_content(sb.GetString(), "application/json");
+}
+
+// The authorized graph of one host: runner ACL discovery, then system-context
+// catalog and graph enrichment of only those objects. Shared by the graph and
+// definition routes so both stand on the same AllowedObjectSet boundary.
+bool Server::explorer_graph_snapshot(
+    const httplib::Request& req,
+    httplib::Response& res,
+    const std::string& host_id,
+    std::shared_ptr<const ExplorerGraph>& graph,
+    bool& stale) {
+  if (host_id.empty()) { json_error(res, 400, "missing_host_id", "Missing host_id."); return false; }
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) { json_error(res, 404, "unknown_host", "Unknown host_id."); return false; }
+  if (!is_host_healthy(health_.get(), host_id)) {
+    json_error(res, 503, "host_unavailable", "Selected host is down.");
+    return false;
+  }
+
+  const uint64_t ts = now_ms();
+  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
+  const std::string security_key = explorer_security_key(host_id);
+  const std::string list_key = security_key + std::string("\0catalog-list", 13);
+  const std::string catalog_key = security_key + std::string("\0catalog", 8);
+  const std::string graph_key = security_key + std::string("\0graph", 6);
+  const std::string functions_key = security_key + std::string("\0functions", 10);
+  const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  if (force_refresh) {
+    explorer_allowed_cache_.erase(security_key);
+    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>",
+    // so an exact erase of the bare prefix never matched any of them.
+    explorer_catalog_list_cache_.erase_prefix(list_key);
+    explorer_catalog_cache_.erase(catalog_key);
+    explorer_graph_cache_.erase(graph_key);
+    explorer_functions_cache_.erase(functions_key);
+  }
+
+  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
+      security_key, ts, ttl, 250,
+      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
+        std::string error;
+        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        if (!runner) { code = "runner_unavailable"; message = error; return false; }
+        try { value = discover_allowed_objects(*runner); return true; }
+        catch (const std::exception& e) { code = "acl_discovery_failed"; message = e.what(); return false; }
+      });
+  if (!allowed_result.has_value || !allowed_result.value) {
+    json_error(
+        res, 503,
+        allowed_result.error_code.empty() ? "acl_unavailable" : allowed_result.error_code,
+        allowed_result.error_message.empty() ? "Unable to determine readable ClickHouse objects." : allowed_result.error_message);
+    return false;
+  }
+
+  auto catalog_result = explorer_catalog_cache_.get_or_refresh(
+      catalog_key, ts, ttl, 250,
+      [&](ExplorerCatalog& value, std::string& code, std::string& message) {
+        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+        std::string error;
+        auto system = acquire_explorer_client(client_pool_, uri, &error);
+        if (!system) { code = "system_context_unavailable"; message = error; return false; }
+        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        if (!runner) {
+          code = "runner_unavailable";
+          message = error.empty() ? "Cannot connect to the runner context." : error;
+          return false;
+        }
+        if (!load_explorer_catalog(*system, *runner, *allowed_result.value, value, &error)) {
+          code = "explorer_catalog_failed"; message = error; return false;
+        }
+        return true;
+      });
+  if (!catalog_result.has_value || !catalog_result.value) {
+    json_error(
+        res, 503,
+        catalog_result.error_code.empty() ? "explorer_unavailable" : catalog_result.error_code,
+        catalog_result.error_message.empty() ? "Explorer metadata is unavailable." : catalog_result.error_message);
+    return false;
+  }
+
+  auto graph_result = explorer_graph_cache_.get_or_refresh(
+      graph_key, ts, ttl, 250,
+      [&](ExplorerGraph& value, std::string& code, std::string& message) {
+        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+        std::string error;
+        auto system = acquire_explorer_client(client_pool_, uri, &error);
+        if (!system) { code = "system_context_unavailable"; message = error; return false; }
+        if (!load_explorer_graph(*system, *allowed_result.value, *catalog_result.value, value, &error)) {
+          code = "explorer_graph_failed"; message = error; return false;
+        }
+        return true;
+      });
+  if (!graph_result.has_value || !graph_result.value) {
+    json_error(
+        res, 503,
+        graph_result.error_code.empty() ? "explorer_graph_unavailable" : graph_result.error_code,
+        graph_result.error_message.empty() ? "Explorer graph is unavailable." : graph_result.error_message);
+    return false;
+  }
+
+  graph = graph_result.value;
+  stale = graph_result.stale || catalog_result.stale || allowed_result.stale;
+  return true;
+}
+
+// What an edge/node panel explains about one logical object: its SELECT, its
+// destination or source, and Distributed routing. Served from the cached
+// authorized graph only: an object outside AllowedObjectSet is simply absent
+// (404), and no SQL is executed for the caller.
+void Server::handle_explorer_graph_definition(const httplib::Request& req, httplib::Response& res) {
+  const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
+  const std::string database = req.has_param("database") ? req.get_param_value("database") : std::string{};
+  const std::string table = req.has_param("table") ? req.get_param_value("table") : std::string{};
+  if (database.empty() || table.empty()) return json_error(res, 400, "missing_object", "Missing database or table.");
+  std::shared_ptr<const ExplorerGraph> graph;
+  bool stale = false;
+  if (!explorer_graph_snapshot(req, res, host_id, graph, stale)) return;
+
+  const std::string id = "table:" + database + "." + table;
+  const ExplorerGraphNode* node = nullptr;
+  for (const auto& candidate : graph->nodes) {
+    if (candidate.layer == "logical" && candidate.id == id && candidate.database == database && candidate.name == table) {
+      node = &candidate;
+      break;
+    }
+  }
+  if (!node) return json_error(res, 404, "unknown_object", "Object is not visible in the Explorer graph.");
+  const auto definition_it = graph->definitions.find(id);
+  const ExplorerGraphDefinition empty_definition;
+  const ExplorerGraphDefinition& definition = definition_it == graph->definitions.end() ? empty_definition : definition_it->second;
+
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("version"); w.Uint(1);
+  w.Key("host_id"); w.String(host_id.c_str());
+  w.Key("stale"); w.Bool(stale);
+  w.Key("id"); w.String(node->id.c_str());
+  w.Key("database"); w.String(node->database.c_str());
+  w.Key("name"); w.String(node->name.c_str());
+  w.Key("kind"); w.String(node->kind.c_str());
+  w.Key("engine"); w.String(node->engine.c_str());
+  w.Key("select_sql");
+  if (definition.select_sql.empty()) w.Null(); else w.String(definition.select_sql.c_str());
+  w.Key("select_sql_truncated"); w.Bool(definition.select_sql_truncated);
+  w.Key("target_visible"); w.Bool(definition.target_visible);
+  w.Key("target");
+  if (definition.target_visible && !definition.target_table.empty()) {
+    w.StartObject();
+    w.Key("database"); w.String(definition.target_database.c_str());
+    w.Key("table"); w.String(definition.target_table.c_str());
+    w.EndObject();
+  } else {
+    w.Null();
+  }
+  w.Key("dictionary");
+  if (node->kind == "dictionary") {
+    w.StartObject();
+    w.Key("source_kind"); w.String(definition.dictionary_source_kind.c_str());
+    w.Key("layout"); w.String(definition.dictionary_layout.c_str());
+    w.Key("lifetime"); w.String(definition.dictionary_lifetime.c_str());
+    w.EndObject();
+  } else {
+    w.Null();
+  }
+  w.Key("distributed");
+  if (node->kind == "distributed") {
+    w.StartObject();
+    w.Key("cluster"); w.String(definition.distributed_cluster.c_str());
+    w.Key("sharding_key"); w.String(definition.distributed_sharding_key.c_str());
+    w.Key("shards"); w.Uint64(definition.distributed_shards);
+    w.Key("replicas_per_shard"); w.Uint64(definition.distributed_replicas);
+    w.EndObject();
+  } else {
+    w.Null();
+  }
   w.EndObject();
   res.set_header("Cache-Control", "private, no-store");
   res.set_content(sb.GetString(), "application/json");

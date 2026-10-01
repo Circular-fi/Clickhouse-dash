@@ -20,9 +20,11 @@ def test_lineage_layout_uses_shared_row_grid_and_top_anchored_ports() -> None:
 
 def test_materialized_views_keep_dashed_node_outline() -> None:
     js = read("src/static/app_explorer_graph.js")
-    expected = '["view", "materialized_view", "refreshable_materialized_view"].includes(node.kind)'
-    assert js.count(expected) >= 2
-    assert 'ctx.setLineDash([5, 4]);' in js
+    # Card outline and focus halo are both dashed for View / MV objects.
+    assert 'const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";' in js
+    assert 'if (viewLike || storageDisabled) ctx.setLineDash([5, 4]);' in js
+    assert 'drawFocusHalo(ctx, item, radius, viewLike);' in js
+    assert 'if (dashed) ctx.setLineDash([5, 4]);' in js
 
 
 def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> None:

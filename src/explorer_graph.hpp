@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace chdash {
@@ -19,6 +20,26 @@ struct ExplorerGraphTtlRule {
   std::string action;      // recompress | move | delete | group_by | ttl
   std::string target_kind; // codec | volume | disk | expression
   std::string target;
+};
+
+// What an edge or node side panel explains about a logical object. Built from
+// the same authorized system.tables texts as the graph; never serialized in
+// the graph payload itself (GET /api/explorer/graph/definition serves it per
+// object). Referenced objects outside AllowedObjectSet keep only a
+// `*_visible = false` flag, never their name.
+struct ExplorerGraphDefinition {
+  std::string select_sql;          // View / MV / refreshable MV AS SELECT
+  bool select_sql_truncated = false;
+  std::string target_database;     // MV TO / Buffer / Distributed destination
+  std::string target_table;
+  bool target_visible = false;
+  std::string dictionary_source_kind; // CLICKHOUSE, MYSQL, FILE, ...
+  std::string dictionary_layout;
+  std::string dictionary_lifetime;
+  std::string distributed_cluster;
+  std::string distributed_sharding_key;
+  uint64_t distributed_shards = 0;
+  uint64_t distributed_replicas = 0;
 };
 
 struct ExplorerGraphNode {
@@ -57,6 +78,10 @@ struct ExplorerGraphNode {
   std::optional<uint64_t> buffer_max_bytes;
   uint64_t buffer_layers = 0;
   std::vector<ExplorerGraphTtlRule> ttl_rules;
+  // Scoped (focused Lineage) payloads only: semantic neighbours of this node
+  // that exist but are outside the shipped neighbourhood, per direction.
+  uint64_t hidden_upstream = 0;
+  uint64_t hidden_downstream = 0;
 };
 
 struct ExplorerGraphEdge {
@@ -74,6 +99,9 @@ struct ExplorerGraph {
   bool refreshable_views_available = true;
   std::vector<ExplorerGraphNode> nodes;
   std::vector<ExplorerGraphEdge> edges;
+  // Keyed by logical node id. Kept beside the nodes so scoped graph payloads
+  // never copy SELECT texts they do not serialize.
+  std::unordered_map<std::string, ExplorerGraphDefinition> definitions;
 };
 
 bool load_explorer_graph(

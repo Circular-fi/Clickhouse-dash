@@ -22,10 +22,10 @@ def test_lineage_routes_detour_around_cards_and_penalize_edge_crossings() -> Non
 def test_logical_dependencies_never_animate_but_selected_dependency_gets_blue_dash_halo() -> None:
     graph = read("src/static/app_explorer_graph.js")
     assert 'function isLogicalDependencyEdge(edge)' in graph
-    assert '["view", "dependency"]' in graph
+    assert '["view", "dependency", "dictionary_source"]' in graph
     assert 'function drawSelectedLogicalDependencyHalo(' in graph
     halo = graph[graph.index('function drawSelectedLogicalDependencyHalo('):graph.index('function drawEdge(')]
-    assert 'ctx.strokeStyle = css("--accent", "#7c9cff");' in halo
+    assert 'ctx.strokeStyle = graphColor("halo");' in halo
     assert 'ctx.shadowBlur = 7 / Math.max' in halo
     assert 'edge.from !== model.focusedId && edge.to !== model.focusedId' in halo
     flow = graph[graph.index('function isInsertFlowEdge(edge)'):graph.index('function isStorageRouteEdge(edge)')]

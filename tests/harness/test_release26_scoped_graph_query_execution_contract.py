@@ -59,8 +59,10 @@ def test_focused_graph_requests_exact_depth_and_groups_databases() -> None:
 
 def test_logical_node_labels_are_database_qualified() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    assert '`${node.database}.${baseName}`' in graph
-    assert "NODE_WIDTH = 240" in graph
+    # Short object name as the title, its database (and engine) as the
+    # subtitle: a long database prefix never truncates the distinctive part.
+    assert 'const subtitle = `${node.database || ""} · ${nodeKindLabel(node)}`;' in graph
+    assert "NODE_WIDTH = 264" in graph
 
 
 def test_focus_animation_cannot_escape_selected_table_edges() -> None:

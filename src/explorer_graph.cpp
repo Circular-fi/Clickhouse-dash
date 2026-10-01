@@ -542,6 +542,51 @@ std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, con
   return result;
 }
 
+// Panels show the object's own SELECT; a pathological generated view must not
+// turn one definition response into megabytes.
+constexpr size_t kDefinitionSqlLimit = 32 * 1024;
+
+// Text inside the parentheses that follow a top-level DDL clause keyword, for
+// example `LIFETIME(MIN 0 MAX 300)` -> `MIN 0 MAX 300`. Quotes and nesting are
+// respected; an unterminated clause yields nothing.
+std::optional<std::string> clause_arguments(std::string_view ddl, std::string_view keyword) {
+  const auto at = find_keyword_ci(ddl, keyword);
+  if (!at) return std::nullopt;
+  size_t pos = *at + keyword.size();
+  while (pos < ddl.size() && std::isspace(static_cast<unsigned char>(ddl[pos]))) ++pos;
+  if (pos >= ddl.size() || ddl[pos] != '(') return std::nullopt;
+  const size_t start = ++pos;
+  int depth = 0;
+  char quote = 0;
+  for (; pos < ddl.size(); ++pos) {
+    const char ch = ddl[pos];
+    if (quote) {
+      if (ch == '\\' && quote == '\'' && pos + 1 < ddl.size()) { ++pos; continue; }
+      if (ch == quote) quote = 0;
+      continue;
+    }
+    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
+    if (ch == '(') { ++depth; continue; }
+    if (ch == ')') {
+      if (depth == 0) return compact_spaces(ddl.substr(start, pos - start));
+      --depth;
+    }
+  }
+  return std::nullopt;
+}
+
+// `CLICKHOUSE(HOST ... TABLE 't')` -> `CLICKHOUSE`. Only the leading kind
+// identifier is kept: connection arguments (host, user, masked password) are
+// not graph metadata.
+std::string leading_identifier(std::string_view text) {
+  size_t pos = 0;
+  auto ident = parse_identifier_token(text, pos);
+  if (!ident) return {};
+  std::string out = *ident;
+  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  return out;
+}
+
 std::string classify_node(const std::string& engine, const std::string& ddl) {
   if (engine == "MaterializedView") {
     return contains_ci(ddl, "REFRESH EVERY") || contains_ci(ddl, "REFRESH AFTER")
@@ -799,6 +844,34 @@ bool load_explorer_graph(
     return false;
   }
 
+  // A dictionary's source table is structured metadata as well
+  // (loading_dependencies_*), so the source -> dictionary edge needs no SOURCE()
+  // parsing. Best-effort: a server without these columns only loses the
+  // dictionary source edges, the rest of the topology stays exact.
+  std::unordered_map<std::string, QualifiedName> dictionary_source_by_id;
+  try_select(system,
+      "SELECT toString(database), toString(name), toString(tupleElement(dep, 1)), toString(tupleElement(dep, 2)) "
+      "FROM (SELECT database, name, arrayJoin(arrayZip(loading_dependencies_database, loading_dependencies_table)) AS dep "
+      "FROM system.tables WHERE engine = 'Dictionary')",
+      [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          const std::string dict_db = block_string_at(block, 0, row);
+          const std::string dict_name = block_string_at(block, 1, row);
+          const std::string source_db = block_string_at(block, 2, row);
+          const std::string source_table = block_string_at(block, 3, row);
+          if (!allowed.allows_table(dict_db, dict_name)) continue;
+          const std::string dict_id = table_node_id(dict_db, dict_name);
+          const bool source_visible = allowed.allows_table(source_db, source_table) && kind_by_key.count(table_key(source_db, source_table));
+          if (!dictionary_source_by_id.count(dict_id)) {
+            dictionary_source_by_id.emplace(dict_id, source_visible ? QualifiedName{source_db, source_table} : QualifiedName{});
+          }
+          if (!source_visible) continue;
+          add_edge_unique(out, seen_edges, {
+            {}, table_node_id(source_db, source_table), dict_id, "dictionary_source", "dictionary source", false
+          });
+        }
+      });
+
   // Add engine-specific destinations and targeted SELECT dependencies. SQL
   // parsing is deliberately limited to identifiers after FROM/JOIN/TO; unknown
   // constructs are omitted rather than guessed.
@@ -807,8 +880,37 @@ bool load_explorer_graph(
     const std::string from_id = table_node_id(table.database, table.name);
     const std::string kind = classify_node(table.engine, table.ddl);
 
+    const bool view_like = kind == "view" || kind == "materialized_view" || kind == "refreshable_materialized_view";
+    if (view_like || kind == "dictionary" || kind == "buffer" || kind == "distributed") {
+      auto& definition = out.definitions[from_id];
+      if (view_like && !table.as_select.empty()) {
+        definition.select_sql_truncated = table.as_select.size() > kDefinitionSqlLimit;
+        definition.select_sql = table.as_select.substr(0, kDefinitionSqlLimit);
+      }
+      if (kind == "dictionary") {
+        if (const auto source = clause_arguments(table.ddl, "SOURCE")) definition.dictionary_source_kind = leading_identifier(*source);
+        if (const auto layout = clause_arguments(table.ddl, "LAYOUT")) definition.dictionary_layout = leading_identifier(*layout);
+        if (const auto lifetime = clause_arguments(table.ddl, "LIFETIME")) definition.dictionary_lifetime = *lifetime;
+        const auto source_it = dictionary_source_by_id.find(from_id);
+        if (source_it != dictionary_source_by_id.end() && !source_it->second.table.empty()) {
+          definition.target_database = source_it->second.database;
+          definition.target_table = source_it->second.table;
+          definition.target_visible = true;
+        }
+      }
+    }
+    const auto set_definition_target = [&](const std::string& database, const std::string& name) {
+      auto& definition = out.definitions[from_id];
+      definition.target_visible = allowed.allows_table(database, name);
+      // A destination outside the runner's visibility is reported only as
+      // "not visible": its name never leaves the backend.
+      definition.target_database = definition.target_visible ? database : std::string{};
+      definition.target_table = definition.target_visible ? name : std::string{};
+    };
+
     if (kind == "materialized_view" || kind == "refreshable_materialized_view") {
       const auto target = qualified_after_keyword(table.ddl, "TO", table.database);
+      if (target) set_definition_target(target->database, target->table);
       if (target && allowed.allows_table(target->database, target->table)) {
         add_edge_unique(out, seen_edges, {
           {}, from_id, table_node_id(target->database, target->table),
@@ -837,6 +939,7 @@ bool load_explorer_graph(
       if (args.size() >= 2) {
         const std::string dest_db = args[0].empty() ? table.database : args[0];
         const std::string dest_table = args[1];
+        set_definition_target(dest_db, dest_table);
         if (allowed.allows_table(dest_db, dest_table)) {
           add_edge_unique(out, seen_edges, {
             {}, from_id, table_node_id(dest_db, dest_table), "buffer", "buffer forwarding", true
@@ -847,10 +950,15 @@ bool load_explorer_graph(
 
     if (kind == "distributed") {
       const auto args = parse_engine_arguments(table.engine_full, "Distributed");
-      if (!args.empty()) referenced_clusters.insert(args[0]);
+      if (!args.empty()) {
+        referenced_clusters.insert(args[0]);
+        out.definitions[from_id].distributed_cluster = args[0];
+      }
+      if (args.size() >= 4) out.definitions[from_id].distributed_sharding_key = compact_spaces(args[3]);
       if (args.size() >= 3) {
         const std::string dest_db = args[1].empty() ? table.database : args[1];
         const std::string dest_table = args[2];
+        set_definition_target(dest_db, dest_table);
         if (allowed.allows_table(dest_db, dest_table)) {
           add_edge_unique(out, seen_edges, {
             {}, from_id, table_node_id(dest_db, dest_table), "distributed_route", "routes to", false
@@ -1065,6 +1173,9 @@ bool load_explorer_graph(
         if (logical_it != logical_node_index.end() && max_shard > 0) {
           out.nodes[logical_it->second].topology_badge = std::to_string(max_shard) + "S × " + std::to_string(max_replica) + "R";
         }
+        auto& definition = out.definitions[parent];
+        definition.distributed_shards = max_shard;
+        definition.distributed_replicas = max_replica;
         std::unordered_set<uint64_t> shard_created;
         for (const auto& row : rows_it->second) {
           const std::string shard_id = "physical:" + parent + ":shard:" + std::to_string(row.shard);

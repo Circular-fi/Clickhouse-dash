@@ -3228,3 +3228,53 @@ html[data-theme="light"] {
   --exd-warn: #b45309;
   --exd-err: #dc2626;
 }
+:root {
+  --graphMuted: #a3adbb;
+  --graphAccentText: #93b4ff;
+  --graphHalo: #7c9cff;
+  --graphEdge: #6b8cff;
+  --graphEdgeMuted: #8b96a8;
+  --graphNodeBorder: rgba(148, 163, 184, 0.34);
+  --graphNodeBg: #141b27;
+  --graphGroupBg: #172033;
+  --graphWarn: #f0a33a;
+  --graphError: #f87171;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --graphMuted: #3d4f78;
+    --graphAccentText: #1d4ed8;
+    --graphHalo: #2563eb;
+    --graphEdge: #2563eb;
+    --graphEdgeMuted: #5b6b8c;
+    --graphNodeBorder: rgba(15, 23, 42, 0.34);
+    --graphNodeBg: #ffffff;
+    --graphGroupBg: #eef3ff;
+    --graphWarn: #b45309;
+    --graphError: #b91c1c;
+  }
+}
+html[data-theme="dark"] {
+  --graphMuted: #a3adbb;
+  --graphAccentText: #93b4ff;
+  --graphHalo: #7c9cff;
+  --graphEdge: #6b8cff;
+  --graphEdgeMuted: #8b96a8;
+  --graphNodeBorder: rgba(148, 163, 184, 0.34);
+  --graphNodeBg: #141b27;
+  --graphGroupBg: #172033;
+  --graphWarn: #f0a33a;
+  --graphError: #f87171;
+}
+html[data-theme="light"] {
+  --graphMuted: #3d4f78;
+  --graphAccentText: #1d4ed8;
+  --graphHalo: #2563eb;
+  --graphEdge: #2563eb;
+  --graphEdgeMuted: #5b6b8c;
+  --graphNodeBorder: rgba(15, 23, 42, 0.34);
+  --graphNodeBg: #ffffff;
+  --graphGroupBg: #eef3ff;
+  --graphWarn: #b45309;
+  --graphError: #b91c1c;
+}

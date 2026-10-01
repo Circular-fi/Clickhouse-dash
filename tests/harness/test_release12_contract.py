@@ -25,8 +25,12 @@ def test_graph_focus_freezes_camera_and_retained_node_coordinates_and_has_select
     assert 'item.x = previous.x;' in graph and 'item.y = previous.y;' in graph
     set_focus = graph[graph.index('function setFocus('):graph.index('function defaultFocusId', graph.index('function setFocus('))]
     assert 'model.offsetX' not in set_focus and 'model.offsetY' not in set_focus and 'model.scale' not in set_focus
-    assert 'shadowBlur = 18' in graph
-    assert 'ctx.strokeStyle = css("--accent"' in graph
+    # The focused card's halo is a translucent ring plus a crisp stroke in
+    # the graph halo token, readable on the light theme's white canvas.
+    halo = graph[graph.index('function drawFocusHalo('):graph.index('function compactTitleFont(')]
+    assert 'ctx.strokeStyle = graphColor("halo");' in halo
+    assert 'ctx.lineWidth = 6;' in halo
+    assert 'if (isFocus && node.layer === "logical") drawFocusHalo(ctx, item, radius, viewLike);' in graph
 
 
 def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -> None:

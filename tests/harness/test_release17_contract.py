@@ -127,7 +127,10 @@ def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> Non
     assert 'cursor: default;' in blocked
 
     assert 'storage_disabled: !canUseStorageForId(node.id)' in graph
-    assert 'ctx.globalAlpha = storageDisabled ? 0.46' in graph
+    # Greyed in Storage mode by a dashed frame and muted text at full
+    # opacity: legible in the light theme, unlike a translucent card.
+    assert 'if (viewLike || storageDisabled) ctx.setLineDash([5, 4]);' in graph
+    assert 'ctx.fillStyle = storageDisabled ? graphColor("muted") : graphColor("text");' in graph
     assert 'ctx.fillText("No persistent storage"' in graph
     assert 'function nodeIsStorageDisabled(node)' in graph
     assert 'function nodeIsClickable(node)' in graph

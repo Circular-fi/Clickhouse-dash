@@ -177,12 +177,20 @@
       query.set("focus_database", focusDatabase);
       query.set("focus_table", focusTable);
       query.set("depth", String(Math.max(0, Math.min(8, Number(options.depth) || 0))));
+      for (const item of Array.isArray(options.expand) ? options.expand.slice(0, 64) : []) query.append("expand", String(item));
     }
     query.set("mode", options.mode === "physical" ? "physical" : "logical");
     if (options.includeSystem === true) query.set("include_system", "1");
     query.set("include_non_storing", options.includeNonStoring === false ? "0" : "1");
     if (options.refresh === true) query.set("refresh", "1");
     return getJson(`api/explorer/graph?${query.toString()}`);
+  }
+
+  // SELECT / source / route of one graph object, for the graph side panel.
+  async function getExplorerGraphDefinition(hostId, database, table) {
+    if (!hostId || !database || !table) throw new Error("Explorer graph object scope is incomplete.");
+    const query = new URLSearchParams({ host_id: String(hostId), database: String(database), table: String(table) });
+    return getJson(`api/explorer/graph/definition?${query.toString()}`);
   }
 
   async function getTracesMeta(hostId) {
@@ -451,7 +459,7 @@
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
     getExplorerOpsActivity, getExplorerOpsKeeper,
-    getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
+    getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,
     getTraceServices, getTraceServicesDb,

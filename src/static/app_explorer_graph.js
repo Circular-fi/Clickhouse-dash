@@ -47,14 +47,47 @@
     includeSystem: false,
     includeNonStoring: true,
     onStateChange: null,
+    openCard: null,
+    // Unfocused Lineage groups objects per database: a collapsed database is
+    // one card; objects without any dependency stay hidden unless asked for.
+    expandedGroups: new Set(),
+    groupsVersion: 0,
+    showIsolated: false,
+    // Per-node one-hop expansions on top of the global depth ("up|down\0id").
+    expansions: new Set(),
+    hoveredEdgeId: null,
+    hoveredControl: null,
+    // Side panel: { type: "node", id } | { type: "edge", id } | null.
+    panel: null,
+    panelSerial: 0,
+    definitionCache: new Map(),
+    columnsCache: new Map(),
+    // "canvas" | "list"; null until the user picks one (mobile defaults to list).
+    viewMode: null,
   };
 
-  const NODE_HEIGHT = 70;
-  const NODE_WIDTH = 240;
-  const PHYSICAL_WIDTH = 166;
-  const PHYSICAL_HEIGHT = 58;
+  const NODE_HEIGHT = 80;
+  const NODE_WIDTH = 264;
+  const PHYSICAL_WIDTH = 180;
+  const PHYSICAL_HEIGHT = 60;
   const X_GAP = 92;
   const Y_GAP = 34;
+  // Smallest canvas font is 12px in Lineage and 11px in Storage: Fit never
+  // zooms below the scale that keeps it at 11px on screen. Further zoom-out
+  // stays possible and switches to the compact level of detail.
+  const LINEAGE_FONT_MIN = 12;
+  const STORAGE_FONT_MIN = 11;
+  const READABLE_TEXT_PX = 11;
+  const FONT = "Arial, Helvetica, sans-serif";
+  const MOBILE_QUERY = "(max-width: 720px)";
+
+  function readableScale() {
+    return READABLE_TEXT_PX / (model.detailMode === "physical" ? STORAGE_FONT_MIN : LINEAGE_FONT_MIN);
+  }
+
+  function mobileLayout() {
+    return !!window.matchMedia?.(MOBILE_QUERY)?.matches;
+  }
 
   // Canvas colours are resolved from CSS variables. getComputedStyle() on the
   // root element per edge/node made every frame pay hundreds of style lookups,
@@ -176,6 +209,12 @@
       // Request exactly what is displayed. The backend exposes scope_has_more,
       // so the + depth control never needs a hidden look-ahead ring.
       options.depth = model.detailMode === "logical" ? Math.min(8, model.focusDepth) : 0;
+      if (model.detailMode === "logical" && model.expansions.size) {
+        options.expand = [...model.expansions].sort().map((key) => {
+          const [direction, id] = key.split("\u0000");
+          return `${direction}:${id}`;
+        });
+      }
     } else if (model.database) {
       options.database = model.database;
     }
@@ -191,6 +230,7 @@
       Number(options.depth) || 0,
       options.includeSystem === true ? 1 : 0,
       options.includeNonStoring === false ? 0 : 1,
+      (options.expand || []).join("\u0001"),
     ].join("\u0000");
   }
 
@@ -846,26 +886,108 @@
         && cache.projection === projection
         && cache.detailMode === model.detailMode
         && cache.focusedId === model.focusedId
-        && cache.focusDepth === model.focusDepth) {
+        && cache.focusDepth === model.focusDepth
+        && cache.groupsVersion === model.groupsVersion
+        && cache.showIsolated === model.showIsolated) {
+      model.groupStats = cache.groupStats;
       return cache;
     }
     let nodes = projection.nodes;
     let edges = projection.edges;
+    model.groupStats = null;
     if (model.detailMode !== "physical") {
-      const logicalIds = logicalNeighborhoodIds();
+      // A payload scoped to exactly the current request (focus, depth and
+      // per-node expansions) is already the neighbourhood. The client-side
+      // ring only bridges the time until a new focus/depth arrives.
+      const exactScope = !!model.focusedId && model.graphRequestKey === graphRequestKey(graphRequestOptions(false));
+      const logicalIds = exactScope ? null : logicalNeighborhoodIds();
       if (logicalIds) nodes = projection.nodes.filter((node) => logicalIds.has(node.id));
       const ids = new Set(nodes.map((node) => node.id));
       edges = projection.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+      if (!model.focusedId) ({ nodes, edges } = groupedOverview(nodes, edges));
     }
     model.visibleSetCache = {
       projection,
       detailMode: model.detailMode,
       focusedId: model.focusedId,
       focusDepth: model.focusDepth,
+      groupsVersion: model.groupsVersion,
+      showIsolated: model.showIsolated,
+      groupStats: model.groupStats,
       nodes,
       edges,
     };
     return model.visibleSetCache;
+  }
+
+  // Unfocused Lineage overview (all databases or one database): objects
+  // without any dependency are hidden unless "Show objects without
+  // dependencies" is on, and every database that is not expanded collapses
+  // into one card. Edges between collapsed databases are aggregated with a
+  // count, so the overview stays a handful of readable cards on any catalog.
+  function groupedOverview(nodes, edges) {
+    const degree = new Map();
+    for (const edge of edges) {
+      degree.set(edge.from, (degree.get(edge.from) || 0) + 1);
+      degree.set(edge.to, (degree.get(edge.to) || 0) + 1);
+    }
+    const stats = new Map();
+    for (const node of nodes) {
+      const database = String(node.database || "default");
+      if (!stats.has(database)) stats.set(database, { total: 0, connected: 0, shown: 0 });
+      const stat = stats.get(database);
+      stat.total += 1;
+      if (degree.get(node.id)) stat.connected += 1;
+    }
+    // One database (database scope or a single-database server) is always
+    // shown expanded: there is nothing to group it against.
+    const autoExpand = stats.size <= 1;
+    const expanded = (database) => autoExpand || model.expandedGroups.has(database);
+    const representative = new Map();
+    const outNodes = [];
+    const groupNodes = new Map();
+    for (const node of nodes) {
+      const database = String(node.database || "default");
+      const stat = stats.get(database);
+      const isolated = !degree.get(node.id);
+      if (isolated && !model.showIsolated) continue;
+      if (expanded(database)) {
+        stat.shown += 1;
+        representative.set(node.id, node.id);
+        outNodes.push(node);
+        continue;
+      }
+      let group = groupNodes.get(database);
+      if (!group) {
+        group = {
+          id: `group:${database}`, layer: "logical", kind: "database_group", database, name: database, label: database,
+          synthetic: true,
+        };
+        groupNodes.set(database, group);
+        outNodes.push(group);
+      }
+      representative.set(node.id, group.id);
+    }
+    const aggregated = new Map();
+    const outEdges = [];
+    for (const edge of edges) {
+      const from = representative.get(edge.from);
+      const to = representative.get(edge.to);
+      if (!from || !to) continue;
+      if (from === edge.from && to === edge.to) { outEdges.push(edge); continue; }
+      if (from === to) continue;
+      const key = `${from}\u0000${to}`;
+      let entry = aggregated.get(key);
+      if (!entry) {
+        entry = { id: `grouped:${from}:${to}`, from, to, kind: edge.kind, label: "", can_animate: false, aggregated: true, members: [] };
+        aggregated.set(key, entry);
+        outEdges.push(entry);
+      }
+      if (entry.kind !== edge.kind && !isLogicalDependencyEdge(edge)) entry.kind = edge.kind;
+      entry.members.push(edge);
+    }
+    model.groupStats = stats;
+    return { nodes: outNodes, edges: outEdges };
   }
 
   function visibleNodes() {
@@ -889,21 +1011,23 @@
     if (node.kind === "storage_tier") {
       const disks = Array.isArray(node.tier_disks) ? node.tier_disks : [];
       const events = Array.isArray(node.ttl_events) ? node.ttl_events : [];
-      const diskHeight = Math.max(1, disks.length) * 31;
-      const eventHeight = events.length ? 25 + Math.min(5, events.length) * 31 + (events.length > 5 ? 17 : 0) : 0;
-      return { width: 274, height: 55 + diskHeight + eventHeight };
+      const diskHeight = Math.max(1, disks.length) * 33;
+      const eventHeight = events.length ? 28 + Math.min(5, events.length) * 33 + (events.length > 5 ? 18 : 0) : 0;
+      return { width: 290, height: 59 + diskHeight + eventHeight };
     }
-    if (node.kind === "ttl_expired") return { width: 154, height: 70 };
+    if (node.kind === "ttl_expired") return { width: 164, height: 72 };
+    if (node.kind === "database_group") return { width: NODE_WIDTH, height: NODE_HEIGHT };
     if (node.layer === "physical") return { width: PHYSICAL_WIDTH, height: PHYSICAL_HEIGHT };
     const rules = model.detailMode === "physical" ? ttlRules(node) : [];
     const storageDisabled = model.detailMode === "physical" && node.layer === "logical" && node.storage_disabled === true;
     const hasStoragePolicy = model.detailMode === "physical" && node.layer === "logical" && !!String(node.storage_policy || "");
     // In Storage mode the table owns the policy label and only identifies the
     // TTL clock. Lifecycle actions themselves live on tiers/transitions.
-    if (storageDisabled) return { width: 238, height: 92 };
-    if (rules.length && hasStoragePolicy) return { width: 250, height: 110 };
-    if (rules.length || hasStoragePolicy) return { width: 238, height: 92 };
-    if (node.kind === "buffer") return { width: NODE_WIDTH, height: 88 };
+    if (storageDisabled) return { width: NODE_WIDTH, height: 96 };
+    if (rules.length && hasStoragePolicy) return { width: NODE_WIDTH, height: 114 };
+    if (hasStoragePolicy) return { width: NODE_WIDTH, height: 88 };
+    if (rules.length) return { width: NODE_WIDTH, height: 96 };
+    if (node.kind === "buffer") return { width: NODE_WIDTH, height: 96 };
     return { width: NODE_WIDTH, height: NODE_HEIGHT };
   }
 
@@ -1335,7 +1459,23 @@
     const innerPad = 14;
     let cursorY = 64;
 
+    // Collapsed database cards form a compact grid above the expanded bands:
+    // a 20-database server overview stays a few rows of cards, not one column.
+    const cardOnly = order.filter(([, items]) => items.length === 1 && items[0].node?.kind === "database_group");
+    if (cardOnly.length) {
+      const columnsCount = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(cardOnly.length * 1.6))));
+      const cardGapX = 48;
+      const cardGapY = 40;
+      cardOnly.forEach(([, [item]], index) => {
+        item.x = 70 + (index % columnsCount) * (NODE_WIDTH + cardGapX);
+        item.y = cursorY + Math.floor(index / columnsCount) * (NODE_HEIGHT + cardGapY);
+        item.lineageRow = Math.floor(index / columnsCount);
+      });
+      cursorY += Math.ceil(cardOnly.length / columnsCount) * (NODE_HEIGHT + cardGapY) + databaseGap - cardGapY + headerSpace;
+    }
+
     for (const [, items] of order) {
+      if (items.length === 1 && items[0].node?.kind === "database_group") continue;
       const columns = new Map();
       for (const item of items) {
         const key = Math.round(item.x * 1000) / 1000;
@@ -1731,15 +1871,41 @@
       : { x: 0, y: 0, width: 1, height: 1 };
   }
 
-  function fitToScreen() {
+  // Scale at which the whole graph fits the canvas (may be unreadable).
+  function overviewScale() {
+    const { width, height } = canvasSize();
+    const bounds = model.worldBounds;
+    if (!bounds || !width || !height) return 1;
+    const cap = model.detailMode === "physical" ? 1.5 : 1.15;
+    return Math.max(0.02, Math.min(cap, Math.min(width / bounds.width, height / bounds.height) * 0.92));
+  }
+
+  function fitToScreen({ anchorId = null, anchorBox = null } = {}) {
     const { width, height } = canvasSize();
     const bounds = model.worldBounds;
     if (!bounds || !width || !height) return;
-    const scale = Math.min(width / bounds.width, height / bounds.height) * 0.92;
-    model.scale = Math.max(0.08, Math.min(1.5, scale));
+    const overview = overviewScale();
+    // Fit never shrinks text below READABLE_TEXT_PX. When the whole graph is
+    // larger than that, Fit shows the focused object (or the requested anchor,
+    // else the top-left of the graph) at the readable scale and the minimap
+    // gives the rest; zooming out further is still possible.
+    model.scale = Math.max(overview, readableScale());
     model.fitScale = model.scale;
-    model.offsetX = width / 2 - (bounds.x + bounds.width / 2) * model.scale;
-    model.offsetY = height / 2 - (bounds.y + bounds.height / 2) * model.scale;
+    const anchor = (anchorId && model.layout.get(anchorId)) || (model.focusedId && model.layout.get(model.focusedId)) || null;
+    if (model.scale > overview + 1e-9 && anchorBox) {
+      // Below the toolbar, from the box's top-left corner (an expanded band).
+      model.offsetX = 24 - anchorBox.x * model.scale;
+      model.offsetY = 64 - anchorBox.y * model.scale;
+    } else if (model.scale > overview + 1e-9 && anchor) {
+      model.offsetX = width / 2 - (anchor.x + anchor.width / 2) * model.scale;
+      model.offsetY = height / 2 - (anchor.y + anchor.height / 2) * model.scale;
+    } else if (model.scale > overview + 1e-9) {
+      model.offsetX = 24 - bounds.x * model.scale;
+      model.offsetY = 64 - bounds.y * model.scale;
+    } else {
+      model.offsetX = width / 2 - (bounds.x + bounds.width / 2) * model.scale;
+      model.offsetY = height / 2 - (bounds.y + bounds.height / 2) * model.scale;
+    }
     clampViewportToGraph();
     model.fitOffsetX = model.offsetX;
     model.fitOffsetY = model.offsetY;
@@ -1832,10 +1998,12 @@
     return new Set(visibleNodes().map((node) => node.id));
   }
 
-  function databaseBounds() {
+  function databaseBounds({ includeGroupCards = false } = {}) {
     const groups = new Map();
     for (const item of model.layout.values()) {
       if (item.node.layer !== "logical") continue;
+      // A collapsed database card is its own frame; bands wrap expanded ones.
+      if (!includeGroupCards && item.node.kind === "database_group") continue;
       const key = item.node.database || "default";
       const current = groups.get(key) || { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, count: 0 };
       current.minX = Math.min(current.minX, item.x);
@@ -1850,6 +2018,7 @@
 
   function edgeDashPattern(edge) {
     if (edge.kind === "view" || edge.kind === "dependency") return { dash: [7, 7], width: 1 };
+    if (edge.kind === "dictionary_source") return { dash: [2, 4, 7, 4], width: 1.1 };
     if (edge.kind === "distributed_route") return { dash: [3, 5], width: 1.1 };
     if (edge.kind === "contains") return { dash: [3, 5], width: 0.8 };
     if (edge.kind === "ttl_delete" || edge.kind === "ttl_move" || (Array.isArray(edge.ttl_events) && edge.ttl_events.length)) {
@@ -2043,7 +2212,7 @@
 
     ctx.save();
     ctx.globalAlpha = 0.96;
-    ctx.fillStyle = css("--accent", "#7c9cff");
+    ctx.fillStyle = graphColor("halo");
     for (let index = 0; index < markerCount; index += 1) {
       const ageMs = newestAgeMs + index * FLOW_EMISSION_INTERVAL_MS;
       if (ageMs < 0 || ageMs > travelMs) continue;
@@ -2062,7 +2231,7 @@
   }
 
   function isLogicalDependencyEdge(edge) {
-    return ["view", "dependency"].includes(String(edge?.kind || ""));
+    return ["view", "dependency", "dictionary_source"].includes(String(edge?.kind || ""));
   }
 
   function pointInsideItem(point, item, padding = 8) {
@@ -2896,10 +3065,10 @@
     const style = edgeDashPattern(edge);
     ctx.save();
     ctx.globalAlpha = 0.30;
-    ctx.strokeStyle = css("--accent", "#7c9cff");
+    ctx.strokeStyle = graphColor("halo");
     ctx.setLineDash(style.dash);
     ctx.lineWidth = style.width + 3.4;
-    ctx.shadowColor = css("--accent", "#7c9cff");
+    ctx.shadowColor = graphColor("halo");
     ctx.shadowBlur = 7 / Math.max(0.2, Number(model.scale || 1));
     strokeEdgePath(ctx, routePoints, a, p1, p2, b);
     ctx.restore();
@@ -2923,11 +3092,15 @@
     const p2 = straightStorage ? b : { x: b.x - dx, y: b.y };
     const routePoints = straightStorage ? storageRoute.points : (lineageRoute?.points || null);
     const selected = !focused || (focused.has(edge.from) && focused.has(edge.to));
+    // Hit testing and labels reuse the exact drawn geometry of this frame.
+    if (model.edgeGeometry) model.edgeGeometry.set(edge.id, routePoints || bezierRoutePoints(a, p1, p2, b, 24));
+    const highlighted = edgeIsHighlighted(edge);
     ctx.save();
     drawSelectedLogicalDependencyHalo(ctx, edge, routePoints, a, p1, p2, b);
-    ctx.globalAlpha = selected ? 0.78 : 0.14;
-    ctx.strokeStyle = isLogicalDependencyEdge(edge) ? css("--muted", "#788395") : css("--accentBorder", "#6b8cff");
+    ctx.globalAlpha = highlighted ? 1 : selected ? 0.8 : Math.min(0.2, dimAlpha());
+    ctx.strokeStyle = highlighted ? graphColor("halo") : isLogicalDependencyEdge(edge) ? graphColor("edgeMuted") : graphColor("edge");
     edgeStyle(edge, ctx);
+    if (highlighted) ctx.lineWidth += 1.2;
     // Dash patterns encode edge semantics but never move. Motion is reserved
     // for the one normalized round marker on actual insert-time data flow.
     strokeEdgePath(ctx, routePoints, a, p1, p2, b);
@@ -3053,6 +3226,37 @@
     return "expiration expression";
   }
 
+  // Graph-specific colour tokens (style.css "Explorer graph" block). The
+  // shared --accent is a translucent tint in the light theme, so canvas text,
+  // halos and edges use dedicated tokens with readable values in both themes.
+  function graphColor(role) {
+    switch (role) {
+      case "text": return css("--text", "#edf2f7");
+      case "muted": return css("--graphMuted", lightThemeActive() ? "#3d4f78" : "#a3adbb");
+      case "accentText": return css("--graphAccentText", lightThemeActive() ? "#1d4ed8" : "#93b4ff");
+      case "halo": return css("--graphHalo", lightThemeActive() ? "#2563eb" : "#7c9cff");
+      case "edge": return css("--graphEdge", lightThemeActive() ? "#2563eb" : "#6b8cff");
+      case "edgeMuted": return css("--graphEdgeMuted", lightThemeActive() ? "#5b6b8c" : "#8b96a8");
+      case "border": return css("--graphNodeBorder", lightThemeActive() ? "rgba(15, 23, 42, 0.34)" : "rgba(148, 163, 184, 0.34)");
+      case "nodeBg": return css("--graphNodeBg", lightThemeActive() ? "#ffffff" : "#141b27");
+      case "groupBg": return css("--graphGroupBg", lightThemeActive() ? "#eef3ff" : "#172033");
+      case "warn": return css("--graphWarn", lightThemeActive() ? "#b45309" : "#f0a33a");
+      case "error": return css("--graphError", lightThemeActive() ? "#b91c1c" : "#f87171");
+      default: return css("--text", "#edf2f7");
+    }
+  }
+
+  // Alpha of objects outside the focused neighbourhood: faint but legible.
+  function dimAlpha() {
+    return lightThemeActive() ? 0.34 : 0.26;
+  }
+
+  function roundedRectPath(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, width, height, radius);
+    else ctx.rect(x, y, width, height);
+  }
+
   function drawTtlSummary(ctx, item, node) {
     if (model.detailMode !== "physical" || node.layer !== "logical") return;
     const rules = ttlRules(node);
@@ -3060,23 +3264,22 @@
     const hasPolicy = !!String(node.storage_policy || "");
     if (!storageDisabled && !rules.length) return;
 
-    const dividerY = item.y + (hasPolicy && !storageDisabled ? 82 : 66);
-    ctx.strokeStyle = css("--borderStrong", "#384152");
-    ctx.globalAlpha = storageDisabled ? 0.42 : 0.72;
+    const dividerY = item.y + (hasPolicy && !storageDisabled ? 85 : 67);
+    ctx.strokeStyle = graphColor("border");
     ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.moveTo(item.x + 10, dividerY);
-    ctx.lineTo(item.x + item.width - 10, dividerY);
+    ctx.moveTo(item.x + 12, dividerY);
+    ctx.lineTo(item.x + item.width - 12, dividerY);
     ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = css("--muted", "#8993a4");
-    ctx.font = "9px Arial, Helvetica, sans-serif";
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `12px ${FONT}`;
     if (storageDisabled) {
-      ctx.fillText("No persistent storage", item.x + 10, item.y + 83);
+      ctx.fillText("No persistent storage", item.x + 12, item.y + 85);
       return;
     }
     const count = `${rules.length} lifecycle rule${rules.length === 1 ? "" : "s"}`;
-    ctx.fillText(canvasEllipsis(ctx, `TTL · ${ttlBaseSummary(node)} · ${count}`, item.width - 20), item.x + 10, item.y + (hasPolicy ? 100 : 83));
+    ctx.fillStyle = graphColor("accentText");
+    ctx.fillText(canvasEllipsis(ctx, `TTL · ${ttlBaseSummary(node)} · ${count}`, item.width - 24), item.x + 12, item.y + (hasPolicy ? 103 : 85));
   }
 
   function diskCapacitySummary(disk) {
@@ -3098,85 +3301,79 @@
     const volumeName = String(node.volume_name || node.name || "volume");
 
     ctx.save();
-    ctx.globalAlpha = selected ? 1 : 0.18;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(item.x, item.y, item.width, item.height, 10);
-    else ctx.rect(item.x, item.y, item.width, item.height);
-    ctx.fillStyle = css("--tableBg", "#10141d");
+    ctx.globalAlpha = selected ? 1 : dimAlpha();
+    roundedRectPath(ctx, item.x, item.y, item.width, item.height, 10);
+    ctx.fillStyle = graphColor("nodeBg");
     ctx.fill();
-    ctx.strokeStyle = isHover ? css("--accent", "#7c9cff") : css("--borderStrong", "#384152");
-    ctx.lineWidth = isHover ? 1.5 : 1;
+    ctx.strokeStyle = isHover ? graphColor("halo") : graphColor("border");
+    ctx.lineWidth = isHover ? 1.6 : 1.1;
     ctx.stroke();
 
-    ctx.fillStyle = css("--muted", "#8993a4");
-    ctx.font = "9px Arial, Helvetica, sans-serif";
-    ctx.fillText("Storage tier", item.x + 12, item.y + 16);
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `11px ${FONT}`;
+    ctx.fillText("Storage tier", item.x + 12, item.y + 17);
     if (Number(node.volume_priority || 0) > 0) {
       ctx.textAlign = "right";
-      ctx.fillText(`priority ${node.volume_priority}`, item.x + item.width - 12, item.y + 16);
+      ctx.fillText(`priority ${node.volume_priority}`, item.x + item.width - 12, item.y + 17);
       ctx.textAlign = "left";
     }
 
-    ctx.fillStyle = css("--text", "#edf2f7");
-    ctx.font = "600 12px Arial, Helvetica, sans-serif";
-    ctx.fillText(canvasEllipsis(ctx, `Volume · ${volumeName}`, item.width - 24), item.x + 12, item.y + 36);
+    ctx.fillStyle = graphColor("text");
+    ctx.font = `600 13px ${FONT}`;
+    ctx.fillText(canvasEllipsis(ctx, `Volume · ${volumeName}`, item.width - 24), item.x + 12, item.y + 38);
 
-    let y = item.y + 49;
+    let y = item.y + 51;
     const diskRows = disks.length ? disks : [{ name: "No disk metadata" }];
     for (const disk of diskRows) {
-      ctx.strokeStyle = css("--borderStrong", "#384152");
-      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = graphColor("border");
       ctx.lineWidth = 0.7;
       ctx.beginPath();
       ctx.moveTo(item.x + 12, y);
       ctx.lineTo(item.x + item.width - 12, y);
       ctx.stroke();
-      ctx.globalAlpha = 1;
 
       const diskName = String(disk.disk_name || disk.name || "disk");
-      ctx.fillStyle = css("--text", "#edf2f7");
-      ctx.font = "600 10px Arial, Helvetica, sans-serif";
-      ctx.fillText(canvasEllipsis(ctx, `Disk · ${diskName}`, item.width - 24), item.x + 12, y + 14);
+      ctx.fillStyle = graphColor("text");
+      ctx.font = `600 12px ${FONT}`;
+      ctx.fillText(canvasEllipsis(ctx, `Disk · ${diskName}`, item.width - 24), item.x + 12, y + 16);
       const capacity = diskCapacitySummary(disk);
       if (capacity) {
-        ctx.fillStyle = css("--muted", "#8993a4");
-        ctx.font = "9px Arial, Helvetica, sans-serif";
-        ctx.fillText(canvasEllipsis(ctx, capacity, item.width - 24), item.x + 12, y + 27);
+        ctx.fillStyle = graphColor("muted");
+        ctx.font = `11px ${FONT}`;
+        ctx.fillText(canvasEllipsis(ctx, capacity, item.width - 24), item.x + 12, y + 29);
       }
-      y += 31;
+      y += 33;
     }
 
     if (visibleEvents.length) {
-      ctx.strokeStyle = css("--borderStrong", "#384152");
-      ctx.globalAlpha = 0.72;
+      ctx.strokeStyle = graphColor("border");
       ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.moveTo(item.x + 12, y + 1);
       ctx.lineTo(item.x + item.width - 12, y + 1);
       ctx.stroke();
-      ctx.globalAlpha = 1;
 
-      ctx.fillStyle = css("--muted", "#8993a4");
-      ctx.font = "9px Arial, Helvetica, sans-serif";
-      ctx.fillText(`TTL while in ${volumeName}`, item.x + 12, y + 17);
-      y += 29;
+      ctx.fillStyle = graphColor("muted");
+      ctx.font = `11px ${FONT}`;
+      ctx.fillText(`TTL while in ${volumeName}`, item.x + 12, y + 18);
+      y += 31;
 
       for (const event of visibleEvents) {
-        ctx.fillStyle = css("--accent", "#7c9cff");
+        ctx.fillStyle = graphColor("accentText");
         ctx.beginPath();
-        ctx.arc(item.x + 15, y - 3, 2.4, 0, Math.PI * 2);
+        ctx.arc(item.x + 15, y - 4, 2.6, 0, Math.PI * 2);
         ctx.fill();
-        ctx.font = "600 9px Arial, Helvetica, sans-serif";
+        ctx.font = `600 11px ${FONT}`;
         ctx.fillText(canvasEllipsis(ctx, ttlTimingSummary(event), item.width - 38), item.x + 23, y);
-        ctx.fillStyle = css("--text", "#edf2f7");
-        ctx.font = "9px Arial, Helvetica, sans-serif";
+        ctx.fillStyle = graphColor("text");
+        ctx.font = `11px ${FONT}`;
         const summary = event.unresolved_target ? `${ttlActionSummary(event)} · target unresolved` : ttlActionSummary(event);
-        ctx.fillText(canvasEllipsis(ctx, summary, item.width - 38), item.x + 23, y + 13);
-        y += 31;
+        ctx.fillText(canvasEllipsis(ctx, summary, item.width - 38), item.x + 23, y + 14);
+        y += 33;
       }
       if (events.length > visibleEvents.length) {
-        ctx.fillStyle = css("--muted", "#8993a4");
-        ctx.font = "9px Arial, Helvetica, sans-serif";
+        ctx.fillStyle = graphColor("muted");
+        ctx.font = `11px ${FONT}`;
         ctx.fillText(`+${events.length - visibleEvents.length} more`, item.x + 23, y - 2);
       }
     }
@@ -3188,26 +3385,24 @@
     const selected = !focused || focused.has(node.id);
     const isHover = model.hoveredId === node.id;
     ctx.save();
-    ctx.globalAlpha = selected ? 1 : 0.18;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(item.x, item.y, item.width, item.height, 9);
-    else ctx.rect(item.x, item.y, item.width, item.height);
-    ctx.fillStyle = css("--tableBg", "#10141d");
+    ctx.globalAlpha = selected ? 1 : dimAlpha();
+    roundedRectPath(ctx, item.x, item.y, item.width, item.height, 9);
+    ctx.fillStyle = graphColor("nodeBg");
     ctx.fill();
-    ctx.strokeStyle = isHover ? css("--accent", "#7c9cff") : css("--borderStrong", "#384152");
+    ctx.strokeStyle = isHover ? graphColor("halo") : graphColor("border");
     ctx.setLineDash([5, 4]);
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.1;
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = css("--muted", "#8993a4");
-    ctx.font = "9px Arial, Helvetica, sans-serif";
-    ctx.fillText("TTL terminal", item.x + 11, item.y + 16);
-    ctx.fillStyle = css("--text", "#edf2f7");
-    ctx.font = "600 12px Arial, Helvetica, sans-serif";
-    ctx.fillText("Expired", item.x + 11, item.y + 37);
-    ctx.fillStyle = css("--muted", "#8993a4");
-    ctx.font = "9px Arial, Helvetica, sans-serif";
-    ctx.fillText("data deleted", item.x + 11, item.y + 55);
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `11px ${FONT}`;
+    ctx.fillText("TTL terminal", item.x + 12, item.y + 17);
+    ctx.fillStyle = graphColor("text");
+    ctx.font = `600 13px ${FONT}`;
+    ctx.fillText("Expired", item.x + 12, item.y + 38);
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `11px ${FONT}`;
+    ctx.fillText("data deleted", item.x + 12, item.y + 57);
     ctx.restore();
   }
 
@@ -3235,9 +3430,9 @@
     const point = explicitPoint || bezierPoint(a, p1, p2, b, 0.5);
     ctx.save();
     ctx.setLineDash([]);
-    ctx.font = "600 9px Arial, Helvetica, sans-serif";
-    const width = Math.min(198, Math.max(...lines.map((line) => ctx.measureText(line).width)) + 18);
-    const lineHeight = 13;
+    ctx.font = `600 11px ${FONT}`;
+    const width = Math.min(224, Math.max(...lines.map((line) => ctx.measureText(line).width)) + 20);
+    const lineHeight = 15;
     const height = lines.length * lineHeight + 8;
     const x = point.x - width / 2;
     const y = point.y - height / 2;
@@ -3245,183 +3440,1064 @@
     // fully opaque even when another node is focused so MOVE/DELETE rules stay
     // readable against the animated storage route.
     ctx.globalAlpha = 1;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, width, height, 6);
-    else ctx.rect(x, y, width, height);
+    roundedRectPath(ctx, x, y, width, height, 6);
     // --tableBg is intentionally translucent in the general UI theme. TTL
     // labels sit on top of moving routes, so they must use the fully opaque
     // panel background or the arrow remains visible through the label.
     ctx.fillStyle = css("--panelBg", "#0f1623");
     ctx.fill();
-    ctx.strokeStyle = css("--borderStrong", "#384152");
+    ctx.strokeStyle = graphColor("border");
     ctx.lineWidth = 0.8;
     ctx.stroke();
     for (let index = 0; index < lines.length; index += 1) {
-      ctx.fillStyle = index === 0 ? css("--accent", "#7c9cff") : css("--text", "#edf2f7");
-      ctx.font = `${index === 0 ? "600" : "400"} 9px Arial, Helvetica, sans-serif`;
+      ctx.fillStyle = index === 0 ? graphColor("accentText") : graphColor("text");
+      ctx.font = `${index === 0 ? "600" : "400"} 11px ${FONT}`;
       ctx.textAlign = "center";
-      ctx.fillText(canvasEllipsis(ctx, lines[index], width - 12), point.x, y + 13 + index * lineHeight);
+      ctx.fillText(canvasEllipsis(ctx, lines[index], width - 12), point.x, y + 15 + index * lineHeight);
     }
     ctx.textAlign = "left";
     ctx.restore();
+  }
+
+  function nodeKindLabel(node) {
+    if (node.kind === "refreshable_materialized_view" || node.layer !== "logical") return kindCode(node.kind);
+    return node.engine ? humanEngine(node.engine) : kindCode(node.kind);
+  }
+
+  function nodeSizeLabel(node) {
+    const memoryResident = node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary";
+    const rawBytes = memoryResident ? node.resident_bytes : node.logical_bytes;
+    const rows = node.rows == null
+      ? (node.kind === "buffer" ? "\u2014 buffered rows" : "\u2014 rows")
+      : `${util.formatInt(node.rows)}${node.kind === "buffer" ? " buffered rows" : " rows"}`;
+    const bytes = rawBytes == null ? "\u2014" : `${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`;
+    return `${rows} · ${bytes}`;
+  }
+
+  function drawFocusHalo(ctx, item, radius, dashed) {
+    ctx.save();
+    // Outer translucent ring + crisp inner stroke: visible on white without
+    // relying on a blur that the light theme washes out.
+    roundedRectPath(ctx, item.x - 6, item.y - 6, item.width + 12, item.height + 12, radius + 6);
+    ctx.strokeStyle = graphColor("halo");
+    ctx.globalAlpha = lightThemeActive() ? 0.22 : 0.28;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    roundedRectPath(ctx, item.x - 3, item.y - 3, item.width + 6, item.height + 6, radius + 3);
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.6;
+    if (!lightThemeActive()) {
+      ctx.shadowColor = graphColor("halo");
+      ctx.shadowBlur = 12;
+    }
+    if (dashed) ctx.setLineDash([5, 4]);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Below the readable scale a card keeps only its title, drawn larger so it
+  // stays legible while zooming out; below that, cards are plain blocks.
+  function compactTitleFont() {
+    const scale = Math.max(0.01, Number(model.scale) || 1);
+    const size = Math.min(26, Math.max(14, 12 / scale));
+    return size * scale >= 7 ? size : 0;
   }
 
   function drawNode(ctx, item, focused, compact) {
     const node = item.node;
     if (node.kind === "storage_tier") return drawStorageTierNode(ctx, item, focused);
     if (node.kind === "ttl_expired") return drawTtlExpiredNode(ctx, item, focused);
+    if (node.kind === "database_group") return drawGroupNode(ctx, item, compact);
     const selected = !focused || focused.has(node.id);
     const storageDisabled = model.detailMode === "physical" && node.layer === "logical" && node.storage_disabled === true;
     const isFocus = !storageDisabled && model.focusedId === node.id;
     const isHover = !storageDisabled && model.hoveredId === node.id;
+    const inPanel = model.panel?.type === "node" && model.panel.id === node.id;
+    const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";
     ctx.save();
-    ctx.globalAlpha = storageDisabled ? 0.46 : selected ? 1 : 0.18;
+    ctx.globalAlpha = selected ? 1 : dimAlpha();
     const radius = node.layer === "physical" ? 8 : 10;
-    if (isFocus && node.layer === "logical") {
-      ctx.save();
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(item.x - 4, item.y - 4, item.width + 8, item.height + 8, radius + 4);
-      else ctx.rect(item.x - 4, item.y - 4, item.width + 8, item.height + 8);
-      ctx.strokeStyle = css("--accent", "#7c9cff");
-      ctx.lineWidth = 1.4;
-      ctx.shadowColor = css("--accent", "#7c9cff");
-      ctx.shadowBlur = 18;
-      ctx.globalAlpha = 0.95;
-      if (["view", "materialized_view", "refreshable_materialized_view"].includes(node.kind)) ctx.setLineDash([5, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(item.x, item.y, item.width, item.height, radius);
-    else ctx.rect(item.x, item.y, item.width, item.height);
-    ctx.fillStyle = storageDisabled
-      ? css("--panelBg", "#0b0f16")
-      : node.layer === "physical" ? css("--tableBg", "#10141d") : css("--metricBg", "#151a24");
+    if (isFocus && node.layer === "logical") drawFocusHalo(ctx, item, radius, viewLike);
+    roundedRectPath(ctx, item.x, item.y, item.width, item.height, radius);
+    ctx.fillStyle = storageDisabled ? css("--panelBg", "#0b0f16") : graphColor("nodeBg");
     ctx.fill();
-    ctx.strokeStyle = storageDisabled
-      ? css("--border", "#2b3340")
-      : isFocus || isHover ? css("--accent", "#7c9cff") : css("--borderStrong", "#384152");
-    ctx.lineWidth = isFocus ? 2.4 : node.kind === "materialized_view" ? 1.8 : 1;
-    if (["view", "materialized_view", "refreshable_materialized_view"].includes(node.kind)) ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = isFocus || isHover || inPanel ? graphColor("halo") : graphColor("border");
+    ctx.lineWidth = isFocus ? 2.4 : isHover || inPanel ? 1.8 : node.kind === "materialized_view" ? 1.8 : 1.2;
+    if (viewLike || storageDisabled) ctx.setLineDash([5, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    ctx.fillStyle = css("--muted", "#8993a4");
-    ctx.font = `${node.layer === "physical" ? 9 : 10}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(kindCode(node.kind), item.x + 10, item.y + 15);
-
-    ctx.fillStyle = storageDisabled ? css("--muted", "#8993a4") : css("--text", "#edf2f7");
-    ctx.font = `600 ${node.layer === "physical" ? 11 : 12}px Arial, Helvetica, sans-serif`;
-    const maxChars = node.layer === "physical" ? 22 : 31;
+    const pad = 12;
+    const titleFont = compact ? compactTitleFont() : 14;
     const baseName = String(node.label || node.name || "");
-    const name = node.layer === "logical" && node.database ? `${node.database}.${baseName}` : baseName;
-    ctx.fillText(canvasEllipsis(ctx, name, item.width - 20), item.x + 10, item.y + (node.layer === "physical" ? 32 : 34));
-    if (node.layer === "physical" && node.kind === "disk" && node.disk_free_space != null && node.disk_total_space != null) {
-      const free = Number(node.disk_free_space);
-      const total = Number(node.disk_total_space);
-      const used = Math.max(0, total - free);
-      const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity \u2014";
-      ctx.fillStyle = css("--muted", "#8993a4");
-      ctx.font = "9px Arial, Helvetica, sans-serif";
-      ctx.fillText(`${pct} · ${util.formatBytes(free)} free`, item.x + 10, item.y + 47);
+    if (compact) {
+      if (titleFont) {
+        ctx.fillStyle = storageDisabled ? graphColor("muted") : graphColor("text");
+        ctx.font = `600 ${titleFont}px ${FONT}`;
+        ctx.fillText(canvasEllipsis(ctx, baseName, item.width - pad * 2), item.x + pad, item.y + Math.min(item.height - 10, 12 + titleFont));
+      }
+      ctx.restore();
+      return;
     }
 
-    const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";
-    if (!compact && node.layer === "logical" && !viewLike) {
-      ctx.fillStyle = css("--muted", "#8993a4");
-      ctx.font = "10px Arial, Helvetica, sans-serif";
-      const rows = node.rows == null
-        ? (node.kind === "buffer" ? "\u2014 buffered rows" : "\u2014 rows")
-        : `${util.formatInt(node.rows)}${node.kind === "buffer" ? " buffered rows" : " rows"}`;
-      const memoryResident = node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary";
-      const rawBytes = memoryResident ? node.resident_bytes : node.logical_bytes;
-      const bytes = rawBytes == null
-        ? "\u2014"
-        : `${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`;
-      ctx.fillText(`${rows} · ${bytes}`, item.x + 10, item.y + 52);
-      if (model.detailMode === "physical" && node.storage_policy) {
-        ctx.font = "9px Arial, Helvetica, sans-serif";
-        ctx.fillText(canvasEllipsis(ctx, `Storage policy · ${node.storage_policy}`, item.width - 20), item.x + 10, item.y + 70);
+    if (node.layer === "physical") {
+      ctx.fillStyle = graphColor("muted");
+      ctx.font = `11px ${FONT}`;
+      ctx.fillText(kindCode(node.kind), item.x + pad, item.y + 17);
+      ctx.fillStyle = graphColor("text");
+      ctx.font = `600 12px ${FONT}`;
+      ctx.fillText(canvasEllipsis(ctx, baseName, item.width - pad * 2), item.x + pad, item.y + 34);
+      if (node.kind === "disk") {
+        const capacity = diskCapacitySummary(node);
+        if (capacity) {
+          ctx.fillStyle = graphColor("muted");
+          ctx.font = `11px ${FONT}`;
+          ctx.fillText(canvasEllipsis(ctx, capacity, item.width - pad * 2), item.x + pad, item.y + 51);
+        }
       }
-      if (node.kind === "buffer") {
+      ctx.restore();
+      return;
+    }
+
+    // Title = the object's own name; the database is the subtitle so a long
+    // database prefix never truncates the part that tells objects apart.
+    const badge = String(node.topology_badge || "");
+    const health = String(node.health || "healthy");
+    let rightEdge = item.x + item.width - pad;
+    if (health !== "healthy") {
+      ctx.fillStyle = health === "error" || health === "critical" ? graphColor("error") : graphColor("warn");
+      ctx.beginPath();
+      ctx.arc(rightEdge - 4, item.y + 17, 4, 0, Math.PI * 2);
+      ctx.fill();
+      rightEdge -= 14;
+    }
+    if (badge) {
+      ctx.font = `600 12px ${FONT}`;
+      ctx.fillStyle = graphColor("muted");
+      ctx.textAlign = "right";
+      ctx.fillText(badge, rightEdge, item.y + 22);
+      ctx.textAlign = "left";
+      rightEdge -= ctx.measureText(badge).width + 8;
+    }
+    ctx.fillStyle = storageDisabled ? graphColor("muted") : graphColor("text");
+    ctx.font = `600 14px ${FONT}`;
+    ctx.fillText(canvasEllipsis(ctx, baseName, rightEdge - item.x - pad), item.x + pad, item.y + 22);
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `12px ${FONT}`;
+    const subtitle = `${node.database || ""} · ${nodeKindLabel(node)}`;
+    ctx.fillText(canvasEllipsis(ctx, subtitle, item.width - pad * 2), item.x + pad, item.y + 41);
+    if (!viewLike) {
+      ctx.fillText(canvasEllipsis(ctx, nodeSizeLabel(node), item.width - pad * 2), item.x + pad, item.y + 60);
+      if (model.detailMode === "physical" && node.storage_policy) {
+        ctx.fillText(canvasEllipsis(ctx, `Storage policy · ${node.storage_policy}`, item.width - pad * 2), item.x + pad, item.y + 78);
+      } else if (node.kind === "buffer") {
         const minTime = node.buffer_min_time == null ? "\u2014" : `${util.formatInt(node.buffer_min_time)}s`;
         const maxTime = node.buffer_max_time == null ? "\u2014" : `${util.formatInt(node.buffer_max_time)}s`;
         const minRows = node.buffer_min_rows == null ? "\u2014" : util.formatInt(node.buffer_min_rows);
         const maxRows = node.buffer_max_rows == null ? "\u2014" : util.formatInt(node.buffer_max_rows);
-        ctx.font = "9px Arial, Helvetica, sans-serif";
-        ctx.fillText(`${node.buffer_layers || "\u2014"} layers · ${minTime}\u2013${maxTime} · ${minRows}\u2013${maxRows} rows`, item.x + 10, item.y + 69);
-      }
-      const badge = String(node.topology_badge || "");
-      if (badge) {
-        ctx.textAlign = "right";
-        ctx.fillText(badge, item.x + item.width - 10, item.y + 15);
-        ctx.textAlign = "left";
+        ctx.fillText(canvasEllipsis(ctx, `flush ${minTime}\u2013${maxTime} · ${minRows}\u2013${maxRows} rows`, item.width - pad * 2), item.x + pad, item.y + 78);
       }
     }
     drawTtlSummary(ctx, item, node);
     ctx.restore();
   }
 
+  function groupStat(database) {
+    return model.groupStats?.get(database) || null;
+  }
+
+  function drawGroupNode(ctx, item, compact) {
+    const node = item.node;
+    const isHover = model.hoveredId === node.id;
+    const stat = groupStat(node.database) || { total: 0, connected: 0 };
+    ctx.save();
+    // Two offset sheets behind the card read as "a stack of objects".
+    for (const offset of [8, 4]) {
+      roundedRectPath(ctx, item.x + offset, item.y - offset, item.width, item.height, 10);
+      ctx.fillStyle = graphColor("nodeBg");
+      ctx.fill();
+      ctx.strokeStyle = graphColor("border");
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    roundedRectPath(ctx, item.x, item.y, item.width, item.height, 10);
+    ctx.fillStyle = graphColor("groupBg");
+    ctx.fill();
+    ctx.strokeStyle = isHover ? graphColor("halo") : graphColor("border");
+    ctx.lineWidth = isHover ? 1.8 : 1.2;
+    ctx.stroke();
+    const pad = 12;
+    if (compact) {
+      const size = compactTitleFont();
+      if (size) {
+        ctx.fillStyle = graphColor("text");
+        ctx.font = `700 ${size}px ${FONT}`;
+        ctx.fillText(canvasEllipsis(ctx, node.database, item.width - pad * 2), item.x + pad, item.y + Math.min(item.height - 10, 12 + size));
+      }
+      ctx.restore();
+      return;
+    }
+    ctx.fillStyle = graphColor("text");
+    ctx.font = `700 15px ${FONT}`;
+    ctx.fillText(canvasEllipsis(ctx, `\u25b8 ${node.database}`, item.width - pad * 2), item.x + pad, item.y + 24);
+    ctx.fillStyle = graphColor("muted");
+    ctx.font = `12px ${FONT}`;
+    const objects = `${util.formatInt(stat.total)} object${stat.total === 1 ? "" : "s"}`;
+    const linked = stat.connected ? `${util.formatInt(stat.connected)} with dependencies` : "no dependencies";
+    ctx.fillText(canvasEllipsis(ctx, `${objects} · ${linked}`, item.width - pad * 2), item.x + pad, item.y + 44);
+    ctx.fillStyle = graphColor("accentText");
+    ctx.fillText("Click to expand", item.x + pad, item.y + 64);
+    ctx.restore();
+  }
+
+  // Header strip of an expanded database band (click target to collapse).
+  function databaseBandHeader(box) {
+    const padX = 20;
+    const header = 34;
+    return { x: box.minX - padX, y: box.minY - header, width: box.maxX - box.minX + padX * 2, height: header };
+  }
+
   function drawDatabaseGroups(ctx) {
     if (model.detailMode !== "logical") return;
     const groups = databaseBounds();
-    if (groups.size <= 1) return;
+    if (groups.size <= 1 && !(model.groupStats && model.groupStats.size > 1)) return;
     ctx.save();
     for (const [database, box] of groups) {
       const padX = 20;
       const padBottom = 20;
       const header = 34;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(
-        box.minX - padX,
-        box.minY - header,
-        box.maxX - box.minX + padX * 2,
-        box.maxY - box.minY + header + padBottom,
-        12,
-      );
-      else ctx.rect(
-        box.minX - padX,
-        box.minY - header,
-        box.maxX - box.minX + padX * 2,
-        box.maxY - box.minY + header + padBottom,
-      );
+      roundedRectPath(ctx, box.minX - padX, box.minY - header, box.maxX - box.minX + padX * 2, box.maxY - box.minY + header + padBottom, 12);
       ctx.fillStyle = css("--tableBg", "#10141d");
       ctx.globalAlpha = 0.36;
       ctx.fill();
-      ctx.globalAlpha = 0.68;
-      ctx.strokeStyle = css("--borderStrong", "#384152");
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = graphColor("border");
       ctx.lineWidth = 0.9;
       ctx.stroke();
-      ctx.globalAlpha = 0.92;
-      ctx.fillStyle = css("--muted", "#8993a4");
-      ctx.font = "600 11px Arial, Helvetica, sans-serif";
-      ctx.fillText(`${database} · ${box.count}`, box.minX, box.minY - 12);
+      const stat = groupStat(database);
+      const collapsible = !!stat && !model.focusedId;
+      const hover = collapsible && model.hoveredControl?.type === "band" && model.hoveredControl.database === database;
+      ctx.fillStyle = hover ? graphColor("accentText") : graphColor("muted");
+      ctx.font = `600 13px ${FONT}`;
+      // DataHub-style "N of M": the band says when objects without
+      // dependencies are filtered out of it.
+      const count = stat && stat.shown !== stat.total
+        ? `${util.formatInt(stat.shown)} of ${util.formatInt(stat.total)} objects`
+        : `${util.formatInt(stat ? stat.total : box.count)} objects`;
+      ctx.fillText(`${collapsible ? "\u25be " : ""}${database} · ${count}`, box.minX, box.minY - 12);
     }
     ctx.restore();
   }
 
   function drawDatabaseLod(ctx) {
-    const groups = databaseBounds();
+    const groups = databaseBounds({ includeGroupCards: true });
     ctx.save();
     for (const [database, box] of groups) {
       const pad = 24;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(box.minX - pad, box.minY - pad, box.maxX - box.minX + pad * 2, box.maxY - box.minY + pad * 2, 12);
-      else ctx.rect(box.minX - pad, box.minY - pad, box.maxX - box.minX + pad * 2, box.maxY - box.minY + pad * 2);
-      ctx.fillStyle = css("--tableBg", "#10141d");
+      roundedRectPath(ctx, box.minX - pad, box.minY - pad, box.maxX - box.minX + pad * 2, box.maxY - box.minY + pad * 2, 12);
+      ctx.fillStyle = graphColor("groupBg");
       ctx.fill();
-      ctx.strokeStyle = css("--borderStrong", "#384152");
+      ctx.strokeStyle = graphColor("border");
       ctx.lineWidth = 1.2;
       ctx.stroke();
-      ctx.fillStyle = css("--text", "#edf2f7");
-      ctx.font = "700 15px Arial, Helvetica, sans-serif";
-      ctx.fillText(database, box.minX, box.minY + 6);
-      ctx.fillStyle = css("--muted", "#8993a4");
-      ctx.font = "11px Arial, Helvetica, sans-serif";
-      ctx.fillText(`${box.count} objects`, box.minX, box.minY + 25);
+      const scale = Math.max(0.01, Number(model.scale) || 1);
+      ctx.fillStyle = graphColor("text");
+      ctx.font = `700 ${Math.max(15, 13 / scale)}px ${FONT}`;
+      ctx.fillText(database, box.minX, box.minY + Math.max(6, 13 / scale));
+      ctx.fillStyle = graphColor("muted");
+      ctx.font = `${Math.max(11, 11 / scale)}px ${FONT}`;
+      ctx.fillText(`${box.count} objects`, box.minX, box.minY + Math.max(25, 30 / scale));
     }
     ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edge labels, per-node expand controls and canvas hit testing.
+
+  function fmtInt(value) {
+    return value == null || !Number.isFinite(Number(value)) ? "\u2014" : util.formatInt(Number(value));
+  }
+
+  function fmtBytes(value) {
+    return value == null || !Number.isFinite(Number(value)) ? "\u2014" : util.formatBytes(Number(value));
+  }
+
+  function edgeIsHighlighted(edge) {
+    if (!edge) return false;
+    if (model.hoveredEdgeId === edge.id) return true;
+    if (model.panel?.type === "edge" && model.panel.id === edge.id) return true;
+    const hover = model.hoveredId;
+    return !!hover && (edge.from === hover || edge.to === hover);
+  }
+
+  const EDGE_KIND_LABELS = {
+    materialized_view: ["MV", "Materialized View trigger"],
+    materialized_view_output: ["MV output", "Materialized View output"],
+    refreshable_mv: ["refresh", "Refreshable MV input"],
+    refreshable_mv_output: ["refresh output", "Refreshable MV output"],
+    view: ["view", "View dependency (query time)"],
+    buffer: ["flush", "Buffer flush"],
+    distributed_route: ["route", "Distributed route"],
+    dictionary_source: ["dictionary", "Dictionary source"],
+    dependency: ["dependency", "Dependency"],
+  };
+
+  function edgeShortLabel(edge) {
+    if (edge.aggregated) return `×${edge.members.length}`;
+    const base = (EDGE_KIND_LABELS[edge.kind] || [String(edge.kind || "").replaceAll("_", " ")])[0];
+    if (edge.collapsed) return `${base} · via ${edge.collapsed_path?.length || 1}`;
+    return base;
+  }
+
+  function edgeLongLabel(edge) {
+    if (edge.aggregated) return `${edge.members.length} dependenc${edge.members.length === 1 ? "y" : "ies"} between databases`;
+    return (EDGE_KIND_LABELS[edge.kind] || [null, String(edge.kind || "").replaceAll("_", " ")])[1];
+  }
+
+  // Label positions to try, best first: the middle of each horizontal run
+  // (the gaps between columns), longest first, then the middle of the route.
+  function edgeLabelAnchors(points) {
+    if (!Array.isArray(points) || points.length < 2) return [];
+    const runs = [];
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1];
+      const b = points[i];
+      if (Math.abs(a.y - b.y) > 0.5) continue;
+      const length = Math.abs(b.x - a.x);
+      if (length < 36) continue;
+      runs.push({ length, x: (a.x + b.x) / 2, y: a.y });
+      // Long runs also offer their two thirds, so siblings sharing the first
+      // part of a fan do not all compete for the same middle.
+      if (length >= 150) {
+        runs.push({ length: length - 1, x: a.x + (b.x - a.x) * 0.72, y: a.y });
+        runs.push({ length: length - 2, x: a.x + (b.x - a.x) * 0.28, y: a.y });
+      }
+    }
+    runs.sort((p, q) => q.length - p.length);
+    runs.push(storageRoutePoint(points, 0.5));
+    return runs;
+  }
+
+  function drawEdgeLabels(ctx, edges, focused) {
+    if (model.detailMode !== "logical" || !model.edgeGeometry) return;
+    // Every edge is labelled on small graphs; on big ones only the edges that
+    // are hovered, selected or touch the focused / hovered object.
+    const all = edges.length <= 60;
+    const items = [...model.layout.values()];
+    const placed = [];
+    // Highlighted edges first so their labels win the free spots.
+    edges = edges.slice().sort((a, b) => Number(edgeIsHighlighted(b)) - Number(edgeIsHighlighted(a)));
+    ctx.save();
+    ctx.font = `600 12px ${FONT}`;
+    for (const edge of edges) {
+      const highlighted = edgeIsHighlighted(edge);
+      const touchesFocus = !!model.focusedId && (edge.from === model.focusedId || edge.to === model.focusedId);
+      if (!all && !highlighted && !touchesFocus) continue;
+      const text = edgeShortLabel(edge);
+      const width = ctx.measureText(text).width + 12;
+      // First candidate that neither covers a card nor another label; a
+      // highlighted edge always gets its label.
+      const candidates = edgeLabelAnchors(model.edgeGeometry.get(edge.id));
+      const boxOf = (candidate) => ({ x: candidate.x - width / 2, y: candidate.y - 9, width, height: 18 });
+      let anchor = candidates.find((candidate) => {
+        const box = boxOf(candidate);
+        return !items.some((item) => rectsOverlap(box, item, 2)) && !placed.some((other) => rectsOverlap(box, other, 3));
+      }) || null;
+      if (!anchor && highlighted) anchor = candidates[0] || null;
+      if (!anchor) continue;
+      const rect = boxOf(anchor);
+      placed.push(rect);
+      const selected = !focused || (focused.has(edge.from) && focused.has(edge.to));
+      ctx.globalAlpha = highlighted || selected ? 1 : dimAlpha();
+      roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 9);
+      ctx.fillStyle = css("--panelBg", "#0f1623");
+      ctx.fill();
+      ctx.strokeStyle = highlighted ? graphColor("halo") : graphColor("border");
+      ctx.lineWidth = highlighted ? 1.4 : 0.9;
+      ctx.stroke();
+      ctx.fillStyle = highlighted ? graphColor("accentText") : graphColor("muted");
+      ctx.textAlign = "center";
+      ctx.fillText(text, anchor.x, anchor.y + 4.5);
+      ctx.textAlign = "left";
+      model.edgeLabelHits.push({ edge, ...rect });
+    }
+    ctx.restore();
+  }
+
+  function nodeExpandControls(item) {
+    const node = item.node;
+    if (model.detailMode !== "logical" || !model.focusedId || node.layer !== "logical" || node.synthetic) return [];
+    const controls = [];
+    for (const direction of ["up", "down"]) {
+      const hidden = Number(direction === "up" ? node.hidden_upstream : node.hidden_downstream) || 0;
+      const key = `${direction}\u0000${node.id}`;
+      const expanded = model.expansions.has(key);
+      if (!hidden && !expanded) continue;
+      controls.push({
+        key, direction, hidden, expanded, node,
+        label: expanded ? "\u2212" : `+${hidden}`,
+        cx: direction === "up" ? item.x : item.x + item.width,
+        cy: item.y + item.height - 18,
+      });
+    }
+    return controls;
+  }
+
+  function drawNodeExpandControls(ctx, compact) {
+    model.controlHits = [];
+    if (compact || model.detailMode !== "logical" || !model.focusedId) return;
+    ctx.save();
+    ctx.font = `700 12px ${FONT}`;
+    for (const item of model.layout.values()) {
+      for (const control of nodeExpandControls(item)) {
+        const width = Math.max(24, ctx.measureText(control.label).width + 14);
+        const rect = { x: control.cx - width / 2, y: control.cy - 10, width, height: 20 };
+        const hover = model.hoveredControl?.type === "expand" && model.hoveredControl.key === control.key;
+        roundedRectPath(ctx, rect.x, rect.y, rect.width, rect.height, 10);
+        ctx.fillStyle = hover ? graphColor("halo") : graphColor("nodeBg");
+        ctx.fill();
+        ctx.strokeStyle = graphColor("halo");
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.fillStyle = hover ? css("--panelBg", "#0f1623") : graphColor("accentText");
+        ctx.textAlign = "center";
+        ctx.fillText(control.label, control.cx, control.cy + 4.5);
+        ctx.textAlign = "left";
+        model.controlHits.push({ ...control, ...rect });
+      }
+    }
+    ctx.restore();
+  }
+
+  function eventWorldPoint(clientX, clientY) {
+    const rect = dom.explorerGraphCanvas.getBoundingClientRect();
+    return screenToWorld(clientX - rect.left, clientY - rect.top);
+  }
+
+  function pointInRect(point, rect, padding = 0) {
+    return point.x >= rect.x - padding && point.x <= rect.x + rect.width + padding
+      && point.y >= rect.y - padding && point.y <= rect.y + rect.height + padding;
+  }
+
+  function hitControl(clientX, clientY) {
+    if (!dom.explorerGraphCanvas) return null;
+    const point = eventWorldPoint(clientX, clientY);
+    const padding = 3 / Math.max(0.05, model.scale);
+    const control = (model.controlHits || []).find((hit) => pointInRect(point, hit, padding));
+    if (control) return { type: "expand", key: control.key, control };
+    if (model.detailMode === "logical" && !model.focusedId && model.groupStats && model.groupStats.size > 1) {
+      for (const [database, box] of databaseBounds()) {
+        if (pointInRect(point, databaseBandHeader(box))) return { type: "band", database };
+      }
+    }
+    return null;
+  }
+
+  function distanceToSegment(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = dx * dx + dy * dy;
+    const t = length > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / length)) : 0;
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  function hitEdge(clientX, clientY) {
+    if (!dom.explorerGraphCanvas || !model.edgeGeometry || model.scale < 0.2) return null;
+    const point = eventWorldPoint(clientX, clientY);
+    const byId = new Map(visibleEdges().map((edge) => [edge.id, edge]));
+    for (const hit of model.edgeLabelHits || []) {
+      if (pointInRect(point, hit, 2 / model.scale) && byId.has(hit.edge.id)) return byId.get(hit.edge.id);
+    }
+    const tolerance = 6 / model.scale;
+    let best = null;
+    for (const [id, points] of model.edgeGeometry) {
+      const edge = byId.get(id);
+      if (!edge || !Array.isArray(points)) continue;
+      for (let i = 1; i < points.length; i += 1) {
+        const distance = distanceToSegment(point, points[i - 1], points[i]);
+        if (distance <= tolerance && (!best || distance < best.distance)) best = { edge, distance };
+      }
+    }
+    return best ? best.edge : null;
+  }
+
+  function toggleExpansion(key) {
+    if (model.expansions.has(key)) model.expansions.delete(key);
+    else model.expansions.add(key);
+    if (model.active) refresh(false);
+  }
+
+  function setGroupExpanded(database, expanded) {
+    const db = String(database || "");
+    if (!db) return;
+    const before = expanded ? null : captureViewportAnchor();
+    if (expanded) model.expandedGroups.add(db);
+    else model.expandedGroups.delete(db);
+    model.groupsVersion += 1;
+    computeLayout();
+    if (expanded) {
+      const band = databaseBounds().get(db);
+      fitToScreen({ anchorBox: band ? databaseBandHeader(band) : null });
+    } else {
+      if (!restoreViewportAnchor(before)) fitToScreen();
+      model.isFitted = false;
+      syncFocusControls();
+      scheduleDraw();
+    }
+    renderGraphChrome();
+  }
+
+  function setShowIsolated(value) {
+    const next = !!value;
+    if (model.showIsolated === next) return;
+    model.showIsolated = next;
+    model.groupsVersion += 1;
+    computeLayout();
+    fitToScreen();
+    renderGraphChrome();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Graph chrome: Graph / List switch, "objects without dependencies" toggle,
+  // side panel (node or edge) and the impact list. All of it lives inside
+  // #explorerGraphPane and is created once by init().
+
+  const chrome = {
+    root: null, viewSwitch: null, canvasButton: null, listButton: null,
+    isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null, list: null,
+  };
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = String(text);
+    return node;
+  }
+
+  function currentViewMode() {
+    if (model.viewMode) return model.viewMode;
+    return mobileLayout() ? "list" : "canvas";
+  }
+
+  function buildGraphChrome() {
+    const pane = dom.explorerGraphPane;
+    if (!pane || chrome.root) return;
+    chrome.root = pane;
+    const controls = pane.querySelector(".explorerGraphViewportControls");
+
+    const group = el("div", "explorerGraphViewportGroup explorerGraphViewSwitch");
+    group.setAttribute("role", "tablist");
+    group.setAttribute("aria-label", "Graph view");
+    chrome.canvasButton = el("button", "explorerGraphViewportControl explorerGraphViewportControl--text explorerGraphViewSwitch__option", "Graph");
+    chrome.listButton = el("button", "explorerGraphViewportControl explorerGraphViewportControl--text explorerGraphViewSwitch__option", "List");
+    for (const [button, mode] of [[chrome.canvasButton, "canvas"], [chrome.listButton, "list"]]) {
+      button.type = "button";
+      button.setAttribute("role", "tab");
+      button.dataset.graphView = mode;
+      button.addEventListener("click", () => setViewMode(mode));
+    }
+    chrome.canvasButton.id = "explorerGraphCanvasViewButton";
+    chrome.listButton.id = "explorerGraphListViewButton";
+    group.append(chrome.canvasButton, chrome.listButton);
+    chrome.viewSwitch = group;
+
+    const isolated = el("label", "explorerGraphViewportGroup explorerGraphIsolatedToggle");
+    chrome.isolatedInput = el("input");
+    chrome.isolatedInput.type = "checkbox";
+    chrome.isolatedInput.id = "explorerGraphShowIsolated";
+    chrome.isolatedInput.addEventListener("change", () => setShowIsolated(chrome.isolatedInput.checked));
+    isolated.append(chrome.isolatedInput, el("span", null, "Show objects without dependencies"));
+    chrome.isolatedLabel = isolated;
+    if (controls) controls.append(group, isolated);
+    else pane.append(group, isolated);
+
+    const panel = el("aside", "explorerGraphPanel");
+    panel.id = "explorerGraphPanel";
+    panel.hidden = true;
+    panel.setAttribute("aria-label", "Graph object details");
+    chrome.panelBody = el("div", "explorerGraphPanel__body");
+    panel.append(chrome.panelBody);
+    chrome.panel = panel;
+
+    const list = el("section", "explorerGraphImpact");
+    list.id = "explorerGraphImpact";
+    list.hidden = true;
+    list.setAttribute("aria-label", "Lineage impact list");
+    chrome.list = list;
+    pane.append(list, panel);
+
+    window.matchMedia?.(MOBILE_QUERY)?.addEventListener?.("change", () => renderGraphChrome());
+  }
+
+  function setViewMode(mode) {
+    model.viewMode = mode === "list" ? "list" : "canvas";
+    renderGraphChrome();
+    if (model.viewMode === "canvas") {
+      canvasSize();
+      if (!model.isFitted) scheduleDraw();
+      else fitToScreen();
+    }
+  }
+
+  function renderGraphChrome() {
+    updateStatus();
+    if (!chrome.root) return;
+    const listMode = currentViewMode() === "list";
+    const lineage = model.detailMode === "logical";
+    chrome.root.classList.toggle("explorerGraphPane--list", listMode);
+    chrome.root.classList.toggle("explorerGraphPane--panel", !!model.panel && !chrome.panel.hidden);
+    chrome.canvasButton?.setAttribute("aria-selected", String(!listMode));
+    chrome.listButton?.setAttribute("aria-selected", String(listMode));
+    if (chrome.viewSwitch) chrome.viewSwitch.hidden = !lineage;
+    if (chrome.isolatedLabel) chrome.isolatedLabel.hidden = !lineage || !!model.focusedId || listMode;
+    if (chrome.isolatedInput) chrome.isolatedInput.checked = model.showIsolated;
+    if (chrome.list) {
+      chrome.list.hidden = !(listMode && lineage);
+      if (!chrome.list.hidden) renderImpactList();
+    }
+  }
+
+  // Directed hop distances from the focused object over the visible
+  // projection: upstream through incoming edges, downstream through outgoing.
+  function impactRows() {
+    const nodes = visibleNodes().filter((node) => node.layer === "logical" && !node.synthetic);
+    const edges = visibleEdges().filter((edge) => !edge.aggregated);
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const focus = model.focusedId && byId.has(model.focusedId) ? model.focusedId : null;
+    const walk = (forward, both = false) => {
+      const distance = new Map();
+      if (!focus) return distance;
+      const links = new Map();
+      const link = (from, to) => {
+        if (!links.has(from)) links.set(from, []);
+        links.get(from).push(to);
+      };
+      for (const edge of edges) {
+        if (both || forward) link(edge.from, edge.to);
+        if (both || !forward) link(edge.to, edge.from);
+      }
+      let frontier = [focus];
+      distance.set(focus, 0);
+      while (frontier.length) {
+        const next = [];
+        for (const id of frontier) {
+          for (const target of links.get(id) || []) {
+            if (distance.has(target)) continue;
+            distance.set(target, distance.get(id) + 1);
+            next.push(target);
+          }
+        }
+        frontier = next;
+      }
+      return distance;
+    };
+    const down = walk(true);
+    const up = walk(false);
+    // Siblings (another consumer of an upstream source, ...) are neither
+    // upstream nor downstream: listed as "related" at their hop distance.
+    const any = walk(true, true);
+    const rows = nodes.map((node) => {
+      const u = node.id === focus ? null : up.get(node.id);
+      const d = node.id === focus ? null : down.get(node.id);
+      let direction = "\u2014";
+      if (node.id === focus) direction = "selected";
+      else if (u != null && d != null) direction = "upstream · downstream";
+      else if (u != null) direction = "upstream";
+      else if (d != null) direction = "downstream";
+      else if (any.has(node.id)) direction = "related";
+      const depth = node.id === focus ? 0 : Math.min(u ?? Infinity, d ?? Infinity, any.get(node.id) ?? Infinity);
+      const order = node.id === focus ? 0 : u != null && d == null ? -1 : d != null ? 1 : 2;
+      return { node, direction, depth: Number.isFinite(depth) ? depth : null, order };
+    });
+    rows.sort((a, b) => a.order - b.order
+      || (a.order < 0 ? (b.depth ?? 0) - (a.depth ?? 0) : (a.depth ?? 0) - (b.depth ?? 0))
+      || `${a.node.database}.${a.node.name}`.localeCompare(`${b.node.database}.${b.node.name}`));
+    return { rows, focus: focus ? byId.get(focus) : null, upstream: up.size ? up.size - 1 : 0, downstream: down.size ? down.size - 1 : 0 };
+  }
+
+  function renderImpactList() {
+    const list = chrome.list;
+    if (!list) return;
+    list.replaceChildren();
+    const { rows, focus, upstream, downstream } = impactRows();
+    const header = el("div", "explorerGraphImpact__header");
+    if (focus) {
+      header.append(
+        el("span", "explorerGraphImpact__title", `Impact of ${focus.database}.${focus.name}`),
+        el("span", "explorerGraphImpact__meta", `${fmtInt(upstream)} upstream · ${fmtInt(downstream)} downstream · depth ${model.focusDepth}${model.expansions.size ? " + expanded" : ""}`),
+      );
+    } else {
+      header.append(
+        el("span", "explorerGraphImpact__title", "Objects with dependencies"),
+        el("span", "explorerGraphImpact__meta", "Select an object to list what it reads from and what depends on it."),
+      );
+    }
+    list.append(header);
+    if (!rows.length) {
+      list.append(el("p", "explorerGraphImpact__empty", model.loading ? "Loading graph\u2026" : "No objects in this scope."));
+      return;
+    }
+    const wrap = el("div", "explorerGraphImpact__wrap");
+    const table = el("table", "explorerGraphImpact__table");
+    const head = el("thead");
+    const headRow = el("tr");
+    for (const [label, column] of [["Object", "name"], ["Type", "type"], ["Direction", "direction"], ["Depth", "depth"], ["Database", "database"]]) {
+      headRow.append(el("th", `explorerGraphImpact__col--${column}`, label));
+    }
+    head.append(headRow);
+    const body = el("tbody");
+    for (const row of rows) {
+      const tr = el("tr", row.node.id === model.focusedId ? "is-selected" : "");
+      tr.dataset.nodeId = row.node.id;
+      const name = el("button", "explorerGraphImpact__open", row.node.name);
+      name.type = "button";
+      name.title = `${row.node.database}.${row.node.name}`;
+      name.addEventListener("click", () => selectGraphNode(row.node.id));
+      const nameCell = el("td", "explorerGraphImpact__name");
+      nameCell.append(name);
+      tr.append(
+        nameCell,
+        el("td", "explorerGraphImpact__col--type", nodeKindLabel(row.node)),
+        el("td", `explorerGraphImpact__direction explorerGraphImpact__direction--${row.order === -1 ? "up" : row.order === 1 ? "down" : "none"}`, row.direction),
+        el("td", "explorerGraphImpact__depth", row.depth == null ? "\u2014" : String(row.depth)),
+        el("td", "explorerGraphImpact__col--database", row.node.database),
+      );
+      body.append(tr);
+    }
+    table.append(head, body);
+    wrap.append(table);
+    list.append(wrap);
+  }
+
+  // Same path as a canvas click on a logical node: focus, tree/URL sync and
+  // the side panel.
+  function selectGraphNode(id) {
+    const node = (model.graph?.nodes || []).find((candidate) => candidate.id === id && candidate.layer === "logical");
+    if (!node) return;
+    setFocus(node.id);
+    if (model.openTable && node.database && node.name) model.openTable(node.database, node.name);
+    openPanel({ type: "node", id: node.id });
+  }
+
+  function openPanel(target) {
+    model.panel = target;
+    model.panelSerial += 1;
+    renderPanel();
+    keepNodeBesidePanel(target);
+    scheduleDraw();
+  }
+
+  // The panel covers the right of the canvas: pan just enough that the
+  // object it describes stays visible to its left (desktop only; on phones
+  // the panel is a bottom sheet).
+  function keepNodeBesidePanel(target) {
+    if (target?.type !== "node" || mobileLayout() || !chrome.panel || chrome.panel.hidden) return;
+    const item = model.layout.get(target.id);
+    const canvas = dom.explorerGraphCanvas;
+    if (!item || !canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const panelLeft = chrome.panel.getBoundingClientRect().left - canvasRect.left;
+    const right = worldToScreen(item.x + item.width, item.y).x;
+    const overlap = right + 24 - panelLeft;
+    if (overlap <= 0) return;
+    const left = worldToScreen(item.x, item.y).x;
+    model.offsetX -= Math.min(overlap, Math.max(0, left - 24));
+    model.isFitted = false;
+    syncFocusControls();
+  }
+
+  function closePanel() {
+    if (!model.panel) return;
+    model.panel = null;
+    model.panelSerial += 1;
+    renderPanel();
+    scheduleDraw();
+  }
+
+  function panelSection(title) {
+    const section = el("section", "explorerGraphPanel__section");
+    if (title) section.append(el("h3", "explorerGraphPanel__sectionTitle", title));
+    return section;
+  }
+
+  function panelFacts(pairs) {
+    const list = el("dl", "explorerGraphPanel__facts");
+    for (const [label, value] of pairs) {
+      if (value == null || value === "") continue;
+      list.append(el("dt", null, label), el("dd", null, value));
+    }
+    return list;
+  }
+
+  function objectButton(id, fallback) {
+    const node = (model.graph?.nodes || []).find((candidate) => candidate.id === id);
+    const label = node ? `${node.database}.${node.name}` : (parseLogicalTableId(id) ? `${parseLogicalTableId(id).database}.${parseLogicalTableId(id).table}` : fallback || id);
+    const button = el("button", "explorerGraphPanel__link", label);
+    button.type = "button";
+    button.title = label;
+    button.addEventListener("click", () => selectGraphNode(id));
+    return button;
+  }
+
+  function sqlBlock(sql, truncated) {
+    const pre = el("pre", "explorerGraphPanel__sql");
+    const code = el("code");
+    if (ns.highlight && typeof ns.highlight.renderInto === "function") ns.highlight.renderInto(code, sql);
+    else code.textContent = sql;
+    pre.append(code);
+    const wrap = el("div", "explorerGraphPanel__sqlWrap");
+    wrap.append(pre);
+    if (truncated) wrap.append(el("p", "explorerGraphPanel__note", "Truncated at 32 KB: the full text is in the object's DDL."));
+    return wrap;
+  }
+
+  async function loadDefinition(node) {
+    const hostId = String(state.selectedHostId || "");
+    const key = `${hostId}\u0000${node.id}`;
+    if (!model.definitionCache.has(key)) {
+      model.definitionCache.set(key, api.getExplorerGraphDefinition(hostId, node.database, node.name).catch((error) => {
+        model.definitionCache.delete(key);
+        throw error;
+      }));
+    }
+    return model.definitionCache.get(key);
+  }
+
+  async function loadColumns(node) {
+    const hostId = String(state.selectedHostId || "");
+    const key = `${hostId}\u0000${node.id}`;
+    if (!model.columnsCache.has(key)) {
+      model.columnsCache.set(key, api.getExplorerTable(hostId, node.database, node.name).then((detail) => (
+        Array.isArray(detail?.columns) ? detail.columns : []
+      )).catch((error) => {
+        model.columnsCache.delete(key);
+        throw error;
+      }));
+    }
+    return model.columnsCache.get(key);
+  }
+
+  // Fills `container` with what the object definition says about it; used by
+  // node panels and by edge panels for the object that defines the edge.
+  function renderDefinitionInto(container, node, { compact = false } = {}) {
+    const serial = model.panelSerial;
+    const status = el("p", "explorerGraphPanel__note", "Loading definition\u2026");
+    container.append(status);
+    loadDefinition(node).then((definition) => {
+      if (serial !== model.panelSerial) return;
+      status.remove();
+      const facts = [];
+      const target = definition.target ? `${definition.target.database}.${definition.target.table}` : null;
+      if (node.kind === "materialized_view" || node.kind === "refreshable_materialized_view") {
+        facts.push(["Writes to", target || (definition.target_visible ? null : "implicit inner table or not visible")]);
+      } else if (node.kind === "buffer") {
+        facts.push(["Flushes to", target || "not visible"]);
+        facts.push(["Flush after", `${fmtInt(node.buffer_min_time)}\u2013${fmtInt(node.buffer_max_time)} s`]);
+        facts.push(["Flush rows", `${fmtInt(node.buffer_min_rows)}\u2013${fmtInt(node.buffer_max_rows)}`]);
+        facts.push(["Flush bytes", `${fmtBytes(node.buffer_min_bytes)}\u2013${fmtBytes(node.buffer_max_bytes)}`]);
+        facts.push(["Layers", fmtInt(node.buffer_layers)]);
+      } else if (node.kind === "dictionary" && definition.dictionary) {
+        facts.push(["Source", [definition.dictionary.source_kind, target].filter(Boolean).join(" · ") || "\u2014"]);
+        facts.push(["Layout", definition.dictionary.layout || "\u2014"]);
+        facts.push(["Lifetime", definition.dictionary.lifetime || "\u2014"]);
+      } else if (node.kind === "distributed" && definition.distributed) {
+        const d = definition.distributed;
+        facts.push(["Cluster", d.cluster || "\u2014"]);
+        facts.push(["Local table", target || "not visible"]);
+        facts.push(["Sharding key", d.sharding_key || "none (single shard writes)"]);
+        if (d.shards) facts.push(["Topology", `${fmtInt(d.shards)} shard${d.shards === 1 ? "" : "s"} × ${fmtInt(d.replicas_per_shard)} replica${d.replicas_per_shard === 1 ? "" : "s"}`]);
+      }
+      if (facts.length) container.append(panelFacts(facts));
+      if (definition.select_sql) {
+        if (!compact) container.append(el("h4", "explorerGraphPanel__subTitle", "SELECT"));
+        container.append(sqlBlock(definition.select_sql, definition.select_sql_truncated));
+      }
+      if (!facts.length && !definition.select_sql) container.append(el("p", "explorerGraphPanel__note", "No definition beyond the table structure."));
+    }).catch((error) => {
+      if (serial !== model.panelSerial) return;
+      status.textContent = error instanceof Error ? error.message : String(error);
+    });
+  }
+
+  function renderColumnsInto(container, node) {
+    const serial = model.panelSerial;
+    const status = el("p", "explorerGraphPanel__note", "Loading columns\u2026");
+    container.append(status);
+    loadColumns(node).then((columns) => {
+      if (serial !== model.panelSerial) return;
+      status.remove();
+      if (!columns.length) { container.append(el("p", "explorerGraphPanel__note", "No columns.")); return; }
+      const limit = 40;
+      const table = el("table", "explorerGraphPanel__columns");
+      const body = el("tbody");
+      for (const column of columns.slice(0, limit)) {
+        const tr = el("tr");
+        tr.append(el("td", "explorerGraphPanel__columnName", column.name), el("td", "explorerGraphPanel__columnType", column.type));
+        body.append(tr);
+      }
+      table.append(body);
+      container.append(table);
+      if (columns.length > limit) container.append(el("p", "explorerGraphPanel__note", `${fmtInt(columns.length - limit)} more columns in the table card.`));
+    }).catch((error) => {
+      if (serial !== model.panelSerial) return;
+      status.textContent = error instanceof Error ? error.message : String(error);
+    });
+  }
+
+  function neighborIds(id, direction) {
+    const edges = visibleEdges().filter((edge) => !edge.aggregated);
+    return [...new Set(edges.filter((edge) => (direction === "up" ? edge.to === id : edge.from === id))
+      .map((edge) => (direction === "up" ? edge.from : edge.to)))];
+  }
+
+  function renderNodePanel(body, node) {
+    const header = el("header", "explorerGraphPanel__header");
+    const titles = el("div", "explorerGraphPanel__titles");
+    titles.append(
+      el("span", "explorerGraphPanel__kind", nodeKindLabel(node)),
+      el("h2", "explorerGraphPanel__title", node.name),
+      el("span", "explorerGraphPanel__subtitle", node.database),
+    );
+    header.append(titles, panelCloseButton());
+    body.append(header);
+
+    const actions = el("div", "explorerGraphPanel__actions");
+    const open = el("button", "button button--small explorerGraphPanel__openCard", "Open card");
+    open.type = "button";
+    open.id = "explorerGraphPanelOpenCard";
+    open.addEventListener("click", () => {
+      if (typeof model.openCard === "function") model.openCard(node.database, node.name);
+    });
+    actions.append(open);
+    body.append(actions);
+
+    const summary = panelSection("Summary");
+    const viewLike = ["view", "materialized_view", "refreshable_materialized_view"].includes(node.kind);
+    summary.append(panelFacts([
+      ["Engine", humanEngine(node.engine)],
+      ["Rows", viewLike ? null : fmtInt(node.rows)],
+      ["Size", viewLike ? null : (node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary"
+        ? `${fmtBytes(node.resident_bytes)} RAM` : fmtBytes(node.logical_bytes))],
+      ["Parts", viewLike || !node.active_parts ? null : fmtInt(node.active_parts)],
+      ["Replication", node.topology_badge || null],
+      ["Health", node.health && node.health !== "healthy" ? node.health : null],
+      ["TTL", ttlRules(node).length ? `${ttlRules(node).length} rule${ttlRules(node).length === 1 ? "" : "s"} · ${ttlBaseSummary(node)}` : null],
+    ]));
+    body.append(summary);
+
+    const lineage = panelSection("Lineage");
+    for (const [label, direction] of [["Reads from", "up"], ["Used by", "down"]]) {
+      const ids = neighborIds(node.id, direction);
+      const hidden = Number(direction === "up" ? node.hidden_upstream : node.hidden_downstream) || 0;
+      const row = el("div", "explorerGraphPanel__lineageRow");
+      row.append(el("span", "explorerGraphPanel__lineageLabel", label));
+      const values = el("div", "explorerGraphPanel__lineageValues");
+      for (const id of ids.slice(0, 12)) values.append(objectButton(id));
+      if (ids.length > 12) values.append(el("span", "explorerGraphPanel__note", `+${ids.length - 12} more`));
+      if (!ids.length && !hidden) values.append(el("span", "explorerGraphPanel__note", "\u2014"));
+      if (hidden) {
+        const more = el("button", "explorerGraphPanel__link explorerGraphPanel__expand", `Show ${fmtInt(hidden)} more`);
+        more.type = "button";
+        more.addEventListener("click", () => toggleExpansion(`${direction}\u0000${node.id}`));
+        values.append(more);
+      }
+      row.append(values);
+      lineage.append(row);
+    }
+    body.append(lineage);
+
+    if (["view", "materialized_view", "refreshable_materialized_view", "dictionary", "distributed", "buffer"].includes(node.kind)) {
+      const definition = panelSection("Definition");
+      renderDefinitionInto(definition, node);
+      body.append(definition);
+    }
+    const columns = panelSection("Columns");
+    renderColumnsInto(columns, node);
+    body.append(columns);
+  }
+
+  // The object whose definition explains an edge: the MV for MV trigger and
+  // output edges, the View it feeds, the Buffer / Distributed table that
+  // forwards, the dictionary that loads.
+  function edgeDefiningObjectIds(edge) {
+    if (edge.collapsed) return (edge.collapsed_path || []).slice();
+    if (["materialized_view", "refreshable_mv", "view", "dictionary_source"].includes(edge.kind)) return [edge.to];
+    if (["materialized_view_output", "refreshable_mv_output", "buffer", "distributed_route"].includes(edge.kind)) return [edge.from];
+    return [];
+  }
+
+  function renderEdgePanel(body, edge) {
+    const header = el("header", "explorerGraphPanel__header");
+    const titles = el("div", "explorerGraphPanel__titles");
+    titles.append(el("span", "explorerGraphPanel__kind", "Dependency"), el("h2", "explorerGraphPanel__title", edgeLongLabel(edge)));
+    header.append(titles, panelCloseButton());
+    body.append(header);
+
+    const route = panelSection(null);
+    const fromTo = el("div", "explorerGraphPanel__route");
+    const groupLabel = (id) => {
+      const node = visibleNodes().find((candidate) => candidate.id === id);
+      return node?.kind === "database_group" ? el("span", "explorerGraphPanel__routeGroup", `${node.database} (database)`) : objectButton(id);
+    };
+    fromTo.append(groupLabel(edge.from), el("span", "explorerGraphPanel__arrow", "\u2192"), groupLabel(edge.to));
+    route.append(fromTo);
+    if (edge.collapsed) route.append(el("p", "explorerGraphPanel__note", `Through ${edge.collapsed_path.length} hidden object${edge.collapsed_path.length === 1 ? "" : "s"} (non-storing objects are hidden).`));
+    body.append(route);
+
+    if (edge.aggregated) {
+      const members = panelSection("Dependencies");
+      const list = el("ul", "explorerGraphPanel__members");
+      for (const member of edge.members.slice(0, 40)) {
+        const item = el("li");
+        item.append(objectButton(member.from), el("span", "explorerGraphPanel__arrow", "\u2192"), objectButton(member.to),
+          el("span", "explorerGraphPanel__memberKind", edgeShortLabel(member)));
+        list.append(item);
+      }
+      members.append(list);
+      body.append(members);
+      return;
+    }
+
+    const nodesById = new Map((model.graph?.nodes || []).map((node) => [node.id, node]));
+    for (const id of edgeDefiningObjectIds(edge)) {
+      const node = nodesById.get(id);
+      if (!node) continue;
+      const section = panelSection(`${nodeKindLabel(node)} · ${node.name}`);
+      renderDefinitionInto(section, node, { compact: false });
+      body.append(section);
+    }
+    if (edge.kind === "view" && !edge.collapsed) {
+      body.append(el("p", "explorerGraphPanel__note explorerGraphPanel__note--block", "A View is evaluated at query time: no data is copied along this edge."));
+    }
+  }
+
+  function panelCloseButton() {
+    const close = el("button", "explorerGraphPanel__close", "×");
+    close.type = "button";
+    close.setAttribute("aria-label", "Close details");
+    close.addEventListener("click", closePanel);
+    return close;
+  }
+
+  function renderPanel({ keepScroll = false } = {}) {
+    const panel = chrome.panel;
+    const body = chrome.panelBody;
+    if (!panel || !body) return;
+    const scrollTop = keepScroll ? body.scrollTop : 0;
+    body.replaceChildren();
+    let rendered = false;
+    if (model.panel?.type === "node") {
+      const node = (model.graph?.nodes || []).find((candidate) => candidate.id === model.panel.id && candidate.layer === "logical");
+      if (node) { renderNodePanel(body, node); rendered = true; }
+    } else if (model.panel?.type === "edge") {
+      const edge = visibleEdges().find((candidate) => candidate.id === model.panel.id);
+      if (edge) { renderEdgePanel(body, edge); rendered = true; }
+    }
+    panel.hidden = !rendered;
+    if (!rendered) model.panel = null;
+    chrome.root?.classList.toggle("explorerGraphPane--panel", rendered);
+    panel.dataset.panelType = rendered ? model.panel.type : "";
+    if (keepScroll) body.scrollTop = scrollTop;
   }
 
   function graphHasClippedElements() {
@@ -3444,7 +4520,9 @@
     const canvas = dom.explorerGraphMinimap;
     const bounds = model.worldBounds;
     if (!canvas) return;
-    const hasClippedElements = graphHasClippedElements();
+    // Also shown as soon as the zoom is below the readable scale: the cards
+    // are then compact and the minimap is the orientation aid.
+    const hasClippedElements = graphHasClippedElements() || (model.layout.size > 1 && model.scale < readableScale() - 1e-6);
     canvas.hidden = !hasClippedElements;
     if (!hasClippedElements || !bounds || !model.layout.size) return;
     const ctx = canvas.getContext("2d");
@@ -3461,7 +4539,7 @@
     // but direction and bends must match what the user sees in the graph rather
     // than falling back to misleading centre-to-centre diagonals.
     ctx.save();
-    ctx.strokeStyle = css("--accentBorder", "#6b8cff");
+    ctx.strokeStyle = graphColor("edge");
     ctx.fillStyle = ctx.strokeStyle;
     ctx.globalAlpha = 0.48;
     const lineageRoutes = model.detailMode === "logical" ? ensureLineageRouteCache() : null;
@@ -3506,7 +4584,7 @@
     }
     ctx.restore();
 
-    ctx.fillStyle = css("--muted", "#8993a4");
+    ctx.fillStyle = graphColor("muted");
     for (const item of model.layout.values()) {
       // The preview mirrors the active projection. Storage tiers/TTL terminals
       // must therefore be represented too; otherwise the minimap can appear
@@ -3529,7 +4607,7 @@
         ctx.fillStyle = "rgba(15, 23, 42, 0.10)";
         ctx.fillRect(viewportX, viewportY, viewportWidth, viewportHeight);
       }
-      ctx.strokeStyle = lightThemeActive() ? "rgba(15, 23, 42, 0.92)" : css("--accent", "#7c9cff");
+      ctx.strokeStyle = lightThemeActive() ? "rgba(15, 23, 42, 0.92)" : graphColor("halo");
       ctx.lineWidth = lightThemeActive() ? 1.6 : 1;
       ctx.strokeRect(viewportX, viewportY, viewportWidth, viewportHeight);
     }
@@ -3548,7 +4626,7 @@
     ctx.fillRect(0, 0, width, height);
 
     if (!model.graph || !model.layout.size) {
-      ctx.fillStyle = css("--muted", "#8993a4");
+      ctx.fillStyle = graphColor("muted");
       ctx.font = "13px Arial, Helvetica, sans-serif";
       ctx.fillText(model.loading ? "Loading graph\u2026" : "No accessible objects in this scope", 24, 34);
       return;
@@ -3562,9 +4640,14 @@
     } else {
       const focused = focusedSet();
       drawDatabaseGroups(ctx);
-      for (const edge of visibleEdges()) drawEdge(ctx, edge, now, focused);
-      const compact = model.scale < 0.62;
+      const edges = visibleEdges();
+      model.edgeLabelHits = [];
+      model.edgeGeometry = new Map();
+      for (const edge of edges) drawEdge(ctx, edge, now, focused);
+      const compact = model.scale < readableScale() - 1e-6;
       for (const item of model.layout.values()) drawNode(ctx, item, focused, compact);
+      if (!compact) drawEdgeLabels(ctx, edges, focused);
+      drawNodeExpandControls(ctx, compact);
     }
     ctx.restore();
     drawMinimap();
@@ -3719,7 +4802,10 @@
     const changed = model.focusedId !== nextId;
     model.focusedId = nextId;
     if (changed && !preserveDepth) model.focusDepth = 1;
+    // Per-node expansions belong to the neighbourhood they were made in.
+    if (changed) model.expansions.clear();
     syncFocusControls();
+    if (changed) renderGraphChrome();
     if (changed) model.onStateChange?.();
     if (!model.graph) { scheduleDraw(); return; }
 
@@ -3859,12 +4945,24 @@
       dom.explorerGraphStatus.textContent = "Loading graph\u2026";
       return;
     }
-    const nodes = visibleNodes().length;
+    const visible = visibleNodes();
+    const nodes = visible.filter((node) => !node.synthetic).length;
+    const groups = visible.length - nodes;
     const edges = visibleEdges().length;
     const focusedScope = currentFocusScope();
     const scope = focusedScope ? `${focusedScope.database}.${focusedScope.table}` : (model.database || "all databases");
-    const focus = model.focusedId && model.detailMode === "logical" ? ` · neighborhood depth ${model.focusDepth}` : "";
-    dom.explorerGraphStatus.textContent = `${nodes} nodes · ${edges} edges · ${scope}${focus}`;
+    const focus = model.focusedId && model.detailMode === "logical"
+      ? ` · neighborhood depth ${model.focusDepth}${model.expansions.size ? ` + ${model.expansions.size} expanded` : ""}` : "";
+    const parts = [];
+    if (groups) parts.push(`${groups} collapsed database${groups === 1 ? "" : "s"}`);
+    if (nodes || !groups) parts.push(`${nodes} nodes`);
+    parts.push(`${edges} edges`, `${scope}${focus}`);
+    if (model.groupStats && !model.showIsolated && model.detailMode === "logical" && !model.focusedId) {
+      let isolated = 0;
+      for (const stat of model.groupStats.values()) isolated += stat.total - stat.connected;
+      if (isolated) parts.push(`${isolated} without dependencies hidden`);
+    }
+    dom.explorerGraphStatus.textContent = parts.join(" · ");
   }
 
 
@@ -3900,6 +4998,7 @@
       if (stale) return;
 
       model.graph = payload;
+      model.graphRequestKey = requestKey;
       let ensurePendingFocus = false;
       if (model.pendingFocusId && (payload.nodes || []).some((node) => node.id === model.pendingFocusId)) {
         if (model.detailMode === "physical" && !canUseStorageForId(model.pendingFocusId)) {
@@ -3957,6 +5056,8 @@
     } finally {
       model.loading = false;
       updateStatus();
+      renderGraphChrome();
+      if (model.panel) renderPanel({ keepScroll: true });
       if (model.refreshQueued && model.active) {
         const queuedForce = model.refreshQueuedForce;
         const queuedReflow = model.refreshQueuedReflow;
@@ -3982,6 +5083,8 @@
     if (ttlLegend) ttlLegend.hidden = next !== "physical";
     closeGraphTypeMenu({ immediate: true });
     if (!changed) return;
+    if (model.panel?.type === "edge") closePanel();
+    renderGraphChrome();
     syncFocusControls();
     // The backend now serves only the active layer. Switching Lineage/Storage
     // therefore changes the transport scope and must fetch that projection
@@ -3993,8 +5096,11 @@
   }
 
   function minimumZoomScale() {
+    // Zoom-out stops at the whole-graph overview: below the readable Fit the
+    // cards switch to their compact level of detail.
     const fitScale = Number(model.fitScale);
-    return Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 0.06;
+    const floor = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 0.06;
+    return Math.min(floor, overviewScale());
   }
 
   function clampViewportToGraph() {
@@ -4109,14 +5215,22 @@
     model.layout.clear();
     model.focusedId = null;
     model.pendingEnsureVisible = false;
+    model.expansions.clear();
+    model.expandedGroups.clear();
+    model.groupsVersion += 1;
+    model.definitionCache.clear();
+    model.columnsCache.clear();
+    closePanel();
     if (model.active) refresh(false);
   }
 
   function init(options = {}) {
     model.openTable = typeof options.openTable === "function" ? options.openTable : null;
+    model.openCard = typeof options.openCard === "function" ? options.openCard : null;
     model.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;
     const canvas = dom.explorerGraphCanvas;
     if (!canvas) return;
+    buildGraphChrome();
 
     model.resizeObserver = new ResizeObserver(() => {
       canvasSize();
@@ -4165,12 +5279,20 @@
         scheduleDraw();
         return;
       }
-      const node = hitNode(event.clientX, event.clientY);
+      const control = hitControl(event.clientX, event.clientY);
+      const node = control ? null : hitNode(event.clientX, event.clientY);
       const clickable = nodeIsClickable(node);
+      const edge = control || node ? null : hitEdge(event.clientX, event.clientY);
       const next = clickable ? node.id : null;
+      const nextEdge = edge ? edge.id : null;
+      const controlKey = control ? `${control.type}\u0000${control.key || control.database}` : null;
+      const previousControlKey = model.hoveredControl ? `${model.hoveredControl.type}\u0000${model.hoveredControl.key || model.hoveredControl.database}` : null;
       updateCanvasPointerState(clickable ? node : null);
-      if (next !== model.hoveredId) {
+      canvas.classList.toggle("is-node-clickable", !!(control || edge || clickable));
+      if (next !== model.hoveredId || nextEdge !== model.hoveredEdgeId || controlKey !== previousControlKey) {
         model.hoveredId = next;
+        model.hoveredEdgeId = nextEdge;
+        model.hoveredControl = control;
         scheduleDraw();
       }
     });
@@ -4179,20 +5301,33 @@
       model.dragging = false;
       canvas.releasePointerCapture?.(event.pointerId);
       canvas.classList.remove("is-dragging");
-      const node = hitNode(event.clientX, event.clientY);
+      const control = hitControl(event.clientX, event.clientY);
+      const node = control ? null : hitNode(event.clientX, event.clientY);
       updateCanvasPointerState(node);
-      if (!model.dragMoved && nodeIsClickable(node)) {
+      if (model.dragMoved) return;
+      if (control?.type === "expand") { toggleExpansion(control.key); return; }
+      if (control?.type === "band") { setGroupExpanded(control.database, false); return; }
+      if (node?.kind === "database_group") { setGroupExpanded(node.database, true); return; }
+      if (nodeIsClickable(node)) {
         setFocus(node.id);
         if (node.layer === "logical" && model.openTable && node.database && node.name) {
           model.openTable(node.database, node.name);
         }
+        if (node.layer === "logical") openPanel({ type: "node", id: node.id });
+        return;
       }
+      if (node) return;
+      const edge = hitEdge(event.clientX, event.clientY);
+      if (edge && model.detailMode === "logical") openPanel({ type: "edge", id: edge.id });
+      else closePanel();
     };
     canvas.addEventListener("pointerup", endDrag);
     canvas.addEventListener("pointercancel", endDrag);
     canvas.addEventListener("pointerleave", () => {
       if (!model.dragging) {
         model.hoveredId = null;
+        model.hoveredEdgeId = null;
+        model.hoveredControl = null;
         updateCanvasPointerState(null);
         scheduleDraw();
       }
@@ -4213,11 +5348,43 @@
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeGraphTypeMenu({ immediate: true });
+      if (event.key === "Escape" && model.active && model.panel && !graphTypeMenuOpen()) closePanel();
     });
     setDetailMode(model.detailMode);
+    renderGraphChrome();
+  }
+
+  // Read-only geometry of the last drawn frame in client (CSS pixel)
+  // coordinates: lets browser tests click real nodes, edge labels and
+  // expand controls on the canvas instead of guessing pixels.
+  function inspect() {
+    const rect = dom.explorerGraphCanvas?.getBoundingClientRect();
+    const toClient = (box) => {
+      const a = worldToScreen(box.x, box.y);
+      return { x: (rect?.left || 0) + a.x, y: (rect?.top || 0) + a.y, width: box.width * model.scale, height: box.height * model.scale };
+    };
+    return {
+      scale: model.scale,
+      fitScale: model.fitScale,
+      readableScale: readableScale(),
+      viewMode: currentViewMode(),
+      focusedId: model.focusedId,
+      panel: model.panel ? { ...model.panel } : null,
+      expansions: [...model.expansions],
+      showIsolated: model.showIsolated,
+      nodes: [...model.layout.values()].map((item) => ({
+        id: item.node.id, kind: item.node.kind, database: item.node.database, name: item.node.name,
+        hiddenUpstream: Number(item.node.hidden_upstream) || 0, hiddenDownstream: Number(item.node.hidden_downstream) || 0,
+        ...toClient(item),
+      })),
+      edges: visibleEdges().map((edge) => ({ id: edge.id, kind: edge.kind, from: edge.from, to: edge.to, aggregated: !!edge.aggregated, collapsed: !!edge.collapsed })),
+      edgeLabels: (model.edgeLabelHits || []).map((hit) => ({ id: hit.edge.id, kind: hit.edge.kind, from: hit.edge.from, to: hit.edge.to, text: edgeShortLabel(hit.edge), ...toClient(hit) })),
+      controls: (model.controlHits || []).map((hit) => ({ key: hit.key, direction: hit.direction, nodeId: hit.node.id, label: hit.label, ...toClient(hit) })),
+    };
   }
 
   ns.explorerGraph = {
+    inspect,
     init,
     activate,
     deactivate,

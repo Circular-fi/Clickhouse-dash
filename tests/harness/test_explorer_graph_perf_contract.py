@@ -9,7 +9,7 @@ def read(path: str) -> str:
 
 def test_layout_transposition_uses_incremental_crossing_delta() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    layout = graph[graph.index("function computeLayout("):graph.index("function fitToScreen()")]
+    layout = graph[graph.index("function computeLayout("):graph.index("function overviewScale()")]
     # Re-scoring every crossing twice per adjacent swap froze a 2k-node catalog
     # for a minute; the swap decision must use the exact incremental delta.
     assert "const before = crossingScore();" not in layout
