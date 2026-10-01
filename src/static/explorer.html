@@ -182,7 +182,8 @@
           <div id="explorerSectionSelectMenu" class="themeSelect__menu explorerNavSelect__menu" role="listbox" tabindex="-1" hidden>
             <button id="explorerTablesSectionButton" class="themeSelect__option" type="button" role="option" data-value="tables" aria-selected="true">Tables</button>
             <button id="explorerFunctionsSectionButton" class="themeSelect__option" type="button" role="option" data-value="functions" aria-selected="false">Functions</button>
-            <button id="explorerSystemSectionButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false">System</button>
+            <button id="explorerSystemSectionButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false">Storage</button>
+            <button id="explorerOpsSectionButton" class="themeSelect__option" type="button" role="option" data-value="operations" aria-selected="false" hidden>Operations</button>
           </div>
         </div>
         <div id="explorerTableModeTabs" class="themeSelect themeSelect--icons explorerModeSelect" aria-label="Table view">
@@ -318,32 +319,12 @@
         </section>
       </div>
 
-      <div id="explorerSystemPane" class="explorerGrid explorerSystemPane" hidden>
-        <aside class="explorerListPane" aria-label="Databases by size">
-          <div class="explorerSidebarToolbar explorerSidebarToolbar--system">
-            <label class="explorerSystemOption"><input id="explorerSystemIncludeSystem" type="checkbox" /> <span>Include system databases</span></label>
-            <button id="explorerSystemRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh storage distribution" title="Refresh storage distribution"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
-          </div>
-          <div id="explorerSystemDatabaseList" class="explorerTableList explorerSystemDatabaseList"></div>
-        </aside>
-        <section class="explorerDetailPane explorerSystemDetail" aria-label="Server storage distribution" aria-live="polite">
-          <div class="explorerDetailHeader explorerSystemHeader">
-            <div>
-              <div class="explorerDetailName">Storage distribution</div>
-              <div id="explorerSystemMeta" class="explorerDetailMeta"></div>
-            </div>
-            <div id="explorerSystemLevelTabs" class="explorerDetailTabs explorerSystemLevelTabs" role="tablist" aria-label="Treemap depth">
-              <button id="explorerSystemDatabasesButton" class="explorerDetailTab is-active" type="button" role="tab" aria-selected="true" data-level="databases">Databases</button>
-              <button id="explorerSystemTablesButton" class="explorerDetailTab" type="button" role="tab" aria-selected="false" data-level="tables">Databases + tables</button>
-            </div>
-          </div>
-          <div id="explorerSystemTreemap" class="explorerTreemapPanel explorerTreemapPanel--system"></div>
-          <div class="explorerTreemapFooter">
-            <div id="explorerSystemLegend" class="explorerTreemapLegend" aria-label="Engine families"></div>
-            <div id="explorerSystemFootnote" class="explorerTreemapFootnote"></div>
-          </div>
-        </section>
-      </div>
+      <!-- Storage section: app_explorer_storage.js renders the server >
+           database > table storage view into this pane. -->
+      <div id="explorerSystemPane" class="explorerSystemPane" aria-label="Storage" hidden></div>
+
+      <!-- Server operations: app_explorer_ops.js renders into this pane. -->
+      <div id="explorerOpsPane" class="explorerOpsPane" aria-label="Server operations" hidden></div>
     </section>
   </main>
 

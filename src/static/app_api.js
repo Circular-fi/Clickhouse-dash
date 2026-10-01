@@ -308,6 +308,22 @@
     return getJson(`api/explorer/storage?${query.toString()}`);
   }
 
+  // Explorer Server operations view: background activity (merges, mutations,
+  // replication, Distributed queues) and Keeper session status.
+  async function getExplorerOpsActivity(hostId, refresh = false) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/ops/activity?${query.toString()}`);
+  }
+
+  async function getExplorerOpsKeeper(hostId, refresh = false) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/ops/keeper?${query.toString()}`);
+  }
+
   async function getExplorerFunctions(hostId, refresh = false) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
@@ -434,6 +450,7 @@
   ns.api = { resolveUrl, getJson,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions, getExplorerStorage,
+    getExplorerOpsActivity, getExplorerOpsKeeper,
     getExplorerGraph, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,

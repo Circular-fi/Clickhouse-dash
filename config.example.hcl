@@ -62,6 +62,11 @@ explorer {
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
+
+  operations {
+    enabled = true
+    keeper  = true
+  }
 }
 
 traces {

@@ -255,28 +255,33 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
-test('explorer captures database and System storage treemaps', async ({ page }, testInfo) => {
+test('explorer captures database storage, the Storage section and Server operations', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
-  const weather = page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="weather_observations"]');
-  await expect(weather).toBeVisible({ timeout: 15_000 });
-  await weather.hover();
-  await expect(page.locator('#explorerDatabaseTreemap [data-treemap-tooltip]')).toBeVisible();
-  await captureState(page, testInfo, 'explorer-database-treemap');
+  await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-database-storage');
 
   await page.locator('#explorerSectionSelectButton').click();
   await page.locator('#explorerSystemSectionButton').click();
-  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="database"]').first()).toBeVisible({ timeout: 15_000 });
-  await captureState(page, testInfo, 'explorer-system-storage-databases');
+  await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-storage-server');
 
-  await page.locator('#explorerSystemTablesButton').click();
-  await page.locator('#explorerSystemIncludeSystem').check();
-  await expect(page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"]').first()).toBeVisible();
-  const table = page.locator('#explorerSystemTreemap .explorerTreemap__node[data-kind="table"]').first();
-  await table.hover();
-  await expect(page.locator('#explorerSystemTreemap [data-treemap-tooltip]')).toBeVisible();
-  await captureState(page, testInfo, 'explorer-system-storage-tables');
+  await page.locator('.explorerStorageView__option input').check();
+  await page.locator('#explorerStorageList tbody tr[data-name="system"] .explorerStorageList__name').click();
+  await expect(page.locator('.explorerStorageCrumbs__current')).toHaveText('system');
+  await expect(page.locator('#explorerStorageList tbody tr').first()).toBeVisible();
+  const table = page.locator('#explorerStorageTreemap .explorerTreemap__node[data-kind="table"]').first();
+  if (await table.isVisible().catch(() => false)) {
+    await table.hover();
+    await expect(page.locator('#explorerStorageTreemap [data-treemap-tooltip]')).toBeVisible();
+  }
+  await captureState(page, testInfo, 'explorer-storage-system-database');
+
+  await page.locator('#explorerSectionSelectButton').click();
+  await page.locator('#explorerOpsSectionButton').click();
+  await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-server-operations');
 });
 
 

@@ -3552,27 +3552,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerDatabaseObjectsTable__missing {
   color: var(--muted);
 }
-.explorerDatabaseStorage {
-  margin-bottom: 4px;
-}
-.explorerDatabaseStorage .explorerSectionTitle {
-  margin-top: 4px;
-}
-.explorerTreemapPanel {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  box-sizing: border-box;
-  padding: 3px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--tableBg);
-}
-.explorerTreemapPanel--database {
-  height: clamp(220px, 40vh, 440px);
-}
 .explorerTreemap {
   position: relative;
   box-sizing: border-box;
@@ -3586,100 +3565,88 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerTreemap.is-layout-pending {
   visibility: hidden;
 }
-.explorerTreemap__empty {
-  display: grid;
-  height: 100%;
-  min-height: 120px;
-  place-items: center;
-  color: var(--muted);
-  font-size: .74rem;
-}
-.explorerTreemapFooter {
+.explorerFunctionObject.explorerTreeObject {
+  min-height: 26px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 14px;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: .64rem;
-  line-height: 1.35;
-}
-.explorerTreemapLegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-.explorerTreemapLegend__item {
-  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
+  margin: 0;
+  padding: 3px 8px 3px 30px;
+}
+.explorerFunctionObject__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.explorerTreemapLegend__swatch {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
+.explorerFunctionObject__badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
 }
-.explorerTreemapFootnote {
-  min-width: 0;
-  flex: 1 1 320px;
-  text-align: right;
-}
-.explorerSystemDatabase {
-  width: 100%;
+.explorerFunctionOverview__header {
   display: grid;
-  gap: 3px;
-  border: 1px solid transparent;
+  gap: 4px;
+}
+.explorerFunctionOverview__title {
+  font-size: 15px;
+}
+.explorerFunctionOverview__sub {
+  color: var(--muted);
+}
+.explorerFunctionOverview__heading {
+  margin: 0 0 8px;
+  font-size: var(--explorer-section-title-size, 13px);
+  font-weight: 650;
+}
+.explorerFunctionOverview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.explorerFunctionOverview__chip,
+.explorerFunctionOverview__category {
+  border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 6px 8px 7px;
   background: transparent;
   color: var(--text);
-  text-align: left;
+  font: inherit;
   cursor: pointer;
 }
-.explorerSystemDatabase:hover,
-.explorerSystemDatabase:focus-visible {
-  border-color: var(--border);
-  background: var(--rowHover);
-  outline: none;
+.explorerFunctionOverview__chip {
+  padding: 3px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
 }
-.explorerSystemDatabase__head {
-  min-width: 0;
+.explorerFunctionOverview__categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+}
+.explorerFunctionOverview__category {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  padding: 6px 10px;
+  text-align: left;
 }
-.explorerSystemDatabase__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 600 .72rem/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-.explorerSystemDatabase__size,
-.explorerSystemDatabase__meta {
+.explorerFunctionOverview__categoryCount {
   color: var(--muted);
-  font-size: .64rem;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.explorerSystemDatabase__meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.explorerSystemDatabase__bar {
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 9%, transparent);
-}
-.explorerSystemDatabase__fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accentBorder);
+.explorerFunctionOverview__chip:hover,
+.explorerFunctionOverview__chip:focus-visible,
+.explorerFunctionOverview__category:hover,
+.explorerFunctionOverview__category:focus-visible {
+  border-color: var(--accentBorder);
+  background: var(--rowHover);
+  outline: none;
 }
 .editorWrap {
   height: var(--initialEditorHeight, 100%);
@@ -3898,10 +3865,6 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .explorerFunctionGroup .explorerTreeDatabase__count {
   font-variant-numeric: tabular-nums;
-}
-.explorerFunctionObject .explorerTreeObject__icon--function {
-  font-family: Georgia, serif;
-  font-size: .82rem;
 }
 .explorerDependencyMatrix {
   display: grid;

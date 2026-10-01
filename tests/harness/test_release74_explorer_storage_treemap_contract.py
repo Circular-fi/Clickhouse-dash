@@ -48,12 +48,36 @@ def test_database_treemap_excludes_resident_memory_from_disk_area() -> None:
 
 def test_system_section_has_its_own_route_that_does_not_shadow_the_system_database() -> None:
     ui = read("src/static/app_explorer.js")
+    storage = read("src/static/app_explorer_storage.js")
     html = read("src/static/explorer.html")
     assert 'const SYSTEM_ROUTE_SEGMENT = "_system";' in ui
     assert "if (parts[0] === SYSTEM_ROUTE_SEGMENT) {" in ui
     assert 'id="explorerSystemSectionButton"' in html
     assert 'id="explorerSystemPane"' in html
-    assert "api.getExplorerStorage(hostId, !!force)" in ui
+    # The Storage section is rendered by app_explorer_storage.js, scoped by
+    # ?database=&table= on the reserved segment.
+    assert "storageView.show(dom.explorerSystemPane, {" in ui
+    assert 'scope.set("database", model.storageScope.database);' in ui
+    assert "ns.api.getExplorerStorage(host, !!force)" in storage
+
+
+def test_storage_view_is_a_sorted_list_first_and_a_bounded_treemap_second() -> None:
+    storage = read("src/static/app_explorer_storage.js")
+    treemap = read("src/static/app_explorer_treemap.js")
+    css = read("src/static/style.css")
+    assert "const TREEMAP_MIN_ITEMS = 3;" in storage
+    assert "const shown = significantLeafCount(tree) >= TREEMAP_MIN_ITEMS;" in storage
+    assert "if (significantLeafCount(tree) >= TREEMAP_MIN_ITEMS) {" in storage
+    assert "root.append(header, notice, list, map, footnote);" in storage
+    # Breadcrumb server > database > table; treemap and list clicks zoom.
+    assert "scope: { database, table } });" in storage
+    assert 'else if (target.kind === "database") setScope({ database: target.database || target.name });' in storage
+    # Partitions are the table level; slivers keep a rotated label or a mark.
+    assert 'const isLeaf = declaredKind === "table" || declaredKind === "partition";' in treemap
+    assert 'label.classList.add("is-vertical");' in treemap
+    assert 'node.classList.add("is-sliver");' in treemap
+    assert "(drawWidth >= 80 || (drawWidth >= 36 && drawHeight >= 160))" in treemap
+    assert ".explorerTreemapPanel--storage,\n.explorerTreemapPanel--database {\n  height: clamp(150px, 26vh, 240px);" in css
 
 
 def test_storage_endpoint_names_come_from_the_runner_boundary() -> None:

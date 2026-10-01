@@ -13,8 +13,8 @@
   // - "Others" is drawn as a proportional bottom strip that is only grown to
   //   the minimum height needed for its label.
   //
-  // ChDash node kinds: "server" (root), "database" (folder), "table" (leaf)
-  // and "other" (grouped siblings). Grouping runs in the browser because the
+  // ChDash node kinds: "server" (root), "database" (folder), "table" and
+  // "partition" (leaves) and "other" (grouped siblings). Grouping runs in the browser because the
   // visible scope (system databases on/off, databases vs databases + tables)
   // is a view option, and the same rules must also apply to the per-database
   // catalog that is already loaded for the sidebar.
@@ -319,7 +319,7 @@
   }
 
   function nodeMetaLabel(node) {
-    if (node.kind === "table") {
+    if (node.kind === "table" || node.kind === "partition") {
       const rows = compactRows(node.rows);
       return rows ? `${rows} ${Number(node.rows) === 1 ? "row" : "rows"}` : (node.engine || "");
     }
@@ -352,18 +352,23 @@
     const children = treemapChildren(node);
     const declaredKind = String(node.kind || "");
     const isFolder = isFolderKind(declaredKind);
+    // A tall, narrow database (for example `system` next to a huge
+    // database) still opens as a branch: its tables are drawn under its
+    // header band instead of being hidden in a terminal tile.
     const isBranch = isFolder
       && children.length > 0
       && depth < treemapMaximumDepth
-      && drawWidth >= 80
+      && (drawWidth >= 80 || (drawWidth >= 36 && drawHeight >= 160))
       && drawHeight >= 84;
-    const kind = declaredKind === "other" ? "other" : (declaredKind === "table" ? "table" : "database");
-    const color = kind === "table" ? tableColor(node.engine, node.name) : databaseColor(node.name);
+    const isLeaf = declaredKind === "table" || declaredKind === "partition";
+    const kind = declaredKind === "other" ? "other" : (isLeaf ? declaredKind : "database");
+    const styleKind = kind === "partition" ? "table" : kind;
+    const color = isLeaf ? tableColor(node.engine, node.name) : databaseColor(node.name);
     const sizeLabel = context.formatBytes(nodeBytes(node));
     const metaLabel = nodeMetaLabel(node);
     const titlePath = kind === "other"
       ? (node.path ? `${node.path} - Others` : "Others")
-      : (node.path || node.name || "");
+      : (kind === "partition" ? `${node.path || ""} partition ${node.name || ""}` : (node.path || node.name || ""));
     const title = `${titlePath}\n${sizeLabel} · ${metaLabel}`;
 
     // Every expanded database owns a header. If the rectangle cannot reserve
@@ -373,10 +378,10 @@
     const labelName = node.name || (kind === "database" ? "Database" : "Unnamed");
     const label = `<span class="explorerTreemap__label"><span class="explorerTreemap__name">${escapeHTML(labelName)}</span><span class="explorerTreemap__details"><span class="explorerTreemap__size">${escapeHTML(sizeLabel)}</span><span class="explorerTreemap__meta">${escapeHTML(metaLabel)}</span></span></span>`;
     const branchClass = isBranch ? " is-branch has-header" : " is-terminal";
-    const actionable = kind !== "other" && (kind === "table" || declaredKind === "database");
+    const actionable = kind === "table" || declaredKind === "database";
     const role = actionable ? "button" : "img";
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : "100%";
-    output.push(`<div class="explorerTreemap__node is-${kind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${escapeHTML(node.name || "")}" data-path="${escapeHTML(actionable ? (node.path || "") : "")}" data-scope="${escapeHTML(kind === "other" ? (node.path || "") : "")}" data-database="${escapeHTML(node.database || "")}" data-table="${escapeHTML(node.table || "")}" data-engine="${escapeHTML(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${escapeHTML(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${escapeHTML(node.name || "")}" data-path="${escapeHTML(actionable ? (node.path || "") : "")}" data-scope="${escapeHTML(kind === "other" ? (node.path || "") : "")}" data-database="${escapeHTML(node.database || "")}" data-table="${escapeHTML(node.table || "")}" data-engine="${escapeHTML(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${escapeHTML(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
     if (!isBranch || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -401,7 +406,8 @@
       const isBranch = node.classList.contains("is-branch");
 
       label.style.maxHeight = `${Math.max(0, labelHeight)}px`;
-      label.classList.remove("is-hidden", "is-compact", "is-tiny", "is-other-compact", "is-other-inline");
+      label.classList.remove("is-hidden", "is-compact", "is-tiny", "is-other-compact", "is-other-inline", "is-vertical", "is-single-line");
+      node.classList.remove("is-sliver");
       if (meta) meta.hidden = false;
 
       // Others always keeps its name, exact size, and member count. The
@@ -418,14 +424,33 @@
       // A database rectangle is never rendered without its name. Small
       // databases use compact typography rather than hiding the label.
       if (isFolder) {
+        if (rect.width < 40 && labelHeight >= 48) {
+          label.classList.add("is-vertical");
+          if (meta) meta.hidden = true;
+          return;
+        }
         if (rect.width < 82 || labelHeight < 38) label.classList.add("is-tiny");
         else if (rect.width < 140 || labelHeight < 52) label.classList.add("is-compact");
         if (meta && (rect.width < 220 || labelHeight < 70 || isBranch)) meta.hidden = true;
         return;
       }
 
+      // Slivers keep a label whenever one line fits, rotated for tall
+      // narrow rectangles; anything smaller gets a visible edge mark so a
+      // 1% table never reads as part of its neighbour.
       if (rect.width < 40 || labelHeight < 24) {
+        if (rect.width >= 12 && labelHeight >= 48) {
+          label.classList.add("is-vertical");
+          if (meta) meta.hidden = true;
+          return;
+        }
+        if (rect.width >= 60 && labelHeight >= 13) {
+          label.classList.add("is-tiny", "is-single-line");
+          if (meta) meta.hidden = true;
+          return;
+        }
         label.classList.add("is-hidden");
+        node.classList.add("is-sliver");
         return;
       }
       if (rect.width < 82 || labelHeight < 38) {
@@ -470,7 +495,7 @@
     const families = new Map();
     const visit = (node) => {
       if (!node) return;
-      if (node.kind === "table") {
+      if (node.kind === "table" || node.kind === "partition") {
         const family = engineFamily(node.engine);
         families.set(family.key, family);
       }
@@ -527,7 +552,9 @@
       const shareText = `${share >= 10 ? share.toFixed(1) : share >= 0.1 ? share.toFixed(2) : "<0.1"}%${rootName ? ` of ${rootName}` : ""}`;
       const name = kind === "other"
         ? (node.dataset.scope ? `Others in ${node.dataset.scope}` : "Others")
-        : (kind === "table" && node.dataset.database ? `${node.dataset.database}.${node.dataset.name}` : (node.dataset.name || "Database"));
+        : kind === "partition"
+          ? `Partition ${node.dataset.name}`
+          : (kind === "table" && node.dataset.database ? `${node.dataset.database}.${node.dataset.name}` : (node.dataset.name || "Database"));
       const bits = [context.formatBytes(size), node.dataset.meta];
       if (kind === "table" && node.dataset.engine) bits.push(node.dataset.engine);
       if (kind === "other" && Number(node.dataset.count || 0) > 0) bits.push(countLabel(node.dataset.count, "table", "tables"));

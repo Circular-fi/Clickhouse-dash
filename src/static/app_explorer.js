@@ -36,20 +36,18 @@
     routeIntent: null,
     includeSystem: false,
     includeNonStoring: true,
-    // System section: server-wide storage distribution.
-    storage: null,
-    storageFetchedAtMs: 0,
-    loadingStorage: false,
-    systemLevel: "databases",
-    systemTreemap: null,
-    databaseTreemap: null,
+    // Storage section (app_explorer_storage.js): breadcrumb scope of the
+    // server / database / table storage view.
+    storageScope: { database: "", table: "" },
+    databaseStorage: null,
   };
 
-  // Route slug of the System section. "/explorer/system" already addresses
+  // Route slug of the Storage section. "/explorer/system" already addresses
   // the ClickHouse `system` database (and /explorer/system/<table>/... its
   // tables), so the section uses a reserved, underscore-prefixed segment.
   const SYSTEM_ROUTE_SEGMENT = "_system";
-  const STORAGE_CLIENT_TTL_MS = 30000;
+  // Route slug of the Server operations section (app_explorer_ops.js).
+  const OPERATIONS_ROUTE_SEGMENT = "_operations";
 
   const TABS = ["Overview", "Schema", "Data", "Lineage", "Storage", "Operations"];
 
@@ -91,7 +89,11 @@
       return { workspace: "explorer", section: "functions", functionName: parts[1] || "" };
     }
     if (parts[0] === SYSTEM_ROUTE_SEGMENT) {
-      return { workspace: "explorer", section: "system", systemLevel: params.get("level") === "tables" ? "tables" : "databases" };
+      const storageDatabase = params.get("database") || "";
+      return { workspace: "explorer", section: "system", storageScope: { database: storageDatabase, table: storageDatabase ? params.get("table") || "" : "" } };
+    }
+    if (parts[0] === OPERATIONS_ROUTE_SEGMENT) {
+      return { workspace: "explorer", section: "operations" };
     }
     if (parts[0] === "databases") {
       return { workspace: "explorer", section: "tables" };
@@ -110,6 +112,7 @@
       return selected?.name ? `/explorer/functions/${encodeRouteSegment(selected.name)}` : "/explorer/functions";
     }
     if (model.section === "system") return `/explorer/${SYSTEM_ROUTE_SEGMENT}`;
+    if (model.section === "operations") return `/explorer/${OPERATIONS_ROUTE_SEGMENT}`;
     const table = selectedTable();
     if (table) return `/explorer/${encodeRouteSegment(table.database)}/${encodeRouteSegment(table.name)}/${model.tab.toLowerCase()}`;
     if (model.selectedDatabase) return `/explorer/${encodeRouteSegment(model.selectedDatabase)}`;
@@ -118,7 +121,13 @@
 
   function currentExplorerUrl() {
     const path = appRoute(currentExplorerPath());
-    if (model.section === "system") return model.systemLevel === "tables" ? `${path}?level=tables` : path;
+    if (model.section === "system") {
+      const scope = new URLSearchParams();
+      if (model.storageScope.database) scope.set("database", model.storageScope.database);
+      if (model.storageScope.database && model.storageScope.table) scope.set("table", model.storageScope.table);
+      const query = scope.toString();
+      return query ? `${path}?${query}` : path;
+    }
     if (model.section !== "tables") return path;
     const params = new URLSearchParams();
     params.set("view", model.mode === "graph" ? "graph" : "browse");
@@ -335,27 +344,32 @@
 
 
   function setSection(section) {
-    const next = section === "functions" || section === "system" ? section : "tables";
+    const operationsEnabled = !!ns.explorerOps && explorerFeatures().operations?.enabled !== false;
+    const next = section === "functions" || section === "system" || (section === "operations" && operationsEnabled) ? section : "tables";
     model.section = next;
     const functions = next === "functions";
     const system = next === "system";
+    const operations = next === "operations";
     const tables = next === "tables";
 
     dom.explorerTablesSectionButton?.setAttribute("aria-selected", String(tables));
     dom.explorerFunctionsSectionButton?.setAttribute("aria-selected", String(functions));
     dom.explorerSystemSectionButton?.setAttribute("aria-selected", String(system));
-    if (dom.explorerSectionSelectButton) dom.explorerSectionSelectButton.textContent = functions ? "Functions" : (system ? "System" : "Tables");
+    dom.explorerOpsSectionButton?.setAttribute("aria-selected", String(operations));
+    if (dom.explorerSectionSelectButton) dom.explorerSectionSelectButton.textContent = functions ? "Functions" : (system ? "Storage" : (operations ? "Operations" : "Tables"));
     closeDropdown(dom.explorerSectionSelect, dom.explorerSectionSelectButton, dom.explorerSectionSelectMenu, { immediate: true });
     if (dom.explorerTableModeTabs) dom.explorerTableModeTabs.hidden = !tables;
     if (dom.explorerFunctionsPane) dom.explorerFunctionsPane.hidden = !functions;
     if (dom.explorerSystemPane) dom.explorerSystemPane.hidden = !system;
+    if (dom.explorerOpsPane) dom.explorerOpsPane.hidden = !operations;
+    if (!operations) ns.explorerOps?.hide?.();
 
-    if (system) {
+    if (system || operations) {
       if (dom.explorerListView) dom.explorerListView.hidden = true;
       if (dom.explorerGraphPane) dom.explorerGraphPane.hidden = true;
       graph?.deactivate();
-      renderSystemView();
-      if (model.active) void refreshStorage(false);
+      if (system) renderSystemView();
+      else if (model.active) ns.explorerOps?.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });
       return;
     }
 
@@ -383,6 +397,9 @@
     const gf = f.graph || {};
     const graphEnabled = f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false);
     if (dom.explorerTableModeTabs) dom.explorerTableModeTabs.hidden = !(browseEnabled && graphEnabled) || model.section !== "tables";
+    const operationsEnabled = !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;
+    if (dom.explorerOpsSectionButton) dom.explorerOpsSectionButton.hidden = !operationsEnabled;
+    if (!operationsEnabled && model.section === "operations") setSection("tables");
     if (!browseEnabled && graphEnabled && model.mode !== "graph") setMode("graph");
     else if (!graphEnabled && model.mode === "graph") setMode("list");
 
@@ -469,7 +486,8 @@
 
     if (explorer) {
       if (model.section === "functions") refreshFunctions(false);
-      else if (model.section === "system") void refreshStorage(false);
+      else if (model.section === "system") renderSystemView();
+      else if (model.section === "operations") ns.explorerOps?.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openStorageRoute(database, table) });
       else {
         refreshCatalog(false);
         if (model.mode === "graph") graph?.activate(false);
@@ -700,13 +718,38 @@
     return `${item.kind || "Function"}\0${item.name || ""}`;
   }
 
+  // Category names come from system.functions.categories, with the kind
+  // ("Function", "Aggregate Function", "Table Function") as the backend
+  // fallback when a function has none. Fold the spelling variants into one
+  // group: "Aggregate Functions" + "Aggregate Function" -> "Aggregate",
+  // uncategorized plain functions -> "Other" (ClickHouse's own catch-all).
+  const FUNCTION_CATEGORY_LABELS = new Map([
+    ["aggregate", "Aggregate"],
+    ["table", "Table functions"],
+    ["", "Other"],
+    ["other", "Other"],
+  ]);
+
   function functionCategory(item) {
     let value = String(item?.category || "").trim();
     // system.functions.categories is represented as text by the native client
     // on some versions. Keep the first meaningful category for navigation.
     value = value.replace(/^\[|\]$/g, "").trim();
-    const first = value.split(",").map((part) => part.trim().replace(/^['\"]|['\"]$/g, "")).find(Boolean);
-    return first || String(item?.kind || "Functions");
+    const first = value.split(",").map((part) => part.trim().replace(/^['\"]|['\"]$/g, "")).find(Boolean) || "";
+    const kind = String(item?.kind || "");
+    const raw = first === kind ? "" : first;
+    if (!raw && kind === "Aggregate Function") return "Aggregate";
+    if (!raw && kind === "Table Function") return "Table functions";
+    const key = raw.toLowerCase().replace(/\bfunctions?\b/g, "").replace(/\s+/g, " ").trim();
+    return FUNCTION_CATEGORY_LABELS.get(key) || raw;
+  }
+
+  // Kind badge shown only where the group does not already say it.
+  function functionKindBadge(item, category) {
+    if (item?.user_defined) return "UDF";
+    if (item?.kind === "Aggregate Function" && category !== "Aggregate") return "aggregate";
+    if (item?.kind === "Table Function" && category !== "Table functions") return "table";
+    return "";
   }
 
   function functionOrigin(item) {
@@ -881,14 +924,107 @@
     root.appendChild(section);
   }
 
+  // Functions most queries use, offered as shortcuts while nothing is
+  // selected (only those the server actually exposes are listed).
+  const POPULAR_FUNCTIONS = [
+    "count", "sum", "avg", "uniq", "quantile", "argMax", "groupArray", "countIf",
+    "if", "multiIf", "toDate", "toStartOfInterval", "formatDateTime", "dateDiff",
+    "arrayJoin", "arrayMap", "has", "JSONExtract", "splitByChar", "replaceRegexpAll",
+  ];
+
+  function revealSelectedFunction(block = "nearest") {
+    dom.explorerFunctionList?.querySelector(".explorerFunctionObject.is-selected")?.scrollIntoView?.({ block });
+  }
+
+  function selectFunction(item, category) {
+    model.selectedFunctionKey = functionKey(item);
+    model.expandedFunctionCategories.add(category);
+    renderFunctionList();
+    syncExplorerUrl("push");
+    revealSelectedFunction();
+  }
+
+  // Empty state: what the catalog contains (categories with counts, popular
+  // functions) instead of a bare "Select a function".
+  function renderFunctionOverview() {
+    const empty = dom.explorerFunctionEmpty;
+    if (!empty) return;
+    const functions = model.functionsCatalog?.functions || [];
+    empty.classList.toggle("explorerFunctionOverview", functions.length > 0);
+    if (!functions.length) {
+      empty.replaceChildren(
+        node("strong", "", model.loadingFunctions ? "Loading functions\u2026" : "Select a function"),
+        node("span", "", "Documentation is loaded from the selected ClickHouse server when available."),
+      );
+      return;
+    }
+    const counts = new Map();
+    for (const item of functions) {
+      const category = functionCategory(item);
+      counts.set(category, (counts.get(category) || 0) + 1);
+    }
+    const header = node("div", "explorerFunctionOverview__header");
+    header.append(
+      node("strong", "explorerFunctionOverview__title", `${fmtInt(functions.length)} functions in ${fmtInt(counts.size)} categories`),
+      node("span", "explorerFunctionOverview__sub", model.functionsCatalog?.documentation_available === false
+        ? "This server does not expose system.documentation: names and categories only."
+        : "Pick a function on the left, search by name, or start from a category."),
+    );
+    const popular = POPULAR_FUNCTIONS
+      .map((name) => functions.find((item) => item.name === name && !item.user_defined))
+      .filter(Boolean);
+    const sections = [header];
+    if (popular.length) {
+      const block = node("section", "explorerFunctionOverview__section");
+      block.appendChild(node("h3", "explorerFunctionOverview__heading", "Popular"));
+      const list = node("div", "explorerFunctionOverview__chips");
+      list.id = "explorerFunctionPopular";
+      for (const item of popular) {
+        const button = node("button", "explorerFunctionOverview__chip", item.name);
+        button.type = "button";
+        button.title = `${item.name} · ${functionCategory(item)}`;
+        button.addEventListener("click", () => selectFunction(item, functionCategory(item)));
+        list.appendChild(button);
+      }
+      block.appendChild(list);
+      sections.push(block);
+    }
+    const block = node("section", "explorerFunctionOverview__section");
+    block.appendChild(node("h3", "explorerFunctionOverview__heading", "Categories"));
+    const grid = node("div", "explorerFunctionOverview__categories");
+    grid.id = "explorerFunctionCategories";
+    for (const [category, count] of [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+      const button = node("button", "explorerFunctionOverview__category");
+      button.type = "button";
+      button.dataset.category = category;
+      button.append(node("span", "explorerFunctionOverview__categoryName", category), node("span", "explorerFunctionOverview__categoryCount", fmtInt(count)));
+      button.addEventListener("click", () => {
+        model.expandedFunctionCategories.add(category);
+        renderFunctionList();
+        const group = [...(dom.explorerFunctionList?.querySelectorAll(".explorerFunctionGroup") || [])].find((el) => el.dataset.category === category);
+        group?.scrollIntoView?.({ block: "start" });
+        group?.querySelector(".explorerTreeDatabase")?.focus({ preventScroll: true });
+      });
+      grid.appendChild(button);
+    }
+    block.appendChild(grid);
+    sections.push(block);
+    empty.replaceChildren(...sections);
+  }
+
   function renderFunctionDetail() {
     const item = (model.functionsCatalog?.functions || []).find((candidate) => functionKey(candidate) === model.selectedFunctionKey) || null;
     if (dom.explorerFunctionEmpty) dom.explorerFunctionEmpty.hidden = !!item;
+    if (!item) renderFunctionOverview();
     if (dom.explorerFunctionDetail) dom.explorerFunctionDetail.hidden = !item;
     if (!item) return;
     if (dom.explorerFunctionDetailName) dom.explorerFunctionDetailName.textContent = item.name || "Function";
     if (dom.explorerFunctionDetailMeta) {
-      const bits = uniqueMetaBits([functionOrigin(item), functionCategory(item), item.kind || "Function"]);
+      const category = functionCategory(item);
+      const kind = item.kind === "Aggregate Function" && category !== "Aggregate"
+        ? "Aggregate function"
+        : (item.kind === "Table Function" && category !== "Table functions" ? "Table function" : "");
+      const bits = uniqueMetaBits([category, kind, item.user_defined ? functionOrigin(item) : "", item.introduced_in ? `since ${item.introduced_in}` : ""]);
       dom.explorerFunctionDetailMeta.textContent = bits.join(" · ");
     }
     if (!dom.explorerFunctionDescription) return;
@@ -944,6 +1080,7 @@
     }
     for (const [category, groupItems] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const section = node("section", "explorerTreeGroup explorerFunctionGroup");
+      section.dataset.category = category;
       const selectedInGroup = groupItems.some((item) => functionKey(item) === model.selectedFunctionKey);
       const expanded = searching || selectedInGroup || model.expandedFunctionCategories.has(category);
       const row = node("div", "explorerTreeDatabaseRow");
@@ -953,7 +1090,7 @@
       toggle.setAttribute("aria-expanded", String(expanded));
       const header = node("button", "explorerTreeDatabase");
       header.type = "button";
-      header.appendChild(node("span", "explorerTreeDatabase__name", category));
+      header.append(node("span", "explorerTreeDatabase__name", category), node("span", "explorerTreeDatabase__count explorerFunctionGroup__count", fmtInt(groupItems.length)));
       const toggleGroup = () => {
         if (model.expandedFunctionCategories.has(category)) model.expandedFunctionCategories.delete(category);
         else model.expandedFunctionCategories.add(category);
@@ -970,16 +1107,13 @@
           const button = node("button", "explorerTreeObject explorerFunctionObject");
           button.type = "button";
           button.classList.toggle("is-selected", key === model.selectedFunctionKey);
-          const labels = node("span", "explorerTreeObject__labels");
-          labels.append(node("span", "explorerTreeObject__name", item.name || "\u2014"), node("span", "explorerTreeObject__meta", uniqueMetaBits([functionOrigin(item), item.kind || "Function"]).join(" · ")));
-          button.append(node("span", "explorerTreeObject__icon explorerTreeObject__icon--function", "\u0192"), labels);
-          button.addEventListener("click", () => {
-            model.selectedFunctionKey = key;
-            model.expandedFunctionCategories.add(category);
-            renderFunctionList();
-            renderFunctionDetail();
-            syncExplorerUrl("push");
-          });
+          // One line per function: the group already names the category,
+          // so only a kind badge that adds information is kept.
+          button.appendChild(node("span", "explorerTreeObject__name explorerFunctionObject__name", item.name || "\u2014"));
+          const badge = functionKindBadge(item, category);
+          if (badge) button.appendChild(node("span", "explorerFunctionObject__badge", badge));
+          button.title = item.name || "";
+          button.addEventListener("click", () => selectFunction(item, category));
           children.appendChild(button);
         }
         section.appendChild(children);
@@ -1016,6 +1150,7 @@
         model.selectedFunctionKey = functionKey(item);
       }
       renderFunctionList();
+      if (route?.functionName) revealSelectedFunction("center");
     } catch (e) {
       setError(e);
       model.functionsCatalog = null;
@@ -1081,38 +1216,18 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Storage treemaps (database detail + System section)
+  // Storage (database page + Storage section), drawn by app_explorer_storage.js
   //
   // Areas are local on-disk bytes, the same accounting as the database header
   // and sidebar summaries (system.parts bytes_on_disk for MergeTree, total_bytes
   // for Log-family and other disk engines). Memory/Buffer/Dictionary objects
   // report resident RAM (isResidentMemorySummary); mixing RAM into an on-disk
-  // area would make the treemap disagree with the header total, so resident
-  // bytes are excluded from the areas and reported in the footnote instead.
+  // area would make the storage view disagree with the header total, so
+  // resident bytes are excluded from the areas and reported separately.
 
   function destroyDatabaseTreemap() {
-    model.databaseTreemap?.destroy();
-    model.databaseTreemap = null;
-  }
-
-  function treemapFootnote({ threshold, scopeLabel, residentBytes }) {
-    const bits = ["On-disk bytes of active parts (local replica)"];
-    if (threshold > 0) bits.push(`objects under 1% of ${scopeLabel} (< ${util.formatBytes(threshold)}) are grouped into Others`);
-    if (residentBytes > 0) bits.push(`resident memory not drawn: ${util.formatBytes(residentBytes)} (Memory / Buffer / Dictionary)`);
-    return `${bits.join(" · ")}.`;
-  }
-
-  function renderTreemapLegend(container, tree) {
-    if (!container) return;
-    const families = treemap?.engineLegend?.([tree]) || [];
-    container.replaceChildren(...families.map((family) => {
-      const item = node("span", "explorerTreemapLegend__item");
-      const swatch = node("span", "explorerTreemapLegend__swatch");
-      swatch.style.background = family.color;
-      item.append(swatch, node("span", "", family.label));
-      return item;
-    }));
-    container.hidden = !families.length;
+    model.databaseStorage?.destroy?.();
+    model.databaseStorage = null;
   }
 
   function databaseStorageTree(database) {
@@ -1143,74 +1258,27 @@
     return { root, residentBytes };
   }
 
+  // Compact storage of the database page: a short treemap band when at least
+  // three tables hold >= 1% of the database, otherwise a single share strip,
+  // so the object list stays in view.
   function renderDatabaseStorage(container, database) {
     destroyDatabaseTreemap();
-    if (!treemap) return;
-    const section = node("section", "explorerDatabaseStorage");
-    section.appendChild(node("h3", "explorerSectionTitle", "Storage distribution"));
+    const storageView = ns.explorerStorage;
+    if (!storageView) return;
     const { root, residentBytes } = databaseStorageTree(database);
-    if (!(root.bytes > 0)) {
-      section.appendChild(node("div", "explorerEmptySection", residentBytes > 0
-        ? `No on-disk data. Resident memory: ${util.formatBytes(residentBytes)} (Memory / Buffer / Dictionary).`
-        : "No on-disk data in this database."));
-      container.appendChild(section);
-      return;
-    }
-    const { threshold, tree } = treemap.buildTreemap(root);
-    const host = node("div", "explorerTreemapPanel explorerTreemapPanel--database");
-    host.id = "explorerDatabaseTreemap";
-    section.appendChild(host);
-    const footer = node("div", "explorerTreemapFooter");
-    const legend = node("div", "explorerTreemapLegend");
-    footer.append(legend, node("div", "explorerTreemapFootnote", treemapFootnote({ threshold, scopeLabel: "the database", residentBytes })));
-    section.appendChild(footer);
-    container.appendChild(section);
-    renderTreemapLegend(legend, tree);
-    model.databaseTreemap = treemap.mount(host, {
-      ariaLabel: `${database} table size treemap`,
-      formatBytes: (value) => util.formatBytes(value),
-      onOpen: (target) => {
-        if (target.kind === "table" && target.database && target.table) void selectTable(target.database, target.table);
-      },
+    model.databaseStorage = storageView.renderCompact(container, {
+      root,
+      residentBytes,
+      name: database,
+      onOpen: (db, table) => void selectTable(db, table),
+      onShowStorage: () => openStorageSection({ database }),
     });
-    model.databaseTreemap?.setTree(tree, { name: database });
   }
 
-  function systemStorageScope() {
-    return (model.storage?.databases || [])
-      .filter((item) => model.includeSystem || !(item.system || isSystemDatabaseName(item.name)));
-  }
-
-  function systemStorageTree(databases) {
-    const withTables = model.systemLevel === "tables";
-    const children = databases.filter((item) => Number(item.bytes || 0) > 0).map((item) => ({
-      kind: "database",
-      name: item.name,
-      path: item.name,
-      database: item.name,
-      bytes: Number(item.bytes || 0),
-      rows: Number(item.rows || 0),
-      count: Number(item.storing_tables || 0),
-      children: withTables ? (item.tables || []).map((table) => ({
-        kind: "table",
-        name: table.name,
-        path: `${item.name}.${table.name}`,
-        database: item.name,
-        table: table.name,
-        engine: humanEngine(table.engine),
-        rows: table.rows == null ? null : Number(table.rows),
-        bytes: Number(table.bytes || 0),
-        count: 1,
-      })) : [],
-    }));
-    return {
-      kind: "server",
-      name: "Server",
-      path: "",
-      bytes: children.reduce((sum, child) => sum + child.bytes, 0),
-      count: children.reduce((sum, child) => sum + child.count, 0),
-      children,
-    };
+  function openStorageSection(scope = {}) {
+    model.storageScope = { database: String(scope.database || ""), table: scope.database ? String(scope.table || "") : "" };
+    setSection("system");
+    syncExplorerUrl("push");
   }
 
   // Treemap clicks leave the System section for the normal Tables routes, so
@@ -1226,121 +1294,25 @@
     void applyRouteFromLocation();
   }
 
-  function renderSystemDatabaseList(databases, totalBytes) {
-    const list = dom.explorerSystemDatabaseList;
-    if (!list) return;
-    clear(list);
-    if (!databases.length) {
-      list.appendChild(node("div", "explorerListEmpty", model.loadingStorage ? "Loading\u2026" : "No accessible databases"));
-      return;
-    }
-    const ordered = [...databases].sort((a, b) => Number(b.bytes || 0) - Number(a.bytes || 0) || String(a.name).localeCompare(String(b.name)));
-    for (const item of ordered) {
-      const bytes = Number(item.bytes || 0);
-      const share = totalBytes > 0 ? bytes / totalBytes * 100 : 0;
-      const button = node("button", "explorerSystemDatabase");
-      button.type = "button";
-      button.dataset.database = item.name;
-      const head = node("span", "explorerSystemDatabase__head");
-      head.append(node("span", "explorerSystemDatabase__name", item.name), node("span", "explorerSystemDatabase__size", bytes > 0 ? fmtStorageBytes(bytes) : "\u2014"));
-      const meta = [`${fmtInt(item.storing_tables || 0)} tables with data`];
-      if (bytes > 0) meta.push(fmtPercent(share));
-      if (Number(item.resident_bytes || 0) > 0) meta.push(`${util.formatBytes(item.resident_bytes)} resident`);
-      const bar = node("span", "explorerSystemDatabase__bar");
-      const fill = node("span", "explorerSystemDatabase__fill");
-      fill.style.width = `${Math.max(bytes > 0 ? 1 : 0, Math.min(100, share)).toFixed(2)}%`;
-      bar.appendChild(fill);
-      button.append(head, node("span", "explorerSystemDatabase__meta", meta.join(" · ")), bar);
-      button.addEventListener("click", () => openStorageRoute(item.name));
-      list.appendChild(button);
-    }
-  }
-
-  function syncSystemControls() {
-    const tables = model.systemLevel === "tables";
-    for (const [button, active] of [[dom.explorerSystemDatabasesButton, !tables], [dom.explorerSystemTablesButton, tables]]) {
-      if (!button) continue;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-selected", String(active));
-    }
-    if (dom.explorerSystemIncludeSystem) {
-      dom.explorerSystemIncludeSystem.checked = model.includeSystem;
-      dom.explorerSystemIncludeSystem.disabled = !!dom.explorerIncludeSystem?.disabled;
-      dom.explorerSystemIncludeSystem.title = dom.explorerIncludeSystem?.title || "";
-    }
-    if (dom.explorerSystemRefreshButton) dom.explorerSystemRefreshButton.disabled = model.loadingStorage;
-  }
-
   function renderSystemView() {
-    syncSystemControls();
-    if (!dom.explorerSystemTreemap) return;
-    const databases = systemStorageScope();
-    const root = systemStorageTree(databases);
-    renderSystemDatabaseList(databases, root.bytes);
-    if (dom.explorerSystemMeta) {
-      if (!model.storage) dom.explorerSystemMeta.textContent = model.loadingStorage ? "Loading\u2026" : "";
-      else {
-        const meta = [
-          `${fmtInt(databases.length)} databases`,
-          `${fmtInt(root.count)} tables with data`,
-          fmtStorageBytes(root.bytes),
-        ];
-        if (model.storage.stale) meta.push("stale");
-        dom.explorerSystemMeta.textContent = meta.join(" · ");
-      }
-    }
-    if (!treemap || !model.storage) {
-      model.systemTreemap?.destroy();
-      model.systemTreemap = null;
-      dom.explorerSystemTreemap.replaceChildren(node("div", "explorerTreemap__empty", model.loadingStorage ? "Loading storage distribution\u2026" : "Storage distribution unavailable."));
-      if (dom.explorerSystemLegend) dom.explorerSystemLegend.replaceChildren();
-      if (dom.explorerSystemFootnote) dom.explorerSystemFootnote.textContent = "";
-      return;
-    }
-    const { threshold, tree } = treemap.buildTreemap(root);
-    if (!model.systemTreemap) {
-      model.systemTreemap = treemap.mount(dom.explorerSystemTreemap, {
-        ariaLabel: "Server storage treemap",
-        emptyText: "No on-disk data.",
-        formatBytes: (value) => util.formatBytes(value),
-        onOpen: (target) => {
-          if (target.kind === "table") openStorageRoute(target.database, target.table);
-          else if (target.kind === "database") openStorageRoute(target.database || target.name);
-        },
-      });
-    }
-    model.systemTreemap?.setTree(tree, { name: "server" });
-    renderTreemapLegend(dom.explorerSystemLegend, tree);
-    const residentBytes = databases.reduce((sum, item) => sum + Number(item.resident_bytes || 0), 0);
-    if (dom.explorerSystemFootnote) {
-      dom.explorerSystemFootnote.textContent = treemapFootnote({ threshold, scopeLabel: "the displayed total", residentBytes });
-    }
-  }
-
-  async function refreshStorage(force) {
-    if (!model.active || model.loadingStorage) return;
-    const hostId = String(state.selectedHostId || "");
-    if (!hostId) return;
-    if (!force && model.storage && String(model.storage.host_id || "") === hostId && Date.now() - model.storageFetchedAtMs < STORAGE_CLIENT_TTL_MS) {
-      renderSystemView();
-      return;
-    }
-    model.loadingStorage = true;
-    setError(null);
-    renderSystemView();
-    try {
-      const payload = await api.getExplorerStorage(hostId, !!force);
-      if (String(state.selectedHostId || "") !== hostId || !model.active) return;
-      model.storage = payload;
-      model.storageFetchedAtMs = Date.now();
-    } catch (e) {
-      if (String(state.selectedHostId || "") !== hostId) return;
-      setError(e);
-    } finally {
-      model.loadingStorage = false;
-      if (model.section === "system") renderSystemView();
-      else syncSystemControls();
-    }
+    const storageView = ns.explorerStorage;
+    if (!storageView || !dom.explorerSystemPane || !model.active) return;
+    storageView.show(dom.explorerSystemPane, {
+      scope: model.storageScope,
+      includeSystem: model.includeSystem,
+      onIncludeSystemChange: (value) => {
+        if (dom.explorerIncludeSystem?.disabled && !value) return;
+        model.includeSystem = !!value;
+        persistVisibilityOptions();
+        syncVisibilityOptionLocks({ propagate: true });
+        renderTableList();
+      },
+      onScopeChange: (scope) => {
+        model.storageScope = { database: scope.database || "", table: scope.table || "" };
+        syncExplorerUrl("push");
+      },
+      onOpenTable: (database, table) => openStorageRoute(database, table),
+    });
   }
 
   function renderDatabaseDetail(database) {
@@ -3201,15 +3173,22 @@
           model.selectedFunctionKey = item ? functionKey(item) : null;
           renderFunctionList();
           renderFunctionDetail();
+          revealSelectedFunction("center");
         }
         model.routeIntent = null;
       }
       return;
     }
     if (route.section === "system") {
-      model.systemLevel = route.systemLevel === "tables" ? "tables" : "databases";
+      model.storageScope = route.storageScope || { database: "", table: "" };
       model.routeIntent = null;
       setSection("system");
+      return;
+    }
+    if (route.section === "operations") {
+      model.routeIntent = null;
+      setSection("operations");
+      if (model.section !== "operations") syncExplorerUrl("replace");
       return;
     }
     setSection("tables");
@@ -3268,8 +3247,7 @@
     model.detailLoading = false;
     model.preview = null;
     model.tab = "Overview";
-    model.storage = null;
-    model.storageFetchedAtMs = 0;
+    model.storageScope = { database: "", table: "" };
     destroyDatabaseTreemap();
     if (dom.explorerEmptyState) {
       dom.explorerEmptyState.hidden = false;
@@ -3282,8 +3260,8 @@
     syncVisibilityOptionLocks();
     if (model.active) {
       if (model.section === "functions") refreshFunctions(false);
-      else if (model.section === "system") void refreshStorage(false);
-      else refreshCatalog(false);
+      else if (model.section === "system") renderSystemView();
+      else if (model.section !== "operations") refreshCatalog(false);
     }
   }
 
@@ -3307,24 +3285,7 @@
     dom.explorerTablesSectionButton?.addEventListener("click", () => { setSection("tables"); syncExplorerUrl("push"); });
     dom.explorerFunctionsSectionButton?.addEventListener("click", () => { setSection("functions"); syncExplorerUrl("push"); });
     dom.explorerSystemSectionButton?.addEventListener("click", () => { setSection("system"); syncExplorerUrl("push"); });
-    for (const button of [dom.explorerSystemDatabasesButton, dom.explorerSystemTablesButton]) {
-      button?.addEventListener("click", () => {
-        const level = button.dataset.level === "tables" ? "tables" : "databases";
-        if (model.systemLevel === level) return;
-        model.systemLevel = level;
-        renderSystemView();
-        syncExplorerUrl("replace");
-      });
-    }
-    dom.explorerSystemRefreshButton?.addEventListener("click", () => void refreshStorage(true));
-    dom.explorerSystemIncludeSystem?.addEventListener("change", () => {
-      if (dom.explorerSystemIncludeSystem.disabled) return renderSystemView();
-      model.includeSystem = !!dom.explorerSystemIncludeSystem.checked;
-      persistVisibilityOptions();
-      syncVisibilityOptionLocks({ propagate: true });
-      renderTableList();
-      renderSystemView();
-    });
+    dom.explorerOpsSectionButton?.addEventListener("click", () => { setSection("operations"); syncExplorerUrl("push"); });
     dom.explorerListModeButton?.addEventListener("click", () => { setMode("list"); syncExplorerUrl("push"); });
     dom.explorerGraphModeButton?.addEventListener("click", () => { setMode("graph"); syncExplorerUrl("push"); });
     dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));

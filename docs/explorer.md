@@ -57,27 +57,51 @@ through `system.clusters`, while remote disk accounting remains explicitly out o
 scope until a safe cluster-wide metadata query is configured. Clicking a table in
 a database card opens that table's normal Explorer route.
 
-## Storage treemaps
+## Storage
 
-The database detail (click a database in the Browse sidebar) starts with a
-**Storage distribution** treemap of its tables, followed by the object list.
-The **System** Explorer section (next to Tables and Functions, route
-`/explorer/_system`) shows the same kind of treemap for the whole server, by
-database, and optionally by table inside each database (`Databases` /
-`Databases + tables`, `?level=tables`). The left rail ranks the databases in
-scope by size. The existing *Include system database* option is shared with the
-Tables sidebar and controls whether `system` is part of the scope and of the
-totals. `/explorer/system` keeps addressing the ClickHouse `system` database, so
-the section uses the reserved `_system` segment.
+The **Storage** Explorer section (route `/explorer/_system`, next to Tables and
+Functions) is one ncdu-style view of where the bytes are, with a breadcrumb
+`server / database / table`:
+
+| Scope | URL | Rows of the list | Treemap rectangles |
+| --- | --- | --- | --- |
+| server | `/explorer/_system` | databases | databases, with their tables nested under a header band |
+| database | `/explorer/_system?database=<db>` | storing tables (+ one "N smaller tables" row beyond the 128 bound) | tables |
+| table | `/explorer/_system?database=<db>&table=<t>` | partitions | partitions |
+
+The sorted list is the main surface: name, size, a share bar (normalized to the
+largest row) with the percentage of the scope, rows, and parts (tables per
+database at server scope, as `storing / objects`). Every header sorts; size is
+the default. Clicking a database or table row, or its treemap rectangle, zooms
+into it; the breadcrumb, Back and a reload keep and restore the scope. A table
+row also has an *open* button, and the table scope an **Open table** button,
+which leave for the table card. `/explorer/system` keeps addressing the
+ClickHouse `system` database, so the section uses the reserved `_system`
+segment. The *System databases* option is shared with the Tables sidebar
+(*Include system database*) and decides whether `system` is part of the server
+scope; opening `?database=system` includes it.
+
+The treemap is secondary: it sits under the list with a bounded height
+(`clamp(150px, 26vh, 240px)`) and is drawn only when at least three rectangles
+of >= 1% of the scope remain after grouping (`TREEMAP_MIN_ITEMS`). A server
+where one database holds 99.9% of the bytes therefore shows the list only,
+instead of one full-height block. Partitions of the table scope come from the
+table detail endpoint (most recent 1000 partitions).
+
+The database page (click a database in the sidebar) embeds a compact variant
+above its object list: the same bounded treemap band when at least three tables
+hold >= 1% of the database, otherwise a single share strip (each table >= 1%
+plus one Others segment, with a one-line legend), and a **Storage view** link to
+the database scope of the Storage section.
 
 Byte accounting is the same local on-disk accounting as the database header and
 sidebar summaries (`metric_scope = local-replica`): `bytes_on_disk` of active
 parts for MergeTree families and `system.tables.total_bytes` for Log-family and
 other disk engines. Memory, Buffer and Dictionary objects report resident RAM
-(`isResidentMemorySummary`); drawing RAM as disk area would make the treemap
-disagree with the database total, so resident bytes are excluded from the areas
-and reported separately (treemap footnote, System rail). Views and other objects
-without bytes are not drawn.
+(`isResidentMemorySummary`); drawing RAM as disk area would make the views
+disagree with the database total, so resident bytes are excluded from the
+areas and reported separately (footnote, database page header). Views and other
+objects without bytes are not drawn.
 
 Grouping and layout follow the S3-Browser folder treemap:
 
@@ -87,18 +111,29 @@ Grouping and layout follow the S3-Browser folder treemap:
 - a level with a single real child is contracted into that child and a sole
   Others child is dropped (the parent already carries the totals);
 - squarified layout, Others as a proportional bottom strip that is only grown to
-  the height its label needs, database headers/insets for nested levels, at most
-  1000 rectangles and 5 levels, label fitting (compact/tiny/hidden modes), hover
-  highlight and a tooltip with size, rows/engine and share of the root.
+  the height its label needs, a header band per database for nested levels,
+  at most 1000 rectangles and 5 levels, hover highlight and a tooltip with size,
+  rows/engine and share of the root;
+- a tall narrow database (for example `system` next to a 47 GB database) still
+  opens as a branch with its tables (width >= 36 px when at least 160 px tall);
+- labels are fitted per rectangle (full, compact, tiny); a sliver keeps a
+  rotated label when it is at least 12 x 48 px, a one-line label when it is at
+  least 60 x 13 px, and otherwise an edge mark (`is-sliver`) so a 1% table never
+  reads as part of its neighbour. Labels use the text face, not monospace.
 
 Grouping runs in the browser: the displayed root depends on view options (system
-databases on/off, depth), and the database treemap reuses the per-database
-catalog that the sidebar already loaded, so one implementation
+databases on/off, scope), and the database page reuses the per-database catalog
+that the sidebar already loaded, so one implementation
 (`app_explorer_treemap.js`) serves both. Tables are coloured by engine family
-(legend under the map); databases use a pale per-database tint. Clicking a table
-opens its Browse route; clicking a database (System) opens the database detail.
+(legend under the map); databases use a pale per-database tint.
 
-`GET /api/explorer/storage?host_id=<id>[&refresh=1]` backs the System section.
+The view is `app_explorer_storage.js`: `ns.explorerStorage.show(container,
+{ scope, includeSystem, onScopeChange, onIncludeSystemChange, onOpenTable })`
+mounts it in any container (the Explorer shell passes its URL/visibility
+callbacks), and `renderCompact(container, { root, residentBytes, name, onOpen,
+onShowStorage })` draws the database-page variant.
+
+`GET /api/explorer/storage?host_id=<id>[&refresh=1]` backs the section.
 Object names come exclusively from runner-context discovery
 (`discover_visible_databases` / `discover_visible_objects`, the same boundary as
 the lazy sidebar). The system context then contributes counters only for those
@@ -129,6 +164,72 @@ The bound is lossless for every treemap the UI can draw: at most 100 siblings ca
 each hold 1% of their parent, and everything smaller is grouped into Others. The
 remainder is still reported exactly through `omitted_*`, so `bytes` always equals
 listed + omitted bytes.
+
+## Server operations
+
+The **Operations** Explorer section (route `/explorer/_operations`,
+`app_explorer_ops.js`, `ns.explorerOps.show(container, { onOpenTable })`) shows
+what the selected server is doing in the background, in the spirit of
+clickhouse-monitoring:
+
+- **Replicas**: health of every replicated table (read-only, expired Keeper
+  session, delay, queue with inserts/merges, last queue update and its exception,
+  `active / total` replicas);
+- **Mutations**: pending mutations only, failing ones first with the failed
+  part, error code name and reason;
+- **Replication queue**: one row per table (entries, executing, postponed, max
+  tries, oldest entry, entry types, last exception or postpone reason);
+- **Merges**: running merges and mutation merges (partition, progress, elapsed,
+  source size, parts, memory);
+- **Distributed send queues**: pending files/bytes per shard directory, errors,
+  blocked state, broken files and the last exception;
+- **Keeper**: connection(s) of `system.zookeeper_connection` (host, session,
+  uptime, timeout, API version), requests in flight, watches, exceptions, and
+  the latency: average wait per transaction since start, replaced by the
+  average over the last refresh interval once two snapshots exist.
+
+Sections with a problem come first, then sections with rows; empty sections are
+folded into one "No pending mutations · No merges running ..." line, and a
+system table the server does not expose is reported as not readable instead of
+empty. A refresh button and an **Auto-refresh (5 s)** option (remembered per
+browser, paused while the section or the browser tab is hidden) keep it live.
+
+`GET /api/explorer/ops/activity?host_id=<id>[&refresh=1]` runs five fixed
+queries through the system context: `system.merges`, `system.mutations WHERE
+NOT is_done`, `system.replication_queue` aggregated `GROUP BY database, table`,
+`system.replicas` and `system.distribution_queue`. Each query is restricted to
+`database IN (<databases the runner can SHOW>)` inside ClickHouse, and every row
+is then kept only when the runner can SHOW that object (runner-context
+`discover_visible_objects`, resolved lazily for the databases that actually
+appear): an object hidden from the runner never reaches the browser, and its
+rows never consume the bound. Each section reads at most 201 rows and returns
+200 (`row_limit`); a full section is listed in `truncated_sections`, an
+unreadable one in `unavailable_sections`. The `system.replicas` read selects
+in-memory columns only; `log_max_index`, `log_pointer`, `total_replicas`,
+`active_replicas`, `zookeeper_exception` and `replica_is_active` cost a Keeper
+request per table and are not selected. The replica counts come from the same
+per-server 60 s cache as the catalog (see "Replication metadata and Keeper
+load").
+
+`GET /api/explorer/ops/keeper?host_id=<id>[&refresh=1]` reads
+`system.zookeeper_connection` (at most 16 rows) and allowlisted
+`system.metrics` (`ZooKeeperSession`, `ZooKeeperSessionExpired`,
+`ZooKeeperRequest`, `ZooKeeperWatch`,
+`ZooKeeperConnectionLossStartedTimestampSeconds`, `KeeperAliveConnections`,
+`KeeperOutstandingRequests`) and `system.events` (`ZooKeeper*` transaction,
+wait, exception, byte and per-operation counters), plus
+`average_wait_ms = ZooKeeperWaitMicroseconds / ZooKeeperTransactions`. It names
+no object. `system.zookeeper` paths are deliberately not browsable: a path read
+is one Keeper request per node, cannot be bounded by a `LIMIT` before ClickHouse
+issues those requests, and the paths themselves (`/clickhouse/tables/<shard>/
+<table>/...`) name objects the runner may not see, outside the
+`AllowedObjectSet` boundary.
+
+Both responses are cached per host for `min(explorer.cache_ttl_ms, 5 s)` (at
+least 1 s), so any number of auto-refreshing pages costs one read per interval;
+`refresh=1` bypasses the cache. No SQL, filter or limit is taken from the
+request. The section and routes are gated by `explorer.operations { enabled,
+keeper }` (see configuration.md).
 
 ## Table detail
 
@@ -203,6 +304,20 @@ aggregate, and table-function documentation. `system.functions` is queried as a
 runner-scoped supplement for user-defined functions and as a fallback when
 `system.documentation` is unavailable. The UI reports that fallback instead of
 silently embedding documentation from another ClickHouse version.
+
+The function list groups functions by category, one line per function (the
+name, plus a kind badge only when the group does not already say it:
+`aggregate`, `table`, `UDF`), with the number of functions on each category
+header. Category names come from `system.functions.categories` with the kind as
+the backend fallback, and spelling variants are folded: "Aggregate Functions"
+and the "Aggregate Function" fallback become **Aggregate**, the table-function
+fallback becomes **Table functions**, and uncategorized plain functions join
+ClickHouse's own **Other**. While no function is selected, the detail pane shows
+an overview instead of a bare placeholder: the catalog size, popular functions
+present on the server (one click opens them) and every category with its count
+(one click expands that group in the list). The detail header lists the
+category, the kind when it adds information, User-defined, and the version that
+introduced the function.
 
 The frontend supports title/name-only function search, kind filtering,
 user-defined filtering, and a safe Markdown detail view. Description text is not

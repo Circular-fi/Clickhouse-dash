@@ -89,14 +89,24 @@ def test_graph_click_updates_browser_selection_and_reset_focus_is_gone() -> None
     assert 'button.classList.toggle("is-selected", key === model.selectedKey);' in explorer
 
 
-def test_function_navigation_is_grouped_by_category_without_counts_and_meta_is_origin_first() -> None:
+def test_function_navigation_is_grouped_by_merged_category_with_counts_and_one_line_items() -> None:
     ui = read('src/static/app_explorer.js')
     render = ui[ui.index('function renderFunctionList()'):ui.index('async function refreshFunctions', ui.index('function renderFunctionList()'))]
     detail = ui[ui.index('function renderFunctionDetail()'):ui.index('function renderFunctionList()', ui.index('function renderFunctionDetail()'))]
+    category = ui[ui.index('function functionCategory(item)'):ui.index('function functionKindBadge(item, category)')]
     assert 'const groups = new Map()' in render
     assert 'functionCategory(item)' in render
-    assert 'explorerTreeDatabase__count' not in render
-    assert 'uniqueMetaBits([functionOrigin(item), functionCategory(item), item.kind || "Function"])' in detail
+    # Each category header carries its function count; items are one line
+    # (name plus a kind badge only when the group does not already say it).
+    assert 'explorerTreeDatabase__count explorerFunctionGroup__count", fmtInt(groupItems.length)' in render
+    assert 'explorerTreeObject__meta' not in render
+    assert 'functionKindBadge(item, category)' in render
+    # "Aggregate Function" (kind fallback) and "Aggregate Functions" merge.
+    assert 'if (!raw && kind === "Aggregate Function") return "Aggregate";' in category
+    assert '["aggregate", "Aggregate"]' in ui
+    # The detail meta no longer repeats "System" and the generic kind.
+    assert 'uniqueMetaBits([functionOrigin(item), functionCategory(item), item.kind || "Function"])' not in ui
+    assert 'renderFunctionOverview();' in detail
 
 
 def test_overview_and_column_storage_are_compact_one_line_lists() -> None:
