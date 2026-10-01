@@ -271,7 +271,7 @@
   }
 
   function gridTemplate(count) {
-    return ["minmax(118px, 0.9fr)", "minmax(96px, 0.85fr)", "minmax(120px, 1.5fr)", "minmax(112px, 1fr)", "62px", "84px"]
+    return ["minmax(158px, 0.9fr)", "minmax(96px, 0.85fr)", "minmax(120px, 1.5fr)", "minmax(112px, 1fr)", "62px", "84px"]
       .concat(Array.from({ length: count }, () => "minmax(72px, 0.8fr)"))
       .join(" ");
   }
@@ -474,7 +474,8 @@
     if (!target) return;
     if (target.closest("[data-span-retry]")) {
       state.error = "";
-      if (state.rows.length) void loadPage(); else void loadPage({ first: true });
+      // A failed later page resumes from its cursor; a failed first page reruns.
+      if (state.cursor) void loadPage(); else void loadPage({ first: true });
       return;
     }
     if (target.closest("[data-span-load-more]")) {
