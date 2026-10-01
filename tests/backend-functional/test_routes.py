@@ -235,6 +235,8 @@ def test_nested_explorer_routes_serve_the_same_application_shell():
         "/explorer/chdash_ui/weather_observations/operations",
         "/explorer/functions",
         "/explorer/functions/arrayMap",
+        "/explorer/_functions",
+        "/explorer/_functions/arrayMap",
         "/explorer/databases",
     ]:
         response = get(path)

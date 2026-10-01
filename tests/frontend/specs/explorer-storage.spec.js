@@ -288,7 +288,7 @@ test('Operations section reports replica health and Keeper, and lists problems f
 });
 
 test('Functions start from an overview, with merged counted categories and one line per function', async ({ page }) => {
-  await page.goto('/explorer/functions');
+  await page.goto('/explorer/_functions');
   await expect(page.locator('#explorerFunctionCategories button').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__title')).toHaveText(/^[\d,]+ functions in \d+ categories$/);
   const groups = await page.locator('#explorerFunctionList .explorerFunctionGroup').evaluateAll((els) => els.map((el) => el.dataset.category));
@@ -309,7 +309,7 @@ test('Functions start from an overview, with merged counted categories and one l
   expect((await arrays.locator('.explorerFunctionObject').first().boundingBox()).height).toBeLessThan(32);
 
   await page.locator('#explorerFunctionPopular button', { hasText: /^arrayMap$/ }).click();
-  await expect(page).toHaveURL(/\/explorer\/functions\/arrayMap$/);
+  await expect(page).toHaveURL(/\/explorer\/_functions\/arrayMap$/);
   await expect(page.locator('#explorerFunctionDetailName')).toHaveText('arrayMap');
   await expect(page.locator('#explorerFunctionDetailMeta')).toHaveText(/^Arrays/);
   await expect(page.locator('#explorerFunctionDetailMeta')).not.toContainText('System');

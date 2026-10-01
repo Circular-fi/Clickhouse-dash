@@ -133,8 +133,8 @@ test('query and explorer are real browser routes with independent layouts', asyn
   await page.goBack();
   await expect(page).toHaveURL(/\/explorer$/);
   await expect(page.locator('#explorerWorkspace')).toBeVisible();
-  await page.goto('/explorer/functions');
-  await expect(page).toHaveURL(/\/explorer\/functions$/);
+  await page.goto('/explorer/_functions');
+  await expect(page).toHaveURL(/\/explorer\/_functions$/);
   await expect(page.locator('#explorerFunctionsPane')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionList .explorerFunctionGroup').first()).toBeVisible({ timeout: 15_000 });
 });
