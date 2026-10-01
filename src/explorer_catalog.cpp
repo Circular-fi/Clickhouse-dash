@@ -2915,4 +2915,16 @@ bool load_explorer_preview(
   return true;
 }
 
+std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
+    clickhouse::Client& system,
+    const std::vector<std::pair<std::string, std::string>>& tables,
+    std::string* error) {
+  std::unordered_map<std::string, ExplorerReplicaCounts> out;
+  if (tables.empty()) return out;
+  for (const auto& [key, counts] : ReplicaCountCache::instance().get(system, tables, error)) {
+    out.emplace(key, ExplorerReplicaCounts{counts.total, counts.active});
+  }
+  return out;
+}
+
 } // namespace chdash

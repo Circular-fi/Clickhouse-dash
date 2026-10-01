@@ -78,7 +78,9 @@ if (CHDASH_BUILD_APP)
     allowed_objects.cpp
     explorer_catalog.cpp
     explorer_graph.cpp
+    explorer_ops.cpp
     api_explorer.cpp
+    api_explorer_ops.cpp
     api_traces.cpp
     api_otel_signals.cpp
     api_trace_logs.cpp

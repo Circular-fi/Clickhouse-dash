@@ -369,7 +369,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
 
   if (const auto* explorer = optional_block(root, "explorer", source)) {
-    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph"});
+    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph", "operations"});
     if (auto v = bool_attr(*explorer, "browse", "explorer")) cfg.explorer.browse = *v;
     if (const auto* graph = optional_block(*explorer, "graph", "explorer")) {
       validate_object(*graph, "explorer.graph", {"lineage", "storage_topology"}, {});
@@ -380,6 +380,11 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
     if (auto v = int_attr(*explorer, "live_refresh_ms", "explorer")) cfg.explorer.live_refresh_ms = int_value(*v, "explorer.live_refresh_ms");
     if (auto v = int_attr(*explorer, "function_cache_ttl_ms", "explorer")) cfg.explorer.function_cache_ttl_ms = int_value(*v, "explorer.function_cache_ttl_ms");
     if (auto v = bool_attr(*explorer, "function_markdown_links", "explorer")) cfg.explorer.function_markdown_links = *v;
+    if (const auto* operations = optional_block(*explorer, "operations", "explorer")) {
+      validate_object(*operations, "explorer.operations", {"enabled", "keeper"}, {});
+      if (auto v = bool_attr(*operations, "enabled", "explorer.operations")) cfg.explorer.operations = *v;
+      if (auto v = bool_attr(*operations, "keeper", "explorer.operations")) cfg.explorer.operations_keeper = *v;
+    }
   }
 
   if (const auto* traces = optional_block(root, "traces", source)) {

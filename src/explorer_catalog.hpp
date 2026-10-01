@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -411,6 +413,20 @@ bool load_explorer_preview(
     const std::string& table,
     size_t limit,
     ExplorerPreview& out,
+    std::string* error);
+
+struct ExplorerReplicaCounts {
+  uint64_t total = 0;
+  uint64_t active = 0;
+};
+
+// total_replicas / active_replicas of the given replicated tables, through
+// the per-server 60 s cache shared with the catalog (each uncached table
+// costs one Keeper request). Keyed by database + '\0' + table; tables whose
+// lookup failed are absent.
+std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
+    clickhouse::Client& system,
+    const std::vector<std::pair<std::string, std::string>>& tables,
     std::string* error);
 
 } // namespace chdash

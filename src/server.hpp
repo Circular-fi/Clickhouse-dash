@@ -5,6 +5,7 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
+#include "explorer_ops.hpp"
 #include "export_job.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
@@ -41,6 +42,13 @@ struct ExplorerSettings {
   // default. When enabled, the browser still accepts only ClickHouse-relative
   // references (/... or ./...) and strips every arbitrary external URL.
   bool function_markdown_links = false;
+  // Server operations view (merges, mutations, replication, Distributed
+  // queues) and its Keeper/ZooKeeper session summary. Both are read-only,
+  // bounded system-table reads; `operations_keeper` can hide the Keeper host
+  // and session details while keeping the activity tables.
+  bool operations = true;
+  bool operations_keeper = true;
+  bool operations_enabled() const { return enabled() && operations; }
 };
 
 struct TraceFeatureSettings {
@@ -216,6 +224,8 @@ private:
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_ops_keeper(const httplib::Request& req, httplib::Response& res);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -307,6 +317,10 @@ private:
   StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
   // Server-wide storage distribution for the Explorer System section.
   StaleCache<std::string, ExplorerStorageMap> explorer_storage_cache_;
+  // Server operations view: short-lived snapshots shared by every viewer of
+  // a host, so an auto-refreshing page costs one read per TTL, not per tab.
+  StaleCache<std::string, ExplorerOpsActivity> explorer_ops_activity_cache_;
+  StaleCache<std::string, ExplorerKeeperStatus> explorer_keeper_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one
