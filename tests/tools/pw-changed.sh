@@ -74,11 +74,13 @@ specs_for() {
     src/static/app_query_chart.js|src/static/app_chart_core.js) echo query-chart ;;
     src/static/app_query_library.js|src/*query_library*) echo query-library ;;
     src/static/app_graph_kit.js) echo explorer-graph trace-views trace-service-map ;;
+    src/static/app_ui_tabs.js|src/static/app_ui_segmented.js|src/static/app_ui_menu.js)
+      echo ui-components ui-consistency ui-foundations ui-layers ;;
     src/static/app_ui_layers.js) echo ui-layers ui-popover ui-panels ui-foundations ui-consistency ;;
     src/static/app_ui_popover.js) echo ui-popover ui-layers ui-foundations ;;
     src/static/app_ui_panel.js) echo ui-panels ui-layers ui-foundations explorer-nav logs metrics-browser trace-spans ;;
     src/static/app_ui*.js|src/static/app_dom.js|src/static/app_palette.js|src/static/app_format.js|src/static/style.css)
-      echo ui-foundations ui-consistency ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
+      echo ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
     src/static/app_results.js|src/static/app_run.js|src/static/app_download.js|src/static/app_export.js|src/api_query*|src/query_*|src/export_*|src/api_export.cpp|src/sse_util.hpp)
       echo functional streaming query-chart ;;
     src/static/app_analysis*.js|src/static/app_pipeline_viewer.js|src/*analysis*) echo functional ;;
