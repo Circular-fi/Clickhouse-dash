@@ -1802,7 +1802,7 @@ test('row menu: several distinct trace ids make Open trace and Copy trace link s
   await expect.poll(readClipboard).toBe(new URL(tracePath(TRACE_C), page.url()).href);
 });
 
-test('row menu: trace ids in array cells count element by element, pair with the span array, and the submenu stops at ten', async ({ page }) => {
+test('row menu: trace ids in array cells count element by element and pair with the span array', async ({ page }) => {
   await setTracesFeature(page, true);
   await openApp(page);
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
@@ -1810,7 +1810,7 @@ test('row menu: trace ids in array cells count element by element, pair with the
   ['${TRACE_B}', '${TRACE_A}', 'not-a-trace', '${TRACE_C}'] AS \`Links.TraceId\`,
   ['1111111111111111', '${SPAN_A}', '', '3333333333333333'] AS \`Links.SpanId\`
 FROM numbers(2)`);
-  let menu = await openTraceRowMenu(page, rows.nth(0));
+  const menu = await openTraceRowMenu(page, rows.nth(0));
   await menu.getByRole('menuitem', { name: 'Open trace', exact: true }).click();
   const sub = traceSubMenu(page);
   await expect(sub).toBeVisible();
@@ -1819,10 +1819,16 @@ FROM numbers(2)`);
   await expect(sub.getByRole('menuitem').first()).toHaveAttribute('title', `${TRACE_A}\nAlso in Links.TraceId[2]`);
   expect(await menuHrefs(sub)).toEqual([tracePath(TRACE_A, SPAN_A), tracePath(TRACE_B, '1111111111111111'), tracePath(TRACE_C, '3333333333333333')]);
   await closeTraceRowMenu(page);
+});
 
-  // Twelve ids: ten links, then "+2 more", disabled and skipped by the keys.
-  await runSuccessfulQuery(page, `SELECT number AS n, arrayMap(i -> concat(repeat('a', 30), leftPad(toString(i), 2, '0')), range(1, 13)) AS trace_ids FROM numbers(2)`);
-  menu = await openTraceRowMenu(page, rows.nth(0));
+test('row menu: the trace submenu stops at ten ids, then a disabled "+N more" the keys skip', async ({ page }) => {
+  await setTracesFeature(page, true);
+  await openApp(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  const sub = traceSubMenu(page);
+  const twelve = Array.from({ length: 12 }, (_, i) => `'${'a'.repeat(30)}${String(i + 1).padStart(2, '0')}'`).join(', ');
+  await runSuccessfulQuery(page, `SELECT number AS n, [${twelve}] AS trace_ids FROM numbers(2)`);
+  await openTraceRowMenu(page, rows.nth(0));
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowRight');
   await expect(sub).toBeVisible();
