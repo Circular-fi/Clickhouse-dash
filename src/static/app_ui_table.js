@@ -24,8 +24,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const esc = (value) => String(value ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const esc = (value) => ns.util.escapeHtml(value ?? "");
 
   const ARIA = { asc: "ascending", desc: "descending" };
   const ariaSort = (dir) => ARIA[dir] || "none";

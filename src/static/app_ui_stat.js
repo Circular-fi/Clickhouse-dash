@@ -16,8 +16,7 @@
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
 
-  const esc = (value) => String(value ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const esc = (value) => ns.util.escapeHtml(value ?? "");
   const TONES = { error: "is-error", warn: "is-warn", warning: "is-warn", ok: "is-ok" };
 
   function statTileHtml({

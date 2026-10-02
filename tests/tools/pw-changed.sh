@@ -83,6 +83,8 @@ specs_for() {
     src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py)
       echo ui-infrastructure ui-foundations page-chrome design functional observability ;;
     src/static/app_state.js|src/static/app_api.js|src/static/app_util.js) echo ui-infrastructure functional ui-foundations page-chrome ;;
+    src/static/app_ui_table.js|src/static/app_ui_badge.js|src/static/app_ui_copy.js|src/static/app_ui_sql.js|src/static/app_ui_kv.js|src/static/app_ui_stat.js|src/static/app_ui_chart.js)
+      echo ui-data ui-foundations functional logs trace-spans trace-services explorer-nav metrics-browser query-chart ;;
     src/static/app_ui*.js|src/static/app_dom.js|src/static/app_palette.js|src/static/app_format.js|src/static/style.css)
       echo ui-foundations ui-consistency ui-components ui-layers ui-popover ui-panels page-chrome design accessibility functional ;;
     src/static/app_results.js|src/static/app_run.js|src/static/app_download.js|src/static/app_export.js|src/api_query*|src/query_*|src/export_*|src/api_export.cpp|src/sse_util.hpp)

@@ -27,8 +27,7 @@
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
 
-  const esc = (value) => String(value ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const esc = (value) => ns.util.escapeHtml(value ?? "");
   const nullToken = () => (ns.format?.nullToken ? ns.format.nullToken() : '<span class="nullToken">NULL</span>');
 
   const JSON_LOOKING = /^\s*[[{]/;

@@ -44,16 +44,14 @@ def offenders(pattern: str, allowed: set[str] = frozenset(), files=None):
 
 
 def test_component_modules_load_on_every_page_after_the_foundations():
-    app = read("app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    obs = read("app_observability.js")
-    common = obs[obs.index("const COMMON_MODULES = ["):obs.index("];", obs.index("const COMMON_MODULES = ["))]
-    for listing in (files, common):
-        dom = listing.index('"app_dom.js"')
-        for module in MODULES:
-            assert listing.index(f'"{module}"') > dom, module
+    # The manifest's common list (src/static/modules.json): every page loads
+    # them, after app_dom.js and app_util.js (ns.util.escapeHtml).
+    import json
+    common = json.loads(read("modules.json"))["common"]
     for module in MODULES:
         assert (STATIC / module).is_file(), module
+        assert module in common, module
+        assert common.index(module) > common.index("app_dom.js") and common.index(module) > common.index("app_util.js"), module
         assert f"/* ==== Components: " in read("style.css")
     # ns.ui keeps what the component modules put on it.
     assert "ns.ui = Object.assign(ns.ui || {}, {" in read("app_ui.js")
@@ -140,7 +138,10 @@ def test_read_only_sql_is_the_sql_block():
     # Highlighted SQL elsewhere: the editor, autocomplete and function docs.
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})
     sql = read("app_ui_sql.js")
-    assert "ns.highlight.toHtml(" in sql and 'const HIGHLIGHTER = "app_highlight.js";' in sql
+    assert "ns.highlight.toHtml(" in sql and "ns.loader.loadGroup(HIGHLIGHT_GROUP)" in sql
+    # Observability loads the highlighter on first use (a lazy group).
+    import json
+    assert json.loads(read("modules.json"))["pages"]["observability"]["lazy"]["highlight"] == ["app_highlight.js"]
 
 
 def test_key_value_lists_are_the_shared_list():

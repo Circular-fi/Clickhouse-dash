@@ -82,7 +82,9 @@
         "app_ui.js",
         "app_timerange.js"
       ],
-      "lazy": {},
+      "lazy": {
+        "highlight": ["app_highlight.js"]
+      },
       "views": {
         "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
         "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   // Read-only SQL, one component for every page (style.css "Components: SQL
-  // block" block), highlighted by the editor's highlighter (app_highlight.js,
+  // block" block), highlighted by the editor's highlighter (ns.highlight,
   // ns.highlight.toHtml). A page that has not loaded it (Observability) gets
   // the plain text at once and the colours when the highlighter has loaded.
   //
@@ -21,11 +21,9 @@
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
 
-  const HIGHLIGHTER = "app_highlight.js";
-  const base = (() => {
-    const src = document.currentScript?.src || "";
-    return src ? src.replace(/[^/]*$/, "") : "";
-  })();
+  // The highlighter: in the Query and Explorer modules, a lazy group of
+  // Observability (src/static/modules.json, ns.loader).
+  const HIGHLIGHT_GROUP = "highlight";
 
   let loading = null;
   const pending = new Set();
@@ -33,15 +31,8 @@
   function loadHighlighter() {
     if (ns.highlight?.toHtml) return Promise.resolve();
     if (!loading) {
-      loading = new Promise((resolve, reject) => {
-        if (!base) { reject(new Error("no base URL")); return; }
-        const script = document.createElement("script");
-        script.src = base + HIGHLIGHTER;
-        script.async = true;
-        script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load ${HIGHLIGHTER}`));
-        document.head.appendChild(script);
-      }).then(() => {
+      loading = (ns.loader ? ns.loader.loadGroup(HIGHLIGHT_GROUP) : Promise.reject(new Error("no loader"))).then(() => {
+        if (!ns.highlight?.toHtml) throw new Error("no highlighter on this page");
         for (const paint of pending) paint();
         pending.clear();
         // Blocks written as HTML strings before the highlighter loaded.
@@ -49,13 +40,12 @@
           code.removeAttribute("data-sql-plain");
           code.innerHTML = ns.highlight.toHtml(code.textContent || "");
         }
-      }, () => { pending.clear(); });
+      }).catch(() => { pending.clear(); });
     }
     return loading;
   }
 
-  const esc = (value) => String(value ?? "")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = (value) => ns.util.escapeHtml(value ?? "");
 
   function paintInto(code, sql) {
     const paint = () => {
@@ -106,9 +96,9 @@
     const attrs = ready ? "" : " data-sql-plain";
     if (inline) {
       const title = `${label}: click to show it all`;
-      return `<button type="button" class="sqlBlock sqlBlock--inline" aria-expanded="false" title="${esc(title).replace(/"/g, "&quot;")}"><code class="sqlBlock__code"${attrs}>${code}</code></button>`;
+      return `<button type="button" class="sqlBlock sqlBlock--inline" aria-expanded="false" title="${esc(title)}"><code class="sqlBlock__code"${attrs}>${code}</code></button>`;
     }
-    return `<div class="sqlBlock"><div class="sqlBlock__body"><pre class="sqlBlock__pre" aria-label="${esc(label).replace(/"/g, "&quot;")}"><code class="sqlBlock__code"${attrs}>${code}</code></pre></div></div>`;
+    return `<div class="sqlBlock"><div class="sqlBlock__body"><pre class="sqlBlock__pre" aria-label="${esc(label)}"><code class="sqlBlock__code"${attrs}>${code}</code></pre></div></div>`;
   }
 
   function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand = null, inline = false, wrap = false, label = "SQL", className = "" } = {}) {
