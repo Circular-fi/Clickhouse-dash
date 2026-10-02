@@ -142,8 +142,11 @@
       ev.preventDefault();
       close();
     });
-    // Closed by the browser or by dialog.close() elsewhere.
-    dialog.addEventListener("close", finish);
+    // Closed by the browser or by dialog.close() elsewhere. The event comes a
+    // task after the close: a dialog reopened meanwhile stays open.
+    dialog.addEventListener("close", () => {
+      if (!dialog.open) finish();
+    });
     // A click that both starts and ends on the backdrop (the dialog box
     // itself is covered by its frame) closes; a drag out of a field does not.
     dialog.addEventListener("pointerdown", (ev) => {

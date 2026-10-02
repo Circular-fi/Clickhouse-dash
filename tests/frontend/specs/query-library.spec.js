@@ -674,6 +674,23 @@ test('the library opens in the profiling dialog: same shell, size and tabs; Esca
   await expect(panel(page)).toBeVisible();
   expect(await page.evaluate(() => !!document.activeElement?.closest('#queryLibraryMenu'))).toBe(true);
 
+  // Closed and reopened at once (the browser's "close" event comes a task
+  // later): it stays the top dialog, so its menus and toasts go in it.
+  await page.evaluate(async () => {
+    window.ChDash.ui.closeQueryLibrary();
+    window.ChDash.ui.openQueryLibrary();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await expect(panel(page)).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  expect(await page.evaluate(() => window.ChDash.dialog.host().id)).toBe('queryLibraryMenu');
+  await rowMenu(page, 'The answer');
+  expect(await page.evaluate(() => document.querySelector('.qlMenu').parentElement.id)).toBe('queryLibraryMenu');
+  await expect(page.locator('.qlMenu [role=menuitem]').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.qlMenu')).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+
   // The last tab is remembered.
   await page.locator('#queryLibraryTabHistory').click();
   await page.keyboard.press('Escape');
