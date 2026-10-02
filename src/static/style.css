@@ -14363,6 +14363,13 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanListRow.is-error { box-shadow: inset 2px 0 0 var(--danger); }
 .traceSpanListRow__cell--service { font-weight: 650; }
 .traceSpanListRow__cell--kind { color: var(--muted); }
+/* A narrow table (beside the docked span panel) drops Kind, then the date
+   of each time (app_trace_spans.js fitTable: data-fit). */
+.traceSpanTable[data-fit="compact"] .traceSpanTable__th--5,
+.traceSpanTable[data-fit="compact"] .traceSpanListRow__cell--kind,
+.traceSpanTable[data-fit="clock"] .traceSpanTable__th--5,
+.traceSpanTable[data-fit="clock"] .traceSpanListRow__cell--kind,
+.traceSpanTable[data-fit="clock"] .traceSpanListRow__date { display: none; }
 .traceSpanListRow__cell--attr.is-missing { color: var(--muted); opacity: .6; }
 .traceSpanTable__foot {
   min-height: 42px;

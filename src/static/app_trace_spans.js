@@ -295,6 +295,14 @@
     return row._time;
   }
 
+  // The shown time as its date and its clock (the last word): a narrow table
+  // hides the date (data-fit="clock").
+  function timeHtml(text) {
+    const at = text.lastIndexOf(" ");
+    if (at < 0) return esc(text);
+    return `<span class="traceSpanListRow__date">${esc(text.slice(0, at + 1))}</span>${esc(text.slice(at + 1))}`;
+  }
+
   function timeTitle(row) {
     if (row._timeTitle == null) row._timeTitle = ctx.absoluteTimeText(Number(row.start_ns), row.timestamp);
     return row._timeTitle;
@@ -305,10 +313,45 @@
     return Number.isFinite(ns) && ns > 0 ? new Date(Math.floor(ns / 1e6)) : null;
   }
 
-  function gridTemplate(count) {
-    return ["minmax(158px, 0.9fr)", "minmax(96px, 0.85fr)", "minmax(120px, 1.5fr)", "minmax(112px, 1fr)", "62px", "84px"]
-      .concat(Array.from({ length: count }, () => "minmax(72px, 0.8fr)"))
-      .join(" ");
+  // The table fits its column (beside the docked span panel it is narrower):
+  // the widest layout that fits wins. "all": every column; "compact": Kind
+  // goes (the panel shows it) and the columns get tighter minimums; "clock":
+  // the time column shows the clock only (the date stays in its tooltip).
+  // Attribute columns stay in every layout, narrower.
+  const LAYOUTS = [
+    { fit: "", cols: ["minmax(158px, 0.9fr)", "minmax(96px, 0.85fr)", "minmax(120px, 1.5fr)", "minmax(112px, 1fr)", "62px", "84px"], attr: "minmax(72px, 0.8fr)" },
+    { fit: "compact", cols: ["minmax(150px, 0.9fr)", "minmax(72px, 0.85fr)", "minmax(88px, 1.5fr)", "minmax(84px, 1fr)", "62px"], attr: "minmax(64px, 0.8fr)" },
+    { fit: "clock", cols: ["minmax(100px, 0.7fr)", "minmax(60px, 0.85fr)", "minmax(64px, 1.5fr)", "minmax(72px, 1fr)", "62px"], attr: "minmax(56px, 0.8fr)" },
+  ];
+  const minPx = (track) => Number((/(\d+)px/.exec(track) || [0, 0])[1]);
+
+  function layoutFor(width, count) {
+    return LAYOUTS.find((layout) => layout.cols.reduce((sum, track) => sum + minPx(track), 0) + count * minPx(layout.attr) <= width)
+      || LAYOUTS[LAYOUTS.length - 1];
+  }
+
+  function gridTemplate(layout, count) {
+    return layout.cols.concat(Array.from({ length: count }, () => layout.attr)).join(" ");
+  }
+
+  // Applies the layout that fits the table's width (on render and resize).
+  function fitTable(table) {
+    const width = table.clientWidth;
+    if (!width) return;
+    const count = state.loadedColumns.length;
+    const layout = layoutFor(width, count);
+    if (table.dataset.fit === layout.fit && table.dataset.fitCount === String(count)) return;
+    table.dataset.fit = layout.fit;
+    table.dataset.fitCount = String(count);
+    table.style.setProperty("--trace-span-grid", gridTemplate(layout, count));
+  }
+
+  let fitObserver = null;
+  function watchTableWidth(table) {
+    fitObserver?.disconnect();
+    fitObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => fitTable(table)) : null;
+    fitObserver?.observe(table);
+    fitTable(table);
   }
 
   function headHtml() {
@@ -346,7 +389,7 @@
       return `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--attr" role="gridcell">${filterValueHtml("tag", value, value === "" ? '""' : value, ` data-filter-scope="${esc(scope)}" data-filter-key="${esc(column.key)}"`)}</span>`;
     }).join("");
     return `<div class="dataList__row traceSpanListRow${selected ? " is-selected" : ""}${error ? " is-error" : ""}" role="row" id="traceSpanListRow-${index}" data-span-index="${index}" aria-rowindex="${index + 2}" aria-selected="${selected ? "true" : "false"}" style="top:${index * ROW_HEIGHT}px;--trace-service-color:${palette.service(row.service_name)}">`
-      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(timeTitle(row))}">${esc(localTime(row))}</span>`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(timeTitle(row))}">${timeHtml(localTime(row))}</span>`
       + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--service" role="gridcell"><i class="serviceSwatch" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>`
       + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--operation" role="gridcell">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</span>`
       + `<span class="dataList__cell num cellBar traceSpanListRow__cell traceSpanListRow__cell--duration" role="gridcell" title="${esc(duration)}" style="${ns.table.cellBarStyle(percent, "var(--trace-service-color)")}">${esc(duration)}</span>`
@@ -421,7 +464,8 @@
       ROW_HEIGHT = ns.table.rowHeight("regular");
       bindTableKeys(table);
       table.dataset.columns = columnsKey;
-      table.style.setProperty("--trace-span-grid", gridTemplate(state.loadedColumns.length));
+      table.style.setProperty("--trace-span-grid", gridTemplate(LAYOUTS[0], state.loadedColumns.length));
+      watchTableWidth(table);
     }
     table.setAttribute("aria-rowcount", String(state.rows.length + 1));
     table.style.setProperty("--trace-span-sticky-top", `${stickyTop()}px`);

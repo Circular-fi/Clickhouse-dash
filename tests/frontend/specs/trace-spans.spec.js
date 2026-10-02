@@ -348,6 +348,56 @@ test('spans: the side panel opens under the search bar; on a phone, a bottom she
   await expect(page.locator('#traceSpanTable')).toBeFocused();
 });
 
+// Every shown column ends inside the table (nothing clipped by the results
+// column); the labels of the shown headers.
+async function spanColumns(page) {
+  return page.evaluate(() => {
+    const table = document.getElementById('traceSpanTable');
+    const box = table.getBoundingClientRect();
+    const shown = [...table.querySelectorAll('.dataList__th')].filter((th) => th.getClientRects().length);
+    const cells = [...table.querySelectorAll('.traceSpanListRow:first-child > .dataList__cell')].filter((cell) => cell.getClientRects().length);
+    const inside = (el) => el.getBoundingClientRect().right <= box.right + 0.5 && el.getBoundingClientRect().left >= box.left - 0.5;
+    return {
+      labels: shown.map((th) => th.textContent.trim()),
+      inside: shown.every(inside) && cells.every(inside),
+      cells: cells.length,
+      fits: table.scrollWidth <= table.clientWidth + 1,
+      fit: table.dataset.fit || '',
+    };
+  });
+}
+
+test('spans: beside the docked panel the table fits its column at 1440 px (Kind goes, Status stays); 1920 px shows every column', async ({ page, request }) => {
+  const range = await denseHour(request);
+  await freshColumns(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(tracesUrl(range, { mode: 'spans' }));
+  await waitRows(page);
+  const all = ['Time', 'Service', 'Operation', 'Duration', 'Status', 'Kind'];
+  expect((await spanColumns(page)).labels).toEqual(all);
+  await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
+  await expect(panel(page)).toBeVisible();
+  await expect.poll(async () => (await spanColumns(page)).fit).not.toBe('');
+  const narrow = await spanColumns(page);
+  expect(narrow.labels).toEqual(['Time', 'Service', 'Operation', 'Duration', 'Status']);
+  expect(narrow).toMatchObject({ inside: true, fits: true, cells: 5 });
+  // The status badge is whole and hit-testable at the table's right edge.
+  const status = rows(page).nth(1).locator('.traceSpanListRow__cell--status .badge');
+  const badge = await status.boundingBox();
+  const table = await page.locator('#traceSpanTable').boundingBox();
+  expect(badge.x + badge.width).toBeLessThanOrEqual(table.x + table.width);
+  expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.traceSpanListRow__cell--status'), [badge.x + badge.width / 2, badge.y + badge.height / 2])).toBe(true);
+  // 1920 px with the panel still open: every column again.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
+  expect(await spanColumns(page)).toMatchObject({ inside: true, fits: true, cells: 6, fit: '' });
+  // Closing the panel at 1440 px gives the full table back.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await panel(page).locator('.traceSpanPanel__close').click();
+  await expect(panel(page)).toBeHidden();
+  await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
+});
+
 test('spans: keyboard navigation through rows and the panel', async ({ page, request }) => {
   const range = await denseHour(request);
   await page.goto(tracesUrl(range, { mode: 'spans' }));
