@@ -1,0 +1,1 @@
+SELECT 0xFF AS hex_value, 0b1011 AS binary_value, 1e-5 AS small_exponent, 2.5E+10 AS large_exponent, -inf AS negative_infinity, nan AS not_a_number, 1_000_000 AS underscored_million, 0.000001 AS micro_value, 18446744073709551615 AS max_uint64 FROM system.one

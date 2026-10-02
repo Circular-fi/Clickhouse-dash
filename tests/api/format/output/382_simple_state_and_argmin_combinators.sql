@@ -1,0 +1,8 @@
+SELECT
+    entity_key,
+    sumSimpleState(metric_value)                AS `simple_total`,
+    argMinState(event_timestamp, metric_value)  AS `min_time_state`,
+    maxMap(attribute_keys, attribute_values)    AS `attribute_max`,
+    groupUniqArrayMerge(10)(tag_state)          AS `merged_tags`
+FROM anon.metrics_store
+GROUP BY entity_key

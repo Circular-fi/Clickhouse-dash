@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.log_store WHERE log_body REGEXP '^ERROR [0-9]+' AND match(entity_key, '^svc-') AND NOT multiSearchAny(log_body, ['healthcheck', 'readiness'])

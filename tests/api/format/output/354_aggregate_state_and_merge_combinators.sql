@@ -1,0 +1,19 @@
+SELECT
+    entity_group,
+    uniqMerge(unique_state)                        AS `unique_entities`,
+    quantilesMerge(0.5, 0.9, 0.99)(latency_state)  AS `latency_quantiles`,
+    sumMergeIf(value_state, is_valid)              AS `valid_total`
+FROM
+(
+    SELECT
+        entity_group,
+        uniqState(entity_key)                       AS `unique_state`,
+        quantilesState(0.5, 0.9, 0.99)(latency_ms)  AS `latency_state`,
+        sumState(metric_value)                      AS `value_state`,
+        metric_value > 0                            AS `is_valid`
+    FROM anon.metrics_store
+    GROUP BY
+        entity_group,
+        is_valid
+)
+GROUP BY entity_group

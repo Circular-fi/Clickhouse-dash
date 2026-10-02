@@ -1,0 +1,1 @@
+SELECT o.entity_key FROM anon.orders AS o WHERE EXISTS (SELECT 1 FROM anon.payments AS p WHERE p.order_key = o.entity_key) AND NOT EXISTS (SELECT 1 FROM anon.refunds AS r WHERE r.order_key = o.entity_key)

@@ -1,0 +1,1 @@
+SELECT minOrNull(metric_value) AS min_or_null, maxOrDefault(metric_value) AS max_or_default, avgOrNullIf(metric_value, entity_group = 'group_live') AS live_avg, argMaxOrNull(entity_key, metric_value) AS top_entity FROM anon.metrics_store WHERE event_date = yesterday()

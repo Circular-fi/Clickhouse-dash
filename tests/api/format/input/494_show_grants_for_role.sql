@@ -1,0 +1,1 @@
+SHOW GRANTS FOR reporting_role

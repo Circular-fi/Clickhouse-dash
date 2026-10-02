@@ -1,0 +1,1 @@
+REVOKE ALTER UPDATE, ALTER DELETE ON anon.* FROM reporting_role

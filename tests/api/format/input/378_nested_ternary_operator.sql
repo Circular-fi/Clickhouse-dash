@@ -1,0 +1,1 @@
+SELECT metric_value > 100 ? 'high' : (metric_value > 10 ? 'medium' : (metric_value > 0 ? 'low' : 'none')) AS value_band, is_active ? metric_value : 0 AS active_value FROM anon.metrics_store

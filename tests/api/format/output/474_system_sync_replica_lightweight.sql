@@ -1,0 +1,1 @@
+SYSTEM SYNC REPLICA anon.metrics_store LIGHTWEIGHT

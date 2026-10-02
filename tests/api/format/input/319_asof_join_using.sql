@@ -1,0 +1,1 @@
+SELECT trades.symbol_code, trades.trade_time, quotes.bid_price FROM anon.trades AS trades ASOF LEFT JOIN anon.quotes AS quotes USING (symbol_code, trade_time)

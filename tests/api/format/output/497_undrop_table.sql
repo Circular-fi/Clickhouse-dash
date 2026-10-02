@@ -1,0 +1,1 @@
+UNDROP TABLE anon.metrics_scratch

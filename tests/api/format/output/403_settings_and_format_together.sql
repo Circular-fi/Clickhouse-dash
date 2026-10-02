@@ -1,0 +1,11 @@
+SELECT
+    entity_key,
+    metric_value
+FROM anon.metrics_store
+WHERE metric_value > 0
+LIMIT 100
+SETTINGS
+    max_threads        = 4,
+    max_execution_time = 30,
+    readonly           = 1
+FORMAT JSONEachRow

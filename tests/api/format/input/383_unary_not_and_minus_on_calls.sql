@@ -1,0 +1,1 @@
+SELECT -abs(metric_value) AS negative_magnitude, NOT has(tag_names, 'archived') AS not_archived, -toInt64(metric_ratio * 100) AS negative_percent, NOT empty(display_name) AND NOT isNull(parent_key) AS has_parent_and_name FROM anon.metrics_store

@@ -1,0 +1,1 @@
+BACKUP TABLE anon.metrics_store, TABLE anon.events TO Disk('backups', 'm.zip')

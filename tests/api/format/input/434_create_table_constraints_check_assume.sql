@@ -1,0 +1,1 @@
+CREATE TABLE anon.orders (order_id UInt64, quantity UInt32, unit_price Decimal(18, 2), total_price Decimal(18, 2), order_date Date, CONSTRAINT positive_quantity CHECK quantity > 0, CONSTRAINT consistent_total CHECK total_price = quantity * unit_price, CONSTRAINT recent_orders ASSUME order_date >= '2020-01-01') ENGINE = MergeTree ORDER BY order_id

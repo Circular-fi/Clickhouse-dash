@@ -1,0 +1,1 @@
+SELECT a.entity_key FROM anon.left_store AS a LEFT JOIN anon.right_store AS b ON (a.entity_key = b.entity_key OR a.alias_key = b.entity_key) AND toDate(a.event_timestamp) = b.event_date

@@ -1,0 +1,1 @@
+SYSTEM STOP TTL MERGES anon.event_history

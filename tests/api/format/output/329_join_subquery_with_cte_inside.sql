@@ -1,0 +1,22 @@
+SELECT
+    l.entity_key,
+    r.total_value
+FROM anon.left_store AS l
+INNER JOIN
+(
+    WITH
+        filtered AS
+        (
+            SELECT
+                entity_key,
+                metric_value
+            FROM anon.right_store
+            WHERE metric_value > 0
+        )
+    SELECT
+        entity_key,
+        sum(metric_value) AS `total_value`
+    FROM filtered
+    GROUP BY entity_key
+) AS r
+    ON l.entity_key = r.entity_key

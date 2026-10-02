@@ -1,0 +1,1 @@
+INSERT INTO anon.metrics FROM INFILE 'm.csv.gz' COMPRESSION 'gzip' FORMAT CSV

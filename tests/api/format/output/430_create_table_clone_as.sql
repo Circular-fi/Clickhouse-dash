@@ -1,0 +1,1 @@
+CREATE TABLE anon.metrics_clone CLONE AS anon.metrics_store

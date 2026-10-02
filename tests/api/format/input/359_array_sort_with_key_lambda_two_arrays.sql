@@ -1,0 +1,1 @@
+select arraySort((name, score) -> -score, entity_names, entity_scores) as ranked_names, arrayReverseSort(x -> length(x), entity_names) as longest_first, arrayMap((k, v, w) -> concat(k, '=', toString(v * w)), tag_keys, tag_values, tag_weights) as weighted_tags from anon.ranking_store

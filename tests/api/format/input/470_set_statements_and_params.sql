@@ -1,0 +1,1 @@
+SET max_threads = 8, param_target_group = 'group_live'

@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.current_store INTERSECT DISTINCT SELECT entity_key FROM anon.previous_store EXCEPT DISTINCT SELECT entity_key FROM anon.blocked_store

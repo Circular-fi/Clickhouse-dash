@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.metrics_store WHERE CASE entity_group WHEN 'group_live' THEN metric_value > 0 WHEN 'group_buffer' THEN metric_value > 10 ELSE 0 END = 1

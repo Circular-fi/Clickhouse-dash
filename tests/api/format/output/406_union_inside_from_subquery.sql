@@ -1,0 +1,13 @@
+SELECT
+    source_name,
+    count() AS `row_count`
+FROM
+(
+    SELECT 'live' AS `source_name`
+    FROM anon.live_store
+    UNION ALL
+    SELECT 'archive' AS `source_name`
+    FROM anon.archive_store
+)
+GROUP BY source_name
+ORDER BY row_count DESC

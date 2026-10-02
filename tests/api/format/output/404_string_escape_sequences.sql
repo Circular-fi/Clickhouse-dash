@@ -1,0 +1,9 @@
+SELECT
+    'tab\there'    AS `tab_text`,
+    'line\nbreak'  AS `newline_text`,
+    'quote\'s'     AS `backslash_quote`,
+    'it''s'        AS `doubled_quote`,
+    '\x41\x42'     AS `hex_escapes`,
+    'back\\slash'  AS `backslash_text`,
+    '\0'           AS `nul_text`
+FROM system.one

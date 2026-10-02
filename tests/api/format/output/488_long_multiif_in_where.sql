@@ -1,0 +1,7 @@
+SELECT entity_key
+FROM anon.metrics_store
+WHERE multiIf(
+        entity_group = 'group_live', metric_value > 0,
+        entity_group = 'group_buffer', metric_value > 10,
+        metric_value > 100
+    )

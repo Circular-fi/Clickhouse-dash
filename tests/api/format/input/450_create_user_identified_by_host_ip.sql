@@ -1,0 +1,1 @@
+create user report_reader identified by 'changeme' host ip '10.0.0.0/8'

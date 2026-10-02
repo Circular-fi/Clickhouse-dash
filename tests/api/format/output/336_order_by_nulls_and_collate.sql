@@ -1,0 +1,9 @@
+SELECT
+    entity_key,
+    display_name,
+    metric_value
+FROM anon.metrics_store
+ORDER BY
+    metric_value DESC NULLS LAST,
+    display_name ASC COLLATE 'en',
+    entity_key ASC NULLS FIRST

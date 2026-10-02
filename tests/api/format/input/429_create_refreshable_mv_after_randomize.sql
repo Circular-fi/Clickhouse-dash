@@ -1,0 +1,1 @@
+CREATE MATERIALIZED VIEW anon.hourly_snapshot_mv REFRESH AFTER 1 HOUR RANDOMIZE FOR 10 MINUTE SETTINGS refresh_retries = 3 TO anon.hourly_snapshot AS SELECT entity_key, max(metric_value) AS peak_value FROM anon.metrics_store GROUP BY entity_key

@@ -1,0 +1,1 @@
+SELECT count() AS row_count FROM merge('anon', '^metrics_20') WHERE number_value IN (SELECT number FROM numbers(10, 5)) AND entity_key IN (SELECT entity_key FROM cluster('analytics_cluster', anon.allowed_keys))

@@ -1,0 +1,9 @@
+CREATE OR REPLACE VIEW anon.restricted_metrics
+DEFINER = analyst_user
+SQL SECURITY DEFINER
+AS
+SELECT
+    entity_key,
+    metric_value
+FROM anon.metrics_store
+WHERE entity_group = 'group_live'

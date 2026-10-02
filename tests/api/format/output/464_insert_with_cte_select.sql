@@ -1,0 +1,16 @@
+INSERT INTO anon.daily_rollup(event_day, entity_key, event_count)
+WITH
+    recent AS
+    (
+        SELECT *
+        FROM anon.events_store
+        WHERE event_date >= today() - 1
+    )
+SELECT
+    toDate(event_timestamp) AS `event_day`,
+    entity_key,
+    count() AS `event_count`
+FROM recent
+GROUP BY
+    event_day,
+    entity_key

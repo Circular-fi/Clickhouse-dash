@@ -1,0 +1,1 @@
+WITH outer_cte AS (WITH inner_cte AS (SELECT entity_key, max(metric_value) AS max_value FROM anon.metrics_store GROUP BY entity_key) SELECT entity_key FROM inner_cte WHERE max_value > 100) SELECT count() AS heavy_entities FROM outer_cte

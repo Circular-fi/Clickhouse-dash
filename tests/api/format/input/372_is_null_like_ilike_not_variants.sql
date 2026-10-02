@@ -1,0 +1,1 @@
+select entity_key from anon.metrics_store where display_name is not null and parent_key is null and display_name not ilike '%test%' and entity_key not like 'tmp\\_%' and lower(display_name) ilike 'prod-%' and not (is_deleted or is_hidden)

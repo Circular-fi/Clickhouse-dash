@@ -1,0 +1,1 @@
+DETACH TABLE IF EXISTS anon.metrics_legacy PERMANENTLY

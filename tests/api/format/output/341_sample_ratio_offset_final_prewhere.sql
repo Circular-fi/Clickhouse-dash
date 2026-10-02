@@ -1,0 +1,8 @@
+SELECT
+    entity_key,
+    count() AS `row_count`
+FROM anon.metrics_store FINAL
+SAMPLE 1 / 10 OFFSET 1 / 2
+PREWHERE event_date = today()
+WHERE metric_value > 0
+GROUP BY entity_key

@@ -1,0 +1,12 @@
+(
+    SELECT entity_key
+    FROM anon.current_store
+)
+EXCEPT ALL
+(
+    SELECT entity_key
+    FROM anon.previous_store
+)
+INTERSECT ALL
+SELECT entity_key
+FROM anon.audited_store

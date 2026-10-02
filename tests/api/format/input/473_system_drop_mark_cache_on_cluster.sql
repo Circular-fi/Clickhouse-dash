@@ -1,0 +1,1 @@
+SYSTEM DROP MARK CACHE ON CLUSTER analytics_cluster

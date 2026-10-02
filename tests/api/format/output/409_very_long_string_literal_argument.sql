@@ -1,0 +1,8 @@
+SELECT
+    entity_key,
+    positionCaseInsensitive(
+        log_body,
+        'upstream connect error or disconnect/reset before headers, reset reason: overflow'
+    ) > 0 AS `is_upstream_reset`
+FROM anon.log_store
+WHERE entity_group = 'group_live'

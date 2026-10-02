@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS anon.metrics_scratch ON CLUSTER analytics_cluster SYNC

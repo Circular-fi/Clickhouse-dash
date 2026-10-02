@@ -1,0 +1,5 @@
+SELECT
+    replaceRegexpAll(raw_text, $regex$\s+$regex$, ' ') AS `normalised_text`,
+    position(raw_text, $$it's$$) AS `apostrophe_position`,
+    concat($tag$prefix-$tag$, entity_key) AS `prefixed_key`
+FROM anon.text_store

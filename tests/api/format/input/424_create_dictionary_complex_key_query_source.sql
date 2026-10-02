@@ -1,0 +1,1 @@
+CREATE DICTIONARY anon.region_lookup (country_code String, region_code String, region_name String INJECTIVE, parent_region String DEFAULT '' HIERARCHICAL) PRIMARY KEY country_code, region_code SOURCE(CLICKHOUSE(QUERY 'SELECT country_code, region_code, region_name, parent_region FROM anon.regions')) LIFETIME(3600) LAYOUT(COMPLEX_KEY_HASHED(PREALLOCATE 1))

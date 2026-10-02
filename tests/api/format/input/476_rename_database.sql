@@ -1,0 +1,1 @@
+RENAME DATABASE analytics_staging TO analytics_archive

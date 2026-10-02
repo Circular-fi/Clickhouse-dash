@@ -1,0 +1,3 @@
+OPTIMIZE TABLE anon.metrics_store
+FINAL
+DEDUPLICATE BY * EXCEPT(ingested_at, ingest_batch_id)

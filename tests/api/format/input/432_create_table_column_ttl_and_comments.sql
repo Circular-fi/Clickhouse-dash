@@ -1,0 +1,1 @@
+CREATE TABLE anon.user_sessions (session_id UUID COMMENT 'session key', email String COMMENT 'monthly' TTL created + INTERVAL 30 DAY, ip IPv6 TTL created + INTERVAL 7 DAY, created DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY (created, session_id) COMMENT 'web sessions'

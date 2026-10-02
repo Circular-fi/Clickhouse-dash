@@ -1,0 +1,1 @@
+SELECT entity_key FROM anon.metrics_store WHERE metric_value BETWEEN 10 AND 20 AND event_date NOT BETWEEN '2026-01-01' AND '2026-01-07' OR metric_ratio NOT BETWEEN 0.1 AND 0.9 AND entity_group != 'group_tmp'

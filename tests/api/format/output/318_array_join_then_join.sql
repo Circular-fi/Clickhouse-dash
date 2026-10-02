@@ -1,0 +1,8 @@
+SELECT
+    s.entity_key,
+    item AS `item_code`,
+    d.item_label
+FROM anon.basket_store AS s
+ARRAY JOIN s.item_codes AS `item`
+INNER JOIN anon.item_dimension AS d
+    ON d.item_code = item

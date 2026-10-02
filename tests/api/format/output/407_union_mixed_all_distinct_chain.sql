@@ -1,0 +1,14 @@
+SELECT
+    'live' AS `source_name`,
+    entity_key
+FROM anon.live_store
+UNION DISTINCT
+SELECT
+    'buffer',
+    entity_key
+FROM anon.buffer_store
+UNION ALL
+SELECT
+    'archive',
+    entity_key
+FROM anon.archive_store

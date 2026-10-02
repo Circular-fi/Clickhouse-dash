@@ -1,0 +1,9 @@
+SELECT
+    entity_key,
+    pair.1 AS `tag_name`,
+    pair.2 AS `tag_value`,
+    position
+FROM anon.tagged_store
+ARRAY JOIN
+    arrayZip(tag_names, tag_values) AS pair,
+    arrayEnumerate(tag_names) AS position

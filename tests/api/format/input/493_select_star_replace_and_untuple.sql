@@ -1,0 +1,1 @@
+SELECT * REPLACE (round(metric_value, 2) AS metric_value), untuple(location_tuple) FROM anon.metrics_store ORDER BY ALL DESC

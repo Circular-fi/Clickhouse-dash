@@ -1,0 +1,1 @@
+SELECT toDateTime64(event_timestamp, 6, 'Europe/Paris') AS paris_time, toTimeZone(event_timestamp, 'Asia/Tokyo') AS tokyo_time, formatDateTime(event_timestamp, '%Y-%m-%d %H:%i:%S', 'UTC') AS formatted_utc, parseDateTimeBestEffortOrNull(raw_timestamp) AS parsed_time, toYYYYMMDD(event_date) AS date_key, toStartOfWeek(event_date, 1) AS week_start FROM anon.events_store

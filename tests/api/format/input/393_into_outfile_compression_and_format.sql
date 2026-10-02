@@ -1,0 +1,1 @@
+SELECT entity_key, metric_value FROM anon.metrics_store INTO OUTFILE 'metrics_export.csv.gz' TRUNCATE COMPRESSION 'gzip' LEVEL 6 FORMAT CSVWithNames SETTINGS format_csv_delimiter = ';'

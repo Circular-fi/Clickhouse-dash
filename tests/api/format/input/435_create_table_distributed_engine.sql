@@ -1,0 +1,1 @@
+CREATE TABLE anon.events_distributed AS anon.events_local ENGINE = Distributed('analytics', 'anon', 'events_local', rand())

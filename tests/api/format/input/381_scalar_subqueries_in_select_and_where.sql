@@ -1,0 +1,1 @@
+SELECT entity_key, metric_value, (SELECT avg(metric_value) FROM anon.metrics_store) AS global_avg, metric_value / (SELECT max(metric_value) FROM anon.metrics_store) AS normalised_value FROM anon.metrics_store WHERE metric_value > (SELECT quantile(0.9)(metric_value) FROM anon.metrics_store WHERE entity_group = 'group_live')

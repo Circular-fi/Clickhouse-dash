@@ -1,0 +1,1 @@
+ALTER TABLE anon.metrics_store REPLACE PARTITION 202601 FROM anon.metrics_rebuilt, MOVE PARTITION 202512 TO TABLE anon.metrics_archive, MOVE PART 'all_1_10_2' TO DISK 'cold_disk', DROP DETACHED PARTITION 202401 SETTINGS allow_drop_detached = 1

@@ -1,0 +1,12 @@
+SELECT
+    entity_group,
+    region_code,
+    sum(metric_value)                    AS `total_value`,
+    grouping(entity_group, region_code)  AS `grouping_mask`
+FROM anon.metrics_store
+GROUP BY
+    entity_group,
+    region_code WITH CUBE WITH TOTALS
+ORDER BY
+    entity_group ASC,
+    region_code ASC

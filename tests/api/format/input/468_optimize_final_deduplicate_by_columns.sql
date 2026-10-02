@@ -1,0 +1,1 @@
+optimize table anon.metrics_store on cluster analytics_cluster partition 202601 final deduplicate by entity_key, event_date, metric_value

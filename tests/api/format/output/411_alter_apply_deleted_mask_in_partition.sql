@@ -1,0 +1,4 @@
+ALTER TABLE anon.metrics_store
+(
+    APPLY DELETED MASK IN PARTITION 202601
+)

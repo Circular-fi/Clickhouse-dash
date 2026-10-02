@@ -1,0 +1,1 @@
+select a.entity_key, b.region_code from anon.left_store as a, anon.region_store as b where a.region_id = b.region_id

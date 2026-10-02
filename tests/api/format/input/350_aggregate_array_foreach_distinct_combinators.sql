@@ -1,0 +1,1 @@
+select sumArray(metric_values) as total_of_arrays, avgForEach(metric_values) as elementwise_avg, countDistinct(entity_key) as distinct_entities, groupArrayDistinct(entity_group) as groups_seen, uniqArrayIf(tag_names, is_active) as active_tags from anon.series_store

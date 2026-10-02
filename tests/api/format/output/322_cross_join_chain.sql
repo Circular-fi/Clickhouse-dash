@@ -1,0 +1,7 @@
+SELECT
+    d.event_date,
+    h.hour_of_day,
+    r.region_code
+FROM anon.calendar_days AS d
+CROSS JOIN anon.hours AS h
+CROSS JOIN anon.regions AS r

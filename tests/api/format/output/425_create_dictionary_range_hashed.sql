@@ -1,0 +1,14 @@
+CREATE DICTIONARY anon.price_history_dict
+(
+    `product_id` UInt64,
+    `valid_from` Date,
+    `valid_to`   Date,
+    `unit_price` Float64 DEFAULT 0
+)
+PRIMARY KEY product_id
+SOURCE(CLICKHOUSE(
+    HOST 'localhost' PORT 9000 USER 'default' TABLE 'price_history' DB 'anon'
+))
+LIFETIME(MIN 300 MAX 600)
+LAYOUT(RANGE_HASHED())
+RANGE(MIN valid_from MAX valid_to)

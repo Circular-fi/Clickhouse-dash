@@ -1,0 +1,1 @@
+SYSTEM CLEAR MARK CACHE ON CLUSTER analytics_cluster

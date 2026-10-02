@@ -1,0 +1,1 @@
+select 1 as probe settings max_execution_time = 1 format Vertical

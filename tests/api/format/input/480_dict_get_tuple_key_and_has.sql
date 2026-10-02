@@ -1,0 +1,1 @@
+SELECT dictGetOrDefault('anon.region_lookup', 'region_name', (country_code, region_code), 'unknown') AS region_name, dictHas('anon.region_lookup', (country_code, region_code)) AS is_known FROM anon.visits

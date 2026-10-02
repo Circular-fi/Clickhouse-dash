@@ -1,0 +1,1 @@
+with raw_events as (select entity_key, event_timestamp from anon.events_store where event_date = today()), sessionised as (select entity_key, count() as event_count from raw_events group by entity_key), ranked as (select entity_key, event_count, row_number() over (order by event_count desc) as position from sessionised) select * from ranked where position <= 10

@@ -1,0 +1,1 @@
+SELECT entity_group, entity_key, metric_value FROM anon.metrics_store ORDER BY metric_value DESC LIMIT 3 OFFSET 1 BY entity_group, region_code LIMIT 50 OFFSET 10

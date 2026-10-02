@@ -1,0 +1,1 @@
+SELECT DISTINCT entity_group, entity_key FROM anon.metrics_store ORDER BY entity_group, entity_key LIMIT 2 BY entity_group

@@ -1,0 +1,1 @@
+alter table anon.metrics_store add statistics if not exists metric_value, metric_ratio type tdigest, uniq

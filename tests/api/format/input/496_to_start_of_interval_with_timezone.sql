@@ -1,0 +1,1 @@
+SELECT toStartOfInterval(event_timestamp, INTERVAL 1 HOUR, 'Europe/Berlin') AS local_hour, count() AS event_count FROM anon.events_store GROUP BY local_hour ORDER BY local_hour

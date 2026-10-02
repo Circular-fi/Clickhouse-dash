@@ -1,0 +1,1 @@
+select entity_key, metric_value from anon.metrics_store prewhere event_date >= '2026-01-01' and entity_group in ('group_live', 'group_buffer') where metric_value > 0 and not is_deleted

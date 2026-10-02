@@ -1,0 +1,1 @@
+ALTER TABLE anon.metrics_store MODIFY COLUMN metric_value Float64 CODEC(Gorilla, ZSTD(3)), MODIFY COLUMN display_name String TTL event_date + INTERVAL 90 DAY, MODIFY COLUMN entity_group REMOVE TTL

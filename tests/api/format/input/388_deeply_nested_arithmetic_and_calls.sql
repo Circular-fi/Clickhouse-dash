@@ -1,0 +1,1 @@
+SELECT round(100 * (sumIf(response_bytes, status_code >= 500) - sumIf(response_bytes, status_code >= 400 AND status_code < 500)) / nullIf(sum(response_bytes) + sumIf(request_bytes, method_name = 'POST'), 0), 2) AS weighted_error_share FROM anon.http_requests GROUP BY toStartOfHour(event_timestamp)

@@ -1,0 +1,1 @@
+KILL QUERY WHERE user = 'analyst_user' AND elapsed > 600 SYNC

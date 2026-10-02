@@ -1,0 +1,16 @@
+SELECT entity_key
+FROM anon.metrics_store
+WHERE entity_key IN (
+        WITH
+            recent AS
+            (
+                SELECT entity_key
+                FROM anon.events_store
+                WHERE event_date >= today() - 1
+            )
+        SELECT entity_key
+        FROM recent
+        UNION DISTINCT
+        SELECT entity_key
+        FROM anon.pinned_entities
+    )

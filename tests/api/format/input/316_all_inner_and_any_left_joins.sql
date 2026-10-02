@@ -1,0 +1,1 @@
+SELECT l.entity_key, r.metric_value, d.display_name FROM anon.left_store AS l ALL INNER JOIN anon.right_store AS r ON l.entity_key = r.entity_key ANY LEFT JOIN anon.dimension_store AS d ON d.entity_key = l.entity_key

@@ -1,0 +1,32 @@
+SELECT
+    entity_group,
+    avg(peak_value) AS `avg_peak`
+FROM
+(
+    SELECT
+        entity_group,
+        entity_key,
+        max(daily_value) AS `peak_value`
+    FROM
+    (
+        SELECT
+            entity_group,
+            entity_key,
+            event_date,
+            sum(metric_value) AS `daily_value`
+        FROM
+        (
+            SELECT *
+            FROM anon.metrics_store
+            WHERE event_date >= today() - 90
+        )
+        GROUP BY
+            entity_group,
+            entity_key,
+            event_date
+    )
+    GROUP BY
+        entity_group,
+        entity_key
+)
+GROUP BY entity_group

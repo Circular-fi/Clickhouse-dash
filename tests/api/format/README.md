@@ -908,6 +908,14 @@ The test fails during collection when an `input/` fixture has no matching `outpu
 
 All `.sql` files are normalized without a trailing newline.
 
+Fixtures `316`–`498` cover ClickHouse syntax construct by construct, in this
+order: windows, grouping, LIMIT / ORDER / SAMPLE forms and joins (`316`–`349`);
+lambdas, aggregate combinators, access and casts, operators and CTEs
+(`350`–`384`); set operators, output clauses, literals, quoting, comments and
+deep nesting (`385`–`409`); DDL (`410`–`446`); INSERT, maintenance, EXPLAIN /
+SHOW / SET / KILL and access control (`447`–`476`); and a mixed batch
+(`477`–`498`).
+
 Every expected output is also formatted again (`test_expected_format_fixtures_are_idempotent_in_batch`)
 and must come back unchanged. That request sends `"cache": false`: the API caches each output as
 the answer for itself, which would otherwise make the check pass without running the formatter.

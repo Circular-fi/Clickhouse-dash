@@ -1,0 +1,1 @@
+SELECT entity_key, count() OVER () AS total_rows, sum(metric_value) OVER (ORDER BY event_date) AS cumulative_value, metric_value / sum(metric_value) OVER () AS share_of_total FROM anon.metrics_store

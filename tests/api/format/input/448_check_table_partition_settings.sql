@@ -1,0 +1,1 @@
+CHECK TABLE anon.metrics_store PARTITION 202601 SETTINGS check_query_single_value_result = 0

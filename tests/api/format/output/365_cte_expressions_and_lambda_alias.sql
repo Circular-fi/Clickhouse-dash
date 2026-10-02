@@ -1,0 +1,13 @@
+WITH
+    0.95                    AS `confidence_level`,
+    toDate('2026-03-01')    AS `report_day`,
+    [1, 5, 10]              AS `bucket_edges`,
+    (x -> x * 100)          AS `to_percent`,
+    'group_live'            AS `target_group`
+SELECT
+    entity_key,
+    to_percent(metric_ratio) AS `ratio_percent`
+FROM anon.metrics_store
+WHERE
+    event_date = report_day
+    AND entity_group = target_group

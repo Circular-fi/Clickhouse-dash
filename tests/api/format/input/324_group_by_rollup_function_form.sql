@@ -1,0 +1,1 @@
+select toYear(event_date) as event_year, toMonth(event_date) as event_month, entity_group, count() as row_count from anon.metrics_store group by rollup(event_year, event_month, entity_group) order by event_year, event_month, entity_group

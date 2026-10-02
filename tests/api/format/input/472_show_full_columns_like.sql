@@ -1,0 +1,1 @@
+SHOW FULL COLUMNS FROM anon.metrics_store LIKE 'metric%'

@@ -1,0 +1,6 @@
+KILL MUTATION
+WHERE
+    database = 'anon'
+    AND `table` = 'metrics_store'
+    AND mutation_id = 'mutation_42.txt'
+TEST

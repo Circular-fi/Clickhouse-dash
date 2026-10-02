@@ -1,0 +1,1 @@
+explain pipeline header = 1 select count() from anon.metrics_store where entity_group = 'group_live' settings max_threads = 2

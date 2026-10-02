@@ -1,0 +1,6 @@
+SELECT
+    entity_group,
+    region_code,
+    count() AS `row_count`
+FROM anon.metrics_store
+GROUP BY ALL WITH ROLLUP WITH TOTALS

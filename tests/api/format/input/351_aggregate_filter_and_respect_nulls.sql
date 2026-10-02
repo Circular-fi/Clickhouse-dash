@@ -1,0 +1,1 @@
+SELECT entity_group, sum(metric_value) FILTER (WHERE metric_value > 0) AS positive_total, count() FILTER (WHERE is_error) AS error_count, first_value(metric_value) RESPECT NULLS AS first_including_nulls FROM anon.metrics_store GROUP BY entity_group

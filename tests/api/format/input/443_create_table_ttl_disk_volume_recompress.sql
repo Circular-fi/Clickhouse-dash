@@ -1,0 +1,1 @@
+CREATE TABLE anon.event_history (event_date Date, entity_key String, metric_value Float64) ENGINE = MergeTree PARTITION BY toYYYYMM(event_date) ORDER BY (entity_key, event_date) TTL event_date + INTERVAL 7 DAY RECOMPRESS CODEC(ZSTD(9)), event_date + INTERVAL 30 DAY TO DISK 'warm_disk', event_date + INTERVAL 180 DAY TO VOLUME 'cold_volume', event_date + INTERVAL 365 DAY DELETE

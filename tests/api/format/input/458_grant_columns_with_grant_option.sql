@@ -1,0 +1,1 @@
+GRANT SELECT(entity_key), INSERT ON anon.metrics TO reader WITH GRANT OPTION

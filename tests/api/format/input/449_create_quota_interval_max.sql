@@ -1,0 +1,1 @@
+create quota analyst_quota for interval 1 hour max queries = 1000 to analyst

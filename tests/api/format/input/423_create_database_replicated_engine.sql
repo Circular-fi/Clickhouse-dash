@@ -1,0 +1,1 @@
+CREATE DATABASE IF NOT EXISTS analytics_replicated ENGINE = Replicated('/clickhouse/databases/analytics', '{shard}', '{replica}') COMMENT 'replicated analytics database'

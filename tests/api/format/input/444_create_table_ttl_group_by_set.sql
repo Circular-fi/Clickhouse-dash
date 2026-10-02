@@ -1,0 +1,1 @@
+CREATE TABLE anon.metric_rollup (event_hour DateTime, entity_key String, metric_sum Float64, metric_max Float64) ENGINE = MergeTree ORDER BY (entity_key, toStartOfDay(event_hour), event_hour) TTL event_hour + INTERVAL 1 MONTH GROUP BY entity_key, toStartOfDay(event_hour) SET metric_sum = sum(metric_sum), metric_max = max(metric_max)

@@ -1,0 +1,19 @@
+SELECT entity_key
+FROM anon.metrics_store
+WHERE
+    (
+        (
+            entity_group = 'group_live'
+            AND region_code IN ('eu-west-1', 'eu-central-1', 'us-east-1')
+        )
+        OR (
+            entity_group = 'group_buffer'
+            AND metric_value > 1000
+            AND NOT is_deleted
+        )
+    )
+    AND event_date >= today() - 30
+    AND (
+        lower(display_name) LIKE '%prod%'
+        OR has(tag_names, 'critical')
+    )

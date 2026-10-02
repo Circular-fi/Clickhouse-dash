@@ -1,0 +1,1 @@
+EXISTS TABLE anon.metrics_store

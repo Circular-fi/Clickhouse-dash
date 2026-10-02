@@ -1,0 +1,3 @@
+ALTER TABLE anon.log_records
+    (MATERIALIZE INDEX idx_trace IN PARTITION 202601),
+    (CLEAR INDEX idx_message IN PARTITION 202512)

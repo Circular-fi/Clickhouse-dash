@@ -1,0 +1,1 @@
+DESCRIBE TABLE anon.typed_store SETTINGS describe_include_subcolumns = 1

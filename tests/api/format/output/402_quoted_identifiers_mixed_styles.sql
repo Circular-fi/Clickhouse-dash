@@ -1,0 +1,10 @@
+SELECT
+    `entity key`,
+    "metric value",
+    `select`,
+    "from" AS `where`,
+    `日付` AS `local_date`
+FROM anon.`odd table name` AS `t`
+WHERE
+    `entity key` != ''
+    AND "metric value" > 0

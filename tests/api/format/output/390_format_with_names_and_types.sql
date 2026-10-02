@@ -1,0 +1,5 @@
+SELECT
+    number            AS `row_id`,
+    toString(number)  AS `row_label`
+FROM numbers(10)
+FORMAT TabSeparatedWithNamesAndTypes
