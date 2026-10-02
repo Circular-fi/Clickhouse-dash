@@ -14,6 +14,7 @@ a segmented look, a menu's own open / close motion or outside-click closer).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -49,19 +50,16 @@ def component_block(css: str, name: str) -> str:
 
 
 def test_components_load_on_every_page_after_the_foundations_and_before_app_ui():
-    app = read("app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    order = [files.index(f'"{name}"') for name in ["app_dom.js", *COMPONENTS, "app_ui.js"]]
-    assert order == sorted(order)
-    skipped = app[app.index("const PAGE_SKIPPED_MODULES = {"):app.index("};", app.index("const PAGE_SKIPPED_MODULES = {"))]
-    for name in COMPONENTS:
-        assert f'"{name}"' not in skipped, name
-    obs = read("app_observability.js")
-    common = re.findall(r'"([^"]+)"', re.search(r"const COMMON_MODULES = \[([^\]]*)\];", obs).group(1))
-    assert common.index("app_dom.js") < common.index("app_ui_tabs.js") < common.index("app_ui_segmented.js") < common.index("app_ui_menu.js") < common.index("app_ui.js")
-    views = obs[obs.index("const VIEW_MODULES = {"):obs.index("};", obs.index("const VIEW_MODULES = {"))]
-    for name in COMPONENTS:
-        assert name not in views, name
+    # The one module list (src/static/modules.json): the components are
+    # common modules, after app_dom.js; app_ui.js is in every page's modules.
+    manifest = json.loads(read("modules.json"))
+    common = manifest["common"]
+    assert common.index("app_dom.js") < common.index("app_ui_tabs.js") < common.index("app_ui_segmented.js") < common.index("app_ui_menu.js")
+    for name, page in manifest["pages"].items():
+        assert "app_ui.js" in page["modules"], name
+        listed = page["modules"] + [f for group in page.get("lazy", {}).values() for f in group] + [f for view in page.get("views", {}).values() for f in view]
+        for component in COMPONENTS:
+            assert component not in listed, (name, component)
 
 
 def test_component_sources_are_ascii():

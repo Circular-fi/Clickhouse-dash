@@ -21,7 +21,8 @@
   if (!ns) return;
 
   const dataKey = (attr) => `data-${attr.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
-  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  // util.escapeHtml (app_util.js loads after this module, before any markup is built).
+  const esc = (value) => ns.util.escapeHtml(String(value ?? ""));
 
   function groupClass(size, className) {
     return ["segmented", size === "compact" ? "segmented--compact" : "", className || ""].filter(Boolean).join(" ");
