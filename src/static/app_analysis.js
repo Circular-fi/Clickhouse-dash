@@ -15,6 +15,8 @@
   let activeTab = "pipeline";
   // The shared modal dialog (app_ui_dialog.js) on #analysisModal.
   let dialog = null;
+  // The Pipeline | Tracing tabs (ns.tabs.bind).
+  let viewTabs = null;
 
   // ns.format (docs/ui-foundations.md): "9 ms", "1.23 s", "120,064 rows", "1.7 KB".
   const format = ns.format;
@@ -262,19 +264,9 @@
     const views = normalizeActiveTab();
     const showSelector = views.pipeline && views.tracing;
     if (dom.analysisTabs) dom.analysisTabs.hidden = !showSelector;
-    const pipelineActive = activeTab === "pipeline";
-    if (dom.analysisPipelineTab) {
-      dom.analysisPipelineTab.hidden = !views.pipeline;
-      dom.analysisPipelineTab.classList.toggle("is-active", pipelineActive);
-      dom.analysisPipelineTab.setAttribute("aria-selected", pipelineActive ? "true" : "false");
-      dom.analysisPipelineTab.tabIndex = pipelineActive ? 0 : -1;
-    }
-    if (dom.analysisTraceTab) {
-      dom.analysisTraceTab.hidden = !views.tracing;
-      dom.analysisTraceTab.classList.toggle("is-active", !pipelineActive);
-      dom.analysisTraceTab.setAttribute("aria-selected", pipelineActive ? "false" : "true");
-      dom.analysisTraceTab.tabIndex = pipelineActive ? -1 : 0;
-    }
+    if (dom.analysisPipelineTab) dom.analysisPipelineTab.hidden = !views.pipeline;
+    if (dom.analysisTraceTab) dom.analysisTraceTab.hidden = !views.tracing;
+    viewTabs?.select(activeTab);
     return views;
   }
 
@@ -381,17 +373,9 @@
 
   function init() {
     dom.analyzeQueryButton?.addEventListener("click", () => open());
-    dom.analysisPipelineTab?.addEventListener("click", () => setActiveTab("pipeline"));
-    dom.analysisTraceTab?.addEventListener("click", () => setActiveTab("tracing"));
-    dom.analysisTabs?.addEventListener("keydown", (event) => {
-      const target = { ArrowLeft: "toggle", ArrowRight: "toggle", Home: "pipeline", End: "tracing" }[event.key];
-      if (!target) return;
-      event.preventDefault();
-      const views = profilingViews();
-      if (!(views.pipeline && views.tracing)) return;
-      setActiveTab(target === "toggle" ? (activeTab === "pipeline" ? "tracing" : "pipeline") : target);
-      (activeTab === "pipeline" ? dom.analysisPipelineTab : dom.analysisTraceTab)?.focus();
-    });
+    // Pipeline | Tracing: the shared tab behaviour (app_ui_tabs.js: click,
+    // arrows, Home / End, roving tabindex) in the dialog's tab style.
+    viewTabs = ns.tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;
     dialog = ns.dialog?.bind(dom.analysisModal, {
       onClose: closed,
       closeButton: dom.analysisCloseButton,

@@ -731,6 +731,7 @@
   let queryLibraryPromise = null;
   let queryLibraryTab = "saved";
   let queryLibraryDialog = null;
+  let queryLibraryTabs = null;
 
   function readQueryLibraryPrefs() {
     try {
@@ -795,13 +796,9 @@
   function setQueryLibraryTab(tab, { focus = false } = {}) {
     const next = tab === "history" ? "history" : "saved";
     queryLibraryTab = next;
-    const pairs = [["saved", dom.queryLibraryTabSaved, dom.queryLibraryViewSaved], ["history", dom.queryLibraryTabHistory, dom.queryLibraryViewHistory]];
-    for (const [name, tabEl, viewEl] of pairs) {
-      const on = name === next;
-      tabEl?.setAttribute("aria-selected", String(on));
-      if (tabEl) tabEl.tabIndex = on ? 0 : -1;
-      if (viewEl) viewEl.hidden = !on;
-    }
+    queryLibraryTabs?.select(next);
+    if (dom.queryLibraryViewSaved) dom.queryLibraryViewSaved.hidden = next !== "saved";
+    if (dom.queryLibraryViewHistory) dom.queryLibraryViewHistory.hidden = next !== "history";
     writeQueryLibraryPrefs({ tab: next });
     if (!isQueryLibraryOpen()) return;
     withQueryLibrary((lib) => {
@@ -849,19 +846,9 @@
         ns.queryLibrary?.hidden?.();
       },
     });
-    const tabButtons = [dom.queryLibraryTabSaved, dom.queryLibraryTabHistory].filter(Boolean);
-    for (const tab of tabButtons) {
-      tab.addEventListener("click", () => setQueryLibraryTab(tab.dataset.tab));
-      tab.addEventListener("keydown", (ev) => {
-        const step = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
-        if (!step && ev.key !== "Home" && ev.key !== "End") return;
-        ev.preventDefault();
-        const index = tabButtons.indexOf(tab);
-        const next = ev.key === "Home" ? tabButtons[0] : ev.key === "End" ? tabButtons[tabButtons.length - 1] : tabButtons[(index + step + tabButtons.length) % tabButtons.length];
-        setQueryLibraryTab(next.dataset.tab);
-        next.focus();
-      });
-    }
+    // Saved | History: the shared tab behaviour (app_ui_tabs.js: click,
+    // arrows, Home / End, roving tabindex) in the dialog's tab style.
+    queryLibraryTabs = ns.tabs?.bind(parts.tabs, { onSelect: (tab) => setQueryLibraryTab(tab) }) || null;
     return queryLibraryDialog;
   }
 

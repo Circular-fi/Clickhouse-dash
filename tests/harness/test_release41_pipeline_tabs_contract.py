@@ -23,7 +23,9 @@ def test_profiling_modal_opens_pipeline_first_and_tracing_second() -> None:
     assert 'activeTab = "pipeline";' in analysis
     assert 'if (activeTab === "tracing") renderTrace();' in analysis
     assert 'else renderPipeline();' in analysis
-    assert 'dom.analysisTraceTab?.addEventListener("click", () => setActiveTab("tracing"));' in analysis
+    # The tabs use the shared tab behaviour (app_ui_tabs.js), keyed by data-tab.
+    assert 'viewTabs = ns.tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;' in analysis
+    assert 'data-tab="pipeline"' in html and 'data-tab="tracing"' in html
 
 
 def test_pipeline_viewer_combines_processor_cost_with_otel_wall_clock() -> None:

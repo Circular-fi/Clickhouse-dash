@@ -4956,6 +4956,24 @@ html[data-theme="light"] {
 [data-sev="debug"] { --sev-color: var(--sev-debug); }
 [data-sev="trace"],
 [data-sev="unset"] { --sev-color: var(--sev-trace); }
+.logsTabs,
+.logsSideTabs,
+.contentTabs { display: flex; gap: 2px; }
+.logsTabs__tab,
+.contentTabs__tab {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: 700 11.5px/1 Arial, Helvetica, sans-serif;
+  cursor: pointer;
+}
+.logsTabs__tab:hover,
+.contentTabs__tab:hover { color: var(--text); }
+.logsTabs__tab.is-active,
+.contentTabs__tab.is-active { border-bottom-color: var(--accentBorder); color: var(--text); }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
 @keyframes metricsSpin { to { transform: rotate(360deg); } }
 @keyframes obsBarPulse { 50% { opacity: .45; } }
