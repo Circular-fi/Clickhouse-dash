@@ -10,7 +10,9 @@
   // adds what the browser does not: the shared markup and size classes,
   // a click on the backdrop closes, the focus moves in on open and goes back
   // to the opener (or a fallback) on close, and floating children (toasts)
-  // follow the top dialog.
+  // follow the top dialog. Every open dialog is a modal layer of ns.layers
+  // (app_ui_layers.js): Escape closes the top layer only (a menu or popover
+  // over the dialog first), and the focus goes back through the layer.
   //
   //   shell({ id, title, size, tabs, ... })   -> the elements of a new shell
   //   bind(dialog, { onClose, ... })           -> { open, close, isOpen }
@@ -130,6 +132,7 @@
     let restore = true;
     let pressedBackdrop = false;
     let value = null;
+    let layer = null;
 
     const finish = () => {
       const index = stack.indexOf(dialog);
@@ -137,11 +140,10 @@
       stack.splice(index, 1);
       // Toasts and other floating children move to the dialog now on top.
       for (const node of dialog.querySelectorAll(":scope > [data-dialog-float]")) host().appendChild(node);
-      if (restore) {
-        const fallback = typeof fallbackFocus === "function" ? fallbackFocus() : fallbackFocus;
-        const target = [returnTo, ...(Array.isArray(fallback) ? fallback : [fallback])].find(isFocusable);
-        target?.focus({ preventScroll: true });
-      }
+      // The layer gives the focus back: to the opener, else to the first
+      // usable element of fallbackFocus.
+      layer?.close({ restoreFocus: restore, force: true });
+      layer = null;
       returnTo = null;
       const result = value;
       value = null;
@@ -186,6 +188,17 @@
       restore = true;
       dialog.showModal();
       stack.push(dialog);
+      layer = ns.layers.push({
+        el: dialog,
+        modal: true,
+        name: dialog.id || "dialog",
+        opener: returnTo,
+        fallbackFocus: () => {
+          const fallback = typeof fallbackFocus === "function" ? fallbackFocus() : fallbackFocus;
+          return Array.isArray(fallback) ? fallback : [fallback];
+        },
+        onDismiss: () => close(),
+      });
       const target = typeof focus === "function" ? focus() : focus;
       (isFocusable(target) ? target : dialog).focus({ preventScroll: true });
     }

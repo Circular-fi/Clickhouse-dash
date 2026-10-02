@@ -25,7 +25,11 @@
   // A view module (ns.traces, ns.logs, ns.metrics) provides
   //   init()                    first show: reads the URL, binds, loads
   //   onLocation()              the URL changed under it (Back / Forward, view switch)
-  //   onShow() / onHide()       optional: resume / pause work while hidden
+  //   onShow(scope) / onHide()  optional: resume / pause work while hidden.
+  //                             scope (ns.lifecycle.enter(view)) is disposed
+  //                             right after onHide(): listeners bound with
+  //                             { signal: scope.signal } (document keys,
+  //                             window resize) live while the view shows
   //   getContext()              -> { range: { from, to }, service } (service null: several / none to share)
   //   applyContext(params, ctx) writes ctx.range / ctx.service (each may be null) into its URL params
   window.ChDash = window.ChDash || {};
@@ -33,7 +37,7 @@
   const LABELS = { traces: "Traces", logs: "Logs", metrics: "Metrics" };
   // Modules every view needs, then each view's own. tools/build_page_css.py
   // reads both lists: a view's stylesheet keeps the rules its modules can use.
-  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
+  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
   const VIEW_MODULES = {
     traces: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
     logs: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_logs.js"],
@@ -294,6 +298,7 @@
       ctl.urls[leaving] = currentUrl();
       publish(leaving);
       viewModule(leaving)?.onHide?.();
+      window.ChDash.lifecycle?.leave(leaving);
     }
     if (history !== "none") {
       const next = targetUrl(view, url);
@@ -310,7 +315,7 @@
     } else {
       module?.onLocation?.();
     }
-    module?.onShow?.();
+    module?.onShow?.(window.ChDash.lifecycle?.enter(view) || null);
   }
 
   // An observability URL of another view, followed in place.

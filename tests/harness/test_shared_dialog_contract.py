@@ -30,7 +30,10 @@ def test_dialog_is_a_native_modal_with_backdrop_escape_and_focus_return():
     assert 'dialog.addEventListener("cancel", (ev) => {' in dialog
     assert "const backdrop = pressedBackdrop && ev.target === dialog;" in dialog
     assert "(isFocusable(target) ? target : dialog).focus({ preventScroll: true });" in dialog
-    assert "[returnTo, ...(Array.isArray(fallback) ? fallback : [fallback])].find(isFocusable)" in dialog
+    # The focus goes back through its ns.layers layer: opener, else fallback.
+    assert "opener: returnTo," in dialog and "layer?.close({ restoreFocus: restore, force: true });" in dialog
+    layers = read("src/static/app_ui_layers.js")
+    assert "const target = [layer.opener, ...(Array.isArray(fallback) ? fallback : [fallback])].find(focusable);" in layers
 
 
 def test_profiling_and_library_share_the_large_shell():
