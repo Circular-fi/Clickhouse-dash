@@ -282,9 +282,11 @@ test('the profiling dialog is the shared modal: focus moves in and stays, Escape
     await expect(analyze).toBeFocused();
   }
 
-  // The close button too; a click inside the dialog does not.
-  await runSuccessfulQuery(page, 'SELECT count() FROM numbers(100)', { profiling: true });
-  await expect(modal).toBeVisible({ timeout: 15_000 });
+  // The close button too; a click inside the dialog does not. Opened from
+  // the editor, the focus goes back to it.
+  await page.locator('#queryTextArea').focus();
+  await page.evaluate(() => window.ChDash.analysis.open());
+  await expect(modal).toBeVisible();
   await page.locator('#analysisModalTitle').click();
   await expect(modal).toBeVisible();
   await page.locator('#analysisCloseButton').click();
