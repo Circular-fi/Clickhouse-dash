@@ -255,7 +255,9 @@
   //              false prints "false" there (aria-pressed="false")
   //   on         { click: fn, ... }; signal: an AbortSignal or an
   //              ns.lifecycle scope that removes them
-  //   value, checked, selected, indeterminate: set as properties
+  //   value      the attribute, like markup; on <select> and <textarea> the
+  //              property, set after the children (a select needs its options)
+  //   indeterminate: the property
   //   anything else: an attribute (true -> present, false / null -> absent)
   // children: strings and numbers (always text, never markup), nodes, arrays
   // of children; null, undefined, false, true and "" are skipped.
@@ -264,7 +266,9 @@
   // icons): the one, greppable way to insert markup next to h().
   // h.replace(container, ...children) replaces the container's children.
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const PROPERTIES = new Set(["value", "checked", "selected", "indeterminate", "defaultValue", "defaultChecked"]);
+  const PROPERTIES = new Set(["indeterminate"]);
+  const VALUE_PROPERTY = new Set(["SELECT", "TEXTAREA"]);
+  const deferred = (el, key) => PROPERTIES.has(key) || (key === "value" && VALUE_PROPERTY.has(el.tagName));
   const ATTRIBUTE_NAMES = { className: "class", htmlFor: "for", tabIndex: "tabindex" };
   const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "xlink:href"]);
   const SCRIPT_URL = /^[\s\u0000-\u001f]*(javascript|vbscript):/i;
@@ -309,7 +313,7 @@
         if (value) for (const name of Object.keys(value)) if (value[name] != null) el.setAttribute(`aria-${name}`, String(value[name]));
       } else if (key === "on" || key === "signal") {
         if (key === "signal") signal = value ? (value.signal || value) : null;
-      } else if (PROPERTIES.has(key)) {
+      } else if (deferred(el, key)) {
         // Set after the children: a <select> value needs its options.
       } else if (key.startsWith("aria-")) {
         if (value != null) el.setAttribute(key, String(value));
@@ -342,7 +346,10 @@
   function fill(el, props, children) {
     if (props) applyProps(el, props);
     for (const child of children) append(el, child);
-    if (props) for (const key of PROPERTIES) if (props[key] != null) el[key] = props[key];
+    if (props) {
+      if (props.indeterminate != null) el.indeterminate = !!props.indeterminate;
+      if (props.value != null && VALUE_PROPERTY.has(el.tagName)) el.value = String(props.value);
+    }
     return el;
   }
 

@@ -275,10 +275,11 @@ every page one way to build and find elements.
   (a string or `{ left: "4px", "--trace-service-color": c }`), `aria`
   (`{ label, pressed: false }`: aria values print `"false"`), `on`
   (`{ click: fn }`, removed by `signal`: an `AbortSignal` or an
-  `ns.lifecycle` scope), the properties `value`, `checked`, `selected` and
-  `indeterminate` (set after the children, so a `<select>` value finds its
-  option), and any other key as an attribute (`true` present, `false` or
-  `null` absent). A URL attribute never takes a `javascript:` URL.
+  `ns.lifecycle` scope), `value` (the attribute, as in markup; the property
+  of a `<select>` or `<textarea>`, set after the children so a select finds
+  its option), `indeterminate` (the property), and any other key as an
+  attribute (`true` present, `false` or `null` absent: `checked`,
+  `disabled`, `hidden`). A URL attribute never takes a `javascript:` URL.
   Children are strings and numbers (always text, never markup), nodes and
   arrays of children; `null`, `undefined`, `false`, `true` and `""` add
   nothing. `h.svg(tag, props, ...children)` builds in the SVG namespace.
