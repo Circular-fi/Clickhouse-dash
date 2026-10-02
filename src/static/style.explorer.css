@@ -4273,7 +4273,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 .resultTable tbody td.is-copyTarget,
 .resultTable thead th.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr.is-selected > td.is-copyTarget {
+.resultTable tbody tr.is-selected > td.is-copyTarget,
+.resultTable tbody tr.is-rowMenuTarget > td.is-copyTarget,
+.resultTable tbody tr:hover > td.is-copyTarget {
   background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
 }
 .runMenu.rowDetailsMenu.is-open {
@@ -4304,9 +4306,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   box-sizing: border-box;
   max-width: 100%;
   min-width: 16rem;
-  /* A 1px border like the cells, then the accent bar (::before), so the
-     detail's bar sits at the exact x of its row's bar. */
-  border-left: 1px solid var(--rowDivider);
+  /* No left border, like the cells: the accent bar (::before) sits at the
+     exact x of its row's bar. */
   background: transparent;
   color: var(--text);
   outline: none;
@@ -6792,17 +6793,19 @@ button:not(.is-loading) > .uiSpin { display: none; }
 .dataTable--grid > tbody > tr.is-selected > .dataTable__rowNum {
   background: linear-gradient(var(--rowHover), var(--rowHover)) var(--panel);
 }
-.dataTable > thead > tr > th.num .dataTable__sort {
-  flex-direction: row-reverse;
+.dataTable > thead > tr > th.is-sortable {
+  padding: 0;
 }
 .dataTable__sort {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px;
-  max-width: 100%;
-  min-height: 100%;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--dt-row);
   margin: 0;
-  padding: 0;
+  padding: 0 var(--dt-pad-x);
   border: 0;
   background: none;
   color: inherit;
@@ -6810,6 +6813,9 @@ button:not(.is-loading) > .uiSpin { display: none; }
   text-align: inherit;
   white-space: nowrap;
   cursor: pointer;
+}
+.dataTable > thead > tr > th.num .dataTable__sort {
+  flex-direction: row-reverse;
 }
 .dataTable__sort::after {
   content: "\2195";
@@ -6912,6 +6918,12 @@ th[aria-sort="descending"] > .dataTable__sort::after {
   --badge-color: var(--warning);
   border-style: dashed;
 }
+.badge--sev {
+  --badge-color: var(--sev-color, var(--sev-trace));
+  justify-content: center;
+  min-width: 42px;
+  color: var(--badge-color);
+}
 .badge--key {
   --badge-color: var(--accent-text);
   background: transparent;
@@ -6941,8 +6953,23 @@ button.badge {
 button.badge:hover {
   background: color-mix(in srgb, var(--badge-color) 20%, transparent);
 }
-button.badge[aria-pressed="false"] {
-  opacity: 0.55;
+button.badge[aria-pressed="true"] {
+  border-color: var(--badge-color);
+  background: color-mix(in srgb, var(--badge-color) 24%, transparent);
+}
+.badge > b {
+  color: var(--text);
+  font-weight: 650;
+}
+.badge svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .chips {
   display: flex;
@@ -7040,6 +7067,12 @@ button.chip__op:hover {
   width: 3px;
   height: 12px;
   border-radius: 1px;
+}
+.serviceSwatch {
+  margin-inline-end: 6px;
+}
+.badge > .serviceSwatch {
+  margin-inline-end: 0;
 }
 .badge > .serviceSwatch--bar:first-child {
   margin-left: -2px;

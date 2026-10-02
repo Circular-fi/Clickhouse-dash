@@ -41,7 +41,9 @@ def test_error_bars_keep_service_colour_and_collapsed_errors_get_a_hollow_marker
     js = read('src/static/app_traces.js')
     css = read('src/static/style.css')
     assert 'const childError = !error && collapsed && cache.errorBelow.has(node);' in js
-    assert 'traceSpanRow__errorBadge--hollow' in js and '.traceSpanRow__errorBadge--hollow {' in css
+    # The hollow marker is the shared error badge without its fill.
+    assert 'tone: "error", className: "badge--count traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow"' in js
+    assert 'tone: "error", solid: true, className: "badge--count traceSpanRow__errorBadge"' in js
     assert 'background: #e45756;' not in css
     assert '.traceSpanBar--error { background: #ef4444; }' not in css
 

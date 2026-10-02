@@ -38,7 +38,7 @@ def test_results_have_a_sortable_table_view_remembered_per_browser():
     assert 'data-results-view="list"' in html and 'data-results-view="table"' in html
     assert "const RESULTS_VIEW_KEY = ns.storage.KEYS.traceResultsView;" in js
     assert 'traceResultsView: "chdash.traceResultsView.v1",' in read("src/static/app_state.js")
-    assert 'class="resultTable traceTable"' in js
+    assert 'class="dataTable traceTable"' in js
     for key in ("name", "services", "spans", "errors", "duration", "start"):
         assert f'{{ key: "{key}", label: ' in js
     assert "function sortTableBy(key)" in js

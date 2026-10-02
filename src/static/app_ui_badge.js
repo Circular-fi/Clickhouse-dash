@@ -91,6 +91,22 @@
     attrs: { "data-status": statusKey(code), ...(options.attrs || {}) },
   });
 
+  // ------------------------------------------------------------ severity
+
+  // A log severity: the palette level (fatal, error, warn, info, debug,
+  // trace) colours it through [data-sev] (--sev-color); the text is what the
+  // record says (SeverityText), the level name otherwise, in capitals on
+  // every page (Logs, trace logs, patterns).
+  function severityHtml(level, text = "", options = {}) {
+    const name = String(level || "trace");
+    return html(String(text || name).toUpperCase(), {
+      ...options,
+      tone: "category",
+      className: `badge--sev ${options.className || ""}`.trim(),
+      attrs: { "data-sev": name, ...(options.attrs || {}) },
+    });
+  }
+
   // ------------------------------------------------------------ service
 
   // swatchHtml(name, { bar }) -> the swatch of a service (palette.service).
@@ -129,6 +145,6 @@
   }
 
   ns.badge = Object.freeze({
-    html, el, classes, statusKey, statusLabel, statusTone, statusHtml, swatchHtml, chipHtml, clearHtml, TONES: [...TONES],
+    html, el, classes, statusKey, statusLabel, statusTone, statusHtml, severityHtml, swatchHtml, chipHtml, clearHtml, TONES: [...TONES],
   });
 })();

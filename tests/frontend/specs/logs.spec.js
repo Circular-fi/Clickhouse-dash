@@ -89,7 +89,7 @@ test('logs: service, level and severity class filters', async ({ page, request }
   await expect.poll(() => param(page, 'level')).toEqual(['17']);
   await expect(page.locator('.logsSearchField--level .tracePicker__button')).toHaveText('Level · ≥ ERROR');
   await expect(rows(page).first()).toBeVisible();
-  for (const badge of await page.locator('#logsTableRows .logsSevBadge').allInnerTexts()) expect(badge).toMatch(/ERROR|FATAL/);
+  for (const badge of await page.locator('#logsTableRows .badge--sev').allInnerTexts()) expect(badge).toMatch(/ERROR|FATAL/);
 
   // A severity class from the histogram legend.
   await page.goto(logsUrl(win));
@@ -98,7 +98,7 @@ test('logs: service, level and severity class filters', async ({ page, request }
   await expect.poll(() => param(page, 'sev')).toEqual(['warn']);
   await expect(page.locator('#logsChips')).toContainText('Level: Warn');
   await expect(rows(page).first()).toBeVisible();
-  for (const badge of await page.locator('#logsTableRows .logsSevBadge').allInnerTexts()) expect(badge).toBe('WARN');
+  for (const badge of await page.locator('#logsTableRows .badge--sev').allInnerTexts()) expect(badge).toBe('WARN');
   // The histogram refetches with the filter: only Warn bars are left.
   await expect.poll(async () => (await barsOf(page)).Info).toBe(0);
   expect((await barsOf(page)).Warn).toBeGreaterThan(0);
@@ -494,14 +494,14 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN']);
   await expect(page.locator('#logsChips')).toContainText('SeverityText = WARN');
   await expect(rows(page).first()).toBeVisible();
-  for (const badge of await page.locator('#logsTableRows .logsSevBadge').allInnerTexts()) expect(badge).toBe('WARN');
+  for (const badge of await page.locator('#logsTableRows .badge--sev').allInnerTexts()) expect(badge).toBe('WARN');
   await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).toBeChecked();
   await expect(field(page, 'SeverityText')).toHaveClass(/is-active/);
   // Its own filter is left out of its values: the other levels stay listed.
   await expect(fieldValue(page, 'SeverityText', 'ERROR')).toBeVisible();
   await fieldValue(page, 'SeverityText', 'ERROR').locator('[data-facet-include]').check();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN', 'SeverityText=ERROR']);
-  await expect.poll(async () => new Set(await page.locator('#logsTableRows .logsSevBadge').allInnerTexts())).toEqual(new Set(['WARN', 'ERROR']));
+  await expect.poll(async () => new Set(await page.locator('#logsTableRows .badge--sev').allInnerTexts())).toEqual(new Set(['WARN', 'ERROR']));
   const valuesRequest = facetRequests.filter((url) => url.pathname.endsWith('/facet_values')).pop();
   expect(valuesRequest.searchParams.get('scope')).toBe('column');
   expect(valuesRequest.searchParams.get('key')).toBe('SeverityText');

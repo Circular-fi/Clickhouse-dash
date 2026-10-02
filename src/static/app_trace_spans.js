@@ -18,7 +18,8 @@
   const palette = ns.palette;
 
   const PAGE_SIZE = 100;
-  const ROW_HEIGHT = 30;
+  // Rows are --row-regular tall (ns.table.rowHeight, read once the CSS is in).
+  let ROW_HEIGHT = 32;
   const OVERSCAN = 12;
   const MAX_ROWS = 10000;
   const MAX_COLUMNS = 20;
@@ -312,9 +313,9 @@
 
   function headHtml() {
     const cells = ["Time", "Service", "Operation", "Duration", "Status", "Kind"]
-      .map((label, index) => `<span class="traceSpanTable__th traceSpanTable__th--${index}" role="columnheader">${label}</span>`);
+      .map((label, index) => `<span class="dataList__th traceSpanTable__th traceSpanTable__th--${index}${index === 3 ? " num" : ""}" role="columnheader">${label}</span>`);
     for (const column of state.loadedColumns) {
-      cells.push(`<span class="traceSpanTable__th traceSpanTable__th--attr" role="columnheader" title="${esc(`${column.scope === "resource" ? "Resource" : column.scope === "span" ? "Span" : "Span or resource"} attribute ${column.key}`)}">${esc(column.key)}</span>`);
+      cells.push(`<span class="dataList__th traceSpanTable__th traceSpanTable__th--attr" role="columnheader" title="${esc(`${column.scope === "resource" ? "Resource" : column.scope === "span" ? "Span" : "Span or resource"} attribute ${column.key}`)}">${esc(column.key)}</span>`);
     }
     return cells.join("");
   }
@@ -323,11 +324,14 @@
     return `<span class="traceFilterable traceSpanListRow__value" data-filter-field="${field}" data-filter-value="${esc(value)}"${extra} role="button" tabindex="-1" aria-haspopup="menu" title="${esc(text)} (click to filter)">${esc(text)}</span>`;
   }
 
+  // One status badge (ns.badge.statusHtml: "OK", "Error", "Unset"), click to filter.
   function statusHtml(status) {
     const code = String(status || "Unset");
-    const lower = code.toLowerCase();
-    if (lower === "error") return `<span class="traceStatus traceStatus--error traceFilterable" data-filter-field="status" data-filter-value="${esc(code)}" role="button" tabindex="-1" aria-haspopup="menu" title="Status (click to filter)">Error</span>`;
-    return `<span class="traceSpanListRow__status traceSpanListRow__status--${esc(lower)} traceFilterable" data-filter-field="status" data-filter-value="${esc(code)}" role="button" tabindex="-1" aria-haspopup="menu" title="Status (click to filter)">${esc(lower === "ok" ? "OK" : code)}</span>`;
+    return ns.badge.statusHtml(code, {
+      className: "traceFilterable",
+      title: "Status (click to filter)",
+      attrs: { "data-filter-field": "status", "data-filter-value": code, role: "button", tabindex: "-1", "aria-haspopup": "menu" },
+    });
   }
 
   function rowHtml(row, index) {
@@ -337,17 +341,17 @@
     const duration = fmt.duration(row.duration_ns);
     const attrs = state.loadedColumns.map((column, i) => {
       const value = Array.isArray(row.attributes) ? row.attributes[i] : null;
-      if (value == null) return `<span class="traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">${fmt.EMPTY}</span>`;
+      if (value == null) return `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">${fmt.EMPTY}</span>`;
       const scope = column.scope === "any" ? "any" : column.scope;
-      return `<span class="traceSpanListRow__cell traceSpanListRow__cell--attr" role="gridcell">${filterValueHtml("tag", value, value === "" ? '""' : value, ` data-filter-scope="${esc(scope)}" data-filter-key="${esc(column.key)}"`)}</span>`;
+      return `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--attr" role="gridcell">${filterValueHtml("tag", value, value === "" ? '""' : value, ` data-filter-scope="${esc(scope)}" data-filter-key="${esc(column.key)}"`)}</span>`;
     }).join("");
-    return `<div class="traceSpanListRow${selected ? " is-selected" : ""}${error ? " is-error" : ""}" role="row" id="traceSpanListRow-${index}" data-span-index="${index}" aria-rowindex="${index + 2}" aria-selected="${selected ? "true" : "false"}" style="top:${index * ROW_HEIGHT}px;--trace-service-color:${palette.service(row.service_name)}">`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(timeTitle(row))}">${esc(localTime(row))}</span>`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--service" role="gridcell"><i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--operation" role="gridcell">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</span>`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--duration" role="gridcell" title="${esc(duration)}"><span class="traceSpanListRow__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%"></i></span><span class="traceSpanListRow__durationText">${esc(duration)}</span></span>`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--status" role="gridcell">${statusHtml(row.status_code)}</span>`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--kind" role="gridcell">${esc(ctx.spanKindLabel(row.span_kind))}</span>`
+    return `<div class="dataList__row traceSpanListRow${selected ? " is-selected" : ""}${error ? " is-error" : ""}" role="row" id="traceSpanListRow-${index}" data-span-index="${index}" aria-rowindex="${index + 2}" aria-selected="${selected ? "true" : "false"}" style="top:${index * ROW_HEIGHT}px;--trace-service-color:${palette.service(row.service_name)}">`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(timeTitle(row))}">${esc(localTime(row))}</span>`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--service" role="gridcell"><i class="serviceSwatch" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--operation" role="gridcell">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</span>`
+      + `<span class="dataList__cell num cellBar traceSpanListRow__cell traceSpanListRow__cell--duration" role="gridcell" title="${esc(duration)}" style="${ns.table.cellBarStyle(percent, "var(--trace-service-color)")}">${esc(duration)}</span>`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--status" role="gridcell">${statusHtml(row.status_code)}</span>`
+      + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--kind" role="gridcell">${esc(ctx.spanKindLabel(row.span_kind))}</span>`
       + attrs
       + "</div>";
   }
@@ -409,11 +413,13 @@
     let table = byId("traceSpanTable");
     const columnsKey = state.loadedColumns.map(columnLabel).join("\x1f");
     if (!table || table.dataset.columns !== columnsKey || !root.contains(table)) {
-      root.innerHTML = `<div id="traceSpanTable" class="traceSpanTable" role="grid" tabindex="0" aria-label="Matching spans" aria-colcount="${6 + state.loadedColumns.length}">
-          <div class="traceSpanTable__head" role="row" aria-rowindex="1">${headHtml()}</div>
+      root.innerHTML = `<div id="traceSpanTable" class="traceSpanTable dataList" role="grid" tabindex="0" aria-label="Matching spans" aria-colcount="${6 + state.loadedColumns.length}">
+          <div class="traceSpanTable__head dataList__head" role="row" aria-rowindex="1">${headHtml()}</div>
           <div class="traceSpanTable__body" role="rowgroup"></div>
         </div><div class="traceSpanTable__footWrap"></div>`;
       table = byId("traceSpanTable");
+      ROW_HEIGHT = ns.table.rowHeight("regular");
+      bindTableKeys(table);
       table.dataset.columns = columnsKey;
       table.style.setProperty("--trace-span-grid", gridTemplate(state.loadedColumns.length));
     }
@@ -519,23 +525,28 @@
     select(index, { open: true });
   }
 
+  // Row keys (ns.rovingRows, index mode: the grid keeps focus, the selected
+  // row is aria-activedescendant): Up / Down, Page Up / Down, Home / End
+  // select, Enter / Space open the panel (Escape: ns.layers).
+  function bindTableKeys(table) {
+    ns.table.rovingRows(table, {
+      count: () => (eventOnGrid ? state.rows.length : 0),
+      current: () => (eventOnGrid ? (state.selected < 0 ? -1 : state.selected) : -1),
+      page: () => Math.max(1, Math.floor((ctx.dom.tracesSearchView?.clientHeight || 600) / ROW_HEIGHT) - 3),
+      onMove: (index) => select(index),
+      onOpen: (index) => select(index, { open: true }),
+    });
+  }
+
+  // The row keys act on the grid itself, not on a value inside a row.
+  let eventOnGrid = false;
   function onTableKeydown(event) {
     const table = byId("traceSpanTable");
-    if (!table || event.target !== table || !state.rows.length) return;
-    const page = Math.max(1, Math.floor((ctx.dom.tracesSearchView?.clientHeight || 600) / ROW_HEIGHT) - 3);
-    const moves = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
-    if (event.key in moves) {
+    eventOnGrid = !!table && event.target === table;
+    if (!eventOnGrid) return;
+    if ((event.key === "Enter" || event.key === " ") && state.selected < 0 && state.rows.length) {
       event.preventDefault();
-      select(state.selected < 0 ? 0 : state.selected + moves[event.key]);
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      select(0);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      select(state.rows.length - 1);
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      select(state.selected < 0 ? 0 : state.selected, { open: true });
+      select(0, { open: true });
     }
   }
 
@@ -636,7 +647,7 @@
     const items = links.map((link) => {
       const href = ctx.spanTraceUrl(link.traceId, link.spanId);
       const attrs = ctx.attributeEntries(link.attributes).length ? `<div class="traceSpanRefs__attrs">${ctx.renderAttributeTable(link.attributes, "")}</div>` : "";
-      return `<li class="traceSpanRefs__item"><span class="traceSpanRefs__kind traceSpanRefs__kind--follows-from">follows from</span><span class="traceSpanRefs__main"><small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(link.traceId)}</code></span><span>SpanID: <code>${esc(link.spanId)}</code></span></small></span><a class="traceSpanRefs__open" href="${esc(href)}" data-span-open-link="${esc(link.traceId)}" data-span-open-link-span="${esc(link.spanId)}">Open linked trace</a>${attrs}</li>`;
+      return `<li class="traceSpanRefs__item">${ns.badge.html("follows from", { tone: "accent", shape: "pill", className: "traceSpanRefs__kind traceSpanRefs__kind--follows-from" })}<span class="traceSpanRefs__main"><small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(link.traceId)}</code></span><span>SpanID: <code>${esc(link.spanId)}</code></span></small></span><a class="traceSpanRefs__open" href="${esc(href)}" data-span-open-link="${esc(link.traceId)}" data-span-open-link-span="${esc(link.spanId)}">Open linked trace</a>${attrs}</li>`;
     }).join("");
     return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanRefs" data-span-section="references"><summary><b>Links</b><span class="traceJaegerGroup__count">(${links.length})</span></summary><div class="traceJaegerGroup__body"><ul class="traceSpanRefs__list">${items}</ul></div></details>`;
   }
@@ -895,7 +906,8 @@
     ns.segmented?.bind(document.querySelector(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
     const root = ctx.dom.tracesResults;
     root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
-    root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); });
+    // Capture: the grid's own row keys (bindTableKeys) read eventOnGrid.
+    root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); }, true);
     ctx.dom.tracesSearchView?.addEventListener("scroll", onScroll, { passive: true });
     // While Traces shows (ns.lifecycle): the window resize and the panel's
     // Up / Down keys.

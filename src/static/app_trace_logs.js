@@ -260,7 +260,7 @@
     const meta = [
       `<span>Time: <b>${esc(absoluteText(record))}</b></span>`,
       `<span>Severity: <b>${esc(record.severity_text || SEVERITY_LABELS[record.sev])}${record.severity_number ? ` (${esc(String(record.severity_number))})` : ""}</b></span>`,
-      `<span>Service: <b class="traceLog__metaService" style="--trace-service-color:${palette.service(record.service_name)}">${esc(record.service_name || "unknown")}</b></span>`,
+      `<span>Service: <b class="traceLog__metaService" style="--trace-service-color:${palette.service(record.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(record.service_name || "unknown")}</b></span>`,
       record.scope_name ? `<span>Scope: <b>${esc(record.scope_name)}</b></span>` : "",
       record.event_name ? `<span>Event: <b>${esc(record.event_name)}</b></span>` : "",
       `<span>SpanID: <code>${esc(record.span_id || "none")}</code>${record.span_id && !span ? " <small>(not in this trace)</small>" : ""}</span>`,
@@ -271,8 +271,9 @@
     return `<div class="traceLog__details">${bodyDetailHtml(record)}<div class="traceLog__meta">${meta}${openSpan}</div><div class="traceLog__attrs"><b>Attributes</b>${ctx.renderAttributeTable(logAttrs, "No attributes")}</div>${resource}</div>`;
   }
 
+  // The shared severity badge (ns.badge.severityHtml), as on the Logs page.
   function sevHtml(record) {
-    return `<span class="traceLog__sev" title="${esc(record.severity_text || SEVERITY_LABELS[record.sev])}">${esc(SEVERITY_LABELS[record.sev])}</span>`;
+    return ns.badge.severityHtml(record.sev, SEVERITY_LABELS[record.sev], { className: "traceLog__sev", title: record.severity_text || SEVERITY_LABELS[record.sev] });
   }
 
   // mode: panel (every column; the row opens the span), inspector (one span:
@@ -285,7 +286,7 @@
       ? `data-log-open-span="${esc(span.span_id)}" title="Open the span of this log"`
       : `data-log-expand aria-expanded="${open ? "true" : "false"}"`;
     const columns = mode === "panel"
-      ? `<span class="traceLog__service" style="--trace-service-color:${palette.service(record.service_name)}">${esc(record.service_name || "unknown")}</span><span class="traceLog__span${span ? "" : " is-missing"}" title="${esc(span ? `${span.service_name || "unknown"}: ${span.span_name || "span"}` : (record.span_id ? "Span not in this trace" : "No span context"))}">${esc(span ? span.span_name || "span" : (record.span_id ? "span not in trace" : "no span"))}</span>`
+      ? `<span class="traceLog__service" style="--trace-service-color:${palette.service(record.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(record.service_name || "unknown")}</span><span class="traceLog__span${span ? "" : " is-missing"}" title="${esc(span ? `${span.service_name || "unknown"}: ${span.span_name || "span"}` : (record.span_id ? "Span not in this trace" : "No span context"))}">${esc(span ? span.span_name || "span" : (record.span_id ? "span not in trace" : "no span"))}</span>`
       : "";
     return `<div class="traceLog traceLog--${mode}${open ? " is-open" : ""}${view.target === record.index ? " is-target" : ""}" data-log-index="${record.index}" data-sev="${record.sev}">
       <div class="traceLog__row" role="button" tabindex="0" ${rowAttrs}><button type="button" class="traceLog__toggle" data-log-expand aria-expanded="${open ? "true" : "false"}" aria-label="${open ? "Hide" : "Show"} log details"></button>${sevHtml(record)}<time class="traceLog__offset" title="${esc(absoluteText(record))}">${esc(offsetText(record))}</time>${columns}<code class="traceLog__body">${esc(record.body || "")}</code></div>
@@ -385,7 +386,11 @@
     const counts = severityCounts(v.records);
     const chips = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => {
       const pressed = v.filters.severities.has(sev);
-      return `<button type="button" class="traceLogsChip" data-sev="${sev}" data-log-severity="${sev}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Show all severities" : `Only ${SEVERITY_LABELS[sev]} logs`}"><i aria-hidden="true"></i>${SEVERITY_LABELS[sev]}<b>${fmt.count(counts.get(sev))}</b></button>`;
+      return ns.badge.severityHtml(sev, "", {
+        tag: "button", size: "md", className: "traceLogsChip", title: pressed ? "Show all severities" : `Only ${SEVERITY_LABELS[sev]} logs`,
+        html: `${SEVERITY_LABELS[sev]}<b>${fmt.count(counts.get(sev))}</b>`,
+        attrs: { "data-log-severity": sev, "aria-pressed": pressed ? "true" : "false" },
+      });
     }).join("");
     const services = new Map();
     for (const record of v.records) services.set(record.service_name, (services.get(record.service_name) || 0) + 1);
@@ -483,7 +488,11 @@
     const open = view.inline.has(id);
     const errors = records.filter((r) => r.sev === "error" || r.sev === "fatal").length;
     const title = `${countLabel(records.length)}${errors ? ` (${fmt.count(errors)} error${errors === 1 ? "" : "s"})` : ""}: ${open ? "hide them" : "list them under this span"}`;
-    return `<button type="button" class="traceSpanLogsBadge" data-sev="${worst}" data-span-logs-toggle aria-expanded="${open ? "true" : "false"}" title="${esc(title)}" aria-label="${esc(title)}">${LOG_ICON}<span>${fmt.count(records.length)}</span></button>`;
+    return ns.badge.severityHtml(worst, "", {
+      tag: "button", className: "traceSpanLogsBadge", title,
+      html: `${LOG_ICON}<span>${fmt.count(records.length)}</span>`,
+      attrs: { "data-span-logs-toggle": true, "aria-expanded": open ? "true" : "false", "aria-label": title },
+    });
   }
 
   // One marker per 0.2 % of the view, in the colour of its worst log.
@@ -577,7 +586,7 @@
     const id = String(span.span_id || "");
     const open = !!ctx.model.spanSections.get(id)?.has("logs");
     const counts = severityCounts(records);
-    const summary = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => `<span class="traceSpanLogs__sev" data-sev="${sev}">${SEVERITY_LABELS[sev]} ${fmt.count(counts.get(sev))}</span>`).join("");
+    const summary = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => ns.badge.severityHtml(sev, `${SEVERITY_LABELS[sev]} ${fmt.count(counts.get(sev))}`, { className: "traceSpanLogs__sev" })).join("");
     return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanLogs" data-span-section="logs"${open ? " open" : ""}><summary><b>Logs</b><span class="traceJaegerGroup__count">(${fmt.count(records.length)})</span><span class="traceSpanLogs__summary">${summary}</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanLogs__list">${records.map((record) => logItemHtml(record, "inspector")).join("")}</div><small class="traceSpanEvents__note">Log timestamps are relative to the start time of the full trace.</small></div></details>`;
   }
 

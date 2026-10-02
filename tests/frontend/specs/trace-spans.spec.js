@@ -139,10 +139,10 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   await expect(page.locator('#traceSpanTable')).toHaveAttribute('aria-rowcount', '101');
   // Service colours, relative duration bars, status and kind cells.
   const firstRow = rows(page).first();
-  await expect(firstRow.locator('.traceSpanListRow__dot')).toHaveCount(1);
+  await expect(firstRow.locator('.serviceSwatch')).toHaveCount(1);
   const color = await firstRow.evaluate((el) => el.style.getPropertyValue('--trace-service-color'));
   expect(color).toMatch(/^var\(--trace-span-color-\d+\)$/);
-  const widths = await rows(page).locator('.traceSpanListRow__bar i').evaluateAll((els) => els.map((el) => parseFloat(el.style.width)));
+  const widths = await rows(page).locator('.traceSpanListRow__cell--duration.cellBar').evaluateAll((els) => els.map((el) => parseFloat(el.style.getPropertyValue('--cellBar'))));
   expect(Math.max(...widths)).toBeLessThanOrEqual(100);
   expect(Math.max(...widths)).toBeGreaterThan(0);
 

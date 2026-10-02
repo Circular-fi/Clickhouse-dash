@@ -755,24 +755,25 @@
   function errorTagHtml(errors) {
     const label = `${fmt.count(errors)} Error${errors === 1 ? "" : "s"}`;
     const title = `${fmt.count(errors)} error span${errors === 1 ? "" : "s"}`;
-    return `<span class="traceErrorCount traceErrorCount--title traceTag traceTag--error" title="${title}" aria-label="${title}">${label}</span>`;
+    return ns.badge.html(label, { tone: "error", className: "traceTag traceTag--error", title, attrs: { "aria-label": title } });
   }
 
   function incompleteTagHtml(missing) {
-    return `<span class="traceTag traceTag--incomplete" data-missing-parents="${missing}" title="${esc(incompleteTooltip(missing))}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 15.2 14.4H.8Z"/><path class="traceTag__glyph" d="M8 6v4M8 11.6v.9"/></svg>Incomplete</span>`;
+    return ns.badge.html("", { tone: "warn", className: "traceTag traceTag--incomplete", title: incompleteTooltip(missing), attrs: { "data-missing-parents": missing }, html: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 15.2 14.4H.8Z"/><path class="traceTag__glyph" d="M8 6v4M8 11.6v.9"/></svg>Incomplete' });
   }
 
   function servicePillHtml(stat) {
     const errors = Number(stat.errors || 0);
     const errorTitle = errors ? ` · ${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` : "";
-    return `<span class="traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} · ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}">${errors ? '<i class="traceSvcPill__error" aria-label="has errors">!</i>' : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
+    // A service chip: the shared badge with the service's left bar.
+    return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? ns.badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
   }
 
   // One line of service pills; layoutServicePills hides the ones that do not
   // fit and shows them behind a "+N" chip.
   function servicePillsHtml(stats) {
     if (!stats.length) return `<div class="traceSvcPills is-empty">${fmt.EMPTY}</div>`;
-    return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" hidden>+0</button></div>`;
+    return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="badge badge--md badge--neutral traceSvcMore" hidden>+0</button></div>`;
   }
 
   function layoutServicePills(scope) {
@@ -864,7 +865,7 @@
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
-          <span class="traceTag traceTag--spans">${fmt.count(spans)} Span${spans === 1 ? "" : "s"}</span>
+          ${ns.badge.html(`${fmt.count(spans)} Span${spans === 1 ? "" : "s"}`, { className: "traceTag traceTag--spans" })}
           ${servicePillsHtml(services)}
           <span class="traceResult__when" title="${esc(start.title)}"><time>${esc(start.absolute)}</time><small>${esc(start.ago)}</small></span>
         </div>
@@ -880,7 +881,8 @@
       const toggle = column.key === "start"
         ? `<button type="button" class="traceTable__startToggle" data-start-toggle title="${relative ? "Show absolute time" : "Show relative time"}" aria-label="Toggle start time format"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10M10 3l2.5 2.5L10 8M13.5 10.5h-10M6 8l-2.5 2.5L6 13"/></svg></button>`
         : "";
-      return `<th class="resultTable__thSortable traceTable__th traceTable__th--${column.key}" data-table-sort="${column.key}"${active ? ` data-sort="${sort.dir}"` : ""} aria-sort="${aria}" tabindex="0" scope="col"><span>${column.label}</span>${toggle}</th>`;
+      const num = column.numeric && column.key !== "services" ? " num" : "";
+      return `<th class="is-sortable traceTable__th traceTable__th--${column.key}${num}" data-table-sort="${column.key}" data-sort-key="${column.key}" aria-sort="${aria}" scope="col"><button type="button" class="dataTable__sort">${column.label}</button>${toggle}</th>`;
     }).join("");
     const body = rows.map((trace) => {
       const errors = Number(trace.error_count || 0);
@@ -889,16 +891,16 @@
       const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
       const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
       const { absolute, ago, title: startTitle, timeTitle: startTimeTitle } = startTexts(trace);
-      return `<tr class="traceTable__row" data-trace-id="${esc(trace.trace_id)}" tabindex="0">
-        <td class="traceTable__name" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}</td>
+      return `<tr class="traceTable__row" data-trace-id="${esc(trace.trace_id)}" tabindex="-1">
+        <td class="traceTable__name has-copy" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}${ns.table.copyCellHtml(trace.trace_id, "Copy Trace ID")}</td>
         <td class="traceTable__services" data-cell="services">${servicePillsHtml(services)}</td>
-        <td class="resultTable__numeric" data-cell="spans">${fmt.count(Number(trace.span_count || 0))}</td>
-        <td class="resultTable__numeric" data-cell="errors">${errors ? `<span class="traceTag traceTag--error">${fmt.count(errors)}</span>` : "0"}</td>
-        <td class="traceTable__duration" data-cell="duration" title="${esc(fmt.duration(trace.duration_ns))}"><span class="traceTable__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}"></i></span><span class="traceTable__durationText">${esc(fmt.duration(trace.duration_ns))}</span></td>
-        <td class="traceTable__start" data-cell="start" title="${esc(relative ? startTimeTitle : startTitle)}">${esc(relative ? ago : absolute)}</td>
+        <td class="num" data-cell="spans">${fmt.count(Number(trace.span_count || 0))}</td>
+        <td class="num" data-cell="errors">${errors ? ns.badge.html(fmt.count(errors), { tone: "error", className: "badge--count traceErrorBadge", title: `${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` }) : "0"}</td>
+        <td class="num traceTable__duration cellBar" data-cell="duration" data-duration-percent="${percent.toFixed(2)}" style="${ns.table.cellBarStyle(percent)}" title="${esc(fmt.duration(trace.duration_ns))}">${esc(fmt.duration(trace.duration_ns))}</td>
+        <td class="num traceTable__start" data-cell="start" title="${esc(relative ? startTimeTitle : startTitle)}">${esc(relative ? ago : absolute)}</td>
       </tr>`;
     }).join("");
-    return `<div class="tableWrap traceTableWrap"><table class="resultTable traceTable"><colgroup><col class="traceTable__col--name"><col class="traceTable__col--services"><col class="traceTable__col--spans"><col class="traceTable__col--errors"><col class="traceTable__col--duration"><col class="traceTable__col--start"></colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="tableWrap traceTableWrap"><table class="dataTable traceTable" aria-label="Traces"><colgroup><col class="traceTable__col--name"><col class="traceTable__col--services"><col class="traceTable__col--spans"><col class="traceTable__col--errors"><col class="traceTable__col--duration"><col class="traceTable__col--start"></colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function syncResultsViewControls() {
@@ -930,7 +932,7 @@
       ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
       : { key, dir: column.numeric ? "desc" : "asc" };
     renderResults();
-    dom.tracesResults?.querySelector(`[data-table-sort="${key}"]`)?.focus({ preventScroll: true });
+    dom.tracesResults?.querySelector(`[data-table-sort="${key}"] .dataTable__sort`)?.focus({ preventScroll: true });
   }
 
   // "No traces / spans found" (the result list and the span table): the
@@ -1010,20 +1012,21 @@
         return;
       }
       const th = target.closest("[data-table-sort]");
-      if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
+      if (th) { if (target.closest(".dataTable__sort")) sortTableBy(th.getAttribute("data-table-sort")); return; }
       const row = target.closest("[data-trace-id]");
       if (row && root.contains(row)) openRow(row);
     });
+    // The list cards are buttons; the table rows rove (ns.rovingRows).
     root.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       const target = event.target;
-      if (target.closest("button")) return;
-      const th = target.closest("[data-table-sort]");
-      if (th) { event.preventDefault(); sortTableBy(th.getAttribute("data-table-sort")); return; }
-      const row = target.closest("[data-trace-id]");
-      if (row === target) { event.preventDefault(); openRow(row); }
+      if (target.closest("button") || !target.matches(".traceResultItem")) return;
+      event.preventDefault();
+      openRow(target);
     });
     serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
+    ns.table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
+    ns.table.bindCopy(root);
     // List | Table: the shared segmented control (app_ui_segmented.js).
     ns.segmented?.bind(document.querySelector(".traceResultsViewToggle"), { attr: "resultsView", onChange: (view) => { setResultsView(view); return false; } });
   }
@@ -1264,7 +1267,7 @@
     }
     found = {
       iconHtml: decoration ? `<span class="traceSpanRow__decoration" data-span-decoration="${decoration.namespace}" title="${esc(decoration.label)}">${DECORATION_ICONS[decoration.namespace]}</span>` : "",
-      pillsHtml: pills.map((pill) => `<span class="traceSpanPill${pill.isError ? " is-error" : ""}" data-span-pill="${esc(pill.label)}" title="${esc(`${pill.label}: ${pill.value}`)}" aria-label="${esc(`${pill.label}: ${pill.value}`)}">${esc(pill.value)}</span>`).join(""),
+      pillsHtml: pills.map((pill) => ns.badge.html(pill.value, { tone: pill.isError ? "error" : "neutral", className: `traceSpanPill${pill.isError ? " is-error" : ""}`, title: `${pill.label}: ${pill.value}`, attrs: { "data-span-pill": pill.label, "aria-label": `${pill.label}: ${pill.value}` } })).join(""),
     };
     cache.decorations.set(span, found);
     return found;
@@ -1601,10 +1604,10 @@
         ["Total Spans", fmt.count(spans.length)],
         ["Errors", fmt.count(cache.errorCount), cache.errorCount ? "is-error" : ""],
       ];
-      const itemsHtml = items.map(([label, value, cls]) => `<div class="tracePageOverviewItem${cls ? ` ${cls}` : ""}" data-trace-header-item="${esc(label)}"><span>${esc(label)}</span><strong>${typeof value === "object" ? value.html : esc(value)}</strong></div>`).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
+      const itemsHtml = items.map(([label, value, cls]) => ns.ui.statTileHtml({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
       const orphans = cache.orphanCount;
       const incomplete = orphans
-        ? `<span class="tracePageHeader__incomplete" data-trace-incomplete title="${esc(`${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`)}">${WARNING_ICON}Incomplete</span>`
+        ? ns.badge.html("", { tone: "warn", size: "md", className: "tracePageHeader__incomplete", title: `${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`, attrs: { "data-trace-incomplete": true }, html: `${WARNING_ICON}Incomplete` })
         : "";
       dom.traceDetailStats.innerHTML = itemsHtml + (ns.traceLogs?.headerItemHtml?.() || "") + incomplete + (ns.traceInsights?.traceExceptionTagHtml(cache) || "");
     }
@@ -1894,8 +1897,8 @@
     const critical = inView ? criticalPathHtml(cache, node, collapsed, ctx) : "";
     const decorations = spanDecorations(cache, span);
     const errorIcon = (error
-      ? '<span class="traceSpanRow__errorBadge" title="Span status: Error" aria-label="Error span">!</span>'
-      : childError ? '<span class="traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow" title="An error span is inside this collapsed branch" aria-label="Error span in this collapsed branch">!</span>' : "")
+      ? ns.badge.html("!", { tone: "error", solid: true, className: "badge--count traceSpanRow__errorBadge", title: "Span status: Error", attrs: { "aria-label": "Error span" } })
+      : childError ? ns.badge.html("!", { tone: "error", className: "badge--count traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow", title: "An error span is inside this collapsed branch", attrs: { "aria-label": "Error span in this collapsed branch" } }) : "")
       + (ns.traceInsights?.exceptionBadgeHtml(span) || "");
     // Log count badge and log markers (app_trace_logs.js).
     const logs = ns.traceLogs;
@@ -2608,7 +2611,14 @@
     else if (!sameTrace) action = `<a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(spanTraceUrl(ref.traceId, ref.spanId))}" data-linked-trace="${esc(ref.traceId)}" data-linked-span="${esc(ref.spanId)}" title="Open linked trace">Open linked trace</a>`;
     const attrs = attributeEntries(ref.attributes).length ? `<div class="traceSpanRefs__attrs">${renderAttributeTable(ref.attributes, "")}</div>` : "";
     const kindClass = kind.replace(/\s+/g, "-");
-    return `<li class="traceSpanRefs__item" data-ref-kind="${esc(kindClass)}"><span class="traceSpanRefs__kind traceSpanRefs__kind--${esc(kindClass)}">${esc(kind)}</span><span class="traceSpanRefs__main">${label}${ids}</span>${action}${attrs}</li>`;
+    return `<li class="traceSpanRefs__item" data-ref-kind="${esc(kindClass)}">${refKindHtml(kind)}<span class="traceSpanRefs__main">${label}${ids}</span>${action}${attrs}</li>`;
+  }
+
+  // The kind of a reference, a pill badge: child of (neutral), follows from /
+  // linked from (accent).
+  function refKindHtml(kind) {
+    const kindClass = String(kind).replace(/\s+/g, "-");
+    return ns.badge.html(kind, { tone: kindClass === "child-of" ? "neutral" : "accent", shape: "pill", className: `traceSpanRefs__kind traceSpanRefs__kind--${kindClass}` });
   }
 
   // Jaeger's references: the parent (child of) and the span's links (follows
@@ -2647,7 +2657,7 @@
     const startNs = Number(span.start_ns || 0);
     const startOffset = Math.max(0, startNs - bounds.start);
     const statusClass = esc(String(status).toLowerCase());
-    const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}" title="Span status (click to filter)" data-filter-field="status" data-filter-value="${esc(status)}" tabindex="0" role="button" aria-haspopup="menu">${esc(status)}</span>`;
+    const statusBadge = String(status).toLowerCase() === "unset" ? "" : ns.badge.statusHtml(status, { className: `traceStatus traceStatus--${statusClass}`, title: "Span status (click to filter)", attrs: { "data-filter-field": "status", "data-filter-value": status, tabindex: "0", role: "button", "aria-haspopup": "menu" } });
     const statusMessage = String(span.status_message || "").trim();
     const color = palette.service(span.service_name);
     const absolute = absoluteTimeText(startNs, span.timestamp);

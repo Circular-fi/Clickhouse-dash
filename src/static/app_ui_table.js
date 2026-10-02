@@ -55,9 +55,14 @@
     if (key != null) th.dataset.sortKey = String(key);
     if (title) button.title = title;
     setSort(th, dir);
-    if (onSort && !button.dataset.bound) {
-      button.dataset.bound = "1";
-      button.addEventListener("click", (event) => onSort(th.dataset.sortKey, event));
+    if (onSort && !th.dataset.sortBound) {
+      th.dataset.sortBound = "1";
+      th.addEventListener("click", (event) => {
+        // Other controls in the header (an info icon) keep their clicks.
+        const control = event.target instanceof Element ? event.target.closest("button, a, [tabindex]") : null;
+        if (control && control !== button && th.contains(control)) return;
+        onSort(th.dataset.sortKey, event);
+      });
     }
     return button;
   }
@@ -129,6 +134,14 @@
     td.classList.add("cellBar");
     td.style.setProperty("--cellBar", `${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2)}%`);
     if (color) td.style.setProperty("--cellBar-color", color);
+  }
+
+  // The row heights of the two densities, in px (--row-regular / --row-compact),
+  // for virtual lists that position their rows.
+  function rowHeight(density = "regular") {
+    const name = density === "compact" ? "--row-compact" : "--row-regular";
+    const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return Number.isFinite(value) && value > 0 ? value : (density === "compact" ? 26 : 32);
   }
 
   // The style attribute value of a bar cell, for HTML strings.
@@ -415,7 +428,7 @@
 
   ns.table = Object.freeze({
     ariaSort, setSort, sortHeader, sortHeadHtml, bindSort,
-    barEligible, barPercent, cellBar, cellBarStyle, textCell, copyCellHtml, copyCell, bindCopy,
+    barEligible, barPercent, cellBar, cellBarStyle, rowHeight, textCell, copyCellHtml, copyCell, bindCopy,
     rovingRows, targetIndex, keyboardMenuTarget,
   });
   ns.rovingRows = rovingRows;

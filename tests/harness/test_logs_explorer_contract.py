@@ -95,7 +95,8 @@ def test_logs_page_script_reuses_shared_pieces():
     assert "timePicker = ns.timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
     assert 'settingName: "logs.max_lookback_minutes",' in js
     # Service colours and formats are the shared ones (ns.palette, ns.format).
-    assert "palette.service(row.service)" in js and "palette.registerServices(" in js
+    # (the swatch is the shared ns.badge.swatchHtml, which reads palette.service)
+    assert "ns.badge.swatchHtml(row.service)" in js and "palette.registerServices(" in js
     assert "chdash.traces.serviceColors" not in js and "SERVICE_COLOR_STORE_KEY" not in js
     assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js
     assert "window.history.pushState({ workspace: \"logs\" }, \"\", next);" in js

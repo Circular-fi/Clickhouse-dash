@@ -24,7 +24,8 @@
 
   const SEV_CLASSES = ["error", "warn", "info", "debug"];
   const SEV_LABELS = { error: "Error", warn: "Warn", info: "Info", debug: "Debug" };
-  const ROW_HEIGHT = 26;
+  // Rows are --row-compact tall (ns.table.rowHeight, read at init).
+  let ROW_HEIGHT = 26;
   const OVERSCAN = 12;
   const MAX_ROWS = 20000;
   const LIVE_POLL_MS = 3000;
@@ -94,8 +95,7 @@
   }
 
   function sevBadgeHtml(row, title = "") {
-    const level = severityLevel(row);
-    return `<span class="logsSevBadge" data-sev="${level}"${title ? ` title="${esc(title)}"` : ""}>${esc(row.severity_text || level.toUpperCase())}</span>`;
+    return ns.badge.severityHtml(severityLevel(row), row.severity_text || "", { title });
   }
 
   // A log time: to the millisecond in the table, every nanosecond in the
@@ -261,7 +261,7 @@
       (names.length ? names.map((name) => `
         <label class="logsMultiPicker__option" role="option" aria-selected="${selected.has(name)}">
           <input type="checkbox" value="${esc(name)}" ${selected.has(name) ? "checked" : ""} />
-          <i class="logsServiceDot" style="background:${palette.service(name)}"></i>
+          ${ns.badge.swatchHtml(name)}
           <span class="logsMultiPicker__name">${esc(name)}</span>
           <span class="logsMultiPicker__count">${counts.has(name) ? fmt.compact(counts.get(name)) : ""}</span>
         </label>`).join("") : '<div class="logsMultiPicker__empty">No services in this range.</div>');
@@ -668,7 +668,7 @@
     switch (col) {
       case "time": return `<span class="logsCell logsCell--time" title="${esc(timeTitle(row))}">${esc(timeLabel(row))}</span>`;
       case "severity": return `<span class="logsCell logsCell--sev">${sevBadgeHtml(row, `SeverityNumber ${row.severity_number}`)}</span>`;
-      case "service": return `<span class="logsCell logsCell--service" title="${esc(row.service)}"><i class="logsServiceDot" style="background:${palette.service(row.service)}"></i>${esc(row.service)}</span>`;
+      case "service": return `<span class="logsCell logsCell--service" title="${esc(row.service)}">${ns.badge.swatchHtml(row.service)}${esc(row.service)}</span>`;
       case "host": return `<span class="logsCell" title="${esc(attrValue(row, "host.name"))}">${esc(attrValue(row, "host.name"))}</span>`;
       case "trace": return `<span class="logsCell logsCell--mono" title="${esc(row.trace_id)}">${esc(row.trace_id)}</span>`;
       case "span": return `<span class="logsCell logsCell--mono" title="${esc(row.span_id)}">${esc(row.span_id)}</span>`;
@@ -685,7 +685,7 @@
     const head = $("logsTableHead");
     if (!head) return;
     head.style.gridTemplateColumns = columnTemplate();
-    head.innerHTML = model.cols.map((col) => `<span class="logsTable__th" role="columnheader">${esc(columnLabel(col))}</span>`).join("");
+    head.innerHTML = model.cols.map((col) => `<span class="logsTable__th${col === "time" ? " num" : ""}" role="columnheader">${esc(columnLabel(col))}</span>`).join("");
   }
 
   // No logs: where the data is (a jump to it) and no filters, the ways out.
@@ -751,13 +751,13 @@
     let html = "";
     for (let i = first; i < last; i += 1) {
       const row = model.rows[i];
-      const classes = ["logsRow"];
+      const classes = ["logsRow", "dataList__row"];
       if (row.id === model.selectedId) classes.push("is-selected");
       if (model.newIds.has(row.id)) classes.push("is-new");
       html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
-      html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
+      html += `<div class="logsRow logsRow--more dataList__row" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
     }
     box.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
     box.innerHTML = html;
@@ -765,6 +765,7 @@
   }
 
   function initTable() {
+    ROW_HEIGHT = ns.table.rowHeight("compact");
     const viewport = $("logsTableViewport");
     const box = $("logsTableRows");
     const message = $("logsTableMessage");
@@ -788,14 +789,20 @@
       timePicker?.refresh();
       void search({ push: true });
     });
-    $("logsTable")?.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      if (!model.rows.length) return;
-      event.preventDefault();
-      const index = model.rows.findIndex((row) => row.id === model.selectedId);
-      const next = Math.max(0, Math.min(model.rows.length - 1, index < 0 ? 0 : index + (event.key === "ArrowDown" ? 1 : -1)));
-      openSidePanel(model.rows[next]);
-      scrollRowIntoView(next);
+    // Row keys (ns.rovingRows, index mode: the grid keeps focus): Up / Down,
+    // Page Up / Down, Home / End open the record in the side panel.
+    const selectedIndex = () => model.rows.findIndex((row) => row.id === model.selectedId);
+    const openAt = (index) => {
+      if (!model.rows[index]) return;
+      openSidePanel(model.rows[index]);
+      scrollRowIntoView(index);
+    };
+    ns.table.rovingRows($("logsTable"), {
+      count: () => model.rows.length,
+      current: selectedIndex,
+      page: () => Math.max(1, Math.floor(($("logsTableViewport")?.clientHeight || 600) / ROW_HEIGHT) - 1),
+      onMove: openAt,
+      onOpen: openAt,
     });
   }
 
@@ -1051,12 +1058,9 @@
     }
   }
 
+  // The shared sparkline (ui.sparkline), in the pattern's severity colour.
   function sparklineSvg(values, sev) {
-    const w = 120, h = 24;
-    const max = Math.max(1, ...values);
-    const step = values.length > 1 ? w / (values.length - 1) : w;
-    const points = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(" ");
-    return `<svg class="logsSparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline class="logsSparkline__line" data-sev="${esc(sev)}" points="${points}"></polyline></svg>`;
+    return `<span class="logsSparkline" data-sev="${esc(sev)}">${ns.ui.sparkline.html(values, { min: 0 })}</span>`;
   }
 
   function patternHtml(text) {
@@ -1090,15 +1094,15 @@
     }
     box.innerHTML = `<div class="logsPatterns__summary">${esc(summary)}</div>
       <div class="logsPatterns__table" role="table" aria-label="Log patterns">
-        <div class="logsPatterns__head" role="row"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
+        <div class="logsPatterns__head dataList__head" role="row"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
         ${shown.map((item) => `
           <button type="button" class="logsPatternRow" role="row" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}">
             <span class="logsPatternRow__count">${fmt.compact(item.count)}</span>
-            <span class="logsPatternRow__share"><span class="logsShareBar"><i style="width:${Math.max(1, Math.round(item.share * 100))}%"></i></span>${fmt.percent(item.share)}</span>
+            <span class="logsPatternRow__share num cellBar" style="${ns.table.cellBarStyle(Math.max(1, Math.round(item.share * 100)))}">${fmt.percent(item.share)}</span>
             <span class="logsPatternRow__trend">${sparklineSvg(item.sparkline || [], item.severity)}</span>
             <span class="logsPatternRow__text">
-              <span class="logsPattern"><span class="logsSevBadge" data-sev="${esc(item.severity)}">${esc(item.severity.toUpperCase())}</span>${patternHtml(item.pattern)}</span>
-              <span class="logsPattern__sample"><i class="logsServiceDot" style="background:${palette.service(item.service)}"></i>${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
+              <span class="logsPattern">${ns.badge.severityHtml(item.severity)}${patternHtml(item.pattern)}</span>
+              <span class="logsPattern__sample">${ns.badge.swatchHtml(item.service)}${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
             </span>
           </button>`).join("")}
       </div>`;
@@ -1257,7 +1261,7 @@
     const title = $("logsSideTitle");
     if (title) {
       title.innerHTML = `${sevBadgeHtml(row)}
-        <span class="logsSideTitle__service"><i class="logsServiceDot" style="background:${palette.service(row.service)}"></i>${esc(row.service)}</span>
+        <span class="logsSideTitle__service">${ns.badge.swatchHtml(row.service)}${esc(row.service)}</span>
         <time class="logsSideTitle__time" title="${esc(timeTitle(row))}">${esc(fullTimeLabel(row))}</time>`;
     }
     const openTrace = $("logsOpenTrace");
@@ -1388,7 +1392,7 @@
         return `<button type="button" class="logsContextRow${r.id === anchor ? " is-anchor" : ""}" data-context-id="${esc(r.id)}">
           <span class="logsContextRow__time" title="${esc(timeTitle(r))}">${esc(fmt.time(Number(r.ts_ms), { precision: "ms", date: "never" }))}</span>
           ${sevBadgeHtml(r)}
-          <span class="logsContextRow__service"><i class="logsServiceDot" style="background:${palette.service(r.service)}"></i>${esc(r.service)}</span>
+          <span class="logsContextRow__service">${ns.badge.swatchHtml(r.service)}${esc(r.service)}</span>
           <span class="logsContextRow__body">${esc(r.body)}</span>
         </button>`;
       }).join("") || ns.uiState.emptyHtml({ body: "No other logs in this window.", compact: true })}

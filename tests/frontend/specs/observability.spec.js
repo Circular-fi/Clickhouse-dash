@@ -580,8 +580,8 @@ test.describe('observability formats on a French browser in Paris', () => {
     await expect(tableRow.locator('.logsCell--time')).toHaveText(sep20('03:22:55.742'), { timeout: 30_000 });
     expect(await tableRow.locator('.logsCell--time').getAttribute('title')).toContain('Sep 20, 2026 01:22:55.742983150 UTC');
     // Severity 21 is fatal: its own colour, not the error one.
-    await expect(tableRow.locator('.logsSevBadge')).toHaveAttribute('data-sev', 'fatal');
-    const colours = await tableRow.locator('.logsSevBadge').evaluate((badge) => {
+    await expect(tableRow.locator('.badge--sev')).toHaveAttribute('data-sev', 'fatal');
+    const colours = await tableRow.locator('.badge--sev').evaluate((badge) => {
       const probe = document.createElement('i');
       probe.style.color = 'var(--sev-fatal)';
       document.body.appendChild(probe);

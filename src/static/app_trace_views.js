@@ -423,16 +423,16 @@
     const rows = statisticsRows();
     const all = rows.flatMap((row) => [row, ...row.details]);
     const heat = heatBackground(all, view.stats.colorBy);
-    const sortMark = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? " \u25b4" : " \u25be") : "");
-    const ariaSort = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? "ascending" : "descending") : "none");
-    const head = `<tr><th aria-sort="${ariaSort("name")}"><button type="button" data-stats-sort="name">${esc(GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`)}${sortMark("name")}</button></th>${STAT_COLUMNS.map(([key, label, title]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-stats-sort="${key}" title="${esc(title)}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
+    // Sortable headers (ns.table): the state in aria-sort, one glyph.
+    const sort = { key: view.stats.sortKey, dir: view.stats.sortAsc ? "asc" : "desc" };
+    const head = `<tr>${ns.table.sortHeadHtml({ key: "name", label: GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`, sort, attrs: { "data-stats-sort": "name" } })}${STAT_COLUMNS.map(([key, label, title]) => ns.table.sortHeadHtml({ key, label, title, sort, num: true, attrs: { "data-stats-sort": key } })).join("")}</tr>`;
     const rowHtml = (row) => {
       const style = [row.service ? `--trace-service-color:${palette.service(row.service)}` : "", heat(row)].filter(Boolean).join(";");
       const cls = `traceStats__row${row.detail ? " traceStats__row--detail" : ""}${row.service ? " has-service" : ""}${view.stats.colorBy ? " is-heat" : ""}`;
-      return `<tr class="${cls}" style="${esc(style)}" data-stats-group="${esc(row.name)}"><th scope="row"><span>${esc(row.name)}</span></th>${STAT_COLUMNS.map(([key]) => `<td data-stat="${key}">${esc(formatStat(key, row.stats[key]))}</td>`).join("")}</tr>`;
+      return `<tr class="${cls}" style="${esc(style)}" data-stats-group="${esc(row.name)}"><th scope="row" title="${esc(row.name)}"><span>${esc(row.name)}</span></th>${STAT_COLUMNS.map(([key]) => `<td class="num" data-stat="${key}">${esc(formatStat(key, row.stats[key]))}</td>`).join("")}</tr>`;
     };
     const body = rows.map((row) => rowHtml(row) + row.details.map(rowHtml).join("")).join("");
-    alt.innerHTML = `<div class="traceStats"><table class="traceStats__table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    alt.innerHTML = `<div class="traceStats"><table class="traceStats__table dataTable dataTable--compact"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
   }
 
   // ---------------------------------------------------------------- spans table
@@ -487,15 +487,16 @@
     const count = tools?.querySelector("#traceSpansCount");
     if (count) count.textContent = `${rows.length} of ${cache.spans.length} span${cache.spans.length === 1 ? "" : "s"}`;
     const shown = rows.slice(0, SPANS_TABLE_LIMIT);
-    const sortMark = (key) => (sortKey === key ? (sortAsc ? " \u25b4" : " \u25be") : "");
-    const ariaSort = (key) => (sortKey === key ? (sortAsc ? "ascending" : "descending") : "none");
-    const head = `<tr>${SPAN_COLUMNS.map(([key, label]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-spans-sort="${key}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
+    const sort = { key: sortKey, dir: sortAsc ? "asc" : "desc" };
+    const NUM = new Set(["duration", "start"]);
+    const head = `<tr>${SPAN_COLUMNS.map(([key, label]) => ns.table.sortHeadHtml({ key, label, sort, num: NUM.has(key), attrs: { "data-spans-sort": key } })).join("")}</tr>`;
     const body = shown.map((span) => {
       const status = String(span.status_code || "Unset");
-      return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="0" title="Show in the timeline"><td data-col="service"><span class="traceSpansTable__service" style="--trace-service-color:${palette.service(span.service_name)}">${esc(span.service_name || "unknown")}</span></td><td data-col="operation">${esc(span.span_name || "span")}</td><td data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status"><span class="traceSpansTable__status traceSpansTable__status--${esc(status.toLowerCase())}">${esc(status)}</span></td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td data-col="id"><code>${esc(span.span_id)}</code></td></tr>`;
+      const name = span.span_name || "span";
+      return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="-1" title="Show in the timeline"><td data-col="service" style="--trace-service-color:${palette.service(span.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(span.service_name || "unknown")}</td><td data-col="operation" title="${esc(name)}">${esc(name)}</td><td class="num" data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td class="num" data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status">${ns.badge.statusHtml(status)}</td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td class="mono" data-col="id">${esc(span.span_id)}</td></tr>`;
     }).join("");
     const more = rows.length > shown.length ? `<div class="traceSpansTable__more">Showing the first ${shown.length} of ${rows.length} spans: refine the filter to see the others.</div>` : "";
-    alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${more}</div>`;
+    alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table dataTable dataTable--compact"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${more}</div>`;
   }
 
   // ---------------------------------------------------------------- flamegraph
@@ -1506,13 +1507,9 @@
         render();
       }
     });
-    alt?.addEventListener("keydown", (event) => {
-      const row = event.target instanceof Element ? event.target.closest("[data-table-span]") : null;
-      if (row && (event.key === "Enter" || event.key === " ")) {
-        event.preventDefault();
-        ctx.focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true });
-      }
-    });
+    // Spans table rows: Up / Down move, Enter / Space show the span in the
+    // timeline (ns.rovingRows).
+    if (alt) ns.table.rovingRows(alt, { rows: "tr[data-table-span]", onOpen: (row) => ctx.focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true }) });
     alt?.addEventListener("mousemove", (event) => {
       const frame = event.target instanceof Element ? event.target.closest("[data-flame-key]") : null;
       if (!frame) { hideFlameTip(); return; }

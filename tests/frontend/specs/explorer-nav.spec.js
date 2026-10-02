@@ -327,11 +327,10 @@ for (const theme of ['dark', 'light']) {
       // Rows are grouped (B4), bytes carry one decimal and a unit.
       await expect(weather.locator('td').nth(3)).toHaveText(/^\d{1,3}(,\d{3})+$/);
       await expect(weather.locator('td').nth(4)).toHaveText(/^\d+\.\d MB$/);
-      // In-cell bars: normalised to the column max, ~35% fill in both themes (B6).
+      // In-cell bars: the shared .cellBar, normalised to the column max (B6).
       const size = weather.locator('td').nth(4);
-      expect(await size.evaluate((td) => td.style.getPropertyValue('--bar-pct'))).toBe('100%');
-      const alpha = await size.evaluate((td) => getComputedStyle(td).getPropertyValue('--explorer-bar-alpha').trim());
-      expect(alpha).toBe('35%');
+      await expect(size).toHaveClass(/cellBar/);
+      expect(await size.evaluate((td) => td.style.getPropertyValue('--cellBar'))).toBe('100.00%');
       // Typography (B3): headers are smaller than the section title above.
       const sizes = await page.evaluate(() => ({
         title: parseFloat(getComputedStyle(document.querySelector('.explorerDatabaseObjects .explorerSectionTitle')).fontSize),

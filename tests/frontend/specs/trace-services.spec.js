@@ -53,11 +53,11 @@ test('the Services tab lists services, sorts them and keeps the sort in the URL'
   await expect(checkout.locator('[data-svc-col="errors"]')).toHaveText('2%');
   await expect(checkout.locator('[data-svc-col="p99"]')).toHaveText('420 ms');
   await expect(checkout.locator('.traceSvcSpark')).toHaveCount(2);
-  await expect(checkout.locator('.traceSvcDot')).toHaveCSS('background-color', /rgb/);
+  await expect(checkout.locator('.serviceSwatch')).toHaveCSS('background-color', /rgb/);
 
   await page.locator('[data-svc-sort="p99"]').click();
   expect(await names(page)).toEqual(['auth', 'checkout', 'orders', 'frontend']);
-  await expect(page.locator('th[aria-sort="descending"] [data-svc-sort="p99"]')).toBeVisible();
+  await expect(page.locator('th[data-svc-sort="p99"]')).toHaveAttribute('aria-sort', 'descending');
   await page.locator('[data-svc-sort="p99"]').click();
   expect(await names(page)).toEqual(['frontend', 'orders', 'checkout', 'auth']);
   expect(new URL(page.url()).searchParams.get('svc_sort')).toBe('p99:asc');
@@ -252,7 +252,7 @@ test('the detail charts read in the table\'s units: a per-minute Requests axis a
   await expect(checkout.locator('[data-svc-col="rate"]')).toHaveText('5/min');
   await expect(checkout.locator('[data-svc-col="errors"]')).toHaveText('2%');
   await checkout.locator('.traceSvcRow__label').click();
-  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Requests' }).locator('b')).toHaveText('5/min');
+  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Requests' }).locator('.statTile__value')).toHaveText('5/min');
   const rate = drawer(page).locator('[data-svc-chart="rate"]');
   await expect(rate.locator('.chartCore')).toHaveAttribute('data-y-ticks', /\/min/);
   // data-y-ticks: the axis labels as drawn (app_chart_core.js).

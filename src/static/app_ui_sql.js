@@ -13,6 +13,8 @@
   //     inline    one line cut with an ellipsis inside a table cell: a click
   //               (Enter / Space) shows it all, wrapped, and back
   //   Returns the element (.sqlBlock).
+  //   ui.sqlBlockHtml({ sql, inline, label }) is the same block as an HTML
+  //   string, for modules that render strings (the inline toggle is delegated).
   const ns = window.ChDash;
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
@@ -40,6 +42,11 @@
       }).then(() => {
         for (const paint of pending) paint();
         pending.clear();
+        // Blocks written as HTML strings before the highlighter loaded.
+        for (const code of document.querySelectorAll(".sqlBlock__code[data-sql-plain]")) {
+          code.removeAttribute("data-sql-plain");
+          code.innerHTML = ns.highlight.toHtml(code.textContent || "");
+        }
       }, () => { pending.clear(); });
     }
     return loading;
@@ -60,24 +67,34 @@
     }
   }
 
-  // Inline (table cell) block: one line, a click shows the statement whole.
+  // Inline (table cell) block: one line, a click shows the statement whole
+  // (one delegated listener for every inline block, string-built ones too).
   function inlineBlock(sql, label) {
-    const block = document.createElement("button");
-    block.type = "button";
-    block.className = "sqlBlock sqlBlock--inline";
-    block.setAttribute("aria-expanded", "false");
-    block.title = `${label}: click to show it all`;
-    const code = document.createElement("code");
-    code.className = "sqlBlock__code";
-    block.appendChild(code);
-    paintInto(code, sql);
-    block.addEventListener("click", (event) => {
-      event.stopPropagation();
-      const open = block.getAttribute("aria-expanded") !== "true";
-      block.setAttribute("aria-expanded", open ? "true" : "false");
-      block.classList.toggle("is-expanded", open);
-    });
-    return block;
+    const holder = document.createElement("div");
+    holder.innerHTML = sqlBlockHtml({ sql, inline: true, label });
+    return holder.firstElementChild;
+  }
+
+  document.addEventListener("click", (event) => {
+    const block = event.target instanceof Element ? event.target.closest(".sqlBlock--inline") : null;
+    if (!block) return;
+    event.stopPropagation();
+    const open = block.getAttribute("aria-expanded") !== "true";
+    block.setAttribute("aria-expanded", open ? "true" : "false");
+    block.classList.toggle("is-expanded", open);
+  }, true);
+
+  function sqlBlockHtml({ sql = "", inline = true, label = "SQL" } = {}) {
+    const text = String(sql ?? "").replace(/\s+$/, "");
+    const ready = !!ns.highlight?.toHtml;
+    if (!ready) void loadHighlighter();
+    const code = ready ? ns.highlight.toHtml(text) : esc(text);
+    const attrs = ready ? "" : " data-sql-plain";
+    if (inline) {
+      const title = `${label}: click to show it all`;
+      return `<button type="button" class="sqlBlock sqlBlock--inline" aria-expanded="false" title="${esc(title).replace(/"/g, "&quot;")}"><code class="sqlBlock__code"${attrs}>${code}</code></button>`;
+    }
+    return `<div class="sqlBlock"><div class="sqlBlock__body"><pre class="sqlBlock__pre" aria-label="${esc(label).replace(/"/g, "&quot;")}"><code class="sqlBlock__code"${attrs}>${code}</code></pre></div></div>`;
   }
 
   function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand = null, inline = false, label = "SQL", className = "" } = {}) {
@@ -140,5 +157,6 @@
   }
 
   ui.sqlBlock = sqlBlock;
+  ui.sqlBlockHtml = sqlBlockHtml;
   ns.sqlBlock = sqlBlock;
 })();

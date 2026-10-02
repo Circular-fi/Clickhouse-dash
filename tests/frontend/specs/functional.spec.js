@@ -856,7 +856,7 @@ test('database detail lists every object under the storage band, sorts each colu
   // Rows / bytes / share columns use the shared Explorer in-cell bar,
   // normalised to the column maximum (the largest object fills the cell).
   const weatherSize = objects.locator('tbody tr[data-table="weather_observations"] td').nth(4);
-  await expect(weatherSize).toHaveClass(/explorerBar/);
+  await expect(weatherSize).toHaveClass(/cellBar/);
   expect(await weatherSize.evaluate((td) => td.style.getPropertyValue('--bar-pct'))).toBe('100%');
 
   // Text columns start ascending, numeric ones descending; each toggles.
@@ -1124,8 +1124,14 @@ test('right-click Details expands a result row inline, under the row, and closes
       const cs = getComputedStyle(el, '::before');
       return { bg: cs.backgroundColor, width: cs.width, left: cs.left, top: cs.top, z: cs.zIndex };
     };
+    // The selected row's bar is the shared .dataTable one: an inset shadow
+    // on its first cell.
+    const rowBar = (el) => {
+      const shadow = getComputedStyle(el).boxShadow;
+      return { bg: (shadow.match(/rgb\([^)]*\)/) || [''])[0], width: (shadow.match(/inset (\d+px)/) || ['', ''])[1], left: '0px' };
+    };
     return {
-      row: inner(index), detail: inner(detail), rowBar: bar(index), detailBar: bar(detail),
+      row: inner(index), detail: inner(detail), rowBar: rowBar(index), detailBar: bar(detail),
       gap: detail.getBoundingClientRect().top - index.getBoundingClientRect().bottom,
     };
   });
@@ -2987,14 +2993,14 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceResultsView.v1'))).toBe('table');
   // Like Jaeger, the sort picker drives the list only.
   await expect(page.locator('.traceResultsSort')).toBeHidden();
-  const table = page.locator('#tracesResults table.resultTable.traceTable');
+  const table = page.locator('#tracesResults table.dataTable.traceTable');
   await expect(table).toBeVisible();
   await expect(table.locator('thead th')).toHaveText(['Name', 'Services', 'Spans', 'Errors', 'Duration', 'Start']);
   const rows = table.locator('tbody tr[data-trace-id]');
   await expect(rows).toHaveCount(SYNTHETIC_TRACES.length);
   const order = () => rows.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceId));
   // The picker's order (Most Recent) carries over: Start, newest first.
-  await expect(table.locator('th[data-table-sort="start"]')).toHaveAttribute('data-sort', 'desc');
+  await expect(table.locator('th[data-table-sort="start"]')).toHaveAttribute('aria-sort', 'descending');
   const byKey = {
     name: (t) => syntheticName(t).toLowerCase(),
     services: (t) => t.services.length,
@@ -3012,23 +3018,23 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
     const th = table.locator(`th[data-table-sort="${key}"]`);
     await th.click();
     const firstDir = key === 'name' ? 'asc' : 'desc';
-    await expect(th).toHaveAttribute('data-sort', firstDir);
+    await expect(th).toHaveAttribute('aria-sort', firstDir === 'asc' ? 'ascending' : 'descending');
     expect(await order(), `${key} ${firstDir}`).toEqual(expectedOrder(key, firstDir));
     await th.click();
     const secondDir = firstDir === 'asc' ? 'desc' : 'asc';
-    await expect(th).toHaveAttribute('data-sort', secondDir);
+    await expect(th).toHaveAttribute('aria-sort', secondDir === 'asc' ? 'ascending' : 'descending');
     expect(await order(), `${key} ${secondDir}`).toEqual(expectedOrder(key, secondDir));
-    await expect(table.locator('th[data-sort]')).toHaveCount(1);
+    await expect(table.locator('th[aria-sort="ascending"], th[aria-sort="descending"]')).toHaveCount(1);
   }
   // Cells: pills with overflow, error tag, relative duration bar, start.
   const mesh = rows.filter({ has: page.locator('[data-service="mesh-service-00"]') });
   await expect(mesh.locator('.traceSvcMore')).toBeVisible();
   await expect(mesh.locator('.traceSvcMore')).toHaveText(/^\+\d+$/);
   const failing = table.locator('tr[data-trace-id="0af7651916cd43dd8448eb211c80319c"]');
-  await expect(failing.locator('[data-cell="errors"] .traceTag--error')).toHaveText('3');
+  await expect(failing.locator('[data-cell="errors"] .badge--error')).toHaveText('3');
   await expect(failing.locator('[data-cell="name"]')).toHaveText('frontend: GET /checkout');
   await expect(failing.locator('[data-cell="duration"]')).toContainText('420 ms');
-  const percent = Number(await failing.locator('[data-cell="duration"] [data-duration-percent]').getAttribute('data-duration-percent'));
+  const percent = Number(await failing.locator('[data-cell="duration"][data-duration-percent]').getAttribute('data-duration-percent'));
   expect(Math.abs(percent - (420 / 610) * 100)).toBeLessThan(0.05);
   await expect(table.locator('tr[data-trace-id="5b8efff798038103d269b633813fc60c"] .traceTag--incomplete')).toHaveCount(1);
   const start = failing.locator('[data-cell="start"]');

@@ -66,6 +66,6 @@ def test_durations_use_whole_units_and_results_flag_errors_by_the_title():
     assert "const fmt = ns.format;" in js and "function formatDuration(" not in js
     assert "formatDurationScaled" not in js
     assert 'traceResult__wideTitle">${esc(title)}</strong>${errors ?' in js
-    assert "traceErrorCount--title" in js and ".traceErrorCount--title" in css
+    assert 'ns.badge.html(label, { tone: "error", className: "traceTag traceTag--error", title' in js and ".badge--error" in css
     assert "tracesResultCount__errors" in js and ".tracesResultCount__errors" in css
     assert "traceErrorCount--total" not in js

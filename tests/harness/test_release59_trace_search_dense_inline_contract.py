@@ -43,7 +43,7 @@ def test_inline_multi_span_inspectors_and_compact_error_badges():
     assert 'traceSpanInspectorRow' in js
     assert 'traceJaegerGroup--summary' in js
     assert 'renderAttributePreview' in js
-    assert 'traceErrorCount' in js
+    assert 'traceTag--error' in js
     assert 'editorCopyButton__icon' in js
     assert '.traceSpanRow__serviceDot' in css
     assert 'width: 3px;' in css
