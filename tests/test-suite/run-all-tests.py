@@ -139,6 +139,9 @@ def reset_clickhouse_fixtures(env: dict[str, str]) -> None:
         fixture_root / "01-chdash-users.sql",
         fixture_root / "02-frontend-fixtures.sql",
         fixture_root / "04-replicated-fixtures.sql",
+        # CREATE ... IF NOT EXISTS only; the backend conftest applied it on its own
+        # reset, which this one replaces (CHDASH_FIXTURES_FRESH below).
+        fixture_root / "05-otel-logs-metrics.sql",
     ]
     print("\n=== fixture-reset ===", flush=True)
     for script in scripts:
@@ -200,12 +203,27 @@ def build_archive(manifest: dict) -> None:
     print(f'\nArchive: {ZIP_PATH}', flush=True)
 
 
+def skipped_phase(name: str, output_dir: Path, reason: str) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    status = {'name': name, 'success': True, 'skipped': True, 'reason': reason, 'duration_seconds': 0}
+    (output_dir / 'status.json').write_text(json.dumps(status, indent=2, sort_keys=True), encoding='utf-8')
+    print(f'\n=== {name} === skipped: {reason}', flush=True)
+    return status
+
+
 def main() -> int:
+    # Quick mode (--quick or CHDASH_TESTS_QUICK=1) is for iterations on a shared
+    # host: the Playwright phases run on desktop-1440 only without the
+    # timing-budget tests (PW_SHARED_HOST=1), and the performance phase is skipped.
+    # The default is the full official suite (tests/README.md, "Running tests quickly").
+    quick = '--quick' in sys.argv[1:] or os.environ.get('CHDASH_TESTS_QUICK') == '1'
     shutil.rmtree(RUN_ROOT, ignore_errors=True)
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     ZIP_PATH.unlink(missing_ok=True)
 
     base_env = os.environ.copy()
+    if quick:
+        base_env['PW_SHARED_HOST'] = '1'
     reset_clickhouse_fixtures(base_env)
     statuses: dict[str, dict] = {}
 
@@ -213,6 +231,8 @@ def main() -> int:
     backend_env = base_env.copy()
     backend_env['TEST_ARTIFACTS_DIR'] = str(backend_dir)
     backend_env['TEST_REPOSITORY_ROOT'] = '/repo'
+    # The fixtures were just reset above: the backend conftest skips its own reset.
+    backend_env['CHDASH_FIXTURES_FRESH'] = '1'
     statuses['backend_functional'] = run_phase(
         'backend-functional',
         [
@@ -253,13 +273,16 @@ def main() -> int:
     performance_dir = RUN_ROOT / 'performance'
     perf_env = base_env.copy()
     perf_env['PERF_ARTIFACTS_DIR'] = str(performance_dir)
-    statuses['performance'] = run_phase(
-        'performance',
-        [sys.executable, str(ROOT / 'performance' / 'run.py')],
-        cwd=ROOT,
-        env=perf_env,
-        output_dir=performance_dir,
-    )
+    if quick:
+        statuses['performance'] = skipped_phase('performance', performance_dir, 'quick mode')
+    else:
+        statuses['performance'] = run_phase(
+            'performance',
+            [sys.executable, str(ROOT / 'performance' / 'run.py')],
+            cwd=ROOT,
+            env=perf_env,
+            output_dir=performance_dir,
+        )
 
     design_dir = RUN_ROOT / 'design'
     design_env = base_env.copy()
@@ -270,6 +293,8 @@ def main() -> int:
         'specs/accessibility.spec.js',
         'specs/visual-regression.spec.js',
     ]
+    if quick:
+        design_cmd.append('--project=desktop-1440')
     statuses['design'] = run_phase(
         'design', design_cmd, cwd=FRONTEND, env=design_env, output_dir=design_dir
     )
@@ -296,6 +321,7 @@ def main() -> int:
         'schema_version': 2,
         'generated_at': utc_now(),
         'success': overall,
+        'mode': 'quick' if quick else 'full',
         'test_model': 'single one-shot Docker container',
         'categories': {
             'backend-functional': statuses['backend_functional'],
