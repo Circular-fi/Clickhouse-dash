@@ -776,7 +776,10 @@ test('database detail lists every object under the storage band, sorts each colu
   expect(Number(weather[6].value)).toBeGreaterThan(50);
   expect(weather[6].text).toMatch(/^\d+(?:\.\d)?%$/);
   expect(Number(weather[7].value)).toBe(weatherSummary.active_parts);
-  expect(weather[8].text).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  // Modified: the server's DateTime in the browser's zone, 24 h (decision
+  // 48); the tooltip carries ISO, local, UTC and the server's zone.
+  expect(weather[8].text).toMatch(/^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d$/);
+  await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(9)).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT[\d:.]+Z\n.* local \(.*\n.* UTC\n.* server \(/);
   // Resident memory is labelled and never takes a share of the on-disk total.
   const memory = rows.find((row) => row.name === 'memory_weather').cells;
   expect(memory[3].text).toMatch(/RAM$/);
