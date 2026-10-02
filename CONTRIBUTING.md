@@ -58,6 +58,7 @@ The release workflow builds Linux amd64/arm64 and macOS amd64/arm64 in isolated 
 - Backend code is C++17.
 - Frontend code is vanilla JavaScript.
 - Edit `src/static/style.css` only, then run `python3 tools/build_page_css.py`: each page loads its generated `style.<page>.css`, the rules of `style.css` that can match on it.
+- A page's script modules are listed in `src/static/modules.json` (shared helpers and UI components in `common`); the page header lives in `src/shell/header.html`. After editing either, run `python3 tools/build_page_css.py`: it writes the generated `shell:header` and `shell:scripts` regions of the page shells, then the stylesheets.
 - Keep `src/static/*.js` and `*.css` Latin-1: write `"…"` in JavaScript and `"\2026"` in CSS rather than the character, so Chrome stores the sources one byte per character.
 - Keep code and docs in English.
 - Do not reformat unrelated files.

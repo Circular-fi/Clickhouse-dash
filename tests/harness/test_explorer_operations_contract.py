@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,11 +58,12 @@ def test_ops_keeper_status_is_allowlisted_and_never_browses_zookeeper_paths() ->
 
 
 def test_ops_and_storage_modules_load_on_explorer_only() -> None:
-    app = read("src/static/app.js")
-    assert '"app_explorer_treemap.js",\n      "app_explorer_storage.js",\n      "app_explorer_ops.js",\n      "app_explorer_detail.js",\n      "app_explorer.js",' in app
-    assert 'query: ["app_graph_kit.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"],' in app
-    assert 'explorerDetail: "app_explorer_detail.js", explorer: "app_explorer.js",' in app
-    assert 'explorerStorage: "app_explorer_storage.js", explorerOps: "app_explorer_ops.js",' in app
+    pages = json.loads(read("src/static/modules.json"))["pages"]
+    explorer = pages["explorer"]["modules"]
+    assert explorer[-4:] == ["app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_detail.js", "app_explorer.js"]
+    # Query loads none of the Explorer's graph, storage, ops or detail modules.
+    for name in ("app_graph_kit.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"):
+        assert name not in pages["query"]["modules"], name
     ops = read("src/static/app_explorer_ops.js")
     assert "ns.explorerOps = { show, hide," in ops
     assert "ns.api.getExplorerOpsActivity(host, force)" in ops

@@ -20,7 +20,7 @@ The **time range** and the **selected service** follow the user across views: wh
 
 `traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on; the page exists while at least one is on (otherwise `/observability` is `404`, like any unknown path), the tabs of the others are hidden and their URLs fall back to the first enabled view. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
 
-Only the shown view is loaded: the page starts with the markup, modules and stylesheet of its first view (`style.observability.<view>.css`; the shell ships every view's markup for the first paint, and the others leave the document before any module runs), and a view's markup and modules (`VIEW_MODULES` in `app_observability.js`) load the first time its tab is shown, once. Showing a second view swaps in `style.observability.css` (every view's rules, in `style.css` order) once it has loaded. `tools/build_page_css.py` writes these sheets.
+Only the shown view is loaded: the page starts with the markup, modules and stylesheet of its first view (`style.observability.<view>.css`; the shell ships every view's markup for the first paint, and the others leave the document before any module runs), and a view's markup and modules (`pages.observability.views` in `src/static/modules.json`) load the first time its tab is shown, once. Showing a second view swaps in `style.observability.css` (every view's rules, in `style.css` order) once it has loaded. `tools/build_page_css.py` writes these sheets.
 
 ## Configuration
 

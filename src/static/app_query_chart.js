@@ -20,7 +20,8 @@
   // more than about a fifth of the main thread on it.
   const MIN_REBUILD_INTERVAL_MS = 100;
   const SYNC_KEY = "query-results";
-  const CORE_SCRIPT = "app_chart_core.js";
+  // The chart engine: modules.json pages.query.lazy.chart.
+  const CORE_GROUP = "chart";
   const CHART_TYPES = [
     ["line", "Line", "One line per series"],
     ["area", "Area", "Stacked areas: the series add up"],
@@ -50,25 +51,16 @@
 
   // --- Chart engine (lazy) ---------------------------------------------------
 
-  const scriptBase = (() => {
-    const script = document.currentScript;
-    if (script && script.src) return script.src.replace(/[^/]*$/, "");
-    if (typeof window.__chdashUrl === "function") return new URL(window.__chdashUrl("static/"), window.location.href).toString();
-    return new URL("./static/", window.location.href).toString();
-  })();
   let corePromise = null;
 
   function loadCore() {
     if (ns.chartCore) return Promise.resolve(ns.chartCore);
     if (!corePromise) {
-      corePromise = new Promise((resolve, reject) => {
-        const el = document.createElement("script");
-        el.src = new URL(CORE_SCRIPT, scriptBase).toString();
-        el.async = true;
-        el.onload = () => (ns.chartCore ? resolve(ns.chartCore) : reject(new Error("chart engine missing")));
-        el.onerror = () => { corePromise = null; reject(new Error(`Failed to load ${CORE_SCRIPT}`)); };
-        document.head.appendChild(el);
+      corePromise = ns.loader.loadGroup(CORE_GROUP).then(() => {
+        if (!ns.chartCore) throw new Error("chart engine missing");
+        return ns.chartCore;
       });
+      corePromise.catch(() => { corePromise = null; });
     }
     return corePromise;
   }

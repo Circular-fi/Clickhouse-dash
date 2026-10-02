@@ -67,10 +67,10 @@ also accepts a mode (`"browse"`, `"graph"`, `"storage"`). Modes disabled by
 to the first available one.
 
 **Server operations** (`/explorer/_operations`, `#explorerOpsPane`) is hidden
-for now: its code is kept, but `app.js` does not load `app_explorer_ops.js` on
-the Explorer (`PAGE_SKIPPED_MODULES.explorer`), so the tab stays hidden and the
-deep link falls back to the Catalog. To bring it back, drop
-`"app_explorer_ops.js"` from that list and rerun `tools/build_page_css.py`; the
+for now: its code is kept, but the Explorer does not load `app_explorer_ops.js`
+(it is not in `pages.explorer.modules` of `src/static/modules.json`), so the tab
+stays hidden and the deep link falls back to the Catalog. To bring it back, add
+`"app_explorer_ops.js"` to that list and rerun `tools/build_page_css.py`; the
 tab then shows unless `explorer.operations.enabled = false`, and the view calls
 `ns.explorerOps.show(container, { onOpenTable })`.
 
@@ -273,8 +273,8 @@ listed + omitted bytes.
 
 ## Server operations
 
-Hidden for now (see *Shell and navigation*: `app.js` does not load the module
-on the Explorer). The **Operations** Explorer section (route
+Hidden for now (see *Shell and navigation*: the Explorer does not load the
+module). The **Operations** Explorer section (route
 `/explorer/_operations`, `app_explorer_ops.js`,
 `ns.explorerOps.show(container, { onOpenTable })`) shows
 what the selected server is doing in the background, in the spirit of

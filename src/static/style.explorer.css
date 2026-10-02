@@ -4263,14 +4263,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   overflow: visible;
   text-overflow: clip;
 }
-.pipelineViewer {
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  color: var(--text);
-}
 :root {
   --obs-on-fill: #fff;
   --obs-shadow-menu: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);

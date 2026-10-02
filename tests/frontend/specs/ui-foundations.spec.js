@@ -87,7 +87,7 @@ function readTokens(page, names, theme) {
 for (const path of PAGES) {
   test(`ui foundations: ns.format and ns.palette load first on ${path}`, async ({ page }) => {
     const errors = await open(page, path);
-    const scripts = await page.evaluate(() => [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop()).filter((name) => /^app_/.test(name) && name !== 'app_observability.js'));
+    const scripts = await page.evaluate(() => [...document.scripts].map((s) => (s.getAttribute('src') || '').split('/').pop()).filter((name) => /^app_/.test(name) && name !== 'app_observability.js' && name !== 'app_loader.js'));
     expect(scripts.slice(0, 3)).toEqual(['app_format.js', 'app_palette.js', 'app_dom.js']);
     const api = await page.evaluate(() => ({
       format: Object.keys(window.ChDash.format).sort(),

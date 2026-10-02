@@ -37,7 +37,7 @@ def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
     viewer = read("src/static/app_trace_viewer.js")
-    app = read("src/static/app.js")
+    app = read("src/static/modules.json")
     assert 'id="analysisTabs"' in html
     assert 'id="analysisPipelineTab"' in html
     assert 'id="analysisTraceTab"' in html

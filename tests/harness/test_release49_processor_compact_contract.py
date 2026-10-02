@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import subprocess
 
@@ -23,5 +24,5 @@ def test_live_response_omits_expanded_processor_duplicates() -> None:
 
 
 def test_processor_decoder_is_loaded_before_analysis() -> None:
-    source = (ROOT / "src/static/app.js").read_text(encoding="utf-8")
-    assert source.index('"app_analysis_data.js"') < source.index('"app_analysis.js"')
+    files = json.loads((ROOT / "src/static/modules.json").read_text(encoding="utf-8"))["pages"]["query"]["modules"]
+    assert files.index("app_analysis_data.js") < files.index("app_analysis.js")

@@ -1,5 +1,6 @@
 import importlib.util
 import re
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,9 +94,8 @@ def test_observability_view_sheets_hold_their_view_and_the_shell():
 
 def test_query_and_explorer_skip_the_modules_they_never_run():
     builder = load_builder()
-    app = read("src/static/app.js")
-    assert "const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);" in app
-    assert "if (skipped.has(f)) continue;" in app
+    # One manifest (modules.json) lists each page's modules; app.js loads that list.
+    assert "return loader.startModules();" in read("src/static/app.js")
     query = builder.page_modules("query")
     explorer = builder.page_modules("explorer")
     assert {"app_explorer.js", "app_run.js", "app_autocomplete.js", "app_analysis.js"} <= set(query)

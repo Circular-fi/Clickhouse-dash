@@ -51,7 +51,7 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     js = read("src/static/app_trace_search.js")
     traces = read("src/static/app_traces.js")
     html = read("src/static/observability.html")
-    boot = read("src/static/app_observability.js")
+    boot = read("src/static/modules.json")  # the module lists, in load order
     assert '"app_trace_search.js"' in boot
     assert boot.index('"app_traces.js"') < boot.index('"app_trace_search.js"')
     for name in ('"from"', '"to"', '"status"', '"service"', '"operation"', '"limit"', '"sort"', '"results"',

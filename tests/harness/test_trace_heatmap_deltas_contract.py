@@ -44,7 +44,7 @@ def test_deltas_compare_two_stable_bounded_samples():
 
 
 def test_heatmap_module_is_wired_to_the_duration_chart_and_the_search():
-    boot = read("src/static/app_observability.js")
+    boot = read("src/static/modules.json")  # the module lists, in load order
     js = read("src/static/app_trace_heatmap.js")
     traces = read("src/static/app_traces.js")
     search = read("src/static/app_trace_search.js")

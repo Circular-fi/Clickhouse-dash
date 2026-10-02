@@ -1,0 +1,84 @@
+{
+  "//": [
+    "The script modules of every page shell, in load order: the one list app_loader.js, app.js, app_observability.js and tools/build_page_css.py read.",
+    "common: loaded first on every page (shared helpers and UI components: add a new app_ui_<name>.js here, after app_dom.js).",
+    "pages.<page>.bootstrap: the page controller the shell starts; modules: loaded at start, after common;",
+    "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
+    "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
+    "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
+    "The Explorer's Server operations view is hidden for now: its tab only shows while app_explorer_ops.js is loaded. To bring it back, add \"app_explorer_ops.js\" to pages.explorer.modules before app_explorer_detail.js."
+  ],
+  "common": [
+    "app_format.js",
+    "app_palette.js",
+    "app_dom.js",
+    "app_ui_layers.js",
+    "app_ui_popover.js",
+    "app_ui_panel.js",
+    "app_ui_tabs.js",
+    "app_ui_segmented.js",
+    "app_ui_menu.js",
+    "app_state.js",
+    "app_util.js"
+  ],
+  "pages": {
+    "query": {
+      "bootstrap": "app.js",
+      "modules": [
+        "app_sql.js",
+        "app_api.js",
+        "app_meta.js",
+        "app_highlight.js",
+        "app_autocomplete.js",
+        "app_query_chart.js",
+        "app_results.js",
+        "app_ui_dialog.js",
+        "app_ui.js",
+        "app_trace_viewer.js",
+        "app_pipeline_viewer.js",
+        "app_analysis_data.js",
+        "app_analysis.js",
+        "app_download.js",
+        "app_export.js",
+        "app_run.js",
+        "app_explorer.js"
+      ],
+      "lazy": {
+        "chart": ["app_chart_core.js"],
+        "library": ["app_query_library.js"]
+      }
+    },
+    "explorer": {
+      "bootstrap": "app.js",
+      "modules": [
+        "app_sql.js",
+        "app_api.js",
+        "app_meta.js",
+        "app_highlight.js",
+        "app_results.js",
+        "app_ui.js",
+        "app_graph_kit.js",
+        "app_explorer_graph.js",
+        "app_explorer_treemap.js",
+        "app_explorer_storage.js",
+        "app_explorer_detail.js",
+        "app_explorer.js"
+      ],
+      "lazy": {}
+    },
+    "observability": {
+      "bootstrap": "app_observability.js",
+      "modules": [
+        "app_api.js",
+        "app_ui.js",
+        "app_timerange.js"
+      ],
+      "lazy": {},
+      "views": {
+        "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
+        "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
+        "metrics": ["app_chart_core.js", "app_metrics.js"]
+      }
+    }
+  }
+}

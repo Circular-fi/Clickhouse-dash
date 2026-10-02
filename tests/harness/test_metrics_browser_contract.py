@@ -1,4 +1,5 @@
 """Source contract of the metrics browser API (src/api_metrics.cpp)."""
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -89,8 +90,7 @@ def test_metrics_view_shell_and_switcher():
     assert section.index('id="metricsToolbar"') < section.index('id="metricsSidebar"')
     assert 'id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace"' in html
     assert not (ROOT / "src/static/metrics.html").exists()
-    controller = read("src/static/app_observability.js")
-    assert '    metrics: ["app_chart_core.js", "app_metrics.js"],' in controller
+    assert json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]["metrics"] == ["app_chart_core.js", "app_metrics.js"]
     # Query and Explorer: one Observability entry, hidden until /api/version reveals it.
     for page in ["query.html", "explorer.html"]:
         shell = read(f"src/static/{page}")

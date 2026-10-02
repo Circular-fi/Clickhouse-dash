@@ -35,47 +35,21 @@
   window.ChDash = window.ChDash || {};
   const VIEWS = ["traces", "logs", "metrics"];
   const LABELS = { traces: "Traces", logs: "Logs", metrics: "Metrics" };
-  // Modules every view needs, then each view's own. tools/build_page_css.py
-  // reads both lists: a view's stylesheet keeps the rules its modules can use.
-  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
-  const VIEW_MODULES = {
-    traces: ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
-    logs: ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
-    metrics: ["app_chart_core.js", "app_metrics.js"],
-  };
+  // The page's modules (src/static/modules.json, through ns.loader): the
+  // common ones every view needs, then each view's own (views.<view>), loaded
+  // the first time the view is shown. tools/build_page_css.py reads the same
+  // lists: a view's stylesheet keeps the rules its modules can use.
   const ALL_VIEWS_SHEET = "style.observability.css";
-
-  const base = (() => {
-    if (typeof window.__chdashUrl === "function") return new URL(window.__chdashUrl("static/"), window.location.href).toString();
-    const script = document.currentScript;
-    return script && script.src ? script.src.replace(/[^/]*$/, "") : new URL("./static/", window.location.href).toString();
-  })();
+  const loader = window.ChDash.loader;
 
   // ------------------------------------------------------------- loading
 
-  const loadedModules = new Set();
-  const loadScript = (name) => new Promise((resolve, reject) => {
-    const el = document.createElement("script");
-    el.src = base + name;
-    el.async = false;
-    el.onload = resolve;
-    el.onerror = () => reject(new Error(`Failed to load ${name}`));
-    document.head.appendChild(el);
-  });
-
-  async function loadModules(names) {
-    for (const name of names) {
-      if (loadedModules.has(name)) continue;
-      await loadScript(name);
-      loadedModules.add(name);
-    }
-  }
-
-  // One load per view, however often it is asked for.
+  // One load per view, however often it is asked for (ns.loader loads each
+  // file once).
   const viewLoads = new Map();
   function loadView(view) {
     if (!viewLoads.has(view)) {
-      const loading = loadModules(VIEW_MODULES[view]);
+      const loading = loader.loadGroup(view);
       viewLoads.set(view, loading);
       loading.catch(() => viewLoads.delete(view));
     }
@@ -112,7 +86,7 @@
       }
       const link = document.createElement("link");
       link.rel = "stylesheet";
-      link.href = base + name;
+      link.href = loader.url(name);
       const done = (ok) => {
         if (ok) {
           for (const v of wanted) styled.add(v);
@@ -422,13 +396,13 @@
   }
 
   async function start() {
-    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, featuresKnown: false, VIEWS, VIEW_MODULES };
+    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, featuresKnown: false, VIEWS };
     // --shell-top (the header and #obsNav) is measured by app_dom.js
     // (ns.shell), as on every page.
     const named = viewFromPath(window.location.pathname);
     const view = named && enabledViews().includes(named) ? named : defaultView();
     detachViews(view);
-    await loadModules(COMMON_MODULES);
+    await loader.startModules();
     humanizeApiErrors(window.ChDash.api);
     const early = String(document.documentElement.dataset.obsView || "");
     styled.add(VIEWS.includes(early) ? early : VIEWS[0]);

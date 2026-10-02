@@ -1,5 +1,6 @@
 """Source contract of the Observability page: Traces, Logs and Metrics as views of /observability."""
 import re
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,7 @@ def test_shell_holds_every_view_marked_and_shows_one_from_the_first_paint():
     # The head script picks the view (path, else the first enabled one) before the first paint.
     assert "var match = /^\\/observability\\/(traces|logs|metrics)(?:\\/|$)/.exec(" in html
     assert "document.documentElement.dataset.obsView = view;" in html
+    assert 'window.__chdashUrl("static/app_loader.js")' in html
     assert 'window.__chdashUrl("static/app_observability.js")' in html
     css = read("src/static/style.css")
     assert 'html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],' in css
@@ -57,17 +59,19 @@ def test_shell_holds_every_view_marked_and_shows_one_from_the_first_paint():
 
 def test_views_load_lazily_once_with_their_stylesheet():
     js = read("src/static/app_observability.js")
-    assert "const VIEW_MODULES = {" in js
+    views = json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]
+    assert sorted(views) == sorted(VIEWS)
+    assert "const loading = loader.loadGroup(view);" in js
     assert "if (!viewLoads.has(view)) {" in js
     assert "await Promise.all([loadView(view), ensureSheet(view)]);" in js
     # The page starts on the common modules only; a view's modules come with its first show.
     start = js[js.index("async function start() {"):]
-    assert "await loadModules(COMMON_MODULES);" in start
+    assert "await loader.startModules();" in start
     # The other views' markup leaves the document before any module runs, and comes back on first show.
-    assert start.index("detachViews(view);") < start.index("await loadModules(COMMON_MODULES);")
+    assert start.index("detachViews(view);") < start.index("await loader.startModules();")
     assert "window.ChDash.dom?.refresh?.();" in js
     assert "dom.refresh = () => {" in read("src/static/app_dom.js")
-    assert "VIEW_MODULES[" not in start
+    assert "loadGroup(" not in start
     # A view is initialised once, then told about the location.
     assert "if (!ctl.started.has(view)) {" in js
     assert "module?.init?.();" in js and "module?.onLocation?.();" in js

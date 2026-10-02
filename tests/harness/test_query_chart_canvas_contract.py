@@ -1,3 +1,4 @@
+import json
 import importlib.util
 from pathlib import Path
 
@@ -18,11 +19,13 @@ def load_builder():
 def test_query_chart_draws_on_the_shared_canvas_engine_loaded_on_first_chart_view():
     chart = read("src/static/app_query_chart.js")
     engine = read("src/static/app_chart_core.js")
-    app = read("src/static/app.js")
+    query = json.loads(read("src/static/modules.json"))["pages"]["query"]
     # The engine is not part of the eager Query bundle: the controller loads it
-    # when a panel first shows (or is about to show) a chart.
-    assert '"app_chart_core.js"' not in app
-    assert 'const CORE_SCRIPT = "app_chart_core.js";' in chart
+    # (its lazy group) when a panel first shows (or is about to show) a chart.
+    assert "app_chart_core.js" not in query["modules"]
+    assert query["lazy"]["chart"] == ["app_chart_core.js"]
+    assert 'const CORE_GROUP = "chart";' in chart
+    assert "ns.loader.loadGroup(CORE_GROUP)" in chart
     assert "function loadCore()" in chart
     assert "core.create(stageEl, {" in chart
     # No SVG strings are built per render any more.
@@ -43,10 +46,10 @@ def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
     engine = read("src/static/app_chart_core.js")
     logs = read("src/static/app_logs.js")
     metrics = read("src/static/app_metrics.js")
-    controller = read("src/static/app_observability.js")
+    views = json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]
     # The Logs and Metrics views load the engine, not the Query chart module.
-    assert '    logs: ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],' in controller
-    assert '    metrics: ["app_chart_core.js", "app_metrics.js"],' in controller
+    assert views["logs"] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
+    assert views["metrics"] == ["app_chart_core.js", "app_metrics.js"]
     # The SVG axis helpers metrics used to borrow are gone with their last reader.
     exports = chart[chart.index("ns.queryChart = {"):]
     for name in ["niceTicks", "timeAxisTicks", "compactUnitFor", "formatTickNumber"]:

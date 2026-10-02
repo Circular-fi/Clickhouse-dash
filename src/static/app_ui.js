@@ -578,13 +578,8 @@
   // renders both views and is loaded then (or when Ctrl+S is used): a page
   // that never opens it costs no module and no dialog.
   const QUERY_LIBRARY_PREFS_KEY = "chdash.queryLibraryMenu.v1";
-  const QUERY_LIBRARY_SCRIPT = "app_query_library.js";
-  const scriptBase = (() => {
-    const script = document.currentScript;
-    if (script && script.src) return script.src.replace(/[^/]*$/, "");
-    if (typeof window.__chdashUrl === "function") return new URL(window.__chdashUrl("static/"), window.location.href).toString();
-    return new URL("./static/", window.location.href).toString();
-  })();
+  // modules.json pages.query.lazy.library.
+  const QUERY_LIBRARY_GROUP = "library";
   let queryLibraryPromise = null;
   let queryLibraryTab = "saved";
   let queryLibraryDialog = null;
@@ -623,16 +618,11 @@
   function loadQueryLibrary() {
     if (ns.queryLibrary) return Promise.resolve(ns.queryLibrary);
     if (!queryLibraryPromise) {
-      queryLibraryPromise = new Promise((resolve, reject) => {
-        const el = document.createElement("script");
-        el.src = new URL(QUERY_LIBRARY_SCRIPT, scriptBase).toString();
-        el.onload = () => (ns.queryLibrary ? resolve(ns.queryLibrary) : reject(new Error(`${QUERY_LIBRARY_SCRIPT} did not register`)));
-        el.onerror = () => {
-          queryLibraryPromise = null;
-          reject(new Error(`Failed to load ${QUERY_LIBRARY_SCRIPT}`));
-        };
-        document.head.appendChild(el);
+      queryLibraryPromise = ns.loader.loadGroup(QUERY_LIBRARY_GROUP).then(() => {
+        if (!ns.queryLibrary) throw new Error("The query library did not register");
+        return ns.queryLibrary;
       });
+      queryLibraryPromise.catch(() => { queryLibraryPromise = null; });
     }
     return queryLibraryPromise;
   }

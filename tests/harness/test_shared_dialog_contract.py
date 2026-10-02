@@ -4,6 +4,7 @@ profiling dialog, the query library and their prompts share it."""
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
@@ -14,11 +15,10 @@ def read(rel: str) -> str:
 
 
 def test_dialog_module_is_loaded_by_query_only():
-    app = read("src/static/app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    assert files.index('"app_ui_dialog.js"') < files.index('"app_ui.js"') < files.index('"app_analysis.js"')
-    explorer = app[app.index("explorer: ["):app.index("]", app.index("explorer: ["))]
-    assert '"app_ui_dialog.js"' in explorer
+    pages = json.loads(read("src/static/modules.json"))["pages"]
+    files = pages["query"]["modules"]
+    assert files.index("app_ui_dialog.js") < files.index("app_ui.js") < files.index("app_analysis.js")
+    assert "app_ui_dialog.js" not in pages["explorer"]["modules"]
 
 
 def test_dialog_is_a_native_modal_with_backdrop_escape_and_focus_return():

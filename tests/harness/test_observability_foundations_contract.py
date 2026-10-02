@@ -9,6 +9,7 @@ allow-lists name the few uses that are justified.
 """
 import importlib.util
 import re
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,9 +22,8 @@ def read(name: str) -> str:
 
 def observability_modules() -> list[str]:
     """The page controller and the view modules it loads, minus the shared engines."""
-    controller = read("app_observability.js")
-    block = re.search(r"const VIEW_MODULES = \{(.*?)\n  \};", controller, re.S).group(1)
-    names = sorted(set(re.findall(r'"(app_[a-z_]+\.js)"', block)))
+    views = json.loads(read("modules.json"))["pages"]["observability"]["views"]
+    names = sorted({name for files in views.values() for name in files})
     own = [n for n in names if re.match(r"app_(traces|trace_[a-z]+|logs|metrics)\.js$", n)]
     return ["app_observability.js", *own]
 

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -8,10 +9,15 @@ def read(rel):
 
 
 def test_time_range_picker_is_loaded_before_the_traces_page():
-    bootstrap = read("src/static/app_observability.js")
+    manifest = json.loads(read("src/static/modules.json"))
+    page = manifest["pages"]["observability"]
     # Common modules (the picker included) load before any view's modules.
-    assert 'const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];' in bootstrap
-    assert '    traces: ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", ' in bootstrap
+    common = manifest["common"] + page["modules"]
+    assert common[:11] == ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js"]
+    assert {"app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"} <= set(common)
+    assert "app_timerange.js" not in [name for files in page["views"].values() for name in files]
+    assert page["views"]["traces"][:3] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
+    assert "await loader.startModules();" in read("src/static/app_observability.js")
 
 
 def test_time_range_panel_ships_grafana_layout_in_the_range_picker():

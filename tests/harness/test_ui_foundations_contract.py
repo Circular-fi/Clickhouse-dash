@@ -51,13 +51,11 @@ def test_format_and_palette_unit_checks(zone: str) -> None:
 
 
 def test_format_and_palette_load_first_in_every_loader() -> None:
-    app = read("app.js")
-    files = app[app.index("const files = [") :]
-    assert files.index('"app_format.js"') < files.index('"app_palette.js"') < files.index('"app_dom.js"')
-    assert 'format: "app_format.js", palette: "app_palette.js",' in app
-    obs = read("app_observability.js")
-    common = re.search(r"const COMMON_MODULES = \[([^\]]*)\];", obs).group(1)
-    assert re.findall(r'"([^"]+)"', common)[:2] == ["app_format.js", "app_palette.js"]
+    # One manifest for every page: its common modules load first, format and palette leading.
+    manifest = json.loads(read("modules.json"))
+    assert manifest["common"][:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
+    for page in manifest["pages"].values():
+        assert not {"app_format.js", "app_palette.js", "app_dom.js"} & set(page["modules"])
 
 
 def test_util_formatters_delegate_without_changing_their_output() -> None:

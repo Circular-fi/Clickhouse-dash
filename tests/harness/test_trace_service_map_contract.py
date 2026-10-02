@@ -46,7 +46,7 @@ def test_service_map_sql_is_bounded_sampled_and_allowlisted():
 
 
 def test_service_map_tab_is_registered_and_lives_in_the_url():
-    boot = read("src/static/app_observability.js")
+    boot = read("src/static/modules.json")  # the module lists, in load order
     tabs = read("src/static/app_trace_tabs.js")
     mapjs = read("src/static/app_trace_map.js")
     search = read("src/static/app_trace_search.js")

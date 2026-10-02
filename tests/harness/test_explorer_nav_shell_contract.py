@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,12 +51,10 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
 
 
 def test_operations_view_is_hidden_by_not_loading_its_module() -> None:
-    app = read("src/static/app.js")
+    manifest = json.loads(read("src/static/modules.json"))
     explorer_css = read("src/static/style.explorer.css")
-    skipped = app[app.index("const PAGE_SKIPPED_MODULES = {"):app.index("};", app.index("const PAGE_SKIPPED_MODULES = {"))]
-    explorer = skipped[skipped.index("explorer: ["):]
-    assert '"app_explorer_ops.js"' in explorer
-    assert 'drop\n  // "app_explorer_ops.js" from the explorer list and rerun\n  // tools/build_page_css.py.' in app
+    assert "app_explorer_ops.js" not in manifest["pages"]["explorer"]["modules"]
+    assert any('To bring it back, add \"app_explorer_ops.js\" to pages.explorer.modules' in line for line in manifest["//"])
     # Its rules are not shipped to the Explorer page while it is hidden.
     assert ".explorerOpsTile" not in explorer_css
 

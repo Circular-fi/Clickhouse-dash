@@ -9,17 +9,19 @@ def read(path: str) -> str:
 
 def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fail_closed() -> None:
     html = read("src/static/query.html")
-    loader = read("src/static/app.js")
+    loader = read("src/static/app_loader.js")
     api = read("src/static/app_api.js")
     server = read("src/server.cpp")
 
     assert "window.__CHDASH_BASE_PATH__" in html
     assert "window.__chdashUrl" in html
     assert 'window.__chdashUrl("static/style.query.css")' in html
+    assert 'window.__chdashUrl("static/app_loader.js")' in html
     assert 'window.__chdashUrl("static/app.js")' in html
-    assert 'const bootstrapBaseUrl = (() =>' in loader
+    # The loader resolves its base once, from the shell's mount path (currentScript is null after start).
+    assert "const base = (() => {" in loader
     assert 'new URL(window.__chdashUrl("static/"), window.location.href).toString()' in loader
-    assert "const getBaseUrl = () => bootstrapBaseUrl;" in loader
+    assert "const url = (file) => new URL(String(file || \"\"), base).toString();" in loader
     assert "function resolveUrl(path)" in api
     assert "fetch(resolveUrl(url)" in api
     assert 'err.code = "invalid_api_response"' in api

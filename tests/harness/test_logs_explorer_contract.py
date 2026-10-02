@@ -1,4 +1,5 @@
 """Source contract of the Logs explorer (the Logs view of /observability and /api/logs/* routes)."""
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -84,8 +85,7 @@ def test_logs_view_follows_the_page_conventions():
     assert not (ROOT / "src/static/logs.html").exists()
     assert not (ROOT / "src/static/app_logs_bootstrap.js").exists()
     # Loaded the first time the Logs tab is shown.
-    controller = read("src/static/app_observability.js")
-    assert '    logs: ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],' in controller
+    assert json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]["logs"] == ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"]
 
 
 def test_logs_page_script_reuses_shared_pieces():

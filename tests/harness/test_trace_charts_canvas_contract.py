@@ -1,3 +1,4 @@
+import json
 import importlib.util
 import re
 from pathlib import Path
@@ -21,8 +22,7 @@ def section(text, start, end):
 
 
 def test_traces_view_loads_the_canvas_engine_before_its_charts():
-    boot = read("src/static/app_observability.js")
-    assert '    traces: ["app_chart_core.js", "app_facet_panel.js", "app_traces.js",' in boot
+    assert json.loads(read("src/static/modules.json"))["pages"]["observability"]["views"]["traces"][:3] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
     builder = load_builder()
     traces = builder.observability_modules("traces")
     assert traces.index("app_chart_core.js") < traces.index("app_traces.js")

@@ -14,9 +14,10 @@ needs a format or a colour these do not offer adds it here, with a unit
 check, instead of writing its own. Component CSS and scripts name tokens
 (`var(--danger)`), never hex, rgb or hsl literals.
 
-Both modules load first, before `app_dom.js`, in every loader: the file list
-and `CORE_MODULES` of `app.js` (Query, Explorer) and `COMMON_MODULES` of
-`app_observability.js` (Traces, Logs, Metrics). Both are pure apart from
+Both modules load first, before `app_dom.js`, on every page: they lead the
+`common` list of `src/static/modules.json`, the one module manifest that
+`app_loader.js` (`ns.loader`), `app.js`, `app_observability.js` and
+`tools/build_page_css.py` read. Both are pure apart from
 `palette.resolve` (which reads computed styles) and the service store (which
 uses `sessionStorage`).
 

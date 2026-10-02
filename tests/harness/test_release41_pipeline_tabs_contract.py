@@ -29,7 +29,7 @@ def test_profiling_modal_opens_pipeline_first_and_tracing_second() -> None:
 
 
 def test_pipeline_viewer_combines_processor_cost_with_otel_wall_clock() -> None:
-    app = read("src/static/app.js")
+    app = read("src/static/modules.json")
     analysis = read("src/static/app_analysis.js")
     pipeline = read("src/static/app_pipeline_viewer.js")
 
