@@ -371,9 +371,9 @@ click-to-filter, library and row context menus. Each family keeps its look
   open the list.
 - **Focus**: opened from the keyboard, the selected item (or the first)
   takes the focus; opened with a pointer, the list does.
-- **Dismissal**: one `pointerdown` listener and one Escape listener for
-  every menu, behind `layer()`. That function is the one place that hands
-  the stack to the shared dismiss layer (`ns.layers`) when it exists.
+- **Dismissal**: every open menu is an `ns.layers` layer (Escape, a press
+  outside), pushed by `layer()`, the one place in the module that knows the
+  stack. `ns.menu` moves the focus itself (`returnFocus: false`).
 
 The entry points:
 
