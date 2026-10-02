@@ -1431,14 +1431,15 @@
     return { start: cache.extent.start + total * lo, total: Math.max(1, total * (hi - lo)) };
   }
 
+  // The open event popover (ns.popover.open: an ns.layers layer, so Escape,
+  // a press outside, a scroll or a resize close it and the focus goes back
+  // to the marker, or its row).
   let popover = null;
-  let popoverCleanup = null;
 
   function closeEventPopover() {
-    if (popoverCleanup) popoverCleanup();
-    popoverCleanup = null;
-    popover?.remove();
+    const open = popover;
     popover = null;
+    open?.close({ restoreFocus: false });
   }
 
   function openEventPopover(marker) {
@@ -1454,47 +1455,21 @@
     const group = groups.find((g) => g.key === markerKey)
       || groups.reduce((best, g) => (Math.abs(g.ratio - markerRatio) < Math.abs(best.ratio - markerRatio) ? g : best), groups[0]);
     closeEventPopover();
-    popover = document.createElement("div");
-    popover.className = "traceEventPopover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Span events");
-    popover.style.setProperty("--trace-service-color", palette.service(node.span.service_name));
     const count = group.events.length;
-    popover.innerHTML = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="traceEventPopover__close" data-event-popover-close aria-label="Close">×</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
-    document.body.appendChild(popover);
-    const rect = marker.getBoundingClientRect();
-    const width = popover.offsetWidth;
-    const height = popover.offsetHeight;
-    const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
-    const below = rect.bottom + 6;
-    const top = below + height > window.innerHeight - 8 && rect.top - height - 6 > 8 ? rect.top - height - 6 : below;
-    popover.style.left = `${Math.round(left)}px`;
-    popover.style.top = `${Math.round(Math.max(8, top))}px`;
-    const onDocClick = (event) => {
-      if (popover && event.target instanceof Node && !popover.contains(event.target) && !event.target.closest?.(".traceSpanEventMarker")) closeEventPopover();
-    };
-    // Escape and the close button give focus back to the marker (or its row).
-    const closeToMarker = () => {
-      closeEventPopover();
-      const back = marker.tabIndex >= 0 && document.contains(marker) ? marker : row;
-      if (back && document.contains(back)) back.focus({ preventScroll: true });
-    };
-    const onKey = (event) => { if (event.key === "Escape") closeToMarker(); };
-    const onScroll = (event) => { if (popover && !(event.target instanceof Node && popover.contains(event.target))) closeEventPopover(); };
-    popover.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-event-popover-close]")) { closeToMarker(); return; }
+    const html = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="closeCross closeCross--sm traceEventPopover__close" data-event-popover-close aria-label="Close" title="Close (Esc)">×</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
+    const open = ns.popover.open(marker, html, {
+      className: "traceEventPopover",
+      label: "Span events",
+      returnFocus: marker,
+      fallbackFocus: () => row,
+      onClose: () => { if (popover === open) popover = null; },
+    });
+    popover = open;
+    open.el.style.setProperty("--trace-service-color", palette.service(node.span.service_name));
+    open.el.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-event-popover-close]")) { open.close(); return; }
       ctx.spanDetailClick(event);
     });
-    document.addEventListener("click", onDocClick, true);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", closeEventPopover);
-    popoverCleanup = () => {
-      document.removeEventListener("click", onDocClick, true);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", closeEventPopover);
-    };
   }
 
   // ---------------------------------------------------------------- events
@@ -1571,23 +1546,14 @@
     });
   }
 
+  // The flamegraph's pointer tooltip (ns.popover.follow).
   let flameTip = null;
   function showFlameTip(frame, x, y) {
-    if (!flameTip) {
-      flameTip = document.createElement("div");
-      flameTip.className = "traceFlame__tip";
-      flameTip.setAttribute("role", "tooltip");
-      document.body.appendChild(flameTip);
-    }
+    flameTip = flameTip || ns.popover.follow({ className: "traceFlame__tip", side: "bottom", align: "start", offset: 16 });
     const count = Number(frame.getAttribute("data-flame-count") || 1);
-    flameTip.innerHTML = `<b>${ctx.esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${ctx.esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${fmt.count(count)} span${count === 1 ? "" : "s"} · ${ctx.esc(frame.getAttribute("data-flame-share"))} of the trace</span>`;
-    flameTip.hidden = false;
-    const width = flameTip.offsetWidth;
-    const height = flameTip.offsetHeight;
-    flameTip.style.left = `${Math.round(Math.min(window.innerWidth - width - 8, x + 12))}px`;
-    flameTip.style.top = `${Math.round(y + 16 + height > window.innerHeight ? y - height - 10 : y + 16)}px`;
+    flameTip.show({ x: x + 12, y }, `<b>${ctx.esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${ctx.esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${fmt.count(count)} span${count === 1 ? "" : "s"} · ${ctx.esc(frame.getAttribute("data-flame-share"))} of the trace</span>`, { html: true });
   }
-  function hideFlameTip() { if (flameTip) flameTip.hidden = true; }
+  function hideFlameTip() { flameTip?.hide(); }
 
   function install(context) {
     ctx = context;

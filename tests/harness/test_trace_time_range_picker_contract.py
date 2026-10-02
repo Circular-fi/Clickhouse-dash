@@ -10,7 +10,7 @@ def read(rel):
 def test_time_range_picker_is_loaded_before_the_traces_page():
     bootstrap = read("src/static/app_observability.js")
     # Common modules (the picker included) load before any view's modules.
-    assert 'const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];' in bootstrap
+    assert 'const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];' in bootstrap
     assert '    traces: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_traces.js", ' in bootstrap
 
 

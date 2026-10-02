@@ -511,16 +511,16 @@
     map.setAttribute("role", "group");
     map.setAttribute("aria-label", options.ariaLabel || "Storage size treemap");
     map.setAttribute("aria-busy", "true");
-    const tooltip = document.createElement("div");
-    tooltip.className = "explorerTreemap__tooltip";
+    host.replaceChildren(map);
+    // A pointer tooltip (ns.popover.follow, role=tooltip: hovering is not
+    // announced), kept in the host so it goes away with the treemap.
+    const tip = ns.popover.follow({ className: "explorerTreemap__tooltip", side: "bottom", align: "start", offset: 12, host });
+    const tooltip = tip.el;
     tooltip.setAttribute("data-treemap-tooltip", "");
-    tooltip.setAttribute("role", "status");
-    tooltip.hidden = true;
     tooltip.append(document.createElement("strong"), document.createElement("span"));
-    host.replaceChildren(map, tooltip);
 
     let hoveredNode = null;
-    const hideTooltip = () => { tooltip.hidden = true; };
+    const hideTooltip = () => { tip.hide(); };
     const clearHover = () => {
       hoveredNode?.classList.remove("is-hovered");
       hoveredNode = null;
@@ -548,19 +548,10 @@
       bits.push(shareText);
       if (nameHost) nameHost.textContent = name;
       if (metaHost) metaHost.textContent = [...new Set(bits.filter(Boolean))].join(" · ");
-      tooltip.hidden = false;
-
-      const panelRect = host.getBoundingClientRect();
       const nodeRect = node.getBoundingClientRect();
-      const tooltipRect = tooltip.getBoundingClientRect();
       const anchorX = Number.isFinite(clientX) ? clientX : nodeRect.left + Math.min(nodeRect.width, 24);
       const anchorY = Number.isFinite(clientY) ? clientY : nodeRect.top + Math.min(nodeRect.height, 24);
-      const maximumLeft = Math.max(8, panelRect.width - tooltipRect.width - 8);
-      const maximumTop = Math.max(8, panelRect.height - tooltipRect.height - 8);
-      const left = Math.min(maximumLeft, Math.max(8, anchorX - panelRect.left + 12));
-      const top = Math.min(maximumTop, Math.max(8, anchorY - panelRect.top + 12));
-      tooltip.style.left = `${left}px`;
-      tooltip.style.top = `${top}px`;
+      tip.show({ x: anchorX + 12, y: anchorY });
     };
     const updateHover = (node, clientX, clientY) => {
       if (hoveredNode !== node) {

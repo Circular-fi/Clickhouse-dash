@@ -31,7 +31,7 @@ def test_layers_load_first_on_every_page():
 def test_layers_own_one_escape_and_one_outside_listener():
     layers = read("src/static/app_ui_layers.js")
     assert "ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug });" in layers
-    assert "ns.lifecycle = Object.freeze({ scope, enter, leave, current });" in layers
+    assert "ns.lifecycle = Object.freeze({ scope, enter, leave, current, bind });" in layers
     assert layers.count('document.addEventListener("keydown", onKeydown);') == 1
     assert layers.count('document.addEventListener("pointerdown", onPointerdown, true);') == 1
     assert layers.count("document.addEventListener(") == 2

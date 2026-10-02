@@ -3314,6 +3314,46 @@ body {
 @keyframes uiDialogFade {
   from { opacity: 0; }
 }
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.uiTip[hidden] { display: none; }
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+}
 .queryLibrary {
   position: relative;
   display: inline-flex;

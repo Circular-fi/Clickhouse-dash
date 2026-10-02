@@ -1902,7 +1902,7 @@
   function ensureDiagnosticsTooltip() {
     if (diagnosticsTooltip && diagnosticsTooltip.isConnected) return diagnosticsTooltip;
     diagnosticsTooltip = document.createElement("div");
-    diagnosticsTooltip.className = "editorDiagnosticTooltip";
+    diagnosticsTooltip.className = "uiTip editorDiagnosticTooltip";
     diagnosticsTooltip.setAttribute("role", "tooltip");
     diagnosticsTooltip.hidden = true;
     document.body.appendChild(diagnosticsTooltip);
@@ -1924,17 +1924,7 @@
     tip.textContent = msg;
     tip.hidden = false;
 
-    const rect = mark.getBoundingClientRect();
-    const margin = 8;
-    const maxLeft = Math.max(margin, window.innerWidth - tip.offsetWidth - margin);
-    const left = Math.min(Math.max(margin, rect.left), maxLeft);
-    let top = rect.top - tip.offsetHeight - 8;
-    if (top < margin) top = rect.bottom + 8;
-    if (top + tip.offsetHeight > window.innerHeight - margin) {
-      top = Math.max(margin, window.innerHeight - tip.offsetHeight - margin);
-    }
-    tip.style.left = `${Math.round(left)}px`;
-    tip.style.top = `${Math.round(top)}px`;
+    ns.popover.place(mark, tip, { side: "top", align: "start", offset: 8 });
   }
 
   function ensureDiagnosticsLayer() {

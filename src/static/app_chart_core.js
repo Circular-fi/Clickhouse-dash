@@ -411,7 +411,7 @@
           <span class="chartCore__badge chartCore__xbadge" hidden></span>
           <span class="chartCore__badge chartCore__ybadge" hidden></span>
         </div>
-        <div class="chartCore__tooltip" role="status" hidden></div>
+        <div class="chartCore__tooltip" role="tooltip" hidden></div>
         <div class="chartCore__overlay" tabindex="0" aria-label="Chart cursor: Left / Right move it point by point (Shift: 10), Home / End jump to the ends, drag to zoom"></div>
         <i class="chartCore__probe" aria-hidden="true"></i>
       </div>

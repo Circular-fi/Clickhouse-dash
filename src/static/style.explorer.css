@@ -2707,25 +2707,10 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerTreemap.is-layout-pending {
   visibility: hidden;
 }
-.explorerTreemap__tooltip {
-  position: absolute;
-  z-index: 3000;
-  display: flex;
-  max-width: min(360px, calc(100% - 16px));
-  flex-direction: column;
-  gap: .08rem;
-  padding: .42rem .52rem;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--borderStrong);
-  border-radius: 6px;
-  box-shadow: var(--shadow1);
+.uiTip.explorerTreemap__tooltip {
+  max-width: min(360px, calc(100vw - 16px));
   font-size: .7rem;
   line-height: 1.25;
-  pointer-events: none;
-}
-.explorerTreemap__tooltip[hidden] {
-  display: none;
 }
 .explorerTreemap__tooltip strong,
 .explorerTreemap__tooltip span {
@@ -6518,6 +6503,46 @@ body {
 }
 @keyframes uiDialogFade {
   from { opacity: 0; }
+}
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.uiTip[hidden] { display: none; }
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
 }
 .queryLibrary {
   position: relative;

@@ -51,7 +51,13 @@
   //     add(dispose), child(), dispose(), active }
   //   ns.lifecycle.enter(name) -> the scope of a view just shown (the previous
   //     one is disposed); ns.lifecycle.leave(name) disposes it when the view is
-  //     hidden; ns.lifecycle.current(name) -> the shown view's scope or null.
+  //     hidden; ns.lifecycle.current(name) -> the shown view's scope or null;
+  //     ns.lifecycle.bind(name, (scope) => ...) runs on every enter(name) (and
+  //     at once when the view shows): a module binds its global listeners
+  //     there, with scope.listen(), and they last while the view shows.
+  //   Names: "traces", "logs", "metrics" (app_observability.js), and
+  //   "explorer:browse", "explorer:graph", "explorer:storage",
+  //   "explorer:functions" (app_explorer.js).
   //   Listeners bound with { signal: scope.signal } go away with the scope:
   //   switching views never adds listeners.
 
@@ -100,11 +106,23 @@
   }
 
   const views = new Map();
+  const binders = new Map();
   function enter(name) {
     views.get(name)?.dispose();
     const next = scope();
     views.set(name, next);
+    for (const bindFn of binders.get(name) || []) {
+      try { bindFn(next); } catch (error) { console.error(error); }
+    }
     return next;
+  }
+  // bindFn(scope) runs each time the view is shown (now, when it shows).
+  function bind(name, bindFn) {
+    if (typeof bindFn !== "function") return;
+    if (!binders.has(name)) binders.set(name, []);
+    binders.get(name).push(bindFn);
+    const shown = current(name);
+    if (shown) bindFn(shown);
   }
   function leave(name) {
     const current = views.get(name);
@@ -116,7 +134,7 @@
     return found && found.active ? found : null;
   }
 
-  ns.lifecycle = Object.freeze({ scope, enter, leave, current });
+  ns.lifecycle = Object.freeze({ scope, enter, leave, current, bind });
 
   // --------------------------------------------------------------- layers
 
@@ -135,6 +153,7 @@
 
   function focusable(node) {
     return node instanceof HTMLElement && node !== document.body && node.isConnected && !node.disabled
+      && (node.matches(FOCUSABLE) || node.hasAttribute("tabindex") || node instanceof HTMLDialogElement)
       && !node.closest("[hidden], [inert]") && node.getClientRects().length > 0;
   }
 

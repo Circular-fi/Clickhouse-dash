@@ -2824,22 +2824,10 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 .editorDiagnostic--unknown_column {
   --diagnosticWaveColor: color-mix(in srgb, #facc15 82%, var(--text));
 }
-.editorDiagnosticTooltip {
-  position: fixed;
-  z-index: 10000;
+.uiTip.editorDiagnosticTooltip {
   max-width: min(30rem, calc(100vw - 1rem));
-  padding: 0.42rem 0.55rem;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.55rem;
-  background: color-mix(in srgb, var(--panelBg) 94%, #000);
-  color: var(--text);
-  box-shadow: var(--shadow2);
   font: 11px/1.35 var(--mono);
   white-space: normal;
-  pointer-events: none;
-}
-.editorDiagnosticTooltip[hidden] {
-  display: none !important;
 }
 .editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
 html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
@@ -5758,6 +5746,46 @@ body {
     width: 36px;
     height: 36px;
   }
+}
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.uiTip[hidden] { display: none; }
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
 }
 .queryLibrary {
   position: relative;

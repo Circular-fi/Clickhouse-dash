@@ -364,14 +364,20 @@
 
   // --------------------------------------------------- click-to-filter menu
 
+  // A menu under the value (ns.popover.place): an ns.layers layer, so
+  // Escape and a press outside close it and the focus goes back to the value.
   let menu = null;
   let menuTarget = null;
+  let menuLayer = null;
 
-  function closeMenu() {
+  function closeMenu({ restoreFocus = false } = {}) {
     if (!menu || menu.hidden) return;
     menu.hidden = true;
     menuTarget?.setAttribute?.("aria-expanded", "false");
     menuTarget = null;
+    const layer = menuLayer;
+    menuLayer = null;
+    layer?.close({ restoreFocus });
   }
 
   function fieldLabel(field) {
@@ -388,7 +394,6 @@
       menu.hidden = true;
       menu.addEventListener("click", onMenuClick);
       menu.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") { event.preventDefault(); const back = menuTarget; closeMenu(); back?.focus?.({ preventScroll: true }); }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
           event.preventDefault();
           const items = [...menu.querySelectorAll("[role=menuitem]")];
@@ -410,13 +415,13 @@
     menu.hidden = false;
     menuTarget = anchor;
     anchor?.setAttribute?.("aria-expanded", "true");
-    const box = anchor.getBoundingClientRect();
-    const size = menu.getBoundingClientRect();
-    const left = Math.max(8, Math.min(window.innerWidth - size.width - 8, box.left));
-    const below = box.bottom + 4;
-    const top = below + size.height > window.innerHeight - 8 ? Math.max(8, box.top - size.height - 4) : below;
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.top = `${Math.round(top)}px`;
+    ns.popover.place(anchor, menu, { side: "bottom", align: "start", offset: 4 });
+    menuLayer = ns.layers.push({
+      el: menu,
+      name: "traceFilterMenu",
+      opener: anchor,
+      onDismiss: (reason) => { closeMenu({ restoreFocus: reason === "escape" }); },
+    });
     menu.querySelector("[role=menuitem]")?.focus({ preventScroll: true });
   }
 
@@ -512,9 +517,7 @@
       event.stopPropagation();
       if (menuTarget === trigger.anchor && menu && !menu.hidden) { closeMenu(); return; }
       openMenu(trigger.anchor, trigger.field, trigger.value);
-      return;
     }
-    closeMenu();
   }
 
   function onDocumentKeydown(event) {
@@ -619,10 +622,15 @@
       const next = TAG_OPS[(TAG_OPS.indexOf(tagOp()) + 1) % TAG_OPS.length];
       setTagOp(next);
     });
-    document.addEventListener("click", onDocumentClick, true);
-    document.addEventListener("keydown", onDocumentKeydown, true);
-    window.addEventListener("scroll", closeMenu, { passive: true, capture: true });
-    window.addEventListener("resize", closeMenu, { passive: true });
+    // Values anywhere in the Traces view open the menu; a scroll or a
+    // resize closes it. Bound while the view shows (ns.lifecycle).
+    ns.lifecycle.bind("traces", (scope) => {
+      scope.listen(document, "click", onDocumentClick, true);
+      scope.listen(document, "keydown", onDocumentKeydown, true);
+      scope.listen(window, "scroll", (event) => { if (!(menu && event.target instanceof Node && menu.contains(event.target))) closeMenu(); }, { passive: true, capture: true });
+      scope.listen(window, "resize", () => closeMenu(), { passive: true });
+      scope.add(() => closeMenu());
+    });
     facets = createFacets();
     // A user's own service / operation choice replaces an applied one.
     for (const select of [ctx.dom.tracesService, ctx.dom.tracesOperation]) {

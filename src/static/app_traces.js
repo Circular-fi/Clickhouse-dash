@@ -851,11 +851,14 @@
   // Through the shared helper: navigator.clipboard alone is missing outside
   // secure contexts (plain-http deployments), where it falls back to a
   // hidden textarea copy.
+  // An icon button (no text of its own to change) also gets the "Copied"
+  // flash (ns.popover.flash, announced).
   function copyText(text, button) {
     util.copyTextToClipboard(text).then(() => {
       if (!button) return;
       button.classList.add("is-copied");
       setTimeout(() => { button.classList.remove("is-copied"); }, 900);
+      if (!button.textContent.trim()) ns.popover?.flash(button);
     }).catch(() => {});
   }
 
@@ -954,7 +957,7 @@
   // fit and shows them behind a "+N" chip.
   function servicePillsHtml(stats) {
     if (!stats.length) return `<div class="traceSvcPills is-empty">${fmt.EMPTY}</div>`;
-    return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" aria-haspopup="true" aria-expanded="false" hidden>+0</button></div>`;
+    return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" hidden>+0</button></div>`;
   }
 
   function layoutServicePills(scope) {
@@ -1005,39 +1008,19 @@
     }
   }
 
-  let servicePopover = null;
-  let servicePopoverOwner = null;
-  function hideServicePopover() {
-    if (servicePopoverOwner) servicePopoverOwner.setAttribute("aria-expanded", "false");
-    servicePopoverOwner = null;
-    if (servicePopover) servicePopover.hidden = true;
+  // The hidden pills of a row, in a tooltip under its "+N" chip (hover,
+  // focus or a click: ns.popover.tip).
+  let serviceTip = null;
+  function hiddenPills(more) {
+    if (!more || more.hidden) return null;
+    const hidden = [...more.parentElement.querySelectorAll(":scope > .traceSvcPill[hidden]")];
+    if (!hidden.length) return null;
+    const list = document.createDocumentFragment();
+    for (const pill of hidden) { const copy = pill.cloneNode(true); copy.hidden = false; list.appendChild(copy); }
+    return list;
   }
-
-  // The hidden pills of a row, in a floating card under its "+N" chip.
-  function showServicePopover(more) {
-    if (!more || more.hidden) return;
-    if (!servicePopover) {
-      servicePopover = document.createElement("div");
-      servicePopover.className = "traceSvcPopover";
-      servicePopover.setAttribute("role", "tooltip");
-      servicePopover.hidden = true;
-      document.body.appendChild(servicePopover);
-    }
-    const group = more.parentElement;
-    const hidden = [...group.querySelectorAll(":scope > .traceSvcPill[hidden]")];
-    if (!hidden.length) { hideServicePopover(); return; }
-    if (servicePopoverOwner && servicePopoverOwner !== more) servicePopoverOwner.setAttribute("aria-expanded", "false");
-    servicePopoverOwner = more;
-    more.setAttribute("aria-expanded", "true");
-    servicePopover.replaceChildren(...hidden.map((pill) => { const copy = pill.cloneNode(true); copy.hidden = false; return copy; }));
-    servicePopover.hidden = false;
-    const anchor = more.getBoundingClientRect();
-    const size = servicePopover.getBoundingClientRect();
-    const left = Math.max(8, Math.min(window.innerWidth - size.width - 8, anchor.left + anchor.width / 2 - size.width / 2));
-    const below = anchor.bottom + 6;
-    const top = below + size.height > window.innerHeight - 8 ? Math.max(8, anchor.top - size.height - 6) : below;
-    servicePopover.style.left = `${Math.round(left)}px`;
-    servicePopover.style.top = `${Math.round(top)}px`;
+  function hideServicePopover() {
+    serviceTip?.hide();
   }
 
   // A trace start: the shown time, how long ago, and the tooltip of both
@@ -1194,7 +1177,7 @@
       const more = target.closest(".traceSvcMore");
       if (more) {
         event.stopPropagation();
-        if (servicePopoverOwner === more) hideServicePopover(); else showServicePopover(more);
+        serviceTip?.show(more);
         return;
       }
       if (target.closest("[data-results-zoom-out]")) { dom.tracesRangeZoomOut?.click(); return; }
@@ -1220,17 +1203,7 @@
       const row = target.closest("[data-trace-id]");
       if (row === target) { event.preventDefault(); openRow(row); }
     });
-    root.addEventListener("pointerover", (event) => {
-      const more = event.target.closest?.(".traceSvcMore");
-      if (more && more !== servicePopoverOwner) showServicePopover(more);
-    });
-    root.addEventListener("pointerout", (event) => {
-      const more = event.target.closest?.(".traceSvcMore");
-      if (more && !more.contains(event.relatedTarget)) hideServicePopover();
-    });
-    root.addEventListener("focusin", (event) => { const more = event.target.closest?.(".traceSvcMore"); if (more) showServicePopover(more); });
-    root.addEventListener("focusout", (event) => { if (event.target.closest?.(".traceSvcMore")) hideServicePopover(); });
-    window.addEventListener("scroll", hideServicePopover, { passive: true });
+    serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
     for (const button of document.querySelectorAll("[data-results-view]")) {
       button.addEventListener("click", () => setResultsView(button.getAttribute("data-results-view")));
     }

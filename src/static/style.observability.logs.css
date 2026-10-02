@@ -2083,6 +2083,38 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect--icons .themeSelect__option--icon:focus-visible {
   box-shadow: none !important;
 }
+.closeCross {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+.closeCross:hover:not(:disabled),
+.closeCross:focus-visible {
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+.closeCross:focus-visible {
+  text-shadow: 0 0 6px var(--accentBorder);
+}
+.closeCross:disabled {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 45%, transparent);
+  cursor: default;
+}
 .traceSearchBar .tracePicker--range .tracePicker__button {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3648,6 +3680,46 @@ body {
 }
 @keyframes uiDialogFade {
   from { opacity: 0; }
+}
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.uiTip[hidden] { display: none; }
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
 }
 .queryLibrary {
   position: relative;

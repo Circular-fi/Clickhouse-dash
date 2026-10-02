@@ -3357,23 +3357,11 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
   --diagnosticWaveColor: color-mix(in srgb, #facc15 82%, var(--text));
 }
 
-.editorDiagnosticTooltip {
-  position: fixed;
-  z-index: 10000;
+/* The editor's diagnostic tooltip: a .uiTip (ns.popover.place) in the mono face. */
+.uiTip.editorDiagnosticTooltip {
   max-width: min(30rem, calc(100vw - 1rem));
-  padding: 0.42rem 0.55rem;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.55rem;
-  background: color-mix(in srgb, var(--panelBg) 94%, #000);
-  color: var(--text);
-  box-shadow: var(--shadow2);
   font: 11px/1.35 var(--mono);
   white-space: normal;
-  pointer-events: none;
-}
-
-.editorDiagnosticTooltip[hidden] {
-  display: none !important;
 }
 
 .editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
@@ -5172,26 +5160,11 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   visibility: hidden;
 }
 
-.explorerTreemap__tooltip {
-  position: absolute;
-  z-index: 3000;
-  display: flex;
-  max-width: min(360px, calc(100% - 16px));
-  flex-direction: column;
-  gap: .08rem;
-  padding: .42rem .52rem;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--borderStrong);
-  border-radius: 6px;
-  box-shadow: var(--shadow1);
+/* The treemap's pointer tooltip: a .uiTip (ns.popover.follow). */
+.uiTip.explorerTreemap__tooltip {
+  max-width: min(360px, calc(100vw - 16px));
   font-size: .7rem;
   line-height: 1.25;
-  pointer-events: none;
-}
-
-.explorerTreemap__tooltip[hidden] {
-  display: none;
 }
 
 .explorerTreemap__tooltip strong,
@@ -12911,19 +12884,13 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .traceSvcMore:hover,
 .traceSvcMore[aria-expanded="true"] { border-color: var(--accentBorder); }
 .traceSvcMore:focus-visible { box-shadow: var(--ring); }
-.traceSvcPopover {
-  position: fixed;
-  z-index: 60;
+/* The hidden service pills of a row: a .uiTip (ns.popover.tip). */
+.uiTip.traceSvcPopover {
   max-width: min(520px, calc(100vw - 16px));
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   padding: 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  box-shadow: var(--obs-shadow-popover);
-  pointer-events: none;
 }
 .traceSvcPopover .traceSvcPill { max-width: 100%; }
 
@@ -13728,28 +13695,18 @@ html[data-theme="light"] {
 .traceSpanEventMarker { cursor: pointer; }
 
 /* Popover listing the events of one marker group. */
+/* The span-bar event popover: a .uiPopover (ns.popover.open). */
 .traceEventPopover {
-  position: fixed;
-  z-index: 1200;
   width: min(460px, calc(100vw - 16px));
   max-height: min(420px, calc(100vh - 16px));
-  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 8px 10px;
-  overflow: auto;
-  border: 1px solid var(--borderStrong);
   border-top: 2px solid var(--trace-service-color, var(--accentBorder));
-  border-radius: 6px;
-  background: var(--panelBg);
-  color: var(--text);
-  box-shadow: var(--shadow2);
 }
-.traceEventPopover__head { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; }
+.traceEventPopover__head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
 .traceEventPopover__head > span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10.5px; }
-.traceEventPopover__close { border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
-.traceEventPopover__close:hover { color: var(--text); }
 
 /* View switcher (Jaeger's TracePage view dropdown) above the waterfall. */
 .traceViewBar {
@@ -13901,23 +13858,6 @@ html[data-theme="light"] {
 .traceFlame__frame.is-root { background: color-mix(in srgb, var(--muted) 30%, var(--panelBg)); }
 .traceFlame__frame.is-ancestor { opacity: .55; }
 .traceFlame__frame.has-error { box-shadow: inset 0 -2px 0 var(--danger); }
-.traceFlame__tip {
-  position: fixed;
-  z-index: 1200;
-  max-width: 420px;
-  padding: 6px 9px;
-  display: grid;
-  gap: 2px;
-  border: 1px solid var(--borderStrong);
-  border-radius: 5px;
-  background: var(--panelBg);
-  box-shadow: var(--shadow1);
-  color: var(--text);
-  font-size: 11px;
-  pointer-events: none;
-}
-.traceFlame__tip > span { color: var(--muted); }
-.traceFlame__tip strong { color: var(--text); }
 
 /* ==========================================================================
    Trace Graph (app_trace_views.js): Jaeger's trace DAG, one card per call
@@ -16670,19 +16610,12 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   }
 }
 
+/* The span column picker: a .uiPopover (ns.popover.open). */
 .traceSpanColumns {
-  position: fixed;
-  z-index: 60;
   width: 360px;
-  max-width: calc(100vw - 16px);
   padding: 10px;
-  border: 1px solid var(--borderStrong);
-  border-radius: 6px;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
   font-size: 12px;
 }
-.traceSpanColumns[hidden] { display: none; }
 .traceSpanColumns__title { margin-bottom: 6px; font-weight: 700; }
 .traceSpanColumns__list { max-height: 240px; margin: 0 0 8px; padding: 0; overflow: auto; list-style: none; }
 .traceSpanColumns__item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
@@ -19069,6 +19002,57 @@ body {
     height: 36px;
   }
 }
+
+/* ==== Components: popover (app_ui_popover.js) ===============================
+   One tooltip (.uiTip: hover / focus tips, pointer tips over canvases, the
+   "Copied" flash) and one click-opened popover shell (.uiPopover), both
+   fixed and placed by ns.popover.place (flipped, kept 8 px inside the
+   viewport). Tips never take the pointer.
+   ========================================================================== */
+.uiTip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-tooltip);
+  box-sizing: border-box;
+  max-width: min(420px, calc(100vw - 16px));
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.uiTip[hidden] { display: none; }
+.uiTip strong,
+.uiTip b { color: var(--text); font-weight: 700; }
+.uiTip small,
+.uiTip > span { color: var(--muted); }
+.uiTip--flash { padding: 3px 8px; font-weight: 650; }
+/* The one close button (.closeCross) in a compact popover head. */
+.closeCross--sm { width: 24px; height: 24px; font-size: 1rem; }
+
+.uiPopover {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  border: 1px solid var(--borderStrong);
+  border-radius: 6px;
+  background: var(--panelBg);
+  box-shadow: var(--shadow2);
+  color: var(--text);
+}
+/* ==== /Components: popover ================================================= */
 
 /* ==== Query page revamp (2026-10) ===========================================
    Query library panel (Saved / History), toolbar hierarchy, running state,
