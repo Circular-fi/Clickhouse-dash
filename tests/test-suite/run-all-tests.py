@@ -203,27 +203,20 @@ def build_archive(manifest: dict) -> None:
     print(f'\nArchive: {ZIP_PATH}', flush=True)
 
 
-def skipped_phase(name: str, output_dir: Path, reason: str) -> dict:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    status = {'name': name, 'success': True, 'skipped': True, 'reason': reason, 'duration_seconds': 0}
-    (output_dir / 'status.json').write_text(json.dumps(status, indent=2, sort_keys=True), encoding='utf-8')
-    print(f'\n=== {name} === skipped: {reason}', flush=True)
-    return status
-
-
 def main() -> int:
-    # Quick mode (--quick or CHDASH_TESTS_QUICK=1) is for iterations on a shared
-    # host: the Playwright phases run on desktop-1440 only without the
-    # timing-budget tests (PW_SHARED_HOST=1), and the performance phase is skipped.
-    # The default is the full official suite (tests/README.md, "Running tests quickly").
+    # The default is the full official suite: PW_ALL_PROJECTS=1 keeps every test of
+    # the listed specs on every viewport the phase selects, whatever the defaults of
+    # playwright.config.js. Quick mode (--quick or CHDASH_TESTS_QUICK=1) runs every
+    # test at least once: the design phase on desktop-1440 only and each
+    # performance case once (tests/README.md, "Running tests quickly").
     quick = '--quick' in sys.argv[1:] or os.environ.get('CHDASH_TESTS_QUICK') == '1'
     shutil.rmtree(RUN_ROOT, ignore_errors=True)
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     ZIP_PATH.unlink(missing_ok=True)
 
     base_env = os.environ.copy()
-    if quick:
-        base_env['PW_SHARED_HOST'] = '1'
+    if not quick:
+        base_env['PW_ALL_PROJECTS'] = '1'
     reset_clickhouse_fixtures(base_env)
     statuses: dict[str, dict] = {}
 
@@ -274,15 +267,15 @@ def main() -> int:
     perf_env = base_env.copy()
     perf_env['PERF_ARTIFACTS_DIR'] = str(performance_dir)
     if quick:
-        statuses['performance'] = skipped_phase('performance', performance_dir, 'quick mode')
-    else:
-        statuses['performance'] = run_phase(
-            'performance',
-            [sys.executable, str(ROOT / 'performance' / 'run.py')],
-            cwd=ROOT,
-            env=perf_env,
-            output_dir=performance_dir,
-        )
+        perf_env['PERF_RUNS'] = '1'
+        perf_env['PERF_WARMUP'] = '0'
+    statuses['performance'] = run_phase(
+        'performance',
+        [sys.executable, str(ROOT / 'performance' / 'run.py')],
+        cwd=ROOT,
+        env=perf_env,
+        output_dir=performance_dir,
+    )
 
     design_dir = RUN_ROOT / 'design'
     design_env = base_env.copy()

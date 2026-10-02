@@ -95,8 +95,11 @@ def test_fast_default_keeps_a_full_mode_and_a_shared_host_mode():
     assert "grep: PERF_TITLES, workers: 1" in config
     assert "retryStrategy: 'isolated'" in config
     assert "'on-first-retry'" in config and "screenshot: 'only-on-failure'" in config
-    # The runner stays the full official suite unless asked for --quick.
+    # The runner stays the full official suite (every test on every viewport its
+    # phases select) unless asked for --quick, which still runs every test once.
     assert "'--quick' in sys.argv[1:]" in runner
+    assert "base_env['PW_ALL_PROJECTS'] = '1'" in runner
+    assert "PW_SHARED_HOST" not in runner
     assert "'--project=desktop-1440'" in runner
     assert "backend_env['CHDASH_FIXTURES_FRESH'] = '1'" in runner
     assert (ROOT / "tests/tools/pw-changed.sh").is_file()
