@@ -79,3 +79,25 @@ def test_ci_collects_single_combined_test_review_artifact():
     assert "--exit-code-from tests" in ci
     assert "tests/artifacts/chdash-test-review.zip" in ci
     assert "name: chdash-test-review" in ci
+
+
+def test_fast_default_keeps_a_full_mode_and_a_shared_host_mode():
+    config = read("tests/frontend/playwright.config.js")
+    runner = read("tests/test-suite/run-all-tests.py")
+    readme = read("tests/README.md")
+    # Layout specs on every viewport, behavioural specs on desktop-1440, everything
+    # everywhere with PW_ALL_PROJECTS=1; timing budgets last, one at a time, and
+    # out of shared-host runs.
+    assert "PW_ALL_PROJECTS === '1'" in config and "PW_SHARED_HOST === '1'" in config
+    assert "const CANONICAL = 'desktop-1440';" in config
+    for spec in ["accessibility", "design", "explorer-nav", "obs-filterbar", "page-chrome", "'ui-*'", "visual-regression"]:
+        assert spec in config
+    assert "grep: PERF_TITLES, workers: 1" in config
+    assert "retryStrategy: 'isolated'" in config
+    assert "'on-first-retry'" in config and "screenshot: 'only-on-failure'" in config
+    # The runner stays the full official suite unless asked for --quick.
+    assert "'--quick' in sys.argv[1:]" in runner
+    assert "'--project=desktop-1440'" in runner
+    assert "backend_env['CHDASH_FIXTURES_FRESH'] = '1'" in runner
+    assert (ROOT / "tests/tools/pw-changed.sh").is_file()
+    assert "## Running tests quickly" in readme and "PW_ALL_PROJECTS=1" in readme

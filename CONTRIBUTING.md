@@ -40,6 +40,15 @@ docker compose --profile test up -d --build
 docker compose --profile test exec -T tests python /tests/runner/wait_for_job.py --job tests --timeout 900
 ```
 
+### Running tests quickly
+
+Details in `tests/README.md`, "Running tests quickly".
+
+- `tests/tools/pw-changed.sh` runs the Playwright specs of the files you changed, on `desktop-1440`, with `PW_SHARED_HOST=1` (one worker, no timing-budget tests).
+- A plain `npx playwright test` runs the layout specs on three viewports and the behavioural specs on `desktop-1440`; `PW_ALL_PROJECTS=1` runs everything on every viewport before a release.
+- `run-all-tests.py --quick` runs the suite without the performance phase and with the design phase on one viewport; without `--quick` it is the full official suite.
+- On a shared host: one Playwright run at a time, changed specs first, the full run once at the end, no `sleep` polling loops, and pytest without `CLICKHOUSE_URL`.
+
 ### Validate release builds
 
 The release workflow builds Linux amd64/arm64 and macOS amd64/arm64 in isolated CMake directories with bounded parallelism. When a matrix build fails, download its `build-diagnostics-*` artifact and inspect `build.log` and `CMakeCache.txt`. Do not cache or reuse a platform-specific `CMakeCache.txt` across runners.

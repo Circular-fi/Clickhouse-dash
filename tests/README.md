@@ -181,6 +181,37 @@ chdash-test-review/
 
 Upload that single ZIP for review.
 
+## Running tests quickly
+
+**Playwright projects.** `tests/frontend/playwright.config.js` builds its projects from three environment variables:
+
+| Mode | What runs |
+| --- | --- |
+| default | layout specs (`accessibility`, `design`, `explorer-nav`, `obs-filterbar`, `page-chrome`, `ui-*`, `visual-regression`) on `desktop-1920`, `desktop-1440` and `laptop-1280`; behavioural specs on `desktop-1440`, plus their viewport-sensitive tests (titles matching `LAYOUT_TITLES`: overflow, fits the viewport, captures, ...) on the other two; the timing-budget tests (`PERF_TITLES`) last, one at a time |
+| `PW_ALL_PROJECTS=1` | every test on every viewport: the pre-release run |
+| `PW_SHARED_HOST=1` | leaves the timing-budget tests out and defaults to one worker; for runs on a host other runs share (budgets measure the host then, not the code) |
+
+Projects of one viewport share its name, so `--project=desktop-1440` selects its behavioural tests and its timing-budget tests, and snapshots and reports keep the viewport name. `PW_WORKERS=<n>` sets the worker count (default 2, 1 with `PW_SHARED_HOST=1`); the tests of a file spread over the workers (`fullyParallel`), and a failed test is retried at the end, alone (`retryStrategy: 'isolated'`). Videos and traces are recorded on the first retry only (`CI=1` retries once); a failure without retry keeps its screenshot and `error-context.md`. `PW_ARTIFACTS=full` records them for every failing test as before.
+
+**Specs of the changed files.** `tests/tools/pw-changed.sh` maps the files changed since the merge base with `main` (`-b <ref>` for another base; uncommitted and untracked files included) to their specs through a table of source modules, then runs them on `desktop-1440` with `PW_SHARED_HOST=1` in the `chdash-tests-all:local` image against `chdash_source` (`-t <container>` for another instance). `-n` prints the selection, `-a` runs the three viewports, arguments after `--` go to Playwright.
+
+```bash
+tests/tools/pw-changed.sh -n                      # which specs
+tests/tools/pw-changed.sh -t chdash-mine -- --reporter=line
+```
+
+**Runner.** `python /tests/test-suite/run-all-tests.py` (the `tests` service) runs the full official suite. `--quick` (or `CHDASH_TESTS_QUICK=1`) is for iterations: the design phase runs on `desktop-1440` only, `PW_SHARED_HOST=1` leaves the timing-budget tests out, and the performance phase is skipped (`mode: quick` in `manifest.json`).
+
+**Fixture reset.** The runner resets the ClickHouse fixtures (`01`, `02`, `04`, `05` of `clickhouse-init/`) before the backend phase and tells the backend conftest (`CHDASH_FIXTURES_FRESH=1`) not to reset them again. Run by hand with `CLICKHOUSE_URL` set, the conftest resets only when needed: after a reset it records, in the comment of the `chdash_ui` database, the digest of the four scripts and of the state they produced (fixture tables and their UUIDs, row counts, users, grants, dictionary status), and skips the next reset while both match. `CHDASH_FIXTURE_RESET=always` forces it, `=never` skips it. Without `CLICKHOUSE_URL` nothing is reset.
+
+**On a shared host** (several agents, one ClickHouse):
+
+1. one Playwright run at a time per agent, against your own ChDash container;
+2. iterate on one project with the changed specs first: `tests/tools/pw-changed.sh` (or `--project=desktop-1440 specs/<file>` with `PW_SHARED_HOST=1`);
+3. run the whole default suite once at the end, and `PW_ALL_PROJECTS=1` only for the pre-release run;
+4. wait for a run through its exit, never with `sleep`/`until` polling loops;
+5. pytest without `CLICKHOUSE_URL`, so the shared fixtures are not reset under another run.
+
 ## Backend functional
 
 The backend phase hits the running ChDash service rather than only inspecting source files. It checks formatter fixtures against `/api/format`, native query/result types, core health/meta/host routes, query run/stream, analysis/execution/deep-analysis, Explorer routes, export and cancel-token rejection behavior.
@@ -267,7 +298,7 @@ The design phase is separate from frontend functionality. It captures determinis
 - overlapping controls;
 - font/radius/color/spacing token counts;
 - axe accessibility findings;
-- Playwright traces/videos when a capture itself fails.
+- Playwright traces/videos of the retry when a capture itself fails (`PW_ARTIFACTS=full`: of every failure).
 
 Design heuristics are report signals rather than aesthetic pass/fail rules. Visual baseline comparison remains opt-in via `VISUAL_COMPARE=1` until the redesign is accepted.
 
