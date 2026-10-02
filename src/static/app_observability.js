@@ -37,10 +37,10 @@
   const LABELS = { traces: "Traces", logs: "Logs", metrics: "Metrics" };
   // Modules every view needs, then each view's own. tools/build_page_css.py
   // reads both lists: a view's stylesheet keeps the rules its modules can use.
-  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
+  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
   const VIEW_MODULES = {
-    traces: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
-    logs: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_logs.js"],
+    traces: ["app_chart_core.js", "app_facet_panel.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
+    logs: ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
     metrics: ["app_chart_core.js", "app_metrics.js"],
   };
   const ALL_VIEWS_SHEET = "style.observability.css";
@@ -256,13 +256,10 @@
     document.documentElement.dataset.obsEnabled = enabled.join(" ");
     const bar = document.getElementById("obsTabs");
     if (bar) bar.hidden = enabled.length < 2;
+    window.ChDash.tabs?.select(bar, ctl.active, "obsTab");
     for (const button of document.querySelectorAll("#obsTabs [data-obs-tab]")) {
       const view = button.getAttribute("data-obs-tab");
-      const selected = view === ctl.active;
       button.hidden = !enabled.includes(view);
-      button.classList.toggle("is-active", selected);
-      button.setAttribute("aria-selected", String(selected));
-      button.tabIndex = selected ? 0 : -1;
       // A view not shown yet has no panel in the document.
       const panel = document.querySelector(`.obsView[data-obs-panel="${view}"]`);
       if (panel) button.setAttribute("aria-controls", panel.id);
@@ -358,18 +355,6 @@
     if (ctl.active && !enabled.includes(ctl.active)) void show(enabled[0], { history: "replace", url: viewRoute(enabled[0]) });
   }
 
-  // The Explorer view tabs' keys: Left / Right wrap, Home / End go to the ends.
-  function onTabKeydown(event) {
-    const target = event.target instanceof Element ? event.target.closest("[data-obs-tab]") : null;
-    if (!target || !["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const shown = enabledViews();
-    const at = shown.indexOf(target.getAttribute("data-obs-tab"));
-    const next = event.key === "Home" ? shown[0] : event.key === "End" ? shown[shown.length - 1]
-      : shown[(at + (event.key === "ArrowRight" ? 1 : -1) + shown.length) % shown.length];
-    void show(next).then(() => document.getElementById(`obsTab-${next}`)?.focus());
-  }
-
   // A plain click on a link to another view switches tab without a reload.
   function onDocumentClick(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -387,12 +372,9 @@
     dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
     dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer")));
     dom.navObservabilityButton?.addEventListener("click", () => ui?.closePageMenu?.());
-    const bar = document.getElementById("obsTabs");
-    bar?.addEventListener("click", (event) => {
-      const button = event.target instanceof Element ? event.target.closest("[data-obs-tab]") : null;
-      if (button) void show(button.getAttribute("data-obs-tab"));
-    });
-    bar?.addEventListener("keydown", onTabKeydown);
+    // Click, arrows, Home / End: the shared tab behaviour (app_ui_tabs.js);
+    // the selected tab keeps the focus once its view is shown.
+    ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });
     document.addEventListener("click", onDocumentClick);
     window.addEventListener("popstate", onPopState);
     window.addEventListener("chdash:features-changed", onFeatures);

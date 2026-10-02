@@ -104,7 +104,7 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     # disabled mode falls back to the first available one.
     assert "browse: f.enabled !== false && f.browse !== false," in explorer
     assert "graph: f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false)," in explorer
-    assert "button.hidden = !available[name];" in explorer
+    assert 'button.hidden = !available[String(button.dataset.mode || "")];' in explorer
     assert "if (!available[model.mode]) setMode(model.mode);" in explorer
     assert 'MODES.includes(requested) && available[requested] ? requested : (MODES.find((name) => available[name]) || "browse")' in explorer
 

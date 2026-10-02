@@ -48,16 +48,16 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     # The Browse/Graph icon selector became segmented tabs: the top views and
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
     assert 'id="explorerTableModeTabs"' not in html
-    assert 'id="explorerViewTabs" class="explorerViewTabs" role="tablist"' in html
+    assert 'id="explorerViewTabs" class="viewTabs" role="tablist"' in html
     for view in ['catalog', 'functions', 'operations']:
         assert f'data-view="{view}"' in html
     # The mode bar is a nav row like #obsNav: full-size tabs, no compact pill.
-    assert 'id="explorerModeTabs" class="explorerViewTabs explorerModeTabs" role="tablist"' in html
-    assert 'explorerViewTabs--compact' not in html + css
+    assert 'id="explorerModeTabs" class="viewTabs explorerModeTabs" role="tablist"' in html
+    assert 'viewTabs--compact' not in html + css
     for mode in ['browse', 'graph', 'storage']:
         assert f'data-mode="{mode}"' in html
-    assert 'button.setAttribute("aria-selected", String(active));' in ui
-    assert '.explorerViewTab.is-active' in css
+    assert 'ns.tabs?.select(tabs, model.mode, "mode");' in ui
+    assert '.viewTab.is-active' in css
 
 
 def test_storage_metric_tables_reuse_query_result_component() -> None:

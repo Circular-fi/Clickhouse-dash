@@ -208,7 +208,7 @@ for (const theme of ['dark', 'light']) {
         return {
           vw: window.innerWidth, vh: window.innerHeight,
           shell: box('.explorerShell'), tree: box('#explorerListPane'), main: box('#explorerCatalogMain'),
-          top: box('#explorerTopBar'), modeBar: box('#explorerModeBar'), tabs: box('#explorerViewTabs'), modeTabs: box('#explorerModeTabs'),
+          top: box('#explorerTopBar'), modeBar: box('#explorerModeBar'), tabs: box('#viewTabs'), modeTabs: box('#explorerModeTabs'),
           detailPad: s('#explorerDetailPane').paddingLeft,
           treeBorder: s('#explorerListPane').borderRightWidth,
           shellStyle: [s('.explorerShell').borderTopWidth, s('.explorerShell').borderTopLeftRadius, s('.explorerShell').boxShadow],

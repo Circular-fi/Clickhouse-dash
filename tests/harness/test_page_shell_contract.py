@@ -98,5 +98,5 @@ def test_nav_rows_share_the_tokens():
     assert "border-bottom: var(--shell-border);" in rows
     assert "background: var(--panelBg);" in rows
     html = read("src/static/explorer.html")
-    assert 'class="explorerViewTabs explorerModeTabs"' in html
-    assert "explorerViewTabs--compact" not in html + css
+    assert 'class="viewTabs explorerModeTabs"' in html
+    assert "viewTabs--compact" not in html + css

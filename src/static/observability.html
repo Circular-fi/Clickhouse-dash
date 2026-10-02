@@ -128,19 +128,19 @@
     </div>
   </header>
 
-  <!-- The view tabs (the Explorer's view tab component) and, on the Traces
+  <!-- The view tabs (the view tab row, .viewTabs, app_ui_tabs.js) and, on the Traces
        view, its Search / Services / Service map tabs on the same row. -->
   <nav id="obsNav" class="obsNav" aria-label="Observability">
-    <div id="obsTabs" class="explorerViewTabs obsNav__views" role="tablist" aria-label="Observability views">
-      <button type="button" class="explorerViewTab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
-      <button type="button" class="explorerViewTab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
-      <button type="button" class="explorerViewTab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
+    <div id="obsTabs" class="viewTabs obsNav__views" role="tablist" aria-label="Observability views">
+      <button type="button" class="viewTab" role="tab" id="obsTab-traces" data-obs-tab="traces" aria-controls="tracesWorkspace" aria-selected="false" tabindex="-1">Traces</button>
+      <button type="button" class="viewTab" role="tab" id="obsTab-logs" data-obs-tab="logs" aria-controls="logsWorkspace" aria-selected="false" tabindex="-1">Logs</button>
+      <button type="button" class="viewTab" role="tab" id="obsTab-metrics" data-obs-tab="metrics" aria-controls="metricsWorkspace" aria-selected="false" tabindex="-1">Metrics</button>
     </div>
     <span class="obsNav__sep" aria-hidden="true"></span>
-    <div id="tracesTabs" class="explorerViewTabs obsNav__sub" role="tablist" aria-label="Trace views">
-      <button type="button" class="explorerViewTab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
-      <button type="button" class="explorerViewTab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1">Services</button>
-      <button type="button" class="explorerViewTab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1">Service map</button>
+    <div id="tracesTabs" class="viewTabs obsNav__sub" role="tablist" aria-label="Trace views">
+      <button type="button" class="viewTab is-active" role="tab" id="tracesTab-search" data-trace-tab="search" aria-selected="true" tabindex="0">Search</button>
+      <button type="button" class="viewTab" role="tab" id="tracesTab-services" data-trace-tab="services" aria-selected="false" tabindex="-1">Services</button>
+      <button type="button" class="viewTab" role="tab" id="tracesTab-map" data-trace-tab="map" aria-selected="false" tabindex="-1">Service map</button>
     </div>
     <script>
       // The head script picked the view and the enabled ones: the row shows
@@ -428,9 +428,9 @@
       </section>
 
       <div class="logsToolbar" role="toolbar" aria-label="Results">
-        <div class="logsTabs contentTabs" role="tablist" aria-label="Logs view">
-          <button id="logsTabResults" class="logsTabs__tab contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsResultsPane" data-tab="results">Results</button>
-          <button id="logsTabPatterns" class="logsTabs__tab contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsPatternsPane" data-tab="patterns" tabindex="-1">Patterns</button>
+        <div class="contentTabs logsTabs" role="tablist" aria-label="Logs view">
+          <button id="logsTabResults" class="contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsResultsPane" data-tab="results">Results</button>
+          <button id="logsTabPatterns" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsPatternsPane" data-tab="patterns" tabindex="-1">Patterns</button>
         </div>
         <span id="logsStatus" class="logsStatus" aria-live="polite"></span>
         <div class="logsToolbar__actions">
@@ -469,9 +469,9 @@
             </div>
             <button id="logsSideClose" class="closeCross uiDetail__close" type="button" aria-label="Close log record" title="Close (Esc)">&times;</button>
           </header>
-          <div class="logsSideTabs" role="tablist" aria-label="Log record view">
-            <button id="logsSideTabDetails" class="logsTabs__tab is-active" type="button" role="tab" aria-selected="true" data-side-tab="details">Details</button>
-            <button id="logsSideTabContext" class="logsTabs__tab" type="button" role="tab" aria-selected="false" data-side-tab="context">Surrounding context</button>
+          <div class="contentTabs logsSideTabs" role="tablist" aria-label="Log record view">
+            <button id="logsSideTabDetails" class="contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsSideDetails" data-side-tab="details">Details</button>
+            <button id="logsSideTabContext" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsSideContext" data-side-tab="context" tabindex="-1">Surrounding context</button>
           </div>
           <div id="logsSideDetails" class="uiDetail__body logsSidePanel__body"></div>
           <div id="logsSideContext" class="uiDetail__body logsSidePanel__body logsContext" hidden>

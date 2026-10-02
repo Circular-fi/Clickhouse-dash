@@ -174,10 +174,10 @@
     <section class="explorerShell">
       <header id="explorerTopBar" class="explorerTopBar" aria-label="Explorer navigation">
         <button id="explorerTreeToggle" class="button button--small explorerTreeToggle" type="button" aria-controls="explorerListPane" aria-expanded="false" aria-label="Show objects" title="Objects"><span class="explorerTreeToggle__glyph" aria-hidden="true"></span><span class="explorerTreeToggle__text">Objects</span></button>
-        <div id="explorerViewTabs" class="explorerViewTabs" role="tablist" aria-label="Explorer views">
-          <button id="explorerCatalogTab" class="explorerViewTab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
-          <button id="explorerFunctionsTab" class="explorerViewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
-          <button id="explorerOpsTab" class="explorerViewTab" type="button" role="tab" data-view="operations" aria-selected="false" hidden>Operations</button>
+        <div id="explorerViewTabs" class="viewTabs" role="tablist" aria-label="Explorer views">
+          <button id="explorerCatalogTab" class="viewTab is-active" type="button" role="tab" data-view="catalog" aria-selected="true">Catalog</button>
+          <button id="explorerFunctionsTab" class="viewTab" type="button" role="tab" data-view="functions" aria-selected="false">Functions</button>
+          <button id="explorerOpsTab" class="viewTab" type="button" role="tab" data-view="operations" aria-selected="false" hidden>Operations</button>
         </div>
       </header>
 
@@ -208,10 +208,10 @@
         <div id="explorerCatalogMain" class="explorerCatalogMain">
         <!-- Catalog modes: the tree selection is the scope of all three. -->
         <div id="explorerModeBar" class="explorerModeBar">
-          <div id="explorerModeTabs" class="explorerViewTabs explorerModeTabs" role="tablist" aria-label="Catalog mode">
-            <button id="explorerModeBrowse" class="explorerViewTab is-active" type="button" role="tab" data-mode="browse" aria-selected="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
-            <button id="explorerModeGraph" class="explorerViewTab" type="button" role="tab" data-mode="graph" aria-selected="false" aria-controls="explorerGraphPane" title="Lineage and topology around the selection">Graph</button>
-            <button id="explorerModeStorage" class="explorerViewTab" type="button" role="tab" data-mode="storage" aria-selected="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
+          <div id="explorerModeTabs" class="viewTabs explorerModeTabs" role="tablist" aria-label="Catalog mode">
+            <button id="explorerModeBrowse" class="viewTab is-active" type="button" role="tab" data-mode="browse" aria-selected="true" aria-controls="explorerCatalogView" title="The selected object's card">Browse</button>
+            <button id="explorerModeGraph" class="viewTab" type="button" role="tab" data-mode="graph" aria-selected="false" aria-controls="explorerGraphPane" title="Lineage and topology around the selection">Graph</button>
+            <button id="explorerModeStorage" class="viewTab" type="button" role="tab" data-mode="storage" aria-selected="false" aria-controls="explorerSystemPane" title="Where the bytes of the selection are">Storage</button>
           </div>
           <button id="explorerScopeUp" class="explorerScopeUp" type="button" hidden><span class="explorerScopeUp__glyph" aria-hidden="true">&uarr;</span><span id="explorerScopeUpText" class="explorerScopeUp__text"></span></button>
         </div>
@@ -231,7 +231,7 @@
             </div>
             <div id="explorerWarnings" class="explorerWarnings" hidden></div>
             <div id="explorerSummaryCards" class="explorerSummaryCards"></div>
-            <div id="explorerDetailTabs" class="explorerDetailTabs" role="tablist" aria-label="Table details"></div>
+            <div id="explorerDetailTabs" class="contentTabs explorerDetailTabs" role="tablist" aria-label="Table details"></div>
             <div id="explorerDetailContent" class="explorerDetailContent"></div>
           </div>
         </section>

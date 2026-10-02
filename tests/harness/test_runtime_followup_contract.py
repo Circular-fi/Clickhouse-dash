@@ -126,7 +126,7 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
     assert 'id="explorerDatabaseSelect"' not in html
     assert "ACL filtered" not in html
     assert "Runner scoped" not in html
-    assert '.explorerViewTabs {' in css and '.explorerTreeFilters {' in css
+    assert '.viewTabs {' in css and '.explorerTreeFilters {' in css
 
 def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> None:
     css = read("src/static/style.css")

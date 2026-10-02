@@ -2,8 +2,8 @@
   "use strict";
   // Tabs of the Traces search view: "Search" (the result list) and the tabs
   // other modules register with ns.traceTabs.register(). They sit in the
-  // Observability tab row (#tracesTabs in #obsNav, after the view tabs, with
-  // the same Explorer view tab component). Every tab shares
+  // Observability tab row (#tracesTabs in #obsNav, after the view tabs, in
+  // the same view tab row: .viewTabs, app_ui_tabs.js). Every tab shares
   // the search bar (time range, filters and chips); the selected tab lives in
   // the URL as ?tab=<id> next to the search parameters (app_trace_search.js
   // calls writeParams / applyParams), and the Search button runs the selected
@@ -53,10 +53,7 @@
     if (!bar) return;
     const shown = tabs.filter(available);
     bar.hidden = shown.length < 2;
-    bar.innerHTML = shown.map((tab) => {
-      const selected = tab.id === current;
-      return `<button type="button" class="explorerViewTab${selected ? " is-active" : ""}" role="tab" id="tracesTab-${tab.id}" data-trace-tab="${tab.id}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}"${tab.panelId ? ` aria-controls="${tab.panelId}"` : ""}>${ctx ? ctx.esc(tab.label) : tab.label}</button>`;
-    }).join("");
+    ns.tabs?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", tier: "view", selected: current });
     // A narrow window scrolls the tab row sideways: keep the selected tab in view.
     const row = bar.parentElement;
     const active = bar.querySelector(".is-active");
@@ -131,27 +128,10 @@
     return current === SEARCH_TAB ? null : find(current)?.onSearch || null;
   }
 
-  // The Explorer view tabs' keys: Left / Right wrap, Home / End go to the ends.
-  function onKeydown(event) {
-    const target = event.target instanceof Element ? event.target.closest("[data-trace-tab]") : null;
-    if (!target || !["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const shown = tabs.filter(available);
-    const at = shown.findIndex((tab) => tab.id === target.getAttribute("data-trace-tab"));
-    const next = event.key === "Home" ? shown[0] : event.key === "End" ? shown[shown.length - 1]
-      : shown[(at + (event.key === "ArrowRight" ? 1 : -1) + shown.length) % shown.length];
-    select(next.id);
-    byId(`tracesTab-${next.id}`)?.focus();
-  }
-
   function install(context) {
     ctx = context;
-    const bar = byId("tracesTabs");
-    bar?.addEventListener("click", (event) => {
-      const button = event.target instanceof Element ? event.target.closest("[data-trace-tab]") : null;
-      if (button) select(button.getAttribute("data-trace-tab"));
-    });
-    bar?.addEventListener("keydown", onKeydown);
+    // Click, arrows, Home / End: the shared tab behaviour (app_ui_tabs.js).
+    ns.tabs?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });
     for (const tab of tabs) tab.install?.(ctx);
     render();
   }

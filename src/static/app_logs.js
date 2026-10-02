@@ -1213,6 +1213,8 @@
 
   // The Results / Patterns in-content tabs (app_ui_tabs.js).
   let viewTabs = null;
+  // The log record tabs (Details | Surrounding context), ns.tabs.bind.
+  let sideTabs = null;
 
   function setTab(tab, { push = false } = {}) {
     model.tab = tab === "patterns" ? "patterns" : "results";
@@ -1352,11 +1354,7 @@
       openTrace.hidden = !traced;
       if (traced) openTrace.href = route(`observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
     }
-    for (const button of document.querySelectorAll(".logsSideTabs [data-side-tab]")) {
-      const on = button.dataset.sideTab === model.side.tab;
-      button.classList.toggle("is-active", on);
-      button.setAttribute("aria-selected", String(on));
-    }
+    sideTabs?.select(model.side.tab);
     $("logsSideDetails").hidden = model.side.tab !== "details";
     $("logsSideContext").hidden = model.side.tab !== "context";
     const details = $("logsSideDetails");
@@ -1494,13 +1492,15 @@
       if (!button) return;
       applyFieldAction(button.dataset.fieldAction, button.dataset.key, button.dataset.value, button);
     });
-    for (const button of document.querySelectorAll(".logsSideTabs [data-side-tab]")) {
-      button.addEventListener("click", () => {
-        model.side.tab = button.dataset.sideTab;
+    // Details | Surrounding context: the shared tab behaviour (app_ui_tabs.js).
+    sideTabs = ns.tabs?.bind(document.querySelector(".logsSideTabs"), {
+      attr: "sideTab",
+      onSelect: (tab) => {
+        model.side.tab = tab;
         renderSidePanel();
         if (model.side.tab === "context" && !model.side.context) void loadContext();
-      });
-    }
+      },
+    }) || null;
     for (const button of document.querySelectorAll("[data-context-preset]")) {
       button.addEventListener("click", () => { model.side.preset = button.dataset.contextPreset; void loadContext(); });
     }

@@ -401,14 +401,9 @@
     syncLifecycle();
     const view = currentView();
     const available = { catalog: true, functions: true, operations: operationsAvailable() };
-    for (const button of shellEl("explorerViewTabs")?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {
-      const name = String(button.dataset.view || "");
-      const active = name === view;
-      button.hidden = !available[name];
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-selected", String(active));
-      button.tabIndex = active ? 0 : -1;
-    }
+    const viewTabs = shellEl("explorerViewTabs");
+    for (const button of viewTabs?.querySelectorAll?.("[data-view]") || []) button.hidden = !available[String(button.dataset.view || "")];
+    ns.tabs?.select(viewTabs, view, "view");
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     if (shell) {
       shell.dataset.explorerView = view;
@@ -438,15 +433,11 @@
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
     let shown = 0;
-    for (const button of tabs?.querySelectorAll?.(".explorerViewTab[data-mode]") || []) {
-      const name = String(button.dataset.mode || "");
-      const active = name === model.mode;
-      button.hidden = !available[name];
+    for (const button of tabs?.querySelectorAll?.("[data-mode]") || []) {
+      button.hidden = !available[String(button.dataset.mode || "")];
       if (!button.hidden) shown += 1;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-selected", String(active));
-      button.tabIndex = active ? 0 : -1;
     }
+    ns.tabs?.select(tabs, model.mode, "mode");
     if (tabs) tabs.hidden = shown < 2;
     syncScopeUp();
   }
@@ -2463,35 +2454,19 @@
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
     window.addEventListener("popstate", () => { void applyRouteFromLocation(); });
-    const viewTabs = shellEl("explorerViewTabs");
-    for (const tab of viewTabs?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {
-      tab.addEventListener("click", () => {
-        if (tab.dataset.view === currentView()) return;
-        setView(String(tab.dataset.view || "catalog"));
-      });
-    }
-    const modeTabs = shellEl("explorerModeTabs");
-    for (const tab of modeTabs?.querySelectorAll?.(".explorerViewTab[data-mode]") || []) {
-      tab.addEventListener("click", () => {
-        if (tab.dataset.mode === model.mode) return;
-        setMode(String(tab.dataset.mode || "browse"));
+    // The view and mode tab rows: the shared tab behaviour (app_ui_tabs.js).
+    ns.tabs?.bind(shellEl("explorerViewTabs"), {
+      attr: "view",
+      onSelect: (view) => { if (view !== currentView()) setView(String(view || "catalog")); },
+    });
+    ns.tabs?.bind(shellEl("explorerModeTabs"), {
+      attr: "mode",
+      onSelect: (mode) => {
+        if (mode === model.mode) return;
+        setMode(String(mode || "browse"));
         syncExplorerUrl("push");
-      });
-    }
-    // Arrow keys, Home and End move between the tabs of either tab list.
-    for (const list of [viewTabs, modeTabs]) {
-      list?.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
-        const tabs = [...list.querySelectorAll(".explorerViewTab")].filter((tab) => !tab.hidden);
-        const index = tabs.indexOf(document.activeElement);
-        if (index < 0 || !tabs.length) return;
-        event.preventDefault();
-        const target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
-          : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-        tabs[target].focus();
-        tabs[target].click();
-      });
-    }
+      },
+    });
     shellEl("explorerScopeUp")?.addEventListener("click", scopeUp);
     for (const chip of shellEl("explorerTreeFilters")?.querySelectorAll?.(".explorerFilterChip[data-filter]") || []) {
       chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });

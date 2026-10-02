@@ -133,7 +133,7 @@ def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_sin
     assert 'model.refreshQueuedForce = true;' in graph
     assert 'queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));' in graph
     # Browse/Graph is chosen with the view tabs, bound once at init.
-    needle = 'for (const tab of viewTabs?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {'
+    needle = 'ns.tabs?.bind(shellEl("explorerViewTabs"), {'
     assert explorer.count(needle) == 1
     assert 'dom.explorerModeSelectButton?.addEventListener("click"' not in explorer
 

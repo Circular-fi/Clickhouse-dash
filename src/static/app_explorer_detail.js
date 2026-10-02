@@ -296,15 +296,11 @@
         return;
       }
       dom.explorerDetailTabs.hidden = false;
-      dom.explorerDetailTabs.replaceChildren(...tabs.map((label) => {
-        const button = node("button", `explorerDetailTab${model.tab === label ? " is-active" : ""}`, label);
-        button.type = "button";
-        button.role = "tab";
-        button.setAttribute("aria-selected", String(model.tab === label));
-        button.addEventListener("click", () => openTab(label));
-        return button;
-      }));
+      ns.tabs?.render(dom.explorerDetailTabs, tabs.map((label) => ({ value: label, label })), { selected: model.tab });
     }
+    // The card's tab row (.contentTabs): the shared tab behaviour (click,
+    // arrows, Home / End, roving tabindex; app_ui_tabs.js).
+    ns.tabs?.bind(dom.explorerDetailTabs, { onSelect: (label) => openTab(label) });
 
     // ---- header -------------------------------------------------------------
 
