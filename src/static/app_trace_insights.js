@@ -425,7 +425,9 @@
     if (el) return el;
     el = document.createElement("aside");
     el.id = "traceContextPanel";
-    el.className = "traceContextPanel";
+    // The detail panel shell's head and close button (ns.detailPanel), in a
+    // drawer over the trace under the page chrome.
+    el.className = "uiDetail traceContextPanel";
     el.setAttribute("role", "dialog");
     el.setAttribute("aria-modal", "false");
     el.setAttribute("aria-labelledby", "traceContextTitle");
@@ -435,9 +437,10 @@
     el.addEventListener("click", onPanelClick);
     el.addEventListener("change", onPanelChange);
     el.addEventListener("keydown", (event) => {
+      // Escape goes on to ns.layers (the panel is a layer).
+      if (event.key === "Escape") return;
       // The trace page's shortcuts (a/d, arrows, [ ]) are not for the panel.
       event.stopPropagation();
-      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeContext(); return; }
       const row = event.target instanceof Element ? event.target.closest("tr[data-context-span]") : null;
       if (row && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openContextRow(row); }
     });
@@ -481,20 +484,25 @@
     context.returnFocus = trigger;
     const el = panel();
     el.hidden = false;
+    // An ns.layers layer: Escape closes it, the focus goes back to its trigger.
+    contextLayer = ns.layers.push({ el, name: "traceContext", docked: true, opener: trigger, onDismiss: () => closeContext() });
     document.body.classList.add("has-trace-context");
     void loadContext("around");
     el.focus({ preventScroll: true });
   }
 
+  let contextLayer = null;
   function closeContext() {
     context.open = false;
     ++context.seq;
+    // The layer gives the focus back to the trigger (when it was in the panel).
+    const layer = contextLayer;
+    contextLayer = null;
+    layer?.close();
     const el = document.getElementById("traceContextPanel");
     if (el) { el.hidden = true; el.innerHTML = ""; }
     document.body.classList.remove("has-trace-context");
-    const back = context.returnFocus;
     context.returnFocus = null;
-    if (back && document.contains(back)) back.focus({ preventScroll: true });
   }
 
   function contextParams() {
@@ -615,9 +623,9 @@
         : context.rows.length
           ? `<p class="traceContextPanel__status" role="status" data-context-summary>${fmt.count(context.rows.length)} span${context.rows.length === 1 ? "" : "s"} · ${esc(windowLabel)} · ${esc(filterLabel)}${Number.isFinite(context.elapsedMs) ? ` · ${fmt.duration.fromMs(context.elapsedMs)}` : ""}</p>`
           : `<p class="traceContextPanel__status" role="status" data-context-summary>No spans ${esc(windowLabel)} around this span (${esc(filterLabel)}).</p>`;
-    el.innerHTML = `<header class="traceContextPanel__head">
-        <div class="traceContextPanel__title"><strong id="traceContextTitle">Surrounding context</strong><span title="${esc(fmt.timeTitle(Math.floor(Number(a.ns) / 1e6)))}"><b style="--trace-service-color:${palette.service(a.service)}">${esc(a.service || "unknown")}</b> ${esc(a.name)} · ${esc(clockText({ timestamp: a.timestamp, start_ns: Number(a.ns) }))}</span></div>
-        <button type="button" class="traceContextPanel__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
+    el.innerHTML = `<header class="uiDetail__head traceContextPanel__head">
+        <div class="uiDetail__titles traceContextPanel__title"><h2 id="traceContextTitle" class="uiDetail__title">Surrounding context</h2><span class="uiDetail__subtitle" title="${esc(fmt.timeTitle(Math.floor(Number(a.ns) / 1e6)))}"><b style="--trace-service-color:${palette.service(a.service)}">${esc(a.service || "unknown")}</b> ${esc(a.name)} · ${esc(clockText({ timestamp: a.timestamp, start_ns: Number(a.ns) }))}</span></div>
+        <button type="button" class="closeCross uiDetail__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
       </header>
       <div class="traceContextPanel__controls">
         <div class="traceContextSeg" role="group" aria-label="Time window">${windows}</div>
@@ -750,9 +758,6 @@
   function install(appCtx) {
     ctx = appCtx;
     document.getElementById("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && context.open && !event.defaultPrevented && !document.querySelector(".tracePicker [aria-expanded='true']")) closeContext();
-    });
     window.addEventListener("chdash:host-changed", () => { linkedFromState.clear(); if (context.open) closeContext(); });
   }
 

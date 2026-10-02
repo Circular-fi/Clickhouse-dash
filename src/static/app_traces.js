@@ -263,8 +263,13 @@
 
   const tracePickers = new Set();
 
+  // An open picker is an ns.layers layer: Escape and a press outside it
+  // close it, the focus goes back to its button.
   function closeTracePicker(root, { immediate = false } = {}) {
     if (!root) return;
+    const layer = root._pickerLayer;
+    root._pickerLayer = null;
+    layer?.close();
     const button = root.querySelector(".tracePicker__button");
     const menu = root.querySelector(".tracePicker__menu");
     if (root._tracePickerCloseTimer) {
@@ -314,6 +319,7 @@
     root.classList.remove("themeSelect--closing");
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    root._pickerLayer = ns.layers.push({ el: root, name: "tracePicker", opener: button, onDismiss: () => closeTracePicker(root) });
     requestAnimationFrame(() => {
       if (button.getAttribute("aria-expanded") !== "true") return;
       root.classList.add("themeSelect--open");
@@ -407,13 +413,6 @@
         openTracePicker(root);
       }
     });
-    menu.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeTracePicker(root);
-        button.focus({ preventScroll: true });
-      }
-    });
     select.addEventListener("change", refresh);
     select.addEventListener("tracepicker-refresh", refresh);
     new MutationObserver(refresh).observe(select, { attributes: true, childList: true, subtree: true, characterData: true });
@@ -425,12 +424,6 @@
     // The Logs and Metrics views share the search bar look: only this view's selects.
     document.querySelectorAll("#tracesWorkspace .traceSearchBar select, #tracesWorkspace .traceResultsSort select").forEach((select) => {
       if (select !== dom.tracesRangeUnit || !timePicker) enhanceTraceSelect(select);
-    });
-    document.addEventListener("click", (event) => {
-      // The dispatch path, not only contains(): a click can re-render the
-      // element it landed on (calendar days, quick range lists).
-      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-      if (![...tracePickers].some((root) => root.contains(event.target) || path.includes(root))) closeTracePickers();
     });
   }
 
@@ -2549,18 +2542,21 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  let traceCopyMenuCleanup = null;
+  // The open menu is an ns.layers layer: Escape and a press outside close
+  // it, the focus goes back to its toggle.
+  let traceCopyMenuLayer = null;
   function closeTraceCopyMenu({ immediate = false } = {}) {
     const split = dom.traceCopySplit;
     const menu = dom.traceCopyMenu;
     if (!split || !menu) return;
+    const layer = traceCopyMenuLayer;
+    traceCopyMenuLayer = null;
+    layer?.close();
     dom.traceCopyMenuButton?.setAttribute("aria-expanded", "false");
     split.classList.remove("is-open");
     const finish = () => {
       if (split.classList.contains("is-open")) return;
       menu.hidden = true;
-      if (traceCopyMenuCleanup) traceCopyMenuCleanup();
-      traceCopyMenuCleanup = null;
     };
     if (immediate) finish();
     else setTimeout(finish, 160);
@@ -2573,21 +2569,13 @@
     menu.hidden = false;
     dom.traceCopyMenuButton?.setAttribute("aria-expanded", "true");
     requestAnimationFrame(() => split.classList.add("is-open"));
+    traceCopyMenuLayer = ns.layers.push({
+      el: split,
+      name: "traceCopyMenu",
+      opener: dom.traceCopyMenuButton,
+      onDismiss: (reason) => closeTraceCopyMenu({ immediate: reason === "escape" }),
+    });
     try { menu.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
-    const onDocClick = (ev) => { if (ev.target instanceof Node && !split.contains(ev.target)) closeTraceCopyMenu(); };
-    // Escape closes it and gives focus back to its toggle.
-    const onKey = (ev) => {
-      if (ev.key !== "Escape") return;
-      const inside = menu.contains(document.activeElement);
-      closeTraceCopyMenu({ immediate: true });
-      if (inside || document.activeElement === document.body) dom.traceCopyMenuButton?.focus({ preventScroll: true });
-    };
-    document.addEventListener("click", onDocClick);
-    document.addEventListener("keydown", onKey);
-    traceCopyMenuCleanup = () => {
-      document.removeEventListener("click", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
   }
 
   // Span detail, after Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
@@ -3592,7 +3580,8 @@
       closeTraceCopyMenu({ immediate: true });
       downloadTraceJson();
     });
-    document.addEventListener("keydown", onTraceKeydown);
+    // The trace page's keys ([ ] o p, a / d, arrows) while Traces shows.
+    ns.lifecycle.bind("traces", (scope) => scope.listen(document, "keydown", onTraceKeydown));
     // The canvas overview holds resolved colours: redraw it for a new theme.
     const redrawOverview = () => {
       const graph = dom.traceOverview?.querySelector?.('[data-overview-mode="canvas"]');

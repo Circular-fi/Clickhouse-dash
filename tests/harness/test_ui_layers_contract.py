@@ -51,6 +51,56 @@ def test_dialog_is_a_modal_layer():
     assert "layer?.close({ restoreFocus: restore, force: true });" in dialog
 
 
+# Escape comparisons left outside ns.layers, per file: keys a component
+# consumes first (an editor's suggestions, a drag or a chart cursor to cancel,
+# a canvas selection, a filter field's text, the tooltip hide, a panel letting
+# the key go on to the layers), and the Query page's menus and editor, which
+# move onto ns.menu / ns.layers with the Query revamp. A new local Escape
+# handler fails here: push an ns.layers layer instead.
+ESCAPE_ALLOWED = {
+    "app_ui_layers.js": 1,
+    "app_ui_popover.js": 1,
+    "app_autocomplete.js": 2,
+    "app_chart_core.js": 3,
+    "app_graph_kit.js": 1,
+    "app_trace_heatmap.js": 1,
+    "app_trace_logs.js": 1,
+    "app_trace_insights.js": 1,
+    "app_ui.js": 2,
+    "app_results.js": 4,
+    "app_query_chart.js": 1,
+    "app_query_library.js": 4,
+}
+
+# Document-level press listeners: the layers' outside press, the
+# Observability shell's link interception, and the Query page's own (editor
+# suggestions, header menus, result and chart menus, library menu).
+OUTSIDE_ALLOWED = {
+    "app_ui_layers.js", "app_observability.js",
+    "app_autocomplete.js", "app_ui.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
+}
+
+
+def test_no_new_local_escape_or_click_outside_handler():
+    for path in sorted(STATIC.glob("*.js")):
+        text = path.read_text(encoding="utf-8")
+        count = text.count('"Escape"')
+        assert count <= ESCAPE_ALLOWED.get(path.name, 0), f"{path.name}: {count} Escape comparisons (use ns.layers)"
+        presses = re.findall(r'document\.addEventListener\("(?:click|pointerdown|mousedown)"', text)
+        assert not presses or path.name in OUTSIDE_ALLOWED, f"{path.name}: a document press listener (use ns.layers)"
+
+
+def test_views_bind_their_global_listeners_while_shown():
+    # Observability views and the Explorer modes: ns.lifecycle scopes.
+    explorer = read("src/static/app_explorer.js")
+    assert "ns.lifecycle?.enter(next);" in explorer and "ns.lifecycle?.leave(lifecycleName);" in explorer
+    for module, view in (("app_traces.js", "traces"), ("app_trace_spans.js", "traces"), ("app_trace_search.js", "traces"), ("app_explorer_graph.js", "explorer:graph")):
+        assert f'ns.lifecycle.bind("{view}", (scope) =>' in read(f"src/static/{module}"), module
+    for module in ("app_logs.js", "app_metrics.js", "app_trace_services.js", "app_trace_map.js", "app_trace_views.js", "app_trace_insights.js", "app_explorer_detail.js"):
+        text = read(f"src/static/{module}")
+        assert not re.search(r'document\.addEventListener\("keydown"', text), module
+
+
 def test_observability_views_get_a_lifecycle_scope():
     obs = read("src/static/app_observability.js")
     assert "window.ChDash.lifecycle?.leave(leaving);" in obs

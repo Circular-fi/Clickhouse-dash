@@ -51,5 +51,5 @@ def test_span_inspector_preview_table_tint_and_resizable_waterfall():
 def test_selection_picker_closes_menu():
     js = read("src/static/app_traces.js")
     assert 'select.dispatchEvent(new Event("change", { bubbles: true }))' in js
-    assert 'closeTracePickers();' in js
+    assert 'closeTracePicker(root);' in js
     assert 'enhanceTraceCombo' not in js

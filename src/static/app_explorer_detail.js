@@ -1633,33 +1633,28 @@
       menu.appendChild(option);
       root.append(button, menu);
 
+      // The open menu is an ns.layers layer (Escape, a press outside, focus
+      // back to the button), placed by ns.popover.place under its button and
+      // kept there while the page scrolls or resizes.
       let open = false;
+      let layer = null;
+      let scope = null;
       const positionMenu = () => {
         if (!open) return;
-        const rect = button.getBoundingClientRect();
         menu.style.position = "fixed";
-        menu.style.left = "auto";
-        menu.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-        menu.style.top = `${Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 4)}px`;
-      };
-      const onOutsideClick = (event) => {
-        const target = event.target;
-        if (target instanceof Node && (root.contains(target) || menu.contains(target))) return;
-        close();
-      };
-      const onEscape = (event) => {
-        if (event.key === "Escape") close();
+        ns.popover.place(button, menu, { side: "bottom", align: "end", offset: 4 });
       };
       const close = () => {
         if (!open) return;
         open = false;
+        const closing = layer;
+        layer = null;
+        closing?.close();
+        scope?.dispose();
+        scope = null;
         root.classList.remove("themeSelect--open");
         menu.classList.remove("is-open");
         button.setAttribute("aria-expanded", "false");
-        document.removeEventListener("click", onOutsideClick);
-        document.removeEventListener("keydown", onEscape);
-        window.removeEventListener("resize", positionMenu);
-        window.removeEventListener("scroll", positionMenu, true);
         menu.hidden = true;
         menu.style.removeProperty("position");
         menu.style.removeProperty("left");
@@ -1679,10 +1674,10 @@
           root.classList.add("themeSelect--open");
           menu.classList.add("is-open");
         });
-        document.addEventListener("click", onOutsideClick);
-        document.addEventListener("keydown", onEscape);
-        window.addEventListener("resize", positionMenu, { passive: true });
-        window.addEventListener("scroll", positionMenu, { passive: true, capture: true });
+        layer = ns.layers.push({ el: menu, name: "explorerDetailMenu", opener: button, inside: [root], onDismiss: () => close() });
+        scope = ns.lifecycle.scope();
+        scope.listen(window, "resize", positionMenu, { passive: true });
+        scope.listen(window, "scroll", positionMenu, { passive: true, capture: true });
       };
 
       option.addEventListener("click", (event) => {

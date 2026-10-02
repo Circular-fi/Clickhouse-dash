@@ -44,7 +44,7 @@ def test_popover_api():
 # The viewport clamp `Math.max(8, Math.min(window.innerWidth - w - 8, x))` is
 # ns.popover.place. Menus still placing themselves wait for ns.menu.
 CLAMP = re.compile(r"window\.innerWidth\s*-\s*[\w.]+\s*-\s*(?:8|margin)\b")
-CLAMP_ALLOWED = {"app_results.js", "app_explorer_detail.js", "app_ui_popover.js"}
+CLAMP_ALLOWED = {"app_results.js", "app_ui_popover.js"}
 
 
 def test_no_local_viewport_clamp():

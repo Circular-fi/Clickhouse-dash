@@ -558,13 +558,8 @@
       else openPanel();
     });
 
-    menu.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closePanel({ restoreFocus: true });
-      }
-    });
+    // Escape: the host's picker is an ns.layers layer (it closes the panel and
+    // gives the focus back to the button).
 
     // Tabbing out of the panel closes it (it is a dropdown, not a modal).
     menu.addEventListener("focusout", (event) => {

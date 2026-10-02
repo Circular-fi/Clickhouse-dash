@@ -82,6 +82,49 @@ test.describe('listener lifecycle', () => {
   });
 });
 
+test.describe('listener lifecycle of views and layers', () => {
+  test('a view\'s global listeners live while it shows; opening and closing panels and pickers 30 times adds none', async ({ page, request }, testInfo) => {
+    await obsFeatures(request);
+    await page.goto(`/observability/traces${HOUR}`);
+    await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
+    await page.waitForLoadState('networkidle');
+    for (const view of ['logs', 'traces']) await showView(page, view);
+    const onTraces = await listenerStats(page);
+    await showView(page, 'logs');
+    await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
+    const onLogs = await listenerStats(page);
+    // The Traces keys (trace page shortcuts, the span panel's arrows, the
+    // value menu's triggers) are bound while Traces shows only.
+    expect(onLogs.types['document:keydown'] || 0).toBeLessThan(onTraces.types['document:keydown'] || 0);
+    const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
+    const panel = page.locator('#logsSidePanel');
+    const picker = page.locator('#logsColumnsButton');
+    // One round first (the panel and the picker built), then 30.
+    const cycle = async () => {
+      await rows.first().click();
+      await expect(panel).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
+      // Closing went Back (log= was the panel's own entry).
+      await expect.poll(() => new URL(page.url()).searchParams.get('log')).toBe(null);
+      await picker.click();
+      await expect(page.locator('#logsColumnsMenu')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#logsColumnsMenu')).toBeHidden();
+    };
+    await cycle();
+    const before = await listenerStats(page, true);
+    for (let i = 0; i < SWITCHES; i += 1) await cycle();
+    const after = await listenerStats(page, true);
+    console.log(`document keydown listeners: ${onTraces.types['document:keydown'] || 0} on Traces, ${onLogs.types['document:keydown'] || 0} on Logs; logs panel + picker x${SWITCHES}: ${before.global} / ${before.connected} -> ${after.global} / ${after.connected}`);
+    testInfo.annotations.push({ type: 'listeners', description: JSON.stringify({ traces: onTraces.types, logs: onLogs.types, before: before.global, after: after.global }) });
+    expect(listenerDiff(before, after)).toEqual({});
+    expect(after.global).toBe(before.global);
+    expect(after.connected).toBe(before.connected);
+    expect(await page.evaluate(() => window.ChDash.layers.size())).toBe(0);
+  });
+});
+
 // A scratch stack on a real page: layers, each with an opener button.
 async function scratchLayers(page, specs) {
   await page.evaluate((list) => {

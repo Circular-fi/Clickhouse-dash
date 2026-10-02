@@ -1471,8 +1471,9 @@
       ev.preventDefault();
       if (zoom) resetZoom(true);
     });
+    // Escape cancels a drag in progress (and is not seen by ns.layers).
     const onKey = (ev) => {
-      if (ev.key === "Escape" && drag) { drag = null; scheduleOverlay(); }
+      if (ev.key === "Escape" && drag) { ev.preventDefault(); drag = null; scheduleOverlay(); }
     };
     // Keyboard cursor: the readouts point by point, without a mouse.
     overCanvas.addEventListener("keydown", (ev) => {
@@ -1485,7 +1486,7 @@
       else if (ev.key === "ArrowLeft") i -= ev.shiftKey ? 10 : 1;
       else if (ev.key === "Home") i = first;
       else if (ev.key === "End") i = last;
-      else if (ev.key === "Escape") { leaveCursor(); return; }
+      else if (ev.key === "Escape") { if (cursorIndex < 0) return; ev.preventDefault(); leaveCursor(); return; }
       else return;
       ev.preventDefault();
       i = Math.max(first, Math.min(last, i));
@@ -2340,7 +2341,7 @@
     });
     overCanvas.addEventListener("pointercancel", () => cancelBox());
     overCanvas.addEventListener("lostpointercapture", () => { if (boxDrag) cancelBox(); });
-    const onBoxKey = (ev) => { if (ev.key === "Escape" && boxDrag) cancelBox(); };
+    const onBoxKey = (ev) => { if (ev.key === "Escape" && boxDrag) { ev.preventDefault(); cancelBox(); } };
     document.addEventListener("keydown", onBoxKey, true);
 
     // --- annotations and regions (DOM, moved on every draw) ---

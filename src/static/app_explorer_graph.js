@@ -104,11 +104,17 @@
     return !!dom.explorerGraphTypeSelect?.classList.contains("themeSelect--open");
   }
 
+  // The open menu is an ns.layers layer: Escape and a press outside close
+  // it, the focus goes back to its button.
+  let graphTypeLayer = null;
   function closeGraphTypeMenu({ immediate = false } = {}) {
     const root = dom.explorerGraphTypeSelect;
     const button = dom.explorerGraphTypeSelectButton;
     const menu = dom.explorerGraphTypeSelectMenu;
     if (!root || !button || !menu) return;
+    const layer = graphTypeLayer;
+    graphTypeLayer = null;
+    layer?.close();
     button.setAttribute("aria-expanded", "false");
     root.classList.remove("themeSelect--open");
     if (immediate) {
@@ -132,6 +138,7 @@
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     root.classList.remove("themeSelect--closing");
+    graphTypeLayer = ns.layers.push({ el: root, name: "explorerGraphType", opener: button, onDismiss: (reason) => closeGraphTypeMenu({ immediate: reason === "escape" }) });
     requestAnimationFrame(() => root.classList.add("themeSelect--open"));
     menu.focus({ preventScroll: true });
   }
@@ -3842,14 +3849,8 @@
     dom.explorerGraphContractButton?.addEventListener("click", contractNeighborhood);
     dom.explorerGraphExpandButton?.addEventListener("click", expandNeighborhood);
     dom.explorerGraphRefreshButton?.addEventListener("click", () => refresh(true, { reflow: true }));
-    document.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof Node) || !graphTypeMenuOpen()) return;
-      if (!dom.explorerGraphTypeSelect?.contains(target)) closeGraphTypeMenu();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeGraphTypeMenu({ immediate: true });
-    });
+    // Leaving the Graph mode closes the menu (ns.lifecycle, app_explorer.js).
+    ns.lifecycle.bind("explorer:graph", (scope) => scope.add(() => closeGraphTypeMenu({ immediate: true })));
     setDetailMode(model.detailMode);
     renderGraphChrome();
   }
