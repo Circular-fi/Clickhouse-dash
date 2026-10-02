@@ -4465,8 +4465,8 @@ html[data-obs-view="traces"] .tracesResults--wide {
   letter-spacing: .02em;
 }
 .timeRangeField.is-active .timeRangeField__label { color: var(--text); }
-.traceSearchBar .timeRangeField__input,
-.traceSearchBar .timeRangePanel__search {
+.traceSearchBar .timeRangePanel__search { width: 100%; }
+.traceSearchBar .timeRangeField__input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -4481,12 +4481,9 @@ html[data-obs-view="traces"] .tracesResults--wide {
   font-variant-numeric: tabular-nums;
   box-shadow: none;
 }
-.traceSearchBar .timeRangeField__input::placeholder,
-.traceSearchBar .timeRangePanel__search::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+.traceSearchBar .timeRangeField__input::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
 .traceSearchBar .timeRangeField__input:hover,
-.traceSearchBar .timeRangePanel__search:hover,
-.traceSearchBar .timeRangeField__input:focus,
-.traceSearchBar .timeRangePanel__search:focus { border-color: var(--buttonBorderHover); }
+.traceSearchBar .timeRangeField__input:focus { border-color: var(--buttonBorderHover); }
 .traceSearchBar .timeRangeField.is-active .timeRangeField__input {
   border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--buttonBorder));
 }
@@ -5625,16 +5622,7 @@ html[data-theme="light"] {
 .traceViewBar__input {
   width: 230px;
   max-width: 40vw;
-  height: 24px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
-  background: var(--inputBg);
-  color: var(--text);
-  font-size: 11px;
 }
-.traceViewBar__input:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceViewBar__count,
 .traceViewBar__crumb { min-width: 0; color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traceViewBar__crumb { max-width: 60vw; }
@@ -6288,8 +6276,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceSearchBody { display: flex; align-items: flex-start; min-width: 0; }
 .traceSearchMain { flex: 1 1 auto; min-width: 0; }
 .traceFacets__list { padding: 2px 0 8px; }
-.traceFacets__empty { padding: 12px 10px; color: var(--muted); font-size: 11px; }
-.traceFacets__empty.is-error,
 .traceFacet__status.is-error { color: var(--danger); }
 .traceFacets__group--pinned { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
 .traceFacet__head { display: flex; align-items: center; min-width: 0; padding: 0 4px 0 2px; }
@@ -6471,16 +6457,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceLogsPanel__filter {
   width: 220px;
   max-width: 36vw;
-  height: 22px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
-  background: var(--inputBg);
-  color: var(--text);
-  font-size: 11px;
 }
-.traceLogsPanel__filter:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceLogsPanel__source { min-width: 0; margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
 .traceLogsPanel__open {
@@ -8077,21 +8054,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.uiSide__search {
-  box-sizing: border-box;
-  width: 100%;
-  height: 30px;
-  min-width: 0;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 500 11.5px/1 Arial, Helvetica, sans-serif;
-}
-.uiSide__search:hover,
-.uiSide__search:focus { border-color: var(--buttonBorderHover); }
-.uiSide__search:focus-visible { box-shadow: var(--ring); }
+.uiSide__search { width: 100%; }
 .uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .uiSide__drawerBar,
@@ -8505,3 +8468,21 @@ button:not(.is-loading) > .uiSpin { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .uiSpin { animation-duration: 2.4s; }
 }
+.uiSearch {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.uiSearch::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+.uiSearch:hover { border-color: var(--buttonBorderHover); }
+.uiSearch:focus { border-color: var(--accentBorder); }
+.uiSearch--compact { height: 24px; font-size: 11px; }
+.uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }

@@ -636,7 +636,7 @@
   // Remembers whether meta enables analytics for the head script of the next
   // page load (see observability.html), and drops the early class once meta is known.
   function rememberAnalyticsEnabled(enabled) {
-    try { localStorage.setItem("chdash.traceAnalytics.v1", enabled ? "1" : "0"); } catch { /* storage may be unavailable */ }
+    ns.storage.pref(ns.storage.KEYS.traceAnalytics, false).set(enabled);
     document.documentElement.classList.remove("chdash-trace-analytics");
   }
 
@@ -681,18 +681,15 @@
   }
 
   // --- Search results: Jaeger-style list and sortable table ---------------
-  const RESULTS_VIEW_KEY = "chdash.traceResultsView.v1";
-  const START_DISPLAY_KEY = "chdash.traceStartDisplay.v1";
+  const RESULTS_VIEW_KEY = ns.storage.KEYS.traceResultsView;
+  const START_DISPLAY_KEY = ns.storage.KEYS.traceStartDisplay;
 
   function readStored(key, allowed, fallback) {
-    try {
-      const value = localStorage.getItem(key);
-      return allowed.includes(value) ? value : fallback;
-    } catch { return fallback; }
+    return ns.storage.pref(key, fallback, { allowed }).get();
   }
 
   function writeStored(key, value) {
-    try { localStorage.setItem(key, value); } catch { /* storage may be unavailable */ }
+    ns.storage.pref(key, "").set(value);
   }
 
   // The list follows the sort picker; the table sorts by its column headers
@@ -944,7 +941,7 @@
     const filtered = !!ns.traceSearch?.hasFilters?.();
     return ns.uiState.emptyHtml({
       title: `No ${noun} found`,
-      body: `No ${noun} match ${filtered ? "these filters" : "the search"} ${when}.`,
+      body: `No ${noun} match these filters ${when}.`,
       attrs: { "data-empty-results": "", ...attrs },
       actions: [
         zoom && !zoom.disabled ? { label: "Zoom out", icon: "zoomOut", attrs: { "data-results-zoom-out": "" } } : null,
@@ -3122,6 +3119,7 @@
       pushEntry();
       renderTrace();
       ns.traceViews?.applyLocation?.();
+      ns.uiState.announce(`Trace loaded: ${fmt.countLabel((trace?.spans || []).length, "span")}.`);
       // Logs load after the trace is on screen, never before.
       void ns.traceLogs?.load?.(trace);
     } catch (error) {

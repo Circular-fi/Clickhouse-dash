@@ -58,4 +58,5 @@ def test_heatmap_module_is_wired_to_the_duration_chart_and_the_search():
     assert "filter: (field, value) => applyFilter(field, value, \"include\")" in search
     assert "ns.traceSearch?.filter?.(field, hit.value.value)" in js
     assert "ns.traceSearch?.setDuration?.(" in js
-    assert 'const MODE_KEY = "chdash.traceDurationView.v1";' in js
+    assert 'const modePref = () => ns.storage.pref(ns.storage.KEYS.traceDurationView, "percentiles", { allowed: MODES });' in js
+    assert 'traceDurationView: "chdash.traceDurationView.v1",' in read("src/static/app_state.js")

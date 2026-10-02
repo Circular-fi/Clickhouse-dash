@@ -14,7 +14,7 @@
   if (!ns) return;
 
   const PREVIEW_LIMITS = [50, 100, 500];
-  const PREVIEW_LIMIT_KEY = "chdash.explorer.previewLimit";
+  const previewLimitPref = () => ns.storage.pref(ns.storage.KEYS.explorerPreviewLimit, 100);
   // Formats from ns.format (docs/ui-foundations.md); EMPTY marks an absent value.
   const format = ns.format;
   const DASH = format.EMPTY;
@@ -1488,15 +1488,14 @@
     function previewLimit() {
       const current = Number(model.previewLimit);
       if (PREVIEW_LIMITS.includes(current)) return current;
-      let stored = 100;
-      try { stored = Number(localStorage.getItem(PREVIEW_LIMIT_KEY)) || 100; } catch { stored = 100; }
+      const stored = previewLimitPref().get() || 100;
       model.previewLimit = PREVIEW_LIMITS.includes(stored) ? stored : 100;
       return model.previewLimit;
     }
 
     function setPreviewLimit(limit) {
       model.previewLimit = limit;
-      try { localStorage.setItem(PREVIEW_LIMIT_KEY, String(limit)); } catch { /* per-viewer convenience only */ }
+      previewLimitPref().set(limit);
       model.preview = null;
       renderTabContent();
     }
@@ -1530,11 +1529,7 @@
       // Explorer and Query are separate HTML documents. Persist the requested SQL
       // in the same session draft consumed by Query before crossing documents,
       // otherwise the textarea does not exist yet and the statement is lost.
-      try {
-        sessionStorage.setItem("chdash.editor.draft.v2", text);
-      } catch {
-        null;
-      }
+      ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);
       if (dom.queryTextArea) {
         util.replaceTextAreaValue(dom.queryTextArea, text);
         setWorkspace("query");

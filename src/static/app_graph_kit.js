@@ -2385,11 +2385,12 @@
   // "hidden" folds every legend, "shown" keeps them open; without one, a fit
   // folds the legend when the graph does not fit beside it (see
   // foldLegendToFit) and opens it again once the room is back.
-  const LEGEND_STORAGE_KEY = "chdash.graphLegend";
+  // "hidden" / "shown" once the user chose; "" until then.
+  const legendPref = () => ns.storage.pref(ns.storage.KEYS.graphLegend, "", { allowed: ["hidden", "shown"] });
   let legendSerial = 0;
   const legendControls = new WeakMap();
   function legendPreference() {
-    try { return localStorage.getItem(LEGEND_STORAGE_KEY) || ""; } catch (_) { return ""; }
+    return legendPref().get();
   }
   function legendToggle(pane, onToggle) {
     const dock = pane?.querySelector?.(":scope > .graphKitDock");
@@ -2421,7 +2422,7 @@
       control.apply(collapsed);
       control.chosen = true;
       control.auto = false;
-      try { localStorage.setItem(LEGEND_STORAGE_KEY, collapsed ? "hidden" : "shown"); } catch (_) { /* storage is optional */ }
+      legendPref().set(collapsed ? "hidden" : "shown");
       onToggle?.();
     });
     status.prepend(button);

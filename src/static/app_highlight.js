@@ -5,15 +5,8 @@
   if (!ns) return;
 
   const tabSize = 4;
-  const escapeHtml = (s) => {
-    const u = ns.util;
-    if (u && typeof u.escapeHtml === "function") return u.escapeHtml(String(s ?? ""));
-    return String(s ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;");
-  };
+  // util.escapeHtml is the one escaper (app_util.js loads first).
+  const escapeHtml = (s) => ns.util.escapeHtml(String(s ?? ""));
 
   const wrapHtml = (raw, kind) => {
     const x = escapeHtml(raw);

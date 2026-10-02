@@ -25,11 +25,12 @@ function memoryStorage(seed = {}) {
   };
 }
 
-// A fresh window with the two modules (and app_util.js) loaded, as the page loaders do.
+// A fresh window with the two modules (and app_state.js, whose ns.storage
+// keeps the service colours, and app_util.js) loaded, as the page loaders do.
 function load({ storage = memoryStorage(), extra = {} } = {}) {
   const window = { ChDash: { ...extra }, sessionStorage: storage };
   const context = vm.createContext({ window, Intl, Date, Math, JSON, Number, String, Object, Map, Set, Array, RegExp, BigInt });
-  for (const file of ["app_format.js", "app_palette.js", "app_util.js"]) vm.runInContext(read(file), context, { filename: file });
+  for (const file of ["app_format.js", "app_palette.js", "app_state.js", "app_util.js"]) vm.runInContext(read(file), context, { filename: file });
   return window.ChDash;
 }
 

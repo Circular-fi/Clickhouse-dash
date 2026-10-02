@@ -19,7 +19,6 @@
   const SEQUENTIAL_STEPS = 8;
   // The Traces store: the result list, its charts, every opened trace and the
   // Logs view read the same assignment.
-  const SERVICE_STORE_KEY = "chdash.traces.serviceColors";
 
   const tokenRef = (name) => `var(${name})`;
 
@@ -44,21 +43,25 @@
   function slots() {
     if (serviceSlots) return serviceSlots;
     serviceSlots = new Map();
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(SERVICE_STORE_KEY) || "null");
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-        for (const [service, slot] of Object.entries(saved)) {
-          if (Number.isInteger(slot) && slot >= 0 && slot < SERVICE_SLOTS) serviceSlots.set(service, slot);
-        }
+    // ns.storage (app_state.js) loads after this module: read it when used.
+    // Without session storage the colours last for this page.
+    const saved = slotsPref()?.get();
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      for (const [service, slot] of Object.entries(saved)) {
+        if (Number.isInteger(slot) && slot >= 0 && slot < SERVICE_SLOTS) serviceSlots.set(service, slot);
       }
-    } catch (_) { /* no session storage: the colours last for this page */ }
+    }
     return serviceSlots;
   }
 
+  // ns.storage.KEYS.serviceColors: the Traces assignment, kept for the session.
+  const slotsPref = () => {
+    const storage = window.ChDash.storage;
+    return storage ? storage.pref(storage.KEYS.serviceColors, null, { json: true, session: true }) : null;
+  };
+
   function saveSlots() {
-    try {
-      window.sessionStorage.setItem(SERVICE_STORE_KEY, JSON.stringify(Object.fromEntries(slots())));
-    } catch (_) { /* best effort */ }
+    slotsPref()?.set(Object.fromEntries(slots()));
   }
 
   const serviceKey = (name) => String(name || "unknown");

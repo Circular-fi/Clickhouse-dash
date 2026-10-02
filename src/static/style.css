@@ -3491,8 +3491,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   white-space: nowrap;
 }
 
-.explorerSelect,
-.explorerSearch input {
+.explorerSelect {
   min-height: 34px;
   border: 1px solid var(--buttonBorder);
   border-radius: 9px;
@@ -3513,13 +3512,13 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   max-width: 460px;
 }
 
+/* The search field is .uiSearch (Components: search), as tall as the toolbar's selects. */
 .explorerSearch input {
   width: 100%;
-  padding: 0 10px;
+  height: 34px;
 }
 
-.explorerSelect:focus,
-.explorerSearch input:focus {
+.explorerSelect:focus {
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }
@@ -12290,8 +12289,8 @@ html[data-obs-view="traces"] .tracesResults--wide {
   letter-spacing: .02em;
 }
 .timeRangeField.is-active .timeRangeField__label { color: var(--text); }
-.traceSearchBar .timeRangeField__input,
-.traceSearchBar .timeRangePanel__search {
+.traceSearchBar .timeRangePanel__search { width: 100%; }
+.traceSearchBar .timeRangeField__input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -12306,12 +12305,9 @@ html[data-obs-view="traces"] .tracesResults--wide {
   font-variant-numeric: tabular-nums;
   box-shadow: none;
 }
-.traceSearchBar .timeRangeField__input::placeholder,
-.traceSearchBar .timeRangePanel__search::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
+.traceSearchBar .timeRangeField__input::placeholder { color: color-mix(in srgb, var(--muted) 72%, transparent); }
 .traceSearchBar .timeRangeField__input:hover,
-.traceSearchBar .timeRangePanel__search:hover,
-.traceSearchBar .timeRangeField__input:focus,
-.traceSearchBar .timeRangePanel__search:focus { border-color: var(--buttonBorderHover); }
+.traceSearchBar .timeRangeField__input:focus { border-color: var(--buttonBorderHover); }
 /* The field the calendar is picking: after a start day, the To field. */
 .traceSearchBar .timeRangeField.is-active .timeRangeField__input {
   border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--buttonBorder));
@@ -13513,16 +13509,7 @@ html[data-theme="light"] {
 .traceViewBar__input {
   width: 230px;
   max-width: 40vw;
-  height: 24px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
-  background: var(--inputBg);
-  color: var(--text);
-  font-size: 11px;
 }
-.traceViewBar__input:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceViewBar__count,
 .traceViewBar__crumb { min-width: 0; color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traceViewBar__crumb { max-width: 60vw; }
@@ -14216,8 +14203,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 /* The Attributes / Fields sidebar: an ns.sidePanel shell (.uiSide,
    Components: panels); its list scrolls in the shell's body. */
 .traceFacets__list { padding: 2px 0 8px; }
-.traceFacets__empty { padding: 12px 10px; color: var(--muted); font-size: 11px; }
-.traceFacets__empty.is-error,
 .traceFacet__status.is-error { color: var(--danger); }
 .traceFacets__group--pinned { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
 .traceFacet__head { display: flex; align-items: center; min-width: 0; padding: 0 4px 0 2px; }
@@ -14411,16 +14396,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceLogsPanel__filter {
   width: 220px;
   max-width: 36vw;
-  height: 22px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 5px;
-  background: var(--inputBg);
-  color: var(--text);
-  font-size: 11px;
 }
-.traceLogsPanel__filter:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceLogsPanel__source { min-width: 0; margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
 .traceLogsPanel__open {
@@ -18266,21 +18242,9 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.uiSide__search {
-  box-sizing: border-box;
-  width: 100%;
-  height: 30px;
-  min-width: 0;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 500 11.5px/1 Arial, Helvetica, sans-serif;
-}
-.uiSide__search:hover,
-.uiSide__search:focus { border-color: var(--buttonBorderHover); }
-.uiSide__search:focus-visible { box-shadow: var(--ring); }
+/* The head's search field: the .uiSearch look (Components: search), full
+   width. */
+.uiSide__search { width: 100%; }
 .uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .uiSide__drawerBar,
@@ -18614,39 +18578,30 @@ body {
   padding: 0.55rem 0.6rem 0.4rem;
 }
 
+/* The library's search: the .uiSearch look on the box that holds its icon. */
 .qlSearch {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  height: 1.95rem;
-  padding: 0 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 0.6rem;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
   background: var(--inputBg);
   color: var(--muted);
 }
 
-.qlSearch:focus-within {
-  border-color: var(--accentBorder);
-  box-shadow: var(--ring);
-}
+.qlSearch:hover { border-color: var(--buttonBorderHover); }
+.qlSearch:focus-within { border-color: var(--accentBorder); }
 
-.qlSearch__input {
+.qlSearch > .qlSearch__input {
   flex: 1 1 auto;
-  min-width: 0;
   height: 100%;
+  padding: 0;
   border: 0;
-  outline: 0;
   background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.75rem;
-}
-
-.qlSearch__input::placeholder {
-  color: var(--muted);
 }
 
 .ql__actions {
@@ -19668,3 +19623,28 @@ button:not(.is-loading) > .uiSpin { display: none; }
   .uiSpin { animation-duration: 2.4s; }
 }
 /* ==== /Components: state ================================================== */
+
+/* ==== Components: search ==================================================
+   ns.search (app_ui_search.js): every search and filter field. One look;
+   a toolbar may set the height (the Explorer's, beside its 34px selects). */
+.uiSearch {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.uiSearch::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+.uiSearch:hover { border-color: var(--buttonBorderHover); }
+.uiSearch:focus { border-color: var(--accentBorder); }
+/* In a dense bar (the trace view bar, the trace logs panel). */
+.uiSearch--compact { height: 24px; font-size: 11px; }
+/* In a side panel head (ns.sidePanel): as tall as every side panel's field. */
+.uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }
+/* ==== /Components: search ================================================= */

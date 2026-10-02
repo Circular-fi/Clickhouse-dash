@@ -12,7 +12,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const VIEW_STORE_KEY = "chdash.results.view";
+  const viewPref = () => ns.storage.pref(ns.storage.KEYS.resultsView, "table", { allowed: ["table", "chart"] });
   // Coloured series slots (--qchart-1..8); further groups fold into "Other".
   const MAX_SERIES = 8;
   const PLOT_HEIGHT = 300;
@@ -34,19 +34,11 @@
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
 
   function readStoredView() {
-    try {
-      return window.localStorage.getItem(VIEW_STORE_KEY) === "chart" ? "chart" : "table";
-    } catch {
-      return "table";
-    }
+    return viewPref().get();
   }
 
   function storeView(view) {
-    try {
-      window.localStorage.setItem(VIEW_STORE_KEY, view === "chart" ? "chart" : "table");
-    } catch {
-      // Storage may be unavailable (private mode); the panel keeps its view.
-    }
+    viewPref().set(view === "chart" ? "chart" : "table");
   }
 
   // --- Chart engine (lazy) ---------------------------------------------------

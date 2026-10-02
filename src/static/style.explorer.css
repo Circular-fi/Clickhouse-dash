@@ -1960,8 +1960,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 #queryWorkspace[hidden] {
   display: none !important;
 }
-.explorerSelect,
-.explorerSearch input {
+.explorerSelect {
   min-height: 34px;
   border: 1px solid var(--buttonBorder);
   border-radius: 9px;
@@ -1981,10 +1980,9 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 }
 .explorerSearch input {
   width: 100%;
-  padding: 0 10px;
+  height: 34px;
 }
-.explorerSelect:focus,
-.explorerSearch input:focus {
+.explorerSelect:focus {
   border-color: var(--accentBorder);
   box-shadow: var(--ring);
 }
@@ -4217,6 +4215,43 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   --obs-shadow-drawer: -12px 0 32px rgba(0, 0, 0, 0.28);
   --obs-shadow-sheet: 0 -14px 36px rgba(0, 0, 0, 0.32);
 }
+.traceResult {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--rowDivider);
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.traceResult:hover { background: var(--rowHover); }
+.traceResult.is-active { border-left-color: var(--accentBorder); background: color-mix(in srgb, var(--accentBorder) 9%, transparent); }
+.traceResult {
+  appearance: none;
+  width: 100%;
+  min-height: 90px;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--rowDivider);
+  border-left: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.traceResult:hover,
+.traceResult:focus-visible { background: var(--rowHover); }
+@media (max-width: 760px) {
+  .traceResult { grid-template-columns: 70px minmax(0, 1fr); }
+}
 .tracePicker {
   width: 100%;
   min-width: 0;
@@ -4729,6 +4764,16 @@ html[data-theme="light"] {
 [data-sev="debug"] { --sev-color: var(--sev-debug); }
 [data-sev="trace"],
 [data-sev="unset"] { --sev-color: var(--sev-trace); }
+.traceLogsPanel {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-height: min(44vh, 460px);
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--panelBg);
+}
+.traceLog { min-width: 0; border-bottom: 1px solid var(--rowDivider); }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
 @keyframes obsBarPulse { 50% { opacity: .45; } }
 :root {
@@ -4747,6 +4792,11 @@ html[data-theme="light"] {
     --trace-heat-5: #2a78d6; --trace-heat-6: #256abf; --trace-heat-7: #184f95; --trace-heat-8: #0d366b;
     --trace-delta-selection: #c2570c; --trace-delta-baseline: #8b95a5;
   }
+}
+.traceSpanColumns {
+  width: 360px;
+  padding: 10px;
+  font-size: 12px;
 }
 :root {
   --exd-ok: #34d399;
@@ -6524,21 +6574,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.uiSide__search {
-  box-sizing: border-box;
-  width: 100%;
-  height: 30px;
-  min-width: 0;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 500 11.5px/1 Arial, Helvetica, sans-serif;
-}
-.uiSide__search:hover,
-.uiSide__search:focus { border-color: var(--buttonBorderHover); }
-.uiSide__search:focus-visible { box-shadow: var(--ring); }
+.uiSide__search { width: 100%; }
 .uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .uiSide__drawerBar,
@@ -6952,3 +6988,21 @@ button:not(.is-loading) > .uiSpin { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .uiSpin { animation-duration: 2.4s; }
 }
+.uiSearch {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.uiSearch::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
+.uiSearch:hover { border-color: var(--buttonBorderHover); }
+.uiSearch:focus { border-color: var(--accentBorder); }
+.uiSearch--compact { height: 24px; font-size: 11px; }
+.uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }

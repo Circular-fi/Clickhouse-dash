@@ -25,8 +25,8 @@
   };
   const EXEMPLAR_KINDS = new Set(["gauge", "sum", "histogram", "exponential_histogram"]);
 
-  const esc = (value) => String(value == null ? "" : value)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  // util.escapeHtml is the one escaper; null prints as "".
+  const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
   const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
   // The Metrics view of the Observability page (app_observability.js) writes
   // the location only while it is the shown view.
@@ -839,7 +839,7 @@
     renderPanelNote(panel);
 
     const stateEl = el.querySelector(".metricsChart__state");
-    el.querySelector(".metricsChart").classList.toggle("is-loading", panel.loading);
+    ns.uiState.busy(el.querySelector(".metricsChart"), panel.loading);
     const ui = ns.uiState;
     if (panel.loading && !data) {
       stateEl.hidden = false;
@@ -1200,7 +1200,8 @@
     });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);
     const search = document.getElementById("metricsSearch");
-    search?.addEventListener("input", () => { model.search = search.value; renderCatalog(); });
+    // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
+    ns.search.bind(search, (value) => { model.search = value; renderCatalog(); });
     search?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();

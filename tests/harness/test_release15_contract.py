@@ -68,10 +68,11 @@ def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     for chip in ['explorerFilterTables', 'explorerFilterViews', 'explorerFilterMv', 'explorerFilterDict', 'explorerFilterSystem']:
         assert f'id="{chip}"' in html
     assert 'class="explorerFilterChip"' in html and 'aria-pressed=' in html
-    assert 'chdash.explorer.includeSystem' in ui
-    assert 'chdash.explorer.typeFilters.v1' in ui
+    keys = read("src/static/app_state.js")
+    assert 'explorerIncludeSystem: "chdash.explorer.includeSystem",' in keys and "KEYS.explorerIncludeSystem" in ui
+    assert 'explorerTypeFilters: "chdash.explorer.typeFilters.v1",' in keys and "KEYS.explorerTypeFilters" in ui
     # The former "Include non-storing objects" off state still hides Views and MVs.
-    assert 'localStorage.getItem("chdash.explorer.includeNonStoring") === "0"' in ui
+    assert "ns.storage.pref(KEYS.explorerIncludeNonStoring, true).get() === false" in ui
     assert 'if (!model.includeSystem' in ui
     assert 'return model.filters[filterKindOf(table)] !== false;' in ui
 

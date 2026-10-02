@@ -61,7 +61,8 @@ def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_c
     assert "precision <= 9" in encoder and "it.get<int32_t>()" in encoder
     assert "precision <= 18" in encoder and "it.get<int64_t>()" in encoder
     assert "it.get<clickhouse::Int128>()" in encoder
-    assert 'sessionStorage.setItem("chdash.editor.draft.v2", text);' in ui
+    assert 'ns.storage.pref(ns.storage.KEYS.editorDraft, "", { session: true }).set(text);' in ui
+    assert 'editorDraft: "chdash.editor.draft.v2",' in read("src/static/app_state.js")
     assert 'window.location.assign(appRoute("/query"));' in ui
     assert 'filter((column) => column?.is_subcolumn !== true)' in ui
 

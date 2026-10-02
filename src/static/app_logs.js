@@ -291,11 +291,8 @@
     });
   }
 
-  let filterSearchTimer = 0;
-  function scheduleFilterSearch() {
-    clearTimeout(filterSearchTimer);
-    filterSearchTimer = setTimeout(() => { void search({ push: true }); }, 350);
-  }
+  // Picker changes (service checkboxes) search once the clicks pause: the one search delay.
+  const scheduleFilterSearch = util.debounce(() => { void search({ push: true }); });
 
   async function loadServiceChoices(range) {
     const req = util.latest("logs.services");
@@ -449,8 +446,8 @@
       collapsedClass: "chdash-logs-facets-collapsed",
       // A phone: the panel is a drawer, toggled from the top of the records.
       drawerHost: document.querySelector(".logsSearchMain"),
-      collapsedStoreKey: "chdash.logsFacetsCollapsed.v1",
-      pinStoreKey: "chdash.logsFacetPins.v1",
+      collapsedStoreKey: ns.storage.KEYS.logsFacetsCollapsed,
+      pinStoreKey: ns.storage.KEYS.logsFacetPins,
       label: "fields",
       noun: ["log", "logs"],
       scopes: {
@@ -721,7 +718,7 @@
     }
     if (message === "error") {
       messageBox.hidden = false;
-      messageBox.innerHTML = failedHtml("The search failed", error, "search");
+      messageBox.innerHTML = failedHtml("Search failed", error, "search");
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
@@ -965,7 +962,7 @@
       const node = document.querySelector(`[data-sev-count="${sev}"]`);
       if (node) node.textContent = h ? fmt.compact(h.totals?.[sev] || 0) : "";
     }
-    box.classList.toggle("is-loading", model.histogramLoading && !!h);
+    ns.uiState.busy(box, model.histogramLoading && !!h);
     if (model.histogramLoading && !h) {
       histogramMessage(box, "Loading volume\u2026");
       if (total) total.textContent = fmt.EMPTY;
@@ -1080,7 +1077,7 @@
       return;
     }
     if (model.patternsError) {
-      box.innerHTML = failedHtml("The patterns could not be mined", model.patternsError, "patterns");
+      box.innerHTML = failedHtml("Patterns failed", model.patternsError, "patterns");
       return;
     }
     const p = model.patterns;

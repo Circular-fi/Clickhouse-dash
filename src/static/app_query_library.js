@@ -25,10 +25,10 @@
 
   const { dom, state, storage, util } = ns;
 
-  const LOCAL_KEY = "chdash.queryLibrary.v2";
-  const LEGACY_KEY = storage.SAVED_QUERIES_STORAGE_KEY || "chdash.savedQueries.v1";
-  const UI_KEY = "chdash.queryLibrary.ui.v1";
-  const IMPORT_OFFER_KEY = "chdash.queryLibrary.importOffer.v1";
+  const LOCAL_KEY = storage.KEYS.queryLibrary;
+  const LEGACY_KEY = storage.KEYS.savedQueries;
+  const UI_KEY = storage.KEYS.queryLibraryUi;
+  const IMPORT_OFFER_KEY = storage.KEYS.queryLibraryImportOffer;
   const API_BASE = "api/query-library";
   const MAX_DEPTH = 8;
   const MAX_NAME_CHARS = 200;
@@ -38,7 +38,6 @@
   const HISTORY_PAGE = 100;
   const PROMPT_SQL_CHARS = 4000;
   const PANE_SQL_CHARS = 20000;
-  const SEARCH_DEBOUNCE_MS = 160;
   const SERVER_RELOAD_AFTER_MS = 30000;
   const ELLIPSIS = "\u2026";
   const MIDDOT = " · ";
@@ -112,23 +111,13 @@
   }
 
   function readJson(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return fallback;
-      const value = JSON.parse(raw);
-      return value == null ? fallback : value;
-    } catch {
-      return fallback;
-    }
+    const value = storage.pref(key, null, { json: true }).get();
+    return value == null ? fallback : value;
   }
 
+  // false when the browser refused the write (quota, private mode).
   function writeJson(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch {
-      return false;
-    }
+    return storage.pref(key, null, { json: true }).set(value);
   }
 
   function hostExists(hostId) {
@@ -1189,40 +1178,25 @@
     root.appendChild(wrap);
     Object.assign(libraryEls, { root, wrap, input, actions, newFolder, save, notice, tree, foot });
 
-    let searchTimer = 0;
-    input.addEventListener("input", () => {
-      if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        ctl.search = input.value;
-        renderTree();
-      }, SEARCH_DEBOUNCE_MS);
+    // ns.search: the one delay; Enter (before the handler below) and Escape (a
+    // filled field) apply the field at once.
+    const searchField = ns.search.bind(input, (value) => {
+      ctl.search = value;
+      renderTree();
     });
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "ArrowDown") {
         ev.preventDefault();
-        if (searchTimer) {
-          clearTimeout(searchTimer);
-          searchTimer = 0;
-          ctl.search = input.value;
-          renderTree();
-        }
+        searchField.flush();
         select("saved", treeItems()[0]);
       } else if (ev.key === "Enter") {
         // The first query found, in the preview.
         ev.preventDefault();
-        ctl.search = input.value;
-        renderTree();
         const first = treeItems().find((li) => li.dataset.kind === "query");
         if (first) {
           select("saved", first);
           enterPreview();
         }
-      } else if (ev.key === "Escape" && input.value) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        input.value = "";
-        ctl.search = "";
-        renderTree();
       }
     });
     newFolder.addEventListener("click", () => {
@@ -2074,24 +2048,14 @@
     root.appendChild(wrap);
     Object.assign(historyEls, { root, input, clear, list, more, foot });
 
-    let timer = 0;
-    input.addEventListener("input", () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        ctl.historyState.q = input.value.trim();
-        loadHistory();
-      }, ctl.history?.kind === "server" ? 260 : SEARCH_DEBOUNCE_MS);
+    ns.search.bind(input, (value) => {
+      ctl.historyState.q = String(value || "").trim();
+      loadHistory();
     });
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "ArrowDown") {
         ev.preventDefault();
         select("history", historyItems()[0]);
-      } else if (ev.key === "Escape" && input.value) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        input.value = "";
-        ctl.historyState.q = "";
-        loadHistory();
       }
     });
     clear.addEventListener("click", clearHistory);

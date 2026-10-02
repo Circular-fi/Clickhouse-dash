@@ -25,7 +25,7 @@
   // Pages a sparse filter may answer empty (a time budget stop) before the
   // table asks instead of searching further on its own.
   const AUTO_EMPTY_PAGES = 3;
-  const COLUMNS_STORE_KEY = "chdash.traceSpanColumns.v1";
+  const columnsPref = () => ns.storage.pref(ns.storage.KEYS.traceSpanColumns, []);
   // OTel span kinds; both spellings exporters write are sent.
   const KINDS = ["Server", "Client", "Producer", "Consumer", "Internal"];
 
@@ -79,20 +79,16 @@
   }
 
   function readColumns() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(COLUMNS_STORE_KEY) || "[]");
-      if (!Array.isArray(saved)) return [];
-      return saved
-        .filter((item) => item && typeof item.key === "string" && item.key && ["span", "resource", "any"].includes(item.scope))
-        .slice(0, MAX_COLUMNS)
-        .map((item) => ({ scope: item.scope, key: item.key }));
-    } catch (_) {
-      return [];
-    }
+    const saved = columnsPref().get();
+    if (!Array.isArray(saved)) return [];
+    return saved
+      .filter((item) => item && typeof item.key === "string" && item.key && ["span", "resource", "any"].includes(item.scope))
+      .slice(0, MAX_COLUMNS)
+      .map((item) => ({ scope: item.scope, key: item.key }));
   }
 
   function saveColumns() {
-    try { localStorage.setItem(COLUMNS_STORE_KEY, JSON.stringify(state.columns)); } catch (_) { /* optional */ }
+    columnsPref().set(state.columns);
   }
 
   // ---------------------------------------------------------- URL state

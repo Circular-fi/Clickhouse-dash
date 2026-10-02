@@ -398,7 +398,7 @@
     const pane = byId("traceMapPane");
     if (!root) return;
     const hasGraph = !!map.data && map.data.nodes.length > 0;
-    pane?.classList.toggle("is-loading", map.loading);
+    ns.uiState.busy(pane, map.loading);
     byId("traceMapView")?.setAttribute("aria-busy", map.loading ? "true" : "false");
     let html = "";
     if (map.loading) {

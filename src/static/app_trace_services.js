@@ -305,7 +305,7 @@
     let body;
     if (view.error && !payload) body = failedHtml(view.error, "list");
     else if (!payload) body = view.loading ? ns.uiState.loadingHtml({ label: "Loading services\u2026" }) : emptyHtml("Search to load services.");
-    else if (!count) body = emptyHtml(`No ${view.scope === "root" ? "trace starts" : "service requests"} match the search in this range.`, { title: "No services in this time range" });
+    else if (!count) body = emptyHtml(`No ${view.scope === "root" ? "root" : "entry"} spans match in this range.`);
     else body = tableHtml(rows);
     releaseDetailCharts();
     // A re-render (Back / Forward, a new answer) keeps the focus on its row.
@@ -512,7 +512,7 @@
     let body;
     if (detail.error) body = failedHtml(detail.error, "detail");
     else if (!payload) body = ns.uiState.loadingHtml({ label: "Loading the service\u2026" });
-    else if (!row) body = emptyHtml("This service handled no requests matching the search in this range.");
+    else if (!row) body = emptyHtml("No entry spans of this service match in this range.");
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">

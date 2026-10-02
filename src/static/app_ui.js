@@ -546,7 +546,7 @@
   // History. The dialog is built the first time it opens; app_query_library.js
   // renders both views and is loaded then (or when Ctrl+S is used): a page
   // that never opens it costs no module and no dialog.
-  const QUERY_LIBRARY_PREFS_KEY = "chdash.queryLibraryMenu.v1";
+  const queryLibraryPrefs = () => storage.pref(storage.KEYS.queryLibraryMenu, {});
   // modules.json pages.query.lazy.library.
   const QUERY_LIBRARY_GROUP = "library";
   let queryLibraryPromise = null;
@@ -555,20 +555,12 @@
   let queryLibraryTabs = null;
 
   function readQueryLibraryPrefs() {
-    try {
-      const value = JSON.parse(localStorage.getItem(QUERY_LIBRARY_PREFS_KEY) || "null");
-      return value && typeof value === "object" ? value : {};
-    } catch {
-      return {};
-    }
+    const value = queryLibraryPrefs().get();
+    return value && typeof value === "object" ? value : {};
   }
 
   function writeQueryLibraryPrefs(patch) {
-    try {
-      localStorage.setItem(QUERY_LIBRARY_PREFS_KEY, JSON.stringify({ ...readQueryLibraryPrefs(), ...patch }));
-    } catch {
-      return;
-    }
+    queryLibraryPrefs().set({ ...readQueryLibraryPrefs(), ...patch });
   }
 
   function isPhoneLayout() {
@@ -802,23 +794,10 @@
   function initEditor() {
     if (!dom.queryTextArea) return;
 
-    const editorDraftKey = "chdash.editor.draft.v2";
-
-    const loadEditorDraft = () => {
-      try {
-        return sessionStorage.getItem(editorDraftKey);
-      } catch {
-        return null;
-      }
-    };
-
-    const saveEditorDraft = (text) => {
-      try {
-        sessionStorage.setItem(editorDraftKey, String(text || ""));
-      } catch {
-        null;
-      }
-    };
+    // The session draft, also written by the Explorer's "Open in Query".
+    const draftPref = storage.pref(storage.KEYS.editorDraft, null, { session: true });
+    const loadEditorDraft = () => draftPref.get();
+    const saveEditorDraft = (text) => draftPref.set(String(text || ""));
 
     const dispatchInputEvent = (el) => {
       if (!el || typeof el.dispatchEvent !== "function") return;

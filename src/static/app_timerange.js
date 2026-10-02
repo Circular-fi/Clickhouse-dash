@@ -10,10 +10,12 @@
 
   const UNITS = "yMwdhms";
   const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
-  const RECENT_KEY = "chdash.traceTimeRanges.v1";
+  // The recently used ranges (ns.storage, read when used).
+  const recentPref = () => window.ChDash.storage.pref(window.ChDash.storage.KEYS.traceTimeRanges, []);
   const RECENT_LIMIT = 2;
   const pad = (value, width = 2) => String(value).padStart(width, "0");
-  const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // util.escapeHtml is the one escaper; null prints as "".
+  const esc = (value) => window.ChDash.util.escapeHtml(value == null ? "" : value);
 
   // --- Date math (Grafana @grafana/data datemath.ts semantics) -------------
 
@@ -232,17 +234,13 @@
   // --- Recently used ranges ---------------------------------------------------
 
   function loadRecent() {
-    try {
-      const items = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
-      return Array.isArray(items) ? items.filter((item) => item && typeof item.from === "string" && typeof item.to === "string").slice(0, RECENT_LIMIT) : [];
-    } catch (_) {
-      return [];
-    }
+    const items = recentPref().get();
+    return Array.isArray(items) ? items.filter((item) => item && typeof item.from === "string" && typeof item.to === "string").slice(0, RECENT_LIMIT) : [];
   }
 
   function saveRecent(raw) {
     const items = [{ from: raw.from, to: raw.to }, ...loadRecent().filter((item) => !sameRange(item, raw))].slice(0, RECENT_LIMIT);
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify(items)); } catch (_) { /* storage may be unavailable */ }
+    recentPref().set(items);
     return items;
   }
 
@@ -633,7 +631,8 @@
 
     applyButton.addEventListener("click", applyForm);
 
-    quickSearch.addEventListener("input", renderLists);
+    // A short local list: it follows every key (ArrowDown goes straight into it).
+    window.ChDash.search.bind(quickSearch, () => renderLists(), { debounceMs: 0 });
     quickSearch.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -690,7 +689,7 @@
             <button id="${p}CustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>
           </section>
           <section class="timeRangePanel__quick" aria-label="Quick ranges">
-            <input id="${p}QuickRangeSearch" class="timeRangePanel__search" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
+            <input id="${p}QuickRangeSearch" class="timeRangePanel__search uiSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search quick ranges" aria-label="Search quick ranges" />
             <div id="${p}QuickRanges" class="timeRangeList"></div>
           </section>
         </div>

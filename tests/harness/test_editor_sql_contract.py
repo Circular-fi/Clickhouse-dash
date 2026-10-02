@@ -45,6 +45,8 @@ global.window = {
     }
   }
 };
+// ns.storage (app_state.js) loads before the editor modules, as on the page.
+vm.runInThisContext(fs.readFileSync(process.argv[2], "utf8"), { filename: process.argv[2] });
 vm.runInThisContext(source, { filename: process.argv[1] });
 const tables = [{ database: "system", name: "tables" }];
 const meta = {
@@ -74,7 +76,7 @@ const results = queries.map((query) => window.ChDash.autocomplete.diagnose(query
 process.stdout.write(JSON.stringify(results));
 """
     completed = subprocess.run(
-        [NODE, "-e", node_script, str(script_path)],
+        [NODE, "-e", node_script, str(script_path), str(ROOT / "src" / "static" / "app_state.js")],
         check=True,
         capture_output=True,
         text=True,

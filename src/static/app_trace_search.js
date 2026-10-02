@@ -21,8 +21,8 @@
     "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
     "min_duration_ms", "max_duration_ms", "duration_view",
     "mode", "kind", "span_min_duration_ms", "span_max_duration_ms"];
-  const PIN_STORE_KEY = "chdash.traceFacetPins.v1";
-  const COLLAPSED_STORE_KEY = "chdash.traceFacetsCollapsed.v1";
+  const PIN_STORE_KEY = ns.storage.KEYS.traceFacetPins;
+  const COLLAPSED_STORE_KEY = ns.storage.KEYS.traceFacetsCollapsed;
 
   let ctx = null;
   const byId = (id) => document.getElementById(id);
@@ -556,7 +556,7 @@
         const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters), { signal });
         return {
           supported: payload?.supported !== false,
-          unsupportedText: "Attributes are not stored as Map columns.",
+          unsupportedText: "This trace table does not keep span attributes.",
           keys: (Array.isArray(payload?.keys) ? payload.keys : []).map((row) => ({ scope: String(row?.[0] || ""), key: String(row?.[1] || ""), count: Number(row?.[2] || 0) })),
           estimated: payload?.estimated === true,
           timedOut: payload?.timed_out === true,

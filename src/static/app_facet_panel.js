@@ -66,16 +66,12 @@
     };
 
     function readPins() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(o.pinStoreKey) || "[]");
-        return Array.isArray(saved) ? saved.filter((item) => Array.isArray(item) && item.length === 2).map(([scope, key]) => facetId(scope, key)) : [];
-      } catch (_) {
-        return [];
-      }
+      const saved = ns.storage.pref(o.pinStoreKey, []).get();
+      return Array.isArray(saved) ? saved.filter((item) => Array.isArray(item) && item.length === 2).map(([scope, key]) => facetId(scope, key)) : [];
     }
 
     function savePins() {
-      try { localStorage.setItem(o.pinStoreKey, JSON.stringify(state.pins.map((id) => { const { scope, key } = splitId(id); return [scope, key]; }))); } catch (_) { /* optional */ }
+      ns.storage.pref(o.pinStoreKey, []).set(state.pins.map((id) => { const { scope, key } = splitId(id); return [scope, key]; }));
     }
 
     // The panel shell (ns.sidePanel): the 32 px rail on wide windows (the
@@ -226,9 +222,10 @@
           : state.keys.length ? `Counted over all ${grouped(state.sampled)} matching ${many} of the range.` : "";
         meta.classList.toggle("is-estimated", state.estimated);
       }
-      if (!state.supported) { list.innerHTML = `<div class="traceFacets__empty">${esc(state.unsupportedText || `No ${o.label} to list.`)}</div>`; return; }
-      if (state.error) { list.innerHTML = `<div class="traceFacets__empty is-error" role="alert">${esc(state.error)} <button type="button" class="traceMiniButton" data-facets-retry>Retry</button></div>`; return; }
-      if (!state.filters) { list.innerHTML = `<div class="traceFacets__empty">Search to discover ${esc(o.label)}.</div>`; return; }
+      const ui = ns.uiState;
+      if (!state.supported) { list.innerHTML = ui.emptyHtml({ body: state.unsupportedText || `No ${o.label} to list.`, compact: true }); return; }
+      if (state.error) { list.innerHTML = ui.errorHtml({ body: state.error, compact: true, retry: { attrs: { "data-facets-retry": "" } } }); return; }
+      if (!state.filters) { list.innerHTML = ui.emptyHtml({ body: `Search to discover ${o.label}.`, compact: true }); return; }
       const query = state.query.trim().toLowerCase();
       const matches = (item) => !query || item.key.toLowerCase().includes(query);
       const known = new Map(state.keys.map((item) => [facetId(item.scope, item.key), item]));
@@ -236,7 +233,11 @@
       const rest = state.keys.filter((item) => !state.pins.includes(facetId(item.scope, item.key)) && matches(item));
       const shown = rest.slice(0, state.shown);
       if (!pinned.length && !rest.length) {
-        list.innerHTML = `<div class="traceFacets__empty">${state.loading ? `Loading ${esc(o.label)}\u2026` : query ? "No key matches." : `No ${esc(o.label)} in the matching ${esc(many)}.`}</div>`;
+        list.innerHTML = state.loading
+          ? ui.loadingHtml({ label: `Loading ${o.label}\u2026`, compact: true })
+          : query
+            ? ui.emptyHtml({ body: "No key matches.", compact: true, action: { label: "Clear the filter", attrs: { "data-facets-clear-query": "" } } })
+            : ui.emptyHtml({ body: `No ${o.label} in the matching ${many}.`, compact: true });
         return;
       }
       const more = rest.length > shown.length
@@ -250,11 +251,14 @@
       return section ? { scope: section.getAttribute("data-facet-scope") || "", key: section.getAttribute("data-facet-key") || "" } : null;
     }
 
+    let searchField = null;
+
     function onClick(event) {
       const target = event.target instanceof Element ? event.target : null;
       if (!target) return;
       if (target.closest("[data-facet-more-keys]")) { state.shown += KEYS_PAGE; render(); return; }
       if (target.closest("[data-facets-retry]")) { if (state.filters) void load(state.filters); return; }
+      if (target.closest("[data-facets-clear-query]")) { searchField?.clear(); byId("search")?.focus(); return; }
       const facet = facetOf(target);
       if (!facet) return;
       const id = facetId(facet.scope, facet.key);
@@ -307,7 +311,7 @@
 
     byId("list")?.addEventListener("click", onClick);
     byId("list")?.addEventListener("change", onChange);
-    byId("search")?.addEventListener("input", (event) => { state.query = String(event.target.value || ""); state.shown = KEYS_PAGE; render(); });
+    searchField = ns.search.bind(byId("search"), (value) => { state.query = String(value || ""); state.shown = KEYS_PAGE; render(); });
 
     return {
       load,

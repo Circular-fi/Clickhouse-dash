@@ -9,7 +9,7 @@
   if (!ns) return;
 
   const VIEWS = ["timeline", "graph", "statistics", "spans", "flamegraph"];
-  const STORAGE_KEY = "chdash.traceView";
+  const viewPref = () => ns.storage.pref(ns.storage.KEYS.traceView, "", { allowed: VIEWS });
   const SPANS_TABLE_LIMIT = 2000;
   const GRAPH_NODE_LIMIT = 1500;
   const FLAME_MIN_RATIO = 0.0005;
@@ -43,16 +43,11 @@
   }
 
   function readStoredView() {
-    try {
-      const value = localStorage.getItem(STORAGE_KEY);
-      return VIEWS.includes(value) ? value : "";
-    } catch (_) {
-      return "";
-    }
+    return viewPref().get();
   }
 
   function storeView(value) {
-    try { localStorage.setItem(STORAGE_KEY, value); } catch (_) { /* storage is optional */ }
+    viewPref().set(value);
   }
 
   function updateParams(mutate, { push = false } = {}) {
@@ -466,7 +461,7 @@
     const cache = derived().cache;
     const services = [...new Set(cache.spans.map((span) => String(span.service_name || "unknown")))].sort((a, b) => a.localeCompare(b));
     const tools = toolsFor("spans", () => [
-      `<label class="traceViewBar__field traceViewBar__field--search"><span class="traceViewBar__label">Filter</span><input id="traceSpansFilter" class="traceViewBar__input" type="search" placeholder="Service, operation or span ID" autocomplete="off" spellcheck="false"></label>`,
+      `<label class="traceViewBar__field traceViewBar__field--search"><span class="traceViewBar__label">Filter</span><input id="traceSpansFilter" class="traceViewBar__input uiSearch uiSearch--compact" type="search" placeholder="Service, operation or span ID" autocomplete="off" spellcheck="false"></label>`,
       pickerHtml("traceSpansService", "Service", [["", "All services"]], ""),
       pickerHtml("traceSpansStatus", "Status", [["", "Any status"], ["error", "Error"], ["ok", "Ok"], ["unset", "Unset"]], view.spans.status),
       '<span id="traceSpansCount" class="traceViewBar__count"></span>',
@@ -1319,7 +1314,7 @@
     if (graph.nodes.length > GRAPH_NODE_LIMIT) {
       alt.innerHTML = ns.uiState.emptyHtml({
         title: "Too many call paths to draw",
-        body: `This trace has ${graph.nodes.length} distinct call paths; the graph draws up to ${GRAPH_NODE_LIMIT}. The Timeline, Statistics and Spans views show every span.`,
+        body: `This trace has ${graph.nodes.length} distinct call paths: too many to draw (limit ${GRAPH_NODE_LIMIT}). The Timeline, Statistics and Spans views show every span.`,
       });
       return;
     }
@@ -1535,11 +1530,7 @@
       else return;
       render();
     });
-    tools?.addEventListener("input", (event) => {
-      if (!(event.target instanceof HTMLInputElement) || event.target.id !== "traceSpansFilter") return;
-      view.spans.text = event.target.value;
-      render();
-    });
+    ns.search.within(tools, "#traceSpansFilter", (value) => { view.spans.text = value; render(); }, { compact: true });
     tools?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-flame-reset]")) {
         view.flame.zoomKey = "";

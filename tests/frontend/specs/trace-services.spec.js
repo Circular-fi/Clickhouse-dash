@@ -171,8 +171,8 @@ test('estimated answers say so and can be computed exactly; empty and unsupporte
   expect(new URL(page.url()).searchParams.get('svc_exact')).toBe('1');
   await rows(page).filter({ hasText: 'orders' }).locator('.traceSvcRow__label').click();
   await expect(drawer(page).locator('.traceSvcDb')).toHaveCount(0);
-  await expect(drawer(page)).toContainText('No database spans');
-  await expect(drawer(page)).toContainText("No ResourceAttributes['service.version']");
+  await expect(drawer(page)).toContainText('No database calls');
+  await expect(drawer(page)).toContainText('No release version (service.version)');
   await expect(drawer(page).locator('.traceSvcRelease')).toHaveCount(0);
 
   // No matching service (the drawer closes first: it covers the toolbar).
@@ -190,7 +190,7 @@ test('estimated answers say so and can be computed exactly; empty and unsupporte
 test('the database statements tab reports an unsupported attribute schema', async ({ page }) => {
   await mockTraceServices(page, { dbSupported: false });
   await openServices(page, 'svc=frontend');
-  await expect(drawer(page)).toContainText('database statements are unavailable', { timeout: 30_000 });
+  await expect(drawer(page)).toContainText('Database statements are unavailable', { timeout: 30_000 });
 });
 
 // Screenshots (dark / light) and no page overflow at 1280 / 1440 / 1920.

@@ -70,13 +70,9 @@
     return node;
   }
 
-  function read(key) {
-    try { return localStorage.getItem(key); } catch (_) { return null; }
-  }
-
-  function write(key, value) {
-    try { localStorage.setItem(key, value); } catch (_) { /* optional */ }
-  }
+  // The remembered fold ("1" / "0"): storage.pref (app_state.js, loaded by
+  // the time a page mounts a panel).
+  const foldPref = (key) => ns.storage.pref(key, false);
 
   // ------------------------------------------------------------ side panel
 
@@ -114,14 +110,14 @@
       const next = !!value;
       if (collapse.rootClass) document.documentElement.classList.toggle(collapse.rootClass, next);
       else panel.classList.toggle("is-collapsed", next);
-      if (collapse.storeKey) write(collapse.storeKey, next ? "1" : "0");
+      if (collapse.storeKey) foldPref(collapse.storeKey).set(next);
       syncCollapse();
       collapse.onChange?.(next);
     }
 
     if (collapse) {
       // The remembered fold (a head script may have set the <html> class).
-      if (collapse.storeKey && read(collapse.storeKey) === "1") {
+      if (collapse.storeKey && foldPref(collapse.storeKey).get() === true) {
         if (collapse.rootClass) document.documentElement.classList.add(collapse.rootClass);
         else panel.classList.add("is-collapsed");
       }

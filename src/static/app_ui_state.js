@@ -71,7 +71,7 @@
     const actions = actionsOf(options);
     const buttons = actions.length ? `<div class="uiState__actions">${actions.map(actionHtml).join("")}</div>` : "";
     const cls = `uiState uiState--${kind}${options.compact ? " uiState--compact" : ""}${options.className ? ` ${esc(options.className)}` : ""}`;
-    const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status"' : "";
+    const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : "";
     const lead = kind === "loading" ? SPINNER : "";
     return `<div class="${cls}"${role}${attrsHtml(options.attrs)}>${lead}${title}${body}${buttons}</div>`;
   }

@@ -14,7 +14,7 @@
   const fmt = ns.format;
   const palette = ns.palette;
 
-  const PANEL_OPEN_KEY = "chdash.traceLogs.panelOpen";
+  const panelOpenPref = () => ns.storage.pref(ns.storage.KEYS.traceLogsPanelOpen, false);
   const PANEL_PAGE = 300;
   const INLINE_LIMIT = 100;
   const INLINE_LINE_PX = 22;
@@ -47,11 +47,11 @@
   const cssEscape = (value) => (window.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&"));
 
   function readPanelOpen() {
-    try { return localStorage.getItem(PANEL_OPEN_KEY) === "1"; } catch (_) { return false; }
+    return panelOpenPref().get();
   }
 
   function storePanelOpen(open) {
-    try { localStorage.setItem(PANEL_OPEN_KEY, open ? "1" : "0"); } catch (_) { /* storage is optional */ }
+    panelOpenPref().set(!!open);
   }
 
   function logsFeatureEnabled() {
@@ -395,7 +395,7 @@
     const openInLogs = logsUrl ? `<a class="traceLogsPanel__open" href="${esc(logsUrl)}" data-trace-logs-open title="Search these logs in the Logs view">Open in Logs</a>` : "";
     const elapsed = Number(v.payload?.elapsed_ms);
     const source = v.payload ? `${v.payload.database}.${v.payload.table}${Number.isFinite(elapsed) ? ` · ${fmt.duration.fromMs(elapsed)}` : ""}` : "";
-    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
+    return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter uiSearch uiSearch--compact" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
   }
 
   function panelListHtml(v) {
@@ -739,12 +739,11 @@
       view.shown = PANEL_PAGE;
       renderPanelList();
     });
-    panel?.addEventListener("input", (event) => {
-      if (!(event.target instanceof HTMLInputElement) || event.target.id !== "traceLogsFilter") return;
-      view.filters.text = event.target.value;
+    ns.search.within(panel, "#traceLogsFilter", (value) => {
+      view.filters.text = value;
       view.shown = PANEL_PAGE;
       renderPanelList();
-    });
+    }, { compact: true });
     byId("traceDetailStats")?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-trace-logs-toggle]")) togglePanel();
     });

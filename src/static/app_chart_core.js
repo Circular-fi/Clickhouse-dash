@@ -35,7 +35,7 @@
   const DRAG_MIN_PX = 4;
   const POINTS_AUTO_SPACING = 12;
   const MAX_CATEGORY_CHARS = 18;
-  const LEGEND_STORE_KEY = "chdash.chart.legendMode";
+  const LEGEND_STORE_KEY = ns.storage.KEYS.chartLegend;
 
   // --- Numbers ----------------------------------------------------------------
 
@@ -339,15 +339,17 @@
     return lo;
   }
 
-  const esc = (value) => String(value == null ? "" : value)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // util.escapeHtml is the one escaper; null prints as "".
+  const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
+
+  const legendPref = () => ns.storage.pref(LEGEND_STORE_KEY, "list", { allowed: ["list", "table"] });
 
   function readLegendMode() {
-    try { return window.localStorage.getItem(LEGEND_STORE_KEY) === "table" ? "table" : "list"; } catch { return "list"; }
+    return legendPref().get();
   }
 
   function storeLegendMode(mode) {
-    try { window.localStorage.setItem(LEGEND_STORE_KEY, mode); } catch { /* the chart keeps its mode */ }
+    legendPref().set(mode);
   }
 
   // --- Gap bridging (Metrics) --------------------------------------------------
@@ -1495,6 +1497,8 @@
       const st = s && stacks && stacks.get(s.id);
       const py = s ? L.yOf(st ? st.top[i] : s.values[i]) : L.top + L.plotH / 2;
       moveCursor({ px, py });
+      // A hover readout is not announced; the keyboard cursor's is (one polite region).
+      if (!tooltipEl.hidden) ns.uiState?.announce?.(tooltipEl.textContent);
     });
     overCanvas.addEventListener("blur", () => { if (!drag) leaveCursor(); });
     document.addEventListener("keydown", onKey, true);

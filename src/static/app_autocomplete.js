@@ -33,36 +33,21 @@
   let lastUpdateKey = "";
   let ghostFrame = 0;
   let ghostKey = "";
-  const autocompleteStorageKey = "chdash.autocomplete.enabled";
-  const autocompletePartialStorageKey = "chdash.autocomplete.partial_match.enabled";
-  const copyButtonStorageKey = "chdash.editor.copy_button.enabled";
-  const lineNumbersStorageKey = "chdash.editor.line_numbers.enabled";
-  const warningsStorageKey = "chdash.editor.warnings.enabled";
-  const warningTablesStorageKey = "chdash.editor.warnings.tables.enabled";
-  const warningFunctionsStorageKey = "chdash.editor.warnings.functions.enabled";
-  const warningColumnsStorageKey = "chdash.editor.warnings.columns.enabled";
-  const legacyWarningsStorageKeys = ["chdash.editor.reference_diagnostics.enabled"];
-  const legacyAutocompletePartialStorageKeys = ["chdash.autocomplete.fuzzy_matching.enabled", "chdash.autocomplete.contains_matches.enabled"];
+  // The editor switches: "true" / "false" in storage (ns.storage.KEYS), the
+  // older names read once and moved.
+  const KEYS = ns.storage.KEYS;
+  const autocompleteStorageKey = KEYS.autocomplete;
+  const autocompletePartialStorageKey = KEYS.autocompletePartial;
+  const copyButtonStorageKey = KEYS.editorCopyButton;
+  const lineNumbersStorageKey = KEYS.editorLineNumbers;
+  const warningsStorageKey = KEYS.editorWarnings;
+  const warningTablesStorageKey = KEYS.editorWarningTables;
+  const warningFunctionsStorageKey = KEYS.editorWarningFunctions;
+  const warningColumnsStorageKey = KEYS.editorWarningColumns;
+  const legacyWarningsStorageKeys = KEYS.editorWarningsLegacy;
+  const legacyAutocompletePartialStorageKeys = KEYS.autocompletePartialLegacy;
   function loadStoredBoolWithLegacy(key, legacyKeys, fallback = true) {
-    try {
-      if (window.localStorage) {
-        const raw = window.localStorage.getItem(key);
-        if (raw != null) return raw !== "false" && raw !== "0";
-
-        const keys = Array.isArray(legacyKeys) ? legacyKeys : (legacyKeys ? [legacyKeys] : []);
-        for (const legacyKey of keys) {
-          const legacyRaw = window.localStorage.getItem(legacyKey);
-          if (legacyRaw != null) {
-            const value = legacyRaw !== "false" && legacyRaw !== "0";
-            window.localStorage.setItem(key, value ? "true" : "false");
-            return value;
-          }
-        }
-      }
-    } catch {
-      // ignore storage failures; fallback applies.
-    }
-    return fallback;
+    return ns.storage.pref(key, fallback, { text: true, legacy: legacyKeys }).get();
   }
   let autocompleteEnabled = loadStoredBool(autocompleteStorageKey, true);
   let autocompletePartialEnabled = loadStoredBoolWithLegacy(autocompletePartialStorageKey, legacyAutocompletePartialStorageKeys, false);
@@ -85,20 +70,11 @@
   let pointerTrackingBound = false;
 
   function loadStoredBool(key, fallback = true) {
-    try {
-      const raw = window.localStorage ? window.localStorage.getItem(key) : null;
-      return raw == null ? fallback : raw !== "false" && raw !== "0";
-    } catch {
-      return fallback;
-    }
+    return ns.storage.pref(key, fallback, { text: true }).get();
   }
 
   function saveStoredBool(key, value) {
-    try {
-      if (window.localStorage) window.localStorage.setItem(key, value ? "true" : "false");
-    } catch {
-      // ignore storage failures; runtime state still applies.
-    }
+    ns.storage.pref(key, true, { text: true }).set(!!value);
   }
 
   function isAutocompleteEnabled() {
@@ -2801,8 +2777,7 @@
     const raw = String(text || "");
     if (!raw) return "";
     if (ns.highlight && typeof ns.highlight.toHtml === "function") return ns.highlight.toHtml(raw);
-    if (ns.util && typeof ns.util.escapeHtml === "function") return ns.util.escapeHtml(raw);
-    return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return ns.util.escapeHtml(raw);
   }
 
   function setHighlightedText(node, text) {

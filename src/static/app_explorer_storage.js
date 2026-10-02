@@ -29,7 +29,8 @@
   const STORAGE_CLIENT_TTL_MS = 30000;
   const TABLE_CLIENT_TTL_MS = 30000;
   const TREEMAP_MIN_ITEMS = 3;
-  const INCLUDE_SYSTEM_KEY = "chdash.explorer.includeSystem";
+  // The Explorer's "System" chip (app_explorer.js writes it).
+  const INCLUDE_SYSTEM_KEY = ns.storage.KEYS.explorerIncludeSystem;
   const DASH = ns.format.EMPTY;
 
   const data = {
@@ -380,7 +381,7 @@
   // stored chip state.
   function includeSystemOption() {
     if (typeof view?.options?.includeSystem === "boolean") return view.options.includeSystem;
-    try { return localStorage.getItem(INCLUDE_SYSTEM_KEY) === "1"; } catch { return false; }
+    return ns.storage.pref(INCLUDE_SYSTEM_KEY, false).get();
   }
 
   function effectiveIncludeSystem() {

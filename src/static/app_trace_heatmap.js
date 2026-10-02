@@ -13,7 +13,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const MODE_KEY = "chdash.traceDurationView.v1";
+  const modePref = () => ns.storage.pref(ns.storage.KEYS.traceDurationView, "percentiles", { allowed: MODES });
   const MODES = ["percentiles", "heatmap"];
   const HEAT_LEVELS = 8;
   const byId = (id) => document.getElementById(id);
@@ -37,14 +37,11 @@
   const deltas = { data: null, loading: false, error: "", baseline: "outside" };
 
   function readMode() {
-    try {
-      const value = localStorage.getItem(MODE_KEY);
-      return MODES.includes(value) ? value : "percentiles";
-    } catch { return "percentiles"; }
+    return modePref().get();
   }
 
   function storeMode(mode) {
-    try { localStorage.setItem(MODE_KEY, mode); } catch { /* storage may be unavailable */ }
+    modePref().set(mode);
   }
 
   const esc = (value) => ctx.esc(value);
@@ -507,7 +504,7 @@
     const keys = Array.isArray(data.keys) ? data.keys : [];
     if (!keys.length) {
       const hidden = (data.hidden_keys || []).length;
-      return ui.emptyHtml({ body: `No attribute sets these traces apart from the baseline${hidden ? ` (${hidden} key${hidden === 1 ? "" : "s"} with a different value on almost every trace skipped)` : ""}.`, compact: true });
+      return ui.emptyHtml({ body: `No attribute sets these traces apart from the baseline${hidden ? ` (${hidden} identifier or high-cardinality key${hidden === 1 ? "" : "s"} skipped)` : ""}.`, compact: true });
     }
     return `<div class="traceDeltaGrid">${keys.map(cardHtml).join("")}</div>`;
   }

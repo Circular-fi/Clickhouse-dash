@@ -16,7 +16,7 @@
   if (!ns) return;
 
   const AUTO_REFRESH_MS = 5000;
-  const AUTO_REFRESH_KEY = "chdash.explorer.opsAutoRefresh";
+  const autoRefreshPref = () => ns.storage.pref(ns.storage.KEYS.explorerOpsAutoRefresh, false);
   // Formats from ns.format (docs/ui-foundations.md): durations "2 h 5 min",
   // "1.82 ms"; counts "120,064"; server times in the browser's zone.
   const format = ns.format;
@@ -47,11 +47,11 @@
   }
 
   function readAutoRefresh() {
-    try { return localStorage.getItem(AUTO_REFRESH_KEY) === "1"; } catch { return false; }
+    return autoRefreshPref().get();
   }
 
   function writeAutoRefresh(value) {
-    try { localStorage.setItem(AUTO_REFRESH_KEY, value ? "1" : "0"); } catch {}
+    autoRefreshPref().set(!!value);
   }
 
   // ---------------------------------------------------------------------------

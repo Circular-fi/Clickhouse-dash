@@ -744,7 +744,7 @@
   }
 
   const TYPE_FILTERS = ["tables", "views", "mv", "dict"];
-  const TYPE_FILTER_STORAGE_KEY = "chdash.explorer.typeFilters.v1";
+  const KEYS = ns.storage.KEYS;
 
   function filterKindOf(table) {
     const key = engineKey(table);
@@ -778,25 +778,21 @@
   }
 
   function persistVisibilityOptions() {
-    try {
-      localStorage.setItem("chdash.explorer.includeSystem", model.includeSystem ? "1" : "0");
-      localStorage.setItem(TYPE_FILTER_STORAGE_KEY, TYPE_FILTERS.filter((key) => model.filters[key] !== false).join(","));
-    } catch {}
+    ns.storage.pref(KEYS.explorerIncludeSystem, false).set(model.includeSystem);
+    ns.storage.pref(KEYS.explorerTypeFilters, "").set(TYPE_FILTERS.filter((key) => model.filters[key] !== false).join(","));
   }
 
   function loadVisibilityOptions() {
-    try {
-      model.includeSystem = localStorage.getItem("chdash.explorer.includeSystem") === "1";
-      const stored = localStorage.getItem(TYPE_FILTER_STORAGE_KEY);
-      if (stored != null) {
-        const enabled = new Set(String(stored).split(",").filter(Boolean));
-        for (const key of TYPE_FILTERS) model.filters[key] = enabled.has(key);
-      } else if (localStorage.getItem("chdash.explorer.includeNonStoring") === "0") {
-        // Former "Include non-storing objects" switch.
-        model.filters.views = false;
-        model.filters.mv = false;
-      }
-    } catch {}
+    model.includeSystem = ns.storage.pref(KEYS.explorerIncludeSystem, false).get();
+    const stored = ns.storage.pref(KEYS.explorerTypeFilters, null).get();
+    if (stored != null) {
+      const enabled = new Set(String(stored).split(",").filter(Boolean));
+      for (const key of TYPE_FILTERS) model.filters[key] = enabled.has(key);
+    } else if (ns.storage.pref(KEYS.explorerIncludeNonStoring, true).get() === false) {
+      // Former "Include non-storing objects" switch.
+      model.filters.views = false;
+      model.filters.mv = false;
+    }
   }
 
   function syncFilterChips(required) {
@@ -1604,7 +1600,7 @@
     // followed by an empty object table.
     if (!tables.length) {
       destroyDatabaseTreemap();
-      dom.explorerDetailContent.appendChild(ns.uiState.block("empty", { title: "No objects in this database", body: "It holds no table, view or dictionary you can read." }));
+      dom.explorerDetailContent.appendChild(ns.uiState.block("empty", { body: "No objects in this database." }));
       return;
     }
     renderDatabaseStorage(dom.explorerDetailContent, name);
@@ -2212,6 +2208,7 @@
       renderTabs();
       renderTabContent();
       syncExplorerUrl(historyMode);
+      ns.uiState.announce(`${database}.${table} loaded.`);
 
       // SQL formatting is cosmetic and must never delay the first usable table
       // view. Format after the raw DDL/detail has already been rendered.
@@ -2460,16 +2457,13 @@
     } catch {}
     dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));
     dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));
-    // The list filter is cheap and stays per keystroke. Graph focus re-runs the
-    // layout, the fit and a scoped graph fetch, so it only follows the query
-    // once typing pauses instead of once per intermediate prefix.
-    let graphSearchTimer = 0;
-    dom.explorerSearchInput?.addEventListener("input", () => {
-      renderTableList();
-      clearTimeout(graphSearchTimer);
-      graphSearchTimer = setTimeout(() => graph?.searchFocus(), 200);
-    });
-    dom.explorerFunctionSearchInput?.addEventListener("input", renderFunctionList);
+    // ns.search: the tree filter is cheap and follows every key. Graph focus
+    // re-runs the layout, the fit and a scoped graph fetch, so it follows the
+    // query once typing pauses (the one search delay) instead of once per
+    // intermediate prefix.
+    const graphSearch = util.debounce(() => graph?.searchFocus());
+    ns.search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
+    ns.search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
     dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
     // Function kind chips, like the tree's type chips: one kind at a time,
     // pressing the pressed chip again lists every function.

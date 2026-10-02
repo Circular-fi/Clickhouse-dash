@@ -21,6 +21,116 @@
   const HISTORY_MAX_ERROR_CHARS = 2048;
   const HISTORY_STATUSES = ["ok", "error", "cancelled"];
 
+  // Every chdash.* key of the browser storage (localStorage unless marked
+  // session), by name: the one list, and the strings never change (a renamed
+  // key drops what users stored). The page shells' head scripts read a few
+  // of them before any module runs (theme, pageNav, editor sizes, facets,
+  // trace analytics).
+  const KEYS = Object.freeze({
+    theme: THEME_STORAGE_KEY,
+    selectedHost: HOST_STORAGE_KEY,
+    queryHistory: HISTORY_STORAGE_KEY,
+    savedQueries: SAVED_QUERIES_STORAGE_KEY,
+    runOptions: RUN_OPTIONS_STORAGE_KEY,
+    editorSql: EDITOR_STORAGE_KEY,
+    pageNav: PAGE_NAV_STORAGE_KEY,
+    editorHeight: EDITOR_HEIGHT_PREFIX,
+    metaPrefix: META_PREFIX,
+    // Session: the SQL the Explorer hands to the Query editor ("Open in Query").
+    editorDraft: "chdash.editor.draft.v2",
+    // Editor switches ("true" / "false") and their older names.
+    autocomplete: "chdash.autocomplete.enabled",
+    autocompletePartial: "chdash.autocomplete.partial_match.enabled",
+    autocompletePartialLegacy: ["chdash.autocomplete.fuzzy_matching.enabled", "chdash.autocomplete.contains_matches.enabled"],
+    editorCopyButton: "chdash.editor.copy_button.enabled",
+    editorLineNumbers: "chdash.editor.line_numbers.enabled",
+    editorWarnings: "chdash.editor.warnings.enabled",
+    editorWarningsLegacy: ["chdash.editor.reference_diagnostics.enabled"],
+    editorWarningTables: "chdash.editor.warnings.tables.enabled",
+    editorWarningFunctions: "chdash.editor.warnings.functions.enabled",
+    editorWarningColumns: "chdash.editor.warnings.columns.enabled",
+    queryLibrary: "chdash.queryLibrary.v2",
+    queryLibraryUi: "chdash.queryLibrary.ui.v1",
+    queryLibraryImportOffer: "chdash.queryLibrary.importOffer.v1",
+    queryLibraryMenu: "chdash.queryLibraryMenu.v1",
+    resultsView: "chdash.results.view",
+    chartLegend: "chdash.chart.legendMode",
+    graphLegend: "chdash.graphLegend",
+    explorerIncludeSystem: "chdash.explorer.includeSystem",
+    explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
+    explorerTypeFilters: "chdash.explorer.typeFilters.v1",
+    explorerPreviewLimit: "chdash.explorer.previewLimit",
+    explorerOpsAutoRefresh: "chdash.explorer.opsAutoRefresh",
+    // Session: the service colour slots (ns.palette), shared by Traces, Logs and Metrics.
+    serviceColors: "chdash.traces.serviceColors",
+    traceTimeRanges: "chdash.traceTimeRanges.v1",
+    traceAnalytics: "chdash.traceAnalytics.v1",
+    traceResultsView: "chdash.traceResultsView.v1",
+    traceStartDisplay: "chdash.traceStartDisplay.v1",
+    traceView: "chdash.traceView",
+    traceDurationView: "chdash.traceDurationView.v1",
+    traceSpanColumns: "chdash.traceSpanColumns.v1",
+    traceLogsPanelOpen: "chdash.traceLogs.panelOpen",
+    traceFacetPins: "chdash.traceFacetPins.v1",
+    traceFacetsCollapsed: "chdash.traceFacetsCollapsed.v1",
+    logsFacetPins: "chdash.logsFacetPins.v1",
+    logsFacetsCollapsed: "chdash.logsFacetsCollapsed.v1",
+  });
+
+  // A stored preference: storage.pref(key, fallback, options) -> { get(), set(value), remove() }.
+  // Reading and writing never throw (private mode, blocked storage, quota):
+  // get() returns `fallback`, set() does nothing. The fallback's type picks
+  // how the value is stored, as it always has been for that key:
+  //   boolean  "1" / "0" ("true" / "false" with text: true; both read)
+  //   number   its text; get() falls back on a non-number
+  //   string   as is; `allowed` lists the valid values
+  //   object   JSON (arrays included); `json: true` for a null fallback
+  // options: session (sessionStorage), allowed, text, json, legacy (older
+  // keys read once and moved to `key`), valid(value) (a parsed value check).
+  function pref(key, fallback, options = {}) {
+    const store = () => (options.session ? window.sessionStorage : window.localStorage);
+    const kind = options.json ? "json" : typeof fallback === "boolean" ? "bool" : typeof fallback === "number" ? "number" : fallback !== null && typeof fallback === "object" ? "json" : "string";
+    const encode = (value) => {
+      if (kind === "bool") return options.text ? (value ? "true" : "false") : (value ? "1" : "0");
+      if (kind === "json") return JSON.stringify(value);
+      return String(value);
+    };
+    const decode = (raw) => {
+      if (raw == null) return undefined;
+      if (kind === "bool") return raw === "1" || raw === "true" ? true : raw === "0" || raw === "false" ? false : undefined;
+      if (kind === "number") return raw.trim() !== "" && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+      if (kind === "json") {
+        try { return JSON.parse(raw); } catch { return undefined; }
+      }
+      return Array.isArray(options.allowed) && !options.allowed.includes(raw) ? undefined : raw;
+    };
+    const valid = (value) => value !== undefined && (typeof options.valid !== "function" || options.valid(value));
+    const read = (name) => {
+      try { return store().getItem(name); } catch { return null; }
+    };
+    const handle = {
+      key,
+      get() {
+        let value = decode(read(key));
+        if (value === undefined && Array.isArray(options.legacy)) {
+          for (const older of options.legacy) {
+            const legacy = decode(read(older));
+            if (legacy !== undefined) { handle.set(legacy); value = legacy; break; }
+          }
+        }
+        return valid(value) ? value : fallback;
+      },
+      // true once stored; false when the browser refused (the page keeps its state).
+      set(value) {
+        try { store().setItem(key, encode(value)); return true; } catch { return false; }
+      },
+      remove() {
+        try { store().removeItem(key); } catch { /* nothing to remove */ }
+      },
+    };
+    return handle;
+  }
+
   const safeRead = (key) => {
     try {
       return localStorage.getItem(key);
@@ -130,6 +240,8 @@
   const normalizeSavedQueryName = (name) => String(name || "").trim().toLocaleLowerCase();
 
   const storage = {
+    KEYS,
+    pref,
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,
