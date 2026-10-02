@@ -31,7 +31,7 @@ const mainTable = (page) => page.locator('#resultsPanel > .tableWrap');
 const core = (chart) => chart.locator('.chartCore');
 
 async function showChart(scope) {
-  await scope.locator('.resultsViewToggle__opt[data-view="chart"]').first().click();
+  await scope.locator('.resultsViewToggle [data-view="chart"]').first().click();
 }
 
 async function enableMultiquery(page) {
@@ -97,7 +97,7 @@ async function timeChartClick(page, scopeSelector) {
     const panel = document.querySelector(sel);
     const host = panel.querySelector(':scope > .queryChart') || panel.querySelector('.queryChart');
     const t0 = performance.now();
-    panel.querySelector('.resultsViewToggle__opt[data-view="chart"]').click();
+    panel.querySelector('.resultsViewToggle [data-view="chart"]').click();
     await new Promise((resolve) => {
       const check = () => (host.dataset.pointsDrawn && host.querySelector('.chartCore:not([hidden])') ? resolve() : requestAnimationFrame(check));
       requestAnimationFrame(check);
@@ -336,7 +336,7 @@ test('x axis picker: Auto, row number or an explicit column', async ({ page }) =
   const x = chart.locator('.queryChart__x');
   await expect(x).toHaveValue('auto');
   await expect(x.locator('xpath=..')).toHaveAttribute('title', /Auto: the first date \/ time column/);
-  for (const btn of await chart.locator('.queryChart__type').all()) expect(await btn.getAttribute('title')).toBeTruthy();
+  for (const btn of await chart.locator('.queryChart__types [data-type]').all()) expect(await btn.getAttribute('title')).toBeTruthy();
 
   await x.selectOption('-1');
   await expect(chart).toHaveAttribute('data-x-kind', 'index');
@@ -353,11 +353,11 @@ test('x axis picker: Auto, row number or an explicit column', async ({ page }) =
   // A text-like column as x: one category per value, drawn as bars.
   await x.selectOption('2');
   await expect(chart).toHaveAttribute('data-x-kind', 'category');
-  await expect(chart.locator('.queryChart__type[data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chart.locator('.queryChart__types [data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
 
   await x.selectOption('auto');
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
-  await expect(chart.locator('.queryChart__type[data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
   // The choice is kept for the next result with the same columns.
   await x.selectOption('0');
   await runSuccessfulQuery(page, EXAMPLE);
@@ -377,7 +377,7 @@ test('time series result switches between table and chart, types and series pick
   await expect(chart).toBeVisible();
   await expect(mainTable(page)).toBeHidden();
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
-  await expect(chart.locator('.queryChart__type[data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(chart.locator('.queryChart__seriesButton')).toHaveText('v, w');
   expect(await seriesStats(chart)).toEqual({ v: { points: 120, runs: 1 }, w: { points: 120, runs: 1 } });
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(2);
@@ -396,15 +396,15 @@ test('time series result switches between table and chart, types and series pick
   await expect(chart.locator('.chartCore__tooltip')).toBeHidden();
 
   // Chart types.
-  await chart.locator('.queryChart__type[data-type="area"]').click();
+  await chart.locator('.queryChart__types [data-type="area"]').click();
   await expect(core(chart)).toHaveAttribute('data-type', 'area');
   await expect(core(chart)).toHaveAttribute('data-series-drawn', '2');
   await hoverPlot(page, chart, 0.5);
   expect(Object.keys(await tooltipValues(chart))).toEqual(['v', 'w', 'Total']);
-  await chart.locator('.queryChart__type[data-type="bar"]').click();
+  await chart.locator('.queryChart__types [data-type="bar"]').click();
   await expect(core(chart)).toHaveAttribute('data-type', 'bar');
   expect(Object.keys(await seriesStats(chart))).toEqual(['v', 'w']);
-  await expect(chart.locator('.queryChart__type[data-type="number"]')).toBeDisabled();
+  await expect(chart.locator('.queryChart__types [data-type="number"]')).toBeDisabled();
 
   // Series picker: w only.
   await chart.locator('.queryChart__seriesButton').click();
@@ -454,7 +454,7 @@ test('string x draws bars, a single value shows a number, text-only results cann
   await showChart(mainToggle(page));
   const chart = mainChart(page);
   await expect(chart).toHaveAttribute('data-x-kind', 'category');
-  await expect(chart.locator('.queryChart__type[data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(chart.locator('.queryChart__types [data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
   expect(await seriesStats(chart)).toEqual({ c: { points: 3, runs: 1 } });
   await hoverPlot(page, chart, 0.5);
   await expect(chart.locator('.chartCore__tooltip strong')).toHaveText('beta');
@@ -691,7 +691,7 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
       expect(sizes.host).toBeLessThanOrEqual(1);
       await hoverPlot(page, chart, 0.62);
       await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/grouped-${theme}-${width}.png` });
-      await chart.locator('.queryChart__type[data-type="area"]').click();
+      await chart.locator('.queryChart__types [data-type="area"]').click();
       await chart.locator('.queryChart__group').selectOption('-1');
       await page.mouse.move(2, 2);
       await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/area-${theme}-${width}.png` });

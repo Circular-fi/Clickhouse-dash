@@ -109,8 +109,8 @@ def test_old_tab_families_are_gone():
     sources = "".join(scripts().values()) + "".join(shells().values())
     for old in [r"\.explorerViewTab", r"\.explorerDetailTab(?!s)", r"\.logsTabs__tab", r"\.explorerModeTab\b(?!s)", r"\.traceTabs__tab"]:
         assert not re.search(old, css), old
-    for old in ["explorerViewTab", "logsTabs__tab", '"explorerDetailTab', "explorerDetailTab${"]:
-        assert old not in sources, old
+    for old in [r"\bexplorerViewTab\b", r"\blogsTabs__tab\b", r"\bexplorerDetailTab\b"]:
+        assert not re.search(old, sources), old
     block = component_block(read("style.css"), "tabs")
     for rule in [".viewTabs {", ".viewTab {", ".viewTab.is-active {", ".contentTabs {", ".contentTabs__tab {", ".contentTabs__tab.is-active {"]:
         assert rule in block, rule
@@ -128,3 +128,85 @@ def test_tab_rows_bind_through_the_component():
     logs = read("app_logs.js")
     assert 'ns.tabs?.bind(document.querySelector(".logsTabs"),' in logs
     assert 'sideTabs = ns.tabs?.bind(document.querySelector(".logsSideTabs"), {' in logs
+
+
+# ---------------------------------------------------------------- segmented
+
+
+def theme_blocks(css: str) -> dict[str, dict[str, str]]:
+    css = strip_comments(css)
+    blocks: dict[str, dict[str, str]] = {"root": {}, "light-media": {}, "dark": {}, "light": {}}
+    for media, selector, body in iter_rules(css):
+        key = {("", ":root"): "root", ("@media (prefers-color-scheme: light)", ":root"): "light-media",
+               ("", 'html[data-theme="dark"]'): "dark", ("", 'html[data-theme="light"]'): "light"}.get((media, selector))
+        if key:
+            blocks[key].update({n: " ".join(v.split()) for n, v in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", body)})
+    return blocks
+
+
+def iter_rules(text: str, media: str = ""):
+    i = 0
+    while True:
+        j = text.find("{", i)
+        if j < 0:
+            return
+        selector = " ".join(text[i:j].split())
+        depth, k = 1, j + 1
+        while depth:
+            depth += {"{": 1, "}": -1}.get(text[k], 0)
+            k += 1
+        body = text[j + 1:k - 1]
+        if selector.startswith("@media"):
+            yield from iter_rules(body, selector)
+        else:
+            yield media, selector, body
+        i = k
+
+
+def test_segmented_active_token_is_defined_in_every_theme_block():
+    blocks = theme_blocks(read("style.css"))
+    for name, tokens in blocks.items():
+        assert "--seg-active-bg" in tokens, name
+    assert blocks["dark"]["--seg-active-bg"] == blocks["root"]["--seg-active-bg"]
+    assert blocks["light"]["--seg-active-bg"] == blocks["light-media"]["--seg-active-bg"]
+
+
+def test_segmented_component_has_two_sizes_one_pattern_and_one_look():
+    seg = read("app_ui_segmented.js")
+    assert "ns.segmented = { html, render, bind, set };" in seg
+    assert 'role="group"' in seg and 'aria-pressed="${pressed}"' in seg
+    block = component_block(read("style.css"), "segmented")
+    assert ".segmented {" in block and "height: 28px;" in block
+    assert ".segmented--compact {\n  height: 24px;" in block
+    assert '.segmented__option[aria-pressed="true"] {' in block and "background: var(--seg-active-bg);" in block
+
+
+def test_old_segmented_families_are_gone():
+    css = strip_comments(read("style.css"))
+    sources = "".join(scripts().values()) + "".join(shells().values())
+    for old in [r"\btraceViewToggle", r"\btraceDurationViews__button", r"\btraceSvcScope__option", r"\bresultsViewToggle__opt",
+                r"\blogsSegmented", r"\bexplorerSegmented", r"\btraceContextSeg__button", r"\bmetricsFilterForm__op\b",
+                r"\bqueryChart__type\b", r"\bthemeSelect__button--singleOption", r"\bexplorerGraphTypeSelect__menu"]:
+        assert not re.search(old, sources), old
+        assert not re.search(old, css), old
+
+
+def test_every_segmented_group_is_a_group_of_pressed_buttons():
+    html = "".join(shells().values())
+    for group in re.findall(r'<(?:div|span) class="segmented[^"]*"[^>]*>', html):
+        assert 'role="group"' in group and "aria-label=" in group, group
+    for option in re.findall(r'<button[^>]*class="segmented__option"[^>]*>', html):
+        assert "aria-pressed=" in option, option
+    # Lineage | Storage is a segmented control, not a dropdown.
+    explorer = read("explorer.html")
+    assert 'id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group" aria-label="Graph type"' in explorer
+    assert 'id="explorerGraphTypeSelectButton"' not in explorer
+
+
+def test_choice_labels_are_inside_the_control():
+    obs = read("observability.html")
+    explorer = read("explorer.html")
+    assert ">Sort:<" not in obs and 'data-field-label="Sort"' in obs
+    assert 'class="traceViewBar__label">View<' not in obs and 'data-field-label="View"' in obs
+    assert ">Depth:<" not in explorer
+    assert 'data-field-label="${esc(label)}"' in read("app_trace_views.js")

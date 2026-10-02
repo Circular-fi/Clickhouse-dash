@@ -96,8 +96,8 @@ def test_logical_lineage_and_physical_storage_are_separate_projections_of_one_ba
     assert 'target.layer !== "physical"' in frontend
     assert 'const projection = logicalProjection();' in frontend
     assert 'return projection.nodes' in frontend
-    assert 'setDetailMode("logical")' in frontend
-    assert 'setDetailMode("physical")' in frontend
+    # Lineage | Storage (data-value logical / physical) switch the projection.
+    assert 'ns.segmented?.bind(dom.explorerGraphTypeSelect, { onChange: (mode) => { setDetailMode(mode); return false; } });' in frontend
     assert 'contractNeighborhood' in frontend
     assert 'model.focusDepth -= 1' in frontend
 

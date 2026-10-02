@@ -1196,37 +1196,8 @@ html[data-theme="light"] {
   --qchart-7: #4a3aa7;
   --qchart-8: #e34948;
 }
-.resultsViewToggle {
-  display: inline-flex;
-  align-items: stretch;
-  height: 1.9rem;
-  margin-right: 0.4rem;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 0.7rem;
-  background: var(--buttonBg);
-  vertical-align: middle;
-}
+.resultsViewToggle { margin-right: 0.4rem; }
 .resultsStack__right .resultsViewToggle { margin-right: 0; }
-.resultsViewToggle__opt {
-  border: 0;
-  border-radius: 0.55rem;
-  padding: 0 0.6rem;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 850;
-  cursor: pointer;
-}
-.resultsViewToggle__opt:not(:disabled):hover { color: var(--text); }
-.resultsViewToggle__opt[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
-  color: var(--text);
-}
-.resultsViewToggle__opt:disabled { opacity: 0.45; cursor: not-allowed; }
-.resultsViewToggle__opt:focus-visible { box-shadow: var(--ring); }
 .panel--results.is-multiquery > .panel__header .resultsViewToggle--main { display: none; }
 .queryChart { display: none; }
 .panel--results.is-chartView:not(.is-multiquery) > .tableWrap,
@@ -1256,31 +1227,6 @@ html[data-theme="light"] {
   margin-bottom: 6px;
   font-size: 0.6875rem;
 }
-.queryChart__types {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 0.6rem;
-  background: var(--buttonBg);
-}
-.queryChart__type {
-  height: 1.5rem;
-  border: 0;
-  border-radius: 0.45rem;
-  padding: 0 0.55rem;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-.queryChart__type:not(:disabled):hover { color: var(--text); }
-.queryChart__type[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
-  color: var(--text);
-}
-.queryChart__type:disabled { opacity: 0.4; cursor: not-allowed; }
 .queryChart__field {
   position: relative;
   display: inline-flex;
@@ -1305,8 +1251,7 @@ html[data-theme="light"] {
   white-space: nowrap;
   cursor: pointer;
 }
-.queryChart__select:focus-visible,
-.queryChart__type:focus-visible { box-shadow: var(--ring); }
+.queryChart__select:focus-visible { box-shadow: var(--ring); }
 .queryChart__seriesButton { text-align: left; }
 .queryChart__seriesButton::after { content: " \25BE"; color: var(--muted); }
 .queryChart__seriesMenu {
@@ -4161,12 +4106,6 @@ html.chdash-page-select-hidden .pageSelect {
   .traceViewer__row {
     grid-template-columns: minmax(0, var(--trace-name-column, 42%)) minmax(0, 1fr);
   }
-}
-.themeSelect__button--singleOption {
-  cursor: default;
-}
-.themeSelect__button--singleOption::after {
-  opacity: 0;
 }
 .traceViewer {
   width: 100%;

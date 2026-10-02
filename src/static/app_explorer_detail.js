@@ -1711,17 +1711,10 @@
       const count = node("span", "explorerPreviewToolbar__count", rows == null ? `LIMIT ${limit}` : `${format.countLabel(rows, "row")} (LIMIT ${limit})`);
       info.appendChild(count);
       if (total != null && rows != null) info.appendChild(node("span", "explorerPreviewToolbar__total", `of ${format.count(total)} in the table`));
-      const limits = node("div", "explorerSegmented");
-      limits.setAttribute("role", "group");
-      limits.setAttribute("aria-label", "Preview row limit");
-      for (const value of PREVIEW_LIMITS) {
-        const button = node("button", `explorerSegmented__option${value === limit ? " is-active" : ""}`, String(value));
-        button.type = "button";
-        button.setAttribute("aria-pressed", String(value === limit));
-        button.title = `Preview the first ${value} rows`;
-        button.addEventListener("click", () => { if (value !== previewLimit()) setPreviewLimit(value); });
-        limits.appendChild(button);
-      }
+      // The row limit: the shared segmented control (app_ui_segmented.js).
+      const limits = node("div", "explorerPreviewLimits");
+      ns.segmented?.render(limits, PREVIEW_LIMITS.map((value) => ({ value, label: String(value), title: `Preview the first ${value} rows` })), { attr: "limit", value: limit, size: "compact", label: "Preview row limit" });
+      ns.segmented?.bind(limits, { attr: "limit", onChange: (value) => { if (Number(value) !== previewLimit()) setPreviewLimit(Number(value)); return false; } });
       info.appendChild(limits);
 
       const open = node("button", "button button--small", "Open in Query");

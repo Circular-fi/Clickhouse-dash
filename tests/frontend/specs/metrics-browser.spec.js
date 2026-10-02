@@ -179,7 +179,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await expect.poll(async () => form.locator('.metricsFilterForm__values option').count(), { timeout: 15_000 }).toBeGreaterThan(1);
   const suggested = await form.locator('.metricsFilterForm__values option').evaluateAll((els) => els.map((el) => el.value));
   expect(suggested).toContain('STATUS_CODE_ERROR');
-  await form.locator('.metricsFilterForm__op[data-op="!="]').click();
+  await form.locator('.metricsFilterForm__ops [data-op="!="]').click();
   await form.locator('.metricsFilterForm__value').fill('STATUS_CODE_ERROR');
   const filtered = page.waitForResponse((r) => r.url().includes('/api/metrics/series') && r.url().includes('filter_not='));
   await form.locator('.metricsFilterForm__apply').click();

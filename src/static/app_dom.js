@@ -116,8 +116,6 @@
     explorerListModeButton: byId("explorerListModeButton"),
     explorerGraphModeButton: byId("explorerGraphModeButton"),
     explorerGraphTypeSelect: byId("explorerGraphTypeSelect"),
-    explorerGraphTypeSelectButton: byId("explorerGraphTypeSelectButton"),
-    explorerGraphTypeSelectMenu: byId("explorerGraphTypeSelectMenu"),
     explorerGraphLogicalButton: byId("explorerGraphLogicalButton"),
     explorerGraphPhysicalButton: byId("explorerGraphPhysicalButton"),
     explorerGraphContractButton: byId("explorerGraphContractButton"),

@@ -143,9 +143,11 @@
 
   // ---------------------------------------------------------------- pickers
 
+  // A picker of a view's tools, its label inside the button ("Group By \u00b7
+  // Service", ns.menu.select reads data-field-label).
   function pickerHtml(id, label, options, value) {
     const opts = options.map(([v, text]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`).join("");
-    return `<label class="traceViewBar__field"><span class="traceViewBar__label">${esc(label)}</span><select id="${esc(id)}" class="traceViewBar__select">${opts}</select></label>`;
+    return `<div class="traceViewBar__field"><select id="${esc(id)}" class="traceViewBar__select" data-field-label="${esc(label)}" aria-label="${esc(label)}">${opts}</select></div>`;
   }
 
   function setSelectOptions(select, options, value) {

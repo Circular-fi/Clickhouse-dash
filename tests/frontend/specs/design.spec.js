@@ -218,9 +218,8 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(expand).toBeEnabled();
   await expand.click();
   await captureState(page, testInfo, 'explorer-graph-lineage-expanded');
-  await page.locator('#explorerGraphTypeSelectButton').click();
   await page.locator('#explorerGraphPhysicalButton').click();
-  await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#explorerGraphPhysicalButton')).toHaveAttribute('aria-pressed', 'true');
   await captureState(page, testInfo, 'explorer-graph-storage-topology');
 
   await page.locator('#explorerFunctionsTab').click();

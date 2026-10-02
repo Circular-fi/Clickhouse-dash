@@ -1081,11 +1081,7 @@
 
   function syncResultsViewControls() {
     const table = model.resultsView === "table";
-    for (const button of document.querySelectorAll("[data-results-view]")) {
-      const active = button.getAttribute("data-results-view") === model.resultsView;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-pressed", active ? "true" : "false");
-    }
+    ns.segmented?.set(document.querySelector(".traceResultsViewToggle"), model.resultsView, "resultsView");
     // Like Jaeger, the sort picker drives the list; the table sorts by its headers.
     const sortLabel = document.querySelector(".traceResultsSort");
     if (sortLabel) sortLabel.hidden = table;
@@ -1197,9 +1193,8 @@
       if (row === target) { event.preventDefault(); openRow(row); }
     });
     serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
-    for (const button of document.querySelectorAll("[data-results-view]")) {
-      button.addEventListener("click", () => setResultsView(button.getAttribute("data-results-view")));
-    }
+    // List | Table: the shared segmented control (app_ui_segmented.js).
+    ns.segmented?.bind(document.querySelector(".traceResultsViewToggle"), { attr: "resultsView", onChange: (view) => { setResultsView(view); return false; } });
   }
 
   function renderResults() {

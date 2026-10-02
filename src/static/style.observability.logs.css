@@ -1714,12 +1714,6 @@ html.chdash-page-select-hidden .pageSelect {
   font-size: .95rem;
   font-weight: 950;
 }
-.themeSelect__button--singleOption {
-  cursor: default;
-}
-.themeSelect__button--singleOption::after {
-  opacity: 0;
-}
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {
@@ -3186,11 +3180,6 @@ html[data-theme="light"] {
 .logsContext { display: flex; flex-direction: column; gap: 8px; }
 .logsContext:not([hidden]) { display: flex; }
 .logsContext__bar { display: flex; flex-wrap: wrap; gap: 6px; }
-.logsSegmented { display: inline-flex; border: 1px solid var(--buttonBorder); border-radius: 6px; overflow: hidden; }
-.logsSegmented > button { height: 25px; padding: 0 9px; border: 0; border-right: 1px solid var(--buttonBorder); background: var(--buttonBg); color: var(--text); font: 600 10.5px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
-.logsSegmented > button:last-child { border-right: 0; }
-.logsSegmented > button[aria-pressed="true"] { background: color-mix(in srgb, var(--accentBorder) 22%, var(--buttonBg)); }
-.logsSegmented > button:disabled { color: var(--muted); cursor: not-allowed; opacity: .55; }
 .logsContext__rows { display: grid; }
 .logsContextRow {
   display: grid;

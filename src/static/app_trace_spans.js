@@ -159,11 +159,7 @@
 
   function syncControls() {
     const spans = active();
-    for (const button of document.querySelectorAll("[data-results-mode]")) {
-      const on = button.getAttribute("data-results-mode") === state.mode;
-      button.classList.toggle("is-active", on);
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-    }
+    ns.segmented?.set(document.querySelector(".traceModeToggle"), state.mode, "resultsMode");
     document.querySelector(".traceResultsSection")?.classList.toggle("is-spanMode", spans);
     const tools = byId("traceSpanTools");
     if (tools) tools.hidden = !spans;
@@ -910,9 +906,8 @@
 
   function install(context) {
     ctx = context;
-    for (const button of document.querySelectorAll("[data-results-mode]")) {
-      button.addEventListener("click", () => setMode(button.getAttribute("data-results-mode")));
-    }
+    // Traces | Spans: the shared segmented control (app_ui_segmented.js).
+    ns.segmented?.bind(document.querySelector(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
     const root = ctx.dom.tracesResults;
     root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
     root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); });

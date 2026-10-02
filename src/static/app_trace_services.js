@@ -285,9 +285,12 @@
     return bits.join("");
   }
 
+  // Entry spans | Root spans: the shared segmented control (app_ui_segmented.js).
   function scopeHtml() {
-    const option = (value, label, title) => `<button type="button" class="traceSvcScope__option${view.scope === value ? " is-active" : ""}" data-svc-scope="${value}" aria-pressed="${view.scope === value ? "true" : "false"}" title="${esc(title)}">${esc(label)}</button>`;
-    return `<div class="traceSvcScope" role="group" aria-label="Spans measured">${option("entry", "Entry spans", "Spans receiving work: SpanKind Server or Consumer, or root spans")}${option("root", "Root spans", "Only root spans (no parent): cheaper on long ranges, one per trace entry")}</div>`;
+    return ns.segmented.html([
+      { value: "entry", label: "Entry spans", title: "Spans receiving work: SpanKind Server or Consumer, or root spans" },
+      { value: "root", label: "Root spans", title: "Only root spans (no parent): cheaper on long ranges, one per trace entry" },
+    ], { attr: "svcScope", value: view.scope, size: "compact", label: "Spans measured", className: "traceSvcScope" });
   }
 
   function render() {

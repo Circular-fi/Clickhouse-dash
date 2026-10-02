@@ -491,18 +491,20 @@
 
   function createController({ getData, viewRoot, onViewChange = null, toggleClassName = "" } = {}) {
     const toggleEl = document.createElement("div");
-    toggleEl.className = `resultsViewToggle ${toggleClassName}`.trim();
+    // Table | Chart and the chart types: shared segmented controls
+    // (app_ui_segmented.js sets the pressed option).
+    toggleEl.className = `segmented resultsViewToggle ${toggleClassName}`.trim();
     toggleEl.setAttribute("role", "group");
     toggleEl.setAttribute("aria-label", "Result view");
     toggleEl.hidden = true;
     const tableBtn = document.createElement("button");
     tableBtn.type = "button";
-    tableBtn.className = "resultsViewToggle__opt";
+    tableBtn.className = "segmented__option";
     tableBtn.dataset.view = "table";
     tableBtn.textContent = "Table";
     const chartBtn = document.createElement("button");
     chartBtn.type = "button";
-    chartBtn.className = "resultsViewToggle__opt";
+    chartBtn.className = "segmented__option";
     chartBtn.dataset.view = "chart";
     chartBtn.textContent = "Chart";
     toggleEl.append(tableBtn, chartBtn);
@@ -511,7 +513,7 @@
     hostEl.className = "queryChart";
     hostEl.innerHTML = `
       <div class="queryChart__toolbar">
-        <div class="queryChart__types" role="group" aria-label="Chart type"></div>
+        <div class="segmented queryChart__types" role="group" aria-label="Chart type"></div>
         <label class="queryChart__field" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
           <span class="queryChart__fieldLabel">X axis</span>
           <select class="queryChart__select queryChart__x" aria-label="X axis column"></select>
@@ -552,7 +554,7 @@
     for (const [type, label, title] of CHART_TYPES) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "queryChart__type";
+      btn.className = "segmented__option";
       btn.dataset.type = type;
       btn.dataset.title = title;
       btn.title = title;
@@ -599,8 +601,7 @@
       chartBtn.disabled = !can;
       chartBtn.title = can ? "Chart the received rows" : NO_NUMERIC_TITLE;
       toggleEl.title = can ? "" : NO_NUMERIC_TITLE;
-      tableBtn.setAttribute("aria-pressed", String(next === "table"));
-      chartBtn.setAttribute("aria-pressed", String(next === "chart"));
+      ns.segmented?.set(toggleEl, next, "view");
       toggleEl.dataset.view = next;
       const changed = next !== effective;
       effective = next;
@@ -685,8 +686,8 @@
           btn.disabled = !(rowCount === 1 && streamDone);
           btn.title = btn.disabled ? "Number needs a single-row result" : btn.dataset.title;
         }
-        btn.setAttribute("aria-pressed", String(key === type));
       }
+      ns.segmented?.set(typesEl, type, "type");
       hostEl.dataset.chartType = type;
     }
 

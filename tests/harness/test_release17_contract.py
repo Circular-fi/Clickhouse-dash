@@ -14,9 +14,11 @@ def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> 
 
     assert 'class="graphKitGroup explorerGraphScopeControls"' in html
     assert '<div class="graphKitGroup" aria-label="Graph actions">' in html
-    assert ".themeSelect__button--singleOption" in css
-    assert 'dom.explorerGraphTypeSelectButton.dataset.singleOption = storageAllowed ? "0" : "1"' in js
-    assert 'button.dataset.singleOption === "1"' in js
+    # Lineage | Storage is a segmented control; Storage is disabled for an
+    # object that keeps no data.
+    assert 'id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group"' in html
+    assert 'dom.explorerGraphPhysicalButton.disabled = !storageAllowed;' in js
+    assert ".segmented__option:disabled {" in css
 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:

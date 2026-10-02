@@ -1410,16 +1410,17 @@
     void search({ push: true });
   }
 
+  const contextScope = () => document.querySelector(".logsContextScope");
+  const contextWindow = () => document.querySelector(".logsContextWindow");
+
   function syncContextBar() {
     const row = model.side.row;
     for (const button of document.querySelectorAll("[data-context-preset]")) {
       const preset = button.dataset.contextPreset;
-      button.setAttribute("aria-pressed", String(preset === model.side.preset));
       button.disabled = (preset === "host" && !row?.resource_attributes?.["host.name"]) || (preset === "trace" && !row?.trace_id);
     }
-    for (const button of document.querySelectorAll("[data-context-window]")) {
-      button.setAttribute("aria-pressed", String(Number(button.dataset.contextWindow) === model.side.windowMs));
-    }
+    ns.segmented?.set(contextScope(), model.side.preset, "contextPreset");
+    ns.segmented?.set(contextWindow(), String(model.side.windowMs), "contextWindow");
   }
 
   async function loadContext() {
@@ -1501,12 +1502,9 @@
         if (model.side.tab === "context" && !model.side.context) void loadContext();
       },
     }) || null;
-    for (const button of document.querySelectorAll("[data-context-preset]")) {
-      button.addEventListener("click", () => { model.side.preset = button.dataset.contextPreset; void loadContext(); });
-    }
-    for (const button of document.querySelectorAll("[data-context-window]")) {
-      button.addEventListener("click", () => { model.side.windowMs = Number(button.dataset.contextWindow); void loadContext(); });
-    }
+    // Context scope and window: shared segmented controls (app_ui_segmented.js).
+    ns.segmented?.bind(contextScope(), { attr: "contextPreset", onChange: (preset) => { model.side.preset = preset; void loadContext(); return false; } });
+    ns.segmented?.bind(contextWindow(), { attr: "contextWindow", onChange: (ms) => { model.side.windowMs = Number(ms); void loadContext(); return false; } });
     $("logsContextRows")?.addEventListener("click", (event) => {
       const item = event.target.closest("[data-context-id]");
       if (!item) return;

@@ -60,11 +60,7 @@
   // ------------------------------------------------------------ mode + URL
 
   function syncToggle() {
-    document.querySelectorAll("[data-duration-view]").forEach((button) => {
-      const on = button.getAttribute("data-duration-view") === hm.mode;
-      button.classList.toggle("is-active", on);
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-    });
+    ns.segmented?.set(document.querySelector(".traceDurationViews"), hm.mode, "durationView");
     const chart = ctx?.dom?.traceDurationChart;
     if (!chart) return;
     if (active()) {
@@ -581,9 +577,8 @@
 
   function install(context) {
     ctx = context;
-    document.querySelectorAll("[data-duration-view]").forEach((button) => {
-      button.addEventListener("click", () => setMode(button.getAttribute("data-duration-view")));
-    });
+    // Percentiles | Heatmap: the shared segmented control (app_ui_segmented.js).
+    ns.segmented?.bind(document.querySelector(".traceDurationViews"), { attr: "durationView", onChange: (mode) => { setMode(mode); return false; } });
     ctx.dom.traceDurationChart?.addEventListener("keydown", onKeydown);
     // The canvas keeps the pointer: a press focuses the card for the keys.
     ctx.dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) ctx.dom.traceDurationChart.focus({ preventScroll: true }); });

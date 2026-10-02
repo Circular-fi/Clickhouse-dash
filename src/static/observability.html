@@ -254,7 +254,7 @@
             <div id="traceServiceChart" class="traceChart"><div class="tracesEmpty">Search to load matching trace activity.</div></div>
           </article>
           <article class="traceAnalyticsCard">
-            <header><strong>Trace duration</strong><span id="traceDurationChartMeta">points + P50 / P90 / P95 / P99</span><span class="traceDurationViews" role="group" aria-label="Duration chart"><button type="button" class="traceDurationViews__button is-active" data-duration-view="percentiles" aria-pressed="true" title="Duration percentiles and listed traces">Percentiles</button><button type="button" class="traceDurationViews__button" data-duration-view="heatmap" aria-pressed="false" title="Trace counts by start time and duration; drag a box to compare its traces">Heatmap</button></span></header>
+            <header><strong>Trace duration</strong><span id="traceDurationChartMeta">points + P50 / P90 / P95 / P99</span><span class="segmented segmented--compact traceDurationViews" role="group" aria-label="Duration chart"><button type="button" class="segmented__option" data-duration-view="percentiles" aria-pressed="true" title="Duration percentiles and listed traces">Percentiles</button><button type="button" class="segmented__option" data-duration-view="heatmap" aria-pressed="false" title="Trace counts by start time and duration; drag a box to compare its traces">Heatmap</button></span></header>
             <div id="traceDurationChart" class="traceChart"><div class="tracesEmpty">Search to load duration distribution.</div></div>
           </article>
         </section>
@@ -263,19 +263,19 @@
         <section class="traceResultsSection" aria-label="Trace search results">
           <div class="traceSearchResults__toolbar">
             <h2 id="tracesResultCount">0 Traces</h2>
-            <label class="traceResultsSort"><span>Sort:</span><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+            <div class="traceResultsSort"><div class="themeSelect tracePicker"><select id="tracesSort" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Sort" aria-label="Sort traces"><option value="recent">Most Recent</option><option value="longest">Longest First</option><option value="shortest">Shortest First</option><option value="spans">Most Spans</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Sort · Most Recent</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
             <div id="traceSpanTools" class="traceSpanTools" role="group" aria-label="Span filters" hidden>
               <label class="traceSpanTools__kind"><div class="themeSelect tracePicker"><select id="traceSpanKind" data-field-label="Kind" aria-label="Span kind" class="tracePicker__native" tabindex="-1" aria-hidden="true"><option value="" selected>ALL</option><option value="Server">Server</option><option value="Client">Client</option><option value="Producer">Producer</option><option value="Consumer">Consumer</option><option value="Internal">Internal</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Kind · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
               <span class="traceSpanTools__duration" title="Span duration in milliseconds; Enter applies"><input id="traceSpanMinDuration" type="text" inputmode="decimal" placeholder="Min ms" aria-label="Minimum span duration (ms)" autocomplete="off" spellcheck="false" /><span aria-hidden="true">–</span><input id="traceSpanMaxDuration" type="text" inputmode="decimal" placeholder="Max ms" aria-label="Maximum span duration (ms)" autocomplete="off" spellcheck="false" /></span>
               <button id="traceSpanColumnsButton" class="button button--small traceSpanTools__columns" type="button" aria-haspopup="dialog" aria-expanded="false" title="Attribute columns">Columns</button>
             </div>
-            <div class="traceViewToggle traceModeToggle" role="group" aria-label="Results mode">
-              <button type="button" class="traceViewToggle__button is-active" data-results-mode="traces" aria-pressed="true" title="One row per trace">Traces</button>
-              <button type="button" class="traceViewToggle__button" data-results-mode="spans" aria-pressed="false" title="One row per matching span">Spans</button>
+            <div class="segmented traceModeToggle" role="group" aria-label="Results mode">
+              <button type="button" class="segmented__option" data-results-mode="traces" aria-pressed="true" title="One row per trace">Traces</button>
+              <button type="button" class="segmented__option" data-results-mode="spans" aria-pressed="false" title="One row per matching span">Spans</button>
             </div>
-            <div class="traceViewToggle traceResultsViewToggle" role="group" aria-label="Results view">
-              <button type="button" class="traceViewToggle__button is-active" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
-              <button type="button" class="traceViewToggle__button" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
+            <div class="segmented traceResultsViewToggle" role="group" aria-label="Results view">
+              <button type="button" class="segmented__option" data-results-view="list" aria-pressed="true" title="List view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg><span>List</span></button>
+              <button type="button" class="segmented__option" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
             </div>
           </div>
           <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="tracesEmpty">Search to load traces.</div></div>
@@ -338,7 +338,7 @@
             <button id="traceViewTab-spans" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="spans" tabindex="-1">Spans</button>
             <button id="traceViewTab-flamegraph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="flamegraph" tabindex="-1">Flamegraph</button>
           </div>
-          <label class="traceViewBar__picker"><span class="traceViewBar__label">View</span><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+          <div class="traceViewBar__picker"><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view" data-field-label="View"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">View · Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></div>
           <div id="traceViewTools" class="traceViewBar__tools"></div>
         </div>
         <div id="traceTimelineFrame" class="traceTimelineFrame">
@@ -476,17 +476,17 @@
           <div id="logsSideDetails" class="uiDetail__body logsSidePanel__body"></div>
           <div id="logsSideContext" class="uiDetail__body logsSidePanel__body logsContext" hidden>
             <div class="logsContext__bar">
-              <div class="logsSegmented" role="group" aria-label="Context scope">
-                <button type="button" data-context-preset="anything" aria-pressed="true">Anything</button>
-                <button type="button" data-context-preset="service" aria-pressed="false">Same service</button>
-                <button type="button" data-context-preset="host" aria-pressed="false">Same host</button>
-                <button type="button" data-context-preset="trace" aria-pressed="false">Same trace</button>
+              <div class="segmented segmented--compact logsContextScope" role="group" aria-label="Context scope">
+                <button type="button" class="segmented__option" data-context-preset="anything" aria-pressed="true">Anything</button>
+                <button type="button" class="segmented__option" data-context-preset="service" aria-pressed="false">Same service</button>
+                <button type="button" class="segmented__option" data-context-preset="host" aria-pressed="false">Same host</button>
+                <button type="button" class="segmented__option" data-context-preset="trace" aria-pressed="false">Same trace</button>
               </div>
-              <div class="logsSegmented" role="group" aria-label="Context window">
-                <button type="button" data-context-window="60000" aria-pressed="false">±1m</button>
-                <button type="button" data-context-window="300000" aria-pressed="true">±5m</button>
-                <button type="button" data-context-window="900000" aria-pressed="false">±15m</button>
-                <button type="button" data-context-window="3600000" aria-pressed="false">±1h</button>
+              <div class="segmented segmented--compact logsContextWindow" role="group" aria-label="Context window">
+                <button type="button" class="segmented__option" data-context-window="60000" aria-pressed="false">±1m</button>
+                <button type="button" class="segmented__option" data-context-window="300000" aria-pressed="true">±5m</button>
+                <button type="button" class="segmented__option" data-context-window="900000" aria-pressed="false">±15m</button>
+                <button type="button" class="segmented__option" data-context-window="3600000" aria-pressed="false">±1h</button>
               </div>
             </div>
             <div id="logsContextRows" class="logsContext__rows"></div>

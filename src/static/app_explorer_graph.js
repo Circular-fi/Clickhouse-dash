@@ -100,49 +100,6 @@
     return kit.reducedMotion();
   }
 
-  function graphTypeMenuOpen() {
-    return !!dom.explorerGraphTypeSelect?.classList.contains("themeSelect--open");
-  }
-
-  // The open menu is an ns.layers layer: Escape and a press outside close
-  // it, the focus goes back to its button.
-  let graphTypeLayer = null;
-  function closeGraphTypeMenu({ immediate = false } = {}) {
-    const root = dom.explorerGraphTypeSelect;
-    const button = dom.explorerGraphTypeSelectButton;
-    const menu = dom.explorerGraphTypeSelectMenu;
-    if (!root || !button || !menu) return;
-    const layer = graphTypeLayer;
-    graphTypeLayer = null;
-    layer?.close();
-    button.setAttribute("aria-expanded", "false");
-    root.classList.remove("themeSelect--open");
-    if (immediate) {
-      root.classList.remove("themeSelect--closing");
-      menu.hidden = true;
-      return;
-    }
-    root.classList.add("themeSelect--closing");
-    setTimeout(() => {
-      if (!graphTypeMenuOpen()) menu.hidden = true;
-      root.classList.remove("themeSelect--closing");
-    }, 160);
-  }
-
-  function toggleGraphTypeMenu() {
-    const root = dom.explorerGraphTypeSelect;
-    const button = dom.explorerGraphTypeSelectButton;
-    const menu = dom.explorerGraphTypeSelectMenu;
-    if (!root || !button || !menu || root.hidden || button.dataset.singleOption === "1") return;
-    if (graphTypeMenuOpen()) return closeGraphTypeMenu();
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-    root.classList.remove("themeSelect--closing");
-    graphTypeLayer = ns.layers.push({ el: root, name: "explorerGraphType", opener: button, onDismiss: (reason) => closeGraphTypeMenu({ immediate: reason === "escape" }) });
-    requestAnimationFrame(() => root.classList.add("themeSelect--open"));
-    menu.focus({ preventScroll: true });
-  }
-
   function canvasSize() {
     return kit.canvasSize(dom.explorerGraphCanvas);
   }
@@ -3320,16 +3277,11 @@
       dom.explorerGraphExpandButton.hidden = model.detailMode !== "logical";
       dom.explorerGraphExpandButton.disabled = !model.focusedId || model.detailMode !== "logical" || !canGrow;
     }
+    // Storage needs an object that stores data (a view has no storage).
     const storageAllowed = !model.focusedId || canUseStorageForId(model.focusedId);
     if (dom.explorerGraphPhysicalButton) {
       dom.explorerGraphPhysicalButton.disabled = !storageAllowed;
-      dom.explorerGraphPhysicalButton.setAttribute("aria-disabled", String(!storageAllowed));
-    }
-    if (dom.explorerGraphTypeSelectButton) {
-      dom.explorerGraphTypeSelectButton.dataset.singleOption = storageAllowed ? "0" : "1";
-      dom.explorerGraphTypeSelectButton.setAttribute("aria-disabled", String(!storageAllowed));
-      dom.explorerGraphTypeSelectButton.classList.toggle("themeSelect__button--singleOption", !storageAllowed);
-      if (!storageAllowed) closeGraphTypeMenu({ immediate: true });
+      dom.explorerGraphPhysicalButton.title = storageAllowed ? "Storage: where the objects keep their data" : "Storage: the selected object keeps no data of its own";
     }
     if (dom.explorerGraphFitButton) dom.explorerGraphFitButton.hidden = false;
   }
@@ -3608,9 +3560,7 @@
       if (model.pendingFocusId && (payload.nodes || []).some((node) => node.id === model.pendingFocusId)) {
         if (model.detailMode === "physical" && !canUseStorageForId(model.pendingFocusId)) {
           model.detailMode = "logical";
-          dom.explorerGraphLogicalButton?.setAttribute("aria-selected", "true");
-          dom.explorerGraphPhysicalButton?.setAttribute("aria-selected", "false");
-          if (dom.explorerGraphTypeSelectButton) dom.explorerGraphTypeSelectButton.textContent = "Lineage";
+          ns.segmented?.set(dom.explorerGraphTypeSelect, "logical");
           model.onStateChange?.();
         }
         model.focusedId = model.pendingFocusId;
@@ -3680,14 +3630,11 @@
     if (next === "physical" && model.focusedId && !canUseStorageForId(model.focusedId)) next = "logical";
     const changed = model.detailMode !== next;
     model.detailMode = next;
-    dom.explorerGraphLogicalButton?.setAttribute("aria-selected", String(next === "logical"));
-    dom.explorerGraphPhysicalButton?.setAttribute("aria-selected", String(next === "physical"));
-    if (dom.explorerGraphTypeSelectButton) dom.explorerGraphTypeSelectButton.textContent = next === "physical" ? "Storage" : "Lineage";
+    ns.segmented?.set(dom.explorerGraphTypeSelect, next);
     // TTL lifecycle only exists in the Storage projection. Keep the legend
     // contextual so Lineage does not advertise an edge type it never renders.
     const ttlLegend = document.getElementById("explorerGraphLegendTtl");
     if (ttlLegend) ttlLegend.hidden = next !== "physical";
-    closeGraphTypeMenu({ immediate: true });
     if (!changed) return;
     if (model.panel?.type === "edge") closePanel();
     renderGraphChrome();
@@ -3843,14 +3790,11 @@
       panelRect: () => (chrome.panel && !chrome.panel.hidden ? chrome.panel.getBoundingClientRect() : null),
       toolbar: { zoomIn: dom.explorerGraphZoomInButton, zoomOut: dom.explorerGraphZoomOutButton, fit: dom.explorerGraphFitButton },
     });
-    dom.explorerGraphLogicalButton?.addEventListener("click", () => setDetailMode("logical"));
-    dom.explorerGraphPhysicalButton?.addEventListener("click", () => setDetailMode("physical"));
-    dom.explorerGraphTypeSelectButton?.addEventListener("click", toggleGraphTypeMenu);
+    // Lineage | Storage: the shared segmented control (app_ui_segmented.js).
+    ns.segmented?.bind(dom.explorerGraphTypeSelect, { onChange: (mode) => { setDetailMode(mode); return false; } });
     dom.explorerGraphContractButton?.addEventListener("click", contractNeighborhood);
     dom.explorerGraphExpandButton?.addEventListener("click", expandNeighborhood);
     dom.explorerGraphRefreshButton?.addEventListener("click", () => refresh(true, { reflow: true }));
-    // Leaving the Graph mode closes the menu (ns.lifecycle, app_explorer.js).
-    ns.lifecycle.bind("explorer:graph", (scope) => scope.add(() => closeGraphTypeMenu({ immediate: true })));
     setDetailMode(model.detailMode);
     renderGraphChrome();
   }

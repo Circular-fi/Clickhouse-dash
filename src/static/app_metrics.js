@@ -627,9 +627,9 @@
       </div>
       <form class="metricsFilterForm" autocomplete="off" hidden>
         <input class="metricsFilterForm__key" type="text" placeholder="Attribute" aria-label="Filter attribute" spellcheck="false" />
-        <div class="metricsFilterForm__ops" role="group" aria-label="Filter operator">
-          <button type="button" class="metricsFilterForm__op is-active" data-op="=" aria-pressed="true">=</button>
-          <button type="button" class="metricsFilterForm__op" data-op="!=" aria-pressed="false">!=</button>
+        <div class="segmented metricsFilterForm__ops" role="group" aria-label="Filter operator">
+          <button type="button" class="segmented__option" data-op="=" aria-pressed="true">=</button>
+          <button type="button" class="segmented__option" data-op="!=" aria-pressed="false">!=</button>
         </div>
         <input class="metricsFilterForm__value" type="text" placeholder="Value" aria-label="Filter value" spellcheck="false" />
         <button type="submit" class="button button--primary metricsFilterForm__apply">Add filter</button>
@@ -765,10 +765,11 @@
     const addButton = el.querySelector(".metricsFilters__add");
     const keyInput = form.querySelector(".metricsFilterForm__key");
     const valueInput = form.querySelector(".metricsFilterForm__value");
-    const opButtons = [...form.querySelectorAll(".metricsFilterForm__op")];
+    // = | !=: the shared segmented control (app_ui_segmented.js).
+    const ops = ns.segmented?.bind(form.querySelector(".metricsFilterForm__ops"), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
     const setOp = (op) => {
       form.dataset.op = op;
-      for (const b of opButtons) { b.classList.toggle("is-active", b.dataset.op === op); b.setAttribute("aria-pressed", String(b.dataset.op === op)); }
+      ops?.set(op);
     };
     setOp("=");
     // The open form is an ns.layers layer: Escape closes it, the focus goes
@@ -793,7 +794,6 @@
       const keys = await ensureKeys(panel);
       form.querySelector(".metricsFilterForm__keys").innerHTML = keys.map((k) => `<option value="${esc(k)}"></option>`).join("");
     });
-    for (const b of opButtons) b.addEventListener("click", () => setOp(b.dataset.op));
     const refreshValues = async () => {
       const key = keyInput.value.trim();
       const list = form.querySelector(".metricsFilterForm__values");

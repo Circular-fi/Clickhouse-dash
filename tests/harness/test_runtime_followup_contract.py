@@ -281,7 +281,7 @@ def test_graph_controls_live_in_viewport_and_depth_can_increase_or_decrease() ->
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = read("src/static/style.css")
     assert 'class="explorerGraphViewportControls graphKitBar"' in html
-    assert '>Depth:<' in html
+    assert '<span class="explorerGraphDepthControls__name">Depth</span>' in html
     assert 'id="explorerGraphContractButton"' in html
     assert 'id="explorerGraphExpandButton"' in html
     assert 'id="explorerGraphFitButton"' in html

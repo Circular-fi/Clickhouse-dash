@@ -77,11 +77,9 @@ def test_graph_animation_is_topological_without_background_activity_polling() ->
 
 def test_noninteractive_lineage_control_has_no_hover_chrome() -> None:
     css = read("src/static/style.css")
-    assert ".explorerGraphTypeSelect .themeSelect__button--singleOption:hover" in css
-    assert "background: transparent !important;" in css
-    assert "border-color: transparent !important;" in css
-    assert "box-shadow: none !important;" in css
-    assert ".themeSelect__button--singleOption {\n  cursor: default;\n}" in css
+    # A disabled segmented option (Storage for a view) takes no hover look.
+    assert ".segmented__option:hover:not(:disabled) {" in css
+    assert ".segmented__option:disabled {\n  opacity: 0.45;\n  cursor: not-allowed;\n}" in css
 
 
 def test_graph_pan_is_clamped_and_minimap_contains_arrows() -> None:

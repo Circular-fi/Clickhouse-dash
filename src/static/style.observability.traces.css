@@ -558,6 +558,11 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+.segmented.traceContextSeg--filters {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 24px;
+}
 .editorWrap {
   --gutterW: 6ch;
   position: relative;
@@ -1930,12 +1935,6 @@ html.chdash-page-select-hidden .pageSelect {
   font-size: .95rem;
   font-weight: 950;
 }
-.themeSelect__button--singleOption {
-  cursor: default;
-}
-.themeSelect__button--singleOption::after {
-  opacity: 0;
-}
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
   padding-right: 2.8rem;
 }
@@ -2619,7 +2618,7 @@ html.chdash-page-select-hidden .pageSelect {
   border-bottom-color: transparent;
 }
 .traceTagSearch__inputs > .tracePicker { min-width: 0; }
-.traceResultsSort .tracePicker { width: 142px; }
+.traceResultsSort .tracePicker { width: 184px; }
 .traceResultsSort .tracePicker__button { height: 27px; min-height: 27px; }
 .traceSearchField > .tracePicker,
 .traceRangeCompact > .tracePicker,
@@ -2924,7 +2923,7 @@ html.chdash-page-select-hidden .pageSelect {
 .traceTagSearch__inputs > .tracePicker:last-child.themeSelect--closing .tracePicker__button {
   border-radius: 0 var(--radiusSm) 0 0;
 }
-.traceResultsSort .tracePicker { width: 158px; }
+.traceResultsSort .tracePicker { width: 184px; }
 .traceResultsSort .tracePicker__button { height: 30px; min-height: 30px; }
 .traceTimelineFrame { min-width: 0; overflow: hidden; }
 .traceWaterfall--jaeger {
@@ -4750,36 +4749,6 @@ html[data-obs-view="traces"] .tracesResults--wide {
 :root { --traceDot: #12939a; }
 .traceSearchResults__toolbar { gap: 12px; }
 .tracesResultCount__latency { color: var(--muted); font-weight: 500; }
-.traceViewToggle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: var(--inputBg);
-}
-.traceViewToggle__button {
-  height: 23px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceViewToggle__button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-.traceViewToggle__button:hover { color: var(--text); }
-.traceViewToggle__button:focus-visible { box-shadow: var(--ring); }
-.traceViewToggle__button.is-active {
-  color: var(--text);
-  border-color: var(--accentBorder);
-  background: color-mix(in srgb, var(--accentBorder) 14%, transparent);
-}
 .traceResult.traceResultItem { gap: 5px; padding: 6px 6px 7px; }
 .traceResultItem__title {
   position: relative;
@@ -6164,22 +6133,6 @@ html[data-theme="light"] {
   background: var(--trace-service-color, var(--muted));
 }
 .traceContextPanel__controls { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); }
-.traceContextSeg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-.traceContextSeg__button {
-  height: 24px;
-  padding: 0 9px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceContextSeg__button:last-child { border-right: 0; }
-.traceContextSeg__button:hover:not(:disabled),
-.traceContextSeg__button:focus-visible { color: var(--text); background: var(--rowHover); }
-.traceContextSeg__button.is-active { background: color-mix(in srgb, var(--accentBorder) 22%, transparent); color: var(--text); }
-.traceContextSeg__button:disabled { opacity: 0.45; cursor: not-allowed; }
 .traceContextPanel__attr { min-width: 0; flex: 1 1 260px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
 .traceContextPanel__attr select {
   min-width: 0;
@@ -7096,11 +7049,6 @@ html[data-theme="light"] {
   }
 }
 .traceAnalyticsCard > header #traceDurationChartMeta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.traceDurationViews { flex: 0 0 auto; display: inline-flex; padding: 1px; gap: 1px; border: 1px solid var(--buttonBorder); border-radius: 5px; }
-.traceDurationViews__button { height: 19px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9.5px; font-weight: 600; line-height: 19px; cursor: pointer; }
-.traceDurationViews__button:hover { color: var(--text); }
-.traceDurationViews__button.is-active { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: var(--text); }
-.traceDurationViews__button:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
 .traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
 .chartCore__box.traceHeatDrag,
 .chartCore__region.traceHeatBrush { background: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); border: 1.5px dashed var(--trace-delta-selection); }
@@ -7204,21 +7152,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   white-space: nowrap;
 }
 .traceSvcAction:hover { border-color: var(--accentBorder); }
-.traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible, .traceSvcScope__option:focus-visible,
+.traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible,
 .traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
-.traceSvcScope { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--buttonBorder); border-radius: 6px; background: var(--inputBg); }
-.traceSvcScope__option {
-  height: 21px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.traceSvcScope__option.is-active { color: var(--text); border-color: var(--accentBorder); background: color-mix(in srgb, var(--accentBorder) 14%, transparent); }
 .traceSvc__table { min-width: 0; overflow-x: auto; }
 .traceSvc__table > .tracesEmpty { min-height: 160px; display: grid; place-items: center; }
 .traceSvcTable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }

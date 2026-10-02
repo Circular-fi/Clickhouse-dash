@@ -241,17 +241,13 @@
           <canvas id="explorerGraphCanvas" class="explorerGraphCanvas graphKit__canvas" tabindex="0" aria-label="Interactive ClickHouse lineage and topology graph. Arrow keys move between objects, Enter selects, + and - zoom, 0 fits, Escape closes the details."></canvas>
           <div class="explorerGraphViewportControls graphKitBar" aria-label="Graph viewport controls">
             <div class="graphKitGroup explorerGraphScopeControls" aria-label="Graph scope controls">
-              <div id="explorerGraphTypeSelect" class="themeSelect explorerGraphTypeSelect">
-                <button id="explorerGraphTypeSelectButton" class="graphKitTool graphKitTool--text themeSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Lineage</button>
-                <div id="explorerGraphTypeSelectMenu" class="themeSelect__menu explorerGraphTypeSelect__menu" role="listbox" tabindex="-1" hidden>
-                  <button id="explorerGraphLogicalButton" class="themeSelect__option" type="button" role="option" data-value="logical" aria-selected="true">Lineage</button>
-                  <button id="explorerGraphPhysicalButton" class="themeSelect__option" type="button" role="option" data-value="physical" aria-selected="false">Storage</button>
-                </div>
+              <div id="explorerGraphTypeSelect" class="segmented segmented--compact explorerGraphTypeSelect" role="group" aria-label="Graph type">
+                <button id="explorerGraphLogicalButton" class="segmented__option" type="button" data-value="logical" aria-pressed="true" title="Lineage: how the objects depend on and feed each other">Lineage</button>
+                <button id="explorerGraphPhysicalButton" class="segmented__option" type="button" data-value="physical" aria-pressed="false" title="Storage: where the objects keep their data">Storage</button>
               </div>
-              <span id="explorerGraphDepthControls" class="explorerGraphDepthControls">
-                <span class="explorerGraphViewportControls__label">Depth:</span>
+              <span id="explorerGraphDepthControls" class="explorerGraphDepthControls" role="group" aria-label="Graph depth">
                 <button id="explorerGraphContractButton" class="graphKitTool" type="button" aria-label="Decrease graph depth">&minus;</button>
-                <span id="explorerGraphDepthValue" class="explorerGraphViewportControls__value">1</span>
+                <span class="explorerGraphViewportControls__value" title="Hops around the selection"><span class="explorerGraphDepthControls__name">Depth</span> <span id="explorerGraphDepthValue">1</span></span>
                 <button id="explorerGraphExpandButton" class="graphKitTool" type="button" aria-label="Increase graph depth">+</button>
               </span>
             </div>

@@ -626,6 +626,12 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* A long row (the trace context filters) may wrap on a narrow panel. */
+.segmented.traceContextSeg--filters {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 24px;
+}
 /* ==== /Components: segmented ================================================ */
 
 .statusPill {
@@ -1355,38 +1361,8 @@ html[data-theme="light"] {
   --qchart-7: #4a3aa7;
   --qchart-8: #e34948;
 }
-
-.resultsViewToggle {
-  display: inline-flex;
-  align-items: stretch;
-  height: 1.9rem;
-  margin-right: 0.4rem;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 0.7rem;
-  background: var(--buttonBg);
-  vertical-align: middle;
-}
+.resultsViewToggle { margin-right: 0.4rem; }
 .resultsStack__right .resultsViewToggle { margin-right: 0; }
-.resultsViewToggle__opt {
-  border: 0;
-  border-radius: 0.55rem;
-  padding: 0 0.6rem;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.6875rem;
-  font-weight: 850;
-  cursor: pointer;
-}
-.resultsViewToggle__opt:not(:disabled):hover { color: var(--text); }
-.resultsViewToggle__opt[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
-  color: var(--text);
-}
-.resultsViewToggle__opt:disabled { opacity: 0.45; cursor: not-allowed; }
-.resultsViewToggle__opt:focus-visible { box-shadow: var(--ring); }
 .panel--results.is-multiquery > .panel__header .resultsViewToggle--main { display: none; }
 
 /* Chart view: the panel's table is hidden (kept mounted for copy, row
@@ -1420,31 +1396,6 @@ html[data-theme="light"] {
   margin-bottom: 6px;
   font-size: 0.6875rem;
 }
-.queryChart__types {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 0.6rem;
-  background: var(--buttonBg);
-}
-.queryChart__type {
-  height: 1.5rem;
-  border: 0;
-  border-radius: 0.45rem;
-  padding: 0 0.55rem;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-.queryChart__type:not(:disabled):hover { color: var(--text); }
-.queryChart__type[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
-  color: var(--text);
-}
-.queryChart__type:disabled { opacity: 0.4; cursor: not-allowed; }
 .queryChart__field {
   position: relative;
   display: inline-flex;
@@ -1469,8 +1420,7 @@ html[data-theme="light"] {
   white-space: nowrap;
   cursor: pointer;
 }
-.queryChart__select:focus-visible,
-.queryChart__type:focus-visible { box-shadow: var(--ring); }
+.queryChart__select:focus-visible { box-shadow: var(--ring); }
 .queryChart__seriesButton { text-align: left; }
 .queryChart__seriesButton::after { content: " \25BE"; color: var(--muted); }
 .queryChart__seriesMenu {
@@ -6380,7 +6330,6 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 /* Viewport controls belong to the graph rather than the global Explorer bar. */
-.explorerGraphViewportControls__label,
 .explorerGraphViewportControls__value {
   color: var(--muted);
   font-size: .66rem;
@@ -6790,28 +6739,6 @@ html.chdash-page-select-hidden .pageSelect {
 /* Graph type is another connected dropdown; viewport/depth controls remain
    directly on the graph because they describe the canvas rather than Explorer
    navigation. */
-.explorerGraphTypeSelect {
-  position: relative;
-  min-width: 122px;
-}
-
-.explorerGraphTypeSelect[hidden] {
-  display: none !important;
-}
-
-.explorerGraphTypeSelect__menu {
-  left: 0;
-  right: auto;
-  top: 100%;
-  min-width: 150px;
-  width: 150px;
-  margin-top: -1px;
-}
-
-.explorerGraphTypeSelect .themeSelect__button {
-  width: 100%;
-  justify-content: flex-start;
-}
 
 /* CREATE statements reuse the editor language: a dedicated line-number gutter,
    syntax-highlighted code and the exact same copy icon as the query editor. */
@@ -7102,33 +7029,6 @@ html.chdash-page-select-hidden .pageSelect {
 /* Graph-type selector is a connected control: trigger and menu share exactly
    the same width so switching Lineage/Storage never produces the offset menu
    seen with the old 122px/150px mismatch. */
-.explorerGraphTypeSelect {
-  width: 154px;
-  min-width: 154px;
-}
-.explorerGraphTypeSelect .themeSelect__button,
-.explorerGraphTypeSelect__menu {
-  box-sizing: border-box;
-  width: 154px;
-  min-width: 154px;
-}
-.explorerGraphTypeSelect__menu {
-  left: -6px;
-  right: auto;
-  top: 100%;
-  width: 160px;
-  min-width: 160px;
-  margin-top: -1px;
-}
-.explorerGraphTypeSelect__menu .themeSelect__option {
-  padding-left: 16px;
-}
-.explorerGraphTypeSelect.themeSelect--open .themeSelect__button,
-.explorerGraphTypeSelect.themeSelect--closing .themeSelect__button {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom-color: transparent;
-}
 
 /* Analysis trace UI is rendered by the reusable traceViewer component below. */
 
@@ -7530,19 +7430,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* Release 17: explorer graph control grouping, larger legend, fixed trace header,
    and complex type readability tweaks. */
-.explorerGraphTypeSelect .themeSelect__button,
-.explorerGraphTypeSelect .themeSelect__option {
-  justify-content: center;
-  text-align: center;
-}
-
-.themeSelect__button--singleOption {
-  cursor: default;
-}
-
-.themeSelect__button--singleOption::after {
-  opacity: 0;
-}
 
 .traceViewer {
   width: 100%;
@@ -8413,15 +8300,6 @@ html.chdash-page-select-hidden .pageSelect {
 }
 
 /* A single available graph mode is a label, not an interactive selector. */
-.explorerGraphTypeSelect .themeSelect__button--singleOption,
-.explorerGraphTypeSelect .themeSelect__button--singleOption:hover,
-.explorerGraphTypeSelect .themeSelect__button--singleOption:focus,
-.explorerGraphTypeSelect .themeSelect__button--singleOption:focus-visible {
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-  color: var(--text);
-}
 
 /* Sidebar gear and refresh are chrome-less icon controls, matching the Query
    editor gear: hover changes icon emphasis only, never button background. */
@@ -10150,7 +10028,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   border-bottom-color: transparent;
 }
 .traceTagSearch__inputs > .tracePicker { min-width: 0; }
-.traceResultsSort .tracePicker { width: 142px; }
+.traceResultsSort .tracePicker { width: 184px; }
 .traceResultsSort .tracePicker__button { height: 27px; min-height: 27px; }
 
 /* Native select rules no longer style the visible trace pickers. */
@@ -10485,7 +10363,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceTagSearch__inputs > .tracePicker:last-child.themeSelect--closing .tracePicker__button {
   border-radius: 0 var(--radiusSm) 0 0;
 }
-.traceResultsSort .tracePicker { width: 158px; }
+.traceResultsSort .tracePicker { width: 184px; }
 .traceResultsSort .tracePicker__button { height: 30px; min-height: 30px; }
 
 .traceTimelineFrame { min-width: 0; overflow: hidden; }
@@ -12787,37 +12665,6 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .traceSearchResults__toolbar { gap: 12px; }
 .tracesResultCount__latency { color: var(--muted); font-weight: 500; }
 
-.traceViewToggle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  background: var(--inputBg);
-}
-.traceViewToggle__button {
-  height: 23px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceViewToggle__button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
-.traceViewToggle__button:hover { color: var(--text); }
-.traceViewToggle__button:focus-visible { box-shadow: var(--ring); }
-.traceViewToggle__button.is-active {
-  color: var(--text);
-  border-color: var(--accentBorder);
-  background: color-mix(in srgb, var(--accentBorder) 14%, transparent);
-}
-
 /* List item */
 .traceResult.traceResultItem { gap: 5px; padding: 6px 6px 7px; }
 .traceResultItem__title {
@@ -14289,22 +14136,6 @@ html[data-theme="light"] {
   background: var(--trace-service-color, var(--muted));
 }
 .traceContextPanel__controls { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); }
-.traceContextSeg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-.traceContextSeg__button {
-  height: 24px;
-  padding: 0 9px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceContextSeg__button:last-child { border-right: 0; }
-.traceContextSeg__button:hover:not(:disabled),
-.traceContextSeg__button:focus-visible { color: var(--text); background: var(--rowHover); }
-.traceContextSeg__button.is-active { background: color-mix(in srgb, var(--accentBorder) 22%, transparent); color: var(--text); }
-.traceContextSeg__button:disabled { opacity: 0.45; cursor: not-allowed; }
 .traceContextPanel__attr { min-width: 0; flex: 1 1 260px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
 .traceContextPanel__attr select {
   min-width: 0;
@@ -15332,11 +15163,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .logsContext { display: flex; flex-direction: column; gap: 8px; }
 .logsContext:not([hidden]) { display: flex; }
 .logsContext__bar { display: flex; flex-wrap: wrap; gap: 6px; }
-.logsSegmented { display: inline-flex; border: 1px solid var(--buttonBorder); border-radius: 6px; overflow: hidden; }
-.logsSegmented > button { height: 25px; padding: 0 9px; border: 0; border-right: 1px solid var(--buttonBorder); background: var(--buttonBg); color: var(--text); font: 600 10.5px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
-.logsSegmented > button:last-child { border-right: 0; }
-.logsSegmented > button[aria-pressed="true"] { background: color-mix(in srgb, var(--accentBorder) 22%, var(--buttonBg)); }
-.logsSegmented > button:disabled { color: var(--muted); cursor: not-allowed; opacity: .55; }
 .logsContext__rows { display: grid; }
 .logsContextRow {
   display: grid;
@@ -15652,19 +15478,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 }
 .metricsFilterForm__key:focus,
 .metricsFilterForm__value:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
-.metricsFilterForm__ops { display: inline-flex; border: 1px solid var(--buttonBorder); border-radius: 6px; overflow: hidden; }
-.metricsFilterForm__op {
-  height: 27px;
-  min-width: 34px;
-  padding: 0 8px;
-  border: 0;
-  background: var(--buttonBg);
-  color: var(--muted);
-  font: 700 11px/1 var(--mono);
-  cursor: pointer;
-}
-.metricsFilterForm__op + .metricsFilterForm__op { border-left: 1px solid var(--buttonBorder); }
-.metricsFilterForm__op.is-active { background: color-mix(in srgb, var(--accentBorder) 22%, var(--buttonBg)); color: var(--text); }
 .metricsFilterForm .button { height: 29px; min-height: 29px; padding: 0 11px; font-size: 11px; }
 .metricsPanel__note {
   display: grid;
@@ -15992,11 +15805,6 @@ html[data-theme="light"] {
 }
 
 .traceAnalyticsCard > header #traceDurationChartMeta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.traceDurationViews { flex: 0 0 auto; display: inline-flex; padding: 1px; gap: 1px; border: 1px solid var(--buttonBorder); border-radius: 5px; }
-.traceDurationViews__button { height: 19px; padding: 0 7px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9.5px; font-weight: 600; line-height: 19px; cursor: pointer; }
-.traceDurationViews__button:hover { color: var(--text); }
-.traceDurationViews__button.is-active { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); color: var(--text); }
-.traceDurationViews__button:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
 
 .traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
 .chartCore__box.traceHeatDrag,
@@ -16105,21 +15913,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   white-space: nowrap;
 }
 .traceSvcAction:hover { border-color: var(--accentBorder); }
-.traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible, .traceSvcScope__option:focus-visible,
+.traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible,
 .traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
-.traceSvcScope { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--buttonBorder); border-radius: 6px; background: var(--inputBg); }
-.traceSvcScope__option {
-  height: 21px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font: 600 11px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.traceSvcScope__option.is-active { color: var(--text); border-color: var(--accentBorder); background: color-mix(in srgb, var(--accentBorder) 14%, transparent); }
 .traceSvc__table { min-width: 0; overflow-x: auto; }
 .traceSvc__table > .tracesEmpty { min-height: 160px; display: grid; place-items: center; }
 .traceSvcTable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -16975,31 +16770,6 @@ html[data-theme="light"] {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.explorerSegmented {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-}
-.explorerSegmented__option {
-  appearance: none;
-  border: 0;
-  border-left: 1px solid var(--buttonBorder);
-  background: var(--buttonBg);
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  padding: 3px 10px;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-}
-.explorerSegmented__option:first-child { border-left: 0; }
-.explorerSegmented__option:hover { color: var(--text); }
-.explorerSegmented__option.is-active {
-  background: color-mix(in srgb, var(--accentBorder) 18%, var(--buttonBg));
-  color: var(--text);
-}
 .explorerCard .explorerPreviewTable .resultTable { font-size: 12.5px; }
 .explorerCard .explorerPreviewTable .resultTable thead th {
   padding: 4px 8px 18px;
@@ -17480,7 +17250,6 @@ html[data-theme="light"] {
    controls (type, depth), the "objects without dependencies" toggle and the
    object / edge panel content.
    ========================================================================== */
-.explorerGraphViewportControls__label,
 .explorerGraphViewportControls__value {
   color: var(--graph-muted);
   font-size: 12px;
@@ -17490,7 +17259,9 @@ html[data-theme="light"] {
   min-width: 12px;
   color: var(--graph-text);
   text-align: center;
+  white-space: nowrap;
 }
+.explorerGraphDepthControls__name { color: var(--graph-muted); }
 .explorerGraphScopeControls { gap: 6px; }
 .explorerGraphIsolatedToggle {
   gap: 6px;

@@ -1714,12 +1714,6 @@ html.chdash-page-select-hidden .pageSelect {
   font-size: .95rem;
   font-weight: 950;
 }
-.themeSelect__button--singleOption {
-  cursor: default;
-}
-.themeSelect__button--singleOption::after {
-  opacity: 0;
-}
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {
@@ -2970,19 +2964,6 @@ html[data-theme="light"] {
 }
 .metricsFilterForm__key:focus,
 .metricsFilterForm__value:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
-.metricsFilterForm__ops { display: inline-flex; border: 1px solid var(--buttonBorder); border-radius: 6px; overflow: hidden; }
-.metricsFilterForm__op {
-  height: 27px;
-  min-width: 34px;
-  padding: 0 8px;
-  border: 0;
-  background: var(--buttonBg);
-  color: var(--muted);
-  font: 700 11px/1 var(--mono);
-  cursor: pointer;
-}
-.metricsFilterForm__op + .metricsFilterForm__op { border-left: 1px solid var(--buttonBorder); }
-.metricsFilterForm__op.is-active { background: color-mix(in srgb, var(--accentBorder) 22%, var(--buttonBg)); color: var(--text); }
 .metricsFilterForm .button { height: 29px; min-height: 29px; padding: 0 11px; font-size: 11px; }
 .metricsPanel__note {
   display: grid;

@@ -578,7 +578,8 @@
     const el = document.getElementById("traceContextPanel");
     if (!el || !context.open || !context.anchor) return;
     const a = context.anchor;
-    const windows = CONTEXT_WINDOWS.map(([ms, label]) => `<button type="button" class="traceContextSeg__button${context.windowMs === ms ? " is-active" : ""}" data-context-window="${ms}" aria-pressed="${context.windowMs === ms ? "true" : "false"}">${esc(label)}</button>`).join("");
+    // The window and filter rows: shared segmented controls (app_ui_segmented.js).
+    const windows = ns.segmented.html(CONTEXT_WINDOWS.map(([ms, label]) => ({ value: ms, label })), { attr: "contextWindow", value: context.windowMs, size: "compact", label: "Time window", className: "traceContextSeg" });
     const unavailable = {
       service: a.service ? "" : "This span has no service name",
       host: a.host ? "" : "This span has no host.name resource attribute",
@@ -586,11 +587,8 @@
       attribute: a.attributes.length ? "" : "This span has no attributes",
     };
     const describe = { any: "Every span in the window", service: `service = ${a.service}`, host: `host.name = ${a.host}`, pod: `k8s.pod.name = ${a.pod}`, attribute: "The attribute picked below" };
-    const filters = CONTEXT_FILTERS.map(([value, label]) => {
-      const reason = unavailable[value] || "";
-      const active = context.filter === value;
-      return `<button type="button" class="traceContextSeg__button${active ? " is-active" : ""}" data-context-filter="${value}" aria-pressed="${active ? "true" : "false"}"${reason ? " disabled" : ""} title="${esc(reason || describe[value])}">${esc(label)}</button>`;
-    }).join("");
+    const filters = ns.segmented.html(CONTEXT_FILTERS.map(([value, label]) => ({ value, label, disabled: !!unavailable[value], title: unavailable[value] || describe[value] })),
+      { attr: "contextFilter", value: context.filter, size: "compact", label: "Filter", className: "traceContextSeg traceContextSeg--filters" });
     const attributePicker = context.filter === "attribute"
       ? `<label class="traceContextPanel__attr"><span>Attribute</span><select data-context-attribute>${a.attributes.map((item) => {
           const value = `${item.scope}\u001f${item.key}`;
@@ -628,8 +626,8 @@
         <button type="button" class="closeCross uiDetail__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
       </header>
       <div class="traceContextPanel__controls">
-        <div class="traceContextSeg" role="group" aria-label="Time window">${windows}</div>
-        <div class="traceContextSeg traceContextSeg--filters" role="group" aria-label="Filter">${filters}</div>
+        ${windows}
+        ${filters}
         ${attributePicker}
       </div>
       ${status}
