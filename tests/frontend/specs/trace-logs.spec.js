@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { MOCK_TRACE_START_NS, nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // OTel logs in the trace detail page (HyperDX's TraceLogsPanel feel): the
@@ -26,7 +26,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 const SHOTS = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/trace-logs`;

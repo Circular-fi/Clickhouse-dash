@@ -1522,6 +1522,9 @@
     tools?.addEventListener("change", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLSelectElement)) return;
+      // A filter typed just before: applied first, or this render would put
+      // the old text back in the field (ns.search waits for the typing delay).
+      spansFilter?.flush();
       if (target.id === "traceStatsGroupBy") view.stats.groupBy = target.value;
       else if (target.id === "traceStatsSubGroup") view.stats.subGroup = target.value;
       else if (target.id === "traceStatsColorBy") view.stats.colorBy = target.value;
@@ -1530,7 +1533,7 @@
       else return;
       render();
     });
-    ns.search.within(tools, "#traceSpansFilter", (value) => { view.spans.text = value; render(); }, { compact: true });
+    const spansFilter = ns.search.within(tools, "#traceSpansFilter", (value) => { view.spans.text = value; render(); }, { compact: true });
     tools?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-flame-reset]")) {
         view.flame.zoomKey = "";

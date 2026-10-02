@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { SYNTHETIC_TRACES, mockTraceFacets, mockTraceResults, syntheticTrace } from '../helpers/traces.js';
 
 // Trace search filters after HyperDX: filter chips (several tag filters,
@@ -15,7 +15,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 const FIRST = SYNTHETIC_TRACES[0];

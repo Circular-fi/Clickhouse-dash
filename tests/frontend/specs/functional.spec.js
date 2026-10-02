@@ -1,21 +1,17 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { enableExecutionStats, expandExplorerDatabase, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, setFlattenTuple } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 import { canvasPixel, chartCore, chartJson, plotBox } from '../helpers/charts.js';
 
 const observers = new WeakMap();
-// An Observability request superseded by a newer one (a range shifted while
-// the previous search still ran) is aborted on purpose (util.latest): not a
-// failure. Every other abort, the Query result stream's included, still is.
-const supersededObsRequest = (r) => /net::ERR_ABORTED/.test(String(r.error || '')) && /\/api\/(traces|logs|metrics)\//.test(String(r.url || ''));
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
 test.afterEach(async ({ page }, testInfo) => {
   const obs = observers.get(page);
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests.filter((r) => !supersededObsRequest(r))).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 // Regression: the client closed the query EventSource as soon as "done"

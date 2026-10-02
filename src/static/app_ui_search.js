@@ -9,9 +9,11 @@
   //     every key), at once on Enter and on the field's clear button. Escape
   //     empties a filled field and stops there; on an empty field it goes on
   //     to close what holds the field (a menu, a panel).
-  //   within(root, selector, onChange, options)
+  //   within(root, selector, onChange, options) -> { flush(), cancel() }
   //     The same for fields a view renders again: one delegated listener on
-  //     `root`; onChange(value, input).
+  //     `root`; onChange(value, input). flush() applies a typed value still
+  //     waiting for the delay: call it before another control re-renders the
+  //     view, so the render does not write the old value back into the field.
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -23,6 +25,8 @@
       typed(input) { last = input; if (later) later(); else run(); },
       now(input) { last = input; later?.cancel(); run(); },
       cancel() { later?.cancel(); },
+      // The waiting call now, if there is one.
+      flush() { later?.flush(); },
     };
   }
 
@@ -64,7 +68,7 @@
     root.addEventListener("input", (event) => { const input = field(event); if (input) { style(input, compact); ctl.typed(input); } });
     root.addEventListener("search", (event) => { const input = field(event); if (input && !input.value) ctl.now(input); }, true);
     root.addEventListener("keydown", (event) => { const input = field(event); if (input) onKeydown(event, input, ctl); });
-    return { cancel: () => ctl.cancel() };
+    return { flush: () => ctl.flush(), cancel: () => ctl.cancel() };
   }
 
   ns.search = Object.freeze({ bind, within });

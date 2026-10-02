@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { stabilizePage } from '../helpers/review.js';
 import { SYNTHETIC_TRACES, mockTraceResults, mockTraceServices, syntheticServices } from '../helpers/traces.js';
 
@@ -19,7 +19,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 const rows = (page) => page.locator('.traceSvcTable:not(.traceSvcTable--compact) tbody tr');

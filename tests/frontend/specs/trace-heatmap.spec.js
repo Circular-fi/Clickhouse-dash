@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults, syntheticAnalytics } from '../helpers/traces.js';
 import { canvasPixel, chartCore } from '../helpers/charts.js';
 
@@ -18,7 +18,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 const BUCKET = 300_000;

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installObservers } from '../helpers/observability.js';
+import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 
 // Span insights on the trace page (app_trace_insights.js): exceptions with
 // parsed stack traces, highlighted attributes in the trace header, spans of
@@ -15,7 +15,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  expect(obs.failedRequests).toEqual([]);
+  expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
 const TRACE_ID = 'e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1';
