@@ -570,8 +570,9 @@
     syncExplorerUrl(historyMode);
   }
 
+  // The tree becomes a drawer at --bp-md (ns.shell, app_dom.js).
   function isMobileShell() {
-    try { return window.matchMedia("(max-width: 820px)").matches; } catch { return false; }
+    return !!ns.shell?.isAtMost("md");
   }
 
   // Mobile: the tree is an off-canvas drawer over the content.
@@ -2523,7 +2524,7 @@
       backdrop.addEventListener("click", () => setTreeDrawerOpen(false));
     }
     try {
-      window.matchMedia("(max-width: 820px)").addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
+      window.matchMedia(ns.shell.mediaQuery("md")).addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
     } catch {}
     dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));
     dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));

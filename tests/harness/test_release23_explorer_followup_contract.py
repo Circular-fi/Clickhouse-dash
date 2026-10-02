@@ -38,11 +38,11 @@ def test_supplied_network_icon_is_used_and_primary_selector_expands() -> None:
     icon = ROOT / "src/static/images/network-wired-svgrepo-com.svg"
     assert icon.is_file()
     assert 'mask-image: url("images/network-wired-svgrepo-com.svg")' in css
-    start = css.rindex(".explorerHeader--sidebar .explorerNavSelect")
-    nav = css[start:css.index("#explorerTableModeTabs", start)]
-    assert 'flex: 1 1 auto;' in nav
-    assert 'width: auto;' in nav
-    assert '143px' not in nav
+    # The primary selector is the #explorerTopBar view tab list now: the old
+    # rail dropdown and its fixed widths are gone.
+    assert ".explorerNavSelect" not in css
+    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
+    assert ".obsNav,\n.explorerTopBar,\n.explorerModeBar {" in shell
 
 
 def test_profiling_has_one_vertical_scroll_owner() -> None:

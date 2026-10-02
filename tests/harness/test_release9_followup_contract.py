@@ -69,9 +69,11 @@ def test_analysis_keeps_reusable_jaeger_trace_as_second_tab() -> None:
 
 def test_explorer_sidebar_primary_selector_uses_space_recovered_by_icon_mode_selector() -> None:
     css = read("src/static/style.css")
-    assert ".explorerHeader--sidebar .explorerNavSelect" in css
-    selector = css[css.rindex(".explorerHeader--sidebar .explorerNavSelect"):css.index("#explorerTableModeTabs", css.rindex(".explorerHeader--sidebar .explorerNavSelect"))]
-    assert "flex: 1 1 auto" in selector
-    assert "width: auto" in selector
+    html = read("src/static/explorer.html")
+    # The rail's section dropdown became the #explorerTopBar view tabs (a nav
+    # row of the Page shell block): its overlay rules are gone with it.
+    assert "explorerHeader--sidebar" not in html and "explorerNavSelect" not in html
+    assert ".explorerHeader--sidebar" not in css
+    assert ".explorerNavSelect" not in css
     tail = css[css.rindex("#explorerTableModeTabs") :]
     assert "border-left: 0" in tail

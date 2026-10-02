@@ -24,7 +24,10 @@ def test_trace_source_badge_and_section_rules_are_removed():
     css = read("src/static/style.css")
     assert 'id="tracesSourceMeta"' not in html
     tail = css[css.rfind("/* Trace polish:"):]
-    assert 'html[data-obs-view="traces"] .appHeader' in tail
+    # The header keeps its border on every view: #obsNav sits under it (Page
+    # shell block), so no view drops it any more.
+    assert 'html[data-obs-view="traces"] .appHeader' not in css
+    assert 'html[data-obs-view="logs"] .appHeader' not in css
     assert 'border-bottom: 0 !important;' in tail
     assert 'html[data-obs-view="traces"] .traceSearchResults__toolbar' in tail
     assert 'html[data-obs-view="traces"] .tracesResults--wide' in tail

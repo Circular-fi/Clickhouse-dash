@@ -37,7 +37,10 @@ def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle()
     assert 'class="editorResizeHandle"' in html
     assert 'aria-orientation="horizontal"' in html
     tail = css[css.rfind('/* 2026-09-06 resize follow-up:') :]
-    assert '#queryWorkspace {' in tail and 'align-content: start;' in tail
+    # The workspace's auto rows never stretch (Page shell block).
+    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
+    layout = shell[shell.index('.layout {'):shell.index('}', shell.index('.layout {'))]
+    assert 'align-content: start;' in layout
     assert '.editorWrap {' in tail and 'resize: none;' in tail
     assert 'left: 50%;' in tail and 'transform: translateX(-50%);' in tail
     assert 'cursor: ns-resize;' in tail

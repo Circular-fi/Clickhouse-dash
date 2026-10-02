@@ -102,7 +102,8 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert '.explorerShell.is-tree-open > .explorerGrid > .explorerListPane' in css
     # Every Catalog mode slides the same tree in, under the mode bar.
     assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui
-    assert ".explorerShell > #explorerListView > .explorerListPane,\n  #explorerTreeBackdrop {\n    top: var(--explorer-mode-bar-height);" in css
+    assert ".explorerShell > #explorerListView > .explorerListPane,\n  #explorerTreeBackdrop {\n    top: var(--nav-row-h);" in css
+    assert "--explorer-mode-bar-height" not in css
     # The header wraps on a phone through the one unscoped rule every shell shares.
     narrow = css[css.index("/* -- Narrow windows: the header wraps"):]
     assert "@media (max-width: 820px) {\n  .appHeader {\n    flex-wrap: wrap;" in narrow

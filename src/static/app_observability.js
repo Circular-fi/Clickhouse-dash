@@ -393,26 +393,6 @@
     window.addEventListener("chdash:features-changed", onFeatures);
   }
 
-  // The page chrome above a view (the header and the #obsNav row, both of
-  // which wrap on narrow windows) as --shell-top on the root element, in px:
-  // the views' drawers and bottom sheets start under it rather than under a
-  // literal offset that a wrapped header outgrows.
-  function trackShellTop() {
-    const root = document.documentElement;
-    const header = document.querySelector("body > .appHeader");
-    const nav = document.getElementById("obsNav");
-    const update = () => {
-      const bottom = Math.max(0, ...[header, nav].filter((el) => el && !el.hidden).map((el) => el.getBoundingClientRect().bottom));
-      const value = `${Math.round(bottom)}px`;
-      if (root.style.getPropertyValue("--shell-top") !== value) root.style.setProperty("--shell-top", value);
-    };
-    update();
-    if (typeof ResizeObserver === "function") {
-      const observer = new ResizeObserver(update);
-      for (const el of [header, nav]) if (el) observer.observe(el);
-    }
-    window.addEventListener("resize", update);
-  }
 
   // A view's message for a failed request: the server's own sentence, without
   // the "error_code: " prefix of app_api.js's Error text (the Query page's
@@ -456,7 +436,8 @@
 
   async function start() {
     window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, featuresKnown: false, VIEWS, VIEW_MODULES };
-    trackShellTop();
+    // --shell-top (the header and #obsNav) is measured by app_dom.js
+    // (ns.shell), as on every page.
     const named = viewFromPath(window.location.pathname);
     const view = named && enabledViews().includes(named) ? named : defaultView();
     detachViews(view);

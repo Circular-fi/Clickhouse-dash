@@ -149,6 +149,15 @@ def test_explorer_uses_arial_and_owns_no_document_scroll_on_desktop() -> None:
     assert 'Arial, Helvetica, sans-serif' in graph
     assert 'ui-sans-serif' not in graph
     assert 'overflow-y: hidden;' in css[css.index('html {'):css.index('html,\nbody {')]
-    assert 'body {\n  min-height: 100dvh;\n  display: flex;\n  flex-direction: column;\n  overflow: hidden;' in css
-    assert '#queryWorkspace {\n  overflow: auto;' in css
-    assert '.explorerWorkspace {\n  height: auto;\n  overflow: hidden;' in css
+    # One scroll model (Page shell block): the document never scrolls, the
+    # Query workspace is its page's one scroller, the Explorer's panes scroll.
+    shell = css[css.index("/* ==== Page shell"):css.index("/* ==== /Page shell")]
+    assert 'html,\nbody {\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;' in shell
+    assert 'body {\n  display: flex;\n  flex-direction: column;\n}' in shell
+    layout = shell[shell.index('.layout {'):shell.index('}', shell.index('.layout {'))]
+    assert 'overflow: auto;' in layout and 'flex: 1 1 auto;' in layout
+    workspace = shell[shell.index('.explorerWorkspace {'):shell.index('}', shell.index('.explorerWorkspace {'))]
+    assert 'overflow: hidden;' in workspace and 'flex: 1 1 auto;' in workspace
+    # No narrow-window rule hands the scroll back to the document.
+    assert 'calc(100vh - 62px)' not in css and 'calc(100dvh - 62px)' not in css
+    assert 'html,\n  body {\n    overflow: auto;' not in css

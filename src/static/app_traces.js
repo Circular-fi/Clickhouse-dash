@@ -219,7 +219,7 @@
   // The search bar's height as --trace-bar-h on the root element, in px (it
   // wraps to 2 or more rows on narrower windows): the drawers of the Search
   // and Services tabs open under it and the facets sidebar sticks under it,
-  // below --shell-top (app_observability.js).
+  // below --shell-top (app_dom.js).
   function trackSearchBarHeight() {
     const bar = dom.tracesForm;
     if (!bar) return;

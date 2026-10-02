@@ -228,4 +228,42 @@
   };
 
   ns.dom = dom;
+
+  // The page shell (style.css "Page shell" block), shared by every page.
+  // BREAKPOINTS mirror --bp-sm / --bp-md / --bp-lg: media queries cannot read
+  // custom properties, so CSS and scripts both name these three numbers.
+  const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });
+  const mediaQuery = (name) => `(max-width: ${BREAKPOINTS[name]}px)`;
+  const isAtMost = (name) => {
+    try { return window.matchMedia(mediaQuery(name)).matches; } catch { return false; }
+  };
+
+  // The chrome above the content region (the header and the page's nav row,
+  // both of which wrap on narrow windows) as --shell-top on the root element,
+  // in px: drawers and bottom sheets start under it rather than under a
+  // literal offset that a wrapped header outgrows.
+  const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar"];
+  let shellTopTracked = false;
+  function trackShellTop() {
+    if (shellTopTracked) return;
+    shellTopTracked = true;
+    const root = document.documentElement;
+    const rows = SHELL_ROWS.map((selector) => document.querySelector(selector)).filter(Boolean);
+    const update = () => {
+      const visible = rows.filter((el) => el.getClientRects().length > 0);
+      const bottom = Math.max(0, ...visible.map((el) => el.getBoundingClientRect().bottom));
+      const value = `${Math.round(bottom)}px`;
+      if (root.style.getPropertyValue("--shell-top") !== value) root.style.setProperty("--shell-top", value);
+    };
+    update();
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(update);
+      for (const el of rows) observer.observe(el);
+    }
+    window.addEventListener("resize", update);
+  }
+
+  ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", trackShellTop, { once: true });
+  else trackShellTop();
 })();

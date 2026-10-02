@@ -232,3 +232,30 @@ Visible changes to expect, all intended:
   on every browser locale.
 - Solid error badges are `--danger` with a `--panel` glyph: light red with a
   dark glyph in dark mode.
+
+## Page shell
+
+Query, Explorer and Observability share one full-bleed page chrome, written
+once in the "Page shell" block of `style.css`:
+
+- The header, then the page's nav row (`#obsNav`, `#explorerTopBar`; the
+  Catalog mode bar `#explorerModeBar` is one too), then the page's regions
+  edge to edge on the flat `--bg`. There is no page card, rounded inset or
+  outer shadow.
+- `--gutter` (12 px, 10 px at 820 px and below) insets every region's
+  content and the header. `--nav-row-h` (46 px) is the height of a nav row.
+  `--shell-border` (1 px `--border`) separates regions and rows.
+- The `--z-*` scale names the stacking levels: `--z-nav`, `--z-drawer`,
+  `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
+- `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the
+  shell breakpoints. Media queries cannot read custom properties, so they
+  repeat the numbers. Scripts use `ns.shell.BREAKPOINTS`,
+  `ns.shell.isAtMost("md")` and `ns.shell.mediaQuery("md")` from
+  `app_dom.js`.
+- Scroll model: html and body never scroll. Each page's content region is
+  its only scroller: `#queryWorkspace`, the Explorer detail, graph and
+  storage panes, and each Observability view's own pane. Side panels and
+  detail panels scroll on their own.
+- Anything placed under the chrome uses `--shell-top`. `app_dom.js` sets it
+  on every page to the bottom of the header and the nav row. Do not use a
+  literal header height.

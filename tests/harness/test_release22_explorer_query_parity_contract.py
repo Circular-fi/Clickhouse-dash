@@ -51,7 +51,9 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     assert 'id="explorerViewTabs" class="explorerViewTabs" role="tablist"' in html
     for view in ['catalog', 'functions', 'operations']:
         assert f'data-view="{view}"' in html
-    assert 'id="explorerModeTabs" class="explorerViewTabs explorerViewTabs--compact explorerModeTabs" role="tablist"' in html
+    # The mode bar is a nav row like #obsNav: full-size tabs, no compact pill.
+    assert 'id="explorerModeTabs" class="explorerViewTabs explorerModeTabs" role="tablist"' in html
+    assert 'explorerViewTabs--compact' not in html + css
     for mode in ['browse', 'graph', 'storage']:
         assert f'data-mode="{mode}"' in html
     assert 'button.setAttribute("aria-selected", String(active));' in ui
