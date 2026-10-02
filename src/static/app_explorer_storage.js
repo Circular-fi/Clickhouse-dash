@@ -30,7 +30,7 @@
   const TABLE_CLIENT_TTL_MS = 30000;
   const TREEMAP_MIN_ITEMS = 3;
   const INCLUDE_SYSTEM_KEY = "chdash.explorer.includeSystem";
-  const DASH = "\u2014";
+  const DASH = ns.format.EMPTY;
 
   const data = {
     hostId: "",
@@ -43,39 +43,14 @@
   let view = null;
 
   // ---------------------------------------------------------------------------
-  // Formatting
+  // Formatting: ns.format (docs/ui-foundations.md). Shares stay on a 0-100
+  // scale for the bars; ns.format.percent takes a ratio.
 
-  function fmtBytes(value) {
+  const format = ns.format;
+
+  function percentText(value) {
     const n = Number(value);
-    return value == null || !Number.isFinite(n) ? DASH : ns.util.formatBytes(n);
-  }
-
-  function fmtInt(value) {
-    const n = Number(value);
-    return value == null || !Number.isFinite(n) ? DASH : ns.util.formatInt(n);
-  }
-
-  function fmtCompact(value) {
-    const n = Number(value);
-    if (value == null || !Number.isFinite(n)) return DASH;
-    try {
-      return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-    } catch {
-      return String(Math.trunc(n));
-    }
-  }
-
-  function fmtPercent(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return DASH;
-    if (n === 0) return "0%";
-    if (n > 0 && n < 0.1) return "<0.1%";
-    return `${n.toFixed(n < 10 ? 1 : 0)}%`;
-  }
-
-  function plural(count, singular, pluralText = `${singular}s`) {
-    const value = Math.max(0, Number(count || 0));
-    return `${fmtInt(value)} ${value === 1 ? singular : pluralText}`;
+    return value == null || !Number.isFinite(n) ? DASH : format.percent(n / 100);
   }
 
   function node(tag, className, text) {
@@ -358,8 +333,8 @@
 
   function footnoteText({ threshold = 0, scopeLabel = "", resident = 0, treemapShown = false }) {
     const bits = ["On-disk bytes of active parts (local replica)"];
-    if (treemapShown && threshold > 0) bits.push(`the map groups objects under 1% of ${scopeLabel} (< ${fmtBytes(threshold)}) into Others`);
-    if (resident > 0) bits.push(`RAM of Memory / Buffer / Dictionary not counted: ${fmtBytes(resident)}`);
+    if (treemapShown && threshold > 0) bits.push(`the map groups objects under 1% of ${scopeLabel} (< ${format.bytes(threshold)}) into Others`);
+    if (resident > 0) bits.push(`RAM of Memory / Buffer / Dictionary not counted: ${format.bytes(resident)}`);
     return `${bits.join(" · ")}.`;
   }
 
@@ -369,7 +344,7 @@
     const fill = node("span", "explorerStorageList__fill");
     fill.style.width = `${max > 0 ? Math.max(bytes > 0 ? 1.5 : 0, Math.min(100, bytes / max * 100)).toFixed(2) : 0}%`;
     bar.appendChild(fill);
-    td.append(bar, node("span", "explorerStorageList__pct", share == null ? DASH : fmtPercent(share)));
+    td.append(bar, node("span", "explorerStorageList__pct", share == null ? DASH : percentText(share)));
     td.dataset.value = share == null ? "" : String(share);
   }
 
@@ -577,20 +552,20 @@
         } else if (column.key === "engine") {
           td.textContent = row.engine || DASH;
         } else if (column.key === "bytes") {
-          td.textContent = fmtBytes(row.bytes);
+          td.textContent = format.bytes(row.bytes);
           td.dataset.value = String(row.bytes ?? "");
-          if (row.resident > 0) td.title = `${fmtBytes(row.resident)} RAM (Memory / Buffer / Dictionary) not counted`;
+          if (row.resident > 0) td.title = `${format.bytes(row.resident)} RAM (Memory / Buffer / Dictionary) not counted`;
         } else if (column.key === "share") {
           shareBarCell(td, Number(row.bytes || 0), info.total, maxBytes);
         } else if (column.key === "rows") {
-          td.textContent = row.rows == null ? DASH : fmtInt(row.rows);
+          td.textContent = row.rows == null ? DASH : format.count(row.rows);
           td.dataset.value = row.rows == null ? "" : String(row.rows);
-          if (row.rows != null && maxRows > 0) td.title = fmtCompact(row.rows);
+          if (row.rows != null && maxRows > 0) td.title = format.compact(row.rows);
         } else if (column.key === "count") {
-          td.textContent = row.objects > row.count ? `${fmtInt(row.count)} / ${fmtInt(row.objects)}` : fmtInt(row.count);
+          td.textContent = row.objects > row.count ? `${format.count(row.count)} / ${format.count(row.objects)}` : format.count(row.count);
           td.dataset.value = String(row.count ?? "");
         } else if (column.key === "parts") {
-          td.textContent = row.parts == null ? DASH : fmtInt(row.parts);
+          td.textContent = row.parts == null ? DASH : format.count(row.parts);
           td.dataset.value = row.parts == null ? "" : String(row.parts);
         }
         tr.appendChild(td);
@@ -607,10 +582,10 @@
       const tr = node("tr", "explorerStorageList__row explorerStorageList__row--omitted");
       for (const column of columns) {
         const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}`);
-        if (column.key === "name") td.textContent = `${plural(info.omitted.count, "smaller table")}`;
-        else if (column.key === "bytes") td.textContent = fmtBytes(info.omitted.bytes);
+        if (column.key === "name") td.textContent = `${format.countLabel(Number(info.omitted.count || 0), "smaller table")}`;
+        else if (column.key === "bytes") td.textContent = format.bytes(info.omitted.bytes);
         else if (column.key === "share") shareBarCell(td, info.omitted.bytes, info.total, maxBytes);
-        else if (column.key === "rows") td.textContent = fmtInt(info.omitted.rows);
+        else if (column.key === "rows") td.textContent = format.count(info.omitted.rows);
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -633,7 +608,7 @@
       view.treemap = treemap.mount(view.mapHost, {
         ariaLabel: "Storage treemap",
         emptyText: "No on-disk data.",
-        formatBytes: (value) => fmtBytes(value),
+        formatBytes: (value) => format.bytes(value),
         onOpen: (target) => {
           if (target.kind === "table" && target.database && target.table) setScope({ database: target.database, table: target.table });
           else if (target.kind === "database") setScope({ database: target.database || target.name });
@@ -685,10 +660,10 @@
       level = "table";
       info = tableLevel(database, table);
       const bits = [info.engine || null];
-      if (info.detail) bits.push(plural(info.rows.length, "partition"));
-      bits.push(fmtBytes(info.total));
+      if (info.detail) bits.push(format.countLabel(info.rows.length, "partition"));
+      bits.push(format.bytes(info.total));
       const rowsTotal = info.detail?.summary?.rows ?? info.storageTable?.rows;
-      if (rowsTotal != null) bits.push(`${fmtCompact(rowsTotal)} rows`);
+      if (rowsTotal != null) bits.push(`${format.compact(rowsTotal)} rows`);
       view.meta.textContent = bits.filter(Boolean).join(" · ");
     } else if (database) {
       level = "database";
@@ -700,14 +675,14 @@
         emptyList(`Database ${database} is not visible to this connection.`);
         return;
       }
-      const bits = [plural(info.entry.storing_tables, "table") + " with data", fmtBytes(info.total)];
-      if (Number(info.entry.objects || 0) > Number(info.entry.storing_tables || 0)) bits.push(`${fmtInt(info.entry.objects)} objects`);
+      const bits = [format.countLabel(Number(info.entry.storing_tables || 0), "table") + " with data", format.bytes(info.total)];
+      if (Number(info.entry.objects || 0) > Number(info.entry.storing_tables || 0)) bits.push(`${format.count(info.entry.objects)} objects`);
       view.meta.textContent = bits.join(" · ");
     } else {
       level = "server";
       info = serverLevel(includeSystem);
       const storing = info.databases.reduce((sum, item) => sum + Number(item.storing_tables || 0), 0);
-      view.meta.textContent = [plural(info.databases.length, "database"), `${plural(storing, "table")} with data`, fmtBytes(info.total)].join(" · ");
+      view.meta.textContent = [format.countLabel(info.databases.length, "database"), `${format.countLabel(storing, "table")} with data`, format.bytes(info.total)].join(" · ");
     }
 
     const scopeName = table ? `${database}.${table}` : (database || "the server");
@@ -719,13 +694,13 @@
       if (info.error) { emptyList(`Partitions unavailable: ${info.error.message || "request failed"}`); return; }
       if (!info.rows.length) {
         emptyList(info.total > 0
-          ? `${info.engine || "This engine"} has no partitions: the table is stored as one unit of ${fmtBytes(info.total)}.`
+          ? `${info.engine || "This engine"} has no partitions: the table is stored as one unit of ${format.bytes(info.total)}.`
           : "This object stores no data on disk.");
         return;
       }
     } else if (level === "database" && !info.rows.length) {
       emptyList(info.resident > 0
-        ? `No table of ${database} stores data on disk; its Memory / Buffer / Dictionary objects hold ${fmtBytes(info.resident)} of RAM.`
+        ? `No table of ${database} stores data on disk; its Memory / Buffer / Dictionary objects hold ${format.bytes(info.resident)} of RAM.`
         : `No table of ${database} stores data on disk.`);
       return;
     } else if (level === "server" && !info.rows.length) {
@@ -791,7 +766,7 @@
     head.appendChild(node("h3", "explorerSectionTitle", "Storage"));
     const total = Number(root?.bytes || 0);
     head.appendChild(node("span", "explorerDatabaseStorage__meta", total > 0
-      ? `${fmtBytes(total)} on disk${residentBytes > 0 ? ` · ${fmtBytes(residentBytes)} RAM` : ""}`
+      ? `${format.bytes(total)} on disk${residentBytes > 0 ? ` · ${format.bytes(residentBytes)} RAM` : ""}`
       : ""));
     if (typeof onShowStorage === "function") {
       const link = node("button", "explorerDatabaseStorage__link", "Storage view");
@@ -804,7 +779,7 @@
     container.appendChild(section);
     if (!treemap || !(total > 0)) {
       section.appendChild(node("div", "explorerEmptySection", residentBytes > 0
-        ? `No on-disk data. Resident memory: ${fmtBytes(residentBytes)} (Memory / Buffer / Dictionary).`
+        ? `No on-disk data. Resident memory: ${format.bytes(residentBytes)} (Memory / Buffer / Dictionary).`
         : "No on-disk data in this database."));
       return { destroy() {} };
     }
@@ -819,7 +794,7 @@
       renderLegend(legend, tree);
       const controller = treemap.mount(host, {
         ariaLabel: `${name} table size treemap`,
-        formatBytes: (value) => fmtBytes(value),
+        formatBytes: (value) => format.bytes(value),
         onOpen: (target) => {
           if (target.kind === "table" && target.database && target.table) onOpen?.(target.database, target.table);
         },
@@ -843,7 +818,7 @@
     for (const item of items) {
       const share = Number(item.bytes || 0) / total * 100;
       const other = item.kind === "other";
-      const label = other ? `Others (${plural(item.members, "table")})` : item.name;
+      const label = other ? `Others (${format.countLabel(Number(item.members || 0), "table")})` : item.name;
       const segment = node(other || !onOpen ? "span" : "button", `explorerStorageStrip__segment${other ? " is-other" : ""}`);
       segment.setAttribute("role", "listitem");
       if (!other) {
@@ -851,8 +826,8 @@
         segment.style.setProperty("--treemap-color", treemap.engineFamily(item.engine).color);
       }
       segment.style.flexGrow = String(Math.max(share, 0.6));
-      segment.title = `${other ? `Others in ${name}` : `${name}.${item.name}`}\n${fmtBytes(item.bytes)} · ${fmtPercent(share)}`;
-      if (share >= 12) segment.appendChild(node("span", "explorerStorageStrip__label", `${label} · ${fmtPercent(share)}`));
+      segment.title = `${other ? `Others in ${name}` : `${name}.${item.name}`}\n${format.bytes(item.bytes)} · ${percentText(share)}`;
+      if (share >= 12) segment.appendChild(node("span", "explorerStorageStrip__label", `${label} · ${percentText(share)}`));
       if (!other && onOpen) {
         segment.type = "button";
         segment.addEventListener("click", () => onOpen(name, item.table || item.name));
@@ -861,7 +836,7 @@
       const entry = node("span", "explorerStorageStrip__entry");
       const swatch = node("span", `explorerStorageStrip__swatch${other ? " is-other" : ""}`);
       if (!other) swatch.style.background = treemap.engineFamily(item.engine).color;
-      entry.append(swatch, node("span", "explorerStorageStrip__name", label), node("span", "explorerStorageStrip__value", `${fmtBytes(item.bytes)} · ${fmtPercent(share)}`));
+      entry.append(swatch, node("span", "explorerStorageStrip__name", label), node("span", "explorerStorageStrip__value", `${format.bytes(item.bytes)} · ${percentText(share)}`));
       legend.appendChild(entry);
     }
     section.append(strip, legend);

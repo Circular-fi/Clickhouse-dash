@@ -9,13 +9,13 @@ def read(path: str) -> str:
 
 def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    assert '`${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
+    assert '`${format.bytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
     ui = read("src/static/app_explorer_detail.js")
     assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
     # One size label: RAM for resident engines, disk otherwise; 0 B is hidden.
-    assert '`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
+    assert '`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
     assert 'if (!viewLike && footprint != null && footprint > 0) {' in ui
     assert 'sectionTitle("Storage breakdown")' not in ui
     assert 'sectionTitle("CREATE statement")' not in ui
@@ -114,4 +114,4 @@ def test_log_family_keeps_clickhouse_uncompressed_total_when_clickhouse_exposes_
     assert "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)" in catalog
     assert "summary.uncompressed_bytes = total_uncompressed_bytes;" in catalog
     assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog
-    assert 'aboutTile("Uncompressed", fmtBytes(s.uncompressed_bytes), "data before compression"' in ui
+    assert 'aboutTile("Uncompressed", format.bytes(s.uncompressed_bytes), "data before compression"' in ui

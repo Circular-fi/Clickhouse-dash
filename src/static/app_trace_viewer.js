@@ -4,27 +4,11 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const ATTEMPT_COLORS = [
-    "#7aa2f7",
-    "#bb9af7",
-    "#7dcfff",
-    "#9ece6a",
-    "#e0af68",
-    "#f7768e",
-    "#73daca",
-    "#ff9e64",
-  ];
-
-  function durationLabel(us) {
-    const value = Math.max(0, Number(us) || 0);
-    if (value < 1000) return `${Math.round(value)}µs`;
-    const ms = value / 1000;
-    if (ms < 10) return `${ms.toFixed(2)}ms`;
-    if (ms < 100) return `${ms.toFixed(1)}ms`;
-    if (ms < 1000) return `${Math.round(ms)}ms`;
-    const seconds = ms / 1000;
-    return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
-  }
+  // ns.format and ns.palette (docs/ui-foundations.md): durations from
+  // microseconds ("2.6 ms", "350 \u00b5s"), and one categorical series slot
+  // (--qchart-N) per query attempt.
+  const { format, palette } = ns;
+  const durationUs = format.duration.fromUs;
 
   function normalizeOperationName(value) {
     return String(value || "span").replace(/(?:_\d+)+$/g, "") || String(value || "span");
@@ -316,7 +300,7 @@
       tick.style.left = `${ratio * 100}%`;
       if (withLabels) {
         const label = document.createElement("b");
-        label.textContent = durationLabel(windowUs * ratio);
+        label.textContent = durationUs(windowUs * ratio);
         tick.appendChild(label);
       }
       parent.appendChild(tick);
@@ -439,7 +423,7 @@
       const notice = document.createElement("div");
       notice.className = "traceViewer__notice";
       notice.textContent = options.processorSummaryOverlay
-        ? `Detailed calls exceed the span limit. Structure is preserved and processor activity is filled from the full time-bucketed OTel summary${Number(options.processorSummaryBucketUs) > 0 ? ` (${durationLabel(options.processorSummaryBucketUs)} buckets)` : ""}.`
+        ? `Detailed calls exceed the span limit. Structure is preserved and processor activity is filled from the full time-bucketed OTel summary${Number(options.processorSummaryBucketUs) > 0 ? ` (${durationUs(options.processorSummaryBucketUs)} buckets)` : ""}.`
         : "Trace truncated at the configured span limit; shallower depths are preserved first.";
       shell.appendChild(notice);
     }
@@ -450,7 +434,7 @@
       model.attemptIds.forEach((id, index) => {
         const item = document.createElement("span");
         item.className = "traceViewer__attempt";
-        item.style.setProperty("--trace-attempt-color", ATTEMPT_COLORS[index % ATTEMPT_COLORS.length]);
+        item.style.setProperty("--trace-attempt-color", palette.categorical(index));
         const swatch = document.createElement("i");
         const text = document.createElement("span");
         text.textContent = `Attempt ${index + 1}`;
@@ -533,7 +517,7 @@
       row.className = "traceViewer__row";
       row.dataset.spanId = span.spanId;
       row.dataset.traceId = span.traceId;
-      row.style.setProperty("--trace-attempt-color", ATTEMPT_COLORS[span.attempt % ATTEMPT_COLORS.length]);
+      row.style.setProperty("--trace-attempt-color", palette.categorical(span.attempt));
       row.hidden = rowHidden(span);
       rowByKey.set(span.key, row);
 
@@ -578,7 +562,7 @@
       operation.className = "traceViewer__operation";
       operation.textContent = span.operation;
       if (span.mergedCount > 1) {
-        operation.title = `${span.mergedCount.toLocaleString()} sibling spans merged after removing trailing _<number> instance suffixes.`;
+        operation.title = `${format.count(span.mergedCount)} sibling spans merged after removing trailing _<number> instance suffixes.`;
       }
       name.append(service, operation);
       if (span.children.length && span.descendantCount) {
@@ -623,7 +607,7 @@
         path.setAttribute("d", commands.join(""));
         minWidthPath.setAttribute("d", minWidthCommands.join(""));
         const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        title.textContent = `${span.operation} · ${renderSegments.length.toLocaleString()} intervals · ${durationLabel(span.duration)} total · +${durationLabel(spanOffset)} · ${(spanWidth * 100).toFixed(2)}% window`;
+        title.textContent = `${span.operation} · ${format.count(renderSegments.length)} intervals · ${durationUs(span.duration)} total · +${durationUs(spanOffset)} · ${format.percent(spanWidth)} window`;
         svg.append(title, path, minWidthPath);
         timeline.appendChild(svg);
       } else {
@@ -634,11 +618,11 @@
           const width = Math.max(0.12, Math.min(100 - left, segment.duration / model.window * 100));
           bar.style.left = `${left}%`;
           bar.style.width = `${width}%`;
-          bar.title = `${span.operation} · ${durationLabel(segment.duration)} · +${durationLabel(segment.start - model.start)}`;
+          bar.title = `${span.operation} · ${durationUs(segment.duration)} · +${durationUs(segment.start - model.start)}`;
           if (renderSegments.length === 1) {
             const label = document.createElement("span");
             label.className = `traceViewer__barLabel${left >= 50 ? " is-before" : " is-after"}`;
-            label.textContent = durationLabel(segment.duration);
+            label.textContent = durationUs(segment.duration);
             bar.appendChild(label);
           }
           timeline.appendChild(bar);
@@ -658,7 +642,7 @@
     if (model.spans.length > maxRows) {
       const limit = document.createElement("div");
       limit.className = "traceViewer__rowLimit";
-      limit.textContent = `Showing the first ${maxRows.toLocaleString()} spans of ${model.spans.length.toLocaleString()}.`;
+      limit.textContent = `Showing the first ${format.count(maxRows)} spans of ${format.count(model.spans.length)}.`;
       shell.appendChild(limit);
     }
 
@@ -667,5 +651,5 @@
     return controller;
   }
 
-  ns.traceViewer = { render, durationLabel, buildModel, initialCollapsedForSpanLimit };
+  ns.traceViewer = { render, buildModel, initialCollapsedForSpanLimit };
 })();

@@ -136,9 +136,10 @@ def test_analysis_exposes_session_elapsed_separately_from_clickhouse_duration() 
     assert "SessionStatus status, int64_t session_elapsed_ms" in query_api
     assert "session_elapsed_ms);" in query_api
     assert 'writer.Key("session_elapsed_ms"); writer.Int64(record->session_elapsed_ms);' in analysis_api
-    assert 'parts.push(`ClickHouse ${fmtMs(overview.duration_ms)}`)' in analysis_ui
-    assert 'parts.push(`Session ${fmtSessionElapsed(data.session_elapsed_ms)}`)' in analysis_ui
-    assert 'util.formatSeconds(Number(v) / 1000)' in analysis_ui
+    # Both durations in the one ns.format duration ("9 ms", "1.23 s").
+    assert 'parts.push(`ClickHouse ${format.duration.fromMs(overview.duration_ms)}`)' in analysis_ui
+    assert 'parts.push(`Session ${format.duration.fromMs(data.session_elapsed_ms)}`)' in analysis_ui
+    assert 'fmtMs' not in analysis_ui and 'formatSeconds' not in analysis_ui
 
 
 def test_analysis_system_log_strings_are_normalized_before_cpp_decoding() -> None:

@@ -210,12 +210,68 @@ test('query execution renders rows and terminal status', async ({ page }) => {
   await runSuccessfulQuery(page, `SELECT number AS id, concat('row-', toString(number)) AS label FROM numbers(24) ORDER BY id`);
   await expect(page.locator('#resultTableBody tr')).toHaveCount(24);
   await expect(page.locator('#resultTableBody')).toContainText('row-23');
-  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('-');
+  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('\u2014');
   await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 12_000 });
-  await expect(page.locator('#clickhouseElapsedText')).toHaveText(/^\d+(?:\.\d+)?(?:ms|s)$/i);
+  // ns.format.duration: "8 ms", "1.23 s".
+  await expect(page.locator('#clickhouseElapsedText')).toHaveText(/^\d+(?:\.\d+)? (?:\u00b5s|ms|s)$/);
   const elapsedBox = await page.locator('#elapsedSecondsText').boundingBox();
   const systemBox = await page.locator('#clickhouseElapsedText').boundingBox();
   expect(elapsedBox && systemBox && systemBox.y > elapsedBox.y).toBeTruthy();
+});
+
+test('result values stay raw, a SQL NULL is the shared NULL token, and the metric rail uses the shared formats', async ({ page }) => {
+  await openApp(page);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  // Decision 45: no grouping, no reformatting of result values in the table
+  // or its copies; timestamps stay as ClickHouse returned them.
+  // Two rows: a single row would open the vertical one-row view.
+  await runSuccessfulQuery(page, "SELECT toUInt64(1234567) + number AS n, toFloat64(1234.5) AS f, toDateTime('2026-09-12 16:29:57', 'UTC') AS t, CAST(NULL AS Nullable(UInt8)) AS z, 'null' AS s FROM numbers(2) ORDER BY n");
+  const cells = page.locator('#resultTableBody tr').first().locator('td');
+  await expect(cells.nth(1)).toHaveText('1234567');
+  await expect(cells.nth(2)).toHaveText('1234.5');
+  // The API sends DateTime as ISO 8601 UTC; the table shows it as sent.
+  await expect(cells.nth(3)).toHaveText('2026-09-12T16:29:57Z');
+  // A data NULL reads "NULL" in the --json-null italic token, as in the chart
+  // tooltips; the string 'null' stays plain text.
+  await expect(cells.nth(4).locator('.nullToken')).toHaveText('NULL');
+  const token = await cells.nth(4).locator('.nullToken').evaluate((el) => ({
+    style: getComputedStyle(el).fontStyle, color: getComputedStyle(el).color, expected: window.ChDash.palette.resolve('--json-null'),
+  }));
+  expect(token.style).toBe('italic');
+  expect(token.color).toBe(token.expected);
+  await expect(cells.nth(5)).toHaveText('null');
+  await expect(cells.nth(5).locator('.nullToken')).toHaveCount(0);
+  // Copy cell keeps the raw value too.
+  await page.evaluate(() => {
+    window.__chdashTestCopiedText = '';
+    document.addEventListener('copy', () => {
+      const active = document.activeElement;
+      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
+    }, true);
+  });
+  const readClipboard = () => page.evaluate(async () => {
+    if (window.isSecureContext && navigator.clipboard) {
+      try { return await navigator.clipboard.readText(); } catch (_) {}
+    }
+    return window.__chdashTestCopiedText || '';
+  });
+  for (const [index, expected] of [[1, '1234567'], [3, '2026-09-12T16:29:57Z']]) {
+    await cells.nth(index).click({ button: 'right' });
+    await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Copy cell' }).click();
+    await expect.poll(readClipboard).toBe(expected);
+  }
+  // The rail: grouped totals, ns.format bytes / durations / percentages,
+  // never the old "KiB", "1.00ms" or two-decimal counts (the unit keeps its
+  // space, a no-break one in the split number / unit layout).
+  await expect(page.locator('#readRowsTotalText')).toHaveText(/^\d{1,3}(,\d{3})*$/);
+  await expect(page.locator('#readBytesTotalText')).toHaveText(/^\d+(\.\d)?\s(B|KB|MB)$/);
+  await expect(page.locator('#elapsedSecondsText')).toHaveText(/^\d+(\.\d+)?\s(ns|\u00b5s|ms|s)$/);
+  await expect(page.locator('#memoryMaxText')).not.toHaveText(/iB|\.\d\d/);
+  for (const id of ['#cpuText', '#cpuMaxText', '#progressPercentText']) {
+    // ns.format.percent: up to three significant digits, no trailing zeros
+    // ("100%", "3.72%", "12.3%"), the em dash when unknown.
+    await expect(page.locator(id)).toHaveText(/^(?:<0\.1%|\d+(?:\.\d*[1-9])?%|\u2014)$/);
+  }
 });
 
 test('query errors are surfaced', async ({ page }) => {
@@ -1028,7 +1084,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await expect(values.nth(3).locator('.tok-num').first()).toBeVisible();
   await expect(values.nth(4)).toHaveText('2');
   await expect(values.nth(5)).toHaveText('t2');
-  await expect(values.nth(6).locator('.tok-null')).toHaveText('null');
+  await expect(values.nth(6).locator('.nullToken')).toHaveText('NULL');
   await expect(values.nth(7)).toContainText(`long-${'abcdefghij'.repeat(40)}-end`);
 
   // Row 4 is pushed below the detail; the detail is exactly the visible

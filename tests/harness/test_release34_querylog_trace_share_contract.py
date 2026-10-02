@@ -26,8 +26,8 @@ def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() ->
     ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
-    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
-    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
+    assert '`${percentText(allShare)} of all databases`' in about
     assert "explorerScopeMeter" not in ui
     assert ".explorerAboutTile__context" in css
     assert '"explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", item.name' in ui

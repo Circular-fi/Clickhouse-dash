@@ -17,7 +17,10 @@
 
   const AUTO_REFRESH_MS = 5000;
   const AUTO_REFRESH_KEY = "chdash.explorer.opsAutoRefresh";
-  const DASH = "\u2014";
+  // Formats from ns.format (docs/ui-foundations.md): durations "2 h 5 min",
+  // "1.82 ms"; counts "120,064"; server times in the browser's zone.
+  const format = ns.format;
+  const DASH = format.EMPTY;
 
   let view = null;
 
@@ -37,38 +40,11 @@
     return !operations || (operations.enabled !== false && operations.keeper !== false);
   }
 
-  function fmtInt(value) {
-    const n = Number(value);
-    return value == null || !Number.isFinite(n) ? DASH : ns.util.formatInt(n);
-  }
-
-  function fmtBytes(value) {
-    const n = Number(value);
-    return value == null || !Number.isFinite(n) ? DASH : ns.util.formatBytes(n);
-  }
-
-  function fmtDuration(seconds) {
-    const n = Number(seconds);
-    if (!Number.isFinite(n)) return DASH;
-    if (n < 1) return `${Math.round(n * 1000)} ms`;
-    if (n < 60) return `${n.toFixed(n < 10 ? 1 : 0)} s`;
-    const minutes = Math.floor(n / 60);
-    if (minutes < 60) return `${minutes} min ${Math.round(n % 60)} s`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 48) return `${hours} h ${minutes % 60} min`;
-    return `${Math.floor(hours / 24)} d ${hours % 24} h`;
-  }
-
-  function fmtMs(value) {
-    const n = Number(value);
-    if (value == null || !Number.isFinite(n)) return DASH;
-    return n < 10 ? `${n.toFixed(2)} ms` : `${n.toFixed(n < 100 ? 1 : 0)} ms`;
-  }
-
-  // ClickHouse reports "1970-01-01 00:00:00" for unset times.
-  function validTime(value) {
-    const text = String(value || "").trim();
-    return text && !text.startsWith("1970-01-01") ? text : "";
+  // A DateTime text of the server's system tables: browser-local text, the
+  // server value (and ISO) in the tooltip; an unset (epoch 0) time is EMPTY.
+  function timeCell(value) {
+    const time = ns.ui.serverTime(value);
+    return textCell(time.text, "", time.title);
   }
 
   function readAutoRefresh() {
@@ -193,7 +169,7 @@
     const fill = node("span", "explorerOpsProgress__fill");
     fill.style.width = `${pct.toFixed(1)}%`;
     bar.appendChild(fill);
-    td.append(bar, node("span", "explorerOpsProgress__text", `${pct.toFixed(pct < 10 ? 1 : 0)}%`));
+    td.append(bar, node("span", "explorerOpsProgress__text", format.percent(pct / 100)));
     return td;
   }
 
@@ -230,7 +206,7 @@
 
   function truncatedNote(name) {
     const activity = view.activity || {};
-    return (activity.truncated_sections || []).includes(name) ? `first ${fmtInt(activity.row_limit)} shown` : "";
+    return (activity.truncated_sections || []).includes(name) ? `first ${format.count(activity.row_limit)} shown` : "";
   }
 
   // ---------------------------------------------------------------------------
@@ -268,14 +244,14 @@
       tiles.appendChild(item);
     };
     const recent = view.keeperRecent;
-    tile("Latency", recent?.latencyMs != null ? fmtMs(recent.latencyMs) : fmtMs(keeper.average_wait_ms),
+    tile("Latency", format.duration.fromMs(recent?.latencyMs != null ? recent.latencyMs : keeper.average_wait_ms),
       recent?.latencyMs != null ? `average over the last ${Math.round(recent.seconds)} s` : "average since server start");
-    tile("Requests in flight", fmtInt(keeper.metrics?.ZooKeeperRequest ?? null),
-      recent ? `${recent.rate.toFixed(recent.rate < 10 ? 1 : 0)} transactions/s` : `${fmtInt(keeper.events?.ZooKeeperTransactions ?? null)} transactions since start`);
-    tile("Watches", fmtInt(keeper.metrics?.ZooKeeperWatch ?? null));
+    tile("Requests in flight", format.count(keeper.metrics?.ZooKeeperRequest ?? null),
+      recent ? format.rate(recent.rate, "transactions") : `${format.count(keeper.events?.ZooKeeperTransactions ?? null)} transactions since start`);
+    tile("Watches", format.count(keeper.metrics?.ZooKeeperWatch ?? null));
     const exceptions = ["ZooKeeperHardwareExceptions", "ZooKeeperUserExceptions", "ZooKeeperOtherExceptions"]
       .reduce((sum, name) => sum + Number(keeper.events?.[name] || 0), 0);
-    tile("Exceptions", fmtInt(exceptions), "since server start");
+    tile("Exceptions", format.count(exceptions), "since server start");
     el.appendChild(tiles);
     if (connections.length) {
       const rows = connections.map((item) => {
@@ -284,10 +260,10 @@
           textCell(item.name || "default"),
           textCell(`${item.host}:${item.port}`, "explorerOpsTable__mono"),
           statusCell(item.is_expired ? "error" : "ok", item.is_expired ? "Expired" : "Connected"),
-          numCell(fmtDuration(item.session_uptime_seconds)),
-          numCell(item.session_timeout_ms == null ? DASH : fmtDuration(Number(item.session_timeout_ms) / 1000)),
-          numCell(fmtInt(item.keeper_api_version)),
-          textCell(validTime(item.connected_time)),
+          numCell(format.duration.fromSeconds(item.session_uptime_seconds)),
+          numCell(format.duration.fromMs(item.session_timeout_ms)),
+          numCell(format.count(item.keeper_api_version)),
+          timeCell(item.connected_time),
         );
         return tr;
       });
@@ -300,7 +276,7 @@
   }
 
   function renderMerges(items) {
-    const el = section("merges", "Merges", `${fmtInt(items.length)} running`, { note: truncatedNote("merges") });
+    const el = section("merges", "Merges", `${format.count(items.length)} running`, { note: truncatedNote("merges") });
     const rows = items.map((item) => {
       const tr = node("tr");
       tr.append(
@@ -308,10 +284,10 @@
         textCell(item.is_mutation ? "Mutation" : (item.merge_type || "Merge")),
         textCell(item.partition_id || DASH, "explorerOpsTable__mono", item.result_part_name ? `Result part ${item.result_part_name}` : ""),
         progressCell(item.progress),
-        numCell(fmtDuration(item.elapsed_seconds)),
-        numCell(fmtBytes(item.total_bytes_compressed)),
-        numCell(fmtInt(item.num_parts)),
-        numCell(fmtBytes(item.memory_usage)),
+        numCell(format.duration.fromSeconds(item.elapsed_seconds)),
+        numCell(format.bytes(item.total_bytes_compressed)),
+        numCell(format.count(item.num_parts)),
+        numCell(format.bytes(item.memory_usage)),
       );
       return tr;
     });
@@ -325,7 +301,7 @@
 
   function renderMutations(items) {
     const failing = items.filter((item) => String(item.latest_fail_reason || "").trim()).length;
-    const el = section("mutations", "Mutations", failing ? `${fmtInt(items.length)} pending · ${fmtInt(failing)} failing` : `${fmtInt(items.length)} pending`, { warn: failing, note: truncatedNote("mutations") });
+    const el = section("mutations", "Mutations", failing ? `${format.count(items.length)} pending · ${format.count(failing)} failing` : `${format.count(items.length)} pending`, { warn: failing, note: truncatedNote("mutations") });
     const rows = items.map((item) => {
       const tr = node("tr");
       const failed = String(item.latest_fail_reason || "").trim();
@@ -337,8 +313,8 @@
         textCell(item.mutation_id, "explorerOpsTable__mono"),
         command,
         statusCell(failed ? "error" : (item.is_killed ? "warning" : "pending"), failed ? (item.latest_fail_error_code_name || "Failing") : (item.is_killed ? "Killed" : "Pending")),
-        numCell(fmtInt(item.parts_to_do)),
-        textCell(validTime(item.create_time)),
+        numCell(format.count(item.parts_to_do)),
+        timeCell(item.create_time),
         messageCell(failed ? `${item.latest_failed_part ? `Part ${item.latest_failed_part}: ` : ""}${failed}` : ""),
       );
       return tr;
@@ -353,16 +329,16 @@
   function renderQueue(items) {
     const entries = items.reduce((sum, item) => sum + Number(item.entries || 0), 0);
     const postponed = items.reduce((sum, item) => sum + Number(item.postponed || 0), 0);
-    const el = section("replication_queue", "Replication queue", `${fmtInt(entries)} entries in ${fmtInt(items.length)} tables`, { warn: postponed, note: truncatedNote("replication_queue") });
+    const el = section("replication_queue", "Replication queue", `${format.count(entries)} entries in ${format.count(items.length)} tables`, { warn: postponed, note: truncatedNote("replication_queue") });
     const rows = items.map((item) => {
       const tr = node("tr");
       tr.append(
         objectCell(item),
-        numCell(fmtInt(item.entries)),
-        numCell(fmtInt(item.executing)),
-        numCell(fmtInt(item.postponed)),
-        numCell(fmtInt(item.max_tries)),
-        textCell(validTime(item.oldest_create_time)),
+        numCell(format.count(item.entries)),
+        numCell(format.count(item.executing)),
+        numCell(format.count(item.postponed)),
+        numCell(format.count(item.max_tries)),
+        timeCell(item.oldest_create_time),
         textCell((item.types || []).join(", ")),
         messageCell(item.last_exception || item.postpone_reason),
       );
@@ -378,7 +354,7 @@
 
   function renderReplicas(items) {
     const problems = items.filter((item) => replicaLevel(item) !== "ok").length;
-    const el = section("replicas", "Replicas", problems ? `${fmtInt(items.length)} tables · ${fmtInt(problems)} need attention` : `${fmtInt(items.length)} tables healthy`, { warn: problems, note: truncatedNote("replicas") });
+    const el = section("replicas", "Replicas", problems ? `${format.count(items.length)} tables · ${format.count(problems)} need attention` : `${format.count(items.length)} tables healthy`, { warn: problems, note: truncatedNote("replicas") });
     const rows = items.map((item) => {
       const level = replicaLevel(item);
       const status = item.is_session_expired ? "Session expired" : item.is_readonly ? "Read-only" : level === "warning" ? "Lagging" : "Healthy";
@@ -387,10 +363,10 @@
         objectCell(item),
         textCell(item.replica_name, "explorerOpsTable__mono", item.is_leader ? "Leader" : ""),
         statusCell(level, status),
-        numCell(item.total_replicas == null ? DASH : `${fmtInt(item.active_replicas)} / ${fmtInt(item.total_replicas)}`, "Active / total replicas (refreshed at most every 60 s)"),
-        numCell(Number(item.absolute_delay_seconds) < 60 ? `${fmtInt(item.absolute_delay_seconds)} s` : fmtDuration(item.absolute_delay_seconds)),
-        numCell(fmtInt(item.queue_size), `${fmtInt(item.inserts_in_queue)} inserts · ${fmtInt(item.merges_in_queue)} merges`),
-        textCell(validTime(item.last_queue_update)),
+        numCell(item.total_replicas == null ? DASH : `${format.count(item.active_replicas)} / ${format.count(item.total_replicas)}`, "Active / total replicas (refreshed at most every 60 s)"),
+        numCell(format.duration.fromSeconds(item.absolute_delay_seconds)),
+        numCell(format.count(item.queue_size), `${format.count(item.inserts_in_queue)} inserts · ${format.count(item.merges_in_queue)} merges`),
+        timeCell(item.last_queue_update),
         messageCell(item.last_queue_update_exception),
       );
       return tr;
@@ -405,7 +381,7 @@
   function renderDistribution(items) {
     const files = items.reduce((sum, item) => sum + Number(item.data_files || 0), 0);
     const errors = items.filter((item) => Number(item.error_count || 0) > 0 || item.is_blocked || Number(item.broken_data_files || 0) > 0).length;
-    const el = section("distribution_queue", "Distributed send queues", `${fmtInt(files)} files pending`, { warn: errors, note: truncatedNote("distribution_queue") });
+    const el = section("distribution_queue", "Distributed send queues", `${format.count(files)} files pending`, { warn: errors, note: truncatedNote("distribution_queue") });
     const rows = items.map((item) => {
       const tr = node("tr");
       const level = item.is_blocked || Number(item.broken_data_files || 0) > 0 ? "error" : Number(item.error_count || 0) > 0 ? "warning" : "ok";
@@ -413,10 +389,10 @@
         objectCell(item),
         textCell(item.data_path, "explorerOpsTable__mono"),
         statusCell(level, item.is_blocked ? "Blocked" : level === "error" ? "Broken files" : level === "warning" ? "Retrying" : "Sending"),
-        numCell(fmtInt(item.data_files)),
-        numCell(fmtBytes(item.data_compressed_bytes)),
-        numCell(fmtInt(item.error_count)),
-        numCell(Number(item.broken_data_files || 0) > 0 ? `${fmtInt(item.broken_data_files)} (${fmtBytes(item.broken_data_compressed_bytes)})` : "0"),
+        numCell(format.count(item.data_files)),
+        numCell(format.bytes(item.data_compressed_bytes)),
+        numCell(format.count(item.error_count)),
+        numCell(Number(item.broken_data_files || 0) > 0 ? `${format.count(item.broken_data_files)} (${format.bytes(item.broken_data_compressed_bytes)})` : "0"),
         messageCell(item.last_exception),
       );
       return tr;
@@ -437,7 +413,7 @@
     const bits = [];
     if (view.loading && !view.activity) bits.push("Loading\u2026");
     else if (view.activity?.generated_at_ms) {
-      bits.push(`Updated ${new Date(Number(view.activity.generated_at_ms)).toLocaleTimeString("en-GB")}`);
+      bits.push(`Updated ${format.time(Number(view.activity.generated_at_ms), { date: "never" })}`);
       if (view.activity.stale) bits.push("stale");
     }
     view.meta.textContent = bits.join(" · ");

@@ -3,7 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
-  const { dom, api, util } = ns;
+  const { dom, api } = ns;
 
   let current = null;
   let payload = null;
@@ -16,12 +16,8 @@
   // The shared modal dialog (app_ui_dialog.js) on #analysisModal.
   let dialog = null;
 
-  const fmtInt = (v) => Number.isFinite(Number(v)) ? new Intl.NumberFormat().format(Number(v)) : "\u2014";
-  const fmtBytes = (v) => util && typeof util.formatBytes === "function" ? util.formatBytes(Number(v) || 0) : `${fmtInt(v)} B`;
-  const fmtMs = (v) => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString()} ms` : "\u2014";
-  const fmtSessionElapsed = (v) => Number.isFinite(Number(v)) && Number(v) >= 0
-    ? (util && typeof util.formatSeconds === "function" ? util.formatSeconds(Number(v) / 1000) : fmtMs(v))
-    : "\u2014";
+  // ns.format (docs/ui-foundations.md): "9 ms", "1.23 s", "120,064 rows", "1.7 KB".
+  const format = ns.format;
 
   function clear(el) {
     if (el) {
@@ -172,10 +168,10 @@
     if (!dom.analysisSummary) return;
     const overview = data?.overview || null;
     const parts = [data?.query_id || ""];
-    if (overview && Number.isFinite(Number(overview.duration_ms))) parts.push(`ClickHouse ${fmtMs(overview.duration_ms)}`);
-    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) parts.push(`Session ${fmtSessionElapsed(data.session_elapsed_ms)}`);
-    if (overview && Number(overview.read_rows) > 0) parts.push(`${fmtInt(overview.read_rows)} rows read`);
-    if (overview && Number(overview.memory_usage) > 0) parts.push(`${fmtBytes(overview.memory_usage)} memory`);
+    if (overview && Number.isFinite(Number(overview.duration_ms))) parts.push(`ClickHouse ${format.duration.fromMs(overview.duration_ms)}`);
+    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) parts.push(`Session ${format.duration.fromMs(data.session_elapsed_ms)}`);
+    if (overview && Number(overview.read_rows) > 0) parts.push(`${format.count(overview.read_rows)} rows read`);
+    if (overview && Number(overview.memory_usage) > 0) parts.push(`${format.bytes(overview.memory_usage)} memory`);
     dom.analysisSummary.textContent = parts.filter(Boolean).join(" · ");
   }
 

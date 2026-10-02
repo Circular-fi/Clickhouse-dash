@@ -39,8 +39,9 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
     assert 'return format.bytes(n);' in util
     assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in format
     assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in format
-    assert 'function fmtStorageBytes(value) {\n    return fmtBytes(value);' in ui
-    assert 'fmtStorageBytes(item.compressed)' in ui
+    # Storage sizes are ns.format.bytes like every other byte value.
+    assert 'fmtStorageBytes' not in ui
+    assert 'format.bytes(item.compressed)' in ui
     assert 'min-width: 9.5ch;' in css
     assert 'font-variant-numeric: tabular-nums;' in css
     assert 'Upstream objects feed this object; downstream objects consume or are populated by it.' not in ui

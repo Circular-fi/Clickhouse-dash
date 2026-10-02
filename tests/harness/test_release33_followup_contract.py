@@ -52,7 +52,7 @@ def test_footprint_scope_is_one_readable_share_tile() -> None:
     ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
-    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
-    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
+    assert '`${percentText(allShare)} of all databases`' in about
     assert "explorerScopeMeter" not in ui
     assert ".explorerAboutTile__context" in css

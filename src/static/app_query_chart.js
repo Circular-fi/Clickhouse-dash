@@ -29,8 +29,8 @@
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
 
-  const esc = (value) => String(value == null ? "" : value)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // util.escapeHtml is the one escaper; null prints as "".
+  const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
 
   function readStoredView() {
     try {
@@ -334,8 +334,9 @@
 
   // --- Model: typed columns -> ascending x and one value array per line -----
 
+  // ns.palette: --qchart-1..8, and --qchart-other for a negative slot.
   function slotColor(slot) {
-    return slot < 0 ? "var(--qchart-other)" : `var(--qchart-${(slot % MAX_SERIES) + 1})`;
+    return ns.palette.categorical(slot);
   }
 
   function buildModel(cfg, meta, rows, store) {
@@ -906,7 +907,7 @@
       const format = ns.chartCore ? ns.chartCore.formatValue : formatFullNumber;
       numbersEl.innerHTML = cols.map((col) => {
         const v = toNumber(Array.isArray(row) ? row[col] : NaN);
-        return `<div class="queryChart__number"><span class="queryChart__numberLabel">${esc(meta.columns[col])}</span><span class="queryChart__numberValue">${esc(v === v ? format(v) : "NULL")}</span></div>`;
+        return `<div class="queryChart__number"><span class="queryChart__numberLabel">${esc(meta.columns[col])}</span><span class="queryChart__numberValue">${v === v ? esc(format(v)) : ns.format.nullToken()}</span></div>`;
       }).join("");
       noteEl.textContent = "1 row";
       delete hostEl.dataset.pointsDrawn;

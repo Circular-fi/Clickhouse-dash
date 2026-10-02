@@ -15,14 +15,15 @@
 
   const PREVIEW_LIMITS = [50, 100, 500];
   const PREVIEW_LIMIT_KEY = "chdash.explorer.previewLimit";
-  const DASH = "\u2014";
+  // Formats from ns.format (docs/ui-foundations.md); EMPTY marks an absent value.
+  const format = ns.format;
+  const DASH = format.EMPTY;
 
   function create(ctx) {
     const { dom, state, api, util, ui, storage } = ns;
     const graph = ns.explorerGraph;
     const {
-      model, node, clear, appRoute, setError, fmtInt,
-      fmtBytes, fmtStorageBytes, fmtRate, fmtPercent, quoteIdent, humanEngine,
+      model, node, clear, appRoute, setError, quoteIdent, humanEngine,
       healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
       isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
       setMode, setWorkspace, syncExplorerUrl,
@@ -81,17 +82,17 @@
       return `${ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(1)}\u00d7`;
     }
 
-    function ageLabel(seconds) {
-      const n = optionalNumber(seconds);
-      if (n == null || n < 0) return null;
-      if (n < 60) return `${Math.round(n)} s`;
-      if (n < 3600) return `${Math.round(n / 60)} min`;
-      if (n < 86400) return `${(n / 3600).toFixed(n < 36000 ? 1 : 0)} h`;
-      return `${(n / 86400).toFixed(n < 864000 ? 1 : 0)} d`;
+    // Shares are kept on a 0-100 scale for the bars; ns.format.percent takes a ratio.
+    function percentText(value) {
+      return value == null ? DASH : format.percent(Number(value) / 100);
     }
 
-    function plural(count, singular, pluralForm = `${singular}s`) {
-      return `${fmtInt(count)} ${Number(count) === 1 ? singular : pluralForm}`;
+    // A DateTime text of the server's system tables: browser-local text, the
+    // server value (and ISO) in the tooltip (decision 48).
+    function timeCell(td, value) {
+      const time = ui.serverTime(value);
+      td.textContent = time.text;
+      if (time.title) td.title = time.title;
     }
 
     // In-cell bar normalised to the column maximum (shared Query gauge cell).
@@ -153,7 +154,7 @@
           const spec = specs[cellCtx.columnIndex];
           const item = cellCtx.row?.__explorerItem;
           if (spec?.render) spec.render(td, item, cellCtx.value);
-          else if (spec?.numeric) numericCell(td, cellCtx.value == null ? DASH : fmtInt(cellCtx.value));
+          else if (spec?.numeric) numericCell(td, cellCtx.value == null ? DASH : format.count(cellCtx.value));
           else textCell(td, cellCtx.value, spec?.cellClass || "");
           return true;
         },
@@ -169,7 +170,7 @@
       details.open = open;
       const summary = node("summary", "explorerSection__summary");
       summary.appendChild(node("span", "explorerSection__title", title));
-      if (count != null) summary.appendChild(node("span", "explorerSection__count", fmtInt(count)));
+      if (count != null) summary.appendChild(node("span", "explorerSection__count", format.count(count)));
       if (note) summary.appendChild(node("span", "explorerSection__note", note));
       const body = node("div", "explorerSection__body");
       details.append(summary, body);
@@ -336,13 +337,13 @@
       const footprint = summaryFootprintBytes(s);
       if (!viewLike && footprint != null && footprint > 0) {
         const resident = isResidentMemorySummary(s);
-        chips.push(metaChip(`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`, {
+        chips.push(metaChip(`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`, {
           kind: "size",
           title: resident ? "Resident memory on this server" : `Bytes on disk of this server's active parts (${detail.metric_scope || "local-replica"})`,
         }));
       }
       const parts = Number(s.active_parts || 0);
-      if (!viewLike && parts > 0) chips.push(metaChip(plural(parts, "part"), { kind: "parts", title: `${plural(Number(s.partitions || 0), "partition")}` }));
+      if (!viewLike && parts > 0) chips.push(metaChip(format.countLabel(parts, "part"), { kind: "parts", title: `${format.countLabel(Number(s.partitions || 0), "partition")}` }));
       return chips;
     }
 
@@ -369,9 +370,9 @@
       const dot = node("i", `explorerHealthDot explorerHealthDot--${status}`);
       dot.setAttribute("aria-hidden", "true");
       const facts = [
-        `${fmtInt(r.active_replicas)}/${fmtInt(r.total_replicas)} replicas active`,
-        `queue ${fmtInt(r.queue_size)}`,
-        `delay ${fmtInt(r.absolute_delay_seconds)} s`,
+        `${format.count(r.active_replicas)}/${format.count(r.total_replicas)} replicas active`,
+        `queue ${format.count(r.queue_size)}`,
+        `delay ${format.count(r.absolute_delay_seconds)} s`,
       ];
       if (r.readonly) facts.push("read-only");
       if (r.session_expired) facts.push("Keeper session expired");
@@ -506,27 +507,27 @@
       const footprint = summaryFootprintBytes(s);
       if (!viewLike && footprint != null && footprint > 0) {
         const rowsText = s.rows == null ? "" : summaryRowsLabel(s);
-        tiles.push(aboutTile("Size", fmtBytes(footprint), [resident ? "in RAM" : "on disk", rowsText].filter(Boolean).join(" \u00b7 "), { id: "size" }));
+        tiles.push(aboutTile("Size", format.bytes(footprint), [resident ? "in RAM" : "on disk", rowsText].filter(Boolean).join(" \u00b7 "), { id: "size" }));
       } else if (!viewLike && s.rows != null) {
-        tiles.push(aboutTile("Rows", fmtInt(s.rows), null, { id: "rows" }));
+        tiles.push(aboutTile("Rows", format.count(s.rows), null, { id: "rows" }));
       }
 
       const ratio = mergeTree ? ratioLabel(s.uncompressed_bytes, s.compressed_bytes) : null;
       if (ratio) {
         const codecs = (detail.default_compression_codecs || []).filter(Boolean);
         tiles.push(aboutTile("Compression", ratio, [
-          `${fmtBytes(s.uncompressed_bytes)} \u2192 ${fmtBytes(s.compressed_bytes)}`,
+          `${format.bytes(s.uncompressed_bytes)} \u2192 ${format.bytes(s.compressed_bytes)}`,
           codecs.length ? `default codec ${codecs.join(" / ")}` : "",
         ], { id: "compression", title: "Uncompressed / compressed bytes of the active parts" }));
       }
 
       // Log-family engines report ClickHouse's uncompressed total, not parts.
       if (!mergeTree && isLogFamilySummary(s) && s.uncompressed_bytes != null) {
-        tiles.push(aboutTile("Uncompressed", fmtBytes(s.uncompressed_bytes), "data before compression", { id: "uncompressed" }));
+        tiles.push(aboutTile("Uncompressed", format.bytes(s.uncompressed_bytes), "data before compression", { id: "uncompressed" }));
       }
 
       const parts = Number(s.active_parts || 0);
-      if (parts > 0) tiles.push(aboutTile("Parts", plural(parts, "active part"), plural(Number(s.partitions || 0), "partition"), { id: "parts" }));
+      if (parts > 0) tiles.push(aboutTile("Parts", format.countLabel(parts, "active part"), format.countLabel(Number(s.partitions || 0), "partition"), { id: "parts" }));
 
       if (s.sorting_key) {
         const pk = String(s.primary_key || "");
@@ -544,7 +545,7 @@
           item.title = rule;
           list.appendChild(item);
         }
-        tiles.push(aboutTile("TTL", plural(rules.length, "rule"), list, { id: "ttl", wide: true, title: ttl }));
+        tiles.push(aboutTile("TTL", format.countLabel(rules.length, "rule"), list, { id: "ttl", wide: true, title: ttl }));
       }
 
       if (mergeTree && s.storage_policy) {
@@ -562,7 +563,7 @@
           chip.title = replica.active ? "Active" : "Inactive";
           list.appendChild(chip);
         }
-        tiles.push(aboutTile("Replicas", `${fmtInt(r.active_replicas)}/${fmtInt(r.total_replicas)} active`, (r.replicas || []).length ? list : null, { id: "replicas" }));
+        tiles.push(aboutTile("Replicas", `${format.count(r.active_replicas)}/${format.count(r.total_replicas)} active`, (r.replicas || []).length ? list : null, { id: "replicas" }));
       }
 
       if (detail.distributed?.table) {
@@ -572,7 +573,7 @@
         tiles.push(aboutTile("Local table", value, `on every shard of ${detail.distributed.cluster}`, { mono: true, id: "local_table", title: `${target.database}.${target.table}` }));
         const shards = new Set((detail.topology || []).map((member) => member.shard_num)).size;
         if ((detail.topology || []).length) {
-          tiles.push(aboutTile("Cluster", detail.distributed.cluster, `${plural(shards, "shard")} \u00b7 ${plural(detail.topology.length, "replica")}`, { mono: true, id: "cluster" }));
+          tiles.push(aboutTile("Cluster", detail.distributed.cluster, `${format.countLabel(shards, "shard")} \u00b7 ${format.countLabel(detail.topology.length, "replica")}`, { mono: true, id: "cluster" }));
         }
       }
 
@@ -581,7 +582,7 @@
       if (!viewLike && !resident && footprint != null && footprint > 0 && dbBytes != null && dbBytes > 0) {
         const dbShare = percentValue(footprint, dbBytes);
         const allShare = allBytes ? percentValue(footprint, allBytes) : null;
-        tiles.push(aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`, allShare == null ? null : `${fmtPercent(allShare)} of all databases`, { id: "share" }));
+        tiles.push(aboutTile("Share", `${percentText(dbShare)} of ${database}`, allShare == null ? null : `${percentText(allShare)} of all databases`, { id: "share" }));
       }
 
       const activeAges = (detail.parts || []).filter((part) => part.active).map((part) => optionalNumber(part.age_seconds)).filter((age) => age != null);
@@ -590,9 +591,9 @@
       if (newest != null || schemaTime) {
         tiles.push(aboutTile(
           "Last modified",
-          newest != null ? `${ageLabel(newest)} ago` : schemaTime,
-          [newest != null ? "newest part written" : "schema changed", newest != null && schemaTime ? `schema changed ${schemaTime}` : ""],
-          { id: "modified" },
+          newest != null ? `${format.duration.fromSeconds(newest)} ago` : ui.serverTime(schemaTime).text,
+          [newest != null ? "newest part written" : "schema changed", newest != null && schemaTime ? `schema changed ${ui.serverTime(schemaTime).text}` : ""],
+          { id: "modified", title: schemaTime ? ui.serverTime(schemaTime).title : "" },
         ));
       }
 
@@ -608,7 +609,7 @@
         const link = node("button", "explorerAboutTile__link", "Open lineage");
         link.type = "button";
         link.addEventListener("click", () => openTab("Lineage"));
-        tiles.push(aboutTile("Lineage", `${fmtInt(up)} upstream \u00b7 ${fmtInt(down)} downstream`, link, { id: "lineage" }));
+        tiles.push(aboutTile("Lineage", `${format.count(up)} upstream \u00b7 ${format.count(down)} downstream`, link, { id: "lineage" }));
       }
       return tiles;
     }
@@ -854,7 +855,7 @@
           value: (item) => item.compressed,
           render: (td, item) => {
             td.classList.add("explorerStorageGaugeCell");
-            gaugeCell(td, item.compressed, compressedMax, item.compressed == null ? DASH : fmtStorageBytes(item.compressed));
+            gaugeCell(td, item.compressed, compressedMax, item.compressed == null ? DASH : format.bytes(item.compressed));
           },
         });
         specs.push({
@@ -865,7 +866,7 @@
           value: (item) => (item.compressed > 0 && item.uncompressed != null ? item.uncompressed / item.compressed : null),
           render: (td, item) => {
             numericCell(td, ratioLabel(item.uncompressed, item.compressed) || DASH);
-            if (item.uncompressed != null) td.title = `${fmtStorageBytes(item.uncompressed)} uncompressed`;
+            if (item.uncompressed != null) td.title = `${format.bytes(item.uncompressed)} uncompressed`;
           },
         });
         specs.push({
@@ -876,7 +877,7 @@
           value: (item) => item.percent,
           render: (td, item) => {
             td.classList.add("explorerStoragePercentCell");
-            numericCell(td, item.percent == null ? DASH : fmtPercent(item.percent));
+            numericCell(td, item.percent == null ? DASH : percentText(item.percent));
           },
         });
       }
@@ -1006,7 +1007,7 @@
             : Math.max(0, Math.min(item.percent, 100 - consumed));
           const segment = node("div", `explorerStorageStackedBar__segment explorerStorageStackedBar__segment--${item.variant}`);
           segment.style.width = `${width}%`;
-          segment.title = `${item.label}: ${fmtPercent(item.percent)} \u00b7 ${fmtStorageBytes(item.bytes)}`;
+          segment.title = `${item.label}: ${percentText(item.percent)} \u00b7 ${format.bytes(item.bytes)}`;
           bar.appendChild(segment);
           consumed += width;
         });
@@ -1027,9 +1028,9 @@
           node("span", "explorerStorageCompositionLegend__percent",
             item.percent == null || item.bytes == null
               ? "unknown"
-              : `${fmtPercent(item.percent)} \u00b7 ${fmtStorageBytes(item.bytes)}`),
+              : `${percentText(item.percent)} \u00b7 ${format.bytes(item.bytes)}`),
         );
-        if (item.bytes != null) entry.title = `${item.label}: ${fmtPercent(item.percent)} \u00b7 ${fmtStorageBytes(item.bytes)}`;
+        if (item.bytes != null) entry.title = `${item.label}: ${percentText(item.percent)} \u00b7 ${format.bytes(item.bytes)}`;
         legend.appendChild(entry);
       }
       if (legendItems.length) wrap.appendChild(legend);
@@ -1042,7 +1043,7 @@
       const head = node("div", "explorerStorageCompositionCard__head");
       head.append(
         node("span", "explorerStorageCompositionCard__label", "Table storage"),
-        node("span", "explorerStorageCompositionCard__bytes", tableBytes == null ? "unknown" : fmtStorageBytes(tableBytes)),
+        node("span", "explorerStorageCompositionCard__bytes", tableBytes == null ? "unknown" : format.bytes(tableBytes)),
       );
       card.append(head, buildStorageComposition(detail, { embedded: true }));
       container.appendChild(card);
@@ -1061,17 +1062,17 @@
           { label: "Path", value: (disk) => disk.path || "", cellClass: "explorerCell--path explorerCell--code" },
           {
             label: "Size", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.bytes),
-            render: (td, disk) => gaugeCell(td, disk.bytes, max, disk.bytes == null ? DASH : fmtStorageBytes(disk.bytes)),
+            render: (td, disk) => gaugeCell(td, disk.bytes, max, disk.bytes == null ? DASH : format.bytes(disk.bytes)),
           },
           { label: "Rows", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.rows) },
           parts && { label: "Parts", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.parts) },
           {
             label: "Free", type: "UInt64", numeric: true, head: "Free space on the disk", value: (disk) => optionalNumber(disk.free_space),
-            render: (td, disk) => numericCell(td, disk.free_space == null ? DASH : fmtStorageBytes(disk.free_space)),
+            render: (td, disk) => numericCell(td, disk.free_space == null ? DASH : format.bytes(disk.free_space)),
           },
           {
             label: "Capacity", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.total_space),
-            render: (td, disk) => numericCell(td, disk.total_space == null ? DASH : fmtStorageBytes(disk.total_space)),
+            render: (td, disk) => numericCell(td, disk.total_space == null ? DASH : format.bytes(disk.total_space)),
           },
         ].filter(Boolean),
       }));
@@ -1090,14 +1091,14 @@
           { label: "Rows", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.rows) },
           {
             label: "Bytes", type: "UInt64", numeric: true, head: "Bytes on disk", value: (part) => optionalNumber(part.bytes),
-            render: (td, part) => gaugeCell(td, part.bytes, max, fmtStorageBytes(part.bytes)),
+            render: (td, part) => gaugeCell(td, part.bytes, max, format.bytes(part.bytes)),
           },
           { label: "Marks", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.marks) },
           { label: "Files", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.files) },
           { label: "Level", type: "UInt64", numeric: true, head: "Merge level (0: never merged)", value: (part) => optionalNumber(part.level) },
           {
             label: "Age", type: "UInt64", numeric: true, head: "Time since the part was written", value: (part) => optionalNumber(part.age_seconds),
-            render: (td, part) => { numericCell(td, ageLabel(part.age_seconds) || DASH); td.title = `${fmtInt(part.age_seconds)} s`; },
+            render: (td, part) => { numericCell(td, format.duration.fromSeconds(part.age_seconds)); td.title = `${format.count(part.age_seconds)} s`; },
           },
           {
             label: "State", value: (part) => (part.active ? "active" : "inactive"),
@@ -1118,7 +1119,7 @@
           { label: "Rows", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.rows) },
           {
             label: "Bytes", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.bytes),
-            render: (td, p) => gaugeCell(td, p.bytes, max, fmtStorageBytes(p.bytes)),
+            render: (td, p) => gaugeCell(td, p.bytes, max, format.bytes(p.bytes)),
           },
           { label: "Parts", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.parts) },
         ],
@@ -1152,15 +1153,15 @@
       specs.push(
         {
           label: "Compressed", type: "Float64", numeric: true, value: (item) => item.compressed,
-          render: (td, item) => { td.classList.add("explorerStorageGaugeCell"); gaugeCell(td, item.compressed, max, item.compressed == null ? DASH : fmtStorageBytes(item.compressed)); },
+          render: (td, item) => { td.classList.add("explorerStorageGaugeCell"); gaugeCell(td, item.compressed, max, item.compressed == null ? DASH : format.bytes(item.compressed)); },
         },
         {
           label: "Uncompressed", type: "Float64", numeric: true, value: (item) => item.uncompressed,
-          render: (td, item) => numericCell(td, item.uncompressed == null ? DASH : fmtStorageBytes(item.uncompressed)),
+          render: (td, item) => numericCell(td, item.uncompressed == null ? DASH : format.bytes(item.uncompressed)),
         },
         {
           label: "% table", type: "Float64", numeric: true, value: (item) => item.percent,
-          render: (td, item) => { td.classList.add("explorerStoragePercentCell"); numericCell(td, item.percent == null ? DASH : fmtPercent(item.percent)); },
+          render: (td, item) => { td.classList.add("explorerStoragePercentCell"); numericCell(td, item.percent == null ? DASH : percentText(item.percent)); },
         },
       );
       body.appendChild(staticTable({ className: `explorerStorageResultTable--${kind}`, items, specs }));
@@ -1184,7 +1185,7 @@
         },
         mergeTree && {
           id: "parts", title: "Parts", count: parts.length, hasData: parts.length > 0,
-          note: parts.length !== activeParts ? `${fmtInt(activeParts)} active` : "",
+          note: parts.length !== activeParts ? `${format.count(activeParts)} active` : "",
           emptyText: sectionUnavailable("parts") ? "Part metadata unavailable" : "No parts",
           render: (body) => renderParts(body, detail),
         },
@@ -1240,8 +1241,8 @@
         for (const [, suffix] of windows) {
           const td = node("td");
           td.append(
-            node("div", "explorerIngestionTable__rows", fmtRate(rate[`rows_per_second_${suffix}`], "rows/s")),
-            node("div", "explorerIngestionTable__bytes", fmtRate(rate[`bytes_per_second_${suffix}`], "bytes/s")),
+            node("div", "explorerIngestionTable__rows", format.rate(rate[`rows_per_second_${suffix}`], "rows")),
+            node("div", "explorerIngestionTable__bytes", format.bytesRate(rate[`bytes_per_second_${suffix}`])),
           );
           tr.appendChild(td);
         }
@@ -1252,11 +1253,11 @@
       const client = s.client_ingress || {};
       const physical = s.physical_ingress || {};
       const facts = [
-        client.rows_total_1h != null ? `1 h client total ${fmtInt(client.rows_total_1h)} rows \u00b7 ${fmtBytes(client.bytes_total_1h)}` : "",
-        physical.rows_total_1h != null ? `1 h persisted total ${fmtInt(physical.rows_total_1h)} rows \u00b7 ${fmtBytes(physical.bytes_total_1h)}` : "",
-        physical.new_parts_per_minute != null ? `${fmtInt(physical.new_parts_per_minute)} new parts in the last minute` : "",
-        client.last_event_time ? `last client write ${client.last_event_time}` : "",
-        physical.last_event_time ? `last persisted write ${physical.last_event_time}` : "",
+        client.rows_total_1h != null ? `1 h client total ${format.count(client.rows_total_1h)} rows \u00b7 ${format.bytes(client.bytes_total_1h)}` : "",
+        physical.rows_total_1h != null ? `1 h persisted total ${format.count(physical.rows_total_1h)} rows \u00b7 ${format.bytes(physical.bytes_total_1h)}` : "",
+        physical.new_parts_per_minute != null ? `${format.count(physical.new_parts_per_minute)} new parts in the last minute` : "",
+        client.last_event_time ? `last client write ${ui.serverTime(client.last_event_time).text}` : "",
+        physical.last_event_time ? `last persisted write ${ui.serverTime(physical.last_event_time).text}` : "",
       ].filter(Boolean);
       if (facts.length) body.appendChild(node("div", "explorerSection__facts", facts.join(" \u00b7 ")));
     }
@@ -1277,10 +1278,10 @@
       const r = detail.summary?.replication || {};
       body.appendChild(keyValueGrid([
         ["This replica", r.replica_name || DASH, { code: true }],
-        ["Active replicas", `${fmtInt(r.active_replicas)}/${fmtInt(r.total_replicas)}`],
-        ["Queue", `${fmtInt(r.queue_size)} (${fmtInt(r.inserts_in_queue)} inserts \u00b7 ${fmtInt(r.merges_in_queue)} merges)`],
-        ["Absolute delay", `${fmtInt(r.absolute_delay_seconds)} s`],
-        ["Log entries to fetch", r.log_lag == null ? null : fmtInt(r.log_lag)],
+        ["Active replicas", `${format.count(r.active_replicas)}/${format.count(r.total_replicas)}`],
+        ["Queue", `${format.count(r.queue_size)} (${format.count(r.inserts_in_queue)} inserts \u00b7 ${format.count(r.merges_in_queue)} merges)`],
+        ["Absolute delay", `${format.count(r.absolute_delay_seconds)} s`],
+        ["Log entries to fetch", r.log_lag == null ? null : format.count(r.log_lag)],
         ["Leader", r.is_leader == null ? null : (r.is_leader ? "yes" : "no")],
         ["Read-only", r.readonly ? "yes" : "no"],
         ["Keeper session", r.session_expired ? "expired" : "ok"],
@@ -1306,11 +1307,11 @@
         items: detail.replication_queue || [],
         specs: [
           { label: "Type", value: (q) => q.type },
-          { label: "Created", value: (q) => q.create_time },
+          { label: "Created", value: (q) => q.create_time, render: (td, q) => timeCell(td, q.create_time) },
           { label: "Source replica", value: (q) => q.source_replica || "", cellClass: "explorerCell--code" },
           { label: "Part", value: (q) => q.new_part_name || "", cellClass: "explorerCell--code" },
           { label: "Tries", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.num_tries) },
-          { label: "Last attempt", value: (q) => q.last_attempt_time || "" },
+          { label: "Last attempt", value: (q) => q.last_attempt_time || "", render: (td, q) => timeCell(td, q.last_attempt_time) },
           { label: "Last exception", value: (q) => q.last_exception || "", cellClass: "explorerCell--message" },
         ],
       }));
@@ -1325,16 +1326,16 @@
           { label: "Partition", value: (m) => m.partition || "", cellClass: "explorerCell--code" },
           {
             label: "Elapsed", type: "Float64", numeric: true, value: (m) => Number(m.elapsed_seconds || 0),
-            render: (td, m) => numericCell(td, util.formatSeconds(Number(m.elapsed_seconds || 0))),
+            render: (td, m) => numericCell(td, format.duration.fromSeconds(Number(m.elapsed_seconds || 0))),
           },
           {
             label: "Progress", type: "Float64", numeric: true, value: (m) => Math.max(0, Math.min(100, Number(m.progress || 0) * 100)),
-            render: (td, m, value) => gaugeCell(td, value, 100, `${Number(value || 0).toFixed(1)}%`),
+            render: (td, m, value) => gaugeCell(td, value, 100, format.percent(Number(value || 0) / 100)),
           },
           { label: "Parts", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.num_parts) },
           { label: "Rows read", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.rows_read) },
-          { label: "Bytes read", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.bytes_read), render: (td, m) => numericCell(td, fmtStorageBytes(m.bytes_read)) },
-          { label: "Memory", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.memory_usage), render: (td, m) => numericCell(td, fmtStorageBytes(m.memory_usage)) },
+          { label: "Bytes read", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.bytes_read), render: (td, m) => numericCell(td, format.bytes(m.bytes_read)) },
+          { label: "Memory", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.memory_usage), render: (td, m) => numericCell(td, format.bytes(m.memory_usage)) },
         ],
       }));
     }
@@ -1346,7 +1347,7 @@
         items: mutations,
         specs: [
           { label: "Mutation", value: (m) => m.mutation_id, cellClass: "explorerCell--code" },
-          { label: "Created", value: (m) => m.create_time },
+          { label: "Created", value: (m) => m.create_time, render: (td, m) => timeCell(td, m.create_time) },
           {
             label: "State", value: (m) => (m.done ? "done" : "pending"),
             render: (td, m) => td.appendChild(node("span", `explorerBadge explorerBadge--${m.done ? "inactive" : "pending"}`, m.done ? "done" : "pending")),
@@ -1367,7 +1368,7 @@
           { label: "Blocked", value: (q) => (q.blocked ? "yes" : "no") },
           { label: "Errors", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.error_count) },
           { label: "Files", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.data_files) },
-          { label: "Compressed", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.data_compressed_bytes), render: (td, q) => numericCell(td, fmtStorageBytes(q.data_compressed_bytes)) },
+          { label: "Compressed", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.data_compressed_bytes), render: (td, q) => numericCell(td, format.bytes(q.data_compressed_bytes)) },
           { label: "Broken files", type: "UInt64", numeric: true, value: (q) => optionalNumber(q.broken_data_files) },
           { label: "Last error", value: (q) => q.last_exception || "", cellClass: "explorerCell--message" },
         ],
@@ -1406,7 +1407,7 @@
       const ingestion = ingestionState(s);
       return [
         r.available && {
-          id: "replication", title: "Replication", hasData: true, note: `${fmtInt(r.active_replicas)}/${fmtInt(r.total_replicas)} active`,
+          id: "replication", title: "Replication", hasData: true, note: `${format.count(r.active_replicas)}/${format.count(r.total_replicas)} active`,
           render: (body) => renderReplication(body, detail),
         },
         r.available && {
@@ -1420,7 +1421,7 @@
           render: (body) => renderMerges(body, detail),
         },
         mergeTree && {
-          id: "mutations", title: "Mutations", count: mutations.length, hasData: mutations.length > 0, note: pending ? `${fmtInt(pending)} pending` : "",
+          id: "mutations", title: "Mutations", count: mutations.length, hasData: mutations.length > 0, note: pending ? `${format.count(pending)} pending` : "",
           emptyText: sectionUnavailable("mutations") ? "Mutation metadata unavailable" : "No mutations",
           render: (body) => renderMutations(body, detail),
         },
@@ -1475,7 +1476,7 @@
         const group = node("section", "explorerDependencyGroup explorerLineage__group");
         group.dataset.relation = relation;
         const title = node("h4", "explorerLineage__title", relation === "upstream" ? "Upstream" : "Downstream");
-        title.appendChild(node("span", "explorerSection__count", fmtInt(items.length)));
+        title.appendChild(node("span", "explorerSection__count", format.count(items.length)));
         group.appendChild(title);
         const list = node("div", "explorerLineage__list");
         if (!items.length) list.appendChild(emptyNote(relation === "upstream" ? "Nothing feeds this object." : "Nothing reads from this object."));
@@ -1728,9 +1729,9 @@
       const limit = previewLimit();
       const rows = Array.isArray(model.preview?.rows) ? model.preview.rows.length : null;
       const total = optionalNumber(detail.summary?.rows);
-      const count = node("span", "explorerPreviewToolbar__count", rows == null ? `LIMIT ${limit}` : `${plural(rows, "row")} (LIMIT ${limit})`);
+      const count = node("span", "explorerPreviewToolbar__count", rows == null ? `LIMIT ${limit}` : `${format.countLabel(rows, "row")} (LIMIT ${limit})`);
       info.appendChild(count);
-      if (total != null && rows != null) info.appendChild(node("span", "explorerPreviewToolbar__total", `of ${fmtInt(total)} in the table`));
+      if (total != null && rows != null) info.appendChild(node("span", "explorerPreviewToolbar__total", `of ${format.count(total)} in the table`));
       const limits = node("div", "explorerSegmented");
       limits.setAttribute("role", "group");
       limits.setAttribute("aria-label", "Preview row limit");
@@ -1775,9 +1776,15 @@
             value: (item) => previewCellText(item.value),
             render: (td, item) => {
               td.classList.add("explorerPreviewTable__value");
-              const text = item.value != null && isTimestampType(item.type) ? shortTimestamp(item.value) : previewCellText(item.value);
+              if (item.value == null) {
+                td.classList.add("is-null");
+                // The shared NULL token of the result tables (ns.format.nullToken()).
+                if (ns.results?.setNullCell) ns.results.setNullCell(td);
+                else td.textContent = "NULL";
+                return;
+              }
+              const text = isTimestampType(item.type) ? shortTimestamp(item.value) : previewCellText(item.value);
               td.textContent = text;
-              if (item.value == null) td.classList.add("is-null");
               if (text.length > 24) td.title = previewCellText(item.value);
             },
           },

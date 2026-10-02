@@ -30,7 +30,7 @@ export async function runSuccessfulQuery(page, sql, options = {}) {
   await runQuery(page, sql, options);
   await waitForTerminal(page);
   await expect(page.locator('#queryStatusText')).toHaveText(/done|finished|limit reached/i);
-  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('-');
+  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('\u2014');
 }
 
 export async function openExplorer(page) {

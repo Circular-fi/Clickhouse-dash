@@ -161,8 +161,8 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     assert "rows_total_1h" in header and "bytes_total_1h" in header
     assert "toString(sum(written_rows)), toString(sum(written_bytes))" in catalog
     assert 'w.Key("rows_total_1h")' in api
-    assert '`1 h client total ${fmtInt(client.rows_total_1h)} rows' in ui
-    assert '`1 h persisted total ${fmtInt(physical.rows_total_1h)} rows' in ui
+    assert '`1 h client total ${format.count(client.rows_total_1h)} rows' in ui
+    assert '`1 h persisted total ${format.count(physical.rows_total_1h)} rows' in ui
     assert "api.formatSqls(hostId" in ui
     assert "detail.formatted_ddl" in ui
     assert "renderHighlightedCode(pre, ddl)" in ui
@@ -205,7 +205,7 @@ def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -
     assert "function renderDatabaseDetail(database)" in ui
     assert "function selectDatabase(database" in ui
     assert 'model.selectedDatabase = name;' in ui
-    assert '`${fmtInt(tables.length)} ${tables.length === 1 ? "object" : "objects"}`' in ui
+    assert 'format.countLabel(tables.length, "object")' in ui
     assert 'button.addEventListener("click", () => void selectTable(table.database, table.name));' in ui
 
 def test_table_switch_requires_requested_identity_instead_of_rendering_undefined() -> None:
@@ -261,8 +261,8 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'ns.results?.createStaticResultTable?.({' in ui
     assert 'detail.default_compression_codecs' in render
     assert '`${observedDefaults[0]} (default)`' in render
-    assert 'item.compressed == null ? DASH : fmtStorageBytes(item.compressed)' in render
-    assert 'item.percent == null ? DASH : fmtPercent(item.percent)' in render
+    assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in render
+    assert 'item.percent == null ? DASH : percentText(item.percent)' in render
     assert 'percentValue(compressed, tableFootprint)' in render
     assert 'Compact parts share one physical data stream' not in render
     assert 'Wide ratio' not in render and 'Wide weight' not in render
@@ -371,7 +371,7 @@ def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     assert 'id="explorerFunctionRefreshButton"' in html
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'node("span", "explorerTreeDatabase__count", countText)' in tree
-    assert 'fmtBytes(bytes)' in tree
+    assert 'format.bytes(bytes)' in tree
     assert 'treeObjectTitle(table)' in tree and 'treeBadge(table)' in tree
     helpers = ui[ui.index("function treeBadge"):ui.index("function renderTableList")]
     assert 'humanEngine(table.engine)' in helpers

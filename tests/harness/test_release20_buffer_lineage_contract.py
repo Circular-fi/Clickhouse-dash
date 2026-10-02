@@ -31,16 +31,16 @@ def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
     # One size label: RAM for resident engines, disk otherwise; 0 B is hidden.
-    assert '`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
+    assert '`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
     assert 'if (!viewLike && footprint != null && footprint > 0) {' in ui
     assert 'node("span", "explorerBufferRuntime__label", "Flush target")' not in ui
 
 
 def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> None:
     ui = read("src/static/app_explorer_detail.js")
-    assert 'const DASH = "\\u2014";' in ui
-    assert 'item.compressed == null ? DASH : fmtStorageBytes(item.compressed)' in ui
-    assert 'item.percent == null ? DASH : fmtPercent(item.percent)' in ui
+    assert 'const DASH = format.EMPTY;' in ui
+    assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in ui
+    assert 'item.percent == null ? DASH : percentText(item.percent)' in ui
     assert 'ns.results?.createStaticResultTable?.({' in ui
     # The composition bar keeps an explicit unknown state.
     assert '"explorerStorageStackedBar__unknown", "unknown"' in ui

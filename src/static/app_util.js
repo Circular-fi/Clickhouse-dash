@@ -11,12 +11,14 @@
 
   // Keep the compact magnitude (K/M/B/T or Ki/Mi/Gi/Ti) at the exact same
   // typographic size as the numeric value. Only the real unit/rate suffix is
-  // split out, e.g. 148.95M/s => [148.95M][/s] and 1.11GiB/s => [1.11Gi][B/s].
+  // split out, e.g. 148.9M/s => [148.9M][/s] and ns.format's "1.7 KB/s" =>
+  // [1.7][ KB/s]: the space before a unit is kept (a no-break space, which
+  // the flex layout does not collapse), so the text reads as ns.format wrote it.
   function setMetricText(el, rawValue) {
     if (!el) return;
 
     const text = String(rawValue ?? "").trim();
-    const match = text.match(/^(-?\d+(?:[.,]\d+)?)(Ki|Mi|Gi|Ti|K|M|B|T)?(.*)$/);
+    const match = text.match(/^(-?\d+(?:[.,]\d+)?)(Ki|Mi|Gi|Ti|K|M|B|T)?(\s*)(.*)$/);
 
     if (!match) {
       if (el.textContent !== text || el.classList.contains("metricCompact__value--split")) {
@@ -27,7 +29,8 @@
     }
 
     const magnitude = `${match[1]}${match[2] || ""}`;
-    const unit = String(match[3] || "").trim();
+    const unitText = String(match[4] || "").trim();
+    const unit = unitText && match[3] ? `\u00a0${unitText}` : unitText;
     if (!unit) {
       if (el.textContent !== magnitude || el.classList.contains("metricCompact__value--split")) {
         el.classList.remove("metricCompact__value--split");

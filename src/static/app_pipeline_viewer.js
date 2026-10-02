@@ -3,31 +3,16 @@
 
   const ns = window.ChDash;
   if (!ns) return;
-  const { util } = ns;
   const cleanupByContainer = new WeakMap();
   function dispose(container) {
     cleanupByContainer.get(container)?.();
     cleanupByContainer.delete(container);
   }
 
-  const fmtInt = (value) => Number.isFinite(Number(value))
-    ? new Intl.NumberFormat().format(Number(value))
-    : "\u2014";
-
-  const fmtBytes = (value) => util && typeof util.formatBytes === "function"
-    ? util.formatBytes(Number(value) || 0)
-    : `${fmtInt(value)} B`;
-
-  function durationLabel(us) {
-    const value = Math.max(0, Number(us) || 0);
-    if (value < 1000) return `${Math.round(value)}µs`;
-    const ms = value / 1000;
-    if (ms < 10) return `${ms.toFixed(2)}ms`;
-    if (ms < 100) return `${ms.toFixed(1)}ms`;
-    if (ms < 1000) return `${Math.round(ms)}ms`;
-    const seconds = ms / 1000;
-    return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
-  }
+  // ns.format (docs/ui-foundations.md): durations from microseconds
+  // ("2.6 ms", "350 \u00b5s"), counts ("120,064"), bytes ("1.7 KB"), shares.
+  const format = ns.format;
+  const durationUs = format.duration.fromUs;
 
   function operationName(value) {
     const raw = String(value || "");
@@ -502,9 +487,9 @@
 
   function timeLabel(us, windowUs) {
     if (us >= 1000000 && windowUs < 1000000) {
-      return `${(us / 1000000).toFixed(windowUs < 1000 ? 6 : windowUs < 100000 ? 4 : 3)}s`;
+      return `${(us / 1000000).toFixed(windowUs < 1000 ? 6 : windowUs < 100000 ? 4 : 3)} s`;
     }
-    return durationLabel(us);
+    return durationUs(us);
   }
 
   function selectWindow(model, start, finish) {
@@ -543,11 +528,6 @@
     return cells.filter(Boolean).map((cell) => ({ ...cell,
       density: cell.workUs / Math.max(1, cell.finish - cell.start),
     }));
-  }
-
-  function workLabel(share) {
-    if (share > 0 && share < 0.001) return "<0.1%";
-    return `${(share * 100).toFixed(1)}%`;
   }
 
   function stageTitle(group) {
@@ -625,7 +605,7 @@
     root.className = "pipelineViewer";
     const header = element("div", "summary");
     header.append(
-      element("div", "summaryText", `${model.groups.length} stages · ${model.processorCount} processors · ${durationLabel(model.totalWorkUs)} total work`),
+      element("div", "summaryText", `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
       element("div", "summaryNote", "Time position and accumulated work are separate measurements"));
     root.appendChild(header);
 
@@ -741,9 +721,9 @@
       stage.append(element("span", "ordinal", String(index + 1).padStart(2, "0")), stageText, focus);
       const timeline = element("div", "timeline");
       const work = element("div", "work");
-      work.title = `${durationLabel(group.elapsedSum)} accumulated active work; ${workLabel(group.workShare)} of all recorded stage work. Waits are separate counters. Parallel work can exceed query duration.`;
+      work.title = `${durationUs(group.elapsedSum)} accumulated active work; ${format.percent(group.workShare)} of all recorded stage work. Waits are separate counters. Parallel work can exceed query duration.`;
       const workValues = element("div", "workValues");
-      workValues.append(element("strong", "", durationLabel(group.elapsedSum)), element("span", "", workLabel(group.workShare)));
+      workValues.append(element("strong", "", durationUs(group.elapsedSum)), element("span", "", format.percent(group.workShare)));
       const workTrack = element("div", "workTrack");
       const workBar = element("span", "workBar");
       workBar.style.width = `${group.workShare * 100}%`;
@@ -751,10 +731,10 @@
       work.append(workValues, workTrack);
       const metrics = element("div", "metrics");
       metrics.append(
-        metric("In wait", durationLabel(group.inputWaitMax), "Maximum input wait on one processor; its position in time is not recorded."),
-        metric("Out wait", durationLabel(group.outputWaitMax), "Maximum output/backpressure wait on one processor; its position in time is not recorded."),
-        metric("Input", [group.flowApproximate ? `\u2248 ${fmtInt(group.inputRows)}` : fmtInt(group.inputRows), fmtBytes(group.inputBytes)], "Sum at stage entry processors; incomplete boundaries are approximate."),
-        metric("Output", [group.flowApproximate ? `\u2248 ${fmtInt(group.outputRows)}` : fmtInt(group.outputRows), fmtBytes(group.outputBytes)], "Sum at stage exit processors; parallel lanes are included."));
+        metric("In wait", durationUs(group.inputWaitMax), "Maximum input wait on one processor; its position in time is not recorded."),
+        metric("Out wait", durationUs(group.outputWaitMax), "Maximum output/backpressure wait on one processor; its position in time is not recorded."),
+        metric("Input", [group.flowApproximate ? `\u2248 ${format.count(group.inputRows)}` : format.count(group.inputRows), format.bytes(group.inputBytes)], "Sum at stage entry processors; incomplete boundaries are approximate."),
+        metric("Output", [group.flowApproximate ? `\u2248 ${format.count(group.outputRows)}` : format.count(group.outputRows), format.bytes(group.outputBytes)], "Sum at stage exit processors; parallel lanes are included."));
       row.append(stage, timeline, work, metrics);
       return { group, row, timeline, order: index };
     }
@@ -767,7 +747,7 @@
 
     const hint = element("div", "hint");
     const defaultHint = () => number(options.summaryBucketUs) > 0
-      ? `Summary resolution: ${durationLabel(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use \u2315 to focus a stage.`
+      ? `Summary resolution: ${durationUs(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use \u2315 to focus a stage.`
       : model.envelopeCount
         ? "Dashed ranges contain unknown activity gaps. Work \u03a3 stays available even when the temporal detail is missing."
         : "Recorded intervals use the available trace resolution. Work \u03a3 covers the whole query; waits have no recorded position on the time axis.";
@@ -840,7 +820,7 @@
           svg.setAttribute("viewBox", "0 0 1000 20");
           svg.setAttribute("preserveAspectRatio", "none");
           svg.setAttribute("role", "img");
-          svg.setAttribute("aria-label", `${stageTitle(group)}: ${group.timingEstimated ? "estimated stage association; " : ""}activity windows. ${durationLabel(group.elapsedSum)} total processor work.`);
+          svg.setAttribute("aria-label", `${stageTitle(group)}: ${group.timingEstimated ? "estimated stage association; " : ""}activity windows. ${durationUs(group.elapsedSum)} total processor work.`);
           const paths = new Map();
           for (const cell of cells) {
             const intensity = cell.bucketed ? Math.min(1, cell.density / Math.max(1, model.peakDensity)) : 1;
@@ -865,7 +845,7 @@
             const time = absoluteStart + (event.clientX - bounds.left) / bounds.width * view.width;
             const cell = cells.find((candidate) => time >= candidate.start && time <= candidate.finish);
             hint.textContent = cell
-              ? `${stageTitle(group)}${group.timingEstimated ? " · \u2248 stage match" : ""}: ${timeLabel(cell.start - model.start, view.width)} \u2192 ${timeLabel(cell.finish - model.start, view.width)} · ${cell.bucketed ? `\u2248 ${durationLabel(cell.workUs)} work in this display cell; activity inside the summary window is unknown.` : "Recorded intervals at the available trace resolution."}`
+              ? `${stageTitle(group)}${group.timingEstimated ? " · \u2248 stage match" : ""}: ${timeLabel(cell.start - model.start, view.width)} \u2192 ${timeLabel(cell.finish - model.start, view.width)} · ${cell.bucketed ? `\u2248 ${durationUs(cell.workUs)} work in this display cell; activity inside the summary window is unknown.` : "Recorded intervals at the available trace resolution."}`
               : defaultHint();
           };
           timeline.onpointerleave = () => { hint.textContent = defaultHint(); };

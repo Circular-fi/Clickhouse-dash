@@ -22,7 +22,7 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
     # One size label: RAM for resident engines, disk otherwise; 0 B is hidden.
-    assert '`${fmtBytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
+    assert '`${format.bytes(footprint)} ${resident ? "RAM" : "on disk"}`' in ui
     assert 'if (!viewLike && footprint != null && footprint > 0) {' in ui
 
 

@@ -75,17 +75,15 @@ def test_one_number_format_is_shared_with_every_explorer_module() -> None:
     ui = read("src/static/app_explorer.js")
     util = read("src/static/app_util.js")
     format = read("src/static/app_format.js")
-    head = ui[ui.index("function fmtInt"):ui.index("function quoteIdent")]
-    assert 'return Math.trunc(n).toLocaleString("en-US");' in head
-    # util.formatBytes is the single byte format of the app (it hands every
-    # value to ns.format.bytes); the Explorer helper only maps a missing value
-    # to the dash.
+    # Every Explorer module formats through ns.format (app_format.js), shared
+    # with the whole app: no Explorer copy of the integer / byte / compact
+    # helpers is left, and util.formatBytes hands its values to ns.format.
+    assert 'const format = ns.format;' in ui
+    for name in ("function fmtInt", "function fmtBytes", "function fmtCompactInt", "ns.explorerFormat", "const MISSING"):
+        assert name not in ui, name
     assert 'return format.bytes(n);' in util
     assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in format
     assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in format
-    assert 'if (n == null) return MISSING;\n    return util.formatBytes(n);' in head
-    assert 'ns.explorerFormat = { MISSING, fmtInt, fmtBytes, fmtStorageBytes, fmtCompactInt, fmtRate, fmtPercent };' in head
-    assert 'const MISSING = "\\u2014";' in ui
     assert "v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)" not in util
 
 
@@ -126,10 +124,10 @@ def test_database_objects_table_fits_and_formats_numbers() -> None:
     ui = read("src/static/app_explorer.js")
     assert 'const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];' in ui
     block = ui[ui.index("function renderDatabaseObjects"):ui.index("function selectDatabase(")]
-    assert 'setBar(td, value, maxima[ctx.columnIndex], fmtInt(value));' in block
+    assert 'setBar(td, value, maxima[ctx.columnIndex], format.count(value));' in block
     assert 'td.classList.add("explorerBar", "explorerBar--cell");' in block
     assert "resultTable__gaugeCell" not in block
-    assert '`${fmtBytes(item.uncompressed)} uncompressed / ${fmtBytes(item.compressed)} compressed`' in block
+    assert '`${format.bytes(item.uncompressed)} uncompressed / ${format.bytes(item.compressed)} compressed`' in block
 
 
 def test_nav_spec_runs_in_the_frontend_phase() -> None:

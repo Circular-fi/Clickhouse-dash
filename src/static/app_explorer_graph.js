@@ -9,7 +9,9 @@
   const ns = window.ChDash;
   if (!ns || !ns.graphKit) return;
 
-  const { dom, state, api, util } = ns;
+  const { dom, state, api } = ns;
+  // Counts, sizes and shares from ns.format (docs/ui-foundations.md).
+  const format = ns.format;
   const kit = ns.graphKit;
 
   const model = {
@@ -2137,8 +2139,8 @@
     const free = Number(disk.disk_free_space);
     const total = Number(disk.disk_total_space);
     const used = Math.max(0, total - free);
-    const pct = total > 0 ? `${(used / total * 100).toFixed(1)}% used` : "capacity \u2014";
-    return `${pct} · ${util.formatBytes(free)} free`;
+    const pct = total > 0 ? `${format.percent(used / total)} used` : `capacity ${format.EMPTY}`;
+    return `${pct} · ${format.bytes(free)} free`;
   }
 
   function drawStorageTierNode(ctx, item, focused) {
@@ -2319,8 +2321,8 @@
     const rawBytes = memoryResident ? node.resident_bytes : node.logical_bytes;
     const rows = node.rows == null
       ? (node.kind === "buffer" ? "\u2014 buffered rows" : "\u2014 rows")
-      : `${util.formatInt(node.rows)}${node.kind === "buffer" ? " buffered rows" : " rows"}`;
-    const bytes = rawBytes == null ? "\u2014" : `${util.formatBytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`;
+      : `${format.count(node.rows)}${node.kind === "buffer" ? " buffered rows" : " rows"}`;
+    const bytes = rawBytes == null ? format.EMPTY : `${format.bytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`;
     return `${rows} · ${bytes}`;
   }
 
@@ -2334,13 +2336,13 @@
     return kit.compactTitleSize(model.scale);
   }
 
-  // Card texts per payload node: util.formatInt() (toLocaleString) for every
-  // card on every frame dominated pan / zoom frames on large catalogs.
+  // Card texts per payload node: formatting every card on every frame
+  // dominated pan / zoom frames on large catalogs.
   const nodeTextCache = new WeakMap();
   function nodeTexts(node) {
     let texts = nodeTextCache.get(node);
     if (texts) return texts;
-    const fmt = (value, suffix = "") => (value == null ? "\u2014" : `${util.formatInt(value)}${suffix}`);
+    const fmt = (value, suffix = "") => (value == null ? format.EMPTY : `${format.count(value)}${suffix}`);
     texts = {
       subtitle: `${node.database || ""} \u00b7 ${nodeKindLabel(node)}`,
       size: nodeSizeLabel(node),
@@ -2457,8 +2459,8 @@
     ctx.fillText(canvasEllipsis(ctx, `\u25b8 ${node.database}`, item.width - pad * 2), item.x + pad, item.y + 24);
     ctx.fillStyle = graphColor("muted");
     ctx.font = `12px ${FONT}`;
-    const objects = `${util.formatInt(stat.total)} object${stat.total === 1 ? "" : "s"}`;
-    const linked = stat.connected ? `${util.formatInt(stat.connected)} with dependencies` : "no dependencies";
+    const objects = format.countLabel(stat.total, "object");
+    const linked = stat.connected ? `${format.count(stat.connected)} with dependencies` : "no dependencies";
     ctx.fillText(canvasEllipsis(ctx, `${objects} · ${linked}`, item.width - pad * 2), item.x + pad, item.y + 44);
     ctx.fillStyle = graphColor("accentText");
     ctx.fillText("Click to expand", item.x + pad, item.y + 64);
@@ -2497,8 +2499,8 @@
       // DataHub-style "N of M": the band says when objects without
       // dependencies are filtered out of it.
       const count = stat && stat.shown !== stat.total
-        ? `${util.formatInt(stat.shown)} of ${util.formatInt(stat.total)} objects`
-        : `${util.formatInt(stat ? stat.total : box.count)} objects`;
+        ? `${format.count(stat.shown)} of ${format.count(stat.total)} objects`
+        : `${format.count(stat ? stat.total : box.count)} objects`;
       ctx.fillText(`${collapsible ? "\u25be " : ""}${database} · ${count}`, box.minX, box.minY - 12);
     }
     ctx.restore();
@@ -2528,14 +2530,6 @@
 
   // ---------------------------------------------------------------------------
   // Edge labels, per-node expand controls and canvas hit testing.
-
-  function fmtInt(value) {
-    return value == null || !Number.isFinite(Number(value)) ? "\u2014" : util.formatInt(Number(value));
-  }
-
-  function fmtBytes(value) {
-    return value == null || !Number.isFinite(Number(value)) ? "\u2014" : util.formatBytes(Number(value));
-  }
 
   function edgeIsHighlighted(edge) {
     if (!edge) return false;
@@ -2921,20 +2915,20 @@
         facts.push(["Writes to", target || (definition.target_visible ? null : "implicit inner table or not visible")]);
       } else if (node.kind === "buffer") {
         facts.push(["Flushes to", target || "not visible"]);
-        facts.push(["Flush after", `${fmtInt(node.buffer_min_time)}\u2013${fmtInt(node.buffer_max_time)} s`]);
-        facts.push(["Flush rows", `${fmtInt(node.buffer_min_rows)}\u2013${fmtInt(node.buffer_max_rows)}`]);
-        facts.push(["Flush bytes", `${fmtBytes(node.buffer_min_bytes)}\u2013${fmtBytes(node.buffer_max_bytes)}`]);
-        facts.push(["Layers", fmtInt(node.buffer_layers)]);
+        facts.push(["Flush after", `${format.count(node.buffer_min_time)}\u2013${format.count(node.buffer_max_time)} s`]);
+        facts.push(["Flush rows", `${format.count(node.buffer_min_rows)}\u2013${format.count(node.buffer_max_rows)}`]);
+        facts.push(["Flush bytes", `${format.bytes(node.buffer_min_bytes)}\u2013${format.bytes(node.buffer_max_bytes)}`]);
+        facts.push(["Layers", format.count(node.buffer_layers)]);
       } else if (node.kind === "dictionary" && definition.dictionary) {
-        facts.push(["Source", [definition.dictionary.source_kind, target].filter(Boolean).join(" · ") || "\u2014"]);
-        facts.push(["Layout", definition.dictionary.layout || "\u2014"]);
-        facts.push(["Lifetime", definition.dictionary.lifetime || "\u2014"]);
+        facts.push(["Source", [definition.dictionary.source_kind, target].filter(Boolean).join(" · ") || format.EMPTY]);
+        facts.push(["Layout", definition.dictionary.layout || format.EMPTY]);
+        facts.push(["Lifetime", definition.dictionary.lifetime || format.EMPTY]);
       } else if (node.kind === "distributed" && definition.distributed) {
         const d = definition.distributed;
-        facts.push(["Cluster", d.cluster || "\u2014"]);
+        facts.push(["Cluster", d.cluster || format.EMPTY]);
         facts.push(["Local table", target || "not visible"]);
         facts.push(["Sharding key", d.sharding_key || "none (single shard writes)"]);
-        if (d.shards) facts.push(["Topology", `${fmtInt(d.shards)} shard${d.shards === 1 ? "" : "s"} × ${fmtInt(d.replicas_per_shard)} replica${d.replicas_per_shard === 1 ? "" : "s"}`]);
+        if (d.shards) facts.push(["Topology", `${format.count(d.shards)} shard${d.shards === 1 ? "" : "s"} × ${format.count(d.replicas_per_shard)} replica${d.replicas_per_shard === 1 ? "" : "s"}`]);
       }
       if (facts.length) container.append(panelFacts(facts));
       if (definition.select_sql) {
@@ -2966,7 +2960,7 @@
       }
       table.append(body);
       container.append(table);
-      if (columns.length > limit) container.append(el("p", "graphKitPanel__note", `${fmtInt(columns.length - limit)} more columns in the table card.`));
+      if (columns.length > limit) container.append(el("p", "graphKitPanel__note", `${format.count(columns.length - limit)} more columns in the table card.`));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;
       status.textContent = error instanceof Error ? error.message : String(error);
@@ -2996,10 +2990,10 @@
     const viewLike = ["view", "materialized_view", "refreshable_materialized_view"].includes(node.kind);
     summary.append(panelFacts([
       ["Engine", humanEngine(node.engine)],
-      ["Rows", viewLike ? null : fmtInt(node.rows)],
+      ["Rows", viewLike ? null : format.count(node.rows)],
       ["Size", viewLike ? null : (node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary"
-        ? `${fmtBytes(node.resident_bytes)} RAM` : fmtBytes(node.logical_bytes))],
-      ["Parts", viewLike || !node.active_parts ? null : fmtInt(node.active_parts)],
+        ? `${format.bytes(node.resident_bytes)} RAM` : format.bytes(node.logical_bytes))],
+      ["Parts", viewLike || !node.active_parts ? null : format.count(node.active_parts)],
       ["Replication", node.topology_badge || null],
       ["Health", node.health && node.health !== "healthy" ? node.health : null],
       ["TTL", ttlRules(node).length ? `${ttlRules(node).length} rule${ttlRules(node).length === 1 ? "" : "s"} · ${ttlBaseSummary(node)}` : null],
@@ -3015,9 +3009,9 @@
       const values = el("div", "explorerGraphPanel__lineageValues");
       for (const id of ids.slice(0, 12)) values.append(objectButton(id));
       if (ids.length > 12) values.append(el("span", "graphKitPanel__note", `+${ids.length - 12} more`));
-      if (!ids.length && !hidden) values.append(el("span", "graphKitPanel__note", "\u2014"));
+      if (!ids.length && !hidden) values.append(el("span", "graphKitPanel__note", format.EMPTY));
       if (hidden) {
-        const more = el("button", "graphKitPanel__link explorerGraphPanel__expand", `Show ${fmtInt(hidden)} more`);
+        const more = el("button", "graphKitPanel__link explorerGraphPanel__expand", `Show ${format.count(hidden)} more`);
         more.type = "button";
         more.addEventListener("click", () => toggleExpansion(`${direction}\u0000${node.id}`));
         values.append(more);

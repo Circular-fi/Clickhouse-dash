@@ -97,7 +97,7 @@ def test_function_navigation_is_grouped_by_merged_category_with_counts_and_one_l
     assert 'functionCategory(item)' in render
     # Each category header carries its function count; items are one line
     # (name plus a kind badge only when the group does not already say it).
-    assert 'explorerTreeDatabase__count explorerFunctionGroup__count", fmtInt(groupItems.length)' in render
+    assert 'explorerTreeDatabase__count explorerFunctionGroup__count", format.count(groupItems.length)' in render
     assert 'explorerTreeObject__meta' not in render
     assert 'functionKindBadge(item, category)' in render
     # "Aggregate Function" (kind fallback) and "Aggregate Functions" merge.

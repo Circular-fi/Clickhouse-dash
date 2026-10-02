@@ -18,7 +18,7 @@ def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
     assert 'renderStructures(body, indexes, "indexes")' in ui
     assert 'renderStructures(body, projections, "projections")' in ui
     # Table / database and table / server shares are one About tile.
-    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in ui
+    assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in ui
     assert "of all databases" in ui
     assert ".explorerAboutTile" in css
 

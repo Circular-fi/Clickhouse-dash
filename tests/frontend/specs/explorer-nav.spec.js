@@ -302,20 +302,23 @@ for (const theme of ['dark', 'light']) {
     });
 
     test('one number format and readable in-cell bars on the database page', async ({ page }) => {
-      const formats = await page.goto('/explorer').then(() => page.waitForFunction(() => window.ChDash?.explorerFormat)).then(() => page.evaluate(() => {
-        const f = window.ChDash.explorerFormat;
+      // The Explorer formats through the app-wide ns.format (docs/ui-foundations.md).
+      const formats = await page.goto('/explorer').then(() => page.waitForFunction(() => window.ChDash?.explorer)).then(() => page.evaluate(() => {
+        const f = window.ChDash.format;
         return {
-          int: f.fmtInt(120064), compact: f.fmtCompactInt(120064), million: f.fmtCompactInt(3_250_000), small: f.fmtCompactInt(999),
-          zero: f.fmtBytes(0), bytes: f.fmtBytes(205), kb: f.fmtBytes(1740), mb: f.fmtBytes(10.3 * 1024 * 1024), carry: f.fmtBytes(1024 * 1024 - 1),
-          storage: f.fmtStorageBytes(10.3 * 1024 * 1024), missing: f.fmtBytes(null), missingInt: f.fmtInt(undefined), rate: f.fmtRate(120064, 'rows/s'),
-          percent: f.fmtPercent(0.05),
+          explorerCopy: 'explorerFormat' in window.ChDash,
+          int: f.count(120064), compact: f.compact(120064), million: f.compact(3_250_000), small: f.compact(999),
+          zero: f.bytes(0), bytes: f.bytes(205), kb: f.bytes(1740), mb: f.bytes(10.3 * 1024 * 1024), carry: f.bytes(1024 * 1024 - 1),
+          missing: f.bytes(null), missingInt: f.count(undefined), rate: f.rate(120064, 'rows'),
+          percent: f.percent(0.0005), objects: f.countLabel(1, 'object'),
         };
       }));
       expect(formats).toEqual({
+        explorerCopy: false,
         int: '120,064', compact: '120.1K', million: '3.3M', small: '999',
         zero: '0 B', bytes: '205 B', kb: '1.7 KB', mb: '10.3 MB', carry: '1.0 MB',
-        storage: '10.3 MB', missing: '—', missingInt: '—', rate: '120.1K rows/s',
-        percent: '<0.1%',
+        missing: '\u2014', missingInt: '\u2014', rate: '120.1K rows/s',
+        percent: '<0.1%', objects: '1 object',
       });
 
       await openDatabasePage(page);

@@ -211,74 +211,16 @@
     dom.explorerError.hidden = false;
   }
 
-  // One number format for the whole Explorer (tree, database page, detail,
-  // treemap labels, graph cards). Other Explorer modules read the same helpers
-  // through ns.explorerFormat at render time.
-  //   integers  120,064 (en-US grouping, like util.formatInt everywhere else)
-  //   compact   120.1K / 3.2M / 1.5B
-  //   bytes     0 B, 205 B, 1.7 KB, 10.3 MB: one decimal from KB up, 1024 base
-  //             (util.formatBytes, shared with the whole app)
-  //   missing   \u2014 (one dash style for every absent value)
-  const MISSING = "\u2014";
+  // Numbers, sizes, percentages and instants come from ns.format
+  // (docs/ui-foundations.md), shared with the whole app: "120,064",
+  // "120.1K", "1.7 KB", "12.3%", EMPTY (\u2014) for an absent value.
+  const format = ns.format;
 
   function finiteOrNull(value) {
     if (value == null || value === "") return null;
     const n = typeof value === "number" ? value : Number(value);
     return Number.isFinite(n) ? n : null;
   }
-
-  function fmtInt(value) {
-    const n = finiteOrNull(value);
-    if (n == null) return MISSING;
-    return Math.trunc(n).toLocaleString("en-US");
-  }
-
-  // util.formatBytes owns the byte format, so Storage, Operations, Functions,
-  // the graph and the rest of the app print bytes exactly like the Explorer.
-  function fmtBytes(value) {
-    const n = finiteOrNull(value);
-    if (n == null) return MISSING;
-    return util.formatBytes(n);
-  }
-
-  // Storage figures (tree, database headers, System rail) use the same
-  // precision as every other byte value; the name is kept for callers.
-  function fmtStorageBytes(value) {
-    return fmtBytes(value);
-  }
-
-  function fmtCompactInt(value) {
-    const n = finiteOrNull(value);
-    if (n == null) return MISSING;
-    const abs = Math.abs(n);
-    if (abs < 1000) return Math.trunc(n).toLocaleString("en-US");
-    const units = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
-    for (let i = 0; i < units.length; i += 1) {
-      const [scale, suffix] = units[i];
-      if (abs < scale) continue;
-      const scaled = Math.round((abs / scale) * 10) / 10;
-      // 999.96K rounds to 1000.0K: promote to the next suffix instead.
-      if (scaled >= 1000 && i > 0) {
-        const [upScale, upSuffix] = units[i - 1];
-        return `${n < 0 ? "-" : ""}${(Math.round((abs / upScale) * 10) / 10).toFixed(1).replace(/\.0$/, "")}${upSuffix}`;
-      }
-      return `${n < 0 ? "-" : ""}${scaled.toFixed(1).replace(/\.0$/, "")}${suffix}`;
-    }
-    return Math.trunc(n).toLocaleString("en-US");
-  }
-
-  function fmtRate(value, suffix) {
-    const n = finiteOrNull(value);
-    if (n == null) return MISSING;
-    if (suffix === "rows/s") {
-      if (Math.abs(n) >= 1000) return `${fmtCompactInt(n)} rows/s`;
-      return `${n.toFixed(n < 10 ? 2 : 0)} rows/s`;
-    }
-    return `${fmtBytes(n)}/s`;
-  }
-
-  // fmtPercent is declared further down (hoisted) next to the percent bars.
-  ns.explorerFormat = { MISSING, fmtInt, fmtBytes, fmtStorageBytes, fmtCompactInt, fmtRate, fmtPercent };
 
   function quoteIdent(value) {
     return `\`${String(value).replace(/`/g, "``")}\``;
@@ -947,7 +889,7 @@
 
   function summaryRowsLabel(summary, { compact = false } = {}) {
     if (!summary || summary.rows == null) return null;
-    const value = compact ? fmtCompactInt(summary.rows) : fmtInt(summary.rows);
+    const value = compact ? format.compact(summary.rows) : format.count(summary.rows);
     return isBufferSummary(summary) ? `${value} buffered rows` : `${value} rows`;
   }
 
@@ -1261,7 +1203,7 @@
     }
     const header = node("div", "explorerFunctionOverview__header");
     header.append(
-      node("strong", "explorerFunctionOverview__title", `${fmtInt(functions.length)} functions in ${fmtInt(counts.size)} categories`),
+      node("strong", "explorerFunctionOverview__title", `${format.countLabel(functions.length, "function")} in ${format.countLabel(counts.size, "category", "categories")}`),
       node("span", "explorerFunctionOverview__sub", model.functionsCatalog?.documentation_available === false
         ? "This server does not expose system.documentation: names and categories only."
         : "Pick a function on the left, search by name, or start from a category."),
@@ -1293,7 +1235,7 @@
       const button = node("button", "explorerFunctionOverview__category");
       button.type = "button";
       button.dataset.category = category;
-      button.append(node("span", "explorerFunctionOverview__categoryName", category), node("span", "explorerFunctionOverview__categoryCount", fmtInt(count)));
+      button.append(node("span", "explorerFunctionOverview__categoryName", category), node("span", "explorerFunctionOverview__categoryCount", format.count(count)));
       button.addEventListener("click", () => {
         model.expandedFunctionCategories.add(category);
         renderFunctionList();
@@ -1386,7 +1328,7 @@
       toggle.setAttribute("aria-expanded", String(expanded));
       const header = node("button", "explorerTreeDatabase");
       header.type = "button";
-      header.append(node("span", "explorerTreeDatabase__name", category), node("span", "explorerTreeDatabase__count explorerFunctionGroup__count", fmtInt(groupItems.length)));
+      header.append(node("span", "explorerTreeDatabase__name", category), node("span", "explorerTreeDatabase__count explorerFunctionGroup__count", format.count(groupItems.length)));
       const toggleGroup = () => {
         if (model.expandedFunctionCategories.has(category)) model.expandedFunctionCategories.delete(category);
         else model.expandedFunctionCategories.add(category);
@@ -1627,8 +1569,8 @@
     if (dom.explorerDetailName) dom.explorerDetailName.textContent = name;
     if (dom.explorerDetailMeta) {
       const databaseSummary = (model.catalog?.database_summaries || []).find((item) => String(item?.name || "") === name) || null;
-      const meta = [`${fmtInt(tables.length)} ${tables.length === 1 ? "object" : "objects"}`];
-      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) meta.push(fmtStorageBytes(databaseSummary.bytes));
+      const meta = [format.countLabel(tables.length, "object")];
+      if (databaseSummary && Number.isFinite(Number(databaseSummary.bytes))) meta.push(format.bytes(databaseSummary.bytes));
       dom.explorerDetailMeta.textContent = meta.join(" · ");
     }
     if (dom.explorerHealthBadge) { dom.explorerHealthBadge.hidden = true; dom.explorerHealthBadge.textContent = ""; }
@@ -1697,17 +1639,10 @@
   // Columns drawn with an in-cell bar normalised to the column maximum.
   const DATABASE_OBJECT_BAR_COLUMNS = new Set([2, 3, 4, 6]);
 
-  function shortCatalogTime(value) {
-    // "2026-09-30 12:34:56[.000]" -> "2026-09-30 12:34"; the full value stays in the tooltip.
-    const text = String(value || "");
-    const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
-    return match ? `${match[1]} ${match[2]}` : text;
-  }
-
   function renderDatabaseObjects(container, database, tables) {
     const section = node("section", "explorerSection explorerDatabaseObjects");
     const head = node("div", "explorerSectionHead");
-    head.append(node("h3", "explorerSectionTitle", "Objects"), node("span", "explorerSectionCount", fmtInt(tables.length)));
+    head.append(node("h3", "explorerSectionTitle", "Objects"), node("span", "explorerSectionCount", format.count(tables.length)));
     section.appendChild(head);
     container.appendChild(section);
     if (!tables.length) {
@@ -1765,7 +1700,7 @@
         }
         if (value == null) {
           if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.classList.add("resultTable__numeric");
-          td.textContent = MISSING;
+          td.textContent = format.EMPTY;
           td.classList.add("explorerDatabaseObjectsTable__missing");
           return true;
         }
@@ -1775,24 +1710,26 @@
           return true;
         }
         if (ctx.columnIndex === 2 || ctx.columnIndex === 7) {
-          setBar(td, value, maxima[ctx.columnIndex], fmtInt(value));
+          setBar(td, value, maxima[ctx.columnIndex], format.count(value));
           return true;
         }
         if (DATABASE_OBJECT_BYTE_COLUMNS.has(ctx.columnIndex)) {
-          const text = fmtBytes(value);
+          const text = format.bytes(value);
           setBar(td, value, maxima[ctx.columnIndex], ctx.columnIndex === 3 && item?.resident ? `${text} RAM` : text);
           if (ctx.columnIndex === 3 && item?.resident) td.title = "RAM held by the object, not on disk";
           return true;
         }
         if (ctx.columnIndex === 5) {
           setBar(td, value, maxima[5], `${value.toFixed(2)}\u00d7`);
-          if (item) td.title = `${fmtBytes(item.uncompressed)} uncompressed / ${fmtBytes(item.compressed)} compressed`;
+          if (item) td.title = `${format.bytes(item.uncompressed)} uncompressed / ${format.bytes(item.compressed)} compressed`;
           return true;
         }
-        if (ctx.columnIndex === 6) { setBar(td, value, maxima[6], fmtPercent(value)); return true; }
+        if (ctx.columnIndex === 6) { setBar(td, value, maxima[6], format.percent(value / 100)); return true; }
         if (ctx.columnIndex === 8) {
-          td.textContent = shortCatalogTime(value);
-          td.title = String(value);
+          // Server DateTime text, shown in the browser's zone (decision 48).
+          const time = ui.serverTime(value);
+          td.textContent = time.text;
+          td.title = time.title || String(value);
           return true;
         }
         return false;
@@ -1916,9 +1853,9 @@
     const resident = isResidentMemorySummary(table);
     const rows = finiteOrNull(table.rows);
     if (footprint != null && (footprint > 0 || (!resident && !isViewLikeSummary(table)))) {
-      return { text: fmtBytes(footprint), value: footprint };
+      return { text: format.bytes(footprint), value: footprint };
     }
-    if (rows != null && rows > 0) return { text: `${fmtCompactInt(rows)} rows`, value: null };
+    if (rows != null && rows > 0) return { text: `${format.compact(rows)} rows`, value: null };
     return null;
   }
 
@@ -1927,7 +1864,7 @@
     const bits = [humanEngine(table.engine)];
     const rows = summaryRowsLabel(table);
     if (rows) bits.push(rows);
-    if (footprint != null) bits.push(isResidentMemorySummary(table) ? `${fmtBytes(footprint)} in memory` : `${fmtBytes(footprint)} on disk`);
+    if (footprint != null) bits.push(isResidentMemorySummary(table) ? `${format.bytes(footprint)} in memory` : `${format.bytes(footprint)} on disk`);
     const health = String(table.health || "healthy");
     if (health !== "healthy") bits.push(healthLabel(table));
     return `${table.database}.${table.name}\n${bits.join(" · ")}`;
@@ -2000,16 +1937,16 @@
       const databaseSummary = summaries.get(database) || null;
       let countText = "";
       if (loading) countText = "Loading\u2026";
-      else if (loaded) countText = `${fmtInt(allItems.length)} ${allItems.length === 1 ? "object" : "objects"}`;
+      else if (loaded) countText = format.countLabel(allItems.length, "object");
       else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) {
         const count = Number(databaseSummary.tables);
-        countText = `${fmtInt(count)} ${count === 1 ? "object" : "objects"}`;
+        countText = format.countLabel(count, "object");
       }
       const bytes = databaseBytes(database);
-      const size = node("span", "explorerTreeDatabase__size explorerBar", bytes == null ? "" : fmtBytes(bytes));
+      const size = node("span", "explorerTreeDatabase__size explorerBar", bytes == null ? "" : format.bytes(bytes));
       size.style.setProperty("--bar-pct", `${barPercent(bytes, maxDatabaseBytes)}%`);
       if (bytes == null) size.hidden = true;
-      headerMain.title = [database, countText, bytes == null ? "" : `${fmtBytes(bytes)} on disk`].filter(Boolean).join(" · ");
+      headerMain.title = [database, countText, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" · ");
       headerMain.append(
         highlightedText("explorerTreeDatabase__name", database, query),
         node("span", "explorerTreeDatabase__count", countText),
@@ -2152,8 +2089,7 @@
   // Table detail (header, tabs and tab bodies) lives in app_explorer_detail.js.
   // The shell hands it the model and the helpers it shares with the tree.
   const detailView = ns.explorerDetail?.create?.({
-    model, node, clear, appRoute, setError, fmtInt,
-    fmtBytes, fmtStorageBytes, fmtRate, fmtPercent, quoteIdent, humanEngine,
+    model, node, clear, appRoute, setError, quoteIdent, humanEngine,
     healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
     isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
     setMode, setWorkspace, syncExplorerUrl,
@@ -2163,13 +2099,6 @@
   function renderTabs() { detailView?.renderTabs(); }
   function renderTabContent() { detailView?.renderTabContent(); }
   function sectionTitle(text) { return node("h3", "explorerSectionTitle", text); }
-
-  function fmtPercent(value) {
-    const n = finiteOrNull(value);
-    if (n == null) return MISSING;
-    if (n > 0 && n < 0.1) return "<0.1%";
-    return `${n.toFixed(n < 10 ? 1 : 0)}%`;
-  }
 
   async function selectTable(database, table, force = false, { historyMode = "push", graphOrigin = false } = {}) {
     if (model.mode === "graph" && graph?.isStorageMode?.() && graph?.canUseStorageForTable?.(database, table) === false) return;

@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const context = { window: { ChDash: {} } };
 vm.createContext(context);
-for (const name of ['app_analysis_data.js', 'app_pipeline_viewer.js']) {
+for (const name of ['app_format.js', 'app_palette.js', 'app_analysis_data.js', 'app_pipeline_viewer.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static', name), 'utf8'), context);
 }
 const { decodeProcessors } = context.window.ChDash.analysisData;

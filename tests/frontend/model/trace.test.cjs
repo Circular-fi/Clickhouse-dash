@@ -6,7 +6,10 @@ const vm = require('node:vm');
 
 const context = { window: { ChDash: {} } };
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static/app_trace_viewer.js'), 'utf8'), context);
+// ns.format and ns.palette load first, as in every page loader.
+for (const name of ['app_format.js', 'app_palette.js', 'app_trace_viewer.js']) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static', name), 'utf8'), context);
+}
 const build = context.window.ChDash.traceViewer.buildModel;
 
 const span = (span_id, parent_span_id, operation_name, start_time_us, finish_time_us) => ({

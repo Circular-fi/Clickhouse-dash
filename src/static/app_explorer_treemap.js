@@ -32,14 +32,10 @@
   const treemapFolderHeaderPixels = 26;
   const treemapBranchInsetPixels = 2;
 
-  function escapeHTML(value) {
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
+  // util.escapeHtml is the one escaper (null prints as ""); counts and shares
+  // come from ns.format, colours from ns.palette (docs/ui-foundations.md).
+  const { format, palette } = ns;
+  const esc = (value) => ns.util.escapeHtml(value ?? "");
 
   function nodeBytes(node) {
     const value = Number(node?.bytes || 0);
@@ -264,14 +260,16 @@
   }
 
   // Engine families, not individual tables, carry the colour: the treemap then
-  // also answers "where do MergeTree / aggregated / log tables live".
+  // also answers "where do MergeTree / aggregated / log tables live". Every
+  // leaf is a table, so the families take categorical series slots (themed
+  // --qchart-N tokens) rather than the object-kind colours.
   const ENGINE_FAMILIES = [
-    { key: "aggregated", label: "Aggregating / Summing", hue: 262, saturation: 72, lightness: 58, test: (engine) => /aggregating|summing/.test(engine) },
-    { key: "dedup", label: "Replacing / Collapsing", hue: 192, saturation: 80, lightness: 38, test: (engine) => /replacing|collapsing|coalescing/.test(engine) },
-    { key: "mergetree", label: "MergeTree", hue: 221, saturation: 76, lightness: 53, test: (engine) => engine.includes("mergetree") },
-    { key: "log", label: "Log family", hue: 161, saturation: 80, lightness: 32, test: (engine) => ["tinylog", "stripelog", "log"].includes(engine) },
+    { key: "aggregated", label: "Aggregating / Summing", slot: 6, test: (engine) => /aggregating|summing/.test(engine) },
+    { key: "dedup", label: "Replacing / Collapsing", slot: 3, test: (engine) => /replacing|collapsing|coalescing/.test(engine) },
+    { key: "mergetree", label: "MergeTree", slot: 0, test: (engine) => engine.includes("mergetree") },
+    { key: "log", label: "Log family", slot: 2, test: (engine) => ["tinylog", "stripelog", "log"].includes(engine) },
   ];
-  const OTHER_ENGINE_FAMILY = { key: "other-engine", label: "Other engines", hue: 215, saturation: 16, lightness: 47 };
+  const OTHER_ENGINE_FAMILY = { key: "other-engine", label: "Other engines", slot: -1 };
 
   function hashName(value) {
     const normalized = String(value || "").trim().toLowerCase();
@@ -280,8 +278,12 @@
     return Math.abs(hash);
   }
 
-  function familyColor(family, lightnessOffset = 0) {
-    return `hsl(${family.hue} ${family.saturation}% ${family.lightness + lightnessOffset}%)`;
+  // step -1 / 0 / 1: the family colour mixed a little toward the surface or
+  // the text colour, so the step reads in both themes.
+  function familyColor(family, step = 0) {
+    const base = palette.categorical(family.slot);
+    if (!step) return base;
+    return `color-mix(in srgb, ${base} 82%, ${step < 0 ? "var(--panelBg)" : "var(--text)"})`;
   }
 
   function engineFamily(engine) {
@@ -295,40 +297,25 @@
   // without inventing a meaning that the legend cannot explain.
   function tableColor(engine, name) {
     const family = engineFamily(engine);
-    return familyColor(family, [-6, 0, 6][hashName(name) % 3]);
+    return familyColor(family, [-1, 0, 1][hashName(name) % 3]);
   }
 
+  // A database keeps one categorical slot, picked from its name.
   function databaseColor(name) {
-    const hue = (210 + hashName(name) * 47) % 360;
-    return `hsl(${hue} 62% 52%)`;
-  }
-
-  function countLabel(count, singular, plural) {
-    const value = Math.max(0, Number(count || 0));
-    return `${value.toLocaleString("en-US")} ${value === 1 ? singular : plural}`;
-  }
-
-  function compactRows(value) {
-    const n = Number(value);
-    if (value == null || !Number.isFinite(n)) return "";
-    try {
-      return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
-    } catch {
-      return String(Math.trunc(n));
-    }
+    return palette.categorical(hashName(name));
   }
 
   function nodeMetaLabel(node) {
     if (node.kind === "table" || node.kind === "partition") {
-      const rows = compactRows(node.rows);
+      const rows = node.rows == null || node.rows === "" || !Number.isFinite(Number(node.rows)) ? "" : format.compact(node.rows);
       return rows ? `${rows} ${Number(node.rows) === 1 ? "row" : "rows"}` : (node.engine || "");
     }
     if (node.kind === "other") {
       return node.memberKind === "database"
-        ? countLabel(node.members, "database", "databases")
-        : countLabel(node.members, "table", "tables");
+        ? format.countLabel(node.members, "database", "databases")
+        : format.countLabel(node.members, "table", "tables");
     }
-    return countLabel(node.count, "table", "tables");
+    return format.countLabel(node.count, "table", "tables");
   }
 
   function layoutTreemapGroup(nodes, x, y, width, height, depth, output, context) {
@@ -376,12 +363,12 @@
     // instead of drawing an unnamed container around its tables.
     const header = isBranch ? Math.min(treemapFolderHeaderPixels, Math.max(0, drawHeight - 30)) : 0;
     const labelName = node.name || (kind === "database" ? "Database" : "Unnamed");
-    const label = `<span class="explorerTreemap__label"><span class="explorerTreemap__name">${escapeHTML(labelName)}</span><span class="explorerTreemap__details"><span class="explorerTreemap__size">${escapeHTML(sizeLabel)}</span><span class="explorerTreemap__meta">${escapeHTML(metaLabel)}</span></span></span>`;
+    const label = `<span class="explorerTreemap__label"><span class="explorerTreemap__name">${esc(labelName)}</span><span class="explorerTreemap__details"><span class="explorerTreemap__size">${esc(sizeLabel)}</span><span class="explorerTreemap__meta">${esc(metaLabel)}</span></span></span>`;
     const branchClass = isBranch ? " is-branch has-header" : " is-terminal";
     const actionable = kind === "table" || declaredKind === "database";
     const role = actionable ? "button" : "img";
     const headerValue = header > 0 ? `${header.toFixed(2)}px` : "100%";
-    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${escapeHTML(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${escapeHTML(node.name || "")}" data-path="${escapeHTML(actionable ? (node.path || "") : "")}" data-scope="${escapeHTML(kind === "other" ? (node.path || "") : "")}" data-database="${escapeHTML(node.database || "")}" data-table="${escapeHTML(node.table || "")}" data-engine="${escapeHTML(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${escapeHTML(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
+    output.push(`<div class="explorerTreemap__node is-${styleKind}${branchClass}" tabindex="0" role="${role}" aria-label="${esc(title.replace(/\n/g, ", "))}" data-kind="${kind}" data-name="${esc(node.name || "")}" data-path="${esc(actionable ? (node.path || "") : "")}" data-scope="${esc(kind === "other" ? (node.path || "") : "")}" data-database="${esc(node.database || "")}" data-table="${esc(node.table || "")}" data-engine="${esc(node.engine || "")}" data-depth="${depth}" data-header-height="${header}" data-size="${nodeBytes(node)}" data-count="${Math.max(0, Number(node.count || 0))}" data-rows="${node.rows == null ? "" : Math.max(0, Number(node.rows || 0))}" data-meta="${esc(metaLabel)}" style="left:${drawX.toFixed(2)}px;top:${drawY.toFixed(2)}px;width:${drawWidth.toFixed(2)}px;height:${drawHeight.toFixed(2)}px;z-index:${depth};--treemap-color:${color};--treemap-header:${headerValue}">${label}</div>`);
     if (!isBranch || output.length >= treemapMaximumRectangles) return;
 
     const inset = Math.min(treemapBranchInsetPixels, drawWidth / 4, drawHeight / 4);
@@ -482,7 +469,7 @@
 
     const output = [];
     layoutTreemapGroup(nodes, 0, 0, width, height, 1, output, context);
-    map.innerHTML = output.join("") || `<div class="explorerTreemap__empty">${escapeHTML(context.emptyText)}</div>`;
+    map.innerHTML = output.join("") || `<div class="explorerTreemap__empty">${esc(context.emptyText)}</div>`;
     map.dataset.layoutWidth = String(width);
     map.dataset.layoutHeight = String(height);
     map.dataset.layoutReady = "1";
@@ -512,7 +499,7 @@
   function mount(host, options = {}) {
     if (!host) return null;
     const context = {
-      formatBytes: typeof options.formatBytes === "function" ? options.formatBytes : (value) => `${value}B`,
+      formatBytes: typeof options.formatBytes === "function" ? options.formatBytes : format.bytes,
       emptyText: options.emptyText || "No on-disk data.",
     };
     let nodes = [];
@@ -549,7 +536,7 @@
       const kind = node.dataset.kind;
       const size = Number(node.dataset.size || 0);
       const share = rootBytes > 0 ? size / rootBytes * 100 : 0;
-      const shareText = `${share >= 10 ? share.toFixed(1) : share >= 0.1 ? share.toFixed(2) : "<0.1"}%${rootName ? ` of ${rootName}` : ""}`;
+      const shareText = `${format.percent(share / 100)}${rootName ? ` of ${rootName}` : ""}`;
       const name = kind === "other"
         ? (node.dataset.scope ? `Others in ${node.dataset.scope}` : "Others")
         : kind === "partition"
@@ -557,7 +544,7 @@
           : (kind === "table" && node.dataset.database ? `${node.dataset.database}.${node.dataset.name}` : (node.dataset.name || "Database"));
       const bits = [context.formatBytes(size), node.dataset.meta];
       if (kind === "table" && node.dataset.engine) bits.push(node.dataset.engine);
-      if (kind === "other" && Number(node.dataset.count || 0) > 0) bits.push(countLabel(node.dataset.count, "table", "tables"));
+      if (kind === "other" && Number(node.dataset.count || 0) > 0) bits.push(format.countLabel(node.dataset.count, "table", "tables"));
       bits.push(shareText);
       if (nameHost) nameHost.textContent = name;
       if (metaHost) metaHost.textContent = [...new Set(bits.filter(Boolean))].join(" · ");

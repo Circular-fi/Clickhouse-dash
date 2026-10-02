@@ -60,18 +60,18 @@ def test_sidebar_loads_database_names_then_only_expanded_database_tables_with_st
     assert "FROM system.parts WHERE active AND database = " in catalog_cpp
     assert "async function loadDatabaseTables(database, force = false)" in ui
     assert "if (!loaded) void loadDatabaseTables(database);" in ui
-    assert "`${fmtCompactInt(rows)} rows`" in ui
+    assert "`${format.compact(rows)} rows`" in ui
     assert "summaryRowsLabel(table)" in ui
     assert "summaryFootprintBytes(table)" in ui
 
 
 def test_query_row_totals_use_compact_two_decimal_counts_without_repeating_rows_unit() -> None:
     run = read("src/static/app_run.js")
-    assert "function formatRows(value)" in run
-    assert 'return formatShort(value, 1000, ["K", "M", "B", "T"], 2, "");' in run
-    assert "formatRows(readRowsTotal)" in run
-    assert "formatRows(writtenRowsTotal)" in run
-    assert '`${formatRows(rowsPerSec)}/s`' in run
+    # Totals are grouped counts ("120,064"), rates compact ("1.2K/s"): ns.format.
+    assert "function formatRows(value)" not in run
+    assert "util.setMetricText(dom.readRowsTotalText, format.count(readRowsTotal));" in run
+    assert "util.setMetricText(dom.writtenRowsTotalText, format.count(writtenRowsTotal));" in run
+    assert 'const rowsRate = (value) => `${format.compact(value)}/s`;' in run
 
 
 def test_graph_live_activity_is_removed_entirely() -> None:

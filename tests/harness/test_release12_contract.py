@@ -44,7 +44,9 @@ def test_analysis_pipeline_is_first_and_trace_keeps_reusable_foldable_viewer() -
     assert 'let activeTab = "pipeline";' in analysis
     assert 'ns.pipelineViewer.render(root' in analysis
     assert 'ns.traceViewer.render(root' in analysis
-    assert 'ns.traceViewer = { render, durationLabel, buildModel, initialCollapsedForSpanLimit };' in viewer
+    # Durations come from ns.format.duration (no local durationLabel copy).
+    assert 'ns.traceViewer = { render, buildModel, initialCollapsedForSpanLimit };' in viewer
+    assert 'const durationUs = format.duration.fromUs;' in viewer
     assert 'shouldCollapseByDefault' in viewer
     assert 'collapsed.has(span.key)' in viewer
     assert 'Attempt ${index + 1}' in viewer

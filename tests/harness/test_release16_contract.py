@@ -88,7 +88,7 @@ def test_header_is_chips_and_about_is_value_context_tiles() -> None:
     chips = ui[ui.index("function headerChips"):ui.index("function replicationStatus")]
     assert 'metaChip(humanEngine(s.engine)' in chips
     assert 'metaChip(summaryRowsLabel(s)' in chips
-    assert 'metaChip(plural(parts, "part")' in chips
+    assert 'metaChip(format.countLabel(parts, "part")' in chips
     # The former "0.00 rows/s in" ingress rate is not part of the header.
     assert "rows_per_second_1m" not in chips
     assert '["Engine"' not in ui and '["Rows"' not in ui and '["Logical size"' not in ui

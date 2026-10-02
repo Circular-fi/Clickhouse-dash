@@ -775,7 +775,7 @@
     }
 
     if (typed === null || typed === undefined) {
-      setScalar("tok-null", "null");
+      setNullCell(td);
       return;
     }
     if (typeof typed === "string") {
@@ -1117,7 +1117,7 @@
     }
 
     if (typed === null || typed === undefined) {
-      setScalar("tok-null", "null");
+      setNullCell(td);
       return;
     }
     if (typeof typed === "string") {
@@ -1150,6 +1150,24 @@
     td.textContent = flat;
     if (flat !== s && s.trim()) td.title = s;
     else td.removeAttribute("title");
+  }
+
+  // A SQL NULL cell shows the shared NULL token (ns.format.nullToken(), the
+  // chart tooltips' "NULL"); every other value stays as ClickHouse sent it.
+  let nullTemplate = null;
+
+  function setNullCell(td) {
+    if (!nullTemplate) {
+      nullTemplate = document.createElement("template");
+      nullTemplate.innerHTML = ns.format.nullToken();
+    }
+    td.replaceChildren(nullTemplate.content.cloneNode(true));
+    td.removeAttribute("title");
+  }
+
+  function setDisplayCell(td, raw, text) {
+    if (raw === null || raw === undefined) setNullCell(td);
+    else setCellTextFlat(td, text);
   }
 
   function setResultColumnsText() {
@@ -1275,7 +1293,7 @@
     const scale = computeGaugeScale(n, maxArr[colIndex] || 0, minArr[colIndex] || 0);
     const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
     td.style.setProperty("--gaugeFill", fill);
-    setCellTextFlat(td, text);
+    setDisplayCell(td, raw, text);
   }
 
   function refreshLiveGauges() {
@@ -1436,12 +1454,12 @@
           if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);
           else {
             td.classList.add("resultTable__numeric");
-            setCellTextFlat(td, text);
+            setDisplayCell(td, row[columnIndex], text);
           }
         } else {
           const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
           if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("resultTable__numeric");
-          setCellTextFlat(td, text);
+          setDisplayCell(td, row[columnIndex], text);
         }
         tr.appendChild(td);
       }
@@ -2694,12 +2712,12 @@
             if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);
             else {
               td.classList.add("resultTable__numeric");
-              setCellTextFlat(td, text);
+              setDisplayCell(td, row[i], text);
             }
           } else {
             const text = formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts);
             if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("resultTable__numeric");
-            setCellTextFlat(td, text);
+            setDisplayCell(td, row[i], text);
           }
           tr.appendChild(td);
         }
@@ -3401,7 +3419,7 @@
                 const text = formatNumericCellText(entry.row[index], index, staticMaxScale);
                 setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin);
               } else {
-                setCellTextFlat(td, formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
+                setDisplayCell(td, entry.row[index], formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
               }
             }
             tr.appendChild(td);
@@ -3977,6 +3995,7 @@
   }
 
   ns.results = {
+    setNullCell,
     beginMultiqueryPanel,
     endMultiqueryPanel,
     clearLiveResults,

@@ -90,19 +90,9 @@
     return out;
   }
 
-  function pad2(n) {
-    return String(n).padStart(2, "0");
-  }
-
-  function timeLabel(ms) {
-    const d = new Date(ms);
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  }
-
-  function dateLabel(ms) {
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${timeLabel(ms)}`;
-  }
+  // Instants and counts in ns.format (docs/ui-foundations.md): browser-local
+  // 24 h "Sep 12 16:29:57" ("16:29:57" under a day heading), "1,234 queries".
+  const format = ns.format;
 
   function dayKey(ms) {
     const d = new Date(ms);
@@ -1095,8 +1085,8 @@
       const empty = !counts.folders && !counts.queries;
       if (!empty) {
         const parts = [];
-        if (counts.queries) parts.push(`${util.formatInt(counts.queries)} ${counts.queries === 1 ? "query" : "queries"}`);
-        if (counts.folders) parts.push(`${util.formatInt(counts.folders)} ${counts.folders === 1 ? "subfolder" : "subfolders"}`);
+        if (counts.queries) parts.push(format.countLabel(counts.queries, "query", "queries"));
+        if (counts.folders) parts.push(format.countLabel(counts.folders, "subfolder"));
         const ok = await confirmDialog({
           title: "Delete folder",
           message: `Delete \u201c${folder.name}\u201d and everything in it (${parts.join(" and ")})? This cannot be undone.`,
@@ -1128,7 +1118,7 @@
     const n = ctl.importOffer;
     const ok = await confirmDialog({
       title: "Import browser queries",
-      message: `Import the ${util.formatInt(n)} ${n === 1 ? "query" : "queries"} saved in this browser into the server library? Everyone using this server will see ${n === 1 ? "it" : "them"}; duplicates are skipped.`,
+      message: `Import the ${format.countLabel(n, "query", "queries")} saved in this browser into the server library? Everyone using this server will see ${n === 1 ? "it" : "them"}; duplicates are skipped.`,
       confirmLabel: "Import",
       danger: false,
     });
@@ -1147,7 +1137,7 @@
     writeJson(IMPORT_OFFER_KEY, { state: "imported", at_ms: Date.now() });
     ctl.importOffer = 0;
     renderLibrary();
-    toast(`Imported ${util.formatInt(payload.queries.length)} browser ${payload.queries.length === 1 ? "query" : "queries"} (duplicates are skipped).`);
+    toast(`Imported ${format.count(payload.queries.length)} browser ${payload.queries.length === 1 ? "query" : "queries"} (duplicates are skipped).`);
   }
 
   // ------------------------------------------------------------ library view
@@ -1293,7 +1283,7 @@
     if (ctl.importOffer > 0 && ctl.writable && !ctl.fatal) {
       const box = el("div", "qlNotice qlNotice--import");
       const n = ctl.importOffer;
-      box.appendChild(el("span", "", `${util.formatInt(n)} ${n === 1 ? "query is" : "queries are"} saved in this browser only.`));
+      box.appendChild(el("span", "", `${format.count(n)} ${n === 1 ? "query is" : "queries are"} saved in this browser only.`));
       const actions = el("div", "qlNotice__actions");
       const importButton = el("button", "button button--small button--primary", "Import my browser queries");
       importButton.type = "button";
@@ -1316,7 +1306,7 @@
     const foot = libraryEls.foot;
     const lib = ctl.library;
     const where = ctl.mode === "server" ? "Stored on the server" : "Stored in this browser";
-    const count = `${util.formatInt(lib.queries.length)} ${lib.queries.length === 1 ? "query" : "queries"}`;
+    const count = format.countLabel(lib.queries.length, "query", "queries");
     foot.textContent = `${count}${MIDDOT}${where}`;
     foot.title = ctl.mode === "server" ? "Shared by everyone using this ChDash server" : "Only this browser sees these queries";
     renderSummary();
@@ -1396,7 +1386,7 @@
     row.appendChild(text);
     if (kind === "folder") {
       const counts = childQueries(ctl.library, entity.id).length + childFolders(ctl.library, entity.id).length;
-      if (counts) row.appendChild(el("span", "qlRow__count", util.formatInt(counts)));
+      if (counts) row.appendChild(el("span", "qlRow__count", format.count(counts)));
     } else if (ctl.opened?.id === entity.id) {
       row.classList.add("is-opened");
       li.setAttribute("aria-current", "true");
@@ -1941,13 +1931,13 @@
       description: query.description,
       tags: query.tags,
       sql: query.sql,
-      meta: [query.host_id ? `host ${query.host_id}` : "", query.updated_at_ms ? `updated ${dateLabel(query.updated_at_ms)}` : ""].filter(Boolean).join(MIDDOT),
+      meta: [query.host_id ? `host ${query.host_id}` : "", query.updated_at_ms ? `updated ${format.time(query.updated_at_ms)}` : ""].filter(Boolean).join(MIDDOT),
     };
   }
 
   function historyPreview(entry) {
     const [, statusText] = statusInfo(entry.status);
-    const meta = [statusText, dateLabel(Number(entry.ran_at_ms) || 0), entry.host_id ? `host ${entry.host_id}` : ""].filter(Boolean).join(MIDDOT);
+    const meta = [statusText, format.time(Number(entry.ran_at_ms) || 0), entry.host_id ? `host ${entry.host_id}` : ""].filter(Boolean).join(MIDDOT);
     return { key: `h:${entry.id}`, title: oneLine(entry.sql, 80), sql: entry.sql, meta, error: entry.status === "error" ? entry.error : "" };
   }
 
@@ -2132,9 +2122,11 @@
       const main = el("div", "qhItem__main");
       main.appendChild(el("div", "qhItem__sql", oneLine(entry.sql, 220)));
       const meta = el("div", "qhItem__meta");
-      meta.appendChild(el("span", "qhItem__time", timeLabel(ts)));
-      if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms != null) meta.appendChild(el("span", "qhItem__elapsed", util.formatSeconds(Number(entry.elapsed_ms) / 1000)));
-      if (Number.isFinite(entry.rows) && entry.rows != null) meta.appendChild(el("span", "qhItem__rows", `${util.formatInt(entry.rows)} ${Number(entry.rows) === 1 ? "row" : "rows"}`));
+      const time = el("span", "qhItem__time", format.time(ts, { date: "never" }));
+      time.title = format.timeTitle(ts);
+      meta.appendChild(time);
+      if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms != null) meta.appendChild(el("span", "qhItem__elapsed", format.duration.fromMs(entry.elapsed_ms)));
+      if (Number.isFinite(entry.rows) && entry.rows != null) meta.appendChild(el("span", "qhItem__rows", format.countLabel(entry.rows, "row")));
       if (entry.host_id) meta.appendChild(el("span", "qhItem__host", String(entry.host_id)));
       main.appendChild(meta);
       const actions = el("div", "qhItem__actions");
@@ -2158,7 +2150,7 @@
     }
     if (hs.loading && !hs.entries.length) list.appendChild(el("div", "qlEmpty", `Loading history${ELLIPSIS}`));
     historyEls.more.hidden = !hs.hasMore;
-    historyEls.foot.textContent = `${util.formatInt(hs.entries.length)}${hs.hasMore ? "+" : ""} ${hs.entries.length === 1 ? "entry" : "entries"}${MIDDOT}${ctl.history?.kind === "server" ? "Stored on the server" : "Stored in this browser"}`;
+    historyEls.foot.textContent = `${format.count(hs.entries.length)}${hs.hasMore ? "+" : ""} ${hs.entries.length === 1 ? "entry" : "entries"}${MIDDOT}${ctl.history?.kind === "server" ? "Stored on the server" : "Stored in this browser"}`;
     const items = historyItems();
     const current = items.find((x) => x.dataset.id === focusedId) || items[0];
     if (current) current.tabIndex = 0;
@@ -2208,7 +2200,7 @@
       title: "Clear the history",
       message: ctl.history?.kind === "server"
         ? "Clear the History stored on the server? Everyone using this server loses it. This cannot be undone."
-        : `Clear the ${util.formatInt(n)} ${n === 1 ? "entry" : "entries"} of the History of this browser?`,
+        : `Clear the ${format.countLabel(n, "entry", "entries")} of the History of this browser?`,
       confirmLabel: "Clear",
     });
     if (!ok) return;

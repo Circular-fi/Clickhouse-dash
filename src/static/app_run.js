@@ -24,11 +24,6 @@
 
   let chartsFrame = 0;
 
-  function getCssVar(name, fallback = "") {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
-    return v && v.trim() ? v.trim() : fallback;
-  }
-
   function pushPointMonotone(arr, t, v) {
     if (!Number.isFinite(t) || !Number.isFinite(v)) return;
     const n = arr.length;
@@ -121,7 +116,7 @@
     const x1 = w - pad;
     const y1 = h - pad;
 
-    const border = getCssVar("--border", "rgba(148,163,184,0.14)");
+    const border = ns.palette.resolve("--border");
     ctx.globalAlpha = 1;
     ctx.strokeStyle = border;
     ctx.lineWidth = 1;
@@ -156,7 +151,7 @@
     if (minMax != null && Number.isFinite(minMax)) vMax = Math.max(vMax, minMax);
     if (!Number.isFinite(vMax) || vMax <= vMin) vMax = vMin + 1;
 
-    const line = opts.lineColor || getCssVar("--accentBorder", "#2563eb");
+    const line = opts.lineColor || ns.palette.resolve("--accent-fill");
     const fillAlpha = opts.fillAlpha ?? 0.12;
 
     function X(t) {
@@ -246,64 +241,36 @@
     scheduleChartsRender();
   }
 
-  function formatShort(value, mul = 1000, units = ["K", "M", "B", "T"], fixed = 2, baseUnit = "") {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "-";
-    const sign = n < 0 ? "-" : "";
-    let v = Math.abs(n);
-    // Whole values below the first unit (row counts, bytes) print without
-    // decimals: "236", "80B"; rates and scaled values keep two.
-    if (v < mul) return `${sign}${Number.isInteger(v) ? String(v) : v.toFixed(fixed)}${baseUnit}`;
-    let u = -1;
-    while (v >= mul && u < units.length - 1) {
-      v /= mul;
-      u += 1;
-    }
-    return `${sign}${v.toFixed(fixed)}${units[u]}`;
-  }
-
-  function formatBytesShort(value) {
-    return formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"], 2, "B");
-  }
-
-  function formatRows(value) {
-    return formatShort(value, 1000, ["K", "M", "B", "T"], 2, "");
-  }
-
-  function formatSecondsFromMs(ms) {
-    const n = Number(ms);
-    if (!Number.isFinite(n) || n < 0) return "-";
-    if (n < 1000) return `${n.toFixed(2)}ms`;
-    return `${(n / 1000).toFixed(2)}s`;
-  }
-
-  function formatPercentFromCenti(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "-";
-    return `${(n / 100).toFixed(2)}%`;
-  }
+  // The metric rail in ns.format (docs/ui-foundations.md): durations
+  // "1 ms" / "8 min 30 s", sizes "15.2 KB", rates "1.2K/s" and "1.7 KB/s",
+  // totals "120,064", percentages "12.3%", and EMPTY for a missing value.
+  const format = ns.format;
+  const EMPTY = format.EMPTY;
+  const rowsRate = (value) => `${format.compact(value)}/s`;
+  // ClickHouse reports CPU and progress in hundredths of a percent.
+  const percentFromCenti = (value) => format.percent(Number(value) / 10000);
 
   function resetMetrics() {
     lockProgressIndeterminate = false;
-    util.setMetricText(dom.elapsedSecondsText, "-");
+    util.setMetricText(dom.elapsedSecondsText, EMPTY);
     util.setText(dom.clickhouseElapsedText, "");
     if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = true;
     if (dom.clickhouseElapsedText) dom.clickhouseElapsedText.removeAttribute("title");
-    util.setText(dom.progressPercentText, "-");
-    util.setMetricText(dom.readRowsRateText, "-");
-    util.setMetricText(dom.readRowsTotalText, "-");
-    util.setMetricText(dom.readBytesRateText, "-");
-    util.setMetricText(dom.readBytesTotalText, "-");
-    util.setMetricText(dom.writtenRowsRateText, "-");
-    util.setMetricText(dom.writtenRowsTotalText, "-");
-    util.setMetricText(dom.writtenBytesRateText, "-");
-    util.setMetricText(dom.writtenBytesTotalText, "-");
+    util.setText(dom.progressPercentText, EMPTY);
+    util.setMetricText(dom.readRowsRateText, EMPTY);
+    util.setMetricText(dom.readRowsTotalText, EMPTY);
+    util.setMetricText(dom.readBytesRateText, EMPTY);
+    util.setMetricText(dom.readBytesTotalText, EMPTY);
+    util.setMetricText(dom.writtenRowsRateText, EMPTY);
+    util.setMetricText(dom.writtenRowsTotalText, EMPTY);
+    util.setMetricText(dom.writtenBytesRateText, EMPTY);
+    util.setMetricText(dom.writtenBytesTotalText, EMPTY);
     if (dom.writtenRowsCard) dom.writtenRowsCard.classList.add("is-hidden");
     if (dom.writtenBytesCard) dom.writtenBytesCard.classList.add("is-hidden");
-    util.setText(dom.cpuText, "-");
-    util.setText(dom.cpuMaxText, "-");
-    util.setMetricText(dom.memoryText, "-");
-    util.setMetricText(dom.memoryMaxText, "-");
+    util.setText(dom.cpuText, EMPTY);
+    util.setText(dom.cpuMaxText, EMPTY);
+    util.setMetricText(dom.memoryText, EMPTY);
+    util.setMetricText(dom.memoryMaxText, EMPTY);
     if (dom.progressCard) {
       dom.progressCard.classList.remove("is-indeterminate");
       dom.progressCard.style.setProperty("--p", "0");
@@ -313,14 +280,14 @@
 
   function resetLiveMetrics() {
     lockProgressIndeterminate = false;
-    // util.setMetricText(dom.elapsedSecondsText, "-");
-    // util.setText(dom.progressPercentText, "-");
-    util.setMetricText(dom.readRowsRateText, "-");
-    util.setMetricText(dom.readBytesRateText, "-");
-    util.setMetricText(dom.writtenRowsRateText, "-");
-    util.setMetricText(dom.writtenBytesRateText, "-");
-    util.setText(dom.cpuText, "-");
-    util.setMetricText(dom.memoryText, "-");
+    // util.setMetricText(dom.elapsedSecondsText, EMPTY);
+    // util.setText(dom.progressPercentText, EMPTY);
+    util.setMetricText(dom.readRowsRateText, EMPTY);
+    util.setMetricText(dom.readBytesRateText, EMPTY);
+    util.setMetricText(dom.writtenRowsRateText, EMPTY);
+    util.setMetricText(dom.writtenBytesRateText, EMPTY);
+    util.setText(dom.cpuText, EMPTY);
+    util.setMetricText(dom.memoryText, EMPTY);
   }
 
   function setProgressIndeterminate(enabled) {
@@ -339,7 +306,7 @@
     try {
       const payload = await api.getQueryExecution(hostId, queryId);
       if (payload && payload.available === true && Number.isFinite(Number(payload.duration_ms))) {
-        util.setText(dom.clickhouseElapsedText, formatSecondsFromMs(Number(payload.duration_ms)));
+        util.setText(dom.clickhouseElapsedText, format.duration.fromMs(payload.duration_ms));
         if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
         return;
       }
@@ -378,41 +345,41 @@
     const writtenRowsPerSec = arr[17] == null ? null : Number(arr[17]);
     const writtenBytesPerSec = arr[18] == null ? null : Number(arr[18]);
 
-    if (Number.isFinite(elapsedMs)) util.setMetricText(dom.elapsedSecondsText, formatSecondsFromMs(elapsedMs));
+    if (Number.isFinite(elapsedMs)) util.setMetricText(dom.elapsedSecondsText, format.duration.fromMs(elapsedMs));
 
     if (percentKnown && Number.isFinite(percentCenti)) {
       const pct = Math.max(0, Math.min(100, percentCenti / 100));
-      util.setText(dom.progressPercentText, `${pct.toFixed(2)}%`);
+      util.setText(dom.progressPercentText, format.percent(pct / 100));
       if (dom.progressCard) dom.progressCard.style.setProperty("--p", String(pct / 100));
       setProgressIndeterminate(false);
     } else {
-      util.setText(dom.progressPercentText, "-");
+      util.setText(dom.progressPercentText, EMPTY);
       if (state.isRunning && !lockProgressIndeterminate) setProgressIndeterminate(true);
       else setProgressIndeterminate(false);
     }
 
-    if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, `${formatRows(rowsPerSec)}/s`);
-    if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, formatRows(readRowsTotal));
+    if (Number.isFinite(rowsPerSec)) util.setMetricText(dom.readRowsRateText, rowsRate(rowsPerSec));
+    if (Number.isFinite(readRowsTotal)) util.setMetricText(dom.readRowsTotalText, format.count(readRowsTotal));
 
-    if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, `${formatBytesShort(bytesPerSec)}/s`);
-    if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, formatBytesShort(readBytesTotal));
+    if (Number.isFinite(bytesPerSec)) util.setMetricText(dom.readBytesRateText, format.bytesRate(bytesPerSec));
+    if (Number.isFinite(readBytesTotal)) util.setMetricText(dom.readBytesTotalText, format.bytes(readBytesTotal));
 
     const hasWrites = (Number.isFinite(writtenRowsTotal) && writtenRowsTotal > 0) ||
       (Number.isFinite(writtenBytesTotal) && writtenBytesTotal > 0);
     if (hasWrites) {
       if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
       if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
-      if (Number.isFinite(writtenRowsPerSec)) util.setMetricText(dom.writtenRowsRateText, `${formatRows(writtenRowsPerSec)}/s`);
-      if (Number.isFinite(writtenRowsTotal)) util.setMetricText(dom.writtenRowsTotalText, formatRows(writtenRowsTotal));
-      if (Number.isFinite(writtenBytesPerSec)) util.setMetricText(dom.writtenBytesRateText, `${formatBytesShort(writtenBytesPerSec)}/s`);
-      if (Number.isFinite(writtenBytesTotal)) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(writtenBytesTotal));
+      if (Number.isFinite(writtenRowsPerSec)) util.setMetricText(dom.writtenRowsRateText, rowsRate(writtenRowsPerSec));
+      if (Number.isFinite(writtenRowsTotal)) util.setMetricText(dom.writtenRowsTotalText, format.count(writtenRowsTotal));
+      if (Number.isFinite(writtenBytesPerSec)) util.setMetricText(dom.writtenBytesRateText, format.bytesRate(writtenBytesPerSec));
+      if (Number.isFinite(writtenBytesTotal)) util.setMetricText(dom.writtenBytesTotalText, format.bytes(writtenBytesTotal));
     }
 
-    util.setText(dom.cpuText, cpuCenti == null ? "-" : formatPercentFromCenti(cpuCenti));
-    util.setText(dom.cpuMaxText, cpuMaxCenti == null ? "-" : formatPercentFromCenti(cpuMaxCenti));
+    util.setText(dom.cpuText, cpuCenti == null ? EMPTY : percentFromCenti(cpuCenti));
+    util.setText(dom.cpuMaxText, cpuMaxCenti == null ? EMPTY : percentFromCenti(cpuMaxCenti));
 
-    util.setMetricText(dom.memoryText, memInst == null ? "-" : formatBytesShort(memInst));
-    util.setMetricText(dom.memoryMaxText, memMax == null ? "-" : formatBytesShort(memMax));
+    util.setMetricText(dom.memoryText, memInst == null ? EMPTY : format.bytes(memInst));
+    util.setMetricText(dom.memoryMaxText, memMax == null ? EMPTY : format.bytes(memMax));
 
     if (agg) {
       if (Number.isFinite(readRowsTotal)) agg.lastReadRows = readRowsTotal;
@@ -516,33 +483,33 @@
   function applyDoneMetrics(done, agg) {
     if (!done || typeof done !== "object") return;
     lockProgressIndeterminate = true;
-    if (done.elapsed_seconds != null) util.setMetricText(dom.elapsedSecondsText, formatSecondsFromMs(Number(done.elapsed_seconds) * 1000));
+    if (done.elapsed_seconds != null) util.setMetricText(dom.elapsedSecondsText, format.duration.fromSeconds(done.elapsed_seconds));
 
     const rr = done.read_rows != null ? Number(done.read_rows) : null;
     const rb = done.read_bytes != null ? Number(done.read_bytes) : null;
     const wr = done.written_rows != null ? Number(done.written_rows) : null;
     const wb = done.written_bytes != null ? Number(done.written_bytes) : null;
 
-    if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, formatRows(rr));
-    else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, formatRows(agg.lastReadRows));
+    if (rr != null && Number.isFinite(rr) && rr > 0) util.setMetricText(dom.readRowsTotalText, format.count(rr));
+    else if (agg && agg.lastReadRows != null) util.setMetricText(dom.readRowsTotalText, format.count(agg.lastReadRows));
 
-    if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, formatBytesShort(rb));
-    else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, formatBytesShort(agg.lastReadBytes));
+    if (rb != null && Number.isFinite(rb) && rb > 0) util.setMetricText(dom.readBytesTotalText, format.bytes(rb));
+    else if (agg && agg.lastReadBytes != null) util.setMetricText(dom.readBytesTotalText, format.bytes(agg.lastReadBytes));
 
     const finalWrittenRows = wr != null && Number.isFinite(wr) ? wr : (agg ? agg.lastWrittenRows : null);
     const finalWrittenBytes = wb != null && Number.isFinite(wb) ? wb : (agg ? agg.lastWrittenBytes : null);
     if ((finalWrittenRows != null && finalWrittenRows > 0) || (finalWrittenBytes != null && finalWrittenBytes > 0)) {
       if (dom.writtenRowsCard) dom.writtenRowsCard.classList.remove("is-hidden");
       if (dom.writtenBytesCard) dom.writtenBytesCard.classList.remove("is-hidden");
-      if (finalWrittenRows != null) util.setMetricText(dom.writtenRowsTotalText, formatRows(finalWrittenRows));
-      if (finalWrittenBytes != null) util.setMetricText(dom.writtenBytesTotalText, formatBytesShort(finalWrittenBytes));
+      if (finalWrittenRows != null) util.setMetricText(dom.writtenRowsTotalText, format.count(finalWrittenRows));
+      if (finalWrittenBytes != null) util.setMetricText(dom.writtenBytesTotalText, format.bytes(finalWrittenBytes));
     }
 
     setProgressIndeterminate(false);
   }
 
   function setQueryIdText(queryId) {
-    util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : "-");
+    util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : EMPTY);
   }
 
   // Prevent out-of-order SSE/UI updates from regressing the status text.
@@ -1484,7 +1451,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         }
 
         if (lower === "finished") {
-          util.setText(dom.progressPercentText, "100.00%");
+          util.setText(dom.progressPercentText, format.percent(1));
           if (dom.progressCard) dom.progressCard.style.setProperty("--p", "1");
         }
 
@@ -1549,28 +1516,21 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     return s === "error" || s === "canceled" || s === "cancelled";
   }
 
-  // "N rows" / "1 row" with the app-wide integer format.
-  function countLabel(n, singular, plural = `${singular}s`) {
-    const v = Number(n) || 0;
-    return `${util.formatInt(v)} ${v === 1 ? singular : plural}`;
-  }
-
-  // Result header and multiquery panel summary, in the app-wide formats
-  // (util.formatInt / formatSeconds / formatBytes): "236 rows · 5 columns ·
-  // 4ms · read 236 rows, 15.2 KB".
+  // Result header and multiquery panel summary, in ns.format: "236 rows ·
+  // 5 columns · 4 ms · read 236 rows, 15.2 KB".
   function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, truncated }) {
     const parts = [];
     if (status) parts.push(statusLabel(status));
-    if (outRows != null) parts.push(`${countLabel(outRows, "row")}${truncated ? " (preview)" : ""}`);
-    if (outCols != null) parts.push(countLabel(outCols, "column"));
-    if (elapsedSeconds != null && Number.isFinite(elapsedSeconds)) parts.push(util.formatSeconds(elapsedSeconds));
+    if (outRows != null) parts.push(`${format.countLabel(outRows, "row")}${truncated ? " (preview)" : ""}`);
+    if (outCols != null) parts.push(format.countLabel(outCols, "column"));
+    if (elapsedSeconds != null && Number.isFinite(elapsedSeconds)) parts.push(format.duration.fromSeconds(elapsedSeconds));
     const read = [];
-    if (readRows != null && Number(readRows) > 0) read.push(countLabel(readRows, "row"));
-    if (readBytes != null && Number(readBytes) > 0) read.push(util.formatBytes(readBytes));
+    if (readRows != null && Number(readRows) > 0) read.push(format.countLabel(readRows, "row"));
+    if (readBytes != null && Number(readBytes) > 0) read.push(format.bytes(readBytes));
     if (read.length) parts.push(`read ${read.join(", ")}`);
 
-    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${formatPercentFromCenti(cpuMaxCenti)}`);
-    if (memMax != null && memMax > 0) parts.push(`max RAM ${util.formatBytes(memMax)}`);
+    if (cpuMaxCenti != null && cpuMaxCenti > 0) parts.push(`max CPU ${percentFromCenti(cpuMaxCenti)}`);
+    if (memMax != null && memMax > 0) parts.push(`max RAM ${format.bytes(memMax)}`);
     return parts.join(" \u00b7 ");
   }
 

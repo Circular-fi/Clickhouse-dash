@@ -49,8 +49,8 @@ def test_storage_shares_of_database_and_server_are_one_about_tile() -> None:
     ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
-    assert 'aboutTile("Share", `${fmtPercent(dbShare)} of ${database}`' in about
-    assert '`${fmtPercent(allShare)} of all databases`' in about
+    assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
+    assert '`${percentText(allShare)} of all databases`' in about
     assert "explorerScopeMeter" not in ui
     assert ".explorerAboutTile__context" in css
 
@@ -94,12 +94,12 @@ def test_query_and_explorer_keep_stable_right_scrollbar_lane() -> None:
     assert "scrollbar-gutter: stable !important;" in tail
 
 
-def test_query_metrics_use_two_decimals_and_keep_magnitude_with_number() -> None:
+def test_query_metrics_use_shared_formats_and_keep_magnitude_with_number() -> None:
     run = read("src/static/app_run.js")
     util = read("src/static/app_util.js")
-    assert 'units = ["K", "M", "B", "T"]' in run
-    assert "v.toFixed(fixed)" in run
-    assert 'formatShort(value, 1024, ["KiB", "MiB", "GiB", "TiB"], 2, "B")' in run
-    assert '`${formatRows(rowsPerSec)}/s`' in run
+    # The rail uses ns.format: "15.2 KB", "1.7 KB/s", "1.2K/s".
+    assert 'KiB' not in run and 'formatShort' not in run
+    assert 'util.setMetricText(dom.readBytesRateText, format.bytesRate(bytesPerSec));' in run
+    assert 'util.setMetricText(dom.readRowsRateText, rowsRate(rowsPerSec));' in run
     assert "(Ki|Mi|Gi|Ti|K|M|B|T)?" in util
     assert "const magnitude = `${match[1]}${match[2] || \"\"}`;" in util

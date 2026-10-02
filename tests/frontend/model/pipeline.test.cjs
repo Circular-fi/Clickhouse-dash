@@ -6,7 +6,10 @@ const vm = require('node:vm');
 
 const context = { window: { ChDash: {} } };
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static/app_pipeline_viewer.js'), 'utf8'), context);
+// ns.format and ns.palette load first, as in every page loader.
+for (const name of ['app_format.js', 'app_palette.js', 'app_pipeline_viewer.js']) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../../src/static', name), 'utf8'), context);
+}
 const build = context.window.ChDash.pipelineViewer.buildModel;
 const processor = (id, step, extra = {}) => ({
   hostname: 'h', query_id: 'q', id: String(id), plan_step: String(step),

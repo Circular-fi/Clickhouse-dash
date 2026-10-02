@@ -44,7 +44,7 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
     assert "GROUP BY database ORDER BY database" in catalog
     assert "discover_visible_databases(runner)" in catalog
     assert "out.database_footprint_bytes = summary_row.bytes;" in catalog
-    assert "fmtStorageBytes(databaseSummary.bytes)" in ui
+    assert "format.bytes(databaseSummary.bytes)" in ui
     assert "const dbShare = percentValue(footprint, dbBytes);" in ui
 
 
