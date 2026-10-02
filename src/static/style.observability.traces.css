@@ -7295,6 +7295,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanPanel .uiDetail__head { border-top: 3px solid var(--trace-service-color); }
 .traceSpanPanel .uiDetail__eyebrow { display: flex; align-items: center; gap: 5px; }
 .traceSpanPanel__open { white-space: nowrap; text-decoration: none; }
+.traceSearchMain { overflow-x: clip; }
+.traceResultsSection .traceSearchResults__toolbar { flex-wrap: wrap; row-gap: 6px; }
 .traceSpanPanel__facts { margin: 0 0 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 .traceSpanPanel__fact { min-width: 0; }
 .traceSpanPanel__fact dt { color: var(--muted); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
