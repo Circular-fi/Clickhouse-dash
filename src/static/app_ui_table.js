@@ -203,6 +203,12 @@
   // the keys move focus between rows. Rows rendered later are picked up.
   //   onMove(row, event)  optional, after focus moved
   //   onOpen(row, event)  Enter / Space on a row
+  //   cells: true         Right / Left step into the row's cells (and back),
+  //                       Up / Down keep the column: a grid. The focused cell
+  //                       is what a keyboard context menu acts on.
+  //   key(row)            a row's identity across re-renders (virtual tables
+  //                       rebuild their rows): focus comes back to the row
+  //                       (and cell) with the same key after a re-render.
   //
   // Index mode (count given: virtual lists whose rows are not all in the DOM;
   // the container keeps focus): the keys call onMove(index, event) and
@@ -213,25 +219,57 @@
   // Returns { refresh(), destroy() }.
   function rovingRows(container, {
     rows = "tbody tr[tabindex]", onMove = null, onOpen = null, count = null, current = null, page = null,
-    selected = ".is-selected",
+    selected = ".is-selected", cells = false, key = null,
   } = {}) {
     if (!container) return { refresh() {}, destroy() {} };
     const indexMode = typeof count === "function";
     const list = () => [...container.querySelectorAll(rows)].filter((row) => !row.hidden);
+    const rowOf = (el) => {
+      const row = el instanceof Element ? el.closest(rows) : null;
+      return row && container.contains(row) ? row : null;
+    };
+    // Row numbers are part of the row, not a cell to stop on.
+    const cellsOf = (row) => [...row.children].filter((cell) => cell.matches("td, th") && !cell.hidden && !cell.classList.contains("dataTable__rowNum"));
+    // The last focused row (and cell) by key, to restore after a re-render.
+    let focusKey = null;
+    let focusCell = -1;
+    let focusInside = false;
+
+    function setRoving(active) {
+      for (const row of list()) {
+        const value = row === active ? 0 : -1;
+        if (row.tabIndex !== value) row.tabIndex = value;
+      }
+    }
+
+    function focusEl(el, scroll = true) {
+      if (!el) return;
+      if (el.tabIndex < 0 && !el.hasAttribute("tabindex")) el.tabIndex = -1;
+      el.focus({ preventScroll: !scroll });
+      if (scroll) el.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    }
 
     function refresh() {
       if (indexMode) return;
       const all = list();
       if (!all.length) return;
-      const active = all.find((row) => row === document.activeElement)
+      const active = document.activeElement;
+      // A virtual re-render dropped the focused row: focus its new element.
+      if (focusInside && typeof key === "function" && focusKey != null && (!active || active === document.body || !container.contains(active))) {
+        const again = all.find((row) => String(key(row)) === focusKey);
+        if (again) {
+          setRoving(again);
+          const cell = focusCell >= 0 ? cellsOf(again)[focusCell] : null;
+          focusEl(cell || again, false);
+          return;
+        }
+      }
+      const current = all.find((row) => row.contains(active))
         || all.find((row) => row.tabIndex === 0 && row.matches(selected))
         || all.find((row) => row.matches(selected))
         || all.find((row) => row.tabIndex === 0)
         || all[0];
-      for (const row of all) {
-        const value = row === active ? 0 : -1;
-        if (row.tabIndex !== value) row.tabIndex = value;
-      }
+      setRoving(current);
     }
 
     function pageSize(all) {
@@ -240,6 +278,15 @@
       const height = first ? first.getBoundingClientRect().height : 0;
       const view = container.clientHeight || window.innerHeight;
       return height > 0 ? Math.max(1, Math.floor(view / height) - 1) : 10;
+    }
+
+    function moveRow(row, next, event, cellIndex = -1) {
+      if (!next) return;
+      event.preventDefault();
+      setRoving(next);
+      const cell = cellIndex >= 0 ? cellsOf(next)[cellIndex] : null;
+      focusEl(cell || next);
+      if (next !== row) onMove?.(next, event);
     }
 
     function onKeydown(event) {
@@ -262,21 +309,50 @@
         }
         return;
       }
-      const row = target?.closest(rows);
-      if (!row || !container.contains(row)) return;
+      const row = rowOf(target);
+      if (!row) return;
+      const onRow = target === row;
+      const cell = !onRow && cells && target.parentElement === row ? target : null;
+      // A button or link inside a row keeps its own keys.
+      if (!onRow && !cell) return;
+      if (cell) {
+        const rowCells = cellsOf(row);
+        const at = rowCells.indexOf(cell);
+        if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          const next = rowCells[at + (event.key === "ArrowRight" ? 1 : -1)];
+          if (next) focusEl(next);
+          else if (event.key === "ArrowLeft") focusEl(row);
+          return;
+        }
+        if (event.key === "Home" || event.key === "End") {
+          event.preventDefault();
+          focusEl(event.key === "Home" ? rowCells[0] : rowCells[rowCells.length - 1]);
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          focusEl(row);
+          return;
+        }
+        if (MOVE_KEYS.has(event.key)) {
+          const all = list();
+          moveRow(row, all[targetIndex(event.key, all.indexOf(row), all.length, pageSize(all))], event, at);
+        }
+        return;
+      }
+      if (cells && event.key === "ArrowRight") {
+        const first = cellsOf(row)[0];
+        if (first) {
+          event.preventDefault();
+          focusEl(first);
+        }
+        return;
+      }
       if (MOVE_KEYS.has(event.key)) {
-        // Only when the row itself has focus: a button inside keeps its keys.
-        if (target !== row) return;
         const all = list();
-        const next = all[targetIndex(event.key, all.indexOf(row), all.length, pageSize(all))];
-        if (!next) return;
-        event.preventDefault();
-        row.tabIndex = -1;
-        next.tabIndex = 0;
-        next.focus({ preventScroll: false });
-        next.scrollIntoView?.({ block: "nearest" });
-        if (next !== row) onMove?.(next, event);
-      } else if (OPEN_KEYS.has(event.key) && onOpen && target === row) {
+        moveRow(row, all[targetIndex(event.key, all.indexOf(row), all.length, pageSize(all))], event);
+      } else if (OPEN_KEYS.has(event.key) && onOpen) {
         event.preventDefault();
         onOpen(row, event);
       }
@@ -284,16 +360,26 @@
 
     function onFocusin(event) {
       if (indexMode) return;
-      const row = event.target instanceof Element ? event.target.closest(rows) : null;
-      if (!row || !container.contains(row)) return;
-      for (const other of list()) {
-        const value = other === row ? 0 : -1;
-        if (other.tabIndex !== value) other.tabIndex = value;
-      }
+      const row = rowOf(event.target);
+      if (!row) return;
+      focusInside = true;
+      focusKey = typeof key === "function" ? String(key(row)) : null;
+      focusCell = event.target !== row && event.target.parentElement === row ? cellsOf(row).indexOf(event.target) : -1;
+      setRoving(row);
+    }
+
+    function onFocusout(event) {
+      if (indexMode) return;
+      const left = event.target;
+      // Focus moved elsewhere (not a re-render removing the row): forget it.
+      setTimeout(() => {
+        if (left instanceof Element && left.isConnected && !container.contains(document.activeElement)) focusInside = false;
+      }, 0);
     }
 
     container.addEventListener("keydown", onKeydown);
     container.addEventListener("focusin", onFocusin);
+    container.addEventListener("focusout", onFocusout);
     let observer = null;
     if (!indexMode && typeof MutationObserver === "function") {
       let queued = false;
@@ -310,15 +396,27 @@
       destroy() {
         container.removeEventListener("keydown", onKeydown);
         container.removeEventListener("focusin", onFocusin);
+        container.removeEventListener("focusout", onFocusout);
         observer?.disconnect();
       },
     };
   }
 
+  // The element a keyboard context menu (Shift+F10, the ContextMenu key)
+  // acts on, and its anchor point: the focused cell or row under root.
+  function keyboardMenuTarget(event, root) {
+    const isMenuKey = event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+    if (!isMenuKey || event.altKey || event.ctrlKey || event.metaKey) return null;
+    const el = event.target instanceof Element ? event.target : null;
+    if (!el || (root && !root.contains(el))) return null;
+    const box = el.getBoundingClientRect();
+    return { el, x: Math.round(box.left + Math.min(box.width / 2, 24)), y: Math.round(box.top + box.height / 2) };
+  }
+
   ns.table = Object.freeze({
     ariaSort, setSort, sortHeader, sortHeadHtml, bindSort,
     barEligible, barPercent, cellBar, cellBarStyle, textCell, copyCellHtml, copyCell, bindCopy,
-    rovingRows, targetIndex,
+    rovingRows, targetIndex, keyboardMenuTarget,
   });
   ns.rovingRows = rovingRows;
 })();

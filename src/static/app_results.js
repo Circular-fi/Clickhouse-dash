@@ -1439,6 +1439,7 @@
   }
 
   function appendLiveRowCells(tr, row) {
+    markKeyboardRow(tr, row && row.__chdashRowIndex);
     const tdIndex = document.createElement("td");
     tdIndex.className = "dataTable__rowNum";
     tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
@@ -2640,6 +2641,7 @@
     }
 
     function appendLocalRowCells(tr, row) {
+      markKeyboardRow(tr, row && row.__chdashRowIndex);
       const tdIndex = document.createElement("td");
       tdIndex.className = "dataTable__rowNum";
       tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
@@ -3200,6 +3202,7 @@
     const tbody = document.createElement("tbody");
     table.append(thead, tbody);
     wrap.appendChild(table);
+    bindKeyboardRows(tbody);
     if (rowDetails) {
       registerRowDetailsSource(table, () => ({ columns: safeColumns, types: safeTypes, typeAsts }), {
         rowCount: () => safeRows.length,
@@ -3329,6 +3332,7 @@
 
       for (const entry of display) {
         const tr = document.createElement("tr");
+        markKeyboardRow(tr, entry.index);
         const indexCell = document.createElement("td");
         indexCell.className = "dataTable__rowNum";
         const customIndex = typeof rowIndexValue === "function"
@@ -3401,6 +3405,34 @@
   // `allRows()` returns every data row (Copy column).
   function registerRowDetailsSource(table, getContext, { rowCount = null, viewRows = null, relayout = null, allRows = null } = {}) {
     if (table && typeof getContext === "function") rowDetailsSources.set(table, { getContext, rowCount, viewRows, relayout, allRows });
+    if (table && table.tBodies[0]) bindKeyboardRows(table.tBodies[0]);
+  }
+
+  // Keyboard rows (ns.rovingRows): every data row is focusable with a roving
+  // tabindex, Right / Left step into its cells, Up / Down keep the column,
+  // Enter opens the row's Details; Shift+F10 or the ContextMenu key opens the
+  // row menu on the focused row or cell. Virtual windows rebuild their rows:
+  // data-row-key brings focus back to the same row.
+  function markKeyboardRow(tr, key) {
+    if (!tr || key == null || key === "") return;
+    tr.tabIndex = -1;
+    tr.dataset.rowKey = String(key);
+  }
+
+  const keyboardBodies = new WeakSet();
+  function bindKeyboardRows(tbody) {
+    if (!tbody || keyboardBodies.has(tbody) || !ns.table) return;
+    keyboardBodies.add(tbody);
+    ns.table.rovingRows(tbody, {
+      rows: "tr[data-row-key]",
+      cells: true,
+      key: (tr) => tr.dataset.rowKey,
+      onOpen: (tr) => {
+        const table = tr.closest("table");
+        const binding = rowDetailsBindings.get(tr);
+        if (binding && table && rowDetailsSources.get(table)) openRowDetails(binding, table, tr);
+      },
+    });
   }
 
   function bindRowDetails(tr, row, label) {
@@ -4004,28 +4036,51 @@
     try { content.focus({ preventScroll: true }); } catch { null; }
   }
 
-  function onResultRowContextMenu(ev) {
-    if (ev.shiftKey || ev.defaultPrevented) return;
-    const target = ev.target instanceof Element ? ev.target : null;
-    if (!target || target.closest(".resultTable__detailRow, .rowDetailsMenu")) return;
+  // The menu a keyboard opened (onResultRowMenuKey) also gets the browser's
+  // contextmenu event of the same key press: it must not open twice or let
+  // the native menu through (Shift+F10 carries shiftKey).
+  let keyboardMenuAt = -Infinity;
+
+  function rowMenuAt(target, clientX, clientY) {
+    if (!target || target.closest(".resultTable__detailRow, .rowDetailsMenu")) return false;
     const tr = target.closest("tr");
     const binding = tr ? rowDetailsBindings.get(tr) : null;
-    if (!binding) return;
+    if (!binding) return false;
     const table = tr.closest("table");
     const source = table ? rowDetailsSources.get(table) : null;
-    if (!source) return;
+    if (!source) return false;
     // A single-row result is already shown vertically: keep the native menu.
     const count = typeof source.rowCount === "function" ? Number(source.rowCount()) || 0 : 0;
-    if (count < 2) return;
-    ev.preventDefault();
+    if (count < 2) return false;
     // Data cells follow the row-number cell.
     const td = target.closest("td");
     const offset = tr.cells[0] && tr.cells[0].classList.contains("dataTable__rowNum") ? 1 : 0;
     const columnIndex = td && td.parentElement === tr ? td.cellIndex - offset : -1;
-    openRowDetailsMenu(ev.clientX, ev.clientY, binding, table, columnIndex, tr);
+    openRowDetailsMenu(clientX, clientY, binding, table, columnIndex, tr);
+    return true;
+  }
+
+  function onResultRowMenuKey(ev) {
+    const hit = ns.table ? ns.table.keyboardMenuTarget(ev) : null;
+    if (!hit || !hit.el.closest(".resultTable")) return;
+    if (rowMenuAt(hit.el, hit.x, hit.y)) {
+      ev.preventDefault();
+      keyboardMenuAt = performance.now();
+    }
+  }
+
+  function onResultRowContextMenu(ev) {
+    if (performance.now() - keyboardMenuAt < 800) {
+      ev.preventDefault();
+      return;
+    }
+    if (ev.shiftKey || ev.defaultPrevented) return;
+    const target = ev.target instanceof Element ? ev.target : null;
+    if (rowMenuAt(target, ev.clientX, ev.clientY)) ev.preventDefault();
   }
 
   document.addEventListener("contextmenu", onResultRowContextMenu);
+  document.addEventListener("keydown", onResultRowMenuKey);
   if (dom.resultTableBody) {
     registerRowDetailsSource(dom.resultTableBody.closest("table"), () => ({
       columns: resultColumns,
