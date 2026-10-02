@@ -1714,6 +1714,10 @@ html.chdash-page-select-hidden .pageSelect {
   font-size: .95rem;
   font-weight: 950;
 }
+.runSettings {
+  position: relative;
+  align-self: center;
+}
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {

@@ -2235,59 +2235,8 @@
     split.appendChild(buttons);
     split.appendChild(menu);
 
-    let onDocClick = null;
-    let onKey = null;
-
-    const isOpen = () => split.classList.contains("is-open");
-
-    const cleanup = () => {
-      if (onDocClick) document.removeEventListener("click", onDocClick);
-      if (onKey) document.removeEventListener("keydown", onKey);
-      onDocClick = null;
-      onKey = null;
-    };
-
-    const openMenu = () => {
-      if (!menu.hidden) return;
-      menu.hidden = false;
-      menuBtn.setAttribute("aria-expanded", "true");
-      requestAnimationFrame(() => split.classList.add("is-open"));
-      try {
-        menu.focus({ preventScroll: true });
-      } catch {
-        null;
-      }
-      onDocClick = (ev) => {
-        const t = ev.target;
-        if (t instanceof Node && !split.contains(t)) closeMenu();
-      };
-      onKey = (ev) => {
-        if (ev.key === "Escape") closeMenu({ immediate: true });
-      };
-      document.addEventListener("click", onDocClick);
-      document.addEventListener("keydown", onKey);
-    };
-
-    const closeMenu = ({ immediate = false } = {}) => {
-      menuBtn.setAttribute("aria-expanded", "false");
-      split.classList.remove("is-open");
-      if (immediate) {
-        menu.hidden = true;
-        cleanup();
-        return;
-      }
-      setTimeout(() => {
-        if (!isOpen()) {
-          menu.hidden = true;
-          cleanup();
-        }
-      }, 160);
-    };
-
-    menuBtn.addEventListener("click", () => {
-      if (menu.hidden) openMenu();
-      else closeMenu();
-    });
+    // Copy JSON | Copy CSV: an ns.menu split button (app_ui_menu.js).
+    const copyMenu = ns.menu?.split(mainBtn, menuBtn, menu, { root: split }) || null;
 
     mainBtn.addEventListener("click", async () => {
       const text = typeof getJsonText === "function" ? getJsonText() : "";
@@ -2295,7 +2244,7 @@
     });
 
     csvBtn.addEventListener("click", async () => {
-      closeMenu({ immediate: true });
+      copyMenu?.close({ immediate: true, focus: false });
       const text = typeof getCsvText === "function" ? getCsvText() : "";
       await copyTextWithFlash(mainBtn, text);
     });
@@ -2304,7 +2253,7 @@
       const disabled = !!v;
       mainBtn.disabled = disabled;
       menuBtn.disabled = disabled;
-      if (disabled) closeMenu({ immediate: true });
+      if (disabled) copyMenu?.close({ immediate: true, focus: false });
     } };
   }
 
@@ -3642,16 +3591,7 @@
   }
 
   function closeRowDetailsMenu({ restoreFocus = false } = {}) {
-    const menu = rowDetailsMenu;
-    if (!menu) return;
-    rowDetailsMenu = null;
-    runDisposers(menu.disposers);
-    menu.el.remove();
-    menu.clearHighlight();
-    if (menu.tr) menu.tr.classList.remove("is-rowMenuTarget");
-    if (restoreFocus && menu.returnFocus && menu.returnFocus.isConnected) {
-      try { menu.returnFocus.focus({ preventScroll: true }); } catch { null; }
-    }
+    rowDetailsMenu?.close({ focus: restoreFocus });
   }
 
   // The cells an action applies to, lit while its menu item is hovered or
@@ -3790,21 +3730,19 @@
     });
   }
 
-  // The row menu (and its submenus, the same component): items are
-  // role=menuitem buttons, or links for "Open trace" (a new tab). Arrows,
-  // Home and End move in the menu that has the focus; ArrowRight (Enter,
-  // a click or hovering) opens a submenu, ArrowLeft and Escape close it.
+  // The row menu and its submenus: an ns.menu context menu at the pointer
+  // (app_ui_menu.js: keys, focus, the outside click / Escape layer, scroll,
+  // resize and blur close it). Items are role=menuitem buttons, or links for
+  // "Open trace" (a new tab). Arrows, Home and End move in the menu that has
+  // the focus; ArrowRight, Enter, a click or hovering opens a submenu,
+  // ArrowLeft and Escape close it back on its item.
   function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, tr = null) {
     closeRowDetailsMenu();
     const el = document.createElement("div");
     el.className = "runMenu rowDetailsMenu";
     el.setAttribute("role", "menu");
     el.setAttribute("aria-label", "Row actions");
-    el.tabIndex = -1;
 
-    const main = { node: el, items: [] };
-    let sub = null; // the open submenu: { node, items, trigger }
-    const submenus = new Map(); // trigger -> fill(list)
     let lit = [];
     const clearHighlight = () => {
       for (const cell of lit) cell.classList.remove("is-copyTarget");
@@ -3831,87 +3769,41 @@
       node.addEventListener("blur", clearHighlight);
       return node;
     };
-    // href: a link opened in a new tab (the results stay), else onPick runs.
-    // column: the cell the item is about (default: the right-clicked one).
-    const addItem = (text, onPick, scope = "", { href = "", column = columnIndex, title = "", list = main } = {}) => {
+    // href: a link opened in a new tab (the results stay), else onPick runs;
+    // the menu closes after the pick. column: the cell the item is about
+    // (default: the right-clicked one).
+    const addItem = (text, onPick, scope = "", { href = "", column = columnIndex, title = "", list = el } = {}) => {
       const node = itemNode(href ? "a" : "button", text, { scope, column, title });
       if (href) {
         node.href = href;
         node.target = "_blank";
         node.rel = "noopener";
+      } else {
+        node.addEventListener("click", () => onPick());
       }
-      node.addEventListener("click", () => {
-        // The link navigates once the click is over: the menu closes after.
-        if (href) setTimeout(() => closeRowDetailsMenu(), 0);
-        else {
-          closeRowDetailsMenu();
-          onPick();
-        }
-      });
-      // Another item of the menu, pointed at or focused, closes the submenu.
-      if (list === main) {
-        node.addEventListener("pointerenter", () => closeSubmenu());
-        node.addEventListener("focus", () => closeSubmenu());
-      }
-      list.node.appendChild(node);
-      list.items.push(node);
+      list.appendChild(node);
     };
     const addNote = (text, list) => {
       const node = itemNode("button", text);
       node.disabled = true;
       node.setAttribute("aria-disabled", "true");
       node.classList.add("runMenu__opt--note");
-      list.node.appendChild(node);
+      list.appendChild(node);
     };
-
-    const closeSubmenu = ({ refocus = false } = {}) => {
-      if (!sub) return;
-      const { node, trigger } = sub;
-      sub = null;
-      node.remove();
-      trigger.setAttribute("aria-expanded", "false");
-      if (refocus) trigger.focus({ preventScroll: true });
-    };
-    const openSubmenu = (trigger, fill, { focus = true } = {}) => {
-      if (!sub || sub.trigger !== trigger) {
-        closeSubmenu();
-        const node = document.createElement("div");
-        node.className = "runMenu rowDetailsMenu rowDetailsMenu--sub is-open";
-        node.setAttribute("role", "menu");
-        node.setAttribute("aria-label", trigger.textContent);
-        node.tabIndex = -1;
-        sub = { node, items: [], trigger };
-        fill(sub);
-        document.body.appendChild(node);
-        // Beside its item, on the side with room.
-        const rect = trigger.getBoundingClientRect();
-        const vw = window.innerWidth || 0;
-        const vh = window.innerHeight || 0;
-        const w = node.offsetWidth;
-        const h = node.offsetHeight;
-        const left = rect.right + w + 4 <= vw ? rect.right + 2 : Math.max(4, rect.left - w - 2);
-        const top = Math.max(4, Math.min(rect.top - 4, vh - h - 4));
-        node.style.left = `${Math.round(left)}px`;
-        node.style.top = `${Math.round(top)}px`;
-        trigger.setAttribute("aria-expanded", "true");
-      }
-      if (focus) sub.items[0]?.focus({ preventScroll: true });
-    };
+    const submenus = [];
     const addSubmenu = (text, fill) => {
       const trigger = itemNode("button", text);
       trigger.classList.add("runMenu__opt--submenu");
-      trigger.setAttribute("aria-haspopup", "menu");
-      trigger.setAttribute("aria-expanded", "false");
       const arrow = document.createElement("span");
       arrow.className = "runMenu__optArrow";
       arrow.setAttribute("aria-hidden", "true");
       trigger.appendChild(arrow);
-      trigger.addEventListener("click", () => openSubmenu(trigger, fill));
-      trigger.addEventListener("pointerenter", () => openSubmenu(trigger, fill, { focus: false }));
-      trigger.addEventListener("focus", () => { if (sub && sub.trigger !== trigger) closeSubmenu(); });
-      submenus.set(trigger, fill);
       el.appendChild(trigger);
-      main.items.push(trigger);
+      const list = document.createElement("div");
+      list.className = "runMenu rowDetailsMenu rowDetailsMenu--sub";
+      list.setAttribute("role", "menu");
+      list.setAttribute("aria-label", text);
+      submenus.push({ trigger, list, fill });
     };
 
     const returnFocus = document.activeElement;
@@ -3930,6 +3822,7 @@
       addItem(`Copy trace link${named}`, () => copy(absolute(link.href)), "cell", { column: link.columnIndex, title });
     } else if (traces.length > 1) {
       const fillTraces = (pick) => (list) => {
+        list.replaceChildren();
         for (const link of traces.slice(0, TRACE_MENU_MAX)) {
           const title = `${link.traceId}${link.others.length ? `\nAlso in ${link.others.join(", ")}` : ""}`;
           addItem(`${link.label} \u00b7 ${link.traceId.slice(0, 8)}\u2026`, () => pick(link), "cell", { ...(pick ? {} : { href: link.href }), column: link.columnIndex, title, list });
@@ -3953,64 +3846,21 @@
     const selection = selectedTextWithin(table);
     if (selection) addItem("Copy selection", () => copy(selection));
 
-    document.body.appendChild(el);
-    const vw = window.innerWidth || 0;
-    const vh = window.innerHeight || 0;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const left = Math.max(4, Math.min(clientX, vw - w - 4));
-    const top = clientY + h + 4 <= vh ? clientY : Math.max(4, clientY - h);
-    el.style.left = `${Math.round(left)}px`;
-    el.style.top = `${Math.round(top)}px`;
-    el.classList.add("is-open");
-
-    const disposers = [() => closeSubmenu()];
     // The right-clicked row shows its accent bar while its menu is open.
     if (tr) tr.classList.add("is-rowMenuTarget");
-    rowDetailsMenu = { el, disposers, returnFocus, tr, clearHighlight };
-    const close = () => closeRowDetailsMenu();
-    const inMenus = (node) => node instanceof Node && (el.contains(node) || !!(sub && sub.node.contains(node)));
-    listenUntilClosed(disposers, document, "pointerdown", (ev) => {
-      if (!inMenus(ev.target)) close();
-    }, true);
-    listenUntilClosed(disposers, document, "keydown", (ev) => {
-      const inSub = !!sub && sub.node.contains(document.activeElement);
-      if (ev.key === "Escape" || (ev.key === "ArrowLeft" && inSub)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (inSub) closeSubmenu({ refocus: true });
-        else if (ev.key === "Escape") closeRowDetailsMenu({ restoreFocus: true });
-        return;
-      }
-      if (ev.key === "ArrowRight" && !inSub) {
-        const trigger = document.activeElement;
-        if (submenus.has(trigger)) {
-          ev.preventDefault();
-          openSubmenu(trigger, submenus.get(trigger));
-        }
-        return;
-      }
-      if (ev.key === "Tab") {
-        close();
-        return;
-      }
-      const moves = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
-      if (!(ev.key in moves)) return;
-      ev.preventDefault();
-      // Arrows move in the menu that has the focus.
-      const items = inSub ? sub.items : main.items;
-      const current = items.indexOf(document.activeElement);
-      const move = moves[ev.key];
-      let next = 0;
-      if (move === "first") next = 0;
-      else if (move === "last") next = items.length - 1;
-      else next = current < 0 ? 0 : (current + move + items.length) % items.length;
-      items[next]?.focus({ preventScroll: true });
-    }, true);
-    listenUntilClosed(disposers, document, "scroll", close, { capture: true, passive: true });
-    listenUntilClosed(disposers, window, "resize", close, { passive: true });
-    listenUntilClosed(disposers, window, "blur", close);
-    try { main.items[0].focus({ preventScroll: true }); } catch { null; }
+    const handle = ns.menu.context(el, {
+      x: clientX,
+      y: clientY,
+      within: table,
+      returnFocus,
+      onClose: () => {
+        clearHighlight();
+        if (tr) tr.classList.remove("is-rowMenuTarget");
+        if (rowDetailsMenu === handle) rowDetailsMenu = null;
+      },
+    });
+    rowDetailsMenu = handle;
+    for (const { trigger, list, fill } of submenus) ns.menu.submenu(trigger, list, { parent: handle, onOpen: fill });
   }
 
   // `silent`: the table is being cleared/rebuilt, skip scroll compensation and

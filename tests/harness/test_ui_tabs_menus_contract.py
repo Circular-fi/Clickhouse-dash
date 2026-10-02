@@ -99,9 +99,9 @@ def test_no_module_builds_tabs_or_handles_tab_keys_itself():
         assert '"role", "tab"' not in source and 'role = "tab"' not in source, name
         assert "aria-selected" not in source or "[data-obs-tab]" not in source, name
         # A tab row's own Left / Right / Home / End handler.
-        for match in re.finditer(r"ArrowRight", source):
+        for match in re.finditer(r"[\"']ArrowRight[\"']", source):
             window = source[max(0, match.start() - 600):match.end() + 600]
-            assert not ("Home" in window and "End" in window and re.search(r"\btab", window)), (name, window[:200])
+            assert not (re.search(r"[\"']Home[\"']", window) and re.search(r"\b(tabs?|tablist|aria-selected)\b", window)), (name, window[:200])
 
 
 def test_old_tab_families_are_gone():
@@ -210,3 +210,69 @@ def test_choice_labels_are_inside_the_control():
     assert 'class="traceViewBar__label">View<' not in obs and 'data-field-label="View"' in obs
     assert ">Depth:<" not in explorer
     assert 'data-field-label="${esc(label)}"' in read("app_trace_views.js")
+
+
+# ---------------------------------------------------------------- menus
+
+
+MENU_OWNERS = {"app_ui_menu.js"}
+
+
+def test_menu_component_owns_motion_keys_focus_and_one_dismiss_layer():
+    menu = read("app_ui_menu.js")
+    assert "ns.menu = { bind, select, multi, split, context, submenu, place, host, closeAll, isAnyOpen: () => openHandles.size > 0 };" in menu
+    # One pointerdown and one Escape listener for every menu, behind layer():
+    # the one place that hands entries to ns.layers when it exists.
+    assert menu.count('document.addEventListener("pointerdown", onPointerDown, true);') == 1
+    assert menu.count('document.addEventListener("keydown", onKeyDown, true);') == 1
+    assert "const shared = ns.layers;" in menu
+    for key in ['"ArrowDown"', '"ArrowUp"', '"Home"', '"End"', '"Tab"', "event.key.length === 1"]:
+        assert key in menu, key
+    assert "const CLOSE_MS = 160;" in menu
+    assert 'const dialog = anchor instanceof Element ? anchor.closest("dialog[open]") : null;' in menu
+
+
+def test_no_module_runs_its_own_menu_motion_or_outside_click_closer():
+    for name, source in scripts().items():
+        if name in MENU_OWNERS:
+            continue
+        # The open / close motion and its 160 ms timer.
+        assert 'classList.add("themeSelect--open")' not in source and 'classList.add("themeSelect--closing")' not in source, name
+        assert "}, 160);" not in source, name
+        # A picker built by hand next to a hidden native select.
+        assert "tracePicker__native" not in source or name in {"app_traces.js", "app_trace_logs.js"}, name
+
+
+def test_menus_go_through_the_component():
+    ui = read("app_ui.js")
+    for menu in ["menus.run = menu?.split(", "menus.host = menu?.bind(", "menus.page = menu?.bind(", "menus.runSettings = menu?.bind(",
+                 "menus.theme = menu?.bind(", "menus.copy = menu?.split("]:
+        assert menu in ui, menu
+    assert "return ns.menu?.select(select) || null;" in read("app_traces.js")
+    assert "ns.menu?.split(dom.traceCopyJsonButton, dom.traceCopyMenuButton, dom.traceCopyMenu)" in read("app_traces.js")
+    logs = read("app_logs.js")
+    assert logs.count("ns.menu?.multi(...pickerParts(root), { root, onOpen:") == 2
+    assert "ns.menu?.select(level, {" in logs
+    metrics = read("app_metrics.js")
+    assert "ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });" in metrics and "ns.menu?.multi(...pickerParts(groupPicker), {" in metrics
+    assert 'ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none" })' in read("app_timerange.js")
+    assert "ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in read("app_trace_search.js")
+    assert "portal: true," in read("app_trace_spans.js")
+    results = read("app_results.js")
+    assert "const handle = ns.menu.context(el, {" in results
+    assert "ns.menu.submenu(trigger, list, { parent: handle, onOpen: fill });" in results
+    assert "ns.menu?.split(mainBtn, menuBtn, menu, { root: split })" in results
+    chart = read("app_query_chart.js")
+    assert 'ns.menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "ns.menu?.multi(seriesButton, seriesMenu," in chart
+    assert "ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")
+    assert "const handle = ns.menu?.context(menu, {" in read("app_query_library.js")
+
+
+def test_hidden_native_selects_are_data_sources_only():
+    # Every native select a page ships inside a picker takes no Tab stop and
+    # is not announced.
+    for name, html in shells().items():
+        for tag in re.findall(r'<select[^>]*class="tracePicker__native"[^>]*>', html):
+            assert 'tabindex="-1"' in tag and 'aria-hidden="true"' in tag, (name, tag)
+    menu = read("app_ui_menu.js")
+    assert "selectEl.tabIndex = -1;" in menu and 'selectEl.setAttribute("aria-hidden", "true");' in menu

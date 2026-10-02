@@ -50,7 +50,10 @@ def test_trace_pickers_ship_in_their_final_markup():
     assert 'Time range · Last 1 hour</button>' in html
     assert 'Status · ALL</button>' in html
     assert 'Results · 50</button>' in html
-    assert 'const shipped = select.parentElement?.classList.contains("tracePicker") ? select.parentElement : null;' in js
+    # ns.menu.select (app_ui_menu.js) adopts the shipped markup.
+    assert "return ns.menu?.select(select) || null;" in js
+    menu = read("src/static/app_ui_menu.js")
+    assert 'const shipped = selectEl.parentElement?.classList.contains("tracePicker") ? selectEl.parentElement : null;' in menu
 
 
 def test_every_shell_header_lists_every_page_and_no_legacy_shell_remains():

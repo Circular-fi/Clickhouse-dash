@@ -780,13 +780,13 @@
 
   // ------------------------------------------------------- column picker
 
-  // The column picker: an ns.popover.open popover under its button (Escape,
-  // a press outside, a scroll or a resize close it).
-  let columnsPopover = null;
+  // A popover of the columns button: an ns.menu menu (app_ui_menu.js) in
+  // a portal, right-aligned with the button; it opens on the key field.
   let columnsMenu = null;
+  let columnsPopover = null;
 
   function closeColumns() {
-    columnsPopover?.close({ restoreFocus: false });
+    columnsPopover?.close({ immediate: true, focus: false });
   }
 
   function columnSuggestions() {
@@ -811,28 +811,25 @@
       <small class="traceSpanColumns__note">Prefix span: or resource: to read one attribute map; columns are kept in this browser.</small>`;
   }
 
-  function openColumns() {
+  function initColumns() {
     const button = byId("traceSpanColumnsButton");
-    if (!button) return;
-    const popover = ns.popover.open(button, "", {
-      id: "traceSpanColumnsMenu",
-      className: "traceSpanColumns",
-      label: "Span table columns",
-      align: "end",
-      offset: 4,
-      onClose: () => {
-        if (columnsPopover !== popover) return;
-        columnsPopover = null;
-        columnsMenu = null;
-      },
-    });
-    columnsPopover = popover;
-    columnsMenu = popover.el;
+    if (!button || columnsMenu) return;
+    columnsMenu = document.createElement("div");
+    columnsMenu.id = "traceSpanColumnsMenu";
+    columnsMenu.className = "traceSpanColumns";
+    columnsMenu.setAttribute("role", "dialog");
+    columnsMenu.setAttribute("aria-label", "Span table columns");
+    columnsMenu.hidden = true;
     columnsMenu.addEventListener("click", onColumnsClick);
     columnsMenu.addEventListener("submit", onColumnsSubmit);
-    renderColumns();
-    popover.place();
-    byId("traceSpanColumnInput")?.focus({ preventScroll: true });
+    document.body.appendChild(columnsMenu);
+    columnsPopover = ns.menu?.bind(button, columnsMenu, {
+      root: null,
+      portal: true,
+      portalAlign: "end",
+      onOpen: renderColumns,
+      focus: () => byId("traceSpanColumnInput"),
+    }) || null;
   }
 
   function columnsChanged() {
@@ -926,10 +923,7 @@
       input?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); commitDuration(input); } });
       input?.addEventListener("blur", () => commitDuration(input));
     }
-    byId("traceSpanColumnsButton")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (columnsPopover) closeColumns(); else openColumns();
-    });
+    initColumns();
     syncControls();
   }
 

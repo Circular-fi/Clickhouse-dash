@@ -261,162 +261,11 @@
     button.disabled = !!loading;
   }
 
-  const tracePickers = new Set();
-
-  // An open picker is an ns.layers layer: Escape and a press outside it
-  // close it, the focus goes back to its button.
-  function closeTracePicker(root, { immediate = false } = {}) {
-    if (!root) return;
-    const layer = root._pickerLayer;
-    root._pickerLayer = null;
-    layer?.close();
-    const button = root.querySelector(".tracePicker__button");
-    const menu = root.querySelector(".tracePicker__menu");
-    if (root._tracePickerCloseTimer) {
-      clearTimeout(root._tracePickerCloseTimer);
-      root._tracePickerCloseTimer = null;
-    }
-    button?.setAttribute("aria-expanded", "false");
-    if (immediate) {
-      root.classList.remove("themeSelect--open", "themeSelect--closing");
-      if (menu) menu.hidden = true;
-      return;
-    }
-    if (menu?.hidden) {
-      root.classList.remove("themeSelect--open", "themeSelect--closing");
-      return;
-    }
-    // Enter the closing state before dropping --open so the button stays
-    // visually connected to the menu for the whole collapse animation.
-    root.classList.add("themeSelect--closing");
-    requestAnimationFrame(() => root.classList.remove("themeSelect--open"));
-    root._tracePickerCloseTimer = setTimeout(() => {
-      if (!root.classList.contains("themeSelect--open")) {
-        if (menu) menu.hidden = true;
-        root.classList.remove("themeSelect--closing");
-      }
-      root._tracePickerCloseTimer = null;
-    }, 160);
-  }
-
-  function closeTracePickers(except = null, { immediate = false } = {}) {
-    for (const root of tracePickers) {
-      if (root === except) continue;
-      closeTracePicker(root, { immediate });
-    }
-  }
-
-  function openTracePicker(root) {
-    if (!root) return;
-    const button = root.querySelector(".tracePicker__button");
-    const menu = root.querySelector(".tracePicker__menu");
-    if (!button || !menu || button.disabled) return;
-    closeTracePickers(root);
-    if (root._tracePickerCloseTimer) {
-      clearTimeout(root._tracePickerCloseTimer);
-      root._tracePickerCloseTimer = null;
-    }
-    root.classList.remove("themeSelect--closing");
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-    root._pickerLayer = ns.layers.push({ el: root, name: "tracePicker", opener: button, onDismiss: () => closeTracePicker(root) });
-    requestAnimationFrame(() => {
-      if (button.getAttribute("aria-expanded") !== "true") return;
-      root.classList.add("themeSelect--open");
-      menu.focus({ preventScroll: true });
-    });
-  }
-
+  // The search bar, results and view pickers are ns.menu.select pickers
+  // (app_ui_menu.js): a hidden native <select> holds the value, the button
+  // reads "<label> \u00b7 <option>".
   function enhanceTraceSelect(select) {
-    if (!select || select.dataset.tracePickerReady === "1") return;
-    select.dataset.tracePickerReady = "1";
-    // observability.html ships every picker already built (root, native select,
-    // button, menu) so the first paint has the final look; adopt that markup
-    // and only build the picker for a select that arrives without it.
-    const shipped = select.parentElement?.classList.contains("tracePicker") ? select.parentElement : null;
-    const root = shipped || document.createElement("div");
-    let button = shipped?.querySelector(":scope > .tracePicker__button") || null;
-    let menu = shipped?.querySelector(":scope > .tracePicker__menu") || null;
-    if (!shipped) {
-      root.className = "themeSelect tracePicker";
-      if (select === dom.tracesRangeUnit) root.classList.add("tracePicker--range");
-      select.parentNode.insertBefore(root, select);
-      root.appendChild(select);
-    }
-    select.classList.add("tracePicker__native");
-    // The custom button is the control: the visually hidden native select
-    // keeps the value and change events but takes no Tab stop and is not
-    // announced a second time.
-    select.tabIndex = -1;
-    select.setAttribute("aria-hidden", "true");
-
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "button themeSelect__button tracePicker__button";
-      button.setAttribute("aria-haspopup", "listbox");
-      button.setAttribute("aria-expanded", "false");
-      root.appendChild(button);
-    }
-    if (!menu) {
-      menu = document.createElement("div");
-      menu.className = "themeSelect__menu tracePicker__menu";
-      menu.setAttribute("role", "listbox");
-      menu.tabIndex = -1;
-      menu.hidden = true;
-      root.appendChild(menu);
-    }
-    tracePickers.add(root);
-
-    const refresh = () => {
-      const selected = select.options[select.selectedIndex] || select.options[0] || null;
-      const fieldLabel = String(select.dataset.fieldLabel || "").trim();
-      const selectedText = selected?.textContent || "Select";
-      const disableWhenEmpty = select.dataset.disableWhenEmpty === "1";
-      const hasValues = Array.from(select.options).some((option) => !option.hidden && String(option.value || "").length > 0);
-      const unavailable = !!select.disabled || (disableWhenEmpty && !hasValues);
-      button.textContent = fieldLabel ? `${fieldLabel} · ${selectedText}` : selectedText;
-      button.disabled = unavailable;
-      button.setAttribute("aria-disabled", unavailable ? "true" : "false");
-      root.classList.toggle("is-disabled", unavailable);
-      root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);
-      if (unavailable) closeTracePicker(root, { immediate: true });
-      menu.innerHTML = "";
-      Array.from(select.options).forEach((option) => {
-        if (option.hidden) return;
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "themeSelect__option tracePicker__option";
-        item.setAttribute("role", "option");
-        item.dataset.value = option.value;
-        item.textContent = option.textContent || option.value || fmt.EMPTY;
-        item.disabled = !!option.disabled;
-        item.setAttribute("aria-selected", option.value === select.value ? "true" : "false");
-        item.addEventListener("click", () => {
-          if (item.disabled) return;
-          select.value = option.value;
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-          refresh();
-          closeTracePicker(root);
-        });
-        menu.appendChild(item);
-      });
-    };
-
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (button.disabled) return;
-      if (root.classList.contains("themeSelect--open") || button.getAttribute("aria-expanded") === "true") {
-        closeTracePicker(root);
-      } else {
-        openTracePicker(root);
-      }
-    });
-    select.addEventListener("change", refresh);
-    select.addEventListener("tracepicker-refresh", refresh);
-    new MutationObserver(refresh).observe(select, { attributes: true, childList: true, subtree: true, characterData: true });
-    refresh();
+    return ns.menu?.select(select) || null;
   }
 
   function initTracePickers() {
@@ -440,14 +289,11 @@
     const root = select?.parentElement;
     if (!ns.timeRange || !root?.querySelector(":scope > .tracePicker__button")) return;
     select.dataset.tracePickerReady = "1";
-    tracePickers.add(root);
     timePicker = ns.timeRange.create(root, {
       idPrefix: "traces",
       getValue: () => model.timeRange,
       getMaxMinutes: maxRangeMinutes,
       onApply: (raw, source) => { void applyCustomRange(raw, source); },
-      open: () => openTracePicker(root),
-      close: () => closeTracePicker(root),
     });
     dom.tracesRangeZoomOut = timePicker.el.zoomOut;
   }
@@ -2537,40 +2383,10 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  // The open menu is an ns.layers layer: Escape and a press outside close
-  // it, the focus goes back to its toggle.
-  let traceCopyMenuLayer = null;
+  // Copy JSON | Download JSON: an ns.menu split button (app_ui_menu.js).
+  let traceCopyMenu = null;
   function closeTraceCopyMenu({ immediate = false } = {}) {
-    const split = dom.traceCopySplit;
-    const menu = dom.traceCopyMenu;
-    if (!split || !menu) return;
-    const layer = traceCopyMenuLayer;
-    traceCopyMenuLayer = null;
-    layer?.close();
-    dom.traceCopyMenuButton?.setAttribute("aria-expanded", "false");
-    split.classList.remove("is-open");
-    const finish = () => {
-      if (split.classList.contains("is-open")) return;
-      menu.hidden = true;
-    };
-    if (immediate) finish();
-    else setTimeout(finish, 160);
-  }
-
-  function openTraceCopyMenu() {
-    const split = dom.traceCopySplit;
-    const menu = dom.traceCopyMenu;
-    if (!split || !menu || !menu.hidden) return;
-    menu.hidden = false;
-    dom.traceCopyMenuButton?.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => split.classList.add("is-open"));
-    traceCopyMenuLayer = ns.layers.push({
-      el: split,
-      name: "traceCopyMenu",
-      opener: dom.traceCopyMenuButton,
-      onDismiss: (reason) => closeTraceCopyMenu({ immediate: reason === "escape" }),
-    });
-    try { menu.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
+    traceCopyMenu?.close({ immediate });
   }
 
   // Span detail, after Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
@@ -3471,7 +3287,7 @@
 
   function onHide() {
     ns.traceSearch?.closeMenu?.();
-    closeTracePickers(null, { immediate: true });
+    ns.menu?.closeAll();
   }
 
   // Shared with the other Observability views: the time range and the service.
@@ -3567,14 +3383,8 @@
     });
     dom.traceDetail?.addEventListener("click", onUnavailableClick);
     dom.traceCopyJsonButton?.addEventListener("click", () => { void copyTraceJson(); });
-    dom.traceCopyMenuButton?.addEventListener("click", () => {
-      if (dom.traceCopyMenu?.hidden) openTraceCopyMenu();
-      else closeTraceCopyMenu();
-    });
-    dom.traceDownloadJsonButton?.addEventListener("click", () => {
-      closeTraceCopyMenu({ immediate: true });
-      downloadTraceJson();
-    });
+    traceCopyMenu = ns.menu?.split(dom.traceCopyJsonButton, dom.traceCopyMenuButton, dom.traceCopyMenu) || null;
+    dom.traceDownloadJsonButton?.addEventListener("click", () => downloadTraceJson());
     // The trace page's keys ([ ] o p, a / d, arrows) while Traces shows.
     ns.lifecycle.bind("traces", (scope) => scope.listen(document, "keydown", onTraceKeydown));
     // The canvas overview holds resolved colours: redraw it for a new theme.

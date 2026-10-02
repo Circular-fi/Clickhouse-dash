@@ -1629,64 +1629,15 @@
       menu.appendChild(option);
       root.append(button, menu);
 
-      // The open menu is an ns.layers layer (Escape, a press outside, focus
-      // back to the button), placed by ns.popover.place under its button and
-      // kept there while the page scrolls or resizes.
-      let open = false;
-      let layer = null;
-      let scope = null;
-      const positionMenu = () => {
-        if (!open) return;
-        menu.style.position = "fixed";
-        ns.popover.place(button, menu, { side: "bottom", align: "end", offset: 4 });
-      };
-      const close = () => {
-        if (!open) return;
-        open = false;
-        const closing = layer;
-        layer = null;
-        closing?.close();
-        scope?.dispose();
-        scope = null;
-        root.classList.remove("themeSelect--open");
-        menu.classList.remove("is-open");
-        button.setAttribute("aria-expanded", "false");
-        menu.hidden = true;
-        menu.style.removeProperty("position");
-        menu.style.removeProperty("left");
-        menu.style.removeProperty("right");
-        menu.style.removeProperty("top");
-        if (menu.parentNode !== root) root.appendChild(menu);
-      };
-      const openMenu = () => {
-        if (open) return;
-        open = true;
-        document.body.appendChild(menu);
-        menu.hidden = false;
-        button.setAttribute("aria-expanded", "true");
-        positionMenu();
-        requestAnimationFrame(() => {
-          if (!open) return;
-          root.classList.add("themeSelect--open");
-          menu.classList.add("is-open");
-        });
-        layer = ns.layers.push({ el: menu, name: "explorerDetailMenu", opener: button, inside: [root], onDismiss: () => close() });
-        scope = ns.lifecycle.scope();
-        scope.listen(window, "resize", positionMenu, { passive: true });
-        scope.listen(window, "scroll", positionMenu, { passive: true, capture: true });
-      };
+      // An ns.menu menu (app_ui_menu.js) in a portal: the card re-renders
+      // and clips; the list opens fixed under the gear, right-aligned.
+      const settings = ns.menu?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true });
 
-      option.addEventListener("click", (event) => {
-        event.stopPropagation();
+      option.addEventListener("click", () => {
         persistFlattenTuple(!(state.runOptFlattenTuple !== false));
         sync();
-        close();
+        settings?.close({ immediate: true, focus: false });
         renderTabContent();
-      });
-      button.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (open) close();
-        else openMenu();
       });
       return root;
     }

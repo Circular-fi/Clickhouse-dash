@@ -259,7 +259,9 @@
   //   getValue()            -> applied raw range { from, to }
   //   getMaxMinutes()       -> widest range the server accepts
   //   onApply(raw, source)  -> the user applied a range ("form", "quick", "recent", "shift", "zoom")
-  //   open() / close()      -> open / close the dropdown (shared picker motion)
+  //   open() / close()      -> optional: open / close the dropdown; by default
+  //                            the panel is an ns.menu menu (app_ui_menu.js:
+  //                            motion, outside click, Escape, focus return)
   //   settingName           -> server setting named by the max range error
   function mountPicker(el, options) {
     const { button, menu, select, fromInput, toInput, fromError, toError, rangeError, calendar, hint, applyButton, quickSearch, lists, timeZone, shiftBack, shiftForward, zoomOut } = el;
@@ -268,6 +270,10 @@
     const fields = { from: fromInput.closest(".timeRangeField"), to: toInput.closest(".timeRangeField") };
     const isOpen = () => button.getAttribute("aria-expanded") === "true";
     const idPrefix = String(options.idPrefix || "timeRange");
+    // The panel keeps its own click, keys and focus (the From field).
+    const dropdown = options.open ? null : ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none" }) || null;
+    const openDropdown = () => (options.open ? options.open() : dropdown?.open());
+    const closeDropdown = () => (options.close ? options.close() : dropdown?.close({ focus: false }));
 
     // Calendar skeleton: header (built once), weekday names, 6 x 7 day grid.
     calendar.innerHTML = `
@@ -537,7 +543,7 @@
       quickSearch.value = "";
       renderLists();
       menu.style.setProperty("--timeRangeButtonWidth", `${button.offsetWidth}px`);
-      options.open();
+      openDropdown();
       requestAnimationFrame(() => {
         if (!isOpen()) return;
         fromInput.focus({ preventScroll: true });
@@ -546,7 +552,7 @@
     }
 
     function closePanel({ restoreFocus = false } = {}) {
-      options.close();
+      closeDropdown();
       if (restoreFocus) button.focus({ preventScroll: true });
     }
 

@@ -1091,14 +1091,14 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?view= an
   await page.setViewportSize({ width: 800, height: 900 });
   await expect(tabs).toBeHidden();
   await expect(viewPicker(page)).toBeVisible();
-  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('Statistics');
+  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('View \u00b7 Statistics');
   await viewPicker(page).locator('.tracePicker__button').click();
   await expect(viewPicker(page).locator('.tracePicker__menu [role="option"]:visible')).toHaveText(['Timeline', 'Graph', 'Spans', 'Flamegraph']);
   await viewPicker(page).locator('.tracePicker__menu').getByRole('option', { name: 'Spans', exact: true }).click();
   await expect(page).toHaveURL(/\?view=spans$/);
   await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
   await expect(page.locator('#traceViewSelect')).toHaveValue('spans');
-  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('Spans');
+  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('View \u00b7 Spans');
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(viewPicker(page)).toBeHidden();
   await expect(viewTab(page, 'Spans')).toHaveAttribute('aria-selected', 'true');

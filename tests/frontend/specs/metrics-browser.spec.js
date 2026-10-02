@@ -134,7 +134,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'traces.span.metrics.calls', kind: 'sum' }));
   const panel = page.locator('.metricsPanel').first();
   await waitForChart(page, panel);
-  await expect(panel.locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Rate (per second)');
+  await expect(panel.locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Rate (per second)');
   await expect(panel.locator('.metricsChart__axisTitle')).toContainText('call/s');
 
   // Aggregation switch.
@@ -143,7 +143,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await panel.locator('.metricsPicker--agg [data-agg="increase"]').click();
   expect((await increase).ok()).toBeTruthy();
   await expect(page).toHaveURL(/agg=increase/);
-  await expect(panel.locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Increase');
+  await expect(panel.locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Increase');
 
   // Group by status.code: one legend entry per status.
   await panel.locator('.metricsPicker--group .tracePicker__button').click();
@@ -208,13 +208,13 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels).toHaveCount(2);
   await waitForChart(page, panels.nth(0));
   await waitForChart(page, panels.nth(1));
-  await expect(panels.nth(0).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('P99');
+  await expect(panels.nth(0).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 P99');
   await expect(panels.nth(0).locator('.metricsChip')).toContainText('request.validate');
   await expect(panels.nth(0).locator('.metricsExemplarToggle')).not.toBeChecked();
   await expect(panels.nth(0).locator('.metricsExemplar')).toHaveCount(0);
   await expect(panels.nth(1).locator('.metricsPanel__name')).toHaveText('queue.depth');
-  await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Max');
-  await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('host.name');
+  await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Max');
+  await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('Group by \u00b7 host.name');
   await expect(panels.nth(1).locator('.chartCore__legendItem')).toHaveCount(3);
   await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(range.from.slice(0, 10));
   // The filter bar (range first) spans the catalog and the panels.
@@ -239,7 +239,7 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await page.reload();
   await expect(panels).toHaveCount(2);
   await waitForChart(page, panels.nth(1));
-  await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Max');
+  await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Max');
 });
 
 test('metrics: an exemplar dot opens its trace with the span selected', async ({ page, request }) => {

@@ -18,10 +18,11 @@ def test_trace_analytics_buckets_cast_datetime_to_datetime64_before_millis_conve
 
 def test_trace_selectors_reuse_custom_dropdown_visual_language():
     ui = read('src/static/app_traces.js')
+    menu = read('src/static/app_ui_menu.js')
     css = read('src/static/style.css')
     assert 'enhanceTraceSelect' in ui
-    assert 'themeSelect__button tracePicker__button' in ui
-    assert 'themeSelect__menu tracePicker__menu' in ui
+    assert 'themeSelect__button tracePicker__button' in menu
+    assert 'themeSelect__menu tracePicker__menu' in menu
     assert '.tracePicker__button' in css
     assert '.tracePicker__option' in css
 

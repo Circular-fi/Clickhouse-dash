@@ -40,8 +40,12 @@ def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -
 def test_data_preview_numeric_finalized_states_and_menu_portal_positioning() -> None:
     src = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert 'values.every((value) => Number.isFinite(Number(value))) ? "Float64" : c.type' in src
-    assert 'menu.style.position = "fixed";' in src
-    assert 'ns.popover.place(button, menu, { side: "bottom", align: "end", offset: 4 });' in src
+    # The data settings menu is an ns.menu portal, fixed and right-aligned
+    # with its gear (app_ui_menu.js placeFloating).
+    assert 'ns.menu?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in src
+    menu = read("src/static/app_ui_menu.js")
+    assert 'menu.style.position = "fixed";' in menu
+    assert 'left = align === "end" ? a.right - w : a.left;' in menu
 
 
 def test_storage_graph_and_minimap_share_routed_geometry() -> None:

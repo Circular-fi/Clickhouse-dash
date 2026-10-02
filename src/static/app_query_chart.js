@@ -514,19 +514,18 @@
     hostEl.innerHTML = `
       <div class="queryChart__toolbar">
         <div class="segmented queryChart__types" role="group" aria-label="Chart type"></div>
-        <label class="queryChart__field" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
-          <span class="queryChart__fieldLabel">X axis</span>
-          <select class="queryChart__select queryChart__x" aria-label="X axis column"></select>
-        </label>
-        <div class="queryChart__field queryChart__seriesField" title="Numeric columns drawn as series on the vertical axis.">
-          <span class="queryChart__fieldLabel">Y values</span>
-          <button type="button" class="queryChart__select queryChart__seriesButton" aria-haspopup="true" aria-expanded="false" aria-label="Y value columns"></button>
-          <div class="queryChart__seriesMenu" role="group" aria-label="Y value columns" hidden></div>
+        <div class="queryChart__field queryChart__xField" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
+          <select class="queryChart__x" data-field-label="X axis" aria-label="X axis column"></select>
         </div>
-        <label class="queryChart__field" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
-          <span class="queryChart__fieldLabel">Split by</span>
-          <select class="queryChart__select queryChart__group" aria-label="Split by column"></select>
-        </label>
+        <div class="queryChart__field queryChart__seriesField" title="Numeric columns drawn as series on the vertical axis.">
+          <div class="themeSelect tracePicker queryChart__picker">
+            <button type="button" class="button themeSelect__button tracePicker__button queryChart__seriesButton" aria-label="Y value columns"></button>
+            <div class="themeSelect__menu tracePicker__menu queryChart__seriesMenu" role="listbox" aria-multiselectable="true" aria-label="Y value columns" tabindex="-1" hidden></div>
+          </div>
+        </div>
+        <div class="queryChart__field queryChart__groupField" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
+          <select class="queryChart__group" data-field-label="Split by" aria-label="Split by column"></select>
+        </div>
         <span class="queryChart__note"></span>
       </div>
       <div class="queryChart__range" hidden>
@@ -543,6 +542,11 @@
     const seriesButton = hostEl.querySelector(".queryChart__seriesButton");
     const seriesMenu = hostEl.querySelector(".queryChart__seriesMenu");
     const groupSelect = hostEl.querySelector(".queryChart__group");
+    // X axis, Y values and Split by: ns.menu pickers (app_ui_menu.js), the
+    // label inside the button ("X axis \u00b7 Auto (time)").
+    ns.menu?.select(xSelect, { className: "queryChart__picker" });
+    ns.menu?.select(groupSelect, { className: "queryChart__picker" });
+    const seriesPicker = ns.menu?.multi(seriesButton, seriesMenu, { root: seriesButton.parentElement }) || null;
     const noteEl = hostEl.querySelector(".queryChart__note");
     const rangeEl = hostEl.querySelector(".queryChart__range");
     const rangeText = hostEl.querySelector(".queryChart__rangeText");
@@ -658,7 +662,7 @@
       });
       seriesMenu.innerHTML = options.length ? options.join("") : `<span class="queryChart__seriesEmpty">No other column</span>`;
       const names = cfg.series.map((i) => meta.columns[i]);
-      seriesButton.textContent = names.length ? names.join(", ") : "None";
+      seriesButton.textContent = `Y values \u00b7 ${names.length ? names.join(", ") : "None"}`;
       seriesButton.title = names.length ? names.join(", ") : "Pick at least one numeric column";
 
       const groupOptions = [`<option value="-1">None</option>`];
@@ -733,33 +737,9 @@
       if (again) again.focus({ preventScroll: true });
     });
 
-    let onDocPointer = null;
-    let onDocKey = null;
     function closeSeriesMenu() {
-      if (seriesMenu.hidden) return;
-      seriesMenu.hidden = true;
-      seriesButton.setAttribute("aria-expanded", "false");
-      if (onDocPointer) document.removeEventListener("pointerdown", onDocPointer, true);
-      if (onDocKey) document.removeEventListener("keydown", onDocKey, true);
-      onDocPointer = onDocKey = null;
+      seriesPicker?.close({ immediate: true, focus: false });
     }
-    function openSeriesMenu() {
-      seriesMenu.hidden = false;
-      seriesButton.setAttribute("aria-expanded", "true");
-      onDocPointer = (ev) => {
-        if (!(ev.target instanceof Node) || !seriesMenu.parentElement.contains(ev.target)) closeSeriesMenu();
-      };
-      onDocKey = (ev) => {
-        if (ev.key === "Escape") { closeSeriesMenu(); seriesButton.focus(); }
-      };
-      document.addEventListener("pointerdown", onDocPointer, true);
-      document.addEventListener("keydown", onDocKey, true);
-      const first = seriesMenu.querySelector("input:not(:disabled)");
-      if (first) first.focus({ preventScroll: true });
-    }
-    seriesButton.addEventListener("click", () => {
-      if (seriesMenu.hidden) openSeriesMenu(); else closeSeriesMenu();
-    });
 
     resetZoomBtn.addEventListener("click", () => { if (chart) chart.resetZoom(); });
 

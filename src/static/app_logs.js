@@ -215,103 +215,11 @@
     return d.getTime();
   }
 
-  // --- Pickers (the Traces search bar pickers, same markup and motion) ------
-
-  const pickers = new Set();
-
-  // An open picker is an ns.layers layer: Escape and a press outside it
-  // close it, the focus goes back to its button.
-  function closePicker(root, { immediate = false } = {}) {
-    if (!root) return;
-    const layer = root._pickerLayer;
-    root._pickerLayer = null;
-    layer?.close();
-    const button = root.querySelector(":scope > .tracePicker__button");
-    const menu = root.querySelector(":scope > .tracePicker__menu");
-    clearTimeout(root._closeTimer);
-    button?.setAttribute("aria-expanded", "false");
-    if (immediate || menu?.hidden) {
-      root.classList.remove("themeSelect--open", "themeSelect--closing");
-      if (menu) menu.hidden = true;
-      return;
-    }
-    root.classList.add("themeSelect--closing");
-    requestAnimationFrame(() => root.classList.remove("themeSelect--open"));
-    root._closeTimer = setTimeout(() => {
-      if (!root.classList.contains("themeSelect--open")) {
-        if (menu) menu.hidden = true;
-        root.classList.remove("themeSelect--closing");
-      }
-    }, 160);
-  }
-
-  function closePickers(except = null) {
-    for (const root of pickers) if (root !== except) closePicker(root);
-  }
-
-  function openPicker(root) {
-    const button = root?.querySelector(":scope > .tracePicker__button");
-    const menu = root?.querySelector(":scope > .tracePicker__menu");
-    if (!button || !menu || button.disabled) return;
-    closePickers(root);
-    clearTimeout(root._closeTimer);
-    root.classList.remove("themeSelect--closing");
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-    root._pickerLayer = ns.layers.push({ el: root, name: "logsPicker", opener: button, onDismiss: () => closePicker(root) });
-    requestAnimationFrame(() => {
-      if (button.getAttribute("aria-expanded") !== "true") return;
-      root.classList.add("themeSelect--open");
-      menu.focus({ preventScroll: true });
-    });
-  }
-
-  function bindPickerButton(root, onOpen) {
-    pickers.add(root);
-    const button = root.querySelector(":scope > .tracePicker__button");
-    const menu = root.querySelector(":scope > .tracePicker__menu");
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (button.getAttribute("aria-expanded") === "true") closePicker(root);
-      else { onOpen?.(); openPicker(root); }
-    });
-  }
-
-  // A native <select> shipped inside its picker root (logs.html markup).
-  function enhanceSelect(select, onChange) {
-    const root = select.parentElement;
-    // The button is the control; the hidden native select only keeps the value.
-    select.tabIndex = -1;
-    select.setAttribute("aria-hidden", "true");
-    const button = root.querySelector(":scope > .tracePicker__button");
-    const menu = root.querySelector(":scope > .tracePicker__menu");
-    const refresh = () => {
-      const selected = select.options[select.selectedIndex] || select.options[0];
-      const label = select.dataset.fieldLabel || "";
-      button.textContent = label ? `${label} · ${selected?.textContent || ""}` : selected?.textContent || "";
-      menu.innerHTML = "";
-      for (const option of select.options) {
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "themeSelect__option tracePicker__option";
-        item.setAttribute("role", "option");
-        item.dataset.value = option.value;
-        item.textContent = option.textContent;
-        item.setAttribute("aria-selected", option.value === select.value ? "true" : "false");
-        item.addEventListener("click", () => {
-          select.value = option.value;
-          refresh();
-          closePicker(root);
-          onChange?.(select.value);
-        });
-        menu.appendChild(item);
-      }
-    };
-    bindPickerButton(root);
-    refresh();
-    return { refresh };
-  }
+  // --- Pickers: ns.menu (app_ui_menu.js) on the Traces search bar look -----
+  // Each picker is an ns.menu menu (motion, keys, focus, the one outside
+  // click / Escape layer); a search closes them all.
+  const closePickers = () => ns.menu?.closeAll();
+  const pickerParts = (root) => [root?.querySelector(":scope > .tracePicker__button"), root?.querySelector(":scope > .tracePicker__menu")];
 
   let timePicker = null;
 
@@ -319,7 +227,6 @@
     const select = $("logsRangeUnit");
     const root = select?.parentElement;
     if (!ns.timeRange || !root) return;
-    pickers.add(root);
     timePicker = ns.timeRange.create(root, {
       idPrefix: "logs",
       getValue: () => model.timeRange,
@@ -327,12 +234,10 @@
       settingName: "logs.max_lookback_minutes",
       onApply: (raw) => {
         model.timeRange = { from: String(raw?.from || ""), to: String(raw?.to || "") };
-        closePicker(root);
+        timePicker?.close();
         timePicker?.refresh();
         void search({ push: true });
       },
-      open: () => openPicker(root),
-      close: () => closePicker(root),
     });
   }
 
@@ -366,7 +271,7 @@
   function initServicePicker() {
     const root = $("logsServicePicker");
     if (!root) return;
-    bindPickerButton(root, renderServiceMenu);
+    ns.menu?.multi(...pickerParts(root), { root, onOpen: renderServiceMenu });
     const menu = $("logsServiceMenu");
     menu.addEventListener("change", (event) => {
       const input = event.target.closest("input[type=checkbox]");
@@ -922,7 +827,7 @@
   function initColumnsPicker() {
     const root = $("logsColumnsPicker");
     if (!root) return;
-    bindPickerButton(root, renderColumnsMenu);
+    ns.menu?.multi(...pickerParts(root), { root, onOpen: renderColumnsMenu });
     const menu = $("logsColumnsMenu");
     menu.addEventListener("change", (event) => {
       const input = event.target.closest("input[type=checkbox]");
@@ -1718,8 +1623,8 @@
     initFields();
     const level = $("logsLevel");
     if (level) {
-      const enhanced = enhanceSelect(level, (value) => { model.level = value; void search({ push: true }); });
-      levelPicker = { set: (value) => { level.value = value || ""; enhanced.refresh(); } };
+      const enhanced = ns.menu?.select(level, { onChange: (value) => { model.level = value; void search({ push: true }); } });
+      levelPicker = { set: (value) => { level.value = value || ""; enhanced?.refresh(); } };
     }
     initTable();
     initHistogram();

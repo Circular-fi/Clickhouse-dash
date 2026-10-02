@@ -2,24 +2,25 @@
   "use strict";
   // Menus, pickers and dropdowns: one behaviour for every popup list of the
   // app (the header host / page / theme menus, the Run and Copy split
-  // menus, the run settings, the Observability pickers, the Explorer and
-  // chart menus, the row context menu). Each family keeps its look (the
-  // themeSelect / tracePicker / runMenu classes); this module owns:
+  // menus, the run settings, the Observability pickers, the Explorer, chart
+  // and editor menus, the click-to-filter and row context menus). Each
+  // family keeps its look (themeSelect / tracePicker / runMenu...); this
+  // module owns:
   //  - open / close: aria-expanded on the button, the root's open / closing
   //    classes (themeSelect--open / --closing, or is-open) and the 160 ms
   //    close motion before the list is hidden;
   //  - one menu open at a time (a submenu keeps its parents open);
   //  - placement: the list stays in the viewport (shifted, flipped above the
-  //    button, or capped in height); a floating menu opens in the open
-  //    <dialog> that holds its anchor, since the page outside a modal
-  //    dialog is inert;
+  //    button, or capped in height); a floating menu (portal, context menu,
+  //    submenu) mounts in the open <dialog> that holds its anchor, since the
+  //    page outside a modal dialog is inert;
   //  - keys: Down / Up / Home / End move between the items, a typed prefix
   //    jumps to the next item starting with it, Enter / Space activate,
   //    Escape closes and returns the focus to the button, Tab closes;
   //    Down / Up on the button open the list;
   //  - focus: on open the selected item (or the first) takes the focus; on
-  //    close by Escape or a pick the button gets it back unless the pick
-  //    moved it somewhere else (a dialog);
+  //    a close by Escape or a pick the button gets it back, unless the pick
+  //    moved it somewhere else (a dialog it opened);
   //  - dismissal: ONE pointerdown listener closes what the pointer lands
   //    outside of and ONE Escape listener the top menu, for every menu
   //    (layer() below is the only code that knows that stack).
@@ -31,13 +32,15 @@
   //                                            ("Status - ALL")
   //   multi(button, menu, options) -> handle   a multi-select list (stays open)
   //   split(main, toggle, menu, o) -> handle   a split button's menu
-  //   context(menu, { x, y, ... }) -> handle   a menu at a point (row menu)
+  //   context(menu, options)       -> handle   a menu at a point or under an
+  //                                            anchor (row and filter menus)
   //   submenu(item, list, options) -> handle   a nested menu of an item
   //   place(menu, anchor)                      viewport clamp / flip
   //   host(anchor)                             where a floating menu mounts
+  //   closeAll()                               closes every open menu
   //
   // handle: { open(), close({ immediate, focus }), toggle(), isOpen(),
-  //           place(), refresh() (select), set(value) (select), destroy() }
+  //           place(), button, menu, root } (+ refresh(), set(value) for select)
   const ns = window.ChDash;
   if (!ns) return;
 
@@ -49,9 +52,9 @@
 
   // ---- Dismiss layer -------------------------------------------------------
   // The stack of open menus. When the shared dismiss layer (ns.layers) is
-  // there, every entry goes to it instead: this function is the one place
-  // to switch. An entry is { el(): elements that count as inside,
-  // onDismiss(reason: "outside" | "escape") }.
+  // there, every entry goes to it instead: layer() is the one place to
+  // switch. An entry is { el(): the elements that count as inside,
+  // onDismiss(reason: "outside" | "escape") }; push() returns { release() }.
   const localLayers = (() => {
     const stack = [];
     let listening = false;
@@ -84,8 +87,9 @@
 
   function layer(entry) {
     const shared = ns.layers;
-    if (shared && typeof shared.push === "function" && shared !== localLayers) {
-      const handle = shared.push({ el: entry.el, onDismiss: entry.onDismiss });
+    if (shared && typeof shared.push === "function") {
+      // ns.menu moves the focus itself (back to the button on Escape).
+      const handle = shared.push({ el: entry.el, onDismiss: entry.onDismiss, returnFocus: false, name: "menu" });
       return { release: () => { (handle?.release || handle?.pop || handle?.remove)?.call(handle); } };
     }
     return localLayers.push(entry);
@@ -94,10 +98,11 @@
   // ---- Shared state --------------------------------------------------------
   const openHandles = new Set();
 
+  // Opening a menu closes the others, except the ones it is nested in.
   function closeOthers(handle) {
     for (const other of [...openHandles]) {
-      if (other === handle || other.contains(handle.button)) continue;
-      other.close({ immediate: true });
+      if (other === handle || (handle.button && other.contains(handle.button))) continue;
+      other.close({ immediate: true, focus: false });
     }
   }
 
@@ -119,6 +124,13 @@
 
   function focusItem(el) {
     try { el?.focus({ preventScroll: false }); } catch { /* detached */ }
+  }
+
+  // A pick on a link item: the link navigates once its click is over (a
+  // link removed or hidden during its click does not navigate).
+  function afterPick(item, fn) {
+    if (item?.matches?.("a[href]")) setTimeout(fn, 0);
+    else fn();
   }
 
   // ---- Placement -----------------------------------------------------------
@@ -155,23 +167,36 @@
     if (dx || dy) menu.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`;
   }
 
-  // A floating menu (context menu, submenu) mounts in the open <dialog>
-  // that holds its anchor: outside a modal dialog the page is inert.
+  // A floating menu mounts in the open <dialog> that holds its anchor: the
+  // page outside a modal dialog is inert.
   function host(anchor) {
     const dialog = anchor instanceof Element ? anchor.closest("dialog[open]") : null;
     return dialog || document.body;
   }
 
-  // A floating menu at a client point: fixed, clamped to the viewport,
-  // opened up / left of the point when it does not fit below / right.
-  function placeAt(menu, x, y) {
+  // A floating menu at a point (x, y), or under an anchor's box: fixed,
+  // clamped to the viewport, opened above (the point, or the anchor's top)
+  // when it does not fit below. align "end" lines its right edge up with
+  // the anchor's.
+  function placeFloating(menu, { x = 0, y = 0, anchor = null, align = "start", gap = 4 } = {}) {
     const vw = document.documentElement.clientWidth || window.innerWidth || 0;
     const vh = window.innerHeight || 0;
+    menu.style.position = "fixed";
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
     const w = menu.offsetWidth;
     const h = menu.offsetHeight;
-    const left = Math.max(4, Math.min(x, vw - w - 4));
-    const top = y + h + 4 <= vh ? y : Math.max(4, y - h);
-    menu.style.position = "fixed";
+    let left = x;
+    let top = y;
+    let above = y - h;
+    if (anchor) {
+      const a = anchor.getBoundingClientRect();
+      left = align === "end" ? a.right - w : a.left;
+      top = a.bottom + gap;
+      above = a.top - gap - h;
+    }
+    left = Math.max(4, Math.min(left, vw - w - 4));
+    top = top + h + 4 <= vh ? top : Math.max(4, above);
     menu.style.left = `${Math.round(left)}px`;
     menu.style.top = `${Math.round(top)}px`;
   }
@@ -183,14 +208,15 @@
     menu.addEventListener("keydown", (event) => {
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest(LISTS) && target.closest(LISTS) !== menu && menu.contains(target.closest(LISTS))) return;
+      const owner = target?.closest(LISTS);
+      if (owner && owner !== menu && menu.contains(owner)) return;
       if (event.key === "Tab") { close({ immediate: true, focus: false }); return; }
       if (target?.matches(TEXT_FIELD)) return;
       const list = items();
+      if (!list.length) return;
       let at = list.indexOf(target);
       if (at < 0 && target?.closest(ITEMS)) at = list.indexOf(target.closest(ITEMS));
       const move = (index) => { event.preventDefault(); focusItem(list[(index + list.length) % list.length]); };
-      if (!list.length) return;
       if (event.key === "ArrowDown") return move(at < 0 ? 0 : at + 1);
       if (event.key === "ArrowUp") return move(at < 0 ? list.length - 1 : at - 1);
       if (event.key === "Home" || event.key === "PageUp") return move(0);
@@ -207,8 +233,7 @@
         typedAt = now;
         const label = (el) => String(el.getAttribute("aria-label") || el.textContent || "").trim().toLowerCase();
         const start = typed.length > 1 ? Math.max(0, at) : at + 1;
-        const order = [...list.slice(start), ...list.slice(0, start)];
-        const hit = order.find((el) => label(el).startsWith(typed));
+        const hit = [...list.slice(start), ...list.slice(0, start)].find((el) => label(el).startsWith(typed));
         if (hit) { event.preventDefault(); focusItem(hit); }
       }
     });
@@ -222,14 +247,19 @@
   //   closingClass    default themeSelect--closing (themeSelect roots)
   //   items           selector of the list's items (default: the ARIA item roles)
   //   focus           "item" (default: the selected or first item), "first",
-  //                   "menu", "none" or a function returning the element
+  //                   "last", "menu", "none" or a function returning the element
   //   closeOnSelect   true / false; default: a pick closes, except the
   //                   menuitemcheckbox / menuitemradio items of a settings menu
   //   canOpen()       false keeps it closed (a one-option picker)
   //   onOpen()        before it shows (fill the list); onClose()
   //   trigger         false: the button's click is the caller's (it calls toggle)
   //   placement       false: CSS alone places the list
-  //   inside()        more elements that count as inside (a portal)
+  //   portal          true: the list opens fixed in host(button) (out of a
+  //                   clipping or re-rendered container), aligned with the
+  //                   button ("start" / "end": portalAlign) and gets is-open
+  //   keys            false: a panel with its own keys and picks (the time
+  //                   range panel): no item keys, a click inside never closes
+  //   inside()        more elements that count as inside
   function bind(button, menu, options = {}) {
     if (!button || !menu) return null;
     const root = options.root !== undefined ? options.root : button.closest(".themeSelect, .runSplit, .picker");
@@ -237,13 +267,15 @@
     const openClass = options.openClass ?? (themed ? "themeSelect--open" : root ? "is-open" : "");
     const closingClass = options.closingClass ?? (themed ? "themeSelect--closing" : "");
     const animate = options.animate ?? !!openClass;
+    const portal = !!options.portal;
+    let home = null;
     let timer = 0;
     let entry = null;
 
     const isOpen = () => button.getAttribute("aria-expanded") === "true";
     const items = () => itemsOf(menu, options.items || ITEMS);
     const role = menu.getAttribute("role");
-    if (!button.hasAttribute("aria-haspopup")) button.setAttribute("aria-haspopup", role === "listbox" ? "listbox" : "menu");
+    if (!button.hasAttribute("aria-haspopup")) button.setAttribute("aria-haspopup", role === "listbox" ? "listbox" : role === "dialog" ? "dialog" : "menu");
     button.setAttribute("aria-expanded", "false");
     if (menu.id) button.setAttribute("aria-controls", menu.id);
     if (!menu.hasAttribute("tabindex")) menu.tabIndex = -1;
@@ -253,16 +285,16 @@
       isOpen,
       contains: (el) => !!el && ((root && root.contains(el)) || menu.contains(el) || button === el),
       open, close, toggle,
-      place: () => place(menu, button),
-      destroy: () => { close({ immediate: true }); },
+      place: () => (portal ? placeFloating(menu, { anchor: button, align: options.portalAlign || "start" }) : place(menu, button)),
     };
 
     function focusOnOpen(how) {
       if (how === "none") return;
-      if (typeof how === "function") { focusItem(how()); return; }
+      if (typeof how === "function") { focusItem(how() || menu); return; }
       if (how === "menu") { menu.focus({ preventScroll: true }); return; }
       const list = items();
-      const target = how === "last" ? list[list.length - 1] : how === "first" ? list[0] : (selectedItem(list) || list[0]);
+      // A listbox opens on its selected option, a menu on its first item.
+      const target = how === "last" ? list[list.length - 1] : how === "first" || role !== "listbox" ? list[0] : (selectedItem(list) || list[0]);
       if (target) focusItem(target);
       else menu.focus({ preventScroll: true });
     }
@@ -275,6 +307,10 @@
       timer = 0;
       options.onOpen?.();
       if (closingClass) root?.classList.remove(closingClass);
+      if (portal) {
+        if (!home) home = { parent: menu.parentNode, next: menu.nextSibling };
+        host(button).appendChild(menu);
+      }
       menu.hidden = false;
       button.setAttribute("aria-expanded", "true");
       openHandles.add(handle);
@@ -282,17 +318,18 @@
       // still runs the opening motion and the list can take the focus.
       void menu.offsetHeight;
       if (openClass) root?.classList.add(openClass);
-      if (options.placement !== false) place(menu, button);
+      if (portal) menu.classList.add("is-open");
+      if (options.placement !== false) handle.place();
       entry = layer({
         el: () => [root || button, button, menu, ...(options.inside?.() || [])],
-        onDismiss: (reason) => close({ focus: reason === "escape", reason }),
+        onDismiss: (reason) => close({ focus: reason === "escape" }),
       });
       focusOnOpen(focus ?? options.focus ?? "item");
       options.onOpened?.();
     }
 
-    // focus: true (always), false (never) or "auto" (default: only when the
-    // focus was in the list and nothing else took it).
+    // focus: true (always), false (never) or "auto" (default: back to the
+    // button when the focus was in the list and nothing else took it).
     function close({ immediate = false, focus = "auto" } = {}) {
       const wasOpen = isOpen();
       if (!wasOpen && menu.hidden) return;
@@ -310,6 +347,14 @@
         menu.style.maxHeight = "";
         if (closingClass) root?.classList.remove(closingClass);
         if (openClass) root?.classList.remove(openClass);
+        if (portal) {
+          menu.classList.remove("is-open");
+          for (const prop of ["position", "left", "top", "right", "bottom"]) menu.style.removeProperty(prop);
+          // Back in its place; gone with it when that place left the page.
+          if (home?.parent?.isConnected) {
+            if (menu.parentNode !== home.parent) home.parent.insertBefore(menu, home.next?.parentNode === home.parent ? home.next : null);
+          } else if (home?.parent) menu.remove();
+        }
       };
       if (immediate || !animate || menu.hidden) finish();
       else {
@@ -317,8 +362,6 @@
         requestAnimationFrame(() => { if (!isOpen() && openClass) root?.classList.remove(openClass); });
         timer = setTimeout(() => { if (!isOpen()) finish(); }, CLOSE_MS);
       }
-      // "auto": back to the button when the focus was in the list and a
-      // pick did not move it elsewhere (a dialog it opened).
       const now = document.activeElement;
       const stranded = !now || now === document.body || !now.isConnected || menu.contains(now);
       if (focus === true || (focus === "auto" && wasOpen && focusWasInside && stranded)) button.focus({ preventScroll: true });
@@ -343,9 +386,10 @@
       event.preventDefault();
       open({ focus: event.key === "ArrowUp" ? "last" : "first" });
     });
-    bindKeys(menu, { items, close: (o) => close(o) });
+    if (options.keys !== false) bindKeys(menu, { items, close: (o) => close(o) });
     menu.addEventListener("click", (event) => {
-      const item = event.target instanceof Element ? event.target.closest(`${ITEMS}, button`) : null;
+      if (options.keys === false) return;
+      const item = event.target instanceof Element ? event.target.closest(`${ITEMS}, button, a[href]`) : null;
       if (!item || !menu.contains(item) || !enabled(item) || !isOpen()) return;
       const owner = item.closest(LISTS);
       if (owner && owner !== menu && menu.contains(owner)) return;
@@ -353,7 +397,7 @@
       const keep = options.closeOnSelect === false
         || (options.closeOnSelect !== true && /^menuitem(checkbox|radio)$/.test(item.getAttribute("role") || ""))
         || (options.closeOnSelect !== true && !item.matches(ITEMS));
-      if (!keep) close({ focus: "auto" });
+      if (!keep) afterPick(item, () => close({ focus: "auto" }));
     });
     return handle;
   }
@@ -397,7 +441,7 @@
       root.appendChild(list);
     }
     button.setAttribute("aria-haspopup", "listbox");
-    const name = selectEl.getAttribute("aria-label");
+    const name = selectEl.getAttribute("aria-label") || selectEl.dataset.fieldLabel;
     if (name && !list.hasAttribute("aria-label")) list.setAttribute("aria-label", name);
 
     const handle = bind(button, list, { root });
@@ -414,7 +458,7 @@
       button.setAttribute("aria-disabled", unavailable ? "true" : "false");
       root.classList.toggle("is-disabled", unavailable);
       root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);
-      if (unavailable) handle.close({ immediate: true });
+      if (unavailable) handle.close({ immediate: true, focus: false });
       const focused = list.contains(document.activeElement) ? document.activeElement?.dataset?.value : null;
       list.replaceChildren(...[...selectEl.options].filter((option) => !option.hidden).map((option) => {
         const item = document.createElement("button");
@@ -427,7 +471,7 @@
         item.setAttribute("aria-selected", option.value === selectEl.value ? "true" : "false");
         return item;
       }));
-      if (focused != null) list.querySelector(`[data-value="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+      if (focused != null) [...list.children].find((item) => item.dataset.value === focused)?.focus({ preventScroll: true });
     }
 
     function set(value, { notify = false } = {}) {
@@ -436,7 +480,7 @@
       refresh();
     }
 
-    // Before bind's own click handler closes the list (it runs on the list).
+    // Runs before bind's own click handler (capture): the pick, then the close.
     list.addEventListener("click", (event) => {
       const item = event.target instanceof Element ? event.target.closest(".tracePicker__option") : null;
       if (!item || item.disabled || !list.contains(item)) return;
@@ -445,16 +489,16 @@
       selectEl.value = value;
       if (changed) selectEl.dispatchEvent(new Event("change", { bubbles: true }));
       refresh();
-      handle.close({ focus: true });
+      handle.close({ focus: document.activeElement === document.body || !document.activeElement || list.contains(document.activeElement) });
       if (changed) options.onChange?.(value);
     }, true);
+    selectEl._chdashMenu = handle;
+    selectEl.dataset.tracePickerReady = "1";
     selectEl.addEventListener("change", refresh);
     selectEl.addEventListener("tracepicker-refresh", refresh);
     new MutationObserver(refresh).observe(selectEl, { attributes: true, childList: true, subtree: true, characterData: true });
     refresh();
     Object.assign(handle, { refresh, set, select: selectEl });
-    selectEl._chdashMenu = handle;
-    selectEl.dataset.tracePickerReady = "1";
     return handle;
   }
 
@@ -476,141 +520,166 @@
     return bind(toggle, menu, { root, focus: "first", ...options });
   }
 
-  // ---- context and submenus -------------------------------------------------
-  // A menu at a client point (a right click): mounted in host(anchor),
-  // fixed, kept in the viewport, its first item focused; it closes on a
-  // pick, Escape (focus back to returnFocus), a pointer outside, a scroll,
-  // a resize or the window losing focus. options: { x, y, anchor,
-  // returnFocus, onClose }.
-  function context(menu, { x = 0, y = 0, anchor = null, returnFocus = null, onClose = null } = {}) {
+  // ---- context menus and submenus -------------------------------------------
+  const floating = new WeakMap(); // menu element -> { current handle }
+
+  // A menu at a point (a right click: x, y) or under an anchor (a click on a
+  // value: anchor, align): mounted in host(anchor), fixed, kept in the
+  // viewport, its first item focused. It closes on a pick, Escape (focus
+  // back to returnFocus), a pointer outside, a scroll outside it, a resize
+  // or the window losing focus. options: { x, y, anchor, align, returnFocus,
+  // expanded (an element whose aria-expanded follows the menu), remove
+  // (default true: the menu leaves the document on close; false: hidden),
+  // within (the element whose open dialog hosts it), onClose }.
+  function context(menu, { x = 0, y = 0, anchor = null, align = "start", returnFocus = null, expanded = null, within = null, remove = true, onClose = null } = {}) {
     if (!menu) return null;
-    for (const other of [...openHandles]) other.close({ immediate: true });
+    for (const other of [...openHandles]) other.close({ immediate: true, focus: false });
+    let state = floating.get(menu);
+    if (!state) {
+      state = { current: null };
+      floating.set(menu, state);
+      bindKeys(menu, { items: () => itemsOf(menu), close: (o) => state.current?.close(o) });
+      menu.addEventListener("click", (event) => {
+        const item = event.target instanceof Element ? event.target.closest(ITEMS) : null;
+        if (!item || !menu.contains(item) || !enabled(item) || item.closest(LISTS) !== menu) return;
+        if (item.getAttribute("aria-haspopup") && item.getAttribute("aria-haspopup") !== "false") return;
+        const current = state.current;
+        afterPick(item, () => current?.close({ focus: false }));
+      });
+      // Another item pointed at or focused closes the open submenu.
+      const leaveSubmenus = (event) => {
+        const item = event.target instanceof Element ? event.target.closest(ITEMS) : null;
+        if (!item || item.closest(LISTS) !== menu) return;
+        for (const sub of [...openHandles]) if (sub.parent === state.current && sub.button !== item) sub.close({ focus: false });
+      };
+      menu.addEventListener("pointerover", leaveSubmenus);
+      menu.addEventListener("focusin", leaveSubmenus);
+    }
     if (!menu.hasAttribute("tabindex")) menu.tabIndex = -1;
-    host(anchor || returnFocus).appendChild(menu);
-    placeAt(menu, x, y);
+    host(within || anchor || returnFocus).appendChild(menu);
+    menu.hidden = false;
+    placeFloating(menu, { x, y, anchor, align });
     menu.classList.add("is-open");
+    expanded?.setAttribute?.("aria-expanded", "true");
     let entry = null;
     const cleanups = [];
-    const items = () => itemsOf(menu);
     const handle = {
       button: null, menu, root: null,
-      isOpen: () => menu.isConnected,
+      isOpen: () => openHandles.has(handle),
       contains: (el) => !!el && menu.contains(el),
       open: () => {},
       toggle: () => handle.close(),
-      place: () => placeAt(menu, x, y),
+      place: () => placeFloating(menu, { x, y, anchor, align }),
       close({ focus = "auto" } = {}) {
         if (!openHandles.has(handle)) return;
         openHandles.delete(handle);
+        if (state.current === handle) state.current = null;
         entry?.release();
         entry = null;
         for (const off of cleanups.splice(0)) off();
-        for (const sub of [...openHandles]) if (sub.parent === handle) sub.close({ immediate: true, focus: false });
+        for (const sub of [...openHandles]) if (sub.parent === handle) sub.close({ focus: false });
         const hadFocus = menu.contains(document.activeElement);
-        menu.remove();
-        if (returnFocus?.isConnected && (focus === true || (focus === "auto" && (hadFocus || document.activeElement === document.body)))) {
-          try { returnFocus.focus({ preventScroll: true }); } catch { /* detached */ }
+        menu.classList.remove("is-open");
+        if (remove) menu.remove();
+        else menu.hidden = true;
+        expanded?.setAttribute?.("aria-expanded", "false");
+        const back = returnFocus || expanded;
+        if (back?.isConnected && (focus === true || (focus === "auto" && (hadFocus || document.activeElement === document.body)))) {
+          try { back.focus({ preventScroll: true }); } catch { /* detached */ }
         }
         onClose?.();
       },
-      destroy: () => handle.close({ focus: false }),
     };
+    state.current = handle;
     openHandles.add(handle);
-    entry = layer({ el: () => [menu, ...[...openHandles].filter((h) => h.parent === handle).map((h) => h.menu)], onDismiss: (reason) => handle.close({ focus: reason === "escape" }) });
+    // The anchor counts as inside: a click on it again is the caller's toggle.
+    entry = layer({
+      el: () => [menu, expanded, ...[...openHandles].filter((h) => h.parent === handle).map((h) => h.menu)].filter(Boolean),
+      onDismiss: (reason) => handle.close({ focus: reason === "escape" }),
+    });
     const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); cleanups.push(() => target.removeEventListener(type, fn, opts)); };
-    on(document, "scroll", (event) => { if (!(event.target instanceof Node) || !menu.contains(event.target)) handle.close({ focus: false }); }, { capture: true, passive: true });
+    const inMenus = (node) => node instanceof Node && (menu.contains(node) || [...openHandles].some((h) => h.parent === handle && h.menu.contains(node)));
+    on(document, "scroll", (event) => { if (!inMenus(event.target)) handle.close({ focus: false }); }, { capture: true, passive: true });
     on(window, "resize", () => handle.close({ focus: false }), { passive: true });
     on(window, "blur", () => handle.close({ focus: false }));
-    bindKeys(menu, { items, close: () => handle.close({ focus: "auto" }) });
-    menu.addEventListener("click", (event) => {
-      const item = event.target instanceof Element ? event.target.closest(ITEMS) : null;
-      if (!item || !menu.contains(item) || !enabled(item) || item.closest(LISTS) !== menu) return;
-      if (item.getAttribute("aria-haspopup") && item.getAttribute("aria-haspopup") !== "false") return;
-      handle.close({ focus: false });
-    });
-    focusItem(items()[0]);
+    focusItem(itemsOf(menu)[0]);
     return handle;
   }
 
-  // A submenu of `item` (role=menuitem, aria-haspopup=menu) in `list` (a
-  // role=menu element, mounted next to the parent menu): opens on a click,
-  // Enter, Space, Right or after a short hover, beside the item (flipped
-  // left when it does not fit); Left or Escape closes it back to the item.
-  // options: { parent (the parent menu's handle), onOpen() }.
+  // A submenu of `item` (a role=menuitem of a context menu) in `list` (a
+  // role=menu element): opens on a click, Enter, Space, Right or when the
+  // pointer enters the item, beside it (flipped left when it does not
+  // fit); Left or Escape close it back on its item; a pick closes the
+  // whole menu. options: { parent (the context menu's handle), onOpen(list)
+  // (fill it) }.
   function submenu(item, list, { parent = null, onOpen = null } = {}) {
     if (!item || !list) return null;
     item.setAttribute("aria-haspopup", "menu");
     item.setAttribute("aria-expanded", "false");
     if (!list.hasAttribute("tabindex")) list.tabIndex = -1;
-    list.hidden = true;
     let entry = null;
-    let hoverTimer = 0;
     const items = () => itemsOf(list);
     const handle = {
       button: item, menu: list, root: null, parent,
-      isOpen: () => item.getAttribute("aria-expanded") === "true",
+      isOpen: () => openHandles.has(handle),
       contains: (el) => !!el && list.contains(el),
       open({ focus = "first" } = {}) {
-        if (handle.isOpen()) { if (focus !== "none") focusItem(items()[0]); return; }
-        for (const other of [...openHandles]) if (other !== handle && other.parent === parent) other.close({ immediate: true, focus: false });
-        onOpen?.();
-        const menuEl = item.closest(LISTS);
-        (menuEl?.parentElement || host(item)).appendChild(list);
-        list.hidden = false;
-        list.classList.add("is-open");
-        const a = item.getBoundingClientRect();
-        const vw = document.documentElement.clientWidth || window.innerWidth || 0;
-        const vh = window.innerHeight || 0;
-        const w = list.offsetWidth;
-        const h = list.offsetHeight;
-        const right = a.right + 2;
-        const left = right + w + 4 <= vw ? right : Math.max(4, a.left - w - 2);
-        list.style.position = "fixed";
-        list.style.left = `${Math.round(left)}px`;
-        list.style.top = `${Math.round(Math.max(4, Math.min(a.top - 4, vh - h - 4)))}px`;
-        item.setAttribute("aria-expanded", "true");
-        openHandles.add(handle);
-        entry = layer({ el: () => [list, item], onDismiss: (reason) => handle.close({ focus: reason === "escape" }) });
+        if (!handle.isOpen()) {
+          for (const other of [...openHandles]) if (other !== handle && other.parent === parent) other.close({ focus: false });
+          onOpen?.(list);
+          host(item).appendChild(list);
+          list.hidden = false;
+          list.classList.add("is-open");
+          list.style.position = "fixed";
+          const a = item.getBoundingClientRect();
+          const vw = document.documentElement.clientWidth || window.innerWidth || 0;
+          const vh = window.innerHeight || 0;
+          const w = list.offsetWidth;
+          const h = list.offsetHeight;
+          const left = a.right + w + 4 <= vw ? a.right + 2 : Math.max(4, a.left - w - 2);
+          list.style.left = `${Math.round(left)}px`;
+          list.style.top = `${Math.round(Math.max(4, Math.min(a.top - 4, vh - h - 4)))}px`;
+          item.setAttribute("aria-expanded", "true");
+          openHandles.add(handle);
+          // The parent menu counts as inside: pointing back at it is the
+          // parent's business (another item closes the submenu).
+          entry = layer({ el: () => [list, item, parent?.menu].filter(Boolean), onDismiss: (reason) => handle.close({ focus: reason === "escape" }) });
+        }
         if (focus !== "none") focusItem(items()[0]);
       },
       close({ focus = false } = {}) {
-        clearTimeout(hoverTimer);
         if (!handle.isOpen()) return;
         openHandles.delete(handle);
         entry?.release();
         entry = null;
         item.setAttribute("aria-expanded", "false");
-        list.hidden = true;
         list.classList.remove("is-open");
+        list.remove();
         if (focus) focusItem(item);
       },
       toggle: () => (handle.isOpen() ? handle.close({ focus: true }) : handle.open()),
       place: () => {},
-      destroy: () => { handle.close(); list.remove(); },
     };
     item.addEventListener("click", (event) => { event.preventDefault(); handle.open(); });
     item.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowRight" || event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        event.stopPropagation();
-        handle.open();
-      }
+      if (event.key !== "ArrowRight" && event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      handle.open();
     });
-    item.addEventListener("pointerenter", () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => handle.open({ focus: "none" }), 180); });
-    item.addEventListener("pointerleave", () => clearTimeout(hoverTimer));
+    item.addEventListener("pointerenter", () => handle.open({ focus: "none" }));
     bindKeys(list, { items, close: () => { handle.close(); parent?.close?.({ focus: false }); }, back: () => handle.close({ focus: true }) });
     list.addEventListener("click", (event) => {
       const pick = event.target instanceof Element ? event.target.closest(ITEMS) : null;
       if (!pick || !list.contains(pick) || !enabled(pick)) return;
-      handle.close();
-      parent?.close?.({ focus: false });
+      afterPick(pick, () => { handle.close(); parent?.close?.({ focus: false }); });
     });
     return handle;
   }
 
   // Closes every open menu (a view hides, a dialog opens).
-  function closeAll({ immediate = true } = {}) {
-    for (const handle of [...openHandles]) handle.close({ immediate, focus: false });
+  function closeAll() {
+    for (const handle of [...openHandles]) handle.close({ immediate: true, focus: false });
   }
 
   ns.menu = { bind, select, multi, split, context, submenu, place, host, closeAll, isAnyOpen: () => openHandles.size > 0 };

@@ -1632,27 +1632,19 @@
 
   // ------------------------------------------------------------- item menu
 
-  let menuEl = null;
-  let menuReturnFocus = null;
+  // An ns.menu context menu (app_ui_menu.js) under the row's "..." button or
+  // at the pointer, in the open dialog: keys, focus back on the row, the
+  // outside click / Escape layer, a scroll closes it.
+  let menuHandle = null;
 
   function closeMenu({ restoreFocus = true } = {}) {
-    if (!menuEl) return;
-    menuEl.remove();
-    menuEl = null;
-    document.removeEventListener("pointerdown", onMenuOutside, true);
-    if (restoreFocus && menuReturnFocus && document.contains(menuReturnFocus)) menuReturnFocus.focus({ preventScroll: true });
-    menuReturnFocus = null;
-  }
-
-  function onMenuOutside(ev) {
-    if (menuEl && !menuEl.contains(ev.target)) closeMenu({ restoreFocus: false });
+    menuHandle?.close({ focus: restoreFocus });
   }
 
   function showMenu(entries, anchor, point, returnFocus) {
     closeMenu({ restoreFocus: false });
     const menu = el("div", "qlMenu");
     menu.setAttribute("role", "menu");
-    menu.tabIndex = -1;
     for (const entry of entries) {
       if (entry === "-") {
         const sep = el("div", "qlMenu__sep");
@@ -1673,41 +1665,16 @@
       });
       menu.appendChild(item);
     }
-    menu.addEventListener("keydown", (ev) => {
-      const items = [...menu.querySelectorAll(".qlMenu__item")];
-      const index = items.indexOf(document.activeElement);
-      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
-        ev.preventDefault();
-        const step = ev.key === "ArrowDown" ? 1 : -1;
-        items[(index + step + items.length) % items.length]?.focus();
-      } else if (ev.key === "Home" || ev.key === "End") {
-        ev.preventDefault();
-        (ev.key === "Home" ? items[0] : items[items.length - 1])?.focus();
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closeMenu();
-      } else if (ev.key === "Tab") {
-        closeMenu();
-      }
-    });
-    (ns.dialog?.host?.() || document.body).appendChild(menu);
-    menuEl = menu;
-    menuReturnFocus = returnFocus || null;
-    const rect = anchor ? anchor.getBoundingClientRect() : { left: point.x, right: point.x, top: point.y, bottom: point.y };
-    const mw = menu.offsetWidth;
-    const mh = menu.offsetHeight;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = anchor ? rect.right - mw : rect.left;
-    let top = rect.bottom + 4;
-    if (left + mw > vw - 8) left = vw - mw - 8;
-    if (left < 8) left = 8;
-    if (top + mh > vh - 8) top = Math.max(8, rect.top - mh - 4);
-    menu.style.left = `${Math.round(left)}px`;
-    menu.style.top = `${Math.round(top)}px`;
-    menu.querySelector(".qlMenu__item")?.focus();
-    setTimeout(() => document.addEventListener("pointerdown", onMenuOutside, true), 0);
+    const handle = ns.menu?.context(menu, {
+      anchor: anchor || null,
+      x: point ? point.x : 0,
+      y: point ? point.y : 0,
+      align: "end",
+      within: anchor || returnFocus || null,
+      returnFocus: returnFocus || null,
+      onClose: () => { if (menuHandle === handle) menuHandle = null; },
+    }) || null;
+    menuHandle = handle;
   }
 
   function openItemMenu(li, anchor, point) {
@@ -2426,10 +2393,6 @@
     }, 150);
   }
 
-  // The item menu is placed once: a scroll closes it.
-  document.addEventListener("scroll", () => {
-    if (menuEl) closeMenu({ restoreFocus: false });
-  }, { passive: true, capture: true });
   // Another tab changed the browser library.
   window.addEventListener("storage", (ev) => {
     if (ctl.mode !== "local") return;

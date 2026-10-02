@@ -181,24 +181,13 @@
   }
 
 
+  // The header and Query menus are ns.menu menus (app_ui_menu.js): open /
+  // close motion, keys, focus return and the one outside-click / Escape
+  // layer. Bound in init(); these keep the names other modules call.
+  const menus = { host: null, page: null, theme: null, runSettings: null, run: null, copy: null };
+
   function closeHostMenu() {
-    if (!dom.hostPickerMenu || !dom.hostPickerButton) return;
-    dom.hostPickerMenu.hidden = true;
-    dom.hostPickerButton.setAttribute("aria-expanded", "false");
-  }
-
-  function openHostMenu() {
-    if (!dom.hostPickerMenu || !dom.hostPickerButton) return;
-    dom.hostPickerMenu.hidden = false;
-    dom.hostPickerButton.setAttribute("aria-expanded", "true");
-    dom.hostPickerMenu.focus({ preventScroll: true });
-  }
-
-  function toggleHostMenu() {
-    if (!dom.hostPickerMenu) return;
-    if (dom.hostPicker?.classList.contains("is-static")) return;
-    if (dom.hostPickerMenu.hidden) openHostMenu();
-    else closeHostMenu();
+    menus.host?.close({ immediate: true, focus: false });
   }
 
   function hostPickerSignature(snapshot) {
@@ -288,8 +277,8 @@
 
       btn.addEventListener("click", () => {
         if (!isSelected) setSelectedHostId(id);
+        menus.host?.close({ focus: true });
         renderHostPicker(state.hostsSnapshot || snapshot);
-        closeHostMenu();
       });
 
       dom.hostPickerMenu.appendChild(btn);
@@ -501,44 +490,8 @@
     }
   }
 
-  function isPageMenuOpen() { return !!(dom.pageSelect && dom.pageSelect.classList.contains("themeSelect--open")); }
-  function openPageMenu() {
-    if (!dom.pageSelect || !dom.pageSelectMenu || !dom.pageSelectButton || dom.pageSelect.hidden) return;
-    dom.pageSelectMenu.hidden = false;
-    dom.pageSelectButton.setAttribute("aria-expanded", "true");
-    dom.pageSelect.classList.remove("themeSelect--closing");
-    requestAnimationFrame(() => dom.pageSelect.classList.add("themeSelect--open"));
-    dom.pageSelectMenu.focus({ preventScroll: true });
-  }
-  function closePageMenu({ immediate = false } = {}) {
-    if (!dom.pageSelect || !dom.pageSelectMenu || !dom.pageSelectButton) return;
-    dom.pageSelectButton.setAttribute("aria-expanded", "false");
-    dom.pageSelect.classList.remove("themeSelect--open");
-    if (immediate) { dom.pageSelect.classList.remove("themeSelect--closing"); dom.pageSelectMenu.hidden = true; return; }
-    dom.pageSelect.classList.add("themeSelect--closing");
-    setTimeout(() => { if (!isPageMenuOpen()) dom.pageSelectMenu.hidden = true; dom.pageSelect.classList.remove("themeSelect--closing"); }, 160);
-  }
-  function togglePageMenu() { if (isPageMenuOpen()) closePageMenu(); else openPageMenu(); }
-
-  function isRunSettingsOpen() { return !!(dom.runSettings && dom.runSettings.classList.contains("themeSelect--open")); }
-  function openRunSettings() {
-    closeRunMenu({ immediate: true });
-    if (!dom.runSettings || !dom.runSettingsMenu || !dom.runSettingsButton) return;
-    dom.runSettingsMenu.hidden = false;
-    dom.runSettingsButton.setAttribute("aria-expanded", "true");
-    dom.runSettings.classList.remove("themeSelect--closing");
-    requestAnimationFrame(() => dom.runSettings.classList.add("themeSelect--open"));
-    dom.runSettingsMenu.focus({ preventScroll: true });
-  }
-  function closeRunSettings({ immediate = false } = {}) {
-    if (!dom.runSettings || !dom.runSettingsMenu || !dom.runSettingsButton) return;
-    dom.runSettingsButton.setAttribute("aria-expanded", "false");
-    dom.runSettings.classList.remove("themeSelect--open");
-    if (immediate) { dom.runSettings.classList.remove("themeSelect--closing"); dom.runSettingsMenu.hidden = true; return; }
-    dom.runSettings.classList.add("themeSelect--closing");
-    setTimeout(() => { if (!isRunSettingsOpen()) dom.runSettingsMenu.hidden = true; dom.runSettings.classList.remove("themeSelect--closing"); }, 160);
-  }
-  function toggleRunSettings() { if (isRunSettingsOpen()) closeRunSettings(); else openRunSettings(); }
+  function closePageMenu({ immediate = false } = {}) { menus.page?.close({ immediate }); }
+  function closeRunSettings({ immediate = false } = {}) { menus.runSettings?.close({ immediate }); }
 
   function applyTheme(mode) {
     const resolved = getResolvedTheme(mode);
@@ -565,105 +518,9 @@
     ns.explorerGraph?.redrawThemeNow?.();
   }
 
-  function isThemeMenuOpen() {
-    return !!(dom.themeSelect && dom.themeSelect.classList.contains("themeSelect--open"));
-  }
-
-  function openThemeMenu() {
-    if (!dom.themeSelectMenu || !dom.themeSelect || !dom.themeSelectButton) return;
-    dom.themeSelectMenu.hidden = false;
-    dom.themeSelectButton.setAttribute("aria-expanded", "true");
-    dom.themeSelect.classList.remove("themeSelect--closing");
-    requestAnimationFrame(() => {
-      dom.themeSelect.classList.add("themeSelect--open");
-    });
-    dom.themeSelectMenu.focus({ preventScroll: true });
-  }
-
-  function closeThemeMenu({ immediate = false } = {}) {
-    if (!dom.themeSelectMenu || !dom.themeSelect || !dom.themeSelectButton) return;
-    dom.themeSelectButton.setAttribute("aria-expanded", "false");
-    dom.themeSelect.classList.remove("themeSelect--open");
-    if (immediate) {
-      dom.themeSelect.classList.remove("themeSelect--closing");
-      dom.themeSelectMenu.hidden = true;
-      return;
-    }
-    dom.themeSelect.classList.add("themeSelect--closing");
-    setTimeout(() => {
-      if (!isThemeMenuOpen()) dom.themeSelectMenu.hidden = true;
-      dom.themeSelect.classList.remove("themeSelect--closing");
-    }, 160);
-  }
-
-  function toggleThemeMenu() {
-    if (!dom.themeSelectMenu) return;
-    if (isThemeMenuOpen()) closeThemeMenu();
-    else openThemeMenu();
-  }
-
-  function isCopyMenuOpen() {
-    return !!(dom.copySplit && dom.copySplit.classList.contains("is-open"));
-  }
-
-  function openCopyMenu() {
-    if (!dom.copyMenu || !dom.copyMenuButton || !dom.copySplit) return;
-    dom.copyMenu.hidden = false;
-    dom.copyMenuButton.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => {
-      dom.copySplit.classList.add("is-open");
-    });
-    dom.copyMenu.focus({ preventScroll: true });
-  }
-
-  function closeCopyMenu({ immediate = false } = {}) {
-    if (!dom.copyMenu || !dom.copyMenuButton || !dom.copySplit) return;
-    dom.copyMenuButton.setAttribute("aria-expanded", "false");
-    dom.copySplit.classList.remove("is-open");
-    if (immediate) {
-      dom.copyMenu.hidden = true;
-      return;
-    }
-    setTimeout(() => {
-      if (!isCopyMenuOpen()) dom.copyMenu.hidden = true;
-    }, 160);
-  }
-
-  function toggleCopyMenu() {
-    if (!dom.copyMenu) return;
-    if (dom.copyMenu.hidden) openCopyMenu();
-    else closeCopyMenu();
-  }
-
-  function openRunMenu() {
-    closeRunSettings({ immediate: true });
-    if (!dom.runMenu || !dom.runMenuButton || !dom.runSplit) return;
-    dom.runMenu.hidden = false;
-    dom.runMenuButton.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => {
-      dom.runSplit.classList.add("is-open");
-    });
-    dom.runMenu.focus({ preventScroll: true });
-  }
-
-  function closeRunMenu({ immediate = false } = {}) {
-    if (!dom.runMenu || !dom.runMenuButton || !dom.runSplit) return;
-    dom.runMenuButton.setAttribute("aria-expanded", "false");
-    dom.runSplit.classList.remove("is-open");
-    if (immediate) {
-      dom.runMenu.hidden = true;
-      return;
-    }
-    setTimeout(() => {
-      if (!dom.runSplit.classList.contains("is-open")) dom.runMenu.hidden = true;
-    }, 160);
-  }
-
-  function toggleRunMenu() {
-    if (!dom.runMenu) return;
-    if (dom.runMenu.hidden) openRunMenu();
-    else closeRunMenu();
-  }
+  function closeThemeMenu({ immediate = false } = {}) { menus.theme?.close({ immediate }); }
+  function closeCopyMenu({ immediate = false } = {}) { menus.copy?.close({ immediate }); }
+  function closeRunMenu({ immediate = false } = {}) { menus.run?.close({ immediate }); }
 
   function applyRunOptionsUi() {
     if (dom.runOptAutoFormat) {
@@ -1417,63 +1274,31 @@
       ns.meta.prepareHost(state.selectedHostId);
     }
 
-    if (dom.runMenuButton) dom.runMenuButton.addEventListener("click", toggleRunMenu);
+    const menu = ns.menu;
+    menus.run = menu?.split(dom.runButton, dom.runMenuButton, dom.runMenu) || null;
 
     if (dom.runOptAutoFormat) dom.runOptAutoFormat.addEventListener("click", () => toggleRunOption("autoFormat"));
     if (dom.runOptMultiQuery) dom.runOptMultiQuery.addEventListener("click", () => toggleRunOption("multiQuery"));
     if (dom.runOptExecutionStats) dom.runOptExecutionStats.addEventListener("click", () => toggleRunOption("executionStats"));
     if (dom.runOptFlattenTuple) dom.runOptFlattenTuple.addEventListener("click", () => toggleRunOption("flattenTuple"));
 
-    if (dom.hostPickerButton) dom.hostPickerButton.addEventListener("click", toggleHostMenu);
-
-    document.addEventListener("click", (ev) => {
-      const t = ev.target;
-      if (dom.runSplit && dom.runMenu && !dom.runMenu.hidden) {
-        if (t instanceof Node && !dom.runSplit.contains(t)) closeRunMenu();
-      }
-      if (dom.hostPicker && dom.hostPickerMenu && !dom.hostPickerMenu.hidden) {
-        if (t instanceof Node && !dom.hostPicker.contains(t)) closeHostMenu();
-      }
-      if (dom.themeSelect && dom.themeSelectMenu && isThemeMenuOpen()) {
-        if (t instanceof Node && !dom.themeSelect.contains(t)) closeThemeMenu();
-      }
-      if (dom.pageSelect && dom.pageSelectMenu && isPageMenuOpen()) {
-        if (t instanceof Node && !dom.pageSelect.contains(t)) closePageMenu();
-      }
-      if (dom.runSettings && dom.runSettingsMenu && isRunSettingsOpen()) {
-        if (t instanceof Node && !dom.runSettings.contains(t)) closeRunSettings();
-      }
-      if (dom.copySplit && dom.copyMenu && !dom.copyMenu.hidden) {
-        if (t instanceof Node && !dom.copySplit.contains(t)) closeCopyMenu();
-      }
-    });
-
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") {
-        closeRunMenu({ immediate: true });
-        closeHostMenu();
-        closeThemeMenu({ immediate: true });
-        closePageMenu({ immediate: true });
-        closeRunSettings({ immediate: true });
-        closeCopyMenu({ immediate: true });
-      }
-    });
+    menus.host = menu?.bind(dom.hostPickerButton, dom.hostPickerMenu, {
+      root: dom.hostPicker,
+      openClass: "",
+      canOpen: () => !dom.hostPicker?.classList.contains("is-static"),
+    }) || null;
 
     initQueryLibrary();
     applyQueryUrl();
 
-    if (dom.pageSelectButton) dom.pageSelectButton.addEventListener("click", togglePageMenu);
+    menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { canOpen: () => !dom.pageSelect?.hidden }) || null;
     // Observability (Traces, Logs, Metrics) is its own page: the Query and
     // Explorer shells navigate to it, on its first enabled view.
     dom.navObservabilityButton?.addEventListener("click", () => {
       if (document.body?.dataset?.page !== "observability") window.location.assign(api.resolveUrl("observability"));
     });
-    if (dom.pageSelectMenu) {
-      for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) b.addEventListener("click", () => closePageMenu());
-    }
-    if (dom.runSettingsButton) dom.runSettingsButton.addEventListener("click", toggleRunSettings);
-
-    if (dom.themeSelectButton) dom.themeSelectButton.addEventListener("click", toggleThemeMenu);
+    menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
+    menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;
     if (dom.themeSelectMenu) {
       const buttons = dom.themeSelectMenu.querySelectorAll(".themeSelect__option[data-value]");
       for (const b of buttons) {
@@ -1482,13 +1307,11 @@
           if (mode !== "system" && mode !== "dark" && mode !== "light") return;
           storage.setSavedThemeMode(mode);
           applyTheme(mode);
-          closeThemeMenu();
         });
       }
     }
 
-    if (dom.copyMenuButton) dom.copyMenuButton.addEventListener("click", toggleCopyMenu);
-    if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", () => closeCopyMenu({ immediate: true }));
+    menus.copy = menu?.split(dom.copyJsonButton, dom.copyMenuButton, dom.copyMenu) || null;
 
     const themeMode = storage.getSavedThemeMode();
     applyTheme(themeMode);

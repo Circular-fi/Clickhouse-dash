@@ -1935,6 +1935,10 @@ html.chdash-page-select-hidden .pageSelect {
   font-size: .95rem;
   font-weight: 950;
 }
+.runSettings {
+  position: relative;
+  align-self: center;
+}
 .resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
   padding-right: 2.8rem;
 }

@@ -600,14 +600,12 @@
       </header>
       <div class="traceSearchBar metricsPanel__controls">
         <div class="metricsControl metricsControl--agg">
-          <span class="metricsControl__label">Aggregation</span>
           <div class="themeSelect tracePicker metricsPicker metricsPicker--agg">
             <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">${fmt.EMPTY}</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
         <div class="metricsControl metricsControl--group">
-          <span class="metricsControl__label">Group by</span>
           <div class="themeSelect tracePicker metricsPicker metricsPicker--group">
             <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">None</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
@@ -655,55 +653,10 @@
     return el;
   }
 
-  // Pickers reuse the connected tracePicker surface and motion.
-  const openPickers = new Set();
-  function openPicker(root) {
-    const button = root.querySelector(":scope > .tracePicker__button");
-    const menu = root.querySelector(":scope > .tracePicker__menu");
-    if (!button || !menu || button.disabled) return;
-    closePickers(root);
-    if (root._closeTimer) { clearTimeout(root._closeTimer); root._closeTimer = null; }
-    root.classList.remove("themeSelect--closing");
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-    openPickers.add(root);
-    // An ns.layers layer: Escape and a press outside close it, the focus
-    // goes back to its button.
-    root._pickerLayer = ns.layers.push({ el: root, name: "metricsPicker", opener: button, onDismiss: () => closePicker(root) });
-    requestAnimationFrame(() => {
-      if (button.getAttribute("aria-expanded") !== "true") return;
-      root.classList.add("themeSelect--open");
-      menu.focus({ preventScroll: true });
-    });
-  }
-  function closePicker(root, { immediate = false } = {}) {
-    const button = root.querySelector(":scope > .tracePicker__button");
-    const menu = root.querySelector(":scope > .tracePicker__menu");
-    openPickers.delete(root);
-    const layer = root._pickerLayer;
-    root._pickerLayer = null;
-    layer?.close();
-    if (root._closeTimer) { clearTimeout(root._closeTimer); root._closeTimer = null; }
-    button?.setAttribute("aria-expanded", "false");
-    if (immediate || menu?.hidden) {
-      root.classList.remove("themeSelect--open", "themeSelect--closing");
-      if (menu) menu.hidden = true;
-      return;
-    }
-    root.classList.add("themeSelect--closing");
-    requestAnimationFrame(() => root.classList.remove("themeSelect--open"));
-    root._closeTimer = setTimeout(() => {
-      if (!root.classList.contains("themeSelect--open")) {
-        if (menu) menu.hidden = true;
-        root.classList.remove("themeSelect--closing");
-      }
-      root._closeTimer = null;
-    }, 160);
-  }
-  function closePickers(except = null) {
-    for (const root of [...openPickers]) if (root !== except) closePicker(root);
-  }
-  function isOpen(root) { return root.querySelector(":scope > .tracePicker__button")?.getAttribute("aria-expanded") === "true"; }
+  // Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
+  // owns their motion, keys, focus and the outside click / Escape layer.
+  const closePickers = () => ns.menu?.closeAll();
+  const pickerParts = (root) => [root.querySelector(":scope > .tracePicker__button"), root.querySelector(":scope > .tracePicker__menu")];
 
   function bindPanel(panel, el) {
     el.addEventListener("pointerdown", () => setActive(panel));
@@ -714,14 +667,10 @@
     });
 
     const aggPicker = el.querySelector(".metricsPicker--agg");
-    aggPicker.querySelector(".tracePicker__button").addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (isOpen(aggPicker)) closePicker(aggPicker); else openPicker(aggPicker);
-    });
+    ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });
     aggPicker.querySelector(".tracePicker__menu").addEventListener("click", (event) => {
       const option = event.target.closest("[data-agg]");
       if (!option) return;
-      closePicker(aggPicker);
       if (option.dataset.agg === panel.agg) return;
       panel.agg = option.dataset.agg;
       panel.hidden.clear();
@@ -730,13 +679,13 @@
     });
 
     const groupPicker = el.querySelector(".metricsPicker--group");
-    groupPicker.querySelector(".tracePicker__button").addEventListener("click", async (event) => {
-      event.stopPropagation();
-      if (isOpen(groupPicker)) { closePicker(groupPicker); return; }
-      renderGroupMenu(panel, true);
-      openPicker(groupPicker);
-      await ensureKeys(panel);
-      renderGroupMenu(panel, false);
+    ns.menu?.multi(...pickerParts(groupPicker), {
+      root: groupPicker,
+      onOpen: () => renderGroupMenu(panel, true),
+      onOpened: async () => {
+        await ensureKeys(panel);
+        renderGroupMenu(panel, false);
+      },
     });
     groupPicker.querySelector(".tracePicker__menu").addEventListener("change", (event) => {
       const box = event.target.closest("input[data-group-key]");
@@ -750,6 +699,7 @@
       renderGroupButton(panel);
       loadPanel(panel);
     });
+
 
     const chips = el.querySelector(".metricsFilters__chips");
     chips.addEventListener("click", (event) => {
@@ -864,7 +814,7 @@
     const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
     const aggPicker = el.querySelector(".metricsPicker--agg");
     const aggButton = aggPicker.querySelector(".tracePicker__button");
-    aggButton.textContent = panel.agg ? aggLabel(panel.agg) : "Default";
+    aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
     aggButton.disabled = !aggs.length;
     aggPicker.querySelector(".tracePicker__menu").innerHTML = aggs.map((agg) =>
       `<button type="button" class="themeSelect__option tracePicker__option" role="option" data-agg="${esc(agg)}" aria-selected="${agg === panel.agg}">${esc(aggLabel(agg))}</button>`).join("");
@@ -913,7 +863,7 @@
   function renderGroupButton(panel) {
     const button = panel.el?.querySelector(".metricsPicker--group .tracePicker__button");
     if (!button) return;
-    button.textContent = panel.groupBy.length ? panel.groupBy.join(", ") : "None";
+    button.textContent = `Group by \u00b7 ${panel.groupBy.length ? panel.groupBy.join(", ") : "None"}`;
     button.title = panel.groupBy.length ? `Group by ${panel.groupBy.join(", ")}` : "No grouping: one series";
   }
 
@@ -1119,9 +1069,7 @@
       idPrefix: "metrics",
       getValue: () => model.range,
       getMaxMinutes: () => MAX_RANGE_MINUTES,
-      onApply: (raw) => { closePicker(root); applyRange(raw); },
-      open: () => openPicker(root),
-      close: () => closePicker(root),
+      onApply: (raw) => { timePicker?.close(); applyRange(raw); },
     });
   }
 

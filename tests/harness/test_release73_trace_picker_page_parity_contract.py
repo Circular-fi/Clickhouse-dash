@@ -19,10 +19,11 @@ def test_status_and_limit_dropdowns_match_button_width():
 
 
 def test_trace_picker_hover_and_close_motion_follow_page_selector():
-    js = read("src/static/app_traces.js")
+    js = read("src/static/app_ui_menu.js")
     css = read("src/static/style.css")
-    assert 'root.classList.add("themeSelect--closing");' in js
-    assert 'requestAnimationFrame(() => root.classList.remove("themeSelect--open"));' in js
+    # Closing first, then the open class drops a frame later (ns.menu).
+    assert 'if (closingClass) root?.classList.add(closingClass);' in js
+    assert 'requestAnimationFrame(() => { if (!isOpen() && openClass) root?.classList.remove(openClass); });' in js
     assert "border-color: var(--buttonBorderHover) !important;" in css
     assert "border-bottom-color: transparent !important;" in css
     assert "border-bottom-left-radius: 0 !important;" in css

@@ -216,25 +216,12 @@
     applyEditorOptionClasses();
   }
 
+  // The editor options menu: an ns.menu menu (app_ui_menu.js); its
+  // checkbox items keep it open.
+  let autocompleteControlHandle = null;
+
   function closeAutocompleteControlMenu() {
-    if (!autocompleteControl || !autocompleteControlButton || !autocompleteControlMenu) return;
-    autocompleteControl.classList.remove("is-open");
-    autocompleteControlButton.setAttribute("aria-expanded", "false");
-    autocompleteControlMenu.hidden = true;
-  }
-
-  function openAutocompleteControlMenu() {
-    if (!autocompleteControl || !autocompleteControlButton || !autocompleteControlMenu) return;
-    autocompleteControl.classList.add("is-open");
-    autocompleteControlButton.setAttribute("aria-expanded", "true");
-    autocompleteControlMenu.hidden = false;
-    autocompleteControlMenu.focus({ preventScroll: true });
-  }
-
-  function toggleAutocompleteControlMenu() {
-    if (!autocompleteControlMenu) return;
-    if (autocompleteControlMenu.hidden) openAutocompleteControlMenu();
-    else closeAutocompleteControlMenu();
+    autocompleteControlHandle?.close({ immediate: true, focus: false });
   }
 
   function setAutocompleteEnabled(value) {
@@ -459,11 +446,7 @@
     if (autocompleteControl.dataset && autocompleteControl.dataset.bound === "1") return;
     if (autocompleteControl.dataset) autocompleteControl.dataset.bound = "1";
 
-    autocompleteControlButton.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      toggleAutocompleteControlMenu();
-    });
+    autocompleteControlHandle = ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu, { root: autocompleteControl, openClass: "is-open", animate: false }) || null;
 
     autocompleteControlMenu.addEventListener("click", (ev) => {
       const btn = ev.target instanceof Element ? ev.target.closest(".editorAutocompleteControl__opt") : null;
@@ -493,13 +476,6 @@
       // This menu is meant to host several settings, so changing one should not close it.
     });
 
-    autocompleteControlMenu.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        closeAutocompleteControlMenu();
-        autocompleteControlButton.focus({ preventScroll: true });
-      }
-    });
   }
 
   function ensureAutocompleteControl() {
@@ -3334,7 +3310,6 @@
     }, true);
     document.addEventListener("pointerdown", (ev) => {
       const target = ev.target instanceof Node ? ev.target : null;
-      if (autocompleteControl && target && !autocompleteControl.contains(target)) closeAutocompleteControlMenu();
       if (!menu || menu.hidden) return;
       if (target && (menu.contains(target) || ta.contains(target))) return;
       // Capture-phase close prevents the floating suggestion layer from

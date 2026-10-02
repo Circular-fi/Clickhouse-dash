@@ -51,9 +51,11 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
 def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> None:
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
-    assert "document.body.appendChild(menu);" in ui
-    assert 'menu.classList.add("is-open");' in ui
-    assert 'if (menu.parentNode !== root) root.appendChild(menu);' in ui
+    menu = read("src/static/app_ui_menu.js")
+    assert 'ns.menu?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in ui
+    assert "host(button).appendChild(menu);" in menu
+    assert 'if (portal) menu.classList.add("is-open");' in menu
+    assert "if (menu.parentNode !== home.parent) home.parent.insertBefore(menu, home.next?.parentNode === home.parent ? home.next : null);" in menu
     assert 'indexCell.textContent = "";' in ui
     assert "table-layout: fixed;" in css
     assert "body > .explorerDataSettings__menu.is-open" in css

@@ -50,12 +50,12 @@ def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_g
 
 def test_empty_trace_period_disables_service_operation_pickers_without_chevron():
     html = read("src/static/observability.html")
-    js = read("src/static/app_traces.js")
+    js = read("src/static/app_ui_menu.js")
     css = read("src/static/style.css")
     assert 'id="tracesService" data-field-label="Service" data-disable-when-empty="1"' in html
     assert 'id="tracesOperation" data-field-label="Operation" data-disable-when-empty="1"' in html
-    assert 'const disableWhenEmpty = select.dataset.disableWhenEmpty === "1";' in js
-    assert 'const unavailable = !!select.disabled || (disableWhenEmpty && !hasValues);' in js
+    assert 'const disableWhenEmpty = options.disableWhenEmpty ?? selectEl.dataset.disableWhenEmpty === "1";' in js
+    assert 'const unavailable = !!selectEl.disabled || (disableWhenEmpty && !hasValues);' in js
     assert 'root.classList.toggle("is-empty", disableWhenEmpty && !hasValues);' in js
     assert '.tracePicker.is-empty .tracePicker__button::after' in css
     assert 'display: none !important;' in css

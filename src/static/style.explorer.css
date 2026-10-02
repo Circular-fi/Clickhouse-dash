@@ -3690,6 +3690,10 @@ html.chdash-page-select-hidden .pageSelect {
 @media (max-width: 820px) {
   .explorerDependencyMatrix { grid-template-columns: 1fr; }
 }
+.runSettings {
+  position: relative;
+  align-self: center;
+}
 .explorerGraphDepthControls {
   display: inline-flex;
   align-items: center;

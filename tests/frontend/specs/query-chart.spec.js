@@ -26,12 +26,18 @@ const dataRows = 'tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)';
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/query-chart`;
 
 const mainToggle = (page) => page.locator('#resultsPanel .resultsViewToggle--main');
+// A chart picker (ns.menu.select over the hidden native select): its button, then the option.
+async function pickChart(chart, select, value) {
+  const picker = chart.locator(`.tracePicker:has(> ${select})`);
+  await picker.locator('.tracePicker__button').click();
+  await picker.locator(`.tracePicker__option[data-value="${value}"]`).click();
+}
 const mainChart = (page) => page.locator('#resultsPanel > .queryChart');
 const mainTable = (page) => page.locator('#resultsPanel > .tableWrap');
 const core = (chart) => chart.locator('.chartCore');
 
 async function showChart(scope) {
-  await scope.locator('.resultsViewToggle [data-view="chart"]').first().click();
+  await scope.locator('.segmented__option[data-view="chart"]').first().click();
 }
 
 async function enableMultiquery(page) {
@@ -97,7 +103,7 @@ async function timeChartClick(page, scopeSelector) {
     const panel = document.querySelector(sel);
     const host = panel.querySelector(':scope > .queryChart') || panel.querySelector('.queryChart');
     const t0 = performance.now();
-    panel.querySelector('.resultsViewToggle [data-view="chart"]').click();
+    panel.querySelector('.segmented__option[data-view="chart"]').click();
     await new Promise((resolve) => {
       const check = () => (host.dataset.pointsDrawn && host.querySelector('.chartCore:not([hidden])') ? resolve() : requestAnimationFrame(check));
       requestAnimationFrame(check);
@@ -118,11 +124,10 @@ test('the example query charts within budget, explains the Array column and read
   const chart = mainChart(page);
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(mainTable(page)).toBeHidden();
-  // Self-explanatory controls: labelled fields, an explicit Auto choice.
-  await expect(chart.locator('.queryChart__fieldLabel')).toHaveText(['X axis', 'Y values', 'Split by']);
-  // The three pickers share one look: no native select chevron next to the
-  // custom Y values picker.
-  const looks = await chart.locator('.queryChart__x, .queryChart__seriesButton, .queryChart__group').evaluateAll((els) => els.map((el) => {
+  // Self-explanatory controls: the label inside each picker, an explicit Auto choice.
+  await expect(chart.locator('.queryChart__picker .tracePicker__button')).toHaveText([/^X axis \u00b7 /, /^Y values \u00b7 /, /^Split by \u00b7 /]);
+  // The three pickers share one look (ns.menu pickers).
+  const looks = await chart.locator('.queryChart__picker .tracePicker__button').evaluateAll((els) => els.map((el) => {
     const cs = getComputedStyle(el);
     return [cs.appearance, cs.height, cs.borderTopColor, cs.borderRadius, cs.backgroundColor, cs.backgroundImage, cs.paddingRight];
   }));
@@ -132,7 +137,7 @@ test('the example query charts within budget, explains the Array column and read
   await expect(chart.locator('.queryChart__x')).toHaveValue('auto');
   await expect(chart.locator('.queryChart__x option').first()).toHaveText('Auto (plus(now(), number))');
   await expect(chart.locator('.queryChart__x option[value="2"]')).toContainText('Array(UInt64)');
-  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('number, minus(number, 10), plus(number, 2)');
+  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 number, minus(number, 10), plus(number, 2)');
   await expect(chart.locator('.queryChart__note')).toContainText('10,000 rows');
   await expect(chart.locator('.queryChart__note')).toContainText('not numeric, not drawn: [number, 1]');
   await chart.locator('.queryChart__seriesButton').click();
@@ -335,31 +340,31 @@ test('x axis picker: Auto, row number or an explicit column', async ({ page }) =
   const chart = mainChart(page);
   const x = chart.locator('.queryChart__x');
   await expect(x).toHaveValue('auto');
-  await expect(x.locator('xpath=..')).toHaveAttribute('title', /Auto: the first date \/ time column/);
+  await expect(chart.locator('.queryChart__xField')).toHaveAttribute('title', /Auto: the first date \/ time column/);
   for (const btn of await chart.locator('.queryChart__types [data-type]').all()) expect(await btn.getAttribute('title')).toBeTruthy();
 
-  await x.selectOption('-1');
+  await pickChart(chart, '.queryChart__x', '-1');
   await expect(chart).toHaveAttribute('data-x-kind', 'index');
   await expect(chart.locator('.queryChart__rangeText')).toContainText('Row 1 → 10,000');
   await chart.locator('.chartCore__overlay').focus();
   await page.keyboard.press('Home');
   await expect(core(chart)).toHaveAttribute('data-cursor-x', 'Row 1');
 
-  await x.selectOption('0');
+  await pickChart(chart, '.queryChart__x', '0');
   await expect(chart).toHaveAttribute('data-x-kind', 'number');
-  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('minus(number, 10), plus(number, 2)');
+  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 minus(number, 10), plus(number, 2)');
   await expect(chart.locator('.queryChart__rangeText')).toContainText('number 0 → 9,999');
 
   // A text-like column as x: one category per value, drawn as bars.
-  await x.selectOption('2');
+  await pickChart(chart, '.queryChart__x', '2');
   await expect(chart).toHaveAttribute('data-x-kind', 'category');
   await expect(chart.locator('.queryChart__types [data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
 
-  await x.selectOption('auto');
+  await pickChart(chart, '.queryChart__x', 'auto');
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
   // The choice is kept for the next result with the same columns.
-  await x.selectOption('0');
+  await pickChart(chart, '.queryChart__x', '0');
   await runSuccessfulQuery(page, EXAMPLE);
   await expect(x).toHaveValue('0');
   await expect(chart).toHaveAttribute('data-x-kind', 'number');
@@ -378,7 +383,7 @@ test('time series result switches between table and chart, types and series pick
   await expect(mainTable(page)).toBeHidden();
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('v, w');
+  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 v, w');
   expect(await seriesStats(chart)).toEqual({ v: { points: 120, runs: 1 }, w: { points: 120, runs: 1 } });
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(2);
   await expect(chart.locator('.queryChart__note')).toContainText('120 rows');
@@ -410,7 +415,7 @@ test('time series result switches between table and chart, types and series pick
   await chart.locator('.queryChart__seriesButton').click();
   await chart.locator('.queryChart__seriesMenu input[value="1"]').uncheck();
   await page.keyboard.press('Escape');
-  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('w');
+  await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 w');
   expect(Object.keys(await seriesStats(chart))).toEqual(['w']);
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(1);
 
@@ -443,7 +448,7 @@ test('split-by column draws one series per value and folds the rest into Other',
   expect(labels[8]).toBe('Other');
   expect(labels.slice(0, 8).sort()).toEqual(['10', '11', '4', '5', '6', '7', '8', '9']);
   await expect(chart.locator('.queryChart__note')).toContainText('4 groups folded into Other');
-  await chart.locator('.queryChart__group').selectOption('-1');
+  await pickChart(chart, '.queryChart__group', '-1');
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(1);
   await expect(chart.locator('.queryChart__note')).toContainText('summed');
 });
@@ -692,7 +697,7 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
       await hoverPlot(page, chart, 0.62);
       await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/grouped-${theme}-${width}.png` });
       await chart.locator('.queryChart__types [data-type="area"]').click();
-      await chart.locator('.queryChart__group').selectOption('-1');
+      await pickChart(chart, '.queryChart__group', '-1');
       await page.mouse.move(2, 2);
       await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/area-${theme}-${width}.png` });
       await runSuccessfulQuery(page, BARS);

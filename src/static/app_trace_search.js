@@ -372,20 +372,14 @@
 
   // --------------------------------------------------- click-to-filter menu
 
-  // A menu under the value (ns.popover.place): an ns.layers layer, so
-  // Escape and a press outside close it and the focus goes back to the value.
+  // An ns.menu context menu under the clicked value (app_ui_menu.js: keys,
+  // focus back on the value, outside click, Escape, scroll and resize).
   let menu = null;
   let menuTarget = null;
-  let menuLayer = null;
+  let menuHandle = null;
 
-  function closeMenu({ restoreFocus = false } = {}) {
-    if (!menu || menu.hidden) return;
-    menu.hidden = true;
-    menuTarget?.setAttribute?.("aria-expanded", "false");
-    menuTarget = null;
-    const layer = menuLayer;
-    menuLayer = null;
-    layer?.close({ restoreFocus });
+  function closeMenu() {
+    menuHandle?.close({ focus: false });
   }
 
   function fieldLabel(field) {
@@ -401,15 +395,6 @@
       menu.setAttribute("role", "menu");
       menu.hidden = true;
       menu.addEventListener("click", onMenuClick);
-      menu.addEventListener("keydown", (event) => {
-        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-          event.preventDefault();
-          const items = [...menu.querySelectorAll("[role=menuitem]")];
-          const at = items.indexOf(document.activeElement);
-          items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
-        }
-      });
-      document.body.appendChild(menu);
     }
     closeMenu();
     menu.dataset.field = JSON.stringify(field);
@@ -420,17 +405,8 @@
       + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="exclude">Exclude this value</button>'
       + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="only">Search only this</button>'
       + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="copy">Copy</button>';
-    menu.hidden = false;
     menuTarget = anchor;
-    anchor?.setAttribute?.("aria-expanded", "true");
-    ns.popover.place(anchor, menu, { side: "bottom", align: "start", offset: 4 });
-    menuLayer = ns.layers.push({
-      el: menu,
-      name: "traceFilterMenu",
-      opener: anchor,
-      onDismiss: (reason) => { closeMenu({ restoreFocus: reason === "escape" }); },
-    });
-    menu.querySelector("[role=menuitem]")?.focus({ preventScroll: true });
+    menuHandle = ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false, onClose: () => { menuTarget = null; menuHandle = null; } }) || null;
   }
 
   // Applies one filter action and searches (from the detail page too: the
@@ -632,13 +608,11 @@
       const next = TAG_OPS[(TAG_OPS.indexOf(tagOp()) + 1) % TAG_OPS.length];
       setTagOp(next);
     });
-    // Values anywhere in the Traces view open the menu; a scroll or a
-    // resize closes it. Bound while the view shows (ns.lifecycle).
+    // Values anywhere in the Traces view open the menu (ns.menu closes it on
+    // a scroll or a resize). Bound while the view shows (ns.lifecycle).
     ns.lifecycle.bind("traces", (scope) => {
       scope.listen(document, "click", onDocumentClick, true);
       scope.listen(document, "keydown", onDocumentKeydown, true);
-      scope.listen(window, "scroll", (event) => { if (!(menu && event.target instanceof Node && menu.contains(event.target))) closeMenu(); }, { passive: true, capture: true });
-      scope.listen(window, "resize", () => closeMenu(), { passive: true });
       scope.add(() => closeMenu());
     });
     facets = createFacets();

@@ -61,7 +61,9 @@ def test_page_and_run_settings_use_connected_dropdowns() -> None:
     assert 'id="runOptAutoFormat"' not in run_menu
     assert 'id="runOptMultiQuery"' not in run_menu
     assert 'id="downloadDebugButton"' in run_menu
-    assert "togglePageMenu" in ui and "toggleRunSettings" in ui
+    # Both are ns.menu menus (app_ui_menu.js).
+    assert "menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu" in ui
+    assert "menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu)" in ui
     assert 'pageSelect: byId("pageSelect")' in dom
     assert 'class="runSettings__button"' in html
     assert 'editorAutocompleteControl__gear' in html
