@@ -165,7 +165,7 @@ test('Storage mode lists databases by size and zooms into a database and a table
   // Sorting by name, then back to size.
   const nameHeader = list.locator('thead th').filter({ hasText: 'Database' });
   await nameHeader.locator('button').click();
-  await expect(nameHeader).toHaveAttribute('data-sort', 'asc');
+  await expect(nameHeader).toHaveAttribute('aria-sort', 'ascending');
   const sortedNames = await names();
   expect(sortedNames).toEqual([...sortedNames].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })));
 

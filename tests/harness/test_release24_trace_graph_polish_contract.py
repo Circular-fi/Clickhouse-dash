@@ -52,8 +52,9 @@ def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
     assert 'th.classList.add("has-finalize-info")' in info
     assert 'event.stopPropagation()' in info
     release = css[css.rindex("/* Release 24: trace geometry"):]
-    assert 'th.resultTable__thSortable.has-finalize-info::after' in release
-    assert 'right: 0.8rem;' in release
+    # The sort glyph sits inline in the header's sort button (.dataTable__sort),
+    # so the info icon keeps its own corner: the header leaves room for it.
+    assert '.explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {' in css
     assert '.explorerFinalizeInfo {' in release
     assert 'top: 2px;' in release and 'right: 2px;' in release
     assert 'width: 9px;' in release and 'height: 9px;' in release

@@ -1651,98 +1651,8 @@ button.button:not(:disabled):hover {
   overflow: auto;
   box-shadow: 0 0.0625rem 0 rgba(255, 255, 255, 0.02);
 }
-.resultTable {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-.resultTable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  text-align: left;
-  padding: 0.75rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--rowDivider);
-  border-right: 1px solid var(--rowDivider);
-  color: color-mix(in srgb, var(--text) 92%, transparent);
-  font-weight: 950;
-  white-space: nowrap;
-}
-.resultTable thead th {
-  background: var(--theadBg);
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable {
-  cursor: pointer;
-  padding-right: 1.9rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
-  content: "\2195";
-  position: absolute;
-  margin-left: 0.4rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1rem;
-  text-align: center;
-  opacity: 0.45;
-  pointer-events: none;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable:hover::after {
-  opacity: 0.8;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
-  content: "\25b2";
-  opacity: 0.9;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
-  content: "\25bc";
-  opacity: 0.9;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {
-  left: 0px;
-  z-index: 3;
-  background: var(--panel);
-}
-.resultTable__rowIndex {
-  width: 6ch;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.resultTable:not(.resultTable--vertical) tbody td.resultTable__stickyLeft {
-  position: sticky;
-  left: 0px;
-  z-index: 1;
-  background: var(--panel);
-}
-.resultTable thead th.resultTable__rowIndex {
-  padding: 0.55rem 0.45rem;
-  padding-right: 1.45rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__rowIndex.resultTable__thSortable::after {
-  right: 0.35rem;
-}
-.resultTable tbody td.resultTable__rowIndex {
-  padding: 0.45rem 0.45rem;
-}
-.resultTable tbody td.resultTable__gaugeCell {
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
-  background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--gaugeFill, 0%) 100%;
-  opacity: 1;
-}
-.resultTable:not(.resultTable--vertical) tbody td.resultTable__numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 .resultTable tbody td {
-    padding: 0.2rem 0.4rem;
-    border: 1px solid var(--rowDivider);
-    vertical-align: middle;
-    white-space: pre;
+  white-space: pre;
 }
 .button--small {
   height: 1.9rem;
@@ -1792,12 +1702,13 @@ button.button:not(:disabled):hover {
   width: auto;
 }
 .resultTable.resultTable--vertical tbody th {
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--rowDivider);
+  padding-top: 6px;
+  padding-bottom: 6px;
   vertical-align: top;
-  font-weight: 950;
-  color: color-mix(in srgb, var(--text) 92%, transparent);
-  background: color-mix(in srgb, var(--theadBg) 45%, transparent);
+  color: var(--muted);
+  font-size: var(--dt-head-font);
+  font-weight: var(--dt-head-weight);
+  background: var(--theadBg);
 }
 .resultTable.resultTable--vertical tbody td {
   white-space: pre-wrap;
@@ -2273,13 +2184,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 .jsonPretty .jBool { color: var(--json-bool); }
 .jsonPretty .jNull { color: var(--json-null); font-style: italic; }
 .nullToken { color: var(--json-null); font-style: italic; }
-.resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
-  background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--gaugeFill, 0%) 100%;
-}
 .resultsStack__toggle {
   width: 3rem;
 }
@@ -3136,20 +3040,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 .analysisModal__content {
   padding: 6px 8px 8px;
 }
-.resultTable tbody td.resultTable__gaugeCell,
-.resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in srgb, var(--accentBorder) 8%, transparent),
-      color-mix(in srgb, var(--accentBorder) 8%, transparent)
-    ),
-    linear-gradient(transparent, transparent);
-  background-repeat: no-repeat, no-repeat;
-  background-origin: content-box, padding-box;
-  background-clip: content-box, padding-box;
-  background-size: var(--gaugeFill, 0%) 100%, 100% 100%;
-}
 .themeSelect--icons .themeSelect__button--icon {
   width: 34px;
   min-width: 34px;
@@ -3388,9 +3278,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerDatabaseObjectsTable {
   margin-top: 8px;
   margin-bottom: 12px;
-}
-.explorerDatabaseObjectsTable .resultTable > tbody > tr > td {
-  white-space: nowrap;
 }
 .explorerDatabaseObjectsTable__open {
   display: inline-block;
@@ -4168,20 +4055,6 @@ html.chdash-page-select-hidden .pageSelect {
 .traceViewer__serviceMarker {
   background: var(--trace-attempt-color);
 }
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
-  padding-right: 2.8rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
-  right: 0.8rem;
-  margin-left: 0;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
-  right: auto;
-  margin-left: 0.4rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
-  padding-right: 2.35rem;
-}
 #queryWorkspace,
 .explorerDetailPane,
 .explorerTableList,
@@ -4871,25 +4744,15 @@ html.chdash-page-select-hidden .pageSelect {
 .rowDetailsMenu .runMenu__opt--note:hover {
   background: transparent;
 }
-.resultTable tbody td.resultTable__rowIndex:not(.resultTable__stickyLeft) {
-  position: relative;
+.resultTable tbody tr.is-rowMenuTarget > td {
+  background-color: var(--rowHover);
 }
-.resultTable tbody tr.is-rowExpanded > td.resultTable__rowIndex::before,
-.resultTable tbody tr.is-rowMenuTarget > td.resultTable__rowIndex::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accentBorder);
-  pointer-events: none;
+.resultTable tbody tr.is-rowMenuTarget > :first-child {
+  box-shadow: inset 3px 0 0 var(--accent-fill);
 }
 .resultTable tbody td.is-copyTarget,
 .resultTable thead th.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr > td.resultTable__stickyLeft.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft.is-copyTarget {
+.resultTable:not(.resultTable--vertical) tbody tr.is-selected > td.is-copyTarget {
   background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
 }
 .runMenu.rowDetailsMenu.is-open {
@@ -5026,10 +4889,6 @@ html.chdash-page-select-hidden .pageSelect {
 .rowDetails__line:first-child .rowDetails__value {
   /* Keep the first value readable under the overlay actions. */
   padding-right: 9rem;
-}
-.resultTable tbody tr.is-rowExpanded > td,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft {
-  background-color: color-mix(in srgb, var(--accentBorder) 16%, var(--panel));
 }
 :root { --traceDot: #12939a; }
 .chartCore__tipRow.is-error em,
@@ -5404,20 +5263,6 @@ html[data-theme="light"] {
   background-repeat: no-repeat;
   background-position: left center;
   background-size: var(--bar-pct, 0%) 100%;
-}
-.resultTable tbody td.explorerBar--cell,
-.resultTable tbody tr:hover td.explorerBar--cell,
-.explorerWorkspace .resultTable tbody td.resultTable__gaugeCell,
-.explorerWorkspace .resultTable tbody tr:hover td.resultTable__gaugeCell,
-.explorerWorkspace .resultTable tbody td.explorerStorageGaugeCell {
-  /* Gauge cells carry their fill in --gaugeFill, Explorer bars in --bar-pct. */
-  --bar-pct-resolved: var(--bar-pct, var(--gaugeFill, 0%));
-  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill)), linear-gradient(transparent, transparent);
-  background-repeat: no-repeat, no-repeat;
-  background-origin: content-box, padding-box;
-  background-clip: content-box, padding-box;
-  background-size: var(--bar-pct-resolved) 100%, 100% 100%;
-  background-position: left center, left top;
 }
 .explorerTreeToggle {
   display: none;
@@ -7305,6 +7150,11 @@ button:not(.is-loading) > .uiSpin { display: none; }
 .dataTable > tbody > tr:last-child > th {
   border-bottom-color: transparent;
 }
+.dataTable--grid > thead > tr > th,
+.dataTable--grid > tbody > tr > td,
+.dataTable--grid > tbody > tr > th {
+  border-right: 1px solid var(--dt-divider);
+}
 .dataTable .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -7331,6 +7181,21 @@ button:not(.is-loading) > .uiSpin { display: none; }
   color: var(--muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.dataTable--grid > tbody > tr > .dataTable__rowNum,
+.dataTable--grid > thead > tr > .dataTable__rowNum {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+.dataTable--grid > thead > tr > .dataTable__rowNum {
+  z-index: 3;
+  background: var(--theadBg);
+}
+.dataTable--grid > tbody > tr:hover > .dataTable__rowNum,
+.dataTable--grid > tbody > tr.is-selected > .dataTable__rowNum {
+  background: linear-gradient(var(--rowHover), var(--rowHover)) var(--panel);
 }
 .dataTable > thead > tr > th.num .dataTable__sort {
   flex-direction: row-reverse;
@@ -7382,12 +7247,13 @@ th[aria-sort="descending"] > .dataTable__sort::after {
   --cellBar-color: var(--accent-fill);
   background-image:
     linear-gradient(color-mix(in srgb, var(--cellBar-color) 70%, transparent), color-mix(in srgb, var(--cellBar-color) 70%, transparent)),
-    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent));
+    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent)),
+    linear-gradient(transparent, transparent);
   background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--cellBar, 0%) 3px, 100% 3px;
-  background-position: left bottom 3px, left bottom 3px;
+  background-origin: content-box, content-box, padding-box;
+  background-clip: content-box, content-box, padding-box;
+  background-size: var(--cellBar, 0%) 3px, 100% 3px, 100% 100%;
+  background-position: left bottom 3px, left bottom 3px, 0 0;
 }
 .dataTable .dataTable__copy {
   margin-left: 4px;
@@ -7938,6 +7804,17 @@ button.chip__op:hover {
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.statTiles--boxed > .statTile {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.statTiles--boxed > .statTile.is-warn {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+.statTiles--boxed > .statTile.is-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 .statTile.is-error .statTile__value { color: var(--danger); }
 .statTile.is-warn .statTile__value { color: var(--warning); }

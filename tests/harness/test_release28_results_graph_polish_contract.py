@@ -61,8 +61,9 @@ def test_finalize_info_does_not_displace_sort_marker() -> None:
     css = read("src/static/style.css")
     assert ".explorerFinalizeInfo {\n  position: absolute;" in css
     assert "right: 2px;" in css
-    marker = ".resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {\n  right: auto;\n  margin-left: 0.4rem;\n}"
-    assert marker in css
+    # The sort marker is inline in the sort button, after the label.
+    assert ".dataTable__sort::after {\n  content: \"\\2195\";" in css
+    assert ".explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {\n  padding-right: 16px;\n}" in css
 
 
 def test_graph_animation_is_topological_without_background_activity_polling() -> None:

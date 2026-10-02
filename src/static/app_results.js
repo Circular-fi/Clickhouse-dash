@@ -1283,13 +1283,16 @@
     if (scaleChanged) numericDirty = true;
   }
 
-  function setGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
-    td.classList.add("resultTable__gaugeCell");
-    td.classList.add("resultTable__numeric");
-    const n = extractFiniteNumber(raw);
-    const scale = computeGaugeScale(n, maxArr[colIndex] || 0, minArr[colIndex] || 0);
-    const fill = scale > 0 ? String(scale * 100) + "%" : "0%";
-    td.style.setProperty("--gaugeFill", fill);
+  // In-cell bar of a numeric cell (ns.table.cellBar): measures only, never on
+  // an identifier-like column or one holding a negative value (barEligible).
+  function setGaugeCell(td, raw, colIndex, text, maxArr, minArr, name = "") {
+    td.classList.add("num");
+    const min = minArr[colIndex] || 0;
+    if (ns.table && ns.table.barEligible({ name, min })) {
+      const n = extractFiniteNumber(raw);
+      const scale = computeGaugeScale(n, maxArr[colIndex] || 0, min);
+      ns.table.cellBar(td, scale > 0 ? scale * 100 : 0);
+    }
     setDisplayCell(td, raw, text);
   }
 
@@ -1403,11 +1406,10 @@
 
   function updateLiveSortIndicators() {
     if (!dom.resultTableHead) return;
-    const ths = dom.resultTableHead.querySelectorAll("th.resultTable__thSortable");
+    const ths = dom.resultTableHead.querySelectorAll("th.is-sortable");
     for (const th of ths) {
       const k = Number(th.dataset.sortKey || "");
-      if (sortKey !== null && sortDir && k === sortKey) th.dataset.sort = sortDir;
-      else th.removeAttribute("data-sort");
+      ns.table.setSort(th, sortKey !== null && sortDir && k === sortKey ? sortDir : "");
     }
   }
 
@@ -1438,7 +1440,7 @@
 
   function appendLiveRowCells(tr, row) {
     const tdIndex = document.createElement("td");
-    tdIndex.className = "resultTable__rowIndex resultTable__stickyLeft";
+    tdIndex.className = "dataTable__rowNum";
     tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
     tr.appendChild(tdIndex);
 
@@ -1448,14 +1450,14 @@
         const td = document.createElement("td");
         if (gaugeNumericCols[columnIndex] && allResultRows.length > 1) {
           const text = formatNumericCellText(row[columnIndex], columnIndex, numericMaxScale);
-          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin);
+          if (liveGaugesEnabled) setGaugeCell(td, row[columnIndex], columnIndex, text, gaugeMax, gaugeMin, resultColumns[columnIndex]);
           else {
-            td.classList.add("resultTable__numeric");
+            td.classList.add("num");
             setDisplayCell(td, row[columnIndex], text);
           }
         } else {
           const text = formatCellForDisplay(row[columnIndex], columnIndex, false);
-          if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("resultTable__numeric");
+          if (isScalarNumericType(resultTypeAsts[columnIndex] || null)) td.classList.add("num");
           setDisplayCell(td, row[columnIndex], text);
         }
         tr.appendChild(td);
@@ -1720,18 +1722,15 @@
 
     const thIndex = document.createElement("th");
     thIndex.textContent = "#";
-    thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
-    thIndex.dataset.sortKey = "-1";
-    thIndex.addEventListener("click", () => setLiveSort(-1));
+    thIndex.className = "dataTable__rowNum";
+    ns.table.sortHeader(thIndex, { key: -1, onSort: () => setLiveSort(-1), title: "Sort by row number" });
     tr.appendChild(thIndex);
 
     for (let i = 0; i < resultColumns.length; i++) {
       const th = document.createElement("th");
       th.textContent = resultColumns[i];
       if (resultTypes[i]) th.title = resultTypes[i];
-      th.classList.add("resultTable__thSortable");
-      th.dataset.sortKey = String(i);
-      th.addEventListener("click", () => setLiveSort(i));
+      ns.table.sortHeader(th, { key: i, onSort: () => setLiveSort(i) });
       tr.appendChild(th);
     }
     dom.resultTableHead.appendChild(tr);
@@ -1962,7 +1961,7 @@
       dom.resultTableBody.appendChild(tr);
     }
 
-    let td = tr.querySelector("td:not(.resultTable__rowIndex)");
+    let td = tr.querySelector("td:not(.dataTable__rowNum)");
     if (!td) td = document.createElement("td");
 
     tr.innerHTML = "";
@@ -1987,7 +1986,7 @@
       renderSingleValueCell(cell, raw, 0, resultTypeAsts);
     };
 
-    const td = dom.resultTableBody.querySelector("tr td:not(.resultTable__rowIndex)");
+    const td = dom.resultTableBody.querySelector("tr td:not(.dataTable__rowNum)");
     if (!td) {
       requestAnimationFrame(() => apply());
       return;
@@ -2612,11 +2611,10 @@
 
     function updateLocalSortIndicators() {
       if (!local.wrap) return;
-      const ths = local.wrap.querySelectorAll("thead th.resultTable__thSortable");
+      const ths = local.wrap.querySelectorAll("thead th.is-sortable");
       for (const th of ths) {
         const k = Number(th.dataset.sortKey || "");
-        if (local.sortKey !== null && local.sortDir && k === local.sortKey) th.dataset.sort = local.sortDir;
-        else th.removeAttribute("data-sort");
+        ns.table.setSort(th, local.sortKey !== null && local.sortDir && k === local.sortKey ? local.sortDir : "");
       }
     }
 
@@ -2643,7 +2641,7 @@
 
     function appendLocalRowCells(tr, row) {
       const tdIndex = document.createElement("td");
-      tdIndex.className = "resultTable__rowIndex resultTable__stickyLeft";
+      tdIndex.className = "dataTable__rowNum";
       tdIndex.textContent = row && row.__chdashRowIndex ? String(row.__chdashRowIndex) : "";
       tr.appendChild(tdIndex);
 
@@ -2653,14 +2651,14 @@
           const td = document.createElement("td");
           if (local.gaugeNumericCols[i] && local.allRows.length > 1) {
             const text = formatNumericCellText(row[i], i, local.numericMaxScale);
-            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin);
+            if (local.gaugesEnabled) setGaugeCell(td, row[i], i, text, local.gaugeMax, local.gaugeMin, local.columns[i]);
             else {
-              td.classList.add("resultTable__numeric");
+              td.classList.add("num");
               setDisplayCell(td, row[i], text);
             }
           } else {
             const text = formatCellForDisplayWithTypes(row[i], i, false, local.typeAsts);
-            if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("resultTable__numeric");
+            if (isScalarNumericType(local.typeAsts[i] || null)) td.classList.add("num");
             setDisplayCell(td, row[i], text);
           }
           tr.appendChild(td);
@@ -2880,7 +2878,7 @@
         tbody.appendChild(tr);
       }
 
-      let td = tr.querySelector("td:not(.resultTable__rowIndex)");
+      let td = tr.querySelector("td:not(.dataTable__rowNum)");
       if (!td) td = document.createElement("td");
 
       tr.innerHTML = "";
@@ -2902,7 +2900,7 @@
         const td = simplifySingleValueTableLocal();
         if (td) renderSingleValueCell(td, raw, 0, local.typeAsts);
       };
-      const td = tbody.querySelector("tr td:not(.resultTable__rowIndex)");
+      const td = tbody.querySelector("tr td:not(.dataTable__rowNum)");
       if (!td) {
         requestAnimationFrame(() => apply());
         return;
@@ -2936,17 +2934,14 @@
       const tr = document.createElement("tr");
       const thIndex = document.createElement("th");
       thIndex.textContent = "#";
-      thIndex.className = "resultTable__rowIndex resultTable__stickyLeft resultTable__thSortable";
-      thIndex.dataset.sortKey = "-1";
-      thIndex.addEventListener("click", () => setLocalSort(-1));
+      thIndex.className = "dataTable__rowNum";
+      ns.table.sortHeader(thIndex, { key: -1, onSort: () => setLocalSort(-1), title: "Sort by row number" });
       tr.appendChild(thIndex);
       for (let i = 0; i < local.columns.length; i++) {
         const th = document.createElement("th");
         th.textContent = local.columns[i];
         if (local.types[i]) th.title = local.types[i];
-        th.classList.add("resultTable__thSortable");
-        th.dataset.sortKey = String(i);
-        th.addEventListener("click", () => setLocalSort(i));
+        ns.table.sortHeader(th, { key: i, onSort: () => setLocalSort(i) });
         tr.appendChild(th);
       }
       thead.appendChild(tr);
@@ -3171,6 +3166,8 @@
     rowIndexValue = null,
     rowDetails = false,
     nullsLast = false,
+    compact = false,
+    bars = true,
   } = {}) {
     const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
     const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
@@ -3198,7 +3195,7 @@
     const wrap = document.createElement("div");
     wrap.className = `tableWrap ${String(className || "").trim()}`.trim();
     const table = document.createElement("table");
-    table.className = "resultTable";
+    table.className = `resultTable dataTable dataTable--grid${compact ? " dataTable--compact" : ""}`;
     const thead = document.createElement("thead");
     const tbody = document.createElement("tbody");
     table.append(thead, tbody);
@@ -3268,15 +3265,16 @@
       const head = document.createElement("tr");
       const indexHead = document.createElement("th");
       indexHead.textContent = "#";
-      indexHead.className = `resultTable__rowIndex resultTable__stickyLeft${indexSortable ? " resultTable__thSortable" : ""}`;
+      indexHead.className = "dataTable__rowNum";
       if (indexSortable) {
-        indexHead.dataset.sortKey = "-1";
-        if (sortKey === -1 && sortDir) indexHead.dataset.sort = sortDir;
-        indexHead.addEventListener("click", () => {
-          const next = nextDirection(-1);
-          sortKey = next ? -1 : null;
-          sortDir = next;
-          render();
+        ns.table.sortHeader(indexHead, {
+          key: -1, dir: sortKey === -1 ? sortDir : "", title: "Sort by row number",
+          onSort: () => {
+            const next = nextDirection(-1);
+            sortKey = next ? -1 : null;
+            sortDir = next;
+            render();
+          },
         });
       }
       head.appendChild(indexHead);
@@ -3285,14 +3283,14 @@
         const th = document.createElement("th");
         th.textContent = column;
         if (safeTypes[index]) th.title = safeTypes[index];
-        th.className = "resultTable__thSortable";
-        th.dataset.sortKey = String(index);
-        if (sortKey === index && sortDir) th.dataset.sort = sortDir;
-        th.addEventListener("click", () => {
-          const next = nextDirection(index);
-          sortKey = next ? index : null;
-          sortDir = next;
-          render();
+        ns.table.sortHeader(th, {
+          key: index, dir: sortKey === index ? sortDir : "",
+          onSort: () => {
+            const next = nextDirection(index);
+            sortKey = next ? index : null;
+            sortDir = next;
+            render();
+          },
         });
         if (typeof decorateHeader === "function") {
           decorateHeader(th, {
@@ -3332,7 +3330,7 @@
       for (const entry of display) {
         const tr = document.createElement("tr");
         const indexCell = document.createElement("td");
-        indexCell.className = "resultTable__rowIndex resultTable__stickyLeft";
+        indexCell.className = "dataTable__rowNum";
         const customIndex = typeof rowIndexValue === "function"
           ? rowIndexValue(entry.row, entry.index - 1, entry.index)
           : entry.index;
@@ -3343,7 +3341,7 @@
           for (let index = 0; index < safeColumns.length; index++) {
             const td = document.createElement("td");
             const ast = typeAsts[index] || null;
-            if (isScalarNumericType(ast)) td.classList.add("resultTable__numeric");
+            if (isScalarNumericType(ast)) td.classList.add("num");
             const handled = typeof renderCell === "function" && renderCell(td, {
               value: entry.row[index],
               row: entry.row,
@@ -3353,9 +3351,9 @@
               columnIndex: index,
             }) === true;
             if (!handled) {
-              if (staticNumericCols[index] && safeRows.length > 1) {
+              if (bars && staticNumericCols[index] && safeRows.length > 1) {
                 const text = formatNumericCellText(entry.row[index], index, staticMaxScale);
-                setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin);
+                setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);
               } else {
                 setDisplayCell(td, entry.row[index], formatCellForDisplayWithTypes(entry.row[index], index, false, typeAsts));
               }
@@ -3505,12 +3503,12 @@
   function setRowDetailsAnchor(view, anchor) {
     if (view.anchor === anchor) return;
     if (view.anchor) {
-      view.anchor.classList.remove("is-rowExpanded");
+      view.anchor.classList.remove("is-rowExpanded", "is-selected");
       view.anchor.removeAttribute("aria-expanded");
     }
     view.anchor = anchor;
     if (anchor) {
-      anchor.classList.add("is-rowExpanded");
+      anchor.classList.add("is-rowExpanded", "is-selected");
       anchor.setAttribute("aria-expanded", "true");
     }
   }
@@ -3586,7 +3584,7 @@
   // The cells an action applies to, lit while its menu item is hovered or
   // focused: the cell, the row, or the column (mounted cells and header).
   function rowMenuTargetCells(table, tr, columnIndex, scope) {
-    const offset = tr && tr.cells[0] && tr.cells[0].classList.contains("resultTable__rowIndex") ? 1 : 0;
+    const offset = tr && tr.cells[0] && tr.cells[0].classList.contains("dataTable__rowNum") ? 1 : 0;
     const col = columnIndex + offset;
     if (scope === "row") return tr ? [...tr.cells] : [];
     if (scope === "cell") return tr && tr.cells[col] ? [tr.cells[col]] : [];
@@ -4022,7 +4020,7 @@
     ev.preventDefault();
     // Data cells follow the row-number cell.
     const td = target.closest("td");
-    const offset = tr.cells[0] && tr.cells[0].classList.contains("resultTable__rowIndex") ? 1 : 0;
+    const offset = tr.cells[0] && tr.cells[0].classList.contains("dataTable__rowNum") ? 1 : 0;
     const columnIndex = td && td.parentElement === tr ? td.cellIndex - offset : -1;
     openRowDetailsMenu(ev.clientX, ev.clientY, binding, table, columnIndex, tr);
   }

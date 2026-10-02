@@ -234,21 +234,25 @@ test('format and clear buttons follow actual editor and result state', async ({ 
   await expect(clear).toBeDisabled();
 });
 
-test('numeric gauges fill from the column baseline: most negative value empty, largest full', async ({ page }) => {
+test('in-cell bars: measures only, from zero; never on a signed or an identifier column', async ({ page }) => {
   await openApp(page);
-  await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p ORDER BY v');
+  await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p, toUInt32(v + 100) AS id ORDER BY v');
   const fills = (col) => page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').evaluateAll((trs, c) =>
-    trs.map((tr) => parseFloat(tr.cells[c].style.getPropertyValue('--gaugeFill'))), col);
-  // v: range [-10, 12] -> -10 has no fill, 12 fills the cell, 0 sits at 10/22.
-  const v = await fills(1);
-  expect(v[0]).toBe(0);
-  expect(v[4]).toBe(100);
-  expect(v[2]).toBeCloseTo(100 * 10 / 22, 3);
-  expect(v[1]).toBeCloseTo(100 * 7 / 22, 3);
+    trs.map((tr) => (tr.cells[c].classList.contains('cellBar') ? parseFloat(tr.cells[c].style.getPropertyValue('--cellBar')) : null)), col);
+  // v holds negatives: no bars (a signed column has no zero to grow from).
+  expect(await fills(1)).toEqual([null, null, null, null, null]);
   // p has no negatives: bars stay proportional to the values (baseline 0).
   const p = await fills(2);
-  expect(p[0]).toBeCloseTo(100 * 10 / 32, 3);
+  expect(p[0]).toBeCloseTo(100 * 10 / 32, 2);
   expect(p[4]).toBe(100);
+  // id names an identifier: no bars either.
+  expect(await fills(3)).toEqual([null, null, null, null, null]);
+  // Numbers are right-aligned tabular figures in the table font, not mono.
+  const look = await page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').first().locator('td').nth(2).evaluate((td) => {
+    const cs = getComputedStyle(td);
+    return { align: cs.textAlign, numeric: cs.fontVariantNumeric, mono: /mono/i.test(cs.fontFamily) };
+  });
+  expect(look).toEqual({ align: 'right', numeric: 'tabular-nums', mono: false });
 });
 
 test('normal query cannot expose analysis', async ({ page }) => {
@@ -782,7 +786,7 @@ function textSortKey(value) { return String(value).toLowerCase(); }
 async function expectObjectColumnSorted(page, column, direction) {
   const header = page.locator('#explorerDatabaseObjects thead th').nth(column + 1);
   await header.click();
-  await expect(header).toHaveAttribute('data-sort', direction);
+  await expect(header).toHaveAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
   const rows = await databaseObjectRows(page);
   const numeric = DATABASE_OBJECT_NUMERIC(column);
   const keys = rows.map((row) => {
@@ -810,7 +814,7 @@ test('database detail lists every object under the storage band, sorts each colu
   const objects = page.locator('#explorerDatabaseObjects');
   await expect(objects).toBeVisible();
   await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
-  await expect(objects.locator('thead th.resultTable__thSortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
+  await expect(objects.locator('thead th.is-sortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
   // Placed under the compact storage band.
   const storageBox = await page.locator('#explorerDetailContent .explorerDatabaseStorage').boundingBox();
   const tableBox = await objects.boundingBox();
@@ -910,7 +914,7 @@ test('database object table handles hundreds of tables and empty databases', asy
     return performance.now() - started;
   });
   expect(elapsedMs).toBeLessThan(1000);
-  await expect(sizeHeader).toHaveAttribute('data-sort', 'desc');
+  await expect(sizeHeader).toHaveAttribute('aria-sort', 'descending');
   const maxBytes = Math.max(...synthetic.map((table) => table.bytes));
   const rows = await databaseObjectRows(page);
   expect(Number(rows[0].cells[3].value)).toBe(maxBytes);
@@ -1113,7 +1117,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await expect(view.locator('.rowDetails__type')).toHaveCount(0);
   // The detail's accent bar sits at exactly the same x as the expanded row's bar.
   const bars = await page.evaluate(() => {
-    const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.resultTable__rowIndex');
+    const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.dataTable__rowNum');
     const detail = document.querySelector('.rowDetails');
     const inner = (el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).borderLeftWidth);
     const bar = (el) => {
@@ -1241,7 +1245,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await page.locator('#resultTableHead th[data-sort-key="0"]').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
   const expanded = page.locator('#resultTableBody tr.is-rowExpanded');
-  await expect(expanded.locator('td.resultTable__rowIndex')).toHaveText('3');
+  await expect(expanded.locator('td.dataTable__rowNum')).toHaveText('3');
   await expectDetailRightAfter(expanded);
 
   // Starting a new query dismisses it too.
@@ -1286,7 +1290,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await expect(menu).not.toContainText(/shift/i);
   expect((await menu.getByRole('menuitem').first().boundingBox()).height).toBeLessThanOrEqual(28);
   await expect(rows.nth(2)).toHaveClass(/is-rowMenuTarget/);
-  expect(await rows.nth(2).locator('td.resultTable__rowIndex').evaluate((td) => getComputedStyle(td, '::before').backgroundColor)).toBe('rgb(37, 99, 235)');
+  expect(await rows.nth(2).locator('td.dataTable__rowNum').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('rgb(37, 99, 235)');
   // Hovering an action lights exactly what it copies.
   const lit = () => page.evaluate(() => [...document.querySelectorAll('.is-copyTarget')].map((el) => {
     const tr = el.parentElement;
@@ -1361,8 +1365,8 @@ test('row menu Details on another row replaces the open detail, and copies a cel
 
   // The expanded row's highlight fills its numeric gauge cells edge to edge
   // (the gauge bar is clipped to the content box, the row colour is not).
-  const gaugeClip = await next.locator('td.resultTable__gaugeCell').first().evaluate((td) => getComputedStyle(td).backgroundClip);
-  expect(gaugeClip).toBe('content-box, padding-box');
+  const gaugeClip = await next.locator('td.cellBar').first().evaluate((td) => getComputedStyle(td).backgroundClip);
+  expect(gaugeClip).toBe('content-box, content-box, padding-box');
 
   // The close button is frameless, like the editor options cog.
   const close = page.locator('.rowDetails__close');
@@ -1425,7 +1429,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   const visibleRowIndex = () => page.evaluate(() => {
     const el = document.elementFromPoint(Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2));
     const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
-    return tr ? Number(tr.querySelector('.resultTable__rowIndex').textContent) : 0;
+    return tr ? Number(tr.querySelector('.dataTable__rowNum').textContent) : 0;
   });
   // Every mounted data row sits at (index - 1) * rowH, plus the detail height
   // for rows after the expanded one: no jump anywhere in the window.
@@ -1434,7 +1438,7 @@ test('inline row details stay attached to their virtualized row and are counted 
     const top = tbody.getBoundingClientRect().top;
     let worst = 0;
     for (const tr of tbody.querySelectorAll('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)')) {
-      const index = Number(tr.querySelector('.resultTable__rowIndex').textContent);
+      const index = Number(tr.querySelector('.dataTable__rowNum').textContent);
       const expected = (index - 1) * rowH + (index > expandedIndex ? detailH : 0);
       worst = Math.max(worst, Math.abs(tr.getBoundingClientRect().top - top - expected));
     }
@@ -1444,7 +1448,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   await scrollBy(10000 * 32);
   await expect.poll(visibleRowIndex, { timeout: 10_000 }).toBeGreaterThan(2000);
   const index = await visibleRowIndex();
-  const rowFor = (n) => body.locator('tr').filter({ has: page.locator(`td.resultTable__rowIndex:text-is("${n}")`) });
+  const rowFor = (n) => body.locator('tr').filter({ has: page.locator(`td.dataTable__rowNum:text-is("${n}")`) });
   const closed = await extent();
   const view = await openRowDetailsFromRow(page, rowFor(index));
   await expect(view).toHaveAttribute('data-row', String(index));
@@ -1473,7 +1477,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   await scrollBy(3000 * 32);
   await expect.poll(async () => body.locator('tr.resultTable__detailRow').count(), { timeout: 10_000 }).toBe(1);
   await expectDetailRightAfter(rowFor(index));
-  await expect(body.locator('tr.is-rowExpanded td.resultTable__rowIndex')).toHaveText(String(index));
+  await expect(body.locator('tr.is-rowExpanded td.dataTable__rowNum')).toHaveText(String(index));
   // The same detail content is re-inserted (not rebuilt) after the new <tr>.
   expect(await page.evaluate(() => document.querySelector('#resultTableBody tr.resultTable__detailRow').__rowDetailsProbe === true)).toBe(true);
 

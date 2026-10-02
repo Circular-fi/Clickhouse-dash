@@ -1905,115 +1905,26 @@ button.button:not(:disabled):hover {
   box-shadow: 0 0.0625rem 0 rgba(255, 255, 255, 0.02);
 }
 
-.resultTable {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.9rem;
-  font-weight: 500;
-}
-
-.resultTable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  text-align: left;
-  padding: 0.75rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  border-left: 1px solid var(--rowDivider);
-  border-right: 1px solid var(--rowDivider);
-  color: color-mix(in srgb, var(--text) 92%, transparent);
-  font-weight: 950;
-  white-space: nowrap;
-}
-
-.resultTable thead th {
-  background: var(--theadBg);
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable {
-  cursor: pointer;
-  padding-right: 1.9rem;
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable::after {
-  content: "\2195";
-  position: absolute;
-  margin-left: 0.4rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1rem;
-  text-align: center;
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable:hover::after {
-  opacity: 0.8;
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="asc"]::after {
-  content: "\25b2";
-  opacity: 0.9;
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable[data-sort="desc"]::after {
-  content: "\25bc";
-  opacity: 0.9;
-}
-
-.resultTable:not(.resultTable--vertical) thead th.resultTable__stickyLeft {
-  left: 0px;
-  z-index: 3;
-  background: var(--panel);
-}
-
-.resultTable__rowIndex {
-  width: 6ch;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.resultTable:not(.resultTable--vertical) tbody td.resultTable__stickyLeft {
-  position: sticky;
-  left: 0px;
-  z-index: 1;
-  background: var(--panel);
-}
 
 
-.resultTable thead th.resultTable__rowIndex {
-  padding: 0.55rem 0.45rem;
-  padding-right: 1.45rem;
-}
 
-.resultTable:not(.resultTable--vertical) thead th.resultTable__rowIndex.resultTable__thSortable::after {
-  right: 0.35rem;
-}
 
-.resultTable tbody td.resultTable__rowIndex {
-  padding: 0.45rem 0.45rem;
-}
 
-.resultTable tbody td.resultTable__gaugeCell {
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
-  background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--gaugeFill, 0%) 100%;
-  opacity: 1;
-}
 
-.resultTable:not(.resultTable--vertical) tbody td.resultTable__numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 
+
+
+
+
+
+
+
+
+
+
+/* Query result values stay as ClickHouse sent them, spaces included. */
 .resultTable tbody td {
-    padding: 0.2rem 0.4rem;
-    border: 1px solid var(--rowDivider);
-    vertical-align: middle;
-    white-space: pre;
+  white-space: pre;
 }
 
 
@@ -2078,12 +1989,13 @@ button.button:not(:disabled):hover {
 }
 
 .resultTable.resultTable--vertical tbody th {
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--rowDivider);
+  padding-top: 6px;
+  padding-bottom: 6px;
   vertical-align: top;
-  font-weight: 950;
-  color: color-mix(in srgb, var(--text) 92%, transparent);
-  background: color-mix(in srgb, var(--theadBg) 45%, transparent);
+  color: var(--muted);
+  font-size: var(--dt-head-font);
+  font-weight: var(--dt-head-weight);
+  background: var(--theadBg);
 }
 
 .resultTable.resultTable--vertical tbody td {
@@ -2724,13 +2636,6 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 /* A SQL NULL inside a value (ns.format.nullToken()). */
 .nullToken { color: var(--json-null); font-style: italic; }
 
-.resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
-  background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--gaugeFill, 0%) 100%;
-}
 
 .resultsStack__toggle {
   width: 3rem;
@@ -4413,20 +4318,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
    clips the background *colour* to the padding box, so a row highlight
    (hover, expanded row) fills the whole gauge cell like every other cell
    instead of stopping at the content box. */
-.resultTable tbody td.resultTable__gaugeCell,
-.resultTable tbody tr:hover td.resultTable__gaugeCell {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in srgb, var(--accentBorder) 8%, transparent),
-      color-mix(in srgb, var(--accentBorder) 8%, transparent)
-    ),
-    linear-gradient(transparent, transparent);
-  background-repeat: no-repeat, no-repeat;
-  background-origin: content-box, padding-box;
-  background-clip: content-box, padding-box;
-  background-size: var(--gaugeFill, 0%) 100%, 100% 100%;
-}
 
 
 /* Explorer summaries are data grids, not nested cards. */
@@ -5083,9 +4974,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   margin-bottom: 12px;
 }
 
-.explorerDatabaseObjectsTable .resultTable > tbody > tr > td {
-  white-space: nowrap;
-}
 
 .explorerDatabaseObjectsTable__open {
   display: inline-block;
@@ -5551,64 +5439,24 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 
 /* ncdu-style list: name, size, share bar, rows, parts. */
-.explorerStorageList {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
 
-.explorerStorageList__th {
-  padding: 0;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
 
-.explorerStorageList__th--num,
-.explorerStorageList__cell--bytes,
-.explorerStorageList__cell--rows,
-.explorerStorageList__cell--parts,
-.explorerStorageList__cell--count {
-  text-align: right;
-}
 
-.explorerStorageList__sort {
-  width: 100%;
-  border: 0;
-  padding: 6px 8px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: inherit;
-  cursor: pointer;
-}
 
-.explorerStorageList__th[data-sort] .explorerStorageList__sort {
-  color: var(--text);
-}
 
-.explorerStorageList__th[data-sort="desc"] .explorerStorageList__sort::after {
-  content: " \25BE";
-}
 
-.explorerStorageList__th[data-sort="asc"] .explorerStorageList__sort::after {
-  content: " \25B4";
-}
 
-.explorerStorageList__cell {
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--rowDivider, var(--border));
-  white-space: nowrap;
-}
 
 .explorerStorageList__cell--name {
   width: 34%;
   max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.explorerStorageList__cell--share {
+  width: 26%;
+  min-width: 140px;
 }
 
 .explorerStorageList--database .explorerStorageList__cell--name {
@@ -5619,18 +5467,11 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
   color: var(--muted);
 }
 
-.explorerStorageList__cell--share {
-  width: 26%;
-  min-width: 140px;
-}
 
 .explorerStorageList__row.is-zoomable {
   cursor: pointer;
 }
 
-.explorerStorageList__row:hover {
-  background: var(--rowHover);
-}
 
 .explorerStorageList__row--omitted {
   color: var(--muted);
@@ -5679,35 +5520,9 @@ button.explorerStorageList__name:focus-visible {
   color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
 }
 
-.explorerStorageList__cell--share {
-  display: table-cell;
-}
 
-.explorerStorageList__bar {
-  display: inline-block;
-  width: calc(100% - 56px);
-  height: 8px;
-  margin-right: 8px;
-  overflow: hidden;
-  border-radius: 2px;
-  vertical-align: middle;
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
 
-.explorerStorageList__fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  /* Same bar colour token as the shared .explorerBar in-cell bars. */
-  background: color-mix(in srgb, var(--explorer-bar-color, var(--accentBorder)) 72%, transparent);
-}
 
-.explorerStorageList__pct {
-  display: inline-block;
-  min-width: 46px;
-  text-align: right;
-  vertical-align: middle;
-}
 
 /* Treemap band of the Storage section and of the database page. */
 .explorerStorageView__map {
@@ -5921,37 +5736,10 @@ button.explorerStorageStrip__segment:focus-visible {
   border-radius: 6px;
 }
 
-.explorerOpsTable {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
 
-.explorerOpsTable th {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--theadBg, transparent);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-  white-space: nowrap;
-}
 
-.explorerOpsTable td {
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--rowDivider, var(--border));
-  vertical-align: top;
-  white-space: nowrap;
-}
 
-.explorerOpsTable tbody tr:last-child td {
-  border-bottom: 0;
-}
 
-.explorerOpsTable .explorerOpsTable__num {
-  text-align: right;
-}
 
 .explorerOpsTable__object {
   min-width: 140px;
@@ -5981,10 +5769,9 @@ button.explorerStorageStrip__segment:focus-visible {
   font-size: 11px;
 }
 
-.explorerOpsTable__mono,
-.explorerOpsTable__command code {
-  font-family: var(--mono);
-  font-size: 12px;
+
+.explorerOpsTiles {
+  margin-bottom: 8px;
 }
 
 .explorerOpsTable__command,
@@ -6006,80 +5793,17 @@ button.explorerStorageStrip__segment:focus-visible {
   -webkit-line-clamp: 2;
 }
 
-.explorerOpsStatus {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 
-.explorerOpsStatus__dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--success);
-}
 
-.explorerOpsStatus.is-warning .explorerOpsStatus__dot,
-.explorerOpsStatus.is-pending .explorerOpsStatus__dot {
-  background: var(--warning);
-}
 
-.explorerOpsStatus.is-pending .explorerOpsStatus__dot {
-  background: var(--muted);
-}
 
-.explorerOpsStatus.is-error .explorerOpsStatus__dot {
-  background: var(--danger);
-}
 
-.explorerOpsProgress {
-  display: inline-block;
-  width: 90px;
-  height: 7px;
-  margin-right: 8px;
-  overflow: hidden;
-  border-radius: 2px;
-  vertical-align: middle;
-  background: color-mix(in srgb, var(--text) 9%, transparent);
-}
 
-.explorerOpsProgress__fill {
-  display: block;
-  height: 100%;
-  background: color-mix(in srgb, var(--accentBorder) 72%, transparent);
-}
 
-.explorerOpsTiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 8px;
-  margin-bottom: 8px;
-}
 
-.explorerOpsTile {
-  display: grid;
-  gap: 2px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 7px 10px;
-}
 
-.explorerOpsTile.is-warning {
-  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
-}
 
-.explorerOpsTile__label,
-.explorerOpsTile__sub {
-  color: var(--muted);
-  font-size: 11px;
-}
 
-.explorerOpsTile__value {
-  font-size: 15px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
 
 .explorerOpsView__quiet {
   display: grid;
@@ -8130,13 +7854,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* Keep the finalize hint subordinate to the shared Query sort affordance: sort
    arrow first, tiny info glyph at the extreme top-right. */
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
-  padding-right: 2.8rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
-  right: 0.8rem;
-  margin-left: 0;
-}
 .explorerFinalizeInfo {
   position: absolute;
   top: 2px;
@@ -8192,13 +7909,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* The sort marker remains immediately after the column label. The aggregate
    hint is independently pinned to the extreme top-right corner. */
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info::after {
-  right: auto;
-  margin-left: 0.4rem;
-}
-.resultTable:not(.resultTable--vertical) thead th.resultTable__thSortable.has-finalize-info {
-  padding-right: 2.35rem;
-}
 
 /* A single available graph mode is a label, not an interactive selector. */
 
@@ -8245,13 +7955,6 @@ html.chdash-page-select-hidden .pageSelect {
 }
 
 /* Storage byte/share columns use the same in-cell background gauge as Query numerics. */
-.explorerStorageGaugeCell {
-  background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
-  background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--gaugeFill, 0%) 100%;
-}
 
 /* Release 31: profiling, Explorer Data controls and storage hierarchy polish. */
 .traceViewer__table {
@@ -8461,22 +8164,6 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 /* Expanding Tuple physical subcolumns must not make the shared table reflow. */
-.explorerStorageResultTable .resultTable {
-  width: 100%;
-  min-width: 720px;
-  table-layout: fixed;
-}
-.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(1),
-.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(1) { width: 42px; }
-.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(2),
-.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(2) { width: 31%; }
-.explorerStorageResultTable .resultTable > thead > tr > th:nth-child(3),
-.explorerStorageResultTable .resultTable > tbody > tr > td:nth-child(3) { width: 18%; }
-.explorerStorageResultTable .resultTable > thead > tr > th,
-.explorerStorageResultTable .resultTable > tbody > tr > td {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* Release 33: profiling fit, Explorer footprint scope graph and local UI polish. */
 
@@ -8652,11 +8339,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 
 /* Storage row numbers are explicit metadata, never a sortable/truncated data column. */
-.explorerStorageResultTable .resultTable > thead > tr > th.resultTable__rowIndex {
-  padding-right: .45rem;
-  overflow: visible;
-  text-overflow: clip;
-}
 
 /* Release 41: Profiling is split into a processor-centric Pipeline view and
    the existing raw Tracing view (tabs: the shared .uiDialog__tabs). Pipeline
@@ -11998,29 +11680,21 @@ html[data-obs-view="traces"] .tracesResults--wide {
    left border), drawn above the cell content so no background tints it. The
    detail's bar starts 1px higher, over the row's bottom border (the index
    cell clips its own overflow), so row and detail bars join. */
-.resultTable tbody td.resultTable__rowIndex:not(.resultTable__stickyLeft) {
-  position: relative;
+/* The row a right-click menu acts on reads as selected (the expanded row is
+   .is-selected). */
+.resultTable tbody tr.is-rowMenuTarget > td {
+  background-color: var(--rowHover);
 }
 
-.resultTable tbody tr.is-rowExpanded > td.resultTable__rowIndex::before,
-.resultTable tbody tr.is-rowMenuTarget > td.resultTable__rowIndex::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--accentBorder);
-  pointer-events: none;
+.resultTable tbody tr.is-rowMenuTarget > :first-child {
+  box-shadow: inset 3px 0 0 var(--accent-fill);
 }
 
 /* What the hovered / focused copy action applies to: the cell, the row or
    the column, all with the same fill. */
 .resultTable tbody td.is-copyTarget,
 .resultTable thead th.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr > td.resultTable__stickyLeft.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.is-copyTarget,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft.is-copyTarget {
+.resultTable:not(.resultTable--vertical) tbody tr.is-selected > td.is-copyTarget {
   background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
 }
 
@@ -12189,10 +11863,7 @@ html[data-obs-view="traces"] .tracesResults--wide {
   padding-right: 9rem;
 }
 
-.resultTable tbody tr.is-rowExpanded > td,
-.resultTable:not(.resultTable--vertical) tbody tr.is-rowExpanded > td.resultTable__stickyLeft {
-  background-color: color-mix(in srgb, var(--accentBorder) 16%, var(--panel));
-}
+
 
 
 
@@ -16257,34 +15928,8 @@ html[data-theme="light"] {
 
 /* Shared result tables of the card: 13px, readable headers, natural widths. */
 .explorerCard .explorerTable { margin-top: 0; }
-.explorerCard .explorerTable .resultTable {
-  font-size: var(--explorer-table-font, 13px);
-  font-weight: 450;
-}
-.explorerCard .explorerTable .resultTable thead th {
-  padding: 7px 8px;
-  padding-right: 1.35rem;
-  color: color-mix(in srgb, var(--text) 80%, transparent);
-  font-size: 12px;
-  font-weight: 700;
-}
-.explorerCard .explorerTable .resultTable thead th.resultTable__rowIndex {
-  padding-right: 0.5rem;
-}
-.explorerCard .explorerTable .resultTable thead th.explorerTable__numHead { text-align: right; }
-.explorerCard .explorerTable .resultTable tbody td { padding: 5px 8px; }
 /* Parts: eleven columns and two-unit ages ("20 h 19 min") fit the card
    beside the About panel at 1440 px without a horizontal scroll. */
-.explorerCard .explorerTable--parts .resultTable thead th { padding-left: 6px; }
-.explorerCard .explorerTable--parts .resultTable tbody td { padding-left: 6px; padding-right: 6px; }
-.explorerCard .explorerTable--parts .resultTable tbody td.resultTable__gaugeCell { min-width: 5rem; }
-.explorerCard .explorerTable .resultTable tbody td.resultTable__rowIndex {
-  padding: 5px 6px;
-  color: var(--muted);
-}
-.explorerCard .explorerTable .resultTable tbody td.resultTable__gaugeCell {
-  min-width: 6.5rem;
-}
 .explorerCell--code,
 .explorerColumns__type,
 .explorerColumns__codec,
@@ -16388,28 +16033,20 @@ html[data-theme="light"] {
 
 /* Operations: ingestion as a 2 x 3 grid, replication as a key / value list. */
 .explorerIngestionTable {
-  border-collapse: collapse;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  width: auto;
 }
-.explorerIngestionTable th,
-.explorerIngestionTable td {
-  padding: 5px 18px 5px 0;
-  text-align: right;
-  vertical-align: top;
+
+.explorerIngestionTable tbody > tr > td {
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
-.explorerIngestionTable thead th {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-.explorerIngestionTable tbody th {
-  text-align: left;
-  font-weight: 650;
+
+.explorerIngestionTable tbody > tr > th {
   text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent);
   text-underline-offset: 3px;
   cursor: help;
 }
+
 .explorerIngestionTable__bytes {
   color: var(--muted);
   font-size: 12px;
@@ -16545,14 +16182,17 @@ html[data-theme="light"] {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.explorerCard .explorerPreviewTable .resultTable { font-size: 12.5px; }
+.explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {
+  padding-right: 16px;
+}
+
+/* Preview headers carry the column type on a second line. */
 .explorerCard .explorerPreviewTable .resultTable thead th {
-  padding: 4px 8px 18px;
-  padding-right: 1.5rem;
+  height: auto;
+  padding-top: 4px;
+  padding-bottom: 18px;
   vertical-align: top;
 }
-.explorerCard .explorerPreviewTable .resultTable thead th.resultTable__rowIndex { padding-bottom: 18px; }
-.explorerCard .explorerPreviewTable .resultTable tbody td { padding: 2px 8px; }
 .explorerCard .explorerPreviewTable .resultTable thead th[data-type]::before {
   content: attr(data-type);
   position: absolute;
@@ -17160,20 +16800,6 @@ html[data-theme="light"] {
   background-size: var(--bar-pct, 0%) 100%;
 }
 
-.resultTable tbody td.explorerBar--cell,
-.resultTable tbody tr:hover td.explorerBar--cell,
-.explorerWorkspace .resultTable tbody td.resultTable__gaugeCell,
-.explorerWorkspace .resultTable tbody tr:hover td.resultTable__gaugeCell,
-.explorerWorkspace .resultTable tbody td.explorerStorageGaugeCell {
-  /* Gauge cells carry their fill in --gaugeFill, Explorer bars in --bar-pct. */
-  --bar-pct-resolved: var(--bar-pct, var(--gaugeFill, 0%));
-  background-image: linear-gradient(var(--explorer-bar-fill), var(--explorer-bar-fill)), linear-gradient(transparent, transparent);
-  background-repeat: no-repeat, no-repeat;
-  background-origin: content-box, padding-box;
-  background-clip: content-box, padding-box;
-  background-size: var(--bar-pct-resolved) 100%, 100% 100%;
-  background-position: left center, left top;
-}
 
 /* --- Typography scale --------------------------------------------------------
    Tables 13px, headers 12px semibold, section titles 13.5px semibold above
@@ -17192,19 +16818,8 @@ html[data-theme="light"] {
   margin-top: 4px;
 }
 
-.explorerWorkspace .resultTable {
-  font-size: var(--explorer-table-font);
-}
 
-.explorerWorkspace .resultTable thead th {
-  font-size: var(--explorer-table-head-font);
-  font-weight: var(--explorer-table-head-weight);
-  color: var(--muted);
-}
 
-.explorerWorkspace .resultTable tbody td {
-  font-size: var(--explorer-table-font);
-}
 
 .explorerWorkspace .explorerDetailMeta {
   font-size: var(--explorer-meta-font);
@@ -17421,16 +17036,7 @@ html[data-theme="light"] {
   margin-top: 0;
 }
 
-.explorerWorkspace .explorerDatabaseObjectsTable .resultTable thead th,
-.explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
-  padding-left: 7px;
-  padding-right: 7px;
-}
 
-.explorerWorkspace .explorerDatabaseObjectsTable .resultTable tbody td {
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
 
 /* Table cells ignore max-width: long names and engines clip inside a span. */
 .explorerDatabaseObjectsTable__clip {
@@ -19721,6 +19327,25 @@ button:not(.is-loading) > .uiSpin { display: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Row numbers stay in view while a wide result scrolls sideways. */
+.dataTable--grid > tbody > tr > .dataTable__rowNum,
+.dataTable--grid > thead > tr > .dataTable__rowNum {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+.dataTable--grid > thead > tr > .dataTable__rowNum {
+  z-index: 3;
+  background: var(--theadBg);
+}
+
+.dataTable--grid > tbody > tr:hover > .dataTable__rowNum,
+.dataTable--grid > tbody > tr.is-selected > .dataTable__rowNum {
+  background: linear-gradient(var(--rowHover), var(--rowHover)) var(--panel);
+}
+
 .dataTable > thead > tr > th.num .dataTable__sort {
   flex-direction: row-reverse;
 }
@@ -19776,16 +19401,19 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 
 /* In-cell bar: track and fill under the value, --cellBar wide, coloured by
    --cellBar-color (the accent by default). Measures only (barEligible). */
+/* The last, empty layer is clipped to the padding box so a row's hover or
+   selected background (painted under the last layer) still fills the cell. */
 .cellBar {
   --cellBar-color: var(--accent-fill);
   background-image:
     linear-gradient(color-mix(in srgb, var(--cellBar-color) 70%, transparent), color-mix(in srgb, var(--cellBar-color) 70%, transparent)),
-    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent));
+    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent)),
+    linear-gradient(transparent, transparent);
   background-repeat: no-repeat;
-  background-origin: content-box;
-  background-clip: content-box;
-  background-size: var(--cellBar, 0%) 3px, 100% 3px;
-  background-position: left bottom 3px, left bottom 3px;
+  background-origin: content-box, content-box, padding-box;
+  background-clip: content-box, content-box, padding-box;
+  background-size: var(--cellBar, 0%) 3px, 100% 3px, 100% 100%;
+  background-position: left bottom 3px, left bottom 3px, 0 0;
 }
 
 /* One hover copy button per cell. */
@@ -20458,6 +20086,21 @@ button.chip__op:hover {
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Tiles in their own boxes (Explorer About, Keeper). */
+.statTiles--boxed > .statTile {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.statTiles--boxed > .statTile.is-warn {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+
+.statTiles--boxed > .statTile.is-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
 .statTile.is-error .statTile__value { color: var(--danger); }

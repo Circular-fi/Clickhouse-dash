@@ -1680,11 +1680,8 @@
     const maxima = DATABASE_OBJECT_COLUMNS.map((_, index) => Math.max(0, ...rows.map((row) => Number(row[index]) || 0)));
     const bars = rows.length > 1;
     const setBar = (td, value, max, text) => {
-      td.classList.add("resultTable__numeric");
-      if (bars && DATABASE_OBJECT_BAR_COLUMNS.has(td.__columnIndex)) {
-        td.classList.add("explorerBar", "explorerBar--cell");
-        td.style.setProperty("--bar-pct", `${barPercent(value, max)}%`);
-      }
+      td.classList.add("num");
+      if (bars && DATABASE_OBJECT_BAR_COLUMNS.has(td.__columnIndex)) ns.table.cellBar(td, barPercent(value, max));
       td.textContent = text;
     };
     const objectTable = ns.results?.createStaticResultTable?.({
@@ -1692,6 +1689,7 @@
       types: DATABASE_OBJECT_TYPES,
       rows,
       className: "explorerResultTable explorerDatabaseObjectsTable",
+      compact: true,
       nullsLast: true,
       decorateHeader: (th, ctx) => {
         th.title = {
@@ -1725,7 +1723,7 @@
           return true;
         }
         if (value == null) {
-          if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.classList.add("resultTable__numeric");
+          if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.classList.add("num");
           td.textContent = format.EMPTY;
           td.classList.add("explorerDatabaseObjectsTable__missing");
           return true;

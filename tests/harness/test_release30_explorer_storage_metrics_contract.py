@@ -37,8 +37,8 @@ def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> 
 def test_storage_metric_columns_share_query_style_background_gauges() -> None:
     ui = read("src/static/app_explorer_detail.js")
     gauge = ui[ui.index("function gaugeCell"):ui.index("function numericCell")]
-    assert 'td.classList.add("resultTable__gaugeCell", "resultTable__numeric");' in gauge
-    assert 'td.style.setProperty("--gaugeFill", `${fill}%`);' in gauge
+    assert 'td.classList.add("num");' in gauge
+    assert "ns.table.cellBar(td, ns.table.barPercent(optionalNumber(value), max));" in gauge
     # Bars are normalised to the column maximum.
     assert "gaugeCell(td, item.compressed, compressedMax" in ui
     assert "gaugeCell(td, part.bytes, max" in ui

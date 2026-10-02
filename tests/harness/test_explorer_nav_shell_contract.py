@@ -120,7 +120,8 @@ def test_shared_bar_and_typography_tokens() -> None:
     # Monospace comes from the one global --mono token.
     assert "--explorer-mono" not in css and "--mono: ui-monospace" in css
     assert ".explorerBar {" in block and "background-size: var(--bar-pct, 0%) 100%;" in block
-    assert ".resultTable tbody td.explorerBar--cell" in block
+    # In-table bars are the shared .cellBar (app_ui_table.js), not .explorerBar.
+    assert ".resultTable tbody td.explorerBar--cell" not in css and ".cellBar {" in css
 
 
 def test_database_objects_table_fits_and_formats_numbers() -> None:
@@ -128,7 +129,7 @@ def test_database_objects_table_fits_and_formats_numbers() -> None:
     assert 'const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];' in ui
     block = ui[ui.index("function renderDatabaseObjects"):ui.index("function selectDatabase(")]
     assert 'setBar(td, value, maxima[ctx.columnIndex], format.count(value));' in block
-    assert 'td.classList.add("explorerBar", "explorerBar--cell");' in block
+    assert "ns.table.cellBar(td, barPercent(value, max));" in block
     assert "resultTable__gaugeCell" not in block
     assert '`${format.bytes(item.uncompressed)} uncompressed / ${format.bytes(item.compressed)} compressed`' in block
 

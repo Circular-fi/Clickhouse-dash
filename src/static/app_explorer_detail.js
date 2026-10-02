@@ -95,17 +95,16 @@
       if (time.title) td.title = time.title;
     }
 
-    // In-cell bar normalised to the column maximum (shared Query gauge cell).
+    // In-cell bar normalised to the column maximum (ns.table.cellBar); the
+    // callers pass measures only (sizes, bytes, progress).
     function gaugeCell(td, value, max, text) {
-      td.classList.add("resultTable__gaugeCell", "resultTable__numeric");
-      const n = optionalNumber(value);
-      const fill = n == null || max <= 0 ? 0 : Math.max(0, Math.min(100, (Math.abs(n) / max) * 100));
-      td.style.setProperty("--gaugeFill", `${fill}%`);
+      td.classList.add("num");
+      ns.table.cellBar(td, ns.table.barPercent(optionalNumber(value), max));
       td.textContent = text;
     }
 
     function numericCell(td, text) {
-      td.classList.add("resultTable__numeric");
+      td.classList.add("num");
       td.textContent = text;
     }
 
@@ -140,6 +139,7 @@
         types: specs.map((spec) => spec.type || "String"),
         rows,
         className: `explorerTable ${className}`,
+        compact: true,
         indexSortable: false,
         nullsLast: true,
         rowDetails,
@@ -147,7 +147,7 @@
         decorateHeader: (th, headCtx) => {
           const spec = specs[headCtx.columnIndex];
           th.title = spec?.head || spec?.label || "";
-          if (spec?.numeric) th.classList.add("explorerTable__numHead");
+          if (spec?.numeric) th.classList.add("num");
         },
         decorateRow: (tr, rowCtx) => decorateRow?.(tr, rowCtx.row?.__explorerItem || null),
         renderCell: (td, cellCtx) => {
@@ -850,7 +850,6 @@
           head: "Compressed bytes on disk (bar: share of the largest column)",
           value: (item) => item.compressed,
           render: (td, item) => {
-            td.classList.add("explorerStorageGaugeCell");
             gaugeCell(td, item.compressed, compressedMax, item.compressed == null ? DASH : format.bytes(item.compressed));
           },
         });
@@ -888,7 +887,7 @@
           tr.dataset.tupleParent = item.tuple_parent;
           tr.classList.add("explorerStorageTupleChild");
           tr.hidden = !tupleExpanded.has(item.tuple_parent);
-          const indexCell = tr.querySelector(".resultTable__rowIndex");
+          const indexCell = tr.querySelector(".dataTable__rowNum");
           if (indexCell) {
             indexCell.textContent = "";
             indexCell.setAttribute("aria-hidden", "true");
@@ -1149,7 +1148,7 @@
       specs.push(
         {
           label: "Compressed", type: "Float64", numeric: true, value: (item) => item.compressed,
-          render: (td, item) => { td.classList.add("explorerStorageGaugeCell"); gaugeCell(td, item.compressed, max, item.compressed == null ? DASH : format.bytes(item.compressed)); },
+          render: (td, item) => gaugeCell(td, item.compressed, max, item.compressed == null ? DASH : format.bytes(item.compressed)),
         },
         {
           label: "Uncompressed", type: "Float64", numeric: true, value: (item) => item.uncompressed,
@@ -1221,10 +1220,10 @@
         ["Client", s.client_ingress || {}, "Finished INSERT queries (system.query_log)"],
         ["Persisted", s.physical_ingress || {}, "New parts written (system.part_log); Buffer forwarding and MV output are not folded in"],
       ];
-      const table = node("table", "explorerIngestionTable");
+      const table = node("table", "explorerIngestionTable dataTable dataTable--compact");
       const head = node("tr");
       head.appendChild(node("th", "", ""));
-      for (const [label] of windows) head.appendChild(node("th", "", label));
+      for (const [label] of windows) head.appendChild(node("th", "num", label));
       const thead = node("thead");
       thead.appendChild(head);
       const tbody = node("tbody");
@@ -1235,7 +1234,7 @@
         th.title = title;
         tr.appendChild(th);
         for (const [, suffix] of windows) {
-          const td = node("td");
+          const td = node("td", "num");
           td.append(
             node("div", "explorerIngestionTable__rows", format.rate(rate[`rows_per_second_${suffix}`], "rows")),
             node("div", "explorerIngestionTable__bytes", format.bytesRate(rate[`bytes_per_second_${suffix}`])),

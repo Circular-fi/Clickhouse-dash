@@ -68,7 +68,7 @@ def test_storage_metric_tables_reuse_query_result_component() -> None:
     assert 'explorerStorageTableTitle' not in ui
     assert 'renderCell: (td, cellCtx) =>' in block
     assert 'td.classList.add("explorerStoragePercentCell")' in ui
-    assert 'th.className = "resultTable__thSortable";' in results
+    assert "ns.table.sortHeader(th, {" in results
     assert 'decorateHeader = null' in results and 'renderCell = null' in results
 
 

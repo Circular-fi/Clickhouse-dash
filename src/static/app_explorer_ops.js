@@ -138,16 +138,14 @@
   }
 
   function numCell(text, title = "") {
-    return textCell(text, "explorerOpsTable__num", title);
+    return textCell(text, "num", title);
   }
+
+  const STATUS_TONES = { ok: "ok", warning: "warn", pending: "neutral", error: "error" };
 
   function statusCell(level, text, title = "") {
     const td = node("td", "explorerOpsTable__status");
-    const badge = node("span", `explorerOpsStatus is-${level}`);
-    badge.appendChild(node("span", "explorerOpsStatus__dot"));
-    badge.appendChild(node("span", "", text));
-    if (title) badge.title = title;
-    td.appendChild(badge);
+    td.appendChild(ns.badge.el(text, { tone: STATUS_TONES[level] || "neutral", title, attrs: { "data-level": level } }));
     return td;
   }
 
@@ -162,23 +160,19 @@
   }
 
   function progressCell(progress) {
-    const td = node("td", "explorerOpsTable__progress");
     const pct = Math.max(0, Math.min(100, Number(progress || 0) * 100));
-    const bar = node("span", "explorerOpsProgress");
-    const fill = node("span", "explorerOpsProgress__fill");
-    fill.style.width = `${pct.toFixed(1)}%`;
-    bar.appendChild(fill);
-    td.append(bar, node("span", "explorerOpsProgress__text", format.percent(pct / 100)));
+    const td = node("td", "num explorerOpsTable__progress", format.percent(pct / 100));
+    ns.table.cellBar(td, pct);
     return td;
   }
 
   function opsTable(id, headers, rows) {
-    const table = node("table", "explorerOpsTable");
+    const table = node("table", "explorerOpsTable dataTable dataTable--compact");
     table.id = id;
     const thead = node("thead");
     const tr = node("tr");
     for (const header of headers) {
-      const th = node("th", header.num ? "explorerOpsTable__num" : "", header.label);
+      const th = node("th", header.num ? "num" : "", header.label);
       th.scope = "col";
       if (header.title) th.title = header.title;
       tr.appendChild(th);
@@ -235,12 +229,9 @@
     const connections = keeper.connections || [];
     const expired = connections.some((item) => item.is_expired) || Number(keeper.metrics?.ZooKeeperSessionExpired || 0) > 0;
     const el = section("keeper", "Keeper", expired ? "session expired" : `${connections.length || Number(keeper.metrics?.ZooKeeperSession || 0)} connected`, { warn: expired ? 1 : 0 });
-    const tiles = node("div", "explorerOpsTiles");
+    const tiles = node("div", "statTiles statTiles--boxed explorerOpsTiles");
     const tile = (label, value, sub = "", level = "") => {
-      const item = node("div", `explorerOpsTile${level ? ` is-${level}` : ""}`);
-      item.append(node("span", "explorerOpsTile__label", label), node("span", "explorerOpsTile__value", value));
-      if (sub) item.appendChild(node("span", "explorerOpsTile__sub", sub));
-      tiles.appendChild(item);
+      tiles.appendChild(ns.ui.statTile({ label, value, sub, tone: level, className: "explorerOpsTile" }));
     };
     const recent = view.keeperRecent;
     tile("Latency", format.duration.fromMs(recent?.latencyMs != null ? recent.latencyMs : keeper.average_wait_ms),
@@ -257,7 +248,7 @@
         const tr = node("tr");
         tr.append(
           textCell(item.name || "default"),
-          textCell(`${item.host}:${item.port}`, "explorerOpsTable__mono"),
+          textCell(`${item.host}:${item.port}`, "mono"),
           statusCell(item.is_expired ? "error" : "ok", item.is_expired ? "Expired" : "Connected"),
           numCell(format.duration.fromSeconds(item.session_uptime_seconds)),
           numCell(format.duration.fromMs(item.session_timeout_ms)),
@@ -281,7 +272,7 @@
       tr.append(
         objectCell(item),
         textCell(item.is_mutation ? "Mutation" : (item.merge_type || "Merge")),
-        textCell(item.partition_id || DASH, "explorerOpsTable__mono", item.result_part_name ? `Result part ${item.result_part_name}` : ""),
+        textCell(item.partition_id || DASH, "mono", item.result_part_name ? `Result part ${item.result_part_name}` : ""),
         progressCell(item.progress),
         numCell(format.duration.fromSeconds(item.elapsed_seconds)),
         numCell(format.bytes(item.total_bytes_compressed)),
@@ -305,11 +296,11 @@
       const tr = node("tr");
       const failed = String(item.latest_fail_reason || "").trim();
       const command = node("td", "explorerOpsTable__command");
-      command.appendChild(node("code", "", item.command));
+      command.appendChild(ns.ui.sqlBlock({ sql: item.command, inline: true, label: "Mutation command" }));
       command.title = item.command;
       tr.append(
         objectCell(item),
-        textCell(item.mutation_id, "explorerOpsTable__mono"),
+        textCell(item.mutation_id, "mono"),
         command,
         statusCell(failed ? "error" : (item.is_killed ? "warning" : "pending"), failed ? (item.latest_fail_error_code_name || "Failing") : (item.is_killed ? "Killed" : "Pending")),
         numCell(format.count(item.parts_to_do)),
@@ -360,7 +351,7 @@
       const tr = node("tr");
       tr.append(
         objectCell(item),
-        textCell(item.replica_name, "explorerOpsTable__mono", item.is_leader ? "Leader" : ""),
+        textCell(item.replica_name, "mono", item.is_leader ? "Leader" : ""),
         statusCell(level, status),
         numCell(item.total_replicas == null ? DASH : `${format.count(item.active_replicas)} / ${format.count(item.total_replicas)}`, "Active / total replicas (refreshed at most every 60 s)"),
         numCell(format.duration.fromSeconds(item.absolute_delay_seconds)),
@@ -386,7 +377,7 @@
       const level = item.is_blocked || Number(item.broken_data_files || 0) > 0 ? "error" : Number(item.error_count || 0) > 0 ? "warning" : "ok";
       tr.append(
         objectCell(item),
-        textCell(item.data_path, "explorerOpsTable__mono"),
+        textCell(item.data_path, "mono"),
         statusCell(level, item.is_blocked ? "Blocked" : level === "error" ? "Broken files" : level === "warning" ? "Retrying" : "Sending"),
         numCell(format.count(item.data_files)),
         numCell(format.bytes(item.data_compressed_bytes)),

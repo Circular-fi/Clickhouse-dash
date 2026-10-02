@@ -38,7 +38,7 @@ def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
     results = read("src/static/app_results.js")
     assert "indexSortable: false" in explorer
     assert "indexSortable = true" in results
-    assert 'indexSortable ? " resultTable__thSortable" : ""' in results
+    assert 'indexHead.className = "dataTable__rowNum";\n      if (indexSortable) {\n        ns.table.sortHeader(indexHead, {' in results
 
 def test_aggregate_info_icon_keeps_more_edge_spacing() -> None:
     css = read("src/static/style.css")

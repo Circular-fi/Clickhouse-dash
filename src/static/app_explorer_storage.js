@@ -341,11 +341,9 @@
 
   function shareBarCell(td, bytes, total, max) {
     const share = total > 0 ? bytes / total * 100 : null;
-    const bar = node("span", "explorerStorageList__bar");
-    const fill = node("span", "explorerStorageList__fill");
-    fill.style.width = `${max > 0 ? Math.max(bytes > 0 ? 1.5 : 0, Math.min(100, bytes / max * 100)).toFixed(2) : 0}%`;
-    bar.appendChild(fill);
-    td.append(bar, node("span", "explorerStorageList__pct", share == null ? DASH : percentText(share)));
+    td.classList.add("num");
+    ns.table.cellBar(td, max > 0 ? Math.max(bytes > 0 ? 1.5 : 0, Math.min(100, bytes / max * 100)) : 0);
+    td.textContent = share == null ? DASH : percentText(share);
     td.dataset.value = share == null ? "" : String(share);
   }
 
@@ -491,31 +489,27 @@
 
   function renderList(level, info) {
     const columns = COLUMNS[level];
-    const table = node("table", `explorerStorageList explorerStorageList--${level}`);
+    const table = node("table", `explorerStorageList explorerStorageList--${level} dataTable dataTable--compact`);
     table.id = "explorerStorageList";
     const thead = node("thead");
     const headRow = node("tr");
     const sort = view.sort[level];
     for (const column of columns) {
-      const th = node("th", `explorerStorageList__th explorerStorageList__th--${column.type} explorerStorageList__th--${column.key}`);
+      const th = node("th", `explorerStorageList__th explorerStorageList__th--${column.key}${column.type === "text" ? "" : " num"}`, column.label);
       th.scope = "col";
-      const active = sort.key === column.key;
-      const button = node("button", "explorerStorageList__sort", column.label);
-      button.type = "button";
-      if (column.title) button.title = column.title;
-      if (active) {
-        th.setAttribute("aria-sort", sort.dir === "asc" ? "ascending" : "descending");
-        th.dataset.sort = sort.dir;
-      }
-      button.addEventListener("click", () => {
-        const current = view.sort[level];
-        const firstDir = column.type === "text" ? "asc" : "desc";
-        view.sort[level] = current.key === column.key
-          ? { key: column.key, dir: current.dir === "asc" ? "desc" : "asc" }
-          : { key: column.key, dir: firstDir };
-        render();
+      ns.table.sortHeader(th, {
+        key: column.key,
+        dir: sort.key === column.key ? sort.dir : "",
+        title: column.title || "",
+        onSort: () => {
+          const current = view.sort[level];
+          const firstDir = column.type === "text" ? "asc" : "desc";
+          view.sort[level] = current.key === column.key
+            ? { key: column.key, dir: current.dir === "asc" ? "desc" : "asc" }
+            : { key: column.key, dir: firstDir };
+          render();
+        },
       });
-      th.appendChild(button);
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
@@ -528,7 +522,7 @@
       tr.dataset.name = row.key;
       if (row.zoom) tr.classList.add("is-zoomable");
       for (const column of columns) {
-        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}`);
+        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}`);
         if (column.key === "name") {
           if (row.zoom) {
             const button = node("button", "explorerStorageList__name", row.name);
@@ -582,7 +576,7 @@
     if (info.omitted) {
       const tr = node("tr", "explorerStorageList__row explorerStorageList__row--omitted");
       for (const column of columns) {
-        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}`);
+        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}`);
         if (column.key === "name") td.textContent = `${format.countLabel(Number(info.omitted.count || 0), "smaller table")}`;
         else if (column.key === "bytes") td.textContent = format.bytes(info.omitted.bytes);
         else if (column.key === "share") shareBarCell(td, info.omitted.bytes, info.total, maxBytes);
