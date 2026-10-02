@@ -463,7 +463,10 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   expect(Math.round(box.width)).toBe(288);
   expect(box.x + box.width).toBeLessThanOrEqual(histogramBox.x);
   expect(box.x + box.width).toBeLessThanOrEqual(tableBox.x);
-  expect(Math.abs(box.y - histogramBox.y)).toBeLessThanOrEqual(1);
+  // A full-height column of the view body (the shell's full-bleed side panel).
+  const body = await page.locator('.logsSearchBody').boundingBox();
+  expect(Math.abs(box.y - body.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(box.y + box.height - (body.y + body.height))).toBeLessThanOrEqual(1);
   await expect(page.locator('#logsFacetsToggle')).toContainText('Fields');
   await expect(page.locator('#logsFacetsMeta')).toHaveText(/^≈?[\d.]+[KMB]? logs$/);
   // Record columns first (C badge), then the attribute maps (L / R badges).

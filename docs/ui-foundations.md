@@ -262,3 +262,33 @@ once in the "Page shell" block of `style.css`:
 - Anything placed under the chrome uses `--shell-top`. `app_dom.js` sets it
   on every page to the bottom of the header and the nav row. Do not use a
   literal header height.
+
+## Layers, popovers and panels
+
+Three modules load right after `app_dom.js` on every page (the `app.js`
+file list and `COMMON_MODULES` of `app_observability.js`):
+
+- `ns.layers` (`app_ui_layers.js`): the one stack of what is open over the
+  page. `ns.layers.push({ el, onDismiss, modal, docked, trapFocus, opener })`
+  returns a handle with `close()`. Escape closes the top layer only (a key a
+  component consumed with `preventDefault()`, or typed in a page field, is
+  left alone); one capture pointerdown dismisses the floating layers a press
+  lands outside of (docked panels and modal layers stay); the focus goes
+  back to the opener. Every `ns.dialog` is a modal layer. Do not add a
+  document Escape or click-outside listener: push a layer.
+- `ns.lifecycle` (same module): `scope()` gives an `AbortController` signal
+  for `addEventListener(..., { signal })`; `bind(view, (scope) => ...)` runs
+  each time a view shows and its listeners go when it is hidden. Views:
+  `traces`, `logs`, `metrics` and `explorer:<mode>`.
+- `ns.popover` (`app_ui_popover.js`): `place(anchor, el, { side, align,
+  offset })` (flip and an 8 px viewport margin), `tip(el, content)` (hover /
+  focus tooltips, `role=tooltip`, never a live region), `follow()` (pointer
+  tips over canvases), `open(anchor, content)` (a popover layer) and
+  `flash(anchor, "Copied")`.
+- `ns.sidePanel` and `ns.detailPanel` (`app_ui_panel.js`): the left list
+  (`.uiSide`, `--side-w` 288 px, a 32 px rail when folded, a drawer on
+  phones) and the right entity panel (`.uiDetail`, `--detail-w`, docked or
+  floating, one head and the `.closeCross` close button, a bottom sheet at
+  `--bp-md`). A detail panel showing one entity writes one URL parameter
+  (`span=`, `log=`, `node=`, `svc=`): pushed when it opens, replaced when
+  it moves, and Back closes it.
