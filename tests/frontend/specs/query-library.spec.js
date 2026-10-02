@@ -521,9 +521,11 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   await expect(ok).toHaveClass(/qhItem--ok/);
   await expect(ok.locator('.qhItem__sql')).toContainText('numbers(7)');
   await expect(ok.locator('.qhItem__rows')).toHaveText('7 rows');
-  await expect(ok.locator('.qhItem__elapsed')).toHaveText(/^\d+(\.\d+)?m?s$/);
+  // ns.format: "8 ms", "1.23 s"; the time of day is browser-local 24 h.
+  await expect(ok.locator('.qhItem__elapsed')).toHaveText(/^\d+(\.\d+)? (\u00b5s|ms|s)$/);
   await expect(ok.locator('.qhItem__host')).toHaveText('local');
-  await expect(ok.locator('.qhItem__time')).toHaveText(/^\d\d:\d\d$/);
+  await expect(ok.locator('.qhItem__time')).toHaveText(/^\d\d:\d\d:\d\d$/);
+  await expect(ok.locator('.qhItem__time')).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT/);
 
   // The failed run's preview shows the server error.
   await failed.hover();

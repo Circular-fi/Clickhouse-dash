@@ -260,6 +260,13 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
     await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Copy cell' }).click();
     await expect.poll(readClipboard).toBe(expected);
   }
+  // The row Details view shows the same raw values and the NULL token.
+  const details = await openRowDetailsFromRow(page, page.locator(`#resultTableBody ${dataRowsSelector}`).first());
+  const values = details.locator('.rowDetails__value');
+  await expect(values.nth(0)).toHaveText('1234567');
+  await expect(values.nth(2)).toHaveText('2026-09-12T16:29:57Z');
+  await expect(values.nth(3).locator('.nullToken')).toHaveText('NULL');
+  await page.keyboard.press('Escape');
   // The rail: grouped totals, ns.format bytes / durations / percentages,
   // never the old "KiB", "1.00ms" or two-decimal counts (the unit keeps its
   // space, a no-break one in the split number / unit layout).
@@ -1496,6 +1503,35 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await page.keyboard.press('Escape');
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
   expect(Math.abs((await measure()).body - 2000 * plain.rowH)).toBeLessThanOrEqual(2);
+});
+
+test('Explorer Preview cells stay raw like Query results: no grouping, no compact numbers, dates as returned', async ({ page }) => {
+  await openApp(page);
+  const response = page.waitForResponse((r) => r.url().includes('/api/explorer/table/data') && r.request().method() === 'POST');
+  await page.goto('/explorer/chdash_ui/weather_observations/preview');
+  const data = await (await response).json();
+  const previewTable = page.locator('#explorerDetailContent .explorerResultTable--preview');
+  await expect(previewTable.locator('tbody tr').first()).toBeVisible({ timeout: 12_000 });
+  const headers = (await previewTable.locator('thead th').allTextContents()).map((text) => text.trim());
+  const names = data.columns.map((column) => column.name);
+  const cells = (rowIndex, name) => previewTable.locator(`tbody ${dataRowsSelector}`).nth(rowIndex).locator('td').nth(headers.indexOf(name));
+  expect(headers.indexOf('id')).toBeGreaterThan(0);
+  expect(headers.indexOf('observed_at')).toBeGreaterThan(0);
+  for (let row = 0; row < 5; row += 1) {
+    const source = data.rows[row];
+    // UInt64 120064 stays "120064": the value as sent, never "120,064" or "120.1K".
+    const id = String(source[names.indexOf('id')]);
+    await expect(cells(row, 'id')).toHaveText(id);
+    await expect(cells(row, 'id')).toHaveText(/^\d+$/);
+    // DateTime64 stays as returned (no shortening, no zone conversion).
+    await expect(cells(row, 'observed_at')).toHaveText(String(source[names.indexOf('observed_at')]));
+    // A data NULL is the shared NULL token.
+    const note = source[names.indexOf('notes')];
+    if (note === null) await expect(cells(row, 'notes').locator('.nullToken')).toHaveText('NULL');
+    else await expect(cells(row, 'notes')).toHaveText(String(note));
+  }
+  // The chrome around the data may group: the row count of the toolbar.
+  await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText(/^\d{1,3}(,\d{3})* rows? \(LIMIT \d+\)$/);
 });
 
 test('inline row details open from the Explorer data preview', async ({ page }) => {

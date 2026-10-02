@@ -1700,21 +1700,9 @@
       return root;
     }
 
-    // "2026-09-01T00:00:02.000Z" -> "2026-09-01 00:00:02" (UTC values; a
-    // non-zero fraction is kept).
-    function shortTimestamp(value) {
-      const text = String(value);
-      const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/);
-      if (!match) return text;
-      const fraction = match[3] && /[1-9]/.test(match[3]) ? match[3].replace(/0+$/, "") : "";
-      const zone = match[4] && match[4] !== "Z" ? ` ${match[4]}` : "";
-      return `${match[1]} ${match[2]}${fraction}${zone}`;
-    }
-
-    function isTimestampType(type) {
-      return /^(?:Nullable\(|LowCardinality\()*DateTime(?:64)?\b/.test(String(type || ""));
-    }
-
+    // Preview cells are query results: every value stays as the API sent it
+    // (decision 45: no grouping, no compact numbers, no reformatted dates),
+    // like the Query result table; only a data NULL takes the NULL token.
     function previewCellText(value) {
       if (value == null) return "NULL";
       if (typeof value === "object") {
@@ -1783,7 +1771,7 @@
                 else td.textContent = "NULL";
                 return;
               }
-              const text = isTimestampType(item.type) ? shortTimestamp(item.value) : previewCellText(item.value);
+              const text = previewCellText(item.value);
               td.textContent = text;
               if (text.length > 24) td.title = previewCellText(item.value);
             },
@@ -1820,7 +1808,6 @@
         renderTransposedPreview(container, projected.columns, projected.types, projected.rows[0], previewColumns, projected.sourceColumnIndexes);
         return;
       }
-      const timestampColumns = new Set(projected.types.map((type, index) => (isTimestampType(type) ? index : -1)).filter((index) => index >= 0));
       const table = ns.results?.createStaticResultTable?.({
         columns: projected.columns,
         types: projected.types,
@@ -1834,12 +1821,6 @@
           const type = projected.types[headCtx.columnIndex] || "";
           if (type) th.dataset.type = type;
           if (aggregatePreviewColumn(previewColumns[sourceIndex])) appendFinalizePreviewInfo(th);
-        },
-        renderCell: (td, cellCtx) => {
-          if (!timestampColumns.has(cellCtx.columnIndex) || cellCtx.value == null) return false;
-          td.textContent = shortTimestamp(cellCtx.value);
-          td.title = String(cellCtx.value);
-          return true;
         },
       });
       if (!table) throw new Error("Shared result table component is unavailable.");

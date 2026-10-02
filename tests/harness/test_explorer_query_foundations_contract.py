@@ -38,9 +38,6 @@ ALLOWED = {
     ("app_results.js", "formatter formatNumericWithScale"), ("app_results.js", "formatter formatNumericCellText"),
     # The chart Number view before the chart engine (ns.chartCore.formatValue) loads.
     ("app_query_chart.js", "formatter formatFullNumber"), ("app_query_chart.js", "locale toLocaleString"),
-    # The Explorer data preview is result data too: the API's ISO value is
-    # only shortened back to its ClickHouse text, never converted.
-    ("app_explorer_detail.js", "formatter shortTimestamp"),
     # Pipeline axis ticks: seconds with the precision the zoom window needs
     # ("1.234567 s"), which ns.format.duration rounds away.
     ("app_pipeline_viewer.js", "formatter timeLabel"),
