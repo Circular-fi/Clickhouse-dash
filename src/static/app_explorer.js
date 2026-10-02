@@ -343,7 +343,7 @@
 
   function operationsAvailable() {
     const f = explorerFeatures();
-    return !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;
+    return !!ns.explorerOps && f.enabled && f.operations.enabled;
   }
 
   function showOperationsView() {
@@ -377,12 +377,12 @@
   }
 
   function modeAvailability() {
+    // ns.features: graph.enabled already requires lineage or storage_topology.
     const f = explorerFeatures();
-    const gf = f.graph || {};
     return {
-      browse: f.enabled !== false && f.browse !== false,
-      graph: f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false),
-      storage: f.enabled !== false,
+      browse: f.enabled && f.browse,
+      graph: f.enabled && f.graph.enabled,
+      storage: f.enabled,
     };
   }
 
@@ -595,7 +595,7 @@
   }
 
   function explorerFeatures() {
-    return state.features?.explorer || { enabled: true, browse: true, graph: { enabled: true, lineage: true, storage_topology: true } };
+    return ns.features.get("explorer");
   }
 
   function applyExplorerFeatures() {
@@ -2488,7 +2488,8 @@
       });
     }
     window.addEventListener("chdash:host-changed", resetForHost);
-    window.addEventListener("chdash:features-changed", applyExplorerFeatures);
+    // Escape on the tree drawer is ns.layers (ns.sidePanel).
+    ns.features.on(applyExplorerFeatures);
     loadVisibilityOptions();
     model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
     syncVisibilityOptionLocks({ propagate: true });

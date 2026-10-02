@@ -36,8 +36,7 @@
   }
 
   function keeperEnabled() {
-    const operations = ns.state?.features?.explorer?.operations;
-    return !operations || (operations.enabled !== false && operations.keeper !== false);
+    return ns.features.get("explorer.operations.keeper");
   }
 
   // A DateTime text of the server's system tables: browser-local text, the

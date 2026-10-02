@@ -3698,7 +3698,7 @@
   // [{ traceId, spanId, label, columnIndex, others: [labels], href }], one
   // per distinct trace id.
   function rowTraceLinks(ctx, row) {
-    if (state.features?.traces?.enabled !== true || !ctx || !Array.isArray(row)) return [];
+    if (!ns.features.get("traces.enabled") || !ctx || !Array.isArray(row)) return [];
     const byId = new Map();
     for (const place of traceCandidates(ctx, row)) {
       let link = byId.get(place.traceId);

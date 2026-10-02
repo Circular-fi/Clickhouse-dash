@@ -602,23 +602,16 @@
     writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400) });
   }
 
+  // /api/version picks the store; without an answer in 4 s, the browser's.
   function waitForFeatures() {
-    if (state.featuresLoaded) return Promise.resolve();
-    return new Promise((resolve) => {
-      const done = () => {
-        window.removeEventListener("chdash:features", done);
-        resolve();
-      };
-      window.addEventListener("chdash:features", done);
-      setTimeout(done, 4000);
-    });
+    return Promise.race([ns.features.ready, new Promise((resolve) => setTimeout(resolve, 4000))]);
   }
 
   function start() {
     if (!ctl.started) {
       ctl.started = (async () => {
         await waitForFeatures();
-        const features = state.features?.query_library || {};
+        const features = ns.features.get("query_library");
         if (features.enabled) {
           ctl.mode = "server";
           ctl.adapter = createServerAdapter();

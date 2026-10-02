@@ -351,18 +351,118 @@
 
   const runOpts = storage.loadRunOptions();
 
+  // --- Feature flags (features of /api/version) ------------------------------
+  // The one defaults table: the server's own defaults (server.hpp), used for
+  // a flag the server did not send (an older server) and until /api/version
+  // has answered. The Explorer and its views are on, the OpenTelemetry views
+  // and the server query library off.
+  const FEATURE_DEFAULTS = Object.freeze({
+    explorer: {
+      enabled: true,
+      browse: true,
+      graph: { enabled: true, lineage: true, storage_topology: true },
+      operations: { enabled: true, keeper: true },
+    },
+    traces: { enabled: false },
+    logs: { enabled: false, body_search: "token" },
+    metrics: { enabled: false },
+    query_library: { enabled: false, writable: false, history_store: "browser" },
+  });
+
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+
+  function lookup(root, path) {
+    let value = root;
+    for (const part of String(path || "").split(".").filter(Boolean)) {
+      if (value == null || typeof value !== "object") return undefined;
+      value = value[part];
+    }
+    return value;
+  }
+
+  const bool = (value, fallback) => (typeof value === "boolean" ? value : fallback);
+
+  // /api/version features -> the effective flags (each missing one from the
+  // defaults table; derived flags as the server computes them).
+  function normalizeFeatures(raw) {
+    const d = FEATURE_DEFAULTS;
+    const src = raw && typeof raw === "object" ? raw : {};
+    const explorer = src.explorer || {};
+    const graph = explorer.graph || {};
+    const operations = explorer.operations || {};
+    const lineage = bool(graph.lineage, d.explorer.graph.lineage);
+    const storageTopology = bool(graph.storage_topology, d.explorer.graph.storage_topology);
+    const operationsEnabled = bool(operations.enabled, d.explorer.operations.enabled);
+    const library = src.query_library || {};
+    const libraryEnabled = bool(library.enabled, d.query_library.enabled);
+    return {
+      explorer: {
+        enabled: bool(explorer.enabled, d.explorer.enabled),
+        browse: bool(explorer.browse, d.explorer.browse),
+        graph: { enabled: bool(graph.enabled, d.explorer.graph.enabled) && (lineage || storageTopology), lineage, storage_topology: storageTopology },
+        operations: { enabled: operationsEnabled, keeper: operationsEnabled && bool(operations.keeper, d.explorer.operations.keeper) },
+      },
+      traces: { enabled: bool(src.traces?.enabled, d.traces.enabled) },
+      logs: { enabled: bool(src.logs?.enabled, d.logs.enabled), body_search: String(src.logs?.body_search || d.logs.body_search) },
+      metrics: { enabled: bool(src.metrics?.enabled, d.metrics.enabled) },
+      query_library: {
+        enabled: libraryEnabled,
+        writable: libraryEnabled && library.writable === true,
+        history_store: libraryEnabled && library.history_store === "server" ? "server" : "browser",
+      },
+    };
+  }
+
+  let resolveReady = null;
+  let answered = false;
+  const ready = new Promise((resolve) => { resolveReady = resolve; });
+
+  // ns.features: every read of a feature flag.
+  //   get(path, fallback)  the flag at "explorer.graph.lineage"; before
+  //                        /api/version answers, `fallback` when given (a
+  //                        caller that tries and lets the endpoint say no),
+  //                        else the defaults table
+  //   known()              /api/version has answered with its flags
+  //   ready                Promise, resolved once it has answered or failed
+  //   on(fn)               fn(features) after every change; returns off()
+  //   set(raw)             app_ui.js: the features of /api/version
+  //   DEFAULTS             the defaults table
+  const features = {
+    DEFAULTS: FEATURE_DEFAULTS,
+    ready,
+    known: () => answered,
+    get(path, fallback) {
+      if (!answered && fallback !== undefined) return fallback;
+      const value = lookup(state.features, path);
+      if (value !== undefined) return value;
+      const preset = lookup(FEATURE_DEFAULTS, path);
+      return preset !== undefined ? clone(preset) : fallback;
+    },
+    set(raw) {
+      state.features = normalizeFeatures(raw);
+      answered = true;
+      return state.features;
+    },
+    markLoaded() {
+      if (state.featuresLoaded) return;
+      state.featuresLoaded = true;
+      resolveReady(state.features);
+      window.dispatchEvent(new CustomEvent("chdash:features"));
+    },
+    on(fn) {
+      if (typeof fn !== "function") return () => {};
+      const listener = (event) => fn(event?.detail || state.features);
+      window.addEventListener("chdash:features-changed", listener);
+      return () => window.removeEventListener("chdash:features-changed", listener);
+    },
+  };
+
   const state = {
     hostsSnapshot: null,
     selectedHostId: storage.getStoredHostId(),
     apiOnline: true,
-    features: {
-      explorer: { enabled: true, browse: true, graph: { enabled: true, lineage: true, storage_topology: true } },
-      traces: { enabled: false },
-      logs: { enabled: false },
-      metrics: { enabled: false },
-      // features.query_library of /api/version (off: the browser library).
-      query_library: { enabled: false, writable: false, history_store: "browser" },
-    },
+    // The effective flags (ns.features reads them): the defaults until /api/version answers.
+    features: clone(FEATURE_DEFAULTS),
     featuresLoaded: false,
     suppressResultsVisibility: false,
 
@@ -389,4 +489,5 @@
 
   ns.storage = storage;
   ns.state = state;
+  ns.features = Object.freeze(features);
 })();

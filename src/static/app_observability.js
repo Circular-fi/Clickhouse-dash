@@ -172,14 +172,11 @@
   }
 
   function featuresKnown() {
-    return window.ChDash.observability?.featuresKnown === true;
+    return window.ChDash.features?.known?.() === true;
   }
 
   function enabledViews() {
-    if (featuresKnown()) {
-      const features = window.ChDash.state?.features || {};
-      return VIEWS.filter((view) => features[view]?.enabled === true);
-    }
+    if (featuresKnown()) return VIEWS.filter((view) => window.ChDash.features.get(`${view}.enabled`));
     const early = String(document.documentElement.dataset.obsEnabled || "").split(/\s+/).filter((v) => VIEWS.includes(v));
     return early.length ? early : [...VIEWS];
   }
@@ -321,8 +318,6 @@
   }
 
   function onFeatures() {
-    const api = window.ChDash.observability;
-    if (api) api.featuresKnown = true;
     const enabled = enabledViews();
     renderTabs();
     if (!enabled.length) return; // app_ui.js leaves the page
@@ -351,7 +346,7 @@
     ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });
     document.addEventListener("click", onDocumentClick);
     window.addEventListener("popstate", onPopState);
-    window.addEventListener("chdash:features-changed", onFeatures);
+    window.ChDash.features.on(onFeatures);
   }
 
 
@@ -396,7 +391,7 @@
   }
 
   async function start() {
-    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, featuresKnown: false, VIEWS };
+    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, VIEWS };
     // --shell-top (the header and #obsNav) is measured by app_dom.js
     // (ns.shell), as on every page.
     const named = viewFromPath(window.location.pathname);

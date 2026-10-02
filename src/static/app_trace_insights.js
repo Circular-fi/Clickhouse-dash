@@ -416,7 +416,6 @@
     loading: "",
     error: "",
     elapsedMs: NaN,
-    seq: 0,
     returnFocus: null,
   };
 
@@ -494,7 +493,7 @@
   let contextLayer = null;
   function closeContext() {
     context.open = false;
-    ++context.seq;
+    ns.util.latest.cancel("traces.context");
     // The layer gives the focus back to the trigger (when it was in the panel).
     const layer = contextLayer;
     contextLayer = null;
@@ -523,7 +522,7 @@
 
   async function loadContext(direction) {
     if (!context.anchor) return;
-    const seq = ++context.seq;
+    const req = ns.util.latest("traces.context");
     const params = { ...contextParams(), direction, limit: CONTEXT_PAGE };
     if (direction === "older" || direction === "newer") {
       const edge = direction === "older" ? context.rows[context.rows.length - 1] : context.rows[0];
@@ -539,8 +538,8 @@
     context.error = "";
     renderContext();
     try {
-      const payload = await ns.api.getTraceContext(ctx.currentHost(), params);
-      if (seq !== context.seq) return;
+      const payload = await ns.api.getTraceContext(ctx.currentHost(), params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       const rows = payload?.rows || [];
       if (direction === "older") context.rows = context.rows.concat(rows);
       else if (direction === "newer") context.rows = rows.concat(context.rows);
@@ -549,7 +548,7 @@
       if ("has_older" in payload) context.hasOlder = !!payload.has_older;
       context.elapsedMs = Number(payload?.elapsed_ms);
     } catch (error) {
-      if (seq !== context.seq) return;
+      if (!req.isCurrent()) return;
       context.error = error instanceof Error ? error.message : String(error);
     }
     context.loading = "";

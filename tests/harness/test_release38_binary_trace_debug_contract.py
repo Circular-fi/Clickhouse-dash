@@ -17,7 +17,7 @@ def test_live_trace_is_classic_json_with_compact_dictionaries_and_local_parents(
     assert 'writer.Key("operations")' in api
     assert 'writer.String("parent_ref")' in api
     assert 'res.set_content(buffer.GetString(), buffer.GetSize(), "application/json; charset=utf-8");' in api
-    assert 'const payload = await readJsonBody(response);' in frontend
+    assert 'payload = await readJsonBody(response);' in frontend
     assert 'response.arrayBuffer()' not in frontend
 
 

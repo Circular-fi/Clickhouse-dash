@@ -45,7 +45,7 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     # Operations: module hook kept, the view hidden while the module is not loaded.
     assert 'ns.explorerOps.show(dom.explorerOpsPane, { onOpenTable: (database, table) => openCard(database, table) });' in ui
     assert 'const available = { catalog: true, functions: true, operations: operationsAvailable() };' in ui
-    assert 'return !!ns.explorerOps && f.enabled !== false && f.operations?.enabled !== false;' in ui
+    assert 'return !!ns.explorerOps && f.enabled && f.operations.enabled;' in ui
     assert 'const OPERATIONS_ROUTE_SEGMENT = "_operations";' in ui
     assert 'init, setWorkspace, setSection, setMode, setView, currentView, storageScope,' in ui
 

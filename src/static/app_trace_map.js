@@ -44,7 +44,6 @@
   const palette = ns.palette;
 
   const map = {
-    seq: 0,
     key: null,
     loading: false,
     error: "",
@@ -688,14 +687,14 @@
   async function load(filters, { force = false } = {}) {
     const key = ns.traceSearch?.searchKey?.() || "";
     if (!force && key === map.key && (map.loading || map.data)) return;
-    const seq = ++map.seq;
+    const req = ns.util.latest("traces.map");
     map.key = key;
     map.loading = true;
     map.error = "";
     renderState();
     try {
-      const payload = await ctx.api.getTraceServiceMap(ctx.currentHost(), filters);
-      if (seq !== map.seq) return;
+      const payload = await ctx.api.getTraceServiceMap(ctx.currentHost(), filters, { signal: req.signal });
+      if (!req.isCurrent()) return;
       const previous = map.selected;
       map.data = normalize(payload);
       palette.registerServices(map.data.nodes.map((node) => node.service));
@@ -717,12 +716,12 @@
       if (dropped || (previous?.kind === "node" && !map.selected)) ns.traceSearch?.writeUrl?.("replace");
       fit();
     } catch (error) {
-      if (seq !== map.seq) return;
+      if (!req.isCurrent()) return;
       map.error = error instanceof Error ? error.message : String(error);
       // Not the key of any search (the default search's key is ""): Retry reloads.
       map.key = null;
     } finally {
-      if (seq === map.seq) {
+      if (req.isCurrent()) {
         map.loading = false;
         renderMeta();
         renderLegend();

@@ -8,7 +8,7 @@
   // picks (range, panels, aggregation, group-by, filters) lives in the URL.
   const ns = window.ChDash;
   if (!ns) return;
-  const { dom, state, api, ui } = ns;
+  const { dom, state, api, ui, util } = ns;
 
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
   const PLOT_HEIGHT = 280;
@@ -143,7 +143,6 @@
       data: null,
       error: "",
       loading: false,
-      seq: 0,
       exemplarData: null,
       exemplarError: "",
       keys: null,
@@ -161,7 +160,6 @@
     catalog: null,
     catalogError: "",
     catalogLoading: false,
-    catalogSeq: 0,
     meta: null,
     search: "",
     collapsed: new Set(),
@@ -297,7 +295,7 @@
   }
 
   async function loadCatalog() {
-    const seq = ++model.catalogSeq;
+    const req = util.latest("metrics.catalog");
     model.catalogLoading = true;
     model.catalogError = "";
     renderCatalog();
@@ -311,11 +309,11 @@
       return;
     }
     try {
-      const data = await api.getJson(`api/metrics/catalog?${hostParams(range).toString()}`);
-      if (seq !== model.catalogSeq) return;
+      const data = await api.getJson(`api/metrics/catalog?${hostParams(range).toString()}`, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.catalog = data;
     } catch (e) {
-      if (seq !== model.catalogSeq) return;
+      if (!req.isCurrent()) return;
       model.catalog = null;
       model.catalogError = e?.message || "Cannot load the metrics catalog.";
     }
@@ -517,39 +515,43 @@
 
   async function loadPanel(panel) {
     if (!panel.metric || !panel.kind || !panel.service) return;
-    const seq = ++panel.seq;
+    // A new load supersedes the panel's series and exemplar requests.
+    const req = util.latest(`metrics.panel.${panel.id}`);
+    util.latest.cancel(`metrics.exemplars.${panel.id}`);
     panel.loading = true;
     panel.error = "";
     renderPanel(panel);
     try {
       const query = panelQuery(panel, { agg: panel.agg, group_by: panel.groupBy.join(","), ...filterParams(panel) });
-      const data = await api.getJson(`api/metrics/series?${query.toString()}`);
-      if (seq !== panel.seq) return;
+      const data = await api.getJson(`api/metrics/series?${query.toString()}`, { signal: req.signal });
+      if (!req.isCurrent()) return;
       panel.data = data;
       if (data?.agg && data.agg !== panel.agg) {
         panel.agg = data.agg;
         writeUrl();
       }
     } catch (e) {
-      if (seq !== panel.seq) return;
+      if (!req.isCurrent()) return;
       panel.data = null;
       panel.error = e?.message || "Cannot load the metric.";
     }
     panel.loading = false;
     renderPanel(panel);
-    if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel, seq);
+    if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
     else { panel.exemplarData = null; drawChart(panel); }
   }
 
-  async function loadExemplars(panel, seq) {
+  // The exemplars of the panel's current series (a new series load cancels them).
+  async function loadExemplars(panel) {
+    const req = util.latest(`metrics.exemplars.${panel.id}`);
     try {
       const query = panelQuery(panel, { step_ms: panel.data?.bucket_ms, ...filterParams(panel) });
-      const data = await api.getJson(`api/metrics/exemplars?${query.toString()}`);
-      if (seq !== panel.seq) return;
+      const data = await api.getJson(`api/metrics/exemplars?${query.toString()}`, { signal: req.signal });
+      if (!req.isCurrent()) return;
       panel.exemplarData = data;
       panel.exemplarError = "";
     } catch (e) {
-      if (seq !== panel.seq) return;
+      if (!req.isCurrent()) return;
       panel.exemplarData = null;
       panel.exemplarError = e?.message || "Cannot load exemplars.";
     }
@@ -781,7 +783,7 @@
     el.querySelector(".metricsExemplarToggle").addEventListener("change", (event) => {
       panel.exemplars = !!event.target.checked;
       writeUrl();
-      if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel, panel.seq);
+      if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
       else { panel.exemplarData = null; renderPanelNote(panel); drawChart(panel); }
     });
   }
@@ -1213,8 +1215,8 @@
       model.catalog = null;
       loadMeta().then(reloadAll);
     });
-    window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.metrics?.enabled === false || !ownsUrl()) return;
+    ns.features.on((features) => {
+      if (features?.metrics?.enabled === false || !ownsUrl()) return;
       start();
     });
     start();

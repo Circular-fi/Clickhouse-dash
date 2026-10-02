@@ -48,7 +48,8 @@
     searchedToNs: "",
     loading: false,
     error: "",
-    seq: 0,
+    // The first page's request (util.latest): later pages share it, so a new search drops them all.
+    req: null,
     searched: false,
     latencyMs: NaN,
     emptyPages: 0,
@@ -245,23 +246,24 @@
 
   async function loadPage({ first = false } = {}) {
     if (!state.base) return;
-    const seq = first ? ++state.seq : state.seq;
-    if (!first && (state.loading || !state.cursor)) return;
+    if (!first && (state.loading || !state.cursor || !state.req)) return;
+    const req = first ? ns.util.latest("traces.spans") : state.req;
+    state.req = req;
     state.loading = true;
     state.error = "";
     render();
     const started = performance.now();
     let payload = null;
     try {
-      payload = await ctx.api.getJson(`api/traces/spans?${requestQuery(state.base, first ? "" : state.cursor).toString()}`);
+      payload = await ctx.api.getJson(`api/traces/spans?${requestQuery(state.base, first ? "" : state.cursor).toString()}`, { signal: req.signal });
     } catch (error) {
-      if (seq !== state.seq) return;
+      if (!req.isCurrent()) return;
       state.loading = false;
       state.error = message(error);
       render();
       return;
     }
-    if (seq !== state.seq) return;
+    if (!req.isCurrent()) return;
     if (first) state.latencyMs = performance.now() - started;
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     palette.registerServices(rows.map((row) => row.service_name));

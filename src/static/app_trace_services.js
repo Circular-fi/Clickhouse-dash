@@ -24,7 +24,6 @@
   const palette = ns.palette;
 
   const view = {
-    seq: 0,
     key: "",
     payload: null,
     loading: false,
@@ -33,8 +32,8 @@
     scope: "entry",
     exact: false,
     detailName: "",
-    detail: { key: "", payload: null, loading: false, error: "", seq: 0 },
-    db: { key: "", payload: null, loading: false, error: "", seq: 0 },
+    detail: { key: "", payload: null, loading: false, error: "" },
+    db: { key: "", payload: null, loading: false, error: "" },
     filters: null,
     searchKey: null,
   };
@@ -138,26 +137,26 @@
       return;
     }
     view.key = key;
-    const seq = ++view.seq;
+    const req = ns.util.latest("traces.services");
     view.loading = true;
     view.error = "";
     render();
     try {
-      const payload = await ctx.api.getTraceServices(ctx.currentHost(), params);
-      if (seq !== view.seq) return;
+      const payload = await ctx.api.getTraceServices(ctx.currentHost(), params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       view.payload = payload;
       palette.registerServices((payload?.services || []).map((row) => row[0]));
     } catch (error) {
-      if (seq !== view.seq) return;
+      if (!req.isCurrent()) return;
       view.payload = null;
       view.error = error instanceof Error ? error.message : String(error);
     } finally {
-      if (seq === view.seq) {
+      if (req.isCurrent()) {
         view.loading = false;
         render();
       }
     }
-    if (seq === view.seq && view.detailName) void loadDetail();
+    if (req.isCurrent() && view.detailName) void loadDetail();
   }
 
   async function loadDetail() {
@@ -168,21 +167,21 @@
     const detail = view.detail;
     if (detail.key === key && (detail.payload || detail.loading)) { renderDetail(); return; }
     detail.key = key;
-    const seq = ++detail.seq;
+    const req = ns.util.latest("traces.services.detail");
     detail.loading = true;
     detail.error = "";
     detail.payload = null;
     renderDetail();
     void loadDb(params);
     try {
-      const payload = await ctx.api.getTraceServices(ctx.currentHost(), params);
-      if (seq !== detail.seq) return;
+      const payload = await ctx.api.getTraceServices(ctx.currentHost(), params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       detail.payload = payload;
     } catch (error) {
-      if (seq !== detail.seq) return;
+      if (!req.isCurrent()) return;
       detail.error = error instanceof Error ? error.message : String(error);
     } finally {
-      if (seq === detail.seq) {
+      if (req.isCurrent()) {
         detail.loading = false;
         renderDetail();
       }
@@ -198,19 +197,19 @@
     const key = keyOf(dbParams);
     if (db.key === key && (db.payload || db.loading)) return;
     db.key = key;
-    const seq = ++db.seq;
+    const req = ns.util.latest("traces.services.db");
     db.loading = true;
     db.error = "";
     db.payload = null;
     try {
-      const payload = await ctx.api.getTraceServicesDb(ctx.currentHost(), dbParams);
-      if (seq !== db.seq) return;
+      const payload = await ctx.api.getTraceServicesDb(ctx.currentHost(), dbParams, { signal: req.signal });
+      if (!req.isCurrent()) return;
       db.payload = payload;
     } catch (error) {
-      if (seq !== db.seq) return;
+      if (!req.isCurrent()) return;
       db.error = error instanceof Error ? error.message : String(error);
     } finally {
-      if (seq === db.seq) {
+      if (req.isCurrent()) {
         db.loading = false;
         renderDetail();
       }

@@ -20,47 +20,20 @@
     }
   }
 
+  // /api/version: the version badge and the feature flags (ns.features; a
+  // flag the server does not send keeps the defaults table's value).
   async function loadMeta() {
     if (!dom.versionBadge) return;
+    let data;
     try {
-      const resp = await fetch(api.resolveUrl("api/version"), { cache: "no-store" });
-      if (!resp.ok) {
-        dom.versionBadge.textContent = "meta: error";
-        markFeaturesLoaded();
-        return;
-      }
-      const data = await resp.json();
-      const explorer = data && data.features && data.features.explorer ? data.features.explorer : {};
-      const explorerGraph = explorer && explorer.graph && typeof explorer.graph === "object" ? explorer.graph : {};
-      const lineage = explorerGraph.lineage !== false;
-      const storageTopology = explorerGraph.storage_topology !== false;
-      state.features.explorer = {
-        enabled: explorer.enabled !== false,
-        browse: explorer.browse !== false,
-        graph: {
-          enabled: explorerGraph.enabled !== false && (lineage || storageTopology),
-          lineage,
-          storage_topology: storageTopology,
-        },
-        // Server operations view (explorer.operations): the tab is hidden when off.
-        operations: {
-          enabled: explorer.operations?.enabled !== false,
-          keeper: explorer.operations?.keeper === true,
-        },
-      };
-      const traces = data && data.features && data.features.traces ? data.features.traces : {};
-      state.features.traces = { enabled: traces.enabled === true };
-      const logs = data && data.features && data.features.logs ? data.features.logs : {};
-      state.features.logs = { enabled: logs.enabled === true, body_search: String(logs.body_search || "token") };
-      const metrics = data && data.features && data.features.metrics ? data.features.metrics : {};
-      state.features.metrics = { enabled: metrics.enabled === true };
-      // Query library: off (or an older server) keeps the browser library.
-      const library = data && data.features && data.features.query_library ? data.features.query_library : {};
-      state.features.query_library = {
-        enabled: library.enabled === true,
-        writable: library.enabled === true && library.writable === true,
-        history_store: library.enabled === true && library.history_store === "server" ? "server" : "browser",
-      };
+      data = await api.getVersion();
+    } catch (error) {
+      dom.versionBadge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
+      markFeaturesLoaded();
+      return;
+    }
+    try {
+      ns.features.set(data && data.features);
       markFeaturesLoaded();
       applyProductFeatures();
       const verObj = data && data.version ? data.version : null;
@@ -79,9 +52,7 @@
   // The library waits for /api/version to pick its storage; without an answer
   // it stays in the browser.
   function markFeaturesLoaded() {
-    if (state.featuresLoaded) return;
-    state.featuresLoaded = true;
-    window.dispatchEvent(new CustomEvent("chdash:features"));
+    ns.features.markLoaded();
   }
 
   // A host's ping in ns.format's duration ("12 ms"), whole milliseconds.
@@ -341,10 +312,7 @@
 
     const fetchHostsOnce = async () => {
       try {
-        const r = await fetch(api.resolveUrl("api/hosts"), { cache: "no-store" });
-        if (!r.ok) return false;
-        const data = await r.json();
-        useSnapshot(data);
+        useSnapshot(await api.getHosts());
         return true;
       } catch {
         return false;
@@ -458,11 +426,12 @@
   }
 
   function applyProductFeatures() {
-    const f = state.features?.explorer || {};
-    const explorerEnabled = f.enabled !== false;
-    const tracesEnabled = state.features?.traces?.enabled === true;
-    const logsEnabled = state.features?.logs?.enabled === true;
-    const metricsEnabled = state.features?.metrics?.enabled === true;
+    const features = ns.features;
+    const f = features.get("explorer");
+    const explorerEnabled = f.enabled;
+    const tracesEnabled = features.get("traces.enabled");
+    const logsEnabled = features.get("logs.enabled");
+    const metricsEnabled = features.get("metrics.enabled");
     applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
@@ -476,7 +445,7 @@
       window.location.replace(api.resolveUrl("query"));
       return;
     }
-    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: state.features?.traces || {}, logs: state.features?.logs || {}, metrics: state.features?.metrics || {} } }));
+    window.dispatchEvent(new CustomEvent("chdash:features-changed", { detail: { explorer: f, traces: features.get("traces"), logs: features.get("logs"), metrics: features.get("metrics") } }));
   }
 
   function setPageSelectorValue(value) {

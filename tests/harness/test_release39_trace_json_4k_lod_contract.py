@@ -15,7 +15,7 @@ def test_analysis_response_is_normal_json_not_binary() -> None:
     assert 'wire.append("CTR1"' not in api
     assert 'decodeAnalysisEnvelope' not in frontend
     assert 'response.arrayBuffer()' not in frontend
-    assert 'const payload = await readJsonBody(response);' in frontend
+    assert 'payload = await readJsonBody(response);' in frontend
 
 
 def test_temporal_lod_is_fixed_to_4k_and_only_merges_leaf_pixel_segments() -> None:

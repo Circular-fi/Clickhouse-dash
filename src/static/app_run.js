@@ -582,8 +582,7 @@
     if (outcome.status === "error" && errorText) outcome.error = errorText.slice(0, 2048);
     storage.completeHistoryEntry(run.tsMs, run.sql, outcome);
     const entry = { sql: run.sql, host_id: run.hostId || null, ran_at_ms: run.tsMs, ...outcome };
-    const library = state.features && state.features.query_library;
-    const toServer = !!(library && library.enabled && library.history_store === "server");
+    const toServer = ns.features.get("query_library.history_store") === "server";
     const notify = (detail) => {
       try {
         window.dispatchEvent(new CustomEvent("chdash:query-history", { detail }));

@@ -23,7 +23,6 @@
   let chart = null;
   const hm = {
     mode: readMode(),
-    seq: 0,
     filters: null,
     data: null,
     dataKey: "",
@@ -35,7 +34,7 @@
     anchor: null,
     drag: null,
   };
-  const deltas = { seq: 0, data: null, loading: false, error: "", baseline: "outside" };
+  const deltas = { data: null, loading: false, error: "", baseline: "outside" };
 
   function readMode() {
     try {
@@ -118,7 +117,7 @@
 
   async function load() {
     if (!hm.filters || !ctx) return;
-    const seq = ++hm.seq;
+    const req = ns.util.latest("traces.heatmap");
     const key = filtersKey(hm.filters);
     hm.loading = true;
     hm.error = "";
@@ -126,15 +125,15 @@
     hm.dataKey = key;
     render();
     try {
-      const data = await ctx.api.getTraceHeatmap(ctx.currentHost(), hm.filters);
-      if (seq !== hm.seq) return;
+      const data = await ctx.api.getTraceHeatmap(ctx.currentHost(), hm.filters, { signal: req.signal });
+      if (!req.isCurrent()) return;
       hm.data = data;
     } catch (error) {
-      if (seq !== hm.seq) return;
+      if (!req.isCurrent()) return;
       hm.error = error instanceof Error ? error.message : String(error);
       hm.dataKey = "";
     } finally {
-      if (seq === hm.seq) {
+      if (req.isCurrent()) {
         hm.loading = false;
         if (active()) render();
       }
@@ -413,7 +412,7 @@
   }
 
   function clearSelection({ render: redraw = true } = {}) {
-    ++deltas.seq;
+    ns.util.latest.cancel("traces.deltas");
     hm.selection = null;
     deltas.data = null;
     deltas.loading = false;
@@ -424,7 +423,7 @@
   async function loadDeltas() {
     const sel = hm.selection;
     if (!sel || !hm.filters) return;
-    const seq = ++deltas.seq;
+    const req = ns.util.latest("traces.deltas");
     deltas.loading = true;
     deltas.error = "";
     deltas.data = null;
@@ -435,14 +434,14 @@
         t0: String(Math.round(sel.t0)), t1: String(Math.round(sel.t1)),
         d0: String(sel.d0 / 1e6), d1: String(sel.d1 / 1e6),
         baseline: deltas.baseline,
-      });
-      if (seq !== deltas.seq) return;
+      }, { signal: req.signal });
+      if (!req.isCurrent()) return;
       deltas.data = data;
     } catch (error) {
-      if (seq !== deltas.seq) return;
+      if (!req.isCurrent()) return;
       deltas.error = error instanceof Error ? error.message : String(error);
     } finally {
-      if (seq === deltas.seq) {
+      if (req.isCurrent()) {
         deltas.loading = false;
         renderPanel();
       }

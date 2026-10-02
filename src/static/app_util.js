@@ -279,7 +279,88 @@
     return normalizeApiErrorPayload(payload, { error_code: "http_error", message: msg });
   }
 
+  // --- Timing and superseded requests ------------------------------------------
+
+  // The one delay of typed searches (ns.search.bind) and of other input-driven work.
+  const SEARCH_DEBOUNCE_MS = 200;
+
+  // fn after `ms` without another call; .cancel() drops the pending call,
+  // .flush() runs it now.
+  function debounce(fn, ms = SEARCH_DEBOUNCE_MS) {
+    let timer = 0;
+    let args = null;
+    const run = () => {
+      timer = 0;
+      const pending = args;
+      args = null;
+      if (pending) fn(...pending);
+    };
+    const debounced = (...next) => {
+      args = next;
+      clearTimeout(timer);
+      timer = setTimeout(run, ms);
+    };
+    debounced.cancel = () => { clearTimeout(timer); timer = 0; args = null; };
+    debounced.flush = () => { if (timer) { clearTimeout(timer); run(); } };
+    return debounced;
+  }
+
+  // fn once on the next animation frame however often it is asked for (the
+  // last arguments win); .cancel() drops it.
+  function rafOnce(fn) {
+    let frame = 0;
+    let args = [];
+    const scheduled = (...next) => {
+      args = next;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        fn(...args);
+      });
+    };
+    scheduled.cancel = () => { if (frame) cancelAnimationFrame(frame); frame = 0; };
+    scheduled.pending = () => frame !== 0;
+    return scheduled;
+  }
+
+  // The latest request for `key` (e.g. "logs.search"): a new one aborts the
+  // previous one still in flight (its fetch stops, so does the server work it
+  // started) and makes it stale.
+  //   const req = util.latest("logs.search");
+  //   const data = await api.getLogs("search", params, { signal: req.signal });
+  //   if (!req.isCurrent()) return;      // superseded: ignore the answer
+  // An aborted request rejects with an AbortError (util.isAbort): check
+  // isCurrent() before showing an error.
+  const latestByKey = new Map();
+  function latest(key) {
+    latestByKey.get(key)?.controller.abort();
+    const controller = new AbortController();
+    const token = {
+      controller,
+      signal: controller.signal,
+      isCurrent: () => latestByKey.get(key) === token,
+    };
+    latestByKey.set(key, token);
+    return token;
+  }
+  // Abort the request in flight for `key` (a view left, a host changed).
+  latest.cancel = (key) => {
+    const token = latestByKey.get(key);
+    if (!token) return;
+    latestByKey.delete(key);
+    token.controller.abort();
+  };
+
+  function isAbort(error) {
+    return !!error && (error.name === "AbortError" || error.code === "aborted");
+  }
+
   ns.util = {
+    SEARCH_DEBOUNCE_MS,
+    debounce,
+    rafOnce,
+    latest,
+    isAbort,
     setText,
     setMetricText,
     escapeHtml,

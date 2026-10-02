@@ -85,8 +85,9 @@ def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall
         assert f"ns.traceLogs?.{hook}?.(" in traces or f"logs?.{hook}?.(" in traces, hook
         assert f"{hook}," in logs or f"{hook}(" in logs, hook
     # Hidden when /api/version says logs are disabled.
-    assert "state?.features?.logs?.enabled !== false" in logs
-    assert "state.features.logs = { enabled: logs.enabled === true" in read("src/static/app_ui.js")
+    # (ns.features: before /api/version answers, the panel tries and the endpoint says disabled.)
+    assert 'return ns.features.get("logs.enabled", true);' in logs
+    assert "logs: { enabled: bool(src.logs?.enabled, d.logs.enabled)" in read("src/static/app_state.js")
     # A log opens its span through the ?span= deep link.
     assert "ctx.focusSpanInTimeline(id, { push: true });" in logs
     # Spans sharing a SpanId: containment, else the nearest span.

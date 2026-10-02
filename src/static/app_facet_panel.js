@@ -45,8 +45,9 @@
     const o = options;
     const byId = (name) => document.getElementById(o.ids[name]);
     const [one, many] = o.noun;
+    // util.latest keys: this panel's keys request, and one per expanded key.
+    const latestKey = `facets.${o.ids.panel}`;
     const state = {
-      seq: 0,
       filterKey: "",
       filters: null,
       keys: [],
@@ -59,7 +60,7 @@
       error: "",
       shown: KEYS_PAGE,
       query: "",
-      // "scope\x1fkey" -> { limit, values, loading, error, estimated, hasMore, seq }
+      // "scope\x1fkey" -> { limit, values, loading, error, estimated, hasMore }
       expanded: new Map(),
       pins: readPins(),
     };
@@ -108,13 +109,13 @@
       if (panel) panel.hidden = !enabled;
       if (!enabled || collapsed()) return;
       state.filterKey = o.filterKey(filters);
-      const seq = ++state.seq;
+      const req = ns.util.latest(latestKey);
       state.loading = true;
       state.error = "";
       render();
       try {
-        const payload = await o.fetchKeys(filters);
-        if (seq !== state.seq) return;
+        const payload = await o.fetchKeys(filters, { signal: req.signal });
+        if (!req.isCurrent()) return;
         state.supported = payload?.supported !== false;
         state.unsupportedText = payload?.unsupportedText || "";
         state.keys = Array.isArray(payload?.keys) ? payload.keys : [];
@@ -122,16 +123,16 @@
         state.timedOut = payload?.timedOut === true;
         state.sampled = Number(payload?.sampled || 0);
       } catch (error) {
-        if (seq !== state.seq) return;
+        if (!req.isCurrent()) return;
         state.keys = [];
         state.error = error instanceof Error ? error.message : String(error);
       } finally {
-        if (seq === state.seq) {
+        if (req.isCurrent()) {
           state.loading = false;
           render();
         }
       }
-      if (seq !== state.seq) return;
+      if (!req.isCurrent()) return;
       for (const id of state.expanded.keys()) {
         const { scope, key } = splitId(id);
         void loadValues(scope, key);
@@ -142,23 +143,24 @@
       const id = facetId(scope, key);
       const entry = state.expanded.get(id);
       if (!entry || !state.filters) return;
-      const seq = (entry.seq || 0) + 1;
-      entry.seq = seq;
+      // The entry check stays: a key folded and opened again is a new entry.
+      const req = ns.util.latest(`${latestKey}.values.${id}`);
+      const current = () => req.isCurrent() && state.expanded.get(id) === entry;
       entry.loading = true;
       entry.error = "";
       render();
       try {
-        const payload = await o.fetchValues(state.filters, scope, key, entry.limit);
-        if (state.expanded.get(id) !== entry || entry.seq !== seq) return;
+        const payload = await o.fetchValues(state.filters, scope, key, entry.limit, { signal: req.signal });
+        if (!current()) return;
         entry.values = Array.isArray(payload?.values) ? payload.values : [];
         entry.estimated = payload?.estimated === true;
         entry.hasMore = payload?.hasMore === true;
       } catch (error) {
-        if (state.expanded.get(id) !== entry || entry.seq !== seq) return;
+        if (!current()) return;
         entry.values = [];
         entry.error = error instanceof Error ? error.message : String(error);
       } finally {
-        if (state.expanded.get(id) === entry && entry.seq === seq) {
+        if (current()) {
           entry.loading = false;
           render();
         }
@@ -259,7 +261,7 @@
       if (target.closest("[data-facet-expand]")) {
         if (state.expanded.has(id)) state.expanded.delete(id);
         else {
-          state.expanded.set(id, { limit: VALUE_LIMITS[0], values: null, loading: false, error: "", estimated: false, hasMore: false, seq: 0 });
+          state.expanded.set(id, { limit: VALUE_LIMITS[0], values: null, loading: false, error: "", estimated: false, hasMore: false });
           void loadValues(facet.scope, facet.key);
         }
         render();
@@ -293,7 +295,7 @@
     }
 
     function reset() {
-      ++state.seq;
+      ns.util.latest.cancel(latestKey);
       state.filters = null;
       state.filterKey = "";
       state.keys = [];

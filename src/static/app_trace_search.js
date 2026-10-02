@@ -552,8 +552,8 @@
       scopes: { span: { badge: "S", title: "Span attribute" }, resource: { badge: "R", title: "Resource attribute" } },
       enabled: () => ctx?.model?.meta?.tag_search_supported !== false,
       filterKey: facetFilterKey,
-      fetchKeys: async (filters) => {
-        const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters));
+      fetchKeys: async (filters, { signal } = {}) => {
+        const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters), { signal });
         return {
           supported: payload?.supported !== false,
           unsupportedText: "Attributes are not stored as Map columns.",
@@ -563,8 +563,8 @@
           sampled: Number(payload?.sampled_spans || 0),
         };
       },
-      fetchValues: async (filters, scope, key, limit) => {
-        const payload = await ctx.api.getTraceFacetValues(ctx.currentHost(), { ...facetFilterParams(filters), scope, key, limit: String(limit) });
+      fetchValues: async (filters, scope, key, limit, { signal } = {}) => {
+        const payload = await ctx.api.getTraceFacetValues(ctx.currentHost(), { ...facetFilterParams(filters), scope, key, limit: String(limit) }, { signal });
         return {
           values: (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) })),
           estimated: payload?.estimated === true,

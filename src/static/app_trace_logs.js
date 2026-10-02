@@ -25,7 +25,6 @@
 
   let ctx = null;
   const view = {
-    seq: 0,
     trace: null,
     // idle | loading | ready | error | unavailable | disabled
     status: "idle",
@@ -56,8 +55,8 @@
   }
 
   function logsFeatureEnabled() {
-    // Unknown until /api/version answers: the endpoint itself says disabled.
-    return state?.features?.logs?.enabled !== false;
+    // Before /api/version answers, try: the endpoint itself says disabled.
+    return ns.features.get("logs.enabled", true);
   }
 
   // Logs of the trace on screen (none while another trace loads).
@@ -133,7 +132,7 @@
   }
 
   async function load(trace) {
-    const seq = ++view.seq;
+    const req = ns.util.latest("traces.logs");
     view.trace = trace || null;
     view.payload = null;
     view.records = [];
@@ -159,8 +158,8 @@
     const servicesChars = services.reduce((sum, name) => sum + encodeURIComponent(name).length + 9, 0);
     if (services.length > 1000 || servicesChars > MAX_SERVICES_QUERY_CHARS) services = [];
     try {
-      const payload = await api.getTraceLogs(ctx.currentHost(), { traceId: trace.trace_id, startNs: win.startNs, endNs: win.endNs, services });
-      if (seq !== view.seq) return;
+      const payload = await api.getTraceLogs(ctx.currentHost(), { traceId: trace.trace_id, startNs: win.startNs, endNs: win.endNs, services }, { signal: req.signal });
+      if (!req.isCurrent()) return;
       view.payload = payload;
       if (payload?.enabled === false) {
         view.status = "disabled";
@@ -172,7 +171,7 @@
         view.status = "ready";
       }
     } catch (error) {
-      if (seq !== view.seq) return;
+      if (!req.isCurrent()) return;
       view.status = "error";
       view.message = error instanceof Error ? error.message : String(error);
     }
@@ -749,11 +748,11 @@
     byId("traceDetailStats")?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-trace-logs-toggle]")) togglePanel();
     });
-    window.addEventListener("chdash:features-changed", () => {
+    ns.features.on(() => {
       const v = current();
       if (!v) return;
       if (!logsFeatureEnabled() && v.status !== "disabled") {
-        ++view.seq;
+        ns.util.latest.cancel("traces.logs");
         view.status = "disabled";
         view.bySpan = new Map();
         updateHeaderItem();

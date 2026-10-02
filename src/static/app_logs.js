@@ -78,7 +78,6 @@
     livePolls: 0,
     liveGap: false,
     newIds: new Set(),
-    seq: { search: 0, histogram: 0, patterns: 0, context: 0, services: 0, more: 0 },
     searchMs: NaN,
     status: "",
   };
@@ -299,14 +298,14 @@
   }
 
   async function loadServiceChoices(range) {
-    const seq = ++model.seq.services;
+    const req = util.latest("logs.services");
     try {
       const params = new URLSearchParams();
       if (currentHost()) params.set("host_id", currentHost());
       params.set("start_ms", String(range.start_ms));
       params.set("end_ms", String(range.end_ms));
-      const payload = await api.getLogs("services", params);
-      if (seq !== model.seq.services) return;
+      const payload = await api.getLogs("services", params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.serviceChoices = Array.isArray(payload.services) ? payload.services : [];
       palette.registerServices(model.serviceChoices.map((s) => s.name));
       if ($("logsServiceMenu") && !$("logsServiceMenu").hidden) renderServiceMenu();
@@ -461,8 +460,8 @@
         scope: { badge: "S", title: "Scope attribute (ScopeAttributes)" },
       },
       filterKey: fieldFilterKeyOf,
-      fetchKeys: async (filters) => {
-        const payload = await api.getLogs("facets", new URLSearchParams(filters.params));
+      fetchKeys: async (filters, { signal } = {}) => {
+        const payload = await api.getLogs("facets", new URLSearchParams(filters.params), { signal });
         return {
           supported: payload?.supported !== false,
           keys: (Array.isArray(payload?.keys) ? payload.keys : []).map((row) => ({ scope: String(row?.[0] || ""), key: String(row?.[1] || ""), count: Number(row?.[2] || 0) })),
@@ -471,12 +470,12 @@
           sampled: Number(payload?.sampled_records || 0),
         };
       },
-      fetchValues: async (filters, scope, key, limit) => {
+      fetchValues: async (filters, scope, key, limit, { signal } = {}) => {
         const params = new URLSearchParams(filters.params);
         params.set("scope", scope);
         params.set("key", key);
         params.set("limit", String(limit));
-        const payload = await api.getLogs("facet_values", params);
+        const payload = await api.getLogs("facet_values", params, { signal });
         return {
           values: (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) })),
           estimated: payload?.estimated === true,
@@ -549,7 +548,11 @@
     writeUrl(push);
     renderChips();
     syncLegend();
-    const seq = ++model.seq.search;
+    // A new search supersedes the previous one, its next page and its live poll.
+    const req = util.latest("logs.search");
+    util.latest.cancel("logs.more");
+    util.latest.cancel("logs.live");
+    model.loadingMore = false;
     model.lastSearch = range;
     model.rows = [];
     model.rowIds = new Set();
@@ -568,8 +571,8 @@
     const started = performance.now();
     try {
       const params = filterParams(range);
-      const payload = await api.getLogs("search", params);
-      if (seq !== model.seq.search) return;
+      const payload = await api.getLogs("search", params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.searchMs = performance.now() - started;
       appendRows(payload.rows || []);
       model.nextCursor = payload.next_cursor || null;
@@ -580,13 +583,13 @@
       if (model.selectedId && !model.rowIds.has(model.selectedId)) closeSidePanel({ url: pendingLogId ? "none" : "clear" });
       openPendingSidePanel();
     } catch (error) {
-      if (seq !== model.seq.search) return;
+      if (!req.isCurrent()) return;
       model.rows = [];
       renderTable({ message: "error", error: error.message });
       setStatus("");
       showError(error.message);
     } finally {
-      if (seq === model.seq.search) setSearching(false);
+      if (req.isCurrent()) setSearching(false);
     }
   }
 
@@ -605,21 +608,21 @@
     if (model.loadingMore || model.searching || !model.nextCursor || !model.lastSearch) return;
     if (model.rows.length >= MAX_ROWS) return;
     model.loadingMore = true;
-    const seq = model.seq.search;
+    const req = util.latest("logs.more");
     renderTable();
     try {
       const params = filterParams(model.lastSearch);
       params.set("cursor", model.nextCursor);
-      const payload = await api.getLogs("search", params);
-      if (seq !== model.seq.search) return;
+      const payload = await api.getLogs("search", params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       appendRows(payload.rows || []);
       model.nextCursor = payload.next_cursor || null;
       model.exhausted = !model.nextCursor;
       model.lastPayload = payload;
     } catch (error) {
-      if (seq === model.seq.search) showError(error.message, () => { void loadMore(); });
+      if (req.isCurrent()) showError(error.message, () => { void loadMore(); });
     } finally {
-      if (seq === model.seq.search) {
+      if (req.isCurrent()) {
         model.loadingMore = false;
         renderTable();
         renderStatus();
@@ -876,7 +879,7 @@
   let histogramChart = null;
 
   async function loadHistogram(range) {
-    const seq = ++model.seq.histogram;
+    const req = util.latest("logs.histogram");
     model.histogramLoading = true;
     model.histogramError = "";
     renderHistogram();
@@ -885,15 +888,15 @@
       params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));
       const width = $("logsHistogram")?.clientWidth || 1000;
       params.set("buckets", String(Math.max(20, Math.min(160, Math.round(width / 9)))));
-      const payload = await api.getLogs("histogram", params);
-      if (seq !== model.seq.histogram) return;
+      const payload = await api.getLogs("histogram", params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.histogram = payload;
     } catch (error) {
-      if (seq !== model.seq.histogram) return;
+      if (!req.isCurrent()) return;
       model.histogram = null;
       model.histogramError = error.message;
     } finally {
-      if (seq === model.seq.histogram) {
+      if (req.isCurrent()) {
         model.histogramLoading = false;
         renderHistogram();
       }
@@ -1035,20 +1038,20 @@
     const key = patternsKey(range);
     if (key === model.patternsKey && (model.patterns || model.patternsLoading)) { renderPatterns(); return; }
     model.patternsKey = key;
-    const seq = ++model.seq.patterns;
+    const req = util.latest("logs.patterns");
     model.patternsLoading = true;
     model.patternsError = "";
     renderPatterns();
     try {
-      const payload = await api.getLogs("patterns", filterParams(range));
-      if (seq !== model.seq.patterns) return;
+      const payload = await api.getLogs("patterns", filterParams(range), { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.patterns = payload;
     } catch (error) {
-      if (seq !== model.seq.patterns) return;
+      if (!req.isCurrent()) return;
       model.patterns = null;
       model.patternsError = error.message;
     } finally {
-      if (seq === model.seq.patterns) {
+      if (req.isCurrent()) {
         model.patternsLoading = false;
         renderPatterns();
       }
@@ -1266,7 +1269,7 @@
     }
     const openTrace = $("logsOpenTrace");
     if (openTrace) {
-      const traced = !!row.trace_id && state.features?.traces?.enabled !== false;
+      const traced = !!row.trace_id && ns.features.get("traces.enabled");
       openTrace.hidden = !traced;
       if (traced) openTrace.href = route(`observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
     }
@@ -1354,23 +1357,23 @@
     if (model.side.preset === "service") params.set("service", row.service);
     if (model.side.preset === "host") params.set("host", row.resource_attributes["host.name"]);
     if (model.side.preset === "trace") params.set("trace_id", row.trace_id);
-    const seq = ++model.seq.context;
+    const req = util.latest("logs.context");
     model.side.contextLoading = true;
     model.side.contextError = "";
     model.side.anchorId = row.id;
     syncContextBar();
     renderContext();
     try {
-      const payload = await api.getLogs("context", params);
-      if (seq !== model.seq.context) return;
+      const payload = await api.getLogs("context", params, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.side.context = payload;
       palette.registerServices((payload.rows || []).map((r) => r.service));
     } catch (error) {
-      if (seq !== model.seq.context) return;
+      if (!req.isCurrent()) return;
       model.side.context = null;
       model.side.contextError = error.message;
     } finally {
-      if (seq === model.seq.context) {
+      if (req.isCurrent()) {
         model.side.contextLoading = false;
         renderContext();
         $("logsContextRows")?.querySelector(".is-anchor")?.scrollIntoView({ block: "center" });
@@ -1482,10 +1485,10 @@
     const newest = model.rows[0];
     const params = filterParams(range);
     if (newest) params.set("after", newest.id);
-    const seq = model.seq.search;
+    const req = util.latest("logs.live");
     try {
-      const payload = newest ? await api.getLogs("search", params) : null;
-      if (!model.live || seq !== model.seq.search) return;
+      const payload = newest ? await api.getLogs("search", params, { signal: req.signal }) : null;
+      if (!model.live || !req.isCurrent()) return;
       if (!newest) {
         await search({ keepLive: true });
       } else {
@@ -1498,7 +1501,7 @@
       if (model.livePolls % LIVE_HISTOGRAM_EVERY === 0) void loadHistogram(range);
       renderStatus();
     } catch (error) {
-      if (model.live) setStatus(`Live tail paused on error: ${error.message}`);
+      if (model.live && req.isCurrent()) setStatus(`Live tail paused on error: ${error.message}`);
     } finally {
       scheduleLive();
     }
@@ -1687,8 +1690,8 @@
       if (ownsUrl()) void reloadForHost();
       else reloadWhenShown = true;
     });
-    window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.logs?.enabled === false || !ownsUrl()) return;
+    ns.features.on((features) => {
+      if (features?.logs?.enabled === false || !ownsUrl()) return;
       if (!booted && currentHost()) { booted = true; void reloadForHost(); }
     });
     if (currentHost()) { booted = true; void reloadForHost(); }

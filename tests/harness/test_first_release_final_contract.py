@@ -104,8 +104,11 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert "explicitTypeChoice = modes.length > 1" in explorer
     # Browse / Graph are Catalog modes, each hidden when its feature is off; a
     # disabled mode falls back to the first available one.
-    assert "browse: f.enabled !== false && f.browse !== false," in explorer
-    assert "graph: f.enabled !== false && gf.enabled !== false && (gf.lineage !== false || gf.storage_topology !== false)," in explorer
+    # ns.features (app_state.js) completes the flags: graph.enabled already
+    # requires lineage or storage_topology.
+    assert "browse: f.enabled && f.browse," in explorer
+    assert "graph: f.enabled && f.graph.enabled," in explorer
+    assert "graph: { enabled: bool(graph.enabled, d.explorer.graph.enabled) && (lineage || storageTopology), lineage, storage_topology: storageTopology }," in read("src/static/app_state.js")
     assert 'button.hidden = !available[String(button.dataset.mode || "")];' in explorer
     assert "if (!available[model.mode]) setMode(model.mode);" in explorer
     assert 'MODES.includes(requested) && available[requested] ? requested : (MODES.find((name) => available[name]) || "browse")' in explorer

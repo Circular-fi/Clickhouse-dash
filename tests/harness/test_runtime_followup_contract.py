@@ -23,7 +23,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
     assert 'new URL(window.__chdashUrl("static/"), window.location.href).toString()' in loader
     assert "const url = (file) => new URL(String(file || \"\"), base).toString();" in loader
     assert "function resolveUrl(path)" in api
-    assert "fetch(resolveUrl(url)" in api
+    assert "response = await fetch(resolveUrl(path), {" in api
     assert 'err.code = "invalid_api_response"' in api
     assert "Check the application/subpath routing" in api
     assert 'shell_req.path = "/query.html";' in server
@@ -222,8 +222,13 @@ def test_table_switch_requires_requested_identity_instead_of_rendering_undefined
 def test_host_bootstrap_uses_api_resolver_instead_of_falling_offline_from_reference_error() -> None:
     ui = read("src/static/app_ui.js")
     assert 'const { dom, state, storage, util, api } = ns;' in ui
-    assert 'fetch(api.resolveUrl("api/version")' in ui
-    assert 'fetch(api.resolveUrl("api/hosts")' in ui
+    # /api/version and /api/hosts go through the one request path of app_api.js.
+    assert "data = await api.getVersion();" in ui
+    assert "useSnapshot(await api.getHosts());" in ui
+    api = read("src/static/app_api.js")
+    assert 'const getVersion = ({ signal } = {}) => getJson("api/version", { signal });' in api
+    assert 'const getHosts = ({ signal } = {}) => getJson("api/hosts", { signal });' in api
+    assert "fetch(" not in ui
 
 
 def test_preview_ignores_empty_callback_blocks_before_validating_selected_column_width() -> None:

@@ -37,10 +37,6 @@
     disabledServices: new Set(),
     collapsed: new Set(),
     criticalPathShown: true,
-    searchSeq: 0,
-    analyticsSeq: 0,
-    prefillSeq: 0,
-    detailSeq: 0,
     timeRange: { from: "now-1h", to: "now" },
     timeRangeTouched: false,
     searched: false,
@@ -2857,7 +2853,7 @@
   async function prefill({ force = false } = {}) {
     if (!model.meta) await loadMeta().catch(() => null);
     if (!force && model.prefillPromise) return model.prefillPromise;
-    const seq = ++model.prefillSeq;
+    const req = util.latest("traces.prefill");
     const run = (async () => {
       showError("");
       try {
@@ -2866,15 +2862,15 @@
         // with those attributes.
         const tags = ns.traceSearch?.prefillTagParams?.() || {};
         ns.traceSearch?.notePrefillTags?.(tags);
-        const payload = await api.prefillTraces(currentHost(), { ...range, ...tags });
-        if (seq !== model.prefillSeq) return;
+        const payload = await api.prefillTraces(currentHost(), { ...range, ...tags }, { signal: req.signal });
+        if (!req.isCurrent()) return;
         model.prefillTagFiltered = payload?.tag_filtered === true;
         model.prefillPairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
         updateServiceOptions();
         updateOperationOptions();
         if (payload?.truncated) showError("Service / operation prefill reached its 20,000-combination safety limit. Use a narrower service / operation filter if the desired value is outside the discovered combinations.");
       } catch (error) {
-        if (seq === model.prefillSeq) showError(error, () => { void prefill({ force: true }); });
+        if (req.isCurrent()) showError(error, () => { void prefill({ force: true }); });
       }
     })();
     model.prefillPromise = run;
@@ -2936,7 +2932,10 @@
       renderAnalytics();
       return;
     }
-    const seq = ++model.analyticsSeq;
+    // The charts of this search: its counts, then its durations (a new
+    // search or host cancels both, and the separate durations load).
+    const req = util.latest("traces.analytics");
+    util.latest.cancel("traces.durations");
     model.analytics = null;
     model.analyticsLoading = true;
     model.analyticsError = "";
@@ -2955,28 +2954,28 @@
     // With filters the first answer already carries both charts.
     let countsError = "";
     try {
-      const counted = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "counts" });
-      if (seq !== model.analyticsSeq) return;
+      const counted = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "counts" }, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.analytics = unpackAnalytics(counted);
       if (!model.analytics.has_durations) renderAnalytics();
     } catch (error) {
-      if (seq !== model.analyticsSeq) return;
+      if (!req.isCurrent()) return;
       // The durations answer below carries the counts too.
       countsError = message(error);
     }
     try {
       if (model.analytics?.has_durations || ns.traceHeatmap?.active?.()) return;
-      const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" });
-      if (seq !== model.analyticsSeq) return;
+      const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" }, { signal: req.signal });
+      if (!req.isCurrent()) return;
       // Span counts replace the index counts: both charts then describe
       // exactly the same traces.
       model.analytics = unpackAnalytics(full, model.analytics);
     } catch (error) {
-      if (seq !== model.analyticsSeq) return;
+      if (!req.isCurrent()) return;
       if (model.analytics) model.durationsError = message(error);
       else model.analyticsError = countsError || message(error);
     } finally {
-      if (seq === model.analyticsSeq) {
+      if (req.isCurrent()) {
         model.analyticsLoading = false;
         renderAnalytics();
       }
@@ -2988,15 +2987,15 @@
   async function loadDurations() {
     const filters = model.analyticsFilters;
     if (!filters || model.analytics?.has_durations || model.meta?.analytics_enabled !== true) { renderAnalytics(); return; }
-    const seq = model.analyticsSeq;
+    const req = util.latest("traces.durations");
     model.durationsError = "";
     renderAnalytics();
     try {
-      const full = await api.getTraceAnalytics(currentHost(), { ...filters, charts: "durations" });
-      if (seq !== model.analyticsSeq) return;
+      const full = await api.getTraceAnalytics(currentHost(), { ...filters, charts: "durations" }, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.analytics = unpackAnalytics(full, model.analytics);
     } catch (error) {
-      if (seq !== model.analyticsSeq) return;
+      if (!req.isCurrent()) return;
       model.durationsError = error instanceof Error ? error.message : String(error);
     }
     renderAnalytics();
@@ -3020,8 +3019,10 @@
       void prefill({ force: true });
     }
     await ensurePrefillForFilters();
-    const seq = ++model.searchSeq;
-    ++model.analyticsSeq;
+    // This search supersedes the previous one and its charts.
+    const req = util.latest("traces.search");
+    util.latest.cancel("traces.analytics");
+    util.latest.cancel("traces.durations");
     let filters;
     try {
       filters = searchFilters();
@@ -3056,7 +3057,7 @@
       if (ns.traceSpans?.active?.()) {
         // One row per span; the span table reports its own errors.
         await ns.traceSpans.search(filters);
-        if (seq !== model.searchSeq) return;
+        if (!req.isCurrent()) return;
         model.searched = true;
         model.lastSearchRange = { start_ms: Number(filters.start_ms), end_ms: Number(filters.end_ms) };
         void loadAnalytics(filters);
@@ -3064,8 +3065,8 @@
         return;
       }
       const requested = performance.now();
-      const payload = await api.searchTraces(currentHost(), filters);
-      if (seq !== model.searchSeq) return;
+      const payload = await api.searchTraces(currentHost(), filters, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.searchLatencyMs = performance.now() - requested;
       model.searched = true;
       model.lastSearchRange = { start_ms: Number(filters.start_ms), end_ms: Number(filters.end_ms) };
@@ -3076,7 +3077,7 @@
       void loadAnalytics(filters);
       searchState?.onSearched?.(filters);
     } catch (error) {
-      if (seq !== model.searchSeq) return;
+      if (!req.isCurrent()) return;
       model.traces = [];
       model.searched = false;
       model.analytics = null;
@@ -3084,14 +3085,14 @@
       renderResults();
       showError(error, () => { void search({ url: "none" }); });
     } finally {
-      if (seq === model.searchSeq) ns.uiState.busy(dom.tracesSearchButton, false);
+      if (req.isCurrent()) ns.uiState.busy(dom.tracesSearchButton, false);
     }
   }
 
   async function loadTrace(traceId, { push = false } = {}) {
     const id = String(traceId || "").trim();
     if (!id) return;
-    const seq = ++model.detailSeq;
+    const req = util.latest("traces.detail");
     const pendingSpanId = model.pendingSpanId;
     model.pendingSpanId = "";
     model.traceError = null;
@@ -3107,8 +3108,8 @@
       if (push && ownsUrl()) window.history.pushState(detailEntryState({ traceId: id }), "", spanTraceUrl(id, pendingSpanId));
     };
     try {
-      const trace = await api.getTrace(currentHost(), id);
-      if (seq !== model.detailSeq) return;
+      const trace = await api.getTrace(currentHost(), id, { signal: req.signal });
+      if (!req.isCurrent()) return;
       model.activeTrace = trace;
       model.activeSpanId = null;
       model.focusedSpanId = "";
@@ -3124,7 +3125,7 @@
       // Logs load after the trace is on screen, never before.
       void ns.traceLogs?.load?.(trace);
     } catch (error) {
-      if (seq !== model.detailSeq) return;
+      if (!req.isCurrent()) return;
       model.activeTrace = null;
       model.activeSpanId = null;
       model.openSpanIds.clear();
@@ -3234,8 +3235,7 @@
     model.analyticsError = "";
     model.prefillPairs = [];
     model.prefillPromise = null;
-    ++model.prefillSeq;
-    ++model.analyticsSeq;
+    for (const key of ["traces.prefill", "traces.analytics", "traces.durations"]) util.latest.cancel(key);
     model.activeTrace = null;
     model.activeSpanId = null;
     model.openSpanIds.clear();
@@ -3390,8 +3390,8 @@
       if (ownsUrl()) reloadForHost();
       else reloadWhenShown = true;
     });
-    window.addEventListener("chdash:features-changed", (event) => {
-      if (event?.detail?.traces?.enabled === false || !ownsUrl()) return;
+    ns.features.on((features) => {
+      if (features?.traces?.enabled === false || !ownsUrl()) return;
       if (!model.meta && currentHost()) reloadForHost();
     });
     const id = traceIdFromPath();
