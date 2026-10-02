@@ -1660,6 +1660,7 @@ html body[data-page="observability"] > .appHeader {
 .jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
 .jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
 .jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
+.nullToken { color: var(--json-null); font-style: italic; }
 .resultTable tbody tr:hover td.resultTable__gaugeCell {
   background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
   background-repeat: no-repeat;

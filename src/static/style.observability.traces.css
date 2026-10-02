@@ -1516,6 +1516,7 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
 .jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
 .jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
 .jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
+.nullToken { color: var(--json-null); font-style: italic; }
 .tableWrap {
   max-height: none;
   overflow-x: auto;

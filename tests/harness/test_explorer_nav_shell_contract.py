@@ -35,12 +35,15 @@ def test_view_tabs_and_containers_replace_the_section_dropdown() -> None:
 def test_one_number_format_is_shared_with_every_explorer_module() -> None:
     ui = read("src/static/app_explorer.js")
     util = read("src/static/app_util.js")
+    format = read("src/static/app_format.js")
     head = ui[ui.index("function fmtInt"):ui.index("function quoteIdent")]
     assert 'return Math.trunc(n).toLocaleString("en-US");' in head
-    # util.formatBytes is the single byte format of the app; the Explorer helper
-    # only maps a missing value to the dash.
-    assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in util
-    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in util
+    # util.formatBytes is the single byte format of the app (it hands every
+    # value to ns.format.bytes); the Explorer helper only maps a missing value
+    # to the dash.
+    assert 'return format.bytes(n);' in util
+    assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in format
+    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in format
     assert 'if (n == null) return MISSING;\n    return util.formatBytes(n);' in head
     assert 'ns.explorerFormat = { MISSING, fmtInt, fmtBytes, fmtStorageBytes, fmtCompactInt, fmtRate, fmtPercent };' in head
     assert 'const MISSING = "\\u2014";' in ui

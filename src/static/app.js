@@ -36,6 +36,7 @@
 
   // Namespace each core module registers, by file.
   const CORE_MODULES = {
+    format: "app_format.js", palette: "app_palette.js",
     dom: "app_dom.js", ui: "app_ui.js", run: "app_run.js", results: "app_results.js", api: "app_api.js", sql: "app_sql.js",
     util: "app_util.js", storage: "app_state.js", pipelineViewer: "app_pipeline_viewer.js", analysisData: "app_analysis_data.js",
     analysis: "app_analysis.js", download: "app_download.js", massExport: "app_export.js", graphKit: "app_graph_kit.js", explorerGraph: "app_explorer_graph.js",
@@ -83,6 +84,8 @@
 
     const base = getBaseUrl();
     const files = [
+      "app_format.js",
+      "app_palette.js",
       "app_dom.js",
       "app_state.js",
       "app_util.js",

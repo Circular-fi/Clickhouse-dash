@@ -110,10 +110,16 @@
     }, durationMs);
   }
 
+  // formatInt and formatBytes keep their "-" for a missing value and hand
+  // the rest to ns.format (app_format.js, loaded first), which owns the
+  // number and byte formats. formatSeconds ("1.234s") is not ns.format's
+  // duration and stays as it is.
+  const format = ns.format;
+
   function formatInt(value) {
     const n = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(n)) return "-";
-    return Math.trunc(n).toLocaleString("en-US");
+    return format.count(Math.trunc(n));
   }
 
   function formatSeconds(value) {
@@ -124,27 +130,12 @@
     return `${n.toFixed(2)}s`;
   }
 
-  // One byte format for the whole app: "0 B", "205 B", "1.7 KB", "10.3 MB":
-  // one decimal from KB up, 1024 base, a space before the unit.
-  const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
-
+  // One byte format for the whole app: "0 B", "205 B", "1.7 KB", "10.3 MB"
+  // (ns.format.bytes: one decimal from KB up, 1024 base).
   function formatBytes(value) {
     const n = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(n)) return "-";
-    const sign = n < 0 ? "-" : "";
-    let v = Math.abs(n);
-    if (v < 1024) return `${sign}${Math.round(v)} B`;
-    let unit = -1;
-    while (v >= 1024 && unit < BYTE_UNITS.length - 1) {
-      v /= 1024;
-      unit += 1;
-    }
-    // 1023.96 KB would print as "1024.0 KB": carry into the next unit.
-    if (Number(v.toFixed(1)) >= 1024 && unit < BYTE_UNITS.length - 1) {
-      v /= 1024;
-      unit += 1;
-    }
-    return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;
+    return format.bytes(n);
   }
 
   function replaceTextAreaValue(textAreaEl, nextValue) {

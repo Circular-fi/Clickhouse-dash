@@ -35,8 +35,10 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
     # One byte format everywhere: one decimal from KB up, "0 B" for zero; the
     # storage helper keeps its name and delegates to it.
     util = read("src/static/app_util.js")
-    assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in util
-    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in util
+    format = read("src/static/app_format.js")
+    assert 'return format.bytes(n);' in util
+    assert 'return `${sign}${v.toFixed(1)} ${BYTE_UNITS[unit]}`;' in format
+    assert 'if (v < 1024) return `${sign}${Math.round(v)} B`;' in format
     assert 'function fmtStorageBytes(value) {\n    return fmtBytes(value);' in ui
     assert 'fmtStorageBytes(item.compressed)' in ui
     assert 'min-width: 9.5ch;' in css

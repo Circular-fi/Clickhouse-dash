@@ -33,7 +33,7 @@
   const LABELS = { traces: "Traces", logs: "Logs", metrics: "Metrics" };
   // Modules every view needs, then each view's own. tools/build_page_css.py
   // reads both lists: a view's stylesheet keeps the rules its modules can use.
-  const COMMON_MODULES = ["app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
+  const COMMON_MODULES = ["app_format.js", "app_palette.js", "app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"];
   const VIEW_MODULES = {
     traces: ["app_chart_core.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_logs.js", "app_trace_tabs.js", "app_trace_services.js", "app_graph_kit.js", "app_trace_map.js", "app_trace_heatmap.js"],
     logs: ["app_chart_core.js", "app_logs.js"],
