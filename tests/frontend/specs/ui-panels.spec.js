@@ -185,3 +185,108 @@ for (const theme of ['dark', 'light']) {
     });
   });
 }
+
+// ------------------------------------------------------------ side panels
+
+// ns.sidePanel: the left list of a page. Each one: a head (title / toggle,
+// meta, a 30 px search), a body scrolling on its own, --side-w (288 px) wide,
+// a 32 px rail when folded on wide windows, a drawer with a toggle on phones.
+const OBS_HOUR = 'from=2026-09-19%2012:30:00&to=2026-09-19%2013:30:00';
+const SIDES = [
+  { name: 'Explorer tree', url: '/explorer', panel: '#explorerListPane', collapse: '#explorerTreeCollapse', drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
+  { name: 'Explorer Functions', url: '/explorer/_functions', panel: '#explorerFunctionListPane', collapse: '#explorerFunctionCollapse', drawer: '#explorerTreeToggle', ready: '#explorerFunctionList > *' },
+  { name: 'Traces Attributes', url: `/observability/traces?${OBS_HOUR}`, panel: '#traceFacets', collapse: '#traceFacetsToggle', drawer: '#traceFacetsDrawerToggle', ready: '#traceFacetsList > *' },
+  { name: 'Logs Fields', url: `/observability/logs?${OBS_HOUR}`, panel: '#logsFacets', collapse: '#logsFacetsToggle', drawer: '#logsFacetsDrawerToggle', ready: '#logsFacetsList > *' },
+  { name: 'Metrics catalog', url: `/observability/metrics?${OBS_HOUR}`, panel: '#metricsSidebar', collapse: '#metricsSidebarToggle', drawer: '#metricsSidebarDrawerToggle', ready: '#metricsCatalog > *' },
+];
+
+async function unfolded(page) {
+  // The facets fold by default below 1100 px: start every panel open.
+  await page.addInitScript(() => {
+    try {
+      if (sessionStorage.getItem('side-spec-reset')) return;
+      sessionStorage.setItem('side-spec-reset', '1');
+      for (const key of ['chdash.traceFacetsCollapsed.v1', 'chdash.logsFacetsCollapsed.v1', 'chdash.metricsCatalogCollapsed.v1', 'chdash.explorerTreeCollapsed.v1', 'chdash.explorerFunctionsCollapsed.v1']) localStorage.setItem(key, '0');
+    } catch (_) {}
+  });
+}
+
+test.describe('side panels', () => {
+  for (const side of SIDES) {
+    test(`${side.name}: the shell, --side-w wide, folds to a 32 px rail and back (remembered)`, async ({ page }) => {
+      await unfolded(page);
+      await page.goto(side.url);
+      const panel = page.locator(side.panel);
+      await expect(panel).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator(side.ready).first()).toBeAttached({ timeout: 30_000 });
+      await expect(panel).toHaveClass(/\buiSide\b/);
+      const m = await panel.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const head = el.querySelector(':scope > .uiSide__head');
+        const body = el.querySelector(':scope > .uiSide__body');
+        const search = head?.querySelector('.uiSide__search');
+        return {
+          width: Math.round(r.width), x: Math.round(r.left), border: getComputedStyle(el).borderRightWidth, radius: getComputedStyle(el).borderTopLeftRadius,
+          search: search ? Math.round(search.getBoundingClientRect().height) : 0,
+          bodyScrolls: body ? ['auto', 'scroll'].includes(getComputedStyle(body).overflowY) : false,
+          headCount: el.querySelectorAll(':scope > .uiSide__head').length,
+        };
+      });
+      expect(m).toMatchObject({ width: 288, x: 0, border: '1px', radius: '0px', search: 30, bodyScrolls: true, headCount: 1 });
+      const toggle = page.locator(side.collapse);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect.poll(async () => Math.round((await panel.boundingBox()).width)).toBe(32);
+      await expect(panel.locator('.uiSide__search')).toBeHidden();
+      await expect(toggle).toBeVisible();
+      // Remembered across a reload.
+      await page.reload();
+      await expect(page.locator(side.collapse)).toHaveAttribute('aria-expanded', 'false');
+      await expect.poll(async () => Math.round((await page.locator(side.panel).boundingBox()).width)).toBe(32);
+      await page.locator(side.collapse).click();
+      await expect.poll(async () => Math.round((await page.locator(side.panel).boundingBox()).width)).toBe(288);
+    });
+  }
+});
+
+for (const theme of ['dark', 'light']) {
+  test.describe(`side panels at 390 px (${theme})`, () => {
+    test.use({ colorScheme: theme, viewport: { width: 390, height: 844 } });
+
+    for (const side of SIDES) {
+      test(`${side.name}: a drawer under the page chrome; Escape and the scrim close it, the focus goes back to its toggle`, async ({ page }) => {
+        await unfolded(page);
+        await page.goto(side.url);
+        const panel = page.locator(side.panel);
+        const toggle = page.locator(side.drawer);
+        await expect(toggle).toBeVisible({ timeout: 20_000 });
+        // The Explorer opens its tree when nothing is selected: start closed.
+        await page.waitForLoadState('networkidle');
+        if ((await toggle.getAttribute('aria-expanded')) === 'true') {
+          await page.keyboard.press('Escape');
+          await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        }
+        await expect(panel).toBeHidden();
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(panel).toBeVisible();
+        await expect.poll(async () => Math.round((await panel.boundingBox()).x)).toBe(0);
+        const box = await panel.boundingBox();
+        expect(box.width).toBeLessThanOrEqual(390 * 0.86 + 1);
+        expect(Math.round(box.y + box.height)).toBe(844);
+        const top = await page.evaluate(() => parseFloat(document.documentElement.style.getPropertyValue('--shell-top')) || 0);
+        expect(box.y).toBeGreaterThanOrEqual(top - 1);
+        await page.keyboard.press('Escape');
+        await expect(panel).toBeHidden();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(toggle).toBeFocused();
+        await toggle.click();
+        await expect(panel).toBeVisible();
+        await page.mouse.click(380, 700);
+        await expect(panel).toBeHidden();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      });
+    }
+  });
+}

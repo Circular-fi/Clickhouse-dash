@@ -232,6 +232,25 @@ test.describe('ns.layers', () => {
     expect(await dismissed(page)).toEqual(['popover:escape']);
   });
 
+  test('an entry may name its elements with a function (ns.menu): each counts as inside; release() keeps the focus', async ({ page }) => {
+    const out = await page.evaluate(() => {
+      const a = document.createElement('div');
+      const b = document.createElement('button');
+      a.style.cssText = 'position:fixed;left:10px;top:200px;width:80px;height:40px';
+      b.style.cssText = 'position:fixed;left:300px;top:200px;width:80px;height:40px';
+      document.body.append(a, b);
+      const log = [];
+      const handle = window.ChDash.layers.push({ el: () => [a, b], onDismiss: (reason) => log.push(reason) });
+      b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const afterInside = log.length;
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      const second = window.ChDash.layers.push({ el: [a], onDismiss: () => {} });
+      second.release();
+      return { afterInside, log, size: window.ChDash.layers.size(), open: handle.isOpen() };
+    });
+    expect(out).toEqual({ afterInside: 0, log: ['outside'], size: 0, open: false });
+  });
+
   test('closing a layer closes the layers opened from it; a scope removes its listeners', async ({ page }) => {
     const out = await page.evaluate(() => {
       const panel = document.createElement('div');

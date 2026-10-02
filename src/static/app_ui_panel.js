@@ -113,13 +113,18 @@
       if (!collapse) return;
       const next = !!value;
       if (collapse.rootClass) document.documentElement.classList.toggle(collapse.rootClass, next);
+      else panel.classList.toggle("is-collapsed", next);
       if (collapse.storeKey) write(collapse.storeKey, next ? "1" : "0");
       syncCollapse();
       collapse.onChange?.(next);
     }
 
     if (collapse) {
-      if (collapse.storeKey && collapse.rootClass && read(collapse.storeKey) === "1") document.documentElement.classList.add(collapse.rootClass);
+      // The remembered fold (a head script may have set the <html> class).
+      if (collapse.storeKey && read(collapse.storeKey) === "1") {
+        if (collapse.rootClass) document.documentElement.classList.add(collapse.rootClass);
+        else panel.classList.add("is-collapsed");
+      }
       collapse.button?.addEventListener("click", () => {
         // A phone has no rail: the panel is a drawer there.
         if (atMostMd() && drawer) { setDrawerOpen(false); return; }

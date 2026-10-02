@@ -8,7 +8,8 @@
   //     handle.close({ restoreFocus = true, force }) -> takes the layer off
   //       (and the layers opened from it); the focus goes back to the opener
   //       when it was inside the layer (or nowhere; force: in any case)
-  //     handle.isOpen(), handle.isTop(), handle.update({ ... })
+  //     handle.release() -> close({ restoreFocus: false }) (the owner moves
+  //       the focus itself), handle.isOpen(), handle.isTop(), handle.update({ ... })
   //   ns.layers.top() / ns.layers.handleOf(el) / ns.layers.isOpen(el)
   //   ns.layers.size() / ns.layers.closeAll(reason)
   //
@@ -29,7 +30,9 @@
   // off once it returns.
   //
   // Options:
-  //   el          the layer's root element (required)
+  //   el          the layer's root element (required), or a list of
+  //               elements / a function returning one (every element counts
+  //               as inside; the first is the root): ns.menu's entries
   //   onDismiss   (reason, event) => void | false
   //   opener      the element the focus returns to (default: the focused
   //               element when pushed); a press on it is not "outside"
@@ -169,15 +172,29 @@
     return !["button", "checkbox", "radio", "range", "color", "file", "submit", "reset", "image"].includes(node.type);
   }
 
+  // Every element of a layer (el may be a list, or a function returning one).
+  function elementsOf(layer) {
+    const value = layer.elFn ? layer.elFn() : layer.root;
+    return (Array.isArray(value) ? value : [value]).filter((node) => node instanceof Element);
+  }
+
+  function holds(layer, node) {
+    return node instanceof Node && elementsOf(layer).some((el) => el.contains(node));
+  }
+
+  function shown(layer) {
+    return elementsOf(layer).some(rendered);
+  }
+
   function inside(layer, node) {
     if (!(node instanceof Node)) return false;
-    if (layer.el.contains(node)) return true;
+    if (holds(layer, node)) return true;
     if (layer.opener instanceof Node && layer.opener.contains(node)) return true;
     return layer.inside.some((other) => other instanceof Node && other.contains(node));
   }
 
   function insideAny(node) {
-    return stack.some((layer) => layer.el.contains(node));
+    return stack.some((layer) => holds(layer, node));
   }
 
   function index(layer) {
@@ -186,7 +203,7 @@
 
   function prune() {
     for (let i = stack.length - 1; i >= 0; i -= 1) {
-      if (!stack[i].el.isConnected) remove(stack[i], { restoreFocus: false });
+      if (!elementsOf(stack[i]).some((el) => el.isConnected)) remove(stack[i], { restoreFocus: false });
     }
   }
 
@@ -194,7 +211,7 @@
   // with it.
   function children(layer) {
     const at = index(layer);
-    return stack.slice(at + 1).filter((other) => layer.el.contains(other.el) || (other.opener instanceof Node && layer.el.contains(other.opener)));
+    return stack.slice(at + 1).filter((other) => holds(layer, other.el) || holds(layer, other.opener));
   }
 
   // force: the opener gets the focus wherever it is now (a native dialog
@@ -202,7 +219,7 @@
   function restoreFocusFrom(layer, force = false) {
     if (layer.returnFocus === false) return;
     const active = document.activeElement;
-    const lost = !active || active === document.body || !active.isConnected || layer.el.contains(active) || !focusable(active);
+    const lost = !active || active === document.body || !active.isConnected || holds(layer, active) || !focusable(active);
     if (!lost && !force) return;
     const fallback = resolve(layer.fallbackFocus);
     const target = [layer.opener, ...(Array.isArray(fallback) ? fallback : [fallback])].find(focusable);
@@ -251,10 +268,12 @@
   }
 
   function push(options = {}) {
-    const el = options.el;
-    if (!(el instanceof Element)) throw new TypeError("ns.layers.push: el must be an element");
+    const elFn = typeof options.el === "function" ? options.el : Array.isArray(options.el) ? () => options.el : null;
+    const first = elFn ? (Array.isArray(elFn()) ? elFn()[0] : elFn()) : options.el;
+    const el = first instanceof Element ? first : null;
+    if (!el) throw new TypeError("ns.layers.push: el must be an element (or a list / function of elements)");
     prune();
-    const existing = stack.find((layer) => layer.el === el);
+    const existing = elFn ? null : stack.find((layer) => layer.root === el && !layer.elFn);
     if (existing) {
       configure(existing, options);
       return existing.handle;
@@ -262,7 +281,9 @@
     const active = document.activeElement;
     const layer = {
       id: ++uid,
-      el,
+      root: el,
+      elFn,
+      get el() { return elementsOf(this)[0] || this.root; },
       onDismiss: null,
       modal: false,
       docked: false,
@@ -273,10 +294,13 @@
       returnFocus: true,
       fallbackFocus: null,
       inside: [],
-      opener: active instanceof HTMLElement && active !== document.body && !el.contains(active) ? active : null,
+      opener: null,
       name: "",
       unlisten: null,
     };
+    // The focus comes back to what had it when the layer opened (not to an
+    // element of the layer itself).
+    if (active instanceof HTMLElement && active !== document.body && !holds(layer, active)) layer.opener = active;
     configure(layer, options);
     if (options.signal) {
       const signal = options.signal;
@@ -289,6 +313,7 @@
       id: layer.id,
       el,
       close: (opts) => remove(layer, opts || {}),
+      release: () => remove(layer, { restoreFocus: false }),
       dismiss: (reason = "close") => dismiss(layer, reason, null),
       isOpen: () => index(layer) >= 0,
       isTop: () => topLayer() === layer,
@@ -301,14 +326,14 @@
   }
 
   function closedHandle(el) {
-    return Object.freeze({ id: 0, el, close() {}, dismiss() { return false; }, isOpen: () => false, isTop: () => false, update() {} });
+    return Object.freeze({ id: 0, el, close() {}, release() {}, dismiss() { return false; }, isOpen: () => false, isTop: () => false, update() {} });
   }
 
   // The top layer on screen, optionally the top one taking Escape.
   function topLayer(filter = null) {
     for (let i = stack.length - 1; i >= 0; i -= 1) {
       const layer = stack[i];
-      if (!rendered(layer.el)) continue;
+      if (!shown(layer)) continue;
       if (filter && !filter(layer)) {
         if (layer.modal) return null;
         continue;
@@ -351,7 +376,7 @@
     }
     const first = items[0];
     const last = items[items.length - 1];
-    if (!layer.el.contains(active)) {
+    if (!holds(layer, active)) {
       event.preventDefault();
       (event.shiftKey ? last : first).focus({ preventScroll: true });
     } else if (event.shiftKey && (active === first || active === layer.el)) {
@@ -370,7 +395,7 @@
     const target = event.target;
     for (let i = stack.length - 1; i >= 0; i -= 1) {
       const layer = stack[i];
-      if (!layer || !rendered(layer.el)) continue;
+      if (!layer || !shown(layer)) continue;
       if (inside(layer, target)) return;
       if (layer.outside) dismiss(layer, "outside", event);
       if (layer.modal) {
@@ -387,7 +412,7 @@
   }
 
   function handleOf(el) {
-    return stack.find((layer) => layer.el === el)?.handle || null;
+    return stack.find((layer) => layer.root === el || (layer.elFn && holds(layer, el) && layer.el === el))?.handle || null;
   }
 
   function isOpen(el) {
@@ -399,7 +424,7 @@
   }
 
   function debug() {
-    return stack.map((layer) => ({ id: layer.id, name: layer.name, modal: layer.modal, docked: layer.docked, outside: layer.outside, shown: rendered(layer.el) }));
+    return stack.map((layer) => ({ id: layer.id, name: layer.name, modal: layer.modal, docked: layer.docked, outside: layer.outside, shown: shown(layer) }));
   }
 
   document.addEventListener("keydown", onKeydown);
