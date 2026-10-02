@@ -39,7 +39,7 @@ def test_debug_bundle_exports_recursive_table_definitions_and_manifest() -> None
 def test_copy_split_no_longer_contains_debug_download() -> None:
     for page in ("src/static/query.html",):
         html = read(page)
-        copy_menu = html[html.index('id="copyMenu"'):html.index('id="copyJsonToast"')]
+        copy_menu = html[html.index('id="copyMenu"'):html.index('id="clearResultsButton"')]
         assert "Download Debug" not in copy_menu
         assert 'id="downloadReceivedZipButton"' not in copy_menu
         run_menu = html[html.index('id="runMenu"'):html.index('id="queryLibrary"')]

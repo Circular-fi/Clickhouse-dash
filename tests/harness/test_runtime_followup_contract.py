@@ -136,7 +136,7 @@ def test_explorer_uses_arial_for_ui_and_only_code_surfaces_keep_monospace() -> N
 
     tail = css[css.rindex("/* Explorer typography is explicitly Arial") :]
     assert "font-family: Arial, Helvetica, sans-serif;" in tail
-    assert ".explorerDdl" in tail and ".functionDoc__code" in tail
+    assert ".functionDoc__code" in tail
     assert "Arial, Helvetica, sans-serif" in graph
     assert "ui-monospace" not in graph
 
@@ -167,7 +167,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     assert '`1 h persisted total ${format.count(physical.rows_total_1h)} rows' in ui
     assert "api.formatSqls(hostId" in ui
     assert "detail.formatted_ddl" in ui
-    assert "renderHighlightedCode(pre, ddl)" in ui
+    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ui
 
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:

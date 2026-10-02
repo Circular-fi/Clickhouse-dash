@@ -550,6 +550,7 @@ test.describe('explorer DDL block', () => {
     const geometry = await page.evaluate(() => {
       const code = document.querySelector('.explorerDdlWrap .explorerDdl');
       const wrap = code.closest('.explorerDdlWrap');
+      const text = code.querySelector('.sqlBlock__pre');
       const about = document.querySelector('.explorerCard > :not(.explorerCard__main)');
       const box = (el) => el.getBoundingClientRect();
       return {
@@ -559,7 +560,7 @@ test.describe('explorer DDL block', () => {
         wrapLeft: box(wrap).left,
         wrapRight: box(wrap).right,
         aboutLeft: about ? box(about).left : -1,
-        font: getComputedStyle(code).fontFamily,
+        font: getComputedStyle(text).fontFamily,
       };
     });
     expect(geometry.overflowX).toBe('auto');

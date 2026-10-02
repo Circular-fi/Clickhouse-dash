@@ -210,7 +210,6 @@
     downloadReceivedJsonButton: byId("downloadReceivedJsonButton"),
     downloadReceivedZipButton: byId("downloadReceivedZipButton"),
     copyJsonButton: byId("copyJsonButton"),
-    copyJsonToast: byId("copyJsonToast"),
     errorBanner: byId("errorBanner"),
     resultTableHead: byId("resultTableHead"),
     resultTableBody: byId("resultTableBody"),

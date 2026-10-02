@@ -52,7 +52,7 @@ def test_trace_results_show_full_id_and_per_service_span_error_counts():
     assert 'service_stats' in ui
     assert 'stat.spans' in ui
     assert 'stat.errors' in ui
-    assert 'traceServiceStat' in css
+    assert '.traceServiceFilter' in css
     assert 'points + P50 / P90 / P95 / P99' in html
 
 

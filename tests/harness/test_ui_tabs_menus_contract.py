@@ -243,10 +243,14 @@ def test_no_module_runs_its_own_menu_motion_or_outside_click_closer():
 def test_menus_go_through_the_component():
     ui = read("app_ui.js")
     for menu in ["menus.run = menu?.split(", "menus.host = menu?.bind(", "menus.page = menu?.bind(", "menus.runSettings = menu?.bind(",
-                 "menus.theme = menu?.bind(", "menus.copy = menu?.split("]:
+                 "menus.theme = menu?.bind("]:
         assert menu in ui, menu
+    # The Copy JSON splits (Query, results panels, trace, Logs) are ui.copySplit
+    # (app_ui_copy.js), whose menu is an ns.menu split.
+    assert "const handle = ns.menu.split(main, toggle, menu, { root });" in read("app_ui_copy.js")
+    for name in ["app_run.js", "app_results.js", "app_traces.js", "app_logs.js"]:
+        assert "ns.ui.copySplit({" in read(name), name
     assert "return ns.menu?.select(select) || null;" in read("app_traces.js")
-    assert "ns.menu?.split(dom.traceCopyJsonButton, dom.traceCopyMenuButton, dom.traceCopyMenu)" in read("app_traces.js")
     logs = read("app_logs.js")
     assert logs.count("ns.menu?.multi(...pickerParts(root), { root, onOpen:") == 2
     assert "ns.menu?.select(level, {" in logs
@@ -258,7 +262,6 @@ def test_menus_go_through_the_component():
     results = read("app_results.js")
     assert "const handle = ns.menu.context(el, {" in results
     assert "ns.menu.submenu(trigger, list, { parent: handle, onOpen: fill });" in results
-    assert "ns.menu?.split(mainBtn, menuBtn, menu, { root: split })" in results
     chart = read("app_query_chart.js")
     assert 'ns.menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "ns.menu?.multi(seriesButton, seriesMenu," in chart
     assert "ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")

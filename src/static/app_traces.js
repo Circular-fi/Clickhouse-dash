@@ -666,18 +666,10 @@
     renderDurationChart();
   }
 
-  // Through the shared helper: navigator.clipboard alone is missing outside
-  // secure contexts (plain-http deployments), where it falls back to a
-  // hidden textarea copy.
-  // An icon button (no text of its own to change) also gets the "Copied"
-  // flash (ns.popover.flash, announced).
+  // The shared copy (ui.copyText): the clipboard (a textarea copy on plain
+  // http) and the one "Copied" feedback on the control.
   function copyText(text, button) {
-    util.copyTextToClipboard(text).then(() => {
-      if (!button) return;
-      button.classList.add("is-copied");
-      setTimeout(() => { button.classList.remove("is-copied"); }, 900);
-      if (!button.textContent.trim()) ns.popover?.flash(button);
-    }).catch(() => {});
+    return ns.ui.copyText(text, button);
   }
 
   // --- Search results: Jaeger-style list and sortable table ---------------
@@ -755,7 +747,7 @@
   function errorTagHtml(errors) {
     const label = `${fmt.count(errors)} Error${errors === 1 ? "" : "s"}`;
     const title = `${fmt.count(errors)} error span${errors === 1 ? "" : "s"}`;
-    return ns.badge.html(label, { tone: "error", className: "traceTag traceTag--error", title, attrs: { "aria-label": title } });
+    return ns.badge.html(label, { tone: "error", className: "traceTag traceTag--error traceErrorCount--title", title, attrs: { "aria-label": title } });
   }
 
   function incompleteTagHtml(missing) {
@@ -861,7 +853,7 @@
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
           <strong title="${esc(title)}" class="traceResult__wideTitle">${esc(title)}</strong>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
-          <button type="button" class="traceCopyButton" data-copy-trace="${esc(trace.trace_id)}" title="Copy Trace ID" aria-label="Copy Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button>
+          ${ns.ui.copyButtonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
@@ -1012,7 +1004,8 @@
         return;
       }
       const th = target.closest("[data-table-sort]");
-      if (th) { if (target.closest(".dataTable__sort")) sortTableBy(th.getAttribute("data-table-sort")); return; }
+      // Anywhere on a header sorts (the start toggle returned above).
+      if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
       const row = target.closest("[data-trace-id]");
       if (row && root.contains(row)) openRow(row);
     });
@@ -1524,10 +1517,13 @@
     const services = [...stats.keys()].sort((a, b) => a.localeCompare(b));
     const allSelected = services.every((service) => !model.disabledServices.has(service));
     const toggleLabel = allSelected ? "Deselect all" : "Select all";
-    dom.traceServiceFilters.innerHTML = `<button type="button" class="traceServiceFilterReset" data-trace-toggle-all title="${toggleLabel} services">${toggleLabel}</button>` + services.map((service) => {
+    // Service toggles: the shared chip badge with the service bar; the error
+    // count is a solid error badge. "Select all" is the chips' clear link.
+    dom.traceServiceFilters.innerHTML = ns.badge.clearHtml(toggleLabel, { "data-trace-toggle-all": true, title: `${toggleLabel} services` }, "traceServiceFilterReset") + services.map((service) => {
       const row = stats.get(service);
       const disabled = model.disabledServices.has(service);
-      return `<button type="button" class="traceServiceStat traceServiceFilter${disabled ? " is-disabled" : ""}${row.errors ? " has-errors" : ""}" data-trace-service-filter="${esc(service)}" aria-pressed="${disabled ? "false" : "true"}" title="${esc(`${service} · ${fmt.count(row.spans)} spans${row.errors ? ` · ${fmt.count(row.errors)} errors` : ""}`)}"><i style="--trace-service-color:${palette.service(service)}"></i><b>${esc(service)}</b><span>${fmt.count(row.spans)}</span>${row.errors ? `<em title="${fmt.count(row.errors)} error${row.errors === 1 ? "" : "s"}">${fmt.count(row.errors)}</em>` : ""}</button>`;
+      const errors = row.errors ? ns.badge.html(fmt.count(row.errors), { tone: "error", solid: true, className: "badge--count traceServiceFilter__errors", title: `${fmt.count(row.errors)} error${row.errors === 1 ? "" : "s"}` }) : "";
+      return `<button type="button" class="badge badge--md badge--neutral traceServiceFilter${disabled ? " is-disabled" : ""}${row.errors ? " has-errors" : ""}" data-trace-service-filter="${esc(service)}" aria-pressed="${disabled ? "false" : "true"}" style="--trace-service-color:${palette.service(service)}" title="${esc(`${service} \u00b7 ${fmt.count(row.spans)} spans${row.errors ? ` \u00b7 ${fmt.count(row.errors)} errors` : ""}`)}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i><b>${esc(service)}</b><span>${fmt.count(row.spans)}</span>${errors}</button>`;
     }).join("");
     dom.traceServiceFilters.querySelector("[data-trace-toggle-all]")?.addEventListener("click", () => {
       model.disabledServices = allSelected ? new Set(services) : new Set();
@@ -1564,7 +1560,7 @@
     const spans = trace?.spans || [];
     if (dom.traceCopyJsonButton) dom.traceCopyJsonButton.disabled = !spans.length;
     if (dom.traceCopyMenuButton) dom.traceCopyMenuButton.disabled = !spans.length;
-    if (!spans.length) closeTraceCopyMenu({ immediate: true });
+    if (!spans.length) traceCopySplit?.close({ immediate: true });
     dom.traceDetail?.classList.toggle("is-unavailable", !spans.length && !!model.traceError);
     if (!spans.length) {
       const failed = model.traceError;
@@ -1588,7 +1584,7 @@
       const filterable = (field, value, text) => (value
         ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
         : text);
-      dom.traceDetailTitle.innerHTML = `<strong><span>${filterable("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterable("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code><button type="button" class="traceCopyButton traceCopyButton--header" data-copy-active-trace="${esc(trace.trace_id)}" aria-label="Copy Trace ID" title="Copy full Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
+      dom.traceDetailTitle.innerHTML = `<strong><span>${filterable("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterable("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>${ns.ui.copyButtonHtml({ label: "Copy full Trace ID", className: "traceCopyButton traceCopyButton--header", attrs: { "data-copy-active-trace": trace.trace_id } })}</span>`;
       dom.traceDetailTitle.querySelector("[data-copy-active-trace]")?.addEventListener("click", (event) => {
         event.stopPropagation();
         copyText(trace.trace_id, event.currentTarget);
@@ -1604,7 +1600,7 @@
         ["Total Spans", fmt.count(spans.length)],
         ["Errors", fmt.count(cache.errorCount), cache.errorCount ? "is-error" : ""],
       ];
-      const itemsHtml = items.map(([label, value, cls]) => ns.ui.statTileHtml({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
+      const itemsHtml = items.map(([label, value, cls]) => ns.ui.statTileHtml({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `statTile--sm tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
       const orphans = cache.orphanCount;
       const incomplete = orphans
         ? ns.badge.html("", { tone: "warn", size: "md", className: "tracePageHeader__incomplete", title: `${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`, attrs: { "data-trace-incomplete": true }, html: `${WARNING_ICON}Incomplete` })
@@ -2343,38 +2339,20 @@
     }, null, 2).replace(/"start_ns": "\\u0000exact-ns:(\d+)"/g, '"start_ns": $1');
   }
 
-  // Copy JSON / Download JSON, the same split control as a query's results.
-  async function copyTraceJson() {
-    const button = dom.traceCopyJsonButton;
+  // Copy JSON / Download JSON: the shared split control (ui.copySplit), the
+  // same as a query's results.
+  function copyTraceJsonText() {
     const trace = model.activeTrace;
-    if (!button || !trace?.spans?.length) return;
-    util.flashButtonText(button, { copiedText: "Copied" });
-    try {
-      await util.copyTextToClipboard(traceJsonText(trace));
-    } catch {
-      util.flashButtonText(button, { copiedText: "Copy failed", durationMs: 1500 });
-    }
+    return trace?.spans?.length ? traceJsonText(trace) : "";
   }
 
   function downloadTraceJson() {
     const trace = model.activeTrace;
     if (!trace?.spans?.length) return;
-    const blob = new Blob([traceJsonText(trace)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `trace-${String(trace.trace_id || "trace").replace(/[^0-9A-Za-z_-]/g, "")}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ns.ui.downloadText(`trace-${String(trace.trace_id || "trace").replace(/[^0-9A-Za-z_-]/g, "")}.json`, traceJsonText(trace));
   }
 
-  // Copy JSON | Download JSON: an ns.menu split button (app_ui_menu.js).
-  let traceCopyMenu = null;
-  function closeTraceCopyMenu({ immediate = false } = {}) {
-    traceCopyMenu?.close({ immediate });
-  }
+  let traceCopySplit = null;
 
   // Span detail, after Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
   // AccordionEvents, AccordionLinks): HTML strings, with the inspector's
@@ -2390,81 +2368,51 @@
     return Object.entries(value).sort(([a], [b]) => String(a).localeCompare(String(b)));
   }
 
-  // A string holding a JSON object or array is shown as a tree (Jaeger's
-  // tryParseJson); any other value as a scalar.
-  function attributeJsonValue(value) {
-    if (value && typeof value === "object") return value;
-    if (typeof value !== "string" || !JSON_LOOKING.test(value)) return null;
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // ClickHouse stores OTel attributes as Map(String, String): a value that
-  // reads as a number or a boolean is coloured as one (the text is unchanged).
-  function scalarKind(value) {
-    if (value == null) return "null";
-    if (typeof value === "number" || typeof value === "bigint") return "number";
-    if (typeof value === "boolean") return "bool";
-    const text = String(value);
-    if (NUMBER_LITERAL.test(text)) return "number";
-    if (text === "true" || text === "false") return "bool";
-    return "string";
-  }
-
-  function scalarHtml(value) {
-    if (value == null) return fmt.nullToken();
-    return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(String(value))}</span>`;
-  }
-
-  // Collapsible pretty tree (Jaeger's JsonView): the top level is open, nested
-  // levels too when the value has at most 10 keys.
-  function jsonTreeHtml(value, expandNested, depth = 0) {
-    if (!value || typeof value !== "object") {
-      if (typeof value === "string") return `<span class="traceKv__v traceKv__v--string">"${esc(value)}"</span>`;
-      return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(value == null ? "null" : String(value))}</span>`;
-    }
-    const isArray = Array.isArray(value);
-    const entries = isArray ? value.map((item, index) => [index, item]) : Object.entries(value);
-    const [open, close] = isArray ? ["[", "]"] : ["{", "}"];
-    if (!entries.length) return `<span class="traceJson__brace">${open}${close}</span>`;
-    const noun = isArray ? "item" : "key";
-    const count = `${entries.length} ${noun}${entries.length === 1 ? "" : "s"}`;
-    const body = entries.map(([key, item]) => `<div class="traceJson__entry">${isArray ? "" : `<span class="traceJson__key">${esc(key)}</span><span class="traceJson__colon">:</span>`}${jsonTreeHtml(item, expandNested, depth + 1)}</div>`).join("");
-    const isOpen = depth === 0 || expandNested;
-    return `<details class="traceJson"${isOpen ? " open" : ""}><summary><span class="traceJson__brace">${open}</span><span class="traceJson__fold">\u2026${close}</span><span class="traceJson__count">${count}</span></summary><div class="traceJson__body">${body}</div><span class="traceJson__brace">${close}</span></details>`;
-  }
-
-  // filterScope ("span" / "resource"): the value opens the click-to-filter
-  // menu (app_trace_search.js) for that attribute map.
-  function attributeRowHtml(key, value, filterScope = "") {
+  // Attribute tables: the shared key / value list (ui.kvListHtml). A string
+  // holding a JSON object or array is a tree (Jaeger's tryParseJson); HTTP
+  // header arrays a plain list; otel.* keys in italics. filterScope ("span" /
+  // "resource"): include / exclude actions, and a click on the value opens
+  // the filter menu (app_trace_search.js) for that attribute map.
+  function attributeRow(key, value, filterScope = "") {
     const name = String(key);
-    const tree = attributeJsonValue(value);
+    const tree = ns.kv.jsonValue(value);
     const headerList = Array.isArray(tree) && /^http\.(?:request|response)\.header\./.test(name);
     const otel = name.startsWith("otel.");
-    const keyHtml = `<span class="traceKv__key${otel ? " is-otel" : ""}"${otel ? ` title="${esc(OTEL_KEY_TITLE)}"` : ""}>${esc(name)}</span>`;
-    let json;
-    try { json = JSON.stringify(value === undefined ? null : value); } catch (_) { json = JSON.stringify(String(value)); }
-    const filter = filterScope ? '<button type="button" class="traceKv__action" data-kv-filter aria-haspopup="menu" title="Filter traces by this value">Filter</button>' : "";
-    const actions = `<span class="traceKv__actions">${filter}<button type="button" class="traceKv__action" data-kv-copy="value" title="Copy value">Copy</button><button type="button" class="traceKv__action" data-kv-copy="json" title="Copy JSON">JSON</button></span>`;
-    const attrs = `data-kv-key="${esc(name)}" data-kv-json="${esc(json)}"${filterScope ? ` data-filter-scope="${esc(filterScope)}"` : ""}`;
-    if (tree && !headerList) {
-      const size = Array.isArray(tree) ? tree.length : Object.keys(tree).length;
-      return `<div class="traceKv__row traceKv__row--tree" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}<div class="traceKv__tree">${jsonTreeHtml(tree, size <= 10)}</div></div></div>`;
-    }
-    const valueHtml = headerList
-      ? tree.map((item) => scalarHtml(item)).join('<span class="traceKv__listSep">, </span>')
-      : scalarHtml(value);
-    return `<div class="traceKv__row" ${attrs}>${keyHtml}<div class="traceKv__cell">${actions}${valueHtml}</div></div>`;
+    return {
+      key: name,
+      value,
+      list: headerList,
+      keyClass: otel ? "is-otel" : "",
+      keyTitle: otel ? OTEL_KEY_TITLE : "",
+      actions: filterScope ? ["include", "exclude", "copy", "json"] : ["copy", "json"],
+      attrs: filterScope ? { "data-filter-scope": filterScope } : {},
+    };
   }
 
   function renderAttributeTable(raw, emptyText = "No attributes", filterScope = "") {
     const entries = attributeEntries(raw);
     if (!entries.length) return emptyText ? `<span class="traceJaegerEmpty">${esc(emptyText)}</span>` : "";
-    return `<div class="traceKv">${entries.map(([key, value]) => attributeRowHtml(key, value, filterScope)).join("")}</div>`;
+    return ns.ui.kvListHtml(entries.map(([key, value]) => attributeRow(key, value, filterScope)), { className: "traceKv" });
+  }
+
+  // The include / exclude / copy actions of the attribute lists: the search
+  // filters, and "JSON" copies { key, value }.
+  function attributeAction(action, { key, value, row, button }) {
+    if (action === "json") {
+      void copyText(JSON.stringify({ key, value }, null, 2), button);
+      return true;
+    }
+    if (action === "include" || action === "exclude") {
+      const scope = row.getAttribute("data-filter-scope") || "any";
+      const text = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+      ns.traceSearch?.applyFilter?.({ kind: "tag", scope, key }, text, action);
+      return true;
+    }
+    if (action === "copy") {
+      void copyText(typeof value === "string" ? value : attributeValueText(value), button);
+      return true;
+    }
+    return false;
   }
 
   function attributeValueText(value) {
@@ -2647,7 +2595,7 @@
 
   function idCopyHtml(label, value, field) {
     if (!value) return `<span>${esc(label)}: <code>root</code></span>`;
-    return `<span>${esc(label)}: <code>${esc(value)}</code><button type="button" class="traceCopyButton traceInspectorIdentity__copy" data-copy-span-field="${esc(value)}" aria-label="Copy ${esc(field)}" title="Copy ${esc(field)}"><span class="editorCopyButton__icon" aria-hidden="true"></span></button></span>`;
+    return `<span>${esc(label)}: <code>${esc(value)}</code>${ns.ui.copyButtonHtml({ label: `Copy ${field}`, className: "traceCopyButton traceInspectorIdentity__copy", attrs: { "data-copy-span-field": value } })}</span>`;
   }
 
   function renderSpanInspectorCard(span, spans, knownBounds = null) {
@@ -2692,17 +2640,14 @@
     // The waterfall handler opens the linked trace; say which span to focus.
     if (linked) { model.pendingSpanId = String(linked.getAttribute("data-linked-span") || ""); return; }
     if (ns.traceInsights?.handleInspectorClick(event, target)) return;
-    const kvCopy = target.closest("[data-kv-copy]");
-    if (kvCopy) {
+    const kvButton = target.closest("[data-kv-action]");
+    const kvRow = kvButton?.closest(".kvList__row");
+    if (kvButton && kvRow) {
       event.preventDefault();
       event.stopPropagation();
-      const row = kvCopy.closest("[data-kv-json]");
       let value = null;
-      try { value = JSON.parse(row?.getAttribute("data-kv-json") || "null"); } catch (_) {}
-      const text = kvCopy.getAttribute("data-kv-copy") === "json"
-        ? JSON.stringify({ key: row?.getAttribute("data-kv-key") || "", value }, null, 2)
-        : (typeof value === "string" ? value : attributeValueText(value));
-      copyText(text, kvCopy);
+      try { value = JSON.parse(kvRow.getAttribute("data-kv-json") || "null"); } catch (_) { value = kvRow.getAttribute("data-kv-text"); }
+      attributeAction(kvButton.getAttribute("data-kv-action"), { key: kvRow.getAttribute("data-kv-key") || "", value, row: kvRow, button: kvButton });
       return;
     }
     const idCopy = target.closest("[data-copy-span-field]");
@@ -2711,7 +2656,6 @@
     if (deepLink) {
       event.preventDefault();
       event.stopPropagation();
-      util.flashButtonText(deepLink, { copiedText: "Copied" });
       copyText(spanDeepLink(deepLink.getAttribute("data-copy-deep-link") || ""), deepLink);
       return;
     }
@@ -3391,9 +3335,13 @@
       else if (retry === "analytics" && model.analyticsFilters) void loadAnalytics(model.analyticsFilters);
     });
     dom.traceDetail?.addEventListener("click", onUnavailableClick);
-    dom.traceCopyJsonButton?.addEventListener("click", () => { void copyTraceJson(); });
-    traceCopyMenu = ns.menu?.split(dom.traceCopyJsonButton, dom.traceCopyMenuButton, dom.traceCopyMenu) || null;
-    dom.traceDownloadJsonButton?.addEventListener("click", () => downloadTraceJson());
+    if (dom.traceCopySplit) {
+      traceCopySplit = ns.ui.copySplit({
+        root: dom.traceCopySplit,
+        getText: copyTraceJsonText,
+        items: [{ el: dom.traceDownloadJsonButton, onSelect: downloadTraceJson }],
+      });
+    }
     // The trace page's keys ([ ] o p, a / d, arrows) while Traces shows.
     ns.lifecycle.bind("traces", (scope) => scope.listen(document, "keydown", onTraceKeydown));
     // The canvas overview holds resolved colours: redraw it for a new theme.

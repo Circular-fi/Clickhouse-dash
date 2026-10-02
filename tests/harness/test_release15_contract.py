@@ -67,7 +67,7 @@ def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     assert 'id="explorerTableSettingsButton"' not in html
     for chip in ['explorerFilterTables', 'explorerFilterViews', 'explorerFilterMv', 'explorerFilterDict', 'explorerFilterSystem']:
         assert f'id="{chip}"' in html
-    assert 'class="explorerFilterChip"' in html and 'aria-pressed=' in html
+    assert 'class="explorerFilterChip badge badge--md badge--pill badge--accent"' in html and 'aria-pressed=' in html
     keys = read("src/static/app_state.js")
     assert 'explorerIncludeSystem: "chdash.explorer.includeSystem",' in keys and "KEYS.explorerIncludeSystem" in ui
     assert 'explorerTypeFilters: "chdash.explorer.typeFilters.v1",' in keys and "KEYS.explorerTypeFilters" in ui
@@ -79,10 +79,11 @@ def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
 
 def test_create_statement_has_no_internal_vertical_height_limit() -> None:
     css = read("src/static/style.css")
-    tail = css[css.rfind("/* Release 15") :]
-    assert ".explorerDdlWrap .explorerDdl" in tail
-    assert "max-height: none;" in tail
-    assert "overflow: visible;" in tail
+    # The DDL is an unclamped SQL block: no max-height of its own.
+    block = css[css.index("/* ==== Components: SQL block"):css.index("/* ==== /Components: SQL block")]
+    body = block[block.index(".sqlBlock__body {"):block.index("}", block.index(".sqlBlock__body {"))]
+    assert "max-height" not in body and "overflow: auto;" in body
+    assert ".sqlBlock.is-clamped:not(.is-expanded) .sqlBlock__body" in block
 
 
 def test_graph_camera_controls_are_separate_and_buffer_ttl_metadata_is_exposed() -> None:

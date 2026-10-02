@@ -157,7 +157,7 @@ test('an endpoint opens the search with its service and operation, a P99 with th
   await page.reload();
   await expect(page.locator('#tracesFilterChips .traceFilterChip--duration')).toContainText('800 ms', { timeout: 30_000 });
   await expect.poll(() => last(searches)?.min_duration_ms).toBe('800');
-  await page.locator('#tracesFilterChips .traceFilterChip--duration .traceFilterChip__remove').click();
+  await page.locator('#tracesFilterChips .traceFilterChip--duration .chip__remove').click();
   await expect.poll(() => last(searches)?.min_duration_ms).toBeUndefined();
 });
 

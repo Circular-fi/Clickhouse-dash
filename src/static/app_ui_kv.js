@@ -179,5 +179,5 @@
   }
 
   Object.assign(ui, { kvList, kvListHtml, kvBind });
-  ns.kv = Object.freeze({ list: kvList, html: kvListHtml, bind: kvBind, treeHtml, scalarHtml, scalarKind, jsonValue, valueText, ACTIONS: Object.keys(ACTIONS) });
+  ns.kv = Object.freeze({ list: kvList, html: kvListHtml, bind: kvBind, actionsHtml, treeHtml, scalarHtml, scalarKind, jsonValue, valueText, ACTIONS: Object.keys(ACTIONS) });
 })();

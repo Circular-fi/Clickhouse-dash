@@ -323,7 +323,7 @@ test('"Search traces in this box" sets the range and the duration filter', async
   await expect.poll(() => last(seen.heatmap).get('min_duration_ms')).toBe('1000');
   // Removing the chip searches without it.
   const count = seen.searches.length;
-  await chip.locator('.traceFilterChip__remove').click();
+  await chip.locator('.chip__remove').click();
   await expect.poll(() => seen.searches.length).toBeGreaterThan(count);
   expect(last(seen.searches).has('min_duration_ms')).toBe(false);
   // A reload restores the duration filter from the URL.

@@ -749,13 +749,10 @@
     ns.run?.handleRun?.();
   }
 
+  // A menu action: the menu is gone, so the toast says it (ui.copyText).
   async function copySql(item) {
-    try {
-      await util.copyTextToClipboard(String(item.sql || ""));
-      toast("SQL copied.");
-    } catch {
-      toast("The SQL could not be copied.", "error");
-    }
+    if (await ns.ui.copyText(String(item.sql || ""))) toast("SQL copied.");
+    else toast("The SQL could not be copied.", "error");
   }
 
   // ------------------------------------------------------------------ toast
@@ -857,13 +854,11 @@
   }
 
   // Highlighted SQL, clipped (a prompt shows the start, the pane more).
+  // The shared read-only SQL block (ui.sqlBlock), wrapped.
   function sqlPreview(sql, max = PROMPT_SQL_CHARS) {
-    const pre = el("pre", "qlSql");
     const text = String(sql || "");
     const clipped = text.length > max ? `${text.slice(0, max)}\n${ELLIPSIS}` : text;
-    if (ns.highlight && typeof ns.highlight.renderInto === "function") ns.highlight.renderInto(pre, clipped);
-    else pre.textContent = clipped;
-    return pre;
+    return ns.ui.sqlBlock({ sql: clipped, wrap: true, label: "Query", className: "qlSql" });
   }
 
   // Save the editor (or a History entry) as a library query. When the editor
@@ -1240,7 +1235,7 @@
       notice.appendChild(ns.uiState.banner(el("div", ""), { message: `The library file could not be read (${ctl.loadError}); it is shown read-only.`, inset: true }));
     }
     if (ctl.mode === "server" && !ctl.writable && !ctl.fatal) {
-      const badge = el("div", "qlBadge qlBadge--readonly", "Read-only library");
+      const badge = ns.badge.el("Read-only library", { tone: "warn", size: "md", shape: "pill", className: "qlBadge qlBadge--readonly" });
       badge.title = "This server shares its query library read-only: opening and copying queries works, changes are disabled.";
       badge.prepend(icon("lock"));
       notice.appendChild(badge);
@@ -1893,7 +1888,7 @@
 
   function tagList(tags) {
     const list = el("span", "qlPreview__tags");
-    for (const tag of tags) list.appendChild(el("span", "qlTag", tag));
+    for (const tag of tags) list.appendChild(ns.badge.el(tag, { tone: "accent", shape: "pill", className: "qlTag" }));
     return list;
   }
 

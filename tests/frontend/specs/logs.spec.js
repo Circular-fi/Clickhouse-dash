@@ -103,7 +103,7 @@ test('logs: service, level and severity class filters', async ({ page, request }
   await expect.poll(async () => (await barsOf(page)).Info).toBe(0);
   expect((await barsOf(page)).Warn).toBeGreaterThan(0);
   // Removing the chip removes the filter.
-  await page.locator('#logsChips .logsChip__remove').first().click();
+  await page.locator('#logsChips .chip__remove').first().click();
   await expect.poll(() => param(page, 'sev')).toEqual([]);
 });
 
@@ -151,10 +151,10 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect(panel.locator('.logsBodyText')).toContainText('inserted');
 
   // Filter on the host of this record.
-  const hostRow = panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^host\.name$/ }) });
-  const host = (await hostRow.locator('.logsField__value').innerText()).trim();
+  const hostRow = panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^host\.name$/ }) });
+  const host = (await hostRow.locator('.kvList__value').innerText()).trim();
   await hostRow.hover();
-  await hostRow.locator('[data-field-action="filter"]').click();
+  await hostRow.locator('[data-kv-action="include"]').click();
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(page.locator('#logsChips')).toContainText(`host.name = ${host}`);
   await expect(page.locator('#logsQuery')).toHaveValue('inserted');
@@ -170,33 +170,33 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
 
   // Exclude one code.function value.
   await rows(page).first().click();
-  const fnRow = panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^code\.function$/ }) });
-  const fn = (await fnRow.locator('.logsField__value').innerText()).trim();
+  const fnRow = panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^code\.function$/ }) });
+  const fn = (await fnRow.locator('.kvList__value').innerText()).trim();
   await fnRow.hover();
-  await fnRow.locator('[data-field-action="exclude"]').click();
+  await fnRow.locator('[data-kv-action="exclude"]').click();
   await expect.poll(() => param(page, 'attr')).toContain(`LogAttributes.code.function!=${fn}`);
   await expect(page.locator('#logsChips .logsChip.is-negated')).toContainText(`code.function ≠ ${fn}`);
   // Every record of that host's "inserted" template has this function: the
   // exclusion empties the table, and removing its chip restores it.
   await expect(page.locator('#logsTableMessage')).toContainText('No logs match these filters');
-  await page.locator('#logsChips .logsChip.is-negated .logsChip__remove').click();
+  await page.locator('#logsChips .logsChip.is-negated .chip__remove').click();
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(rows(page).first()).toBeVisible();
 
   // "Search only this" drops the text search and the other filters.
   await rows(page).first().click();
-  const levelRow = panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^SeverityText$/ }) });
-  const level = (await levelRow.locator('.logsField__value').innerText()).trim();
+  const levelRow = panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^SeverityText$/ }) });
+  const level = (await levelRow.locator('.kvList__value').innerText()).trim();
   await levelRow.hover();
-  await levelRow.locator('[data-field-action="only"]').click();
+  await levelRow.locator('[data-kv-action="only"]').click();
   await expect.poll(() => param(page, 'attr')).toEqual([`SeverityText=${level}`]);
   await expect.poll(() => param(page, 'q')).toEqual([]);
   await expect(page.locator('#logsQuery')).toHaveValue('');
 
   // Open trace links to the Traces view with the span focused.
   await rows(page).first().click();
-  const traceId = (await panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^TraceId$/ }) }).locator('.logsField__value').innerText()).trim();
-  const spanId = (await panel.locator('.logsField').filter({ has: page.locator('.logsField__key', { hasText: /^SpanId$/ }) }).locator('.logsField__value').innerText()).trim();
+  const traceId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^TraceId$/ }) }).locator('.kvList__value').innerText()).trim();
+  const spanId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^SpanId$/ }) }).locator('.kvList__value').innerText()).trim();
   const open = page.locator('#logsOpenTrace');
   await expect(open).toBeVisible();
   await expect(open).toHaveAttribute('href', new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
@@ -528,7 +528,7 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   // Unchecking WARN drops its filter; a removed chip unchecks its value.
   await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').uncheck();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR', `ResourceAttributes.host.name!=${host}`]);
-  await page.locator('#logsChips .logsChip.is-negated .logsChip__remove').click();
+  await page.locator('#logsChips .logsChip.is-negated .chip__remove').click();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR']);
   await expect(fieldValue(page, 'host.name', host)).not.toHaveClass(/is-excluded/);
 

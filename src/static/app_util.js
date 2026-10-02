@@ -86,32 +86,7 @@
     preEl.innerHTML = highlightJsonHtml(pretty);
   }
 
-  async function copyTextToClipboard(text) {
-    const value = String(text ?? "");
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(value);
-      return;
-    }
-    const ta = document.createElement("textarea");
-    ta.value = value;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-1000px";
-    ta.style.left = "-1000px";
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
-  }
-
-  function flashButtonText(buttonEl, { copiedText = "Copied", durationMs = 1200 } = {}) {
-    if (!buttonEl) return;
-    const prev = buttonEl.textContent;
-    buttonEl.textContent = copiedText;
-    setTimeout(() => {
-      buttonEl.textContent = prev;
-    }, durationMs);
-  }
+  // Copying is app_ui_copy.js (ns.ui.copyText): one helper and one feedback.
 
   // formatInt and formatBytes keep their "-" for a missing value and hand
   // the rest to ns.format (app_format.js, loaded first), which owns the
@@ -366,8 +341,6 @@
     escapeHtml,
     highlightJsonHtml,
     renderPrettyJson,
-    copyTextToClipboard,
-    flashButtonText,
     formatInt,
     formatSeconds,
     formatBytes,

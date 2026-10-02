@@ -304,8 +304,13 @@
 
     // ---- header -------------------------------------------------------------
 
-    function metaChip(text, { kind = "", title = "", dot = "" } = {}) {
-      const chip = node("span", `explorerMetaChip${kind ? ` explorerMetaChip--${kind}` : ""}`);
+    // A header chip: the shared badge (md, pill); the engine in its object
+    // kind's colour, the health in its status tone.
+    const HEALTH_TONES = { healthy: "ok", warning: "warn", error: "error" };
+    function metaChip(text, { kind = "", title = "", dot = "", color = "" } = {}) {
+      const tone = dot ? HEALTH_TONES[dot] || "neutral" : color ? "category" : "neutral";
+      const chip = node("span", `${ns.badge.classes({ tone, size: "md", shape: "pill" })} explorerMetaChip${kind ? ` explorerMetaChip--${kind}` : ""}`);
+      if (color) chip.style.setProperty("--badge-color", color);
       if (dot) {
         const mark = node("i", `explorerHealthDot explorerHealthDot--${dot}`);
         mark.setAttribute("aria-hidden", "true");
@@ -324,7 +329,7 @@
     function headerChips(detail) {
       const s = detail.summary || {};
       const viewLike = isViewLikeSummary(s);
-      const chips = [metaChip(humanEngine(s.engine), { kind: "engine", title: s.engine_full || s.engine || "" })];
+      const chips = [metaChip(humanEngine(s.engine), { kind: "engine", title: s.engine_full || s.engine || "", color: ns.palette.kind(s.engine) })];
       if (!detail._loading && !viewLike && s.health) {
         const warnings = Array.isArray(s.warnings) ? s.warnings : [];
         chips.push(metaChip(healthLabel(s), { kind: "health", dot: healthState(s), title: warnings.join("\n") || "No problem reported by system metadata." }));
@@ -813,7 +818,7 @@
             td.title = item.type || "";
             if (item.default_kind) {
               const line = node("span", "explorerColumns__default");
-              line.append(node("span", "explorerBadge explorerBadge--default", item.default_kind), node("span", "explorerColumns__expr", item.default_expression));
+              line.append(ns.badge.el(item.default_kind, { tone: "key", className: "explorerBadge explorerBadge--default" }), node("span", "explorerColumns__expr", item.default_expression));
               td.appendChild(line);
               td.title = `${item.type}\n${item.default_kind} ${item.default_expression}`;
             }
@@ -827,7 +832,7 @@
         render: (td, item) => {
           td.classList.add("explorerColumns__keys");
           for (const [label, title] of item.keys) {
-            const badge = node("span", `explorerBadge explorerBadge--key explorerBadge--${label.toLowerCase().replace(/[^a-z]+/g, "-")}`, label);
+            const badge = ns.badge.el(label, { tone: "key", className: `explorerBadge explorerBadge--key explorerBadge--${label.toLowerCase().replace(/[^a-z]+/g, "-")}` });
             badge.title = title;
             td.appendChild(badge);
           }
@@ -1097,7 +1102,7 @@
           },
           {
             label: "State", value: (part) => (part.active ? "active" : "inactive"),
-            render: (td, part) => td.appendChild(node("span", `explorerBadge explorerBadge--${part.active ? "active" : "inactive"}`, part.active ? "active" : "inactive")),
+            render: (td, part) => td.appendChild(ns.badge.el(part.active ? "active" : "inactive", { tone: part.active ? "ok" : "neutral", className: `explorerBadge explorerBadge--${part.active ? "active" : "inactive"}` })),
           },
         ],
       }));
@@ -1345,7 +1350,7 @@
           { label: "Created", value: (m) => m.create_time, render: (td, m) => timeCell(td, m.create_time) },
           {
             label: "State", value: (m) => (m.done ? "done" : "pending"),
-            render: (td, m) => td.appendChild(node("span", `explorerBadge explorerBadge--${m.done ? "inactive" : "pending"}`, m.done ? "done" : "pending")),
+            render: (td, m) => td.appendChild(ns.badge.el(m.done ? "done" : "pending", { tone: m.done ? "neutral" : "warn", className: `explorerBadge explorerBadge--${m.done ? "inactive" : "pending"}` })),
           },
           { label: "Parts to do", type: "UInt64", numeric: true, value: (m) => optionalNumber(m.parts_to_do) },
           { label: "Command", value: (m) => m.command, cellClass: "explorerCell--code explorerCell--expr" },
@@ -1763,27 +1768,12 @@
       const ddl = String(detail.formatted_ddl || detail.ddl);
       if (detail.ddl_format_error) container.appendChild(emptyNote(`Formatter unavailable: ${detail.ddl_format_error}`));
 
-      // Render CREATE with the same editor primitives as Query: identical gutter,
-      // syntax overlay, token colors and copy control. Explorer only overrides
-      // sizing because this surface is read-only and must grow with the DDL.
-      const wrap = node("div", "editorWrap explorerDdlWrap");
-      const gutter = node("pre", "editorGutter explorerDdlGutter");
-      const lineCount = Math.max(1, ddl.split("\n").length);
-      gutter.textContent = Array.from({ length: lineCount }, (_, index) => String(index + 1)).join("\n");
-
-      const copy = node("button", "editorCopyButton explorerDdlCopy");
-      copy.type = "button";
-      copy.setAttribute("aria-label", "Copy CREATE statement");
-      copy.title = "Copy CREATE statement";
-      copy.appendChild(node("span", "editorCopyButton__icon"));
-      copy.addEventListener("click", async () => {
-        await util.copyTextToClipboard(ddl);
-        copy.classList.add("is-copied");
-        setTimeout(() => copy.classList.remove("is-copied"), 1000);
-      });
-      const pre = node("pre", "editorHighlight explorerDdl");
-      renderHighlightedCode(pre, ddl);
-      wrap.append(gutter, pre, copy);
+      // The shared read-only SQL block (ui.sqlBlock): the editor's highlighter,
+      // a line gutter and the copy button; it grows with the DDL.
+      const wrap = ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" });
+      wrap.querySelector(".sqlBlock__gutter")?.classList.add("explorerDdlGutter");
+      wrap.querySelector(".sqlBlock__body")?.classList.add("explorerDdl");
+      wrap.querySelector(".sqlBlock__copy")?.classList.add("explorerDdlCopy");
       container.appendChild(wrap);
     }
 

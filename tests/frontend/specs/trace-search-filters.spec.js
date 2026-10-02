@@ -87,7 +87,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
 
   // Removing a chip is a new search with its own history entry.
   const before = searches.length;
-  await chips(page).filter({ hasText: 'db.system' }).locator('.traceFilterChip__remove').click();
+  await chips(page).filter({ hasText: 'db.system' }).locator('.chip__remove').click();
   await expect.poll(() => searches.length).toBeGreaterThan(before);
   await expect(chips(page)).toHaveCount(4);
   expect(lastSearch(searches).getAll('tag_exists')).toEqual([]);
@@ -104,7 +104,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
   await expect.poll(() => lastSearch(searches).getAll('tag_exists')).toEqual([]);
 
   // Toggling a chip's operator: = becomes != (and back on the chip itself).
-  await chips(page).filter({ hasText: 'http.method' }).locator('.traceFilterChip__op').click();
+  await chips(page).filter({ hasText: 'http.method' }).locator('.chip__op').click();
   await expect.poll(() => lastSearch(searches).getAll('tag_not')).toEqual(['span:http.method=GET', 'resource:deployment.environment=prod']);
   await expect(chips(page).filter({ hasText: 'http.method' })).toHaveClass(/is-negated/);
 });
@@ -136,7 +136,7 @@ test('the Tag / Value inputs add chips with =, !=, exists and missing', async ({
   await value.fill('dev');
   await page.locator('#tracesSearchButton').click();
   await expect(chips(page)).toHaveCount(2);
-  await expect(chips(page).nth(1).locator('.traceFilterChip__scope')).toHaveText('resource');
+  await expect(chips(page).nth(1).locator('.chip__scope')).toHaveText('resource');
   await expect.poll(() => lastSearch(searches).getAll('tag_not')).toEqual(['resource:deployment.environment=dev']);
 
   await key.fill('db.system');
@@ -182,8 +182,8 @@ test('click-to-filter from the span inspector and the trace header returns to th
   await root.locator('.traceSpanRow__name').click();
   const card = page.locator('#traceWaterfall .traceInspector--inline').first();
   await card.locator('[data-span-section="tags"] > summary').click();
-  const method = card.locator('[data-span-section="tags"] .traceKv__row[data-kv-key="http.method"]');
-  await method.locator('.traceKv__v').click();
+  const method = card.locator('[data-span-section="tags"] .kvList__row[data-kv-key="http.method"]');
+  await method.locator('.kv__v').click();
   const menu = page.locator('#traceFilterMenu');
   await expect(menu).toBeVisible();
   await expect(menu.locator('.traceFilterMenu__title')).toContainText('span:http.method');
@@ -198,16 +198,15 @@ test('click-to-filter from the span inspector and the trace header returns to th
   await expect(chips(page)).toHaveCount(2);
   expect(new URL(page.url()).pathname).toMatch(/\/traces$/);
 
-  // Resource attribute, excluded, through the row's Filter button.
+  // Resource attribute, excluded, through the row's Exclude action.
   await page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"] .traceResult__wideTitle`).click();
   await page.locator('#traceWaterfall .traceSpanRow').first().locator('.traceSpanRow__name').click();
   const process = page.locator('#traceWaterfall .traceInspector--inline').first().locator('[data-span-section="process"]');
   await process.locator(':scope > summary').click();
   // The row's actions show on hover.
-  const envRow = process.locator('.traceKv__row[data-kv-key="deployment.environment"]');
+  const envRow = process.locator('.kvList__row[data-kv-key="deployment.environment"]');
   await envRow.hover();
-  await envRow.locator('[data-kv-filter]').click();
-  await menu.getByRole('menuitem', { name: 'Exclude this value' }).click();
+  await envRow.locator('[data-kv-action="exclude"]').click();
   await expect.poll(() => lastSearch(searches).getAll('tag_not')).toEqual(['resource:deployment.environment=prod']);
 
   // The service in the trace header, "Search only this": every other filter goes.

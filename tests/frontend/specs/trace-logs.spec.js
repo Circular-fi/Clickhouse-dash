@@ -104,7 +104,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   const line = inlineRows(page, busiest).locator('.traceLog--inline').first();
   await line.locator('.traceLog__row').click();
   await expect(line.locator('.traceLog__details .traceLog__attrs .traceKv')).toBeVisible();
-  await expect(line.locator('.traceLog__details .traceKv__row[data-kv-key="log.origin"]')).toBeVisible();
+  await expect(line.locator('.traceLog__details .kvList__row[data-kv-key="log.origin"]')).toBeVisible();
   // The row keeps the waterfall columns: the log line's timeline starts where the span row's does.
   const columns = await page.evaluate((id) => {
     const row = document.querySelector(`#traceWaterfall .traceSpanRow[data-span-id="${id}"] .traceSpanRow__timeline`);
@@ -299,9 +299,10 @@ test('mocked: severities use the Logs view palette (info blue) in both themes; E
     document.body.appendChild(probe);
     const out = {};
     for (const sev of ['error', 'warn', 'info', 'debug']) {
-      probe.style.background = `var(--sev-${sev})`;
-      const chip = document.querySelector(`#traceLogsPanel [data-log-severity="${sev}"] > i`);
-      out[sev] = { logs: getComputedStyle(probe).backgroundColor, trace: chip ? getComputedStyle(chip).backgroundColor : null };
+      probe.style.color = `var(--sev-${sev})`;
+      // The severity chips are the shared severity badge: its text colour.
+      const chip = document.querySelector(`#traceLogsPanel [data-log-severity="${sev}"]`);
+      out[sev] = { logs: getComputedStyle(probe).color, trace: chip ? getComputedStyle(chip).color : null };
     }
     probe.remove();
     return out;
@@ -422,7 +423,7 @@ test('mocked: logs keep the waterfall usable: collapsing a branch removes its lo
   // Keyboard: Enter on a log line opens its details.
   await inlineRows(page, sid(7)).locator('.traceLog__row').focus();
   await page.keyboard.press('Enter');
-  await expect(inlineRows(page, sid(7)).locator('.traceKv__row[data-kv-key="exception.type"]')).toBeVisible();
+  await expect(inlineRows(page, sid(7)).locator('.kvList__row[data-kv-key="exception.type"]')).toBeVisible();
   // Collapsing an ancestor removes the span and its logs rows; expanding brings both back.
   await spanRow(page, sid(5)).locator('[data-toggle-span]').click();
   await expect(spanRow(page, sid(7))).toHaveCount(0);

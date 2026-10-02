@@ -183,13 +183,13 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   const filtered = page.waitForResponse((r) => r.url().includes('/api/metrics/series') && r.url().includes('filter_not='));
   await form.locator('.metricsFilterForm__apply').click();
   expect((await filtered).ok()).toBeTruthy();
-  await expect(panel.locator('.metricsChip--not')).toContainText('status.code');
+  await expect(panel.locator('.metricsChip.is-negated')).toContainText('status.code');
   await expect(page).toHaveURL(/filter_not=status\.code%3DSTATUS_CODE_ERROR/);
   await waitForChart(page, panel);
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveCount(0);
 
   // Equality filter on span.kind keeps only that kind.
-  await panel.locator('.metricsChip__remove').click();
+  await panel.locator('.metricsChip .chip__remove').click();
   await expect(panel.locator('.metricsChip')).toHaveCount(0);
   await expect(page).not.toHaveURL(/filter_not=/);
 });

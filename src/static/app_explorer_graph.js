@@ -2829,14 +2829,11 @@
     return button;
   }
 
+  // The shared read-only SQL block (ui.sqlBlock): copy, the first 16 lines
+  // and "Show all".
   function sqlBlock(sql, truncated) {
-    const pre = el("pre", "explorerGraphPanel__sql");
-    const code = el("code");
-    if (ns.highlight && typeof ns.highlight.renderInto === "function") ns.highlight.renderInto(code, sql);
-    else code.textContent = sql;
-    pre.append(code);
     const wrap = el("div", "explorerGraphPanel__sqlWrap");
-    wrap.append(pre);
+    wrap.append(ns.ui.sqlBlock({ sql, copy: true, maxLines: 16, wrap: true, label: "SELECT", className: "explorerGraphPanel__sql" }));
     if (truncated) wrap.append(el("p", "graphKitPanel__note", "Truncated at 32 KB: the full text is in the object's DDL."));
     return wrap;
   }
@@ -2917,16 +2914,11 @@
       if (serial !== model.panelSerial) return;
       status.remove();
       if (!columns.length) { container.append(el("p", "graphKitPanel__note", "No columns.")); return; }
+      // The shared key / value list (ui.kvList): name, type (mono), copy.
       const limit = 40;
-      const table = el("table", "explorerGraphPanel__columns");
-      const body = el("tbody");
-      for (const column of columns.slice(0, limit)) {
-        const tr = el("tr");
-        tr.append(el("td", "explorerGraphPanel__columnName", column.name), el("td", "explorerGraphPanel__columnType", column.type));
-        body.append(tr);
-      }
-      table.append(body);
-      container.append(table);
+      container.append(ns.ui.kvList(columns.slice(0, limit).map((column) => ({
+        key: column.name, value: column.type, json: false, text: true, mono: true, actions: ["copy"],
+      })), { className: "explorerGraphPanel__columns", label: "Columns" }));
       if (columns.length > limit) container.append(el("p", "graphKitPanel__note", `${format.count(columns.length - limit)} more columns in the table card.`));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;

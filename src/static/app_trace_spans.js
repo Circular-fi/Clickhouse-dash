@@ -631,7 +631,7 @@
   }
 
   function copyButton(value, label) {
-    return `<button type="button" class="traceCopyButton" data-span-copy="${esc(value)}" aria-label="Copy ${esc(label)}" title="Copy ${esc(label)}"><span class="editorCopyButton__icon" aria-hidden="true"></span></button>`;
+    return ns.ui.copyButtonHtml({ label: `Copy ${label}`, className: "traceCopyButton", attrs: { "data-span-copy": value } });
   }
 
   function eventsHtml(span, startNs) {

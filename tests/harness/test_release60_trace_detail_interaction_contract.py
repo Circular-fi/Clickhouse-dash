@@ -45,7 +45,7 @@ def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     assert 'data-trace-waterfall-resizer' in js
     assert '--trace-label-width' in css
     assert '.traceWaterfallResizer' in css
-    assert '.traceKv__row' in css
+    assert '.kvList__row' in css
     assert '--trace-depth-x' in css
 
 def test_selection_picker_closes_menu():

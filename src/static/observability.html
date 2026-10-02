@@ -270,7 +270,7 @@
             </div>
           </div>
         </form>
-        <div id="tracesFilterChips" class="traceFilterChips" role="list" aria-label="Active filters" hidden></div>
+        <div id="tracesFilterChips" class="traceFilterChips chips" role="list" aria-label="Active filters" hidden></div>
 
         <div class="traceSearchBody">
         <aside id="traceFacets" class="uiSide uiSide--sticky traceFacets" aria-label="Attribute filters">
@@ -336,7 +336,7 @@
             <div id="traceMapState" class="traceMap__state"><div class="uiState uiState--empty"><p class="uiState__body">Search to load the service map.</p></div></div>
             <div class="graphKitDock">
               <div id="traceMapLegend" class="graphKitLegend" aria-label="Legend"></div>
-              <div class="graphKitStatus"><span id="traceMapMeta" class="graphKitStatus__text" role="status"></span><span id="traceMapSampled" class="graphKitStatus__badge" hidden></span></div>
+              <div class="graphKitStatus"><span id="traceMapMeta" class="graphKitStatus__text" role="status"></span><span id="traceMapSampled" class="graphKitStatus__badge badge badge--estimate badge--pill" hidden></span></div>
             </div>
             <canvas id="traceMapMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>
             <aside id="traceMapPanel" class="graphKitPanel" aria-label="Service map selection" hidden></aside>
@@ -433,7 +433,7 @@
         </div>
       </form>
 
-      <div id="logsChips" class="logsChips" aria-label="Active filters" hidden></div>
+      <div id="logsChips" class="logsChips chips" role="list" aria-label="Active filters" hidden></div>
       <div id="logsError" class="uiBanner logsError" role="alert" hidden></div>
 
       <div class="logsSearchBody">
@@ -503,7 +503,16 @@
             </div>
             <div class="uiDetail__actions logsSidePanel__headerActions">
               <a id="logsOpenTrace" class="button button--primary button--small logsOpenTrace" href="#" hidden>Open trace</a>
-              <button id="logsCopyJson" class="button button--small" type="button">Copy JSON</button>
+              <div id="logsCopySplit" class="runSplit copySplit logsCopySplit">
+                <div class="runSplit__buttons">
+                  <button id="logsCopyJson" class="button button--small resultsStack__copy runSplit__main" type="button" title="Copy the record as JSON">Copy JSON</button>
+                  <button id="logsCopyMenuButton" class="button button--small runSplit__toggle" type="button" aria-haspopup="menu" aria-expanded="false" title="Copy options"></button>
+                </div>
+                <div id="logsCopyMenu" class="runMenu copyMenu" role="menu" tabindex="-1" hidden>
+                  <button id="logsCopyBody" class="runMenu__opt" type="button" role="menuitem"><span class="runMenu__optText">Copy body</span></button>
+                  <button id="logsDownloadJson" class="runMenu__opt" type="button" role="menuitem"><span class="runMenu__optText">Download JSON</span></button>
+                </div>
+              </div>
             </div>
             <button id="logsSideClose" class="closeCross uiDetail__close" type="button" aria-label="Close log record" title="Close (Esc)">&times;</button>
           </header>

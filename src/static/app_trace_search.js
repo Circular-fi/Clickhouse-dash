@@ -148,21 +148,30 @@
     if (!root) return;
     const count = search.chips.length + (search.duration ? 1 : 0);
     root.hidden = !count;
+    // The shared filter chips (ns.badge.chipHtml): scope, key, operator (a
+    // toggle for tag filters), value and remove.
     const durationChip = search.duration
-      ? `<span class="traceFilterChip traceFilterChip--duration" role="listitem" data-chip-kind="duration" title="${esc(`trace duration ${durationLabel(search.duration)}`)}"><span class="traceFilterChip__key">duration</span><span class="traceFilterChip__value">${esc(durationLabel(search.duration))}</span><button type="button" class="traceFilterChip__remove" data-chip-duration-remove aria-label="Remove filter trace duration ${esc(durationLabel(search.duration))}" title="Remove filter">×</button></span>`
+      ? ns.badge.chipHtml({
+        key: "duration", value: durationLabel(search.duration), className: "traceFilterChip traceFilterChip--duration",
+        title: `trace duration ${durationLabel(search.duration)}`, attrs: { "data-chip-kind": "duration" },
+        remove: { label: `Remove filter trace duration ${durationLabel(search.duration)}`, attrs: { "data-chip-duration-remove": true } },
+      })
       : "";
     root.innerHTML = durationChip + search.chips.map((chip, index) => {
       const negated = chip.op === "!=" || chip.op === "missing";
-      const scope = chip.kind === "tag" && chip.scope !== "any" ? `<span class="traceFilterChip__scope">${esc(chip.scope)}</span>` : "";
       const key = chip.kind === "tag" ? chip.key : chip.kind;
       const valued = chip.op === "=" || chip.op === "!=";
       const toggle = chip.kind === "tag";
       const next = { "=": "!=", "!=": "=", exists: "missing", missing: "exists" }[chip.op];
-      const op = toggle
-        ? `<button type="button" class="traceFilterChip__op" data-chip-op="${index}" title="Switch to ${esc(OP_LABELS[next])}" aria-label="Switch ${esc(key)} to ${esc(OP_NAMES[next])}">${esc(OP_LABELS[chip.op])}</button>`
-        : `<span class="traceFilterChip__op">${esc(OP_LABELS[chip.op])}</span>`;
-      return `<span class="traceFilterChip${negated ? " is-negated" : ""}" role="listitem" data-chip-index="${index}" data-chip-kind="${esc(chip.kind)}" data-chip-op-value="${esc(chip.op)}" title="${esc(chipLabel(chip))}">${scope}<span class="traceFilterChip__key">${esc(key)}</span>${op}${valued ? `<span class="traceFilterChip__value">${esc(chip.value === "" ? '""' : chip.value)}</span>` : ""}<button type="button" class="traceFilterChip__remove" data-chip-remove="${index}" aria-label="Remove filter ${esc(chipLabel(chip))}" title="Remove filter">×</button></span>`;
-    }).join("") + (count > 1 ? '<button type="button" class="traceFilterChips__clear" data-chips-clear>Clear filters</button>' : "");
+      return ns.badge.chipHtml({
+        key, op: OP_LABELS[chip.op], value: valued ? (chip.value === "" ? '""' : chip.value) : "", negated,
+        scope: chip.kind === "tag" && chip.scope !== "any" ? chip.scope : "",
+        opAttrs: toggle ? { "data-chip-op": index, title: `Switch to ${OP_LABELS[next]}`, "aria-label": `Switch ${key} to ${OP_NAMES[next]}` } : null,
+        className: "traceFilterChip", title: chipLabel(chip),
+        attrs: { "data-chip-index": index, "data-chip-kind": chip.kind, "data-chip-op-value": chip.op },
+        remove: { label: `Remove filter ${chipLabel(chip)}`, attrs: { "data-chip-remove": index } },
+      });
+    }).join("") + (count > 1 ? ns.badge.clearHtml("Clear filters", { "data-chips-clear": true }) : "");
   }
 
   function onChipsClick(event) {
@@ -464,11 +473,10 @@
 
   // What a click landed on: a value that can become a filter.
   function filterTrigger(target) {
-    const kvButton = target.closest("[data-kv-filter]");
-    const kvValue = kvButton ? null : target.closest(".traceKv__row[data-filter-scope] .traceKv__v, .traceKv__row[data-filter-scope] .traceKv__tree > .traceJson > summary");
-    const kv = kvButton || kvValue;
+    // A value of a filterable attribute row (ui.kvListHtml) opens the menu.
+    const kv = target.closest(".kvList__row[data-filter-scope] .kv__v, .kvList__row[data-filter-scope] .kvList__tree > .kvTree > summary");
     if (kv) {
-      const row = kv.closest(".traceKv__row[data-filter-scope]");
+      const row = kv.closest(".kvList__row[data-filter-scope]");
       if (!row) return null;
       let value = null;
       try { value = JSON.parse(row.getAttribute("data-kv-json") || "null"); } catch (_) { value = null; }

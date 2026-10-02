@@ -716,28 +716,16 @@
     return state.selectedHostId;
   }
 
-  async function handleCopyLiveJson() {
-    if (!dom.copyJsonButton) return;
-    const copyText = state.lastRunMode === "batch" && download && typeof download.buildGlobalJson === "function"
+  // The results' Copy JSON split (ui.copySplit): JSON on the main button,
+  // CSV and Download JSON (app_download.js) in its menu.
+  function liveJsonText() {
+    return state.lastRunMode === "batch" && download && typeof download.buildGlobalJson === "function"
       ? download.buildGlobalJson()
       : (results && typeof results.buildCopyText === "function" ? results.buildCopyText("json") : "");
-    util.flashButtonText(dom.copyJsonButton, { copiedText: "Copied" });
-    try {
-      await util.copyTextToClipboard(copyText);
-    } catch {
-      util.flashButtonText(dom.copyJsonButton, { copiedText: "Copy failed", durationMs: 1500 });
-    }
   }
 
-  async function handleCopyLiveCsv() {
-    if (!dom.copyCsvButton) return;
-    const copyText = results && typeof results.buildCopyText === "function" ? results.buildCopyText("csv") : "";
-    util.flashButtonText(dom.copyJsonButton || dom.copyCsvButton, { copiedText: "Copied" });
-    try {
-      await util.copyTextToClipboard(copyText);
-    } catch {
-      util.flashButtonText(dom.copyJsonButton || dom.copyCsvButton, { copiedText: "Copy failed", durationMs: 1500 });
-    }
+  function liveCsvText() {
+    return results && typeof results.buildCopyText === "function" ? results.buildCopyText("csv") : "";
   }
 
 
@@ -2071,8 +2059,16 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     if (dom.downloadDebugButton) dom.downloadDebugButton.addEventListener("click", () => handleDownloadRun("debug"));
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
     if (dom.clearResultsButton) dom.clearResultsButton.addEventListener("click", handleCancelOrClear);
-    if (dom.copyJsonButton) dom.copyJsonButton.addEventListener("click", handleCopyLiveJson);
-    if (dom.copyCsvButton) dom.copyCsvButton.addEventListener("click", handleCopyLiveCsv);
+    if (dom.copySplit) {
+      ns.ui.copySplit({
+        root: dom.copySplit,
+        getText: liveJsonText,
+        items: [
+          { el: dom.copyCsvButton, copy: liveCsvText },
+          { el: dom.downloadReceivedJsonButton },
+        ],
+      });
+    }
   }
 
   ns.run = { init, handleRun, handleRunWithProfiling, handleDownloadRun, handleFormat, handleCancelOrClear, updateActionButtons };

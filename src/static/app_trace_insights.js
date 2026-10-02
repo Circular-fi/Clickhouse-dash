@@ -686,7 +686,6 @@
     const header = exceptionTitle(item);
     const body = item.stacktrace && !item.stacktrace.includes(item.type || "\u0000") ? `${header}\n${item.stacktrace}` : (item.stacktrace || header);
     ctx.copyText(body, button);
-    ns.util?.flashButtonText?.(button, { copiedText: "Copied" });
   }
 
   // Clicks inside the inline span inspector; true when handled.

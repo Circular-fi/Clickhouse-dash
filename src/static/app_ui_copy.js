@@ -12,6 +12,7 @@
   //                                   modules that render strings and delegate
   //                                   clicks to ui.copyText
   //   ui.copySplit(options)           the "Copy JSON" split button and its menu
+  //   ui.downloadText(name, text)     its "Download JSON": the text as a file
   //
   // One feedback, held FEEDBACK_MS: the control gets .is-copied (.is-copyFailed
   // when the clipboard refused) and reads "Copied" ("Copy failed"): a text
@@ -121,66 +122,15 @@
 
   // ------------------------------------------------------------ split button
 
-  // The menu of a split button: opens under its toggle, first item focused;
-  // Up / Down / Home / End move, Escape closes and gives focus back to the
-  // toggle, Tab and a press outside close it. ns.menu, once it exists, owns
-  // this behaviour: menuDriver() hands the menu over to it.
-  function localMenu(root, toggle, menu) {
-    let cleanup = null;
-    const items = () => [...menu.querySelectorAll('[role="menuitem"]')].filter((item) => !item.hidden && !item.disabled);
-    const isOpen = () => !menu.hidden;
-    function close({ immediate = false, focusToggle = false } = {}) {
-      toggle.setAttribute("aria-expanded", "false");
-      root.classList.remove("is-open");
-      cleanup?.();
-      cleanup = null;
-      const finish = () => { if (!root.classList.contains("is-open")) menu.hidden = true; };
-      if (immediate) finish();
-      else setTimeout(finish, 160);
-      if (focusToggle) toggle.focus({ preventScroll: true });
-    }
-    function open() {
-      if (isOpen() && root.classList.contains("is-open")) return;
-      menu.hidden = false;
-      toggle.setAttribute("aria-expanded", "true");
-      requestAnimationFrame(() => root.classList.add("is-open"));
-      const first = items()[0];
-      (first || menu).focus({ preventScroll: true });
-      const onDown = (event) => { if (event.target instanceof Node && !root.contains(event.target)) close(); };
-      const onKey = (event) => {
-        if (event.key === "Escape" && isOpen()) {
-          event.stopPropagation();
-          close({ immediate: true, focusToggle: menu.contains(document.activeElement) || document.activeElement === document.body });
-        }
-      };
-      document.addEventListener("pointerdown", onDown, true);
-      document.addEventListener("keydown", onKey, true);
-      cleanup = () => {
-        document.removeEventListener("pointerdown", onDown, true);
-        document.removeEventListener("keydown", onKey, true);
-      };
-    }
-    toggle.addEventListener("click", () => (isOpen() && root.classList.contains("is-open") ? close() : open()));
-    menu.addEventListener("keydown", (event) => {
-      const list = items();
-      const at = list.indexOf(document.activeElement);
-      let next = null;
-      if (event.key === "ArrowDown") next = list[(at + 1) % list.length];
-      else if (event.key === "ArrowUp") next = list[(at - 1 + list.length) % list.length];
-      else if (event.key === "Home") next = list[0];
-      else if (event.key === "End") next = list[list.length - 1];
-      else if (event.key === "Tab") close({ immediate: true });
-      if (next) {
-        event.preventDefault();
-        next.focus({ preventScroll: true });
-      }
-    });
-    return { open, close, isOpen };
-  }
-
-  function menuDriver(root, toggle, menu) {
-    if (ns.menu && typeof ns.menu.split === "function") return ns.menu.split(root, { toggle, menu });
-    return localMenu(root, toggle, menu);
+  // The menu of a split button is an ns.menu split (app_ui_menu.js): keys,
+  // focus, placement and dismissal (ns.layers) are ns.menu's.
+  function menuDriver(root, main, toggle, menu) {
+    const handle = ns.menu.split(main, toggle, menu, { root });
+    return {
+      open: () => handle.open(),
+      close: ({ immediate = false, focus = false } = {}) => handle.close({ immediate, focus }),
+      isOpen: () => handle.isOpen(),
+    };
   }
 
   function menuItem({ id = "", label }) {
@@ -237,7 +187,7 @@
       el.append(buttons, menu);
     }
     if (!toggle.getAttribute("aria-label")) toggle.setAttribute("aria-label", toggle.title || "Copy options");
-    const driver = menuDriver(el, toggle, menu);
+    const driver = menuDriver(el, main, toggle, menu);
     const byKey = {};
     for (const spec of items) {
       const item = spec.el || (spec.id && el.querySelector(`#${CSS.escape(spec.id)}`)) || menu.appendChild(menuItem(spec));
@@ -265,6 +215,19 @@
     return { el, main, toggle, menu, items: byKey, setDisabled, open: driver.open, close: driver.close, isOpen: driver.isOpen };
   }
 
-  Object.assign(ui, { copyText, copyFeedback: feedback, copyButton, copyButtonHtml, copySplit });
-  ns.copy = Object.freeze({ text: copyText, feedback, button: copyButton, buttonHtml: copyButtonHtml, split: copySplit, FEEDBACK_MS });
+  // The "Download JSON" of a copy split: text saved as a file.
+  function downloadText(name, text, type = "application/json") {
+    const blob = new Blob([String(text ?? "")], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  Object.assign(ui, { copyText, copyFeedback: feedback, copyButton, copyButtonHtml, copySplit, downloadText });
+  ns.copy = Object.freeze({ text: copyText, feedback, button: copyButton, buttonHtml: copyButtonHtml, split: copySplit, download: downloadText, FEEDBACK_MS });
 })();

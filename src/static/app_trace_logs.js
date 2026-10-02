@@ -317,7 +317,11 @@
       title = `${countLabel(n)}${errors ? `, ${fmt.count(errors)} error${errors === 1 ? "" : "s"}` : ""}${v.payload?.truncated ? " (first logs only)" : ""}. ${v.panelOpen ? "Hide" : "Show"} the logs panel.`;
       if (errors) extra = `<span class="traceLogsToggle__errors" data-trace-logs-errors>${fmt.count(errors)} ERR</span>`;
     }
-    return `<div class="tracePageOverviewItem tracePageOverviewItem--logs" data-trace-header-item="Logs"><span>Logs</span><strong><button type="button" class="traceLogsToggle${cls}${v.panelOpen ? " is-open" : ""}" data-trace-logs-toggle aria-expanded="${v.panelOpen ? "true" : "false"}" aria-controls="traceLogsPanel" title="${esc(title)}" aria-label="${esc(`Logs: ${title}`)}">${LOG_ICON}<span data-trace-logs-count>${value}</span>${extra}</button></strong></div>`;
+    // A header stat tile like the others (ns.ui.statTileHtml), its value the toggle.
+    return ns.ui.statTileHtml({
+      label: "Logs", className: "statTile--sm tracePageOverviewItem tracePageOverviewItem--logs", attrs: { "data-trace-header-item": "Logs" },
+      valueHtml: `<button type="button" class="traceLogsToggle${cls}${v.panelOpen ? " is-open" : ""}" data-trace-logs-toggle aria-expanded="${v.panelOpen ? "true" : "false"}" aria-controls="traceLogsPanel" title="${esc(title)}" aria-label="${esc(`Logs: ${title}`)}">${LOG_ICON}<span data-trace-logs-count>${value}</span>${extra}</button>`,
+    });
   }
 
   function updateHeaderItem() {

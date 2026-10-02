@@ -36,12 +36,11 @@ def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> Non
     ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
     css = read('src/static/style.css')
     render = ui[ui.index('function renderDdl('):ui.index('function renderTabContent', ui.index('function renderDdl('))]
-    assert 'explorerDdlGutter' in render
-    assert 'editorCopyButton explorerDdlCopy' in render
-    assert 'editorCopyButton__icon' in render
-    assert 'renderHighlightedCode(pre, ddl)' in render
+    # The shared SQL block: gutter, copy button (its icon) and highlighting.
+    assert 'ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" })' in render
+    assert 'explorerDdlGutter' in render and 'explorerDdlCopy' in render
     assert 'Copy DDL' not in render
-    assert '.explorerDdlGutter' in css
+    assert '.sqlBlock__gutter' in css and '.uiCopy__icon' in css
 
 
 def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:

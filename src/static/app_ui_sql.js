@@ -12,6 +12,7 @@
   //               the default when maxLines is set) or a scroll
   //     inline    one line cut with an ellipsis inside a table cell: a click
   //               (Enter / Space) shows it all, wrapped, and back
+  //     wrap      long lines wrap instead of scrolling
   //   Returns the element (.sqlBlock).
   //   ui.sqlBlockHtml({ sql, inline, label }) is the same block as an HTML
   //   string, for modules that render strings (the inline toggle is delegated).
@@ -97,7 +98,7 @@
     return `<div class="sqlBlock"><div class="sqlBlock__body"><pre class="sqlBlock__pre" aria-label="${esc(label).replace(/"/g, "&quot;")}"><code class="sqlBlock__code"${attrs}>${code}</code></pre></div></div>`;
   }
 
-  function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand = null, inline = false, label = "SQL", className = "" } = {}) {
+  function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand = null, inline = false, wrap = false, label = "SQL", className = "" } = {}) {
     const text = String(sql ?? "").replace(/\s+$/, "");
     if (inline) {
       const block = inlineBlock(text, label);
@@ -106,7 +107,7 @@
     }
     const lines = text ? text.split("\n").length : 1;
     const block = document.createElement("div");
-    block.className = `sqlBlock${gutter ? " sqlBlock--gutter" : ""}${copy ? " sqlBlock--copy" : ""}${className ? ` ${className}` : ""}`;
+    block.className = `sqlBlock${gutter ? " sqlBlock--gutter" : ""}${copy ? " sqlBlock--copy" : ""}${wrap ? " sqlBlock--wrap" : ""}${className ? ` ${className}` : ""}`;
     block.style.setProperty("--sql-gutter", `${String(lines).length + 1}ch`);
     const body = document.createElement("div");
     body.className = "sqlBlock__body";

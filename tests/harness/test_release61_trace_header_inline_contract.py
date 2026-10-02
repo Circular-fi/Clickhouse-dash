@@ -17,7 +17,7 @@ def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
     assert '<code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>' in render_header
     assert 'shortId(trace.trace_id, 10)' not in render_header
     assert 'title="${esc(trace.trace_id)}"' in render_header
-    assert 'data-copy-active-trace="${esc(trace.trace_id)}"' in render_header
+    assert 'attrs: { "data-copy-active-trace": trace.trace_id }' in render_header
 
 def test_span_inspector_meta_forced_inline_and_service_bar_is_continuous():
     css = read("src/static/style.css")

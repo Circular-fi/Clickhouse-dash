@@ -71,7 +71,7 @@ def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
     assert 'id="explorerFunctionSettings"' not in html
     assert 'id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds"' in html
     for kind in ["Function", "Aggregate Function", "Table Function", "user-defined"]:
-        assert f'class="explorerFilterChip" type="button" data-function-kind="{kind}" aria-pressed="false"' in html
+        assert f'class="explorerFilterChip badge badge--md badge--pill badge--accent" type="button" data-function-kind="{kind}" aria-pressed="false"' in html
     assert 'const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;' in ui
 
 

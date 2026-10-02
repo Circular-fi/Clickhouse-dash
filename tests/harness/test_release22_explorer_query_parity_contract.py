@@ -76,12 +76,11 @@ def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> No
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     css = read("src/static/style.css")
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
-    assert 'node("div", "editorWrap explorerDdlWrap")' in ddl
-    assert 'node("pre", "editorGutter explorerDdlGutter")' in ddl
-    assert 'node("pre", "editorHighlight explorerDdl")' in ddl
-    assert 'renderHighlightedCode(pre, ddl)' in ddl
-    assert '.explorerDdlWrap .editorGutter.explorerDdlGutter' in css
-    assert '.explorerDdlWrap .editorHighlight.explorerDdl' in css
+    # One read-only SQL block (app_ui_sql.js) on the editor's highlighter.
+    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl
+    sql = read("src/static/app_ui_sql.js")
+    assert "ns.highlight.toHtml(" in sql
+    assert '.sqlBlock__gutter' in css
 
 
 def test_flow_emission_is_time_based_and_zoom_out_is_clamped_to_fit_scale() -> None:

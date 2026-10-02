@@ -225,8 +225,8 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
   // The value column starts right after the longest key (capped at 40 %).
   const layout = await table.evaluate((el) => {
     const t = el.getBoundingClientRect();
-    const keys = [...el.querySelectorAll('.traceKv__row:not(.traceKv__row--tree) > .traceKv__key')];
-    const cells = [...el.querySelectorAll('.traceKv__row:not(.traceKv__row--tree) > .traceKv__cell')];
+    const keys = [...el.querySelectorAll('.kvList__row:not(.kvList__row--tree) > .kvList__key')];
+    const cells = [...el.querySelectorAll('.kvList__row:not(.kvList__row--tree) > .kvList__value')];
     const widest = Math.max(...keys.map((k) => {
       const range = document.createRange();
       range.selectNodeContents(k);
@@ -239,45 +239,47 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
   expect(layout.valueLeft - layout.tableLeft).toBeLessThanOrEqual(Math.min(layout.widest + 24, layout.tableWidth * 0.4 + 2));
 
   // Values coloured by type; otel.* keys in italics.
-  const kv = (key) => table.locator(`.traceKv__row[data-kv-key="${key}"]`);
-  await expect(kv('http.status_code').locator('.traceKv__v')).toHaveClass(/traceKv__v--number/);
-  await expect(kv('cache.hit').locator('.traceKv__v')).toHaveClass(/traceKv__v--bool/);
-  await expect(kv('http.method').locator('.traceKv__v')).toHaveClass(/traceKv__v--string/);
-  const colours = await Promise.all(['http.status_code', 'cache.hit', 'http.method'].map((key) => kv(key).locator('.traceKv__v').evaluate((el) => getComputedStyle(el).color)));
+  const kv = (key) => table.locator(`.kvList__row[data-kv-key="${key}"]`);
+  await expect(kv('http.status_code').locator('.kv__v')).toHaveClass(/kv__v--number/);
+  await expect(kv('cache.hit').locator('.kv__v')).toHaveClass(/kv__v--bool/);
+  await expect(kv('http.method').locator('.kv__v')).toHaveClass(/kv__v--string/);
+  const colours = await Promise.all(['http.status_code', 'cache.hit', 'http.method'].map((key) => kv(key).locator('.kv__v').evaluate((el) => getComputedStyle(el).color)));
   expect(new Set(colours).size).toBe(3);
-  await expect(kv('otel.scope.name').locator('.traceKv__key')).toHaveCSS('font-style', 'italic');
-  await expect(kv('http.method').locator('.traceKv__key')).toHaveCSS('font-style', 'normal');
+  await expect(kv('otel.scope.name').locator('.kvList__key')).toHaveCSS('font-style', 'italic');
+  await expect(kv('http.method').locator('.kvList__key')).toHaveCSS('font-style', 'normal');
   // HTTP header arrays are a plain list.
-  await expect(kv('http.request.header.accept').locator('.traceKv__cell')).toContainText('text/html, application/json');
+  await expect(kv('http.request.header.accept').locator('.kvList__value')).toContainText('text/html, application/json');
 
   // JSON-looking strings: a pretty tree on its own full-width row; a value of
   // at most 10 keys opens fully, a larger one keeps nested levels closed.
   const cart = kv('app.cart');
-  await expect(cart).toHaveClass(/traceKv__row--tree/);
-  await expect(cart.locator('.traceJson').first()).toHaveAttribute('open', '');
-  expect(await cart.locator('details.traceJson').evaluateAll((els) => els.every((el) => el.open))).toBe(true);
-  await expect(cart.locator('.traceJson__key').first()).toHaveText('items');
-  await expect(cart.locator('.traceKv__v--null')).toHaveText('null');
+  await expect(cart).toHaveClass(/kvList__row--tree/);
+  await expect(cart.locator('.kvTree').first()).toHaveAttribute('open', '');
+  expect(await cart.locator('details.kvTree').evaluateAll((els) => els.every((el) => el.open))).toBe(true);
+  await expect(cart.locator('.kvTree__key').first()).toHaveText('items');
+  await expect(cart.locator('.kv__v--null')).toHaveText('null');
   const flags = kv('app.flags');
-  expect(await flags.locator('details.traceJson').evaluateAll((els) => els.map((el) => el.open))).toEqual([true, false]);
-  await flags.locator('details.traceJson details.traceJson > summary').click();
-  expect(await flags.locator('details.traceJson').evaluateAll((els) => els.map((el) => el.open))).toEqual([true, true]);
-  const cartBox = await cart.locator('.traceKv__cell').boundingBox();
+  expect(await flags.locator('details.kvTree').evaluateAll((els) => els.map((el) => el.open))).toEqual([true, false]);
+  await flags.locator('details.kvTree details.kvTree > summary').click();
+  expect(await flags.locator('details.kvTree').evaluateAll((els) => els.map((el) => el.open))).toEqual([true, true]);
+  const cartBox = await cart.locator('.kvList__value').boundingBox();
   const tableBox = await table.boundingBox();
   expect(cartBox.x - tableBox.x).toBeLessThan(12);
 
   // Copy (value) / JSON actions appear on hover.
   const status = kv('http.status_code');
-  await expect(status.locator('[data-kv-copy="value"]')).toBeHidden();
-  await status.hover();
-  await expect(status.locator('[data-kv-copy="value"]')).toBeVisible();
+  const actionOpacity = () => status.locator('.kvList__actions').evaluate((el) => getComputedStyle(el).opacity);
+  await page.mouse.move(0, 0);
+  expect(await actionOpacity()).toBe('0');
+  await status.locator('.kvList__key').hover();
+  await expect.poll(actionOpacity).toBe('1');
   await captureCopies(page);
-  await status.locator('[data-kv-copy="value"]').click();
+  await status.locator('[data-kv-action="copy"]').click();
   await expect.poll(() => lastCopy(page)).toBe('200');
-  await status.locator('[data-kv-copy="json"]').click();
+  await status.locator('[data-kv-action="json"]').click();
   await expect.poll(() => lastCopy(page)).toBe(JSON.stringify({ key: 'http.status_code', value: '200' }, null, 2));
   await cart.hover();
-  await cart.locator('[data-kv-copy="value"]').click();
+  await cart.locator('[data-kv-action="copy"]').click();
   await expect.poll(() => lastCopy(page)).toBe(MOCK_SPANS[0].span_attributes && JSON.parse(MOCK_SPANS[0].span_attributes)['app.cart']);
   // The row stays open: copying does not toggle the span.
   await expect(card).toBeVisible();
@@ -286,7 +288,7 @@ test('span inspector: attribute table layout, typed values, JSON trees and per-r
   const process = card.locator('[data-span-section="process"]');
   await expect(process.locator(':scope > summary .traceJaegerSummaryPreview')).toContainText('host.name=web-1');
   await process.locator(':scope > summary').click();
-  await expect(process.locator('.traceKv__row[data-kv-key="host.name"] .traceKv__v')).toHaveText('web-1');
+  await expect(process.locator('.kvList__row[data-kv-key="host.name"] .kv__v')).toHaveText('web-1');
 });
 
 test('span inspector: events relative to the trace start, sorted, first three then show more', async ({ page }) => {
@@ -311,7 +313,7 @@ test('span inspector: events relative to the trace start, sorted, first three th
   await expect(auth.locator(':scope > summary .traceJaegerSummaryPreview')).toContainText('auth.method=cookie');
   await auth.locator(':scope > summary').click();
   await expect(auth.locator(':scope > summary .traceJaegerSummaryPreview')).toBeHidden();
-  await expect(auth.locator('.traceKv__row[data-kv-key="auth.method"] .traceKv__v')).toHaveText('cookie');
+  await expect(auth.locator('.kvList__row[data-kv-key="auth.method"] .kv__v')).toHaveText('cookie');
   await events.locator('[data-events-more]').click();
   await expect(events.locator('.traceSpanEvents__list > .traceSpanEvent:visible')).toHaveCount(3);
 
@@ -359,7 +361,7 @@ test('span inspector: references list links, the parent and linked-from spans', 
   await expect(items.nth(1).locator('.traceSpanRefs__main')).toContainText('< span in another trace >');
   await expect(items.nth(1).locator('.traceSpanRefs__ids')).toContainText(`TraceID: ${OTHER_TRACE_ID}`);
   await expect(items.nth(1).locator('.traceSpanRefs__ids')).toContainText(`SpanID: ${OTHER_SPAN_ID}`);
-  await expect(items.nth(1).locator('.traceKv__row[data-kv-key="link.reason"]')).toContainText('retry');
+  await expect(items.nth(1).locator('.kvList__row[data-kv-key="link.reason"]')).toContainText('retry');
   await expect(items.nth(2).locator('.traceSpanRefs__main')).toContainText('checkoutPOST /cart/checkout');
 
   // Same trace: "Go to span" focuses it.

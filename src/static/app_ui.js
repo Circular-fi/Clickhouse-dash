@@ -488,7 +488,6 @@
   }
 
   function closeThemeMenu({ immediate = false } = {}) { menus.theme?.close({ immediate }); }
-  function closeCopyMenu({ immediate = false } = {}) { menus.copy?.close({ immediate }); }
   function closeRunMenu({ immediate = false } = {}) { menus.run?.close({ immediate }); }
 
   function applyRunOptionsUi() {
@@ -665,7 +664,6 @@
     if (!libraryDialog) return Promise.resolve(null);
     closeRunMenu({ immediate: true });
     closeRunSettings({ immediate: true });
-    closeCopyMenu({ immediate: true });
     // The focus moves into the dialog at once (the views render when the
     // module is in) and comes back to the book button when it closes.
     if (!libraryDialog.isOpen()) libraryDialog.open({ returnFocus: dom.queryLibraryButton });
@@ -762,30 +760,19 @@
     });
   }
 
+  // The editor's copy button: the shared ui.copyButton (icon, tooltip and
+  // the one "Copied" feedback).
   function initEditorCopyButton() {
     if (!dom.editorCopyButton || !dom.queryTextArea) return;
-
-    let copyTimer = 0;
 
     const sync = () => {
       dom.editorCopyButton.disabled = !String(dom.queryTextArea.value || "").trim();
     };
 
-    dom.editorCopyButton.addEventListener("click", async () => {
+    ns.ui.copyButton(dom.editorCopyButton, () => {
       const text = String(dom.queryTextArea.value || "");
-      if (!text.trim()) return;
-      try {
-        await util.copyTextToClipboard(text);
-        dom.editorCopyButton.classList.add("is-copied");
-        if (copyTimer) clearTimeout(copyTimer);
-        copyTimer = window.setTimeout(() => {
-          dom.editorCopyButton.classList.remove("is-copied");
-          copyTimer = 0;
-        }, 1200);
-      } catch {
-        null;
-      }
-    });
+      return text.trim() ? text : "";
+    }, { label: "Copy query" });
 
     sync();
     dom.queryTextArea.addEventListener("input", sync);
@@ -1243,7 +1230,6 @@
       }
     }
 
-    menus.copy = menu?.split(dom.copyJsonButton, dom.copyMenuButton, dom.copyMenu) || null;
 
     const themeMode = storage.getSavedThemeMode();
     applyTheme(themeMode);

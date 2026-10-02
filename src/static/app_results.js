@@ -2179,79 +2179,13 @@
     return Array.isArray(resultColumns) ? resultColumns.length : 0;
   }
 
-  async function copyTextWithFlash(btn, text) {
-    const v = text == null ? "" : String(text);
-    util.flashButtonText(btn, { copiedText: "Copied" });
-    try {
-      await util.copyTextToClipboard(v);
-    } catch {
-      util.flashButtonText(btn, { copiedText: "Copy failed", durationMs: 1500 });
-    }
-  }
-
+  // A query block's Copy JSON split (ui.copySplit): JSON, and CSV in the menu.
   function createCopySplitSmall({ getJsonText, getCsvText }) {
-    const split = document.createElement("div");
-    split.className = "runSplit copySplit";
-
-    const buttons = document.createElement("div");
-    buttons.className = "runSplit__buttons";
-
-    const mainBtn = document.createElement("button");
-    mainBtn.type = "button";
-    mainBtn.className = "button button--small resultsStack__copy runSplit__main";
-    mainBtn.textContent = "Copy JSON";
-
-    const menuBtn = document.createElement("button");
-    menuBtn.type = "button";
-    menuBtn.className = "button button--small runSplit__toggle";
-    menuBtn.setAttribute("aria-haspopup", "menu");
-    menuBtn.setAttribute("aria-expanded", "false");
-    menuBtn.title = "Copy options";
-
-    buttons.appendChild(mainBtn);
-    buttons.appendChild(menuBtn);
-
-    const menu = document.createElement("div");
-    menu.className = "runMenu copyMenu";
-    menu.setAttribute("role", "menu");
-    menu.tabIndex = -1;
-    menu.hidden = true;
-
-    const csvBtn = document.createElement("button");
-    csvBtn.type = "button";
-    csvBtn.className = "runMenu__opt";
-    csvBtn.setAttribute("role", "menuitem");
-
-    const csvText = document.createElement("span");
-    csvText.className = "runMenu__optText";
-    csvText.textContent = "Copy CSV";
-    csvBtn.appendChild(csvText);
-
-    menu.appendChild(csvBtn);
-
-    split.appendChild(buttons);
-    split.appendChild(menu);
-
-    // Copy JSON | Copy CSV: an ns.menu split button (app_ui_menu.js).
-    const copyMenu = ns.menu?.split(mainBtn, menuBtn, menu, { root: split }) || null;
-
-    mainBtn.addEventListener("click", async () => {
-      const text = typeof getJsonText === "function" ? getJsonText() : "";
-      await copyTextWithFlash(mainBtn, text);
+    const ctrl = ns.ui.copySplit({
+      getText: () => (typeof getJsonText === "function" ? getJsonText() : ""),
+      items: [{ label: "Copy CSV", copy: () => (typeof getCsvText === "function" ? getCsvText() : "") }],
     });
-
-    csvBtn.addEventListener("click", async () => {
-      copyMenu?.close({ immediate: true, focus: false });
-      const text = typeof getCsvText === "function" ? getCsvText() : "";
-      await copyTextWithFlash(mainBtn, text);
-    });
-
-    return { el: split, mainBtn, menuBtn, menu, csvBtn, setDisabled: (v) => {
-      const disabled = !!v;
-      mainBtn.disabled = disabled;
-      menuBtn.disabled = disabled;
-      if (disabled) copyMenu?.close({ immediate: true, focus: false });
-    } };
+    return { el: ctrl.el, mainBtn: ctrl.main, menuBtn: ctrl.toggle, menu: ctrl.menu, setDisabled: ctrl.setDisabled };
   }
 
   function pushResultsBlock(title, metaText, copyText, { expandedByDefault = false, errorText = "" } = {}) {
@@ -2335,7 +2269,6 @@
     if (dom.copySplit) dom.copySplit.hidden = false;
     if (dom.copyCsvButton) dom.copyCsvButton.hidden = multi;
     if (dom.copyJsonButton) dom.copyJsonButton.textContent = "Copy JSON";
-    if (dom.copyJsonToast) dom.copyJsonToast.hidden = true;
     if (dom.resultColumnsText) dom.resultColumnsText.hidden = multi;
   }
 
@@ -3826,7 +3759,7 @@
     };
 
     const returnFocus = document.activeElement;
-    const copy = (text) => { void util.copyTextToClipboard(text).catch(() => undefined); };
+    const copy = (text) => { void ns.ui.copyText(text); };
     const absolute = (href) => new URL(href, window.location.href).href;
     addItem("Details", () => openRowDetails(binding, table, returnFocus));
     const ctx = rowDetailsContext(table);
@@ -3927,7 +3860,7 @@
     copyBtn.textContent = "Copy JSON";
     copyBtn.title = label ? `Copy row ${label} as JSON` : "Copy row as JSON";
     copyBtn.addEventListener("click", () => {
-      void copyTextWithFlash(copyBtn, JSON.stringify(buildRowDetailsObject(ctx, row), null, 2));
+      void ns.ui.copyText(JSON.stringify(buildRowDetailsObject(ctx, row), null, 2), copyBtn);
     });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -3938,33 +3871,36 @@
     closeBtn.addEventListener("click", onClose);
     actions.append(copyBtn, closeBtn);
 
-    // Same presentation as a one-row result: one line per column, the value
-    // rendered by the shared single-value renderer (pretty JSON/arrays/maps,
-    // NULL token); tuple-flattened columns arrive already flattened.
-    const list = document.createElement("div");
-    list.className = "rowDetails__list";
-    list.setAttribute("role", "list");
+    // The shared key / value list (app_ui_kv.js): one row per column, the
+    // value as the one-row view prints it (the raw single-value renderer:
+    // pretty JSON / arrays / maps, NULL token), a copy action per value;
+    // tuple-flattened columns arrive already flattened.
+    const list = document.createElement("dl");
+    list.className = "kvList rowDetails__list";
     for (let i = 0; i < ctx.columns.length; i++) {
+      const raw = row[i];
       const line = document.createElement("div");
-      line.className = "rowDetails__line";
-      line.setAttribute("role", "listitem");
-      const name = document.createElement("div");
-      name.className = "rowDetails__name";
+      line.className = "kvList__row rowDetails__line";
       const colName = String(ctx.columns[i] ?? "");
+      line.dataset.kvKey = colName;
+      line.dataset.kvText = raw == null ? "" : typeof raw === "string" ? raw : JSON.stringify(raw);
+      line.dataset.kvJson = JSON.stringify(raw === undefined ? null : raw);
+      const name = document.createElement("dt");
+      name.className = "kvList__key rowDetails__name";
       // Column name only, like the one-row view (no type line).
       name.textContent = colName;
       name.title = colName;
-      const value = document.createElement("div");
-      value.className = "rowDetails__value";
-      // The cell box (border, full line height, vertical centering) wraps a
-      // plain block that receives the shared one-row renderer's output.
+      const value = document.createElement("dd");
+      value.className = "kvList__value rowDetails__value";
+      value.insertAdjacentHTML("afterbegin", ns.kv.actionsHtml(["copy"], colName));
       const valueContent = document.createElement("div");
       valueContent.className = "rowDetails__valueContent";
-      renderSingleValueCell(valueContent, row[i], i, ctx.typeAsts);
+      renderSingleValueCell(valueContent, raw, i, ctx.typeAsts);
       value.appendChild(valueContent);
       line.append(name, value);
       list.appendChild(line);
     }
+    ns.ui.kvBind(list);
     content.append(list, actions);
     return content;
   }

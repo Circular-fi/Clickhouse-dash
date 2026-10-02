@@ -533,7 +533,7 @@ test.describe('observability formats on a French browser in Paris', () => {
 
     await result.click();
     await expect(page.locator('#traceDetail')).toBeVisible();
-    const start = page.locator('#traceDetailStats [data-trace-header-item="Trace Start"] > strong');
+    const start = page.locator('#traceDetailStats [data-trace-header-item="Trace Start"] .statTile__value');
     await expect(start).toHaveText(sep20('03:22:52.000'));
     expect(await start.locator('time').getAttribute('title')).toContain('2026-09-20T01:22:52.000Z');
     // The span inspector: the start offset, then the local time to the ms.
@@ -549,7 +549,7 @@ test.describe('observability formats on a French browser in Paris', () => {
     const trace = largeTrace(2000);
     await routeTrace(page, trace);
     await page.goto(`/observability/traces/${trace.trace_id}`);
-    await expect(page.locator('#traceDetailStats [data-trace-header-item="Total Spans"] > strong')).toHaveText('2,000', { timeout: 30_000 });
+    await expect(page.locator('#traceDetailStats [data-trace-header-item="Total Spans"] .statTile__value')).toHaveText('2,000', { timeout: 30_000 });
   });
 
   test('observability formats: Services releases and slowest spans print 24 h local times', async ({ page }) => {

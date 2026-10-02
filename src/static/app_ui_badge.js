@@ -123,8 +123,8 @@
     const parts = [];
     if (inner != null) parts.push(inner);
     else {
-      if (key !== "") parts.push(`<span class="chip__key">${esc(key)}</span>`);
       if (scope) parts.push(`<span class="chip__scope">${esc(scope)}</span>`);
+      if (key !== "") parts.push(`<span class="chip__key">${esc(key)}</span>`);
       if (op !== "") {
         parts.push(opAttrs
           ? `<button type="button" class="chip__op"${attrsHtml(opAttrs)}>${esc(op)}</button>`
@@ -140,8 +140,8 @@
     return `<span class="${esc(cls)}" role="listitem"${title ? ` title="${esc(title)}"` : ""}${attrsHtml(attrs)}>${parts.join("")}</span>`;
   }
 
-  function clearHtml(label = "Clear filters", attrs = {}) {
-    return `<button type="button" class="chips__clear"${attrsHtml(attrs)}>${esc(label)}</button>`;
+  function clearHtml(label = "Clear filters", attrs = {}, className = "") {
+    return `<button type="button" class="chips__clear${className ? ` ${esc(className)}` : ""}"${attrsHtml(attrs)}>${esc(label)}</button>`;
   }
 
   ns.badge = Object.freeze({

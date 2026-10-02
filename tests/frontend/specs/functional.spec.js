@@ -857,7 +857,7 @@ test('database detail lists every object under the storage band, sorts each colu
   // normalised to the column maximum (the largest object fills the cell).
   const weatherSize = objects.locator('tbody tr[data-table="weather_observations"] td').nth(4);
   await expect(weatherSize).toHaveClass(/cellBar/);
-  expect(await weatherSize.evaluate((td) => td.style.getPropertyValue('--bar-pct'))).toBe('100%');
+  expect(await weatherSize.evaluate((td) => td.style.getPropertyValue('--cellBar'))).toBe('100.00%');
 
   // Text columns start ascending, numeric ones descending; each toggles.
   for (let column = 0; column < 9; column++) {
@@ -1128,7 +1128,7 @@ test('right-click Details expands a result row inline, under the row, and closes
     // on its first cell.
     const rowBar = (el) => {
       const shadow = getComputedStyle(el).boxShadow;
-      return { bg: (shadow.match(/rgb\([^)]*\)/) || [''])[0], width: (shadow.match(/inset (\d+px)/) || ['', ''])[1], left: '0px' };
+      return { bg: (shadow.match(/rgb\([^)]*\)/) || [''])[0], width: (shadow.match(/\) (\d+px) /) || ['', ''])[1], left: '0px' };
     };
     return {
       row: inner(index), detail: inner(detail), rowBar: rowBar(index), detailBar: bar(detail),
@@ -2935,8 +2935,8 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
     } else {
       await expect(incomplete).toHaveCount(0);
     }
-    // Service pills in first-span order, "name (count)", colored left border,
-    // (!) before services with error spans.
+    // Service pills in first-span order, "name (count)", the service's left
+    // bar (.serviceSwatch--bar), (!) before services with error spans.
     const pills = item.locator('.traceSvcPills > .traceSvcPill');
     const expected = [...trace.services].sort((a, b) => a[3] - b[3]);
     expect(await pills.evaluateAll((nodes) => nodes.map((node) => node.dataset.service))).toEqual(expected.map(([name]) => name));
@@ -2944,8 +2944,8 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
     if (await first.isVisible()) {
       const [name, spans, errors] = expected[0];
       await expect(first).toHaveText(`${errors ? '!' : ''}${name} (${spans})`);
-      const border = await first.evaluate((node) => { const style = getComputedStyle(node); return [style.borderLeftWidth, style.borderLeftColor, style.getPropertyValue('--trace-service-color').trim()]; });
-      expect(border[0]).toBe('4px');
+      const border = await first.evaluate((node) => { const bar = getComputedStyle(node.querySelector(':scope > .serviceSwatch--bar')); return [bar.width, bar.backgroundColor, getComputedStyle(node).getPropertyValue('--trace-service-color').trim()]; });
+      expect(border[0]).toBe('3px');
       const probe = await page.evaluate((color) => { const el = document.createElement('i'); el.style.color = color; document.body.appendChild(el); const out = getComputedStyle(el).color; el.remove(); return out; }, border[2]);
       expect(border[1]).toBe(probe);
     }

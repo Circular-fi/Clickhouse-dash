@@ -796,6 +796,22 @@ body {
   cursor: pointer;
 }
 
+/* The editor's copy button is a .uiCopy at the editor's own size. */
+.editorCopyButton.uiCopy {
+  width: 30px;
+  height: 30px;
+}
+
+.editorCopyButton.uiCopy > .uiCopy__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.traceCopyButton.uiCopy {
+  width: 18px;
+  height: 18px;
+}
+
 .editorCopyButton:active:not(:disabled) {
   transform: translateY(1px);
 }
@@ -924,24 +940,7 @@ body {
   min-width: 0;
 }
 
-.editorCopyButton__icon {
-  width: 16px;
-  height: 16px;
-  background-color: currentColor;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7.25A2.25 2.25 0 0 1 9.25 5h6.5A2.25 2.25 0 0 1 18 7.25v8.5A2.25 2.25 0 0 1 15.75 18h-6.5A2.25 2.25 0 0 1 7 15.75v-8.5ZM5 13H4.75A2.75 2.75 0 0 1 2 10.25v-6.5A2.75 2.75 0 0 1 4.75 1h6.5A2.75 2.75 0 0 1 14 3.75V4h-1.5v-.25c0-.69-.56-1.25-1.25-1.25h-6.5C4.06 2.5 3.5 3.06 3.5 3.75v6.5c0 .69.56 1.25 1.25 1.25H5V13Z' fill='%23000'/%3E%3C/svg%3E");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: 16px 16px;
-  mask-size: 16px 16px;
-}
 
-.editorCopyButton.is-copied .editorCopyButton__icon {
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
 
 .editorInput::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
@@ -1936,12 +1935,6 @@ button.button:not(:disabled):hover {
   font-size: 0.6875rem;
 }
 
-.copyToast {
-  font-size: 0.6875rem;
-  font-weight: 900;
-  color: var(--muted);
-  user-select: none;
-}
 
 /* --bp-lg: the metric rail moves under the editor (the Page shell block
    stacks the .layout regions at the same width). */
@@ -3030,14 +3023,11 @@ html[data-theme="light"] .autocompleteItem__badge {
   box-shadow: none;
 }
 
-.editorCopyButton__icon,
 .editorAutocompleteControl__gear {
   opacity: 0.78;
   transition: opacity 120ms ease, background-color 120ms ease;
 }
 
-.editorCopyButton:hover:not(:disabled) .editorCopyButton__icon,
-.editorCopyButton.is-copied .editorCopyButton__icon,
 .editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__gear {
   opacity: 1;
@@ -3698,19 +3688,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   font-size: 0.78rem;
 }
 
-.explorerDdl {
-  margin: 0;
-  max-height: 58vh;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--editorSolidBg);
-  color: var(--text);
-  font: 0.72rem/1.55 var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 
 @media (max-width: 1150px) {
   .explorerSummaryCards {
@@ -4885,8 +4862,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerDatabaseTable {
   font-family: Arial, Helvetica, sans-serif;
 }
-.explorerDdl,
-.explorerDdl code,
 .functionDoc__code,
 .functionDoc__inlineCode {
   font-family: var(--mono);
@@ -5831,15 +5806,6 @@ button.explorerStorageStrip__segment:focus-visible {
   white-space: nowrap;
 }
 
-.explorerFunctionObject__badge {
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 16px;
-}
 
 .explorerFunctionOverview {
   display: grid;
@@ -6373,43 +6339,9 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* CREATE statements reuse the editor language: a dedicated line-number gutter,
    syntax-highlighted code and the exact same copy icon as the query editor. */
-.explorerDdlWrap {
-  position: relative;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 4.2ch minmax(0, 1fr);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--inputBg);
-  overflow: hidden;
-}
 
-.explorerDdlGutter {
-  margin: 0;
-  padding: 10px 8px 10px 4px;
-  border-right: 1px solid var(--border);
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
-  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
-  text-align: right;
-  user-select: none;
-  font: 500 .72rem/1.55 var(--mono);
-}
 
-.explorerDdlWrap .explorerDdl {
-  min-width: 0;
-  margin: 0;
-  padding: 10px 42px 10px 12px;
-  border: 0;
-  border-radius: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
-  font: 500 .72rem/1.55 var(--mono);
-}
 
-.explorerDdlCopy {
-  top: 8px;
-  right: 8px;
-}
 
 .explorerFunctionGroup .explorerTreeDatabase__count {
   font-variant-numeric: tabular-nums;
@@ -7021,13 +6953,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* CREATE text and gutter grow together; the table detail pane owns vertical
    scrolling, and a line longer than the block scrolls inside it. */
-.explorerDdl,
-.explorerDdlWrap .explorerDdl {
-  max-height: none;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-gutter: auto;
-}
 
 /* Release 16: function-filter cog uses the exact same compact menu language as
    the Run-settings cog. The native select remains only as a state bridge. */
@@ -7752,61 +7677,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* CREATE uses the same editor classes as Query. Only read-only auto-height
    behavior differs; gutter/token/copy styling comes from the shared classes. */
-.explorerDdlWrap.editorWrap {
-  --gutterW: 6ch;
-  display: block;
-  height: auto;
-  min-width: 0;
-  min-height: 0;
-  margin-top: 10px;
-  resize: none;
-  overflow: hidden;
-}
-.explorerDdlWrap .editorGutter.explorerDdlGutter {
-  width: var(--gutterW);
-  margin: 0;
-  box-sizing: border-box;
-  padding: 14px 9px;
-  border-radius: var(--radiusSm) 0 0 var(--radiusSm);
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 21px;
-  font-weight: 400;
-  color: color-mix(in srgb, var(--muted) 78%, transparent);
-  background: var(--panelBg);
-  border-right: 1px solid var(--border);
-}
-.explorerDdlWrap .editorHighlight.explorerDdl {
-  position: relative;
-  max-height: none;
-  inset: auto;
-  min-width: 0;
-  min-height: 0;
-  /* The scroll box starts after the gutter, so long lines never slide
-     under the line numbers. */
-  margin: 0 0 0 var(--gutterW);
-  box-sizing: border-box;
-  padding: 14px;
-  padding-right: 84px;
-  border: 0;
-  border-radius: 0 var(--radiusSm) var(--radiusSm) 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-gutter: auto;
-  color: var(--text);
-  background: transparent;
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 21px;
-  font-weight: 400;
-  letter-spacing: 0;
-  white-space: pre !important;
-  pointer-events: auto;
-}
-.explorerDdlWrap .explorerDdlCopy {
-  top: 10px;
-  right: 42px;
-}
 
 /* Release 24: trace geometry is one viewport. The analysis content itself is
    the TraceViewer host, so remove its inset and let the trace consume the full
@@ -8170,12 +8040,6 @@ body > .explorerDataSettings__menu.is-open {
 /* CREATE/DDL previews reuse editor visuals but must never inherit the persisted
    Query editor height. Long CREATE statements should size from their own content
    / scroll box instead of the session's query-editor resize preference. */
-html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
-.editorWrap.explorerDdlWrap {
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-}
 
 /* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
    does not expose the generic ThemeSelect caret. */
@@ -9493,18 +9357,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceResult__line--main { min-height: 20px; }
 .traceResult__wideTitle { min-width: 120px; max-width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .traceResult__fullId { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 9px var(--mono); }
-.traceCopyButton { flex: 0 0 auto; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
-.traceCopyButton:hover { color: var(--text); background: var(--hoverTint); }
 .traceResult__right { margin-left: auto; flex: 0 0 auto; display: flex; align-items: baseline; gap: 12px; color: var(--muted); font-size: 9px; }
 .traceResult__right b { color: var(--text); font: 700 12px var(--mono); }
 .traceResult__line--stats { color: var(--muted); font-size: 9px; }
-.traceServiceStats { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 3px 5px; }
-.traceServiceStat { display: inline-flex; align-items: center; gap: 4px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--panelBg) 76%, transparent); }
-.traceServiceStat > i { width: 5px; height: 5px; border-radius: 50%; background: var(--trace-service-color, var(--accentBorder)); }
-.traceServiceStat > b { color: var(--text); font-size: 8px; font-weight: 700; }
-.traceServiceStat > span { color: var(--muted); font-size: 8px; }
-.traceServiceStat.is-error { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
-.traceServiceStat.is-error > span { color: var(--danger); }
 
 @media (max-width: 1100px) {
   .traceSearchBar__source { grid-column: 1 / -1; }
@@ -9695,19 +9550,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   padding: 5px 13px;
 }
 .tracePageOverviewItem:first-child { padding-left: 2px; min-width: 230px; }
-.tracePageOverviewItem > span {
-  color: var(--muted);
-  font-size: 8.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .025em;
-}
-.tracePageOverviewItem > strong {
-  color: var(--text);
-  font-size: 10.5px;
-  font-weight: 760;
-}
-.tracePageOverviewItem.is-error > strong { color: var(--danger); }
 .tracePageOverviewDivider {
   width: 1px;
   margin: 8px 0;
@@ -10262,36 +10104,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceResult__line--stats {
   gap: 10px;
 }
-.traceServiceStats {
-  gap: 4px 6px;
-}
-.traceServiceStat {
-  gap: 5px;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.traceServiceStat > i {
-  width: 7px;
-  height: 7px;
-  border-radius: 1px;
-}
-.traceServiceStat > b {
-  font-size: 9px;
-}
-.traceServiceStat > span {
-  font-size: 9px;
-}
-.traceCopyButton {
-  width: 18px;
-  height: 18px;
-}
-.traceCopyButton .editorCopyButton__icon {
-  width: 14px;
-  height: 14px;
-}
-.traceCopyButton.is-copied {
-  color: var(--accentText);
-}
 .traceSearchField > .tracePicker,
 .traceTagSearch__inputs > .tracePicker,
 .traceRangeCompact > .tracePicker {
@@ -10393,8 +10205,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   color: var(--danger);
   font-weight: 600;
 }
-.traceServiceStat.is-error > span { color: var(--muted); }
-.traceServiceStat.is-error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 
 /* Denser individual trace while preserving Jaeger-like vertical guides. */
 .traceSpanRow,
@@ -10503,10 +10313,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   padding-bottom: 8px;
 }
 
-.traceCopyButton.is-copied .editorCopyButton__icon {
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
 
 @media (max-width: 980px) {
   .traceWaterfallHead,
@@ -10515,8 +10321,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   .traceJaegerPrimaryGroups { grid-template-columns: 1fr; }
   .traceJaegerPrimaryGroups .traceJaegerGroup + .traceJaegerGroup { border-left: 0; border-top: 1px solid var(--rowDivider); }
 }
-.traceServiceStat > b { font-size: 10.5px; }
-.traceServiceStat > span { font-size: 10px; }
 .traceResult__when time { font-size: 12px; }
 .traceResult__when small { font-size: 9.5px; }
 
@@ -10691,8 +10495,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceInspectorIdentity { padding: 3px 10px 1px 24px !important; }
 .traceInspector--jaeger { padding-bottom: 3px !important; }
 
-.traceServiceStat > b { font-size: 11px !important; font-weight: 600 !important; }
-.traceServiceStat > span { font-size: 10.5px !important; }
 .traceResult__wideTitle { font-size: 12px; font-weight: 600; }
 .traceResult__fullId { font-size: 10px; }
 .traceResult__line--stats { font-size: 10.5px; }
@@ -10768,12 +10570,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 .tracePageOverviewDivider {
   margin: 6px 0;
-}
-.tracePageOverviewItem > span {
-  font-size: 7.5px;
-}
-.tracePageOverviewItem > strong {
-  font-size: 9.5px;
 }
 
 .traceInspectorHead--jaeger {
@@ -11021,55 +10817,6 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   border-top: 1px solid var(--rowDivider);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
 }
-.traceServiceFilter {
-  min-width: 0;
-  height: 22px;
-  padding: 0 7px 0 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--panelBg) 86%, var(--bg));
-  color: var(--text);
-  cursor: pointer;
-  font: 500 10px/1 Arial, Helvetica, sans-serif;
-}
-.traceServiceFilter:hover {
-  border-color: color-mix(in srgb, var(--accentBorder) 55%, var(--border));
-  background: var(--rowHover);
-}
-.traceServiceFilter > i {
-  width: 3px;
-  height: 14px;
-  flex: 0 0 3px;
-  border-radius: 1px;
-  background: var(--trace-service-color, var(--accentBorder));
-}
-.traceServiceFilter > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.traceServiceFilter > b {
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  display: inline-grid;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--danger);
-  color: var(--panel);
-  font: 700 9px/1 Arial, Helvetica, sans-serif;
-}
-.traceServiceFilter.is-disabled {
-  opacity: .42;
-  filter: saturate(.35);
-}
-.traceServiceFilter.is-disabled > i {
-  background: var(--muted);
-}
 
 .traceOverview__graph > i.is-error {
   box-shadow: 0 0 0 1px var(--danger);
@@ -11157,45 +10904,11 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceSpanRow:hover .traceSpanBar__label .traceSpanBar__sep,
 .traceSpanRow:focus-within .traceSpanBar__label .traceSpanBar__ref,
 .traceSpanRow:focus-within .traceSpanBar__label .traceSpanBar__sep { display: inline; }
-.traceServiceFilterReset { height:22px; padding:0 7px; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--muted); font:600 9px Arial,sans-serif; cursor:pointer; }
-.traceServiceFilterReset:hover { color:var(--text); border-color:var(--accentBorder); }
-.traceServiceFilter.traceServiceStat { height:22px; border-radius:4px; }
-.traceServiceFilter.traceServiceStat > i { width:7px; height:7px; border-radius:1px; flex:0 0 7px; }
-.traceServiceFilter.traceServiceStat > b { font-size:9px; }
-.traceServiceFilter.traceServiceStat > span { font-size:9px; }
-.traceServiceFilter.traceServiceStat > em { min-width:15px; height:15px; padding:0 4px; display:inline-grid; place-items:center; border-radius:999px; background:var(--danger); color:var(--panel); font:700 9px/1 Arial,sans-serif; font-style:normal; }
 .tracePageBack { width:36px !important; height:36px !important; background:transparent !important; border:0 !important; color:var(--muted); }
 .tracePageBack:hover { background:transparent !important; color:var(--text) !important; }
 .tracePageBack svg { width:24px; height:24px; display:block; }
 
 /* Trace v8: correct service pills and denser/nicer analytics axes. */
-.traceServiceFilter.traceServiceStat > b {
-  min-width: 0 !important;
-  height: auto !important;
-  padding: 0 !important;
-  display: inline !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  color: var(--text) !important;
-  font-size: 9px !important;
-  font-weight: 650 !important;
-  line-height: 1.15 !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.traceServiceFilter.traceServiceStat > span {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 9px;
-}
-.traceServiceFilter.traceServiceStat.has-errors > b {
-  color: var(--text) !important;
-}
-.traceServiceFilterReset {
-  min-width: 70px;
-  white-space: nowrap;
-}
 .traceServiceFilters {
   align-content: flex-start;
 }
@@ -11791,35 +11504,22 @@ html[data-obs-view="traces"] .tracesResults--wide {
 }
 
 /* Mirrors .resultTable--vertical tbody th / td (the one-row result view). */
-.rowDetails__line {
-  display: grid;
+
+
+
+/* The details list lines up with the one-row result it mirrors: a 14rem
+   name column, the table font; the first value leaves room for the overlay
+   actions. */
+.kvList.rowDetails__list {
   grid-template-columns: 14rem minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--dt-font);
 }
 
-.rowDetails__name {
-  min-width: 0;
-  padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid var(--rowDivider);
-  background: color-mix(in srgb, var(--theadBg) 45%, transparent);
-  color: color-mix(in srgb, var(--text) 92%, transparent);
-  font-weight: 950;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rowDetails__value {
-  /* The table cell is vertical-align: middle; as a grid item it keeps block
-     layout (pre-wrap JSON indentation) and is centered in its line instead. */
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--rowDivider);
-  user-select: text;
+.rowDetails__list > .kvList__row:first-child > .kvList__value {
+  padding-right: 9rem;
 }
 
 .rowDetails__valueContent {
@@ -11828,10 +11528,6 @@ html[data-obs-view="traces"] .tracesResults--wide {
   overflow-wrap: anywhere;
 }
 
-.rowDetails__line:first-child .rowDetails__value {
-  /* Keep the first value readable under the overlay actions. */
-  padding-right: 9rem;
-}
 
 
 
@@ -12407,7 +12103,6 @@ html[data-theme="light"] {
   font-size: inherit;
   font-weight: 500;
 }
-.tracePageOverviewItem.is-error > strong { color: var(--danger); }
 .tracePageHeader__incomplete {
   margin: 0 4px 0 8px;
   align-self: center;
@@ -12721,113 +12416,10 @@ html[data-theme="light"] {
   cursor: pointer;
 }
 .traceInspectorIdentity__deepLink:hover,
-.traceInspectorIdentity__deepLink:focus-visible,
-.traceInspectorIdentity__deepLink.is-copied { color: var(--text); border-color: var(--accentBorder); }
+.traceInspectorIdentity__deepLink:focus-visible { color: var(--text); border-color: var(--accentBorder); }
 
 /* Attribute table: a muted key column sized to its longest key (at most
    40 %), the value right after it; JSON values get a full-width row. */
-.traceKv {
-  min-width: 0;
-  max-height: 450px;
-  display: grid;
-  grid-template-columns: fit-content(40%) minmax(0, 1fr);
-  overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--panelBg) 70%, transparent);
-  font-size: 11.5px;
-  line-height: 1.3;
-}
-.traceKv__row {
-  position: relative;
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: subgrid;
-  min-width: 0;
-}
-.traceKv__row:nth-child(even) { background: color-mix(in srgb, var(--theadBg) 48%, transparent); }
-.traceKv__row:hover { background: var(--rowHover); }
-.traceKv__key {
-  min-width: 0;
-  padding: 3px 12px 3px 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: pre;
-  color: var(--muted);
-}
-.traceKv__key.is-otel { font-style: italic; cursor: help; }
-.traceKv__cell {
-  min-width: 0;
-  padding: 3px 8px 3px 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  font-family: var(--mono);
-  font-size: 11px;
-}
-.traceKv__row--tree > .traceKv__key { grid-column: 1 / -1; padding-bottom: 0; color: var(--text); font-weight: 600; }
-.traceKv__row--tree > .traceKv__cell { grid-column: 1 / -1; padding: 1px 8px 4px; }
-.traceKv__v--string { color: var(--json-string); }
-.traceKv__v--number { color: var(--json-number); }
-.traceKv__v--bool { color: var(--json-bool); }
-.traceKv__v--null { color: var(--json-null); font-style: italic; }
-.traceKv__listSep { color: var(--muted); }
-.traceKv__actions {
-  /* Positioned so it stays above a JSON tree's lines that run under it. */
-  position: relative;
-  z-index: var(--z-raised);
-  float: right;
-  display: inline-flex;
-  gap: 3px;
-  margin-left: 8px;
-  visibility: hidden;
-}
-.traceKv__row:hover .traceKv__actions,
-.traceKv__row:focus-within .traceKv__actions { visibility: visible; }
-.traceKv__action {
-  height: 17px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--panelBg);
-  color: var(--muted);
-  font: 600 9.5px Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceKv__action:hover,
-.traceKv__action:focus-visible { color: var(--text); border-color: var(--accentBorder); }
-.traceKv__action.is-copied { color: var(--text); border-color: var(--accentBorder); background: color-mix(in srgb, var(--accentBorder) 16%, var(--panelBg)); }
-.traceKv__tree { min-width: 0; white-space: normal; }
-.traceJson { display: inline; }
-.traceJson > summary {
-  display: inline;
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-}
-.traceJson > summary::-webkit-details-marker { display: none; }
-.traceJson > summary::before {
-  content: "\203a";
-  display: inline-block;
-  width: 10px;
-  color: var(--muted);
-  transition: transform 100ms ease;
-}
-.traceJson[open] > summary::before { transform: rotate(90deg); }
-.traceJson__brace,
-.traceJson__fold,
-.traceJson__count { color: var(--muted); }
-.traceJson__count { margin-left: 6px; font-size: 10px; font-style: italic; }
-.traceJson[open] > summary .traceJson__fold,
-.traceJson[open] > summary .traceJson__count { display: none; }
-.traceJson__body {
-  margin-left: 4px;
-  padding-left: 12px;
-  border-left: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent);
-}
-.traceJson[open] > .traceJson__brace { display: block; }
-.traceJson__entry { white-space: pre-wrap; overflow-wrap: anywhere; }
-.traceJson__key { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
-.traceJson__colon { margin-right: 5px; color: var(--muted); }
 
 /* Events (Jaeger's AccordionEvents). */
 .traceSpanEvents__list,
@@ -13225,8 +12817,7 @@ html[data-theme="light"] {
   cursor: pointer;
 }
 .traceStack__button:hover,
-.traceStack__button:focus-visible,
-.traceStack__button.is-copied { border-color: var(--accentBorder); color: var(--text); }
+.traceStack__button:focus-visible { border-color: var(--accentBorder); color: var(--text); }
 .traceStack__rows {
   max-height: 360px;
   margin: 0;
@@ -13309,8 +12900,7 @@ html[data-theme="light"] {
 }
 .traceHighlight__value { min-width: 0; padding: 0 7px; display: inline-flex; align-items: center; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .traceHighlight:hover,
-.traceHighlight:focus-visible,
-.traceHighlight.is-copied { border-color: var(--accentBorder); }
+.traceHighlight:focus-visible { border-color: var(--accentBorder); }
 
 /* Linked from other traces (References section). */
 .traceLinkedFrom { margin-top: 6px; display: grid; gap: 4px; }
@@ -13410,88 +13000,14 @@ html[data-theme="light"] {
 .traceTagSearch__op[data-op="missing"] { color: var(--danger); }
 .traceTagSearch__inputs--op > input:disabled { opacity: .6; }
 
-.traceFilterChips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 12px 0;
-}
-.traceFilterChips[hidden] { display: none; }
-.traceFilterChip {
-  max-width: 100%;
-  min-width: 0;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 2px 0 8px;
-  border: 1px solid color-mix(in srgb, var(--accentBorder) 45%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accentBorder) 10%, var(--panelBg));
-  color: var(--text);
-  font-size: 11px;
-}
-.traceFilterChip.is-negated {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  background: color-mix(in srgb, var(--danger) 9%, var(--panelBg));
-}
-.traceFilterChip__scope {
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--muted) 16%, transparent);
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.traceFilterChip__key { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-.traceFilterChip__value { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
-.traceFilterChip__op {
-  padding: 0 3px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--muted);
-  font: 700 11px/18px var(--mono);
-}
 button.traceFilterChip__op { cursor: pointer; }
 button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--text); }
-.traceFilterChip.is-negated .traceFilterChip__op { color: var(--danger); }
-.traceFilterChip__remove {
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-.traceFilterChip__remove:hover { background: var(--rowHover); color: var(--text); }
-.traceFilterChips__clear {
-  height: 24px;
-  padding: 0 6px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-}
-.traceFilterChips__clear:hover { color: var(--text); text-decoration: underline; }
 
 .traceFilterable { cursor: pointer; border-radius: 3px; }
 .traceFilterable:hover,
 .traceFilterable:focus-visible,
 .traceFilterable[aria-expanded="true"] { text-decoration: underline dotted; text-underline-offset: 3px; }
 .traceInspectorHead__meta > .traceStatus[data-filter-field] { cursor: pointer; }
-.traceKv__row[data-filter-scope] .traceKv__v { cursor: pointer; border-radius: 3px; }
-.traceKv__row[data-filter-scope] .traceKv__v:hover,
-.traceKv__row[data-filter-scope] .traceKv__v[aria-expanded="true"] { background: var(--rowHover); text-decoration: underline dotted; text-underline-offset: 3px; }
 #tracesResults .traceSvcPill[data-service] { cursor: pointer; }
 #tracesResults .traceSvcPill[data-service]:hover,
 #tracesResults .traceSvcPill[aria-expanded="true"] { border-color: color-mix(in srgb, var(--trace-service-color, var(--accentBorder)) 70%, var(--border)); }
@@ -14006,42 +13522,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .logsMiniButton:hover { border-color: var(--buttonBorderHover); }
 .logsMultiPicker__option .serviceSwatch { margin-right: 0; }
 
-.logsChips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px 0;
-}
-.logsChip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 420px;
-  height: 23px;
-  padding: 0 2px 0 8px;
-  border: 1px solid color-mix(in srgb, var(--accentBorder) 45%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accentBorder) 12%, transparent);
-  color: var(--text);
-  font: 600 11px/1 var(--mono);
-}
-.logsChip.is-negated {
-  border-color: color-mix(in srgb, var(--sev-error) 50%, var(--border));
-  background: color-mix(in srgb, var(--sev-error) 10%, transparent);
-}
-.logsChip__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.logsChip__remove {
-  width: 18px;
-  height: 18px;
-  margin-left: 3px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font: 700 13px/1 Arial, sans-serif;
-  cursor: pointer;
-}
-.logsChip__remove:hover { background: var(--rowHover); color: var(--text); }
 
 .logsHistogram {
   flex: 0 0 auto;
@@ -14208,27 +13688,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   white-space: pre-wrap;
   word-break: break-word;
 }
-.logsField {
-  display: grid;
-  grid-template-columns: minmax(96px, 34%) minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: start;
-  min-height: 24px;
-  padding: 3px 4px;
-  border-bottom: 1px solid var(--rowDivider);
-  font: 11.5px/1.45 var(--mono);
-}
-.logsField:hover { background: var(--rowHover); }
-.logsField--empty { display: block; color: var(--muted); font-family: Arial, Helvetica, sans-serif; }
-.logsField__key { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
-.logsField__value { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
-.logsField__actions { display: flex; gap: 2px; opacity: .15; transition: opacity 120ms ease; }
-.logsField:hover .logsField__actions,
-.logsField:focus-within .logsField__actions { opacity: 1; }
-.logsFieldAction { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
-.logsFieldAction:hover { border-color: var(--border); background: var(--buttonBg); color: var(--text); }
-.logsFieldAction.is-copied { color: var(--success); }
-.logsFieldAction svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 
 .logsContext { display: flex; flex-direction: column; gap: 8px; }
 .logsContext:not([hidden]) { display: flex; }
@@ -14359,24 +13818,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .metricsCatalog__name mark,
 .metricsCatalog__serviceName mark { background: color-mix(in srgb, var(--warning) 36%, transparent); color: inherit; border-radius: 2px; }
 .metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 3px; }
-.metricsBadge {
-  display: inline-flex;
-  align-items: center;
-  height: 16px;
-  padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--muted);
-  font: 700 9.5px/1 Arial, Helvetica, sans-serif;
-  letter-spacing: .01em;
-  white-space: nowrap;
-}
-.metricsBadge--unit { font-family: var(--mono); font-weight: 600; }
-.metricsBadge--gauge { color: color-mix(in srgb, var(--qchart-3) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-3) 40%, transparent); }
-.metricsBadge--sum { color: color-mix(in srgb, var(--qchart-1) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-1) 40%, transparent); }
-.metricsBadge--histogram,
-.metricsBadge--exponential_histogram { color: color-mix(in srgb, var(--qchart-2) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-2) 40%, transparent); }
-.metricsBadge--summary { color: color-mix(in srgb, var(--qchart-7) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-7) 40%, transparent); }
 .metricsCatalog .uiState__action { height: auto; min-height: 28px; white-space: normal; }
 .metricsPanel__empty > .uiState { min-height: 220px; }
 
@@ -14485,38 +13926,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .metricsFilters { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 31px; min-width: 0; }
 .metricsFilters__chips { display: contents; }
 .metricsFilters__add { height: 27px; min-height: 27px; padding: 0 10px; font-size: 11px; }
-.metricsChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  height: 25px;
-  padding: 0 3px 0 8px;
-  border: 1px solid color-mix(in srgb, var(--accentBorder) 45%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
-  font-size: 11px;
-  min-width: 0;
-}
-.metricsChip--not { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 9%, transparent); }
-.metricsChip__key { font-weight: 700; white-space: nowrap; }
-.metricsChip__op { color: var(--muted); font-weight: 700; font-family: var(--mono); }
-.metricsChip__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
-.metricsChip__remove {
-  width: 19px;
-  height: 19px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-.metricsChip__remove:hover { background: var(--rowHover); color: var(--text); }
 .metricsFilterForm {
   display: flex;
   flex-wrap: wrap;
@@ -14899,7 +14308,6 @@ html[data-theme="light"] {
 .traceDeltaRow__exclude svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .traceDeltaRow__exclude:hover, .traceDeltaRow__exclude:focus-visible { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .traceDeltaRow__exclude:focus-visible { box-shadow: 0 0 0 2px var(--accentBorder); }
-.traceFilterChip--duration .traceFilterChip__key { margin-right: 4px; }
 @media (max-width: 760px) {
   .traceDeltaPanel { margin: 8px 8px 0; }
   .traceHeatLegend__hint { display: none; }
@@ -15092,15 +14500,6 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 @media (max-width: 820px) {
   /* No hover here: the row actions show over the value's end on focus
      instead of taking a column of their own. */
-  .traceKv__actions {
-    position: absolute;
-    top: 2px;
-    right: 4px;
-    float: none;
-    margin: 0;
-    padding-left: 6px;
-    background: var(--panelBg);
-  }
 }
 
 /* The span column picker: a .uiPopover (ns.popover.open). */
@@ -15182,24 +14581,6 @@ html[data-theme="light"] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-.explorerMetaChip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 22px;
-  padding: 1px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radiusPill);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.explorerMetaChip--engine {
-  border-color: color-mix(in srgb, var(--accentBorder) 42%, var(--border));
 }
 .explorerHealthDot {
   flex: 0 0 auto;
@@ -15494,42 +14875,7 @@ html[data-theme="light"] {
 .explorerCard .explorerTable .resultTable tbody td.explorerCell--expr { max-width: 22rem; }
 .explorerCard .explorerTable .resultTable tbody td.explorerCell--message { max-width: 26rem; }
 
-.explorerBadge {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--muted);
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-  vertical-align: middle;
-}
 .explorerBadge + .explorerBadge { margin-left: 4px; }
-.explorerBadge--key {
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
-  background: color-mix(in srgb, var(--accentBorder) 11%, transparent);
-  color: var(--text);
-}
-.explorerBadge--partition {
-  border-color: color-mix(in srgb, var(--qchart-7) 50%, var(--border));
-  background: color-mix(in srgb, var(--qchart-7) 12%, transparent);
-}
-.explorerBadge--sample {
-  border-color: color-mix(in srgb, var(--qchart-3) 50%, var(--border));
-  background: color-mix(in srgb, var(--qchart-3) 12%, transparent);
-}
-.explorerBadge--active,
-.explorerBadge--pending {
-  --exd-state: var(--exd-ok);
-  border-color: color-mix(in srgb, var(--exd-state) 45%, var(--border));
-  color: var(--exd-state);
-}
-.explorerBadge--pending { --exd-state: var(--exd-warn); }
 
 /* Storage tab: composition card above the sections. */
 .explorerCard .explorerStorageCompositionCard {
@@ -15996,16 +15342,7 @@ html[data-theme="light"] {
   white-space: nowrap;
 }
 .graphKitStatus__badge {
-  flex: 0 0 auto;
-  padding: 1px 7px;
-  border: 1px solid color-mix(in srgb, var(--graph-warn) 55%, transparent);
-  border-radius: var(--radiusPill);
-  background: color-mix(in srgb, var(--graph-warn) 12%, transparent);
-  color: var(--graph-text);
-  font-size: 11px;
-  font-weight: 700;
   cursor: help;
-  pointer-events: auto;
 }
 .graphKitStatus__badge[hidden] { display: none; }
 /* The legend folds away from a button at the start of the status line. */
@@ -16246,44 +15583,6 @@ html[data-theme="light"] {
   color: var(--graph-muted);
   font-size: 12px;
 }
-.explorerGraphPanel__sqlWrap { margin-top: 4px; }
-.explorerGraphPanel__sql {
-  max-height: 320px;
-  margin: 0;
-  padding: 8px 10px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--editorSolidBg, var(--tableBg));
-  color: var(--text);
-  font: 12px/1.5 var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.explorerGraphPanel__columns {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 13px;
-}
-.explorerGraphPanel__columns td {
-  padding: 3px 0;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.explorerGraphPanel__columnName {
-  width: 52%;
-  padding-right: 10px !important;
-  font-family: var(--mono);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.explorerGraphPanel__columnType {
-  color: var(--graph-muted);
-  font-family: var(--mono);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
 
 /* ==========================================================================
    Explorer nav: shell (view tabs, breadcrumb, mobile drawer), object tree,
@@ -16372,34 +15671,9 @@ html[data-theme="light"] {
   gap: 4px;
 }
 
-.explorerFilterChip {
-  appearance: none;
-  min-height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 22px;
-  cursor: pointer;
-}
 
-.explorerFilterChip:hover {
-  color: var(--text);
-  border-color: var(--buttonBorderHover);
-}
 
-.explorerFilterChip[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--accentBorder) 55%, transparent);
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-  color: var(--text);
-}
 
-.explorerFilterChip:focus-visible {
-  box-shadow: var(--ring);
-}
 
 .explorerFilterChip:disabled {
   cursor: default;
@@ -17745,16 +17019,6 @@ body {
 
 .qlBadge {
   justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.22rem 0.55rem;
-  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
-  border-radius: 999px;
-  background: var(--warning-bg);
-  color: var(--text);
-  font-size: 0.68rem;
-  font-weight: 800;
 }
 
 .qlBadge .qlIcon {
@@ -18238,8 +17502,9 @@ body {
 }
 
 .qlPreview .qlSql {
-  flex: 0 0 auto;
-  overflow: visible;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .qlPreview__foot {
@@ -18250,16 +17515,6 @@ body {
   gap: 0.5rem;
   padding: 0.5rem 1rem 0.85rem;
 }
-
-.qlTag {
-  padding: 0.08rem 0.45rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accentBorder) 14%, transparent);
-  color: var(--text);
-  font-size: 0.64rem;
-  font-weight: 700;
-}
-
 .qlSql {
   flex: 0 1 auto;
   min-height: 0;
@@ -19072,6 +18327,14 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 .badge--warn { --badge-color: var(--warning); }
 .badge--error { --badge-color: var(--danger); }
 
+/* Status and accent text is the token itself (each is a 4.5:1 text colour). */
+.badge--accent,
+.badge--ok,
+.badge--warn,
+.badge--error {
+  color: var(--badge-color);
+}
+
 .badge--estimate {
   --badge-color: var(--warning);
   border-style: dashed;
@@ -19122,10 +18385,16 @@ button.badge:hover {
   background: color-mix(in srgb, var(--badge-color) 20%, transparent);
 }
 
-/* A pressed toggle badge (a filter that is on). */
+/* Toggle badges (filters): off is an outline in the tone's text colour, on
+   is filled. */
+button.badge[aria-pressed="false"] {
+  border-color: var(--border);
+  background: transparent;
+}
+
 button.badge[aria-pressed="true"] {
-  border-color: var(--badge-color);
-  background: color-mix(in srgb, var(--badge-color) 24%, transparent);
+  border-color: color-mix(in srgb, var(--badge-color) 70%, transparent);
+  background: color-mix(in srgb, var(--badge-color) 22%, transparent);
 }
 
 .badge > b {
@@ -19226,6 +18495,16 @@ button.chip__op:hover {
   color: var(--text);
 }
 
+/* Where the filter chip rows sit (Traces and Logs, under the search bar). */
+.traceFilterChips.chips,
+.logsChips.chips {
+  padding: 6px 12px 0;
+}
+
+.logsChip {
+  max-width: 420px;
+}
+
 .chips__clear {
   padding: 0 2px;
   border: 0;
@@ -19271,6 +18550,11 @@ button.chip__op:hover {
   margin-left: -2px;
 }
 /* Badges in tight rows: the waterfall error marks, a service chip's "!". */
+.traceSpanRow__errorBadge--hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
 .traceSpanRow__errorBadge,
 .traceSvcPill__error {
   height: 14px;
@@ -19289,14 +18573,33 @@ button.chip__op:hover {
   color: var(--text);
 }
 
+/* The trace's service toggles are all on by default: one turned off dims. */
+.badge.traceServiceFilter[aria-pressed="false"] {
+  opacity: 0.5;
+}
+
+.badge.traceServiceFilter[aria-pressed="false"] > .serviceSwatch {
+  background: var(--muted);
+}
+
+.badge.traceServiceFilter > span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ==== /Components: badge =================================================== */
 
 /* ==== Components: copy (app_ui_copy.js) =====================================
    One copy control: the copy icon, a tooltip and one "Copied" feedback held
    1.2 s (.is-copied): a text button swaps its label, an icon button shows the
    check and a "Copied" bubble (data-copied). */
-.uiCopy {
+/* Zero-specificity position: a control placed absolutely (the editor's
+   copy button) keeps its place. */
+:where(.uiCopy) {
   position: relative;
+}
+
+.uiCopy {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -19352,7 +18655,7 @@ button.chip__op:hover {
 }
 
 /* The "Copied" bubble of a control without a text label. */
-[data-copied] {
+:where([data-copied]) {
   position: relative;
 }
 
@@ -19431,6 +18734,11 @@ button.chip__op:hover {
   tab-size: 4;
 }
 
+.sqlBlock--wrap .sqlBlock__pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .sqlBlock--copy .sqlBlock__pre {
   padding-right: 36px;
 }
@@ -19496,71 +18804,97 @@ button.chip__op:hover {
 /* ==== /Components: SQL block =============================================== */
 
 /* ==== Components: key/value (app_ui_kv.js) ==================================
-   One key / value list: a key column, the value coloured by its JSON type
-   (--json-*), a JSON tree for objects, and the include / exclude / only /
-   copy actions shown on row hover. */
+   One key / value list (the trace attribute table is the reference): the
+   value column after the longest key (at most 40 % in), zebra rows, values
+   coloured by their JSON type (--json-*), JSON trees on a full-width row,
+   and the include / exclude / only / copy actions on hover. */
 .kvList {
+  min-width: 0;
   display: grid;
-  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
   margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panelBg) 70%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .kvList__row {
-  display: contents;
+  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  min-width: 0;
+}
+
+.kvList__row:nth-child(even) {
+  background: color-mix(in srgb, var(--theadBg) 48%, transparent);
+}
+
+.kvList__row:hover {
+  background: var(--rowHover);
 }
 
 .kvList__key,
 .kvList__value {
   min-width: 0;
   margin: 0;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--dt-divider);
-}
-
-.kvList__row:last-child > .kvList__key,
-.kvList__row:last-child > .kvList__value {
-  border-bottom-color: transparent;
+  padding: 3px 8px;
 }
 
 .kvList__key {
-  max-width: 18rem;
+  padding-right: 12px;
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
 }
 
 .kvList__value {
-  position: relative;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.kvList__row:hover > .kvList__key,
-.kvList__row:hover > .kvList__value {
-  background: var(--rowHover);
+/* A JSON tree takes the whole width, under its key. */
+.kvList__row--tree > .kvList__key,
+.kvList__row--tree > .kvList__value {
+  grid-column: 1 / -1;
 }
 
-.kvList__row.is-mono > .kvList__value {
+.kvList__row--tree > .kvList__key {
+  padding-bottom: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.kvList__row--tree > .kvList__value {
+  padding-top: 1px;
+  padding-bottom: 4px;
+}
+
+.kvList__row.is-mono > .kvList__value,
+.kvList__tree {
   font-family: var(--mono);
   font-size: 0.94em;
+}
+
+.kvList__tree {
+  min-width: 0;
+  white-space: normal;
 }
 
 .kvList__row.is-muted > .kvList__value {
   color: var(--muted);
 }
 
+/* Actions at the end of the value's first line, shown on hover or focus
+   (always on touch screens). */
 .kvList__actions {
-  position: absolute;
-  top: 2px;
-  right: 4px;
+  float: right;
   display: inline-flex;
   gap: 2px;
-  padding-left: 6px;
-  border-radius: 4px;
-  background: var(--panel);
+  margin: -2px 0 0 8px;
   opacity: 0;
 }
 
@@ -19571,8 +18905,6 @@ button.chip__op:hover {
 
 @media (hover: none) {
   .kvList__actions {
-    position: static;
-    float: right;
     opacity: 1;
   }
 }
@@ -19616,45 +18948,76 @@ button.chip__op:hover {
 .kv__v--bool { color: var(--json-bool); }
 .kv__v--null { color: var(--json-null); font-style: italic; }
 
+/* The one-value renderer of the Query details (raw values) in the same
+   colours, and the one-row result it mirrors. */
+.rowDetails .tok-str,
+.resultTable--vertical .tok-str { color: var(--json-string); }
+.rowDetails .tok-num,
+.resultTable--vertical .tok-num { color: var(--json-number); }
+.rowDetails .tok-kw,
+.resultTable--vertical .tok-kw { color: var(--json-bool); }
+
 .kvList__sep {
   color: var(--muted);
 }
 
 .kvTree {
-  font-family: var(--mono);
-  font-size: 0.94em;
+  display: inline;
 }
 
 .kvTree > summary {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  cursor: pointer;
+  display: inline;
   list-style: none;
+  cursor: pointer;
+  user-select: none;
 }
 
 .kvTree > summary::-webkit-details-marker {
   display: none;
 }
 
-.kvTree[open] > summary > .kvTree__fold,
-.kvTree[open] > summary > .kvTree__count {
-  display: none;
+.kvTree > summary::before {
+  content: "\203a";
+  display: inline-block;
+  width: 10px;
+  color: var(--muted);
+  transition: transform 100ms ease;
+}
+
+.kvTree[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.kvTree__brace,
+.kvTree__fold,
+.kvTree__count {
+  color: var(--muted);
 }
 
 .kvTree__count {
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 0.9em;
+  margin-left: 6px;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.kvTree[open] > summary .kvTree__fold,
+.kvTree[open] > summary .kvTree__count {
+  display: none;
 }
 
 .kvTree__body {
-  padding-left: 14px;
-  border-left: 1px dotted var(--border);
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.kvTree[open] > .kvTree__brace {
+  display: block;
 }
 
 .kvTree__entry {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .kvTree__key {
@@ -19662,13 +19025,32 @@ button.chip__op:hover {
 }
 
 .kvTree__colon {
-  margin-right: 4px;
+  margin-right: 5px;
   color: var(--muted);
 }
 
-.kvTree__brace,
-.kvTree__fold {
-  color: var(--muted);
+/* Trace attribute tables: scroll past 450 px; otel.* keys in italics; a
+   filterable value opens the filter menu. */
+.kvList.traceKv {
+  max-height: 450px;
+  overflow: auto;
+}
+
+.traceKv .kvList__key.is-otel {
+  font-style: italic;
+  cursor: help;
+}
+
+.kvList__row[data-filter-scope] .kv__v {
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.kvList__row[data-filter-scope] .kv__v:hover,
+.kvList__row[data-filter-scope] .kv__v[aria-expanded="true"] {
+  background: var(--rowHover);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 /* ==== /Components: key/value =============================================== */
 
@@ -19744,6 +19126,11 @@ button.chip__op:hover {
 .statTile.is-error .statTile__value { color: var(--danger); }
 .statTile.is-warn .statTile__value { color: var(--warning); }
 .statTile.is-ok .statTile__value { color: var(--success); }
+
+/* Dense rows (the trace header, the pipeline columns): a smaller value. */
+.statTile--sm .statTile__value {
+  font-size: 12.5px;
+}
 
 .statTile--inline {
   flex-direction: row;

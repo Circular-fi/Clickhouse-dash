@@ -121,7 +121,8 @@ def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:
     results = read("src/static/app_results.js")
 
     assert html.count("Download Debug") == 1
-    copy_menu = html[html.index('id="copyMenu"'):html.index('id="copyJsonToast"')]
+    copy_menu = html[html.index('id="copyMenu"'):html.index('id="clearResultsButton"')]
+    assert 'id="copyJsonToast"' not in html  # the dead toast is gone
     assert "Download Debug" not in copy_menu
     assert 'id="downloadReceivedZipButton"' not in copy_menu
     assert 'handleDownloadRun("json")' in run

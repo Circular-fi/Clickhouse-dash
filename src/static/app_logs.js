@@ -112,23 +112,10 @@
     return fmt.timeTitle(Number(row.ts_ms), { precision: "ns", ns: row.ts_ns });
   }
 
-  async function copyText(text, button) {
-    try {
-      await navigator.clipboard.writeText(String(text));
-      if (button) {
-        button.classList.add("is-copied");
-        setTimeout(() => button.classList.remove("is-copied"), 900);
-        // An icon button also gets the "Copied" flash (ns.popover.flash).
-        if (!button.textContent.trim()) ns.popover?.flash(button);
-      }
-    } catch (_) {
-      const area = document.createElement("textarea");
-      area.value = String(text);
-      document.body.appendChild(area);
-      area.select();
-      try { document.execCommand("copy"); } catch (__) { /* ignore */ }
-      area.remove();
-    }
+  // The shared copy (ui.copyText): the secure-context check, the textarea
+  // fallback and the one "Copied" feedback.
+  function copyText(text, button) {
+    return ns.ui.copyText(String(text), button);
   }
 
   // --- URL state -------------------------------------------------------------
@@ -333,11 +320,11 @@
       chips.push({ kind: "attr", value: attr, text: `${attrLabel(key)} ${negate ? "\u2260" : "="} ${value}`, title: key, negate });
     }
     box.hidden = chips.length === 0;
-    box.innerHTML = chips.map((chip) => `
-      <span class="logsChip${chip.negate ? " is-negated" : ""}" title="${esc(chip.title)}">
-        <span class="logsChip__text">${esc(chip.text)}</span>
-        <button type="button" class="logsChip__remove" data-chip-kind="${chip.kind}" data-chip-value="${esc(chip.value || "")}" aria-label="Remove filter ${esc(chip.text)}">×</button>
-      </span>`).join("") + (chips.length > 1 ? '<button type="button" class="logsMiniButton" data-chip-clear>Clear filters</button>' : "");
+    // The shared filter chips (ns.badge.chipHtml) and "Clear filters" link.
+    box.innerHTML = chips.map((chip) => ns.badge.chipHtml({
+      html: `<span class="chip__value">${esc(chip.text)}</span>`, negated: !!chip.negate, className: "logsChip", title: chip.title,
+      remove: { label: `Remove filter ${chip.text}`, attrs: { "data-chip-kind": chip.kind, "data-chip-value": chip.value || "" } },
+    })).join("") + (chips.length > 1 ? ns.badge.clearHtml("Clear filters", { "data-chip-clear": true }) : "");
   }
 
   function addFilterText(text) {
@@ -1221,37 +1208,19 @@
     else if (logParam.get()) logParam.clear();
   }
 
-  const ACTION_ICONS = {
-    filter: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>',
-    exclude: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8h5"/></svg>',
-    only: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 13.5 13.5"/></svg>',
-    copy: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.2"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/></svg>',
-  };
-
-  function fieldActions(key, value) {
-    const k = esc(key), v = esc(value);
-    return `<span class="logsField__actions">
-      <button type="button" class="logsFieldAction" data-field-action="filter" data-key="${k}" data-value="${v}" title="Filter for value" aria-label="Filter for ${k} = value">${ACTION_ICONS.filter}</button>
-      <button type="button" class="logsFieldAction" data-field-action="exclude" data-key="${k}" data-value="${v}" title="Exclude value" aria-label="Exclude ${k} = value">${ACTION_ICONS.exclude}</button>
-      <button type="button" class="logsFieldAction" data-field-action="only" data-key="${k}" data-value="${v}" title="Search only this" aria-label="Search only ${k} = value">${ACTION_ICONS.only}</button>
-      <button type="button" class="logsFieldAction" data-field-action="copy" data-key="${k}" data-value="${v}" title="Copy value" aria-label="Copy ${k} value">${ACTION_ICONS.copy}</button>
-    </span>`;
-  }
+  // Record fields: the shared key / value list (ui.kvListHtml) with the
+  // include / exclude / only / copy actions (applyFieldAction).
+  const FIELD_ACTIONS = ["include", "exclude", "only", "copy"];
 
   function fieldRow(label, key, value, { mono = false, actions = true } = {}) {
-    const text = String(value == null ? "" : value);
-    return `<div class="logsField">
-      <span class="logsField__key" title="${esc(key)}">${esc(label)}</span>
-      <span class="logsField__value${mono ? " logsField__value--mono" : ""}">${esc(text)}</span>
-      ${actions ? fieldActions(key, text) : ""}
-    </div>`;
+    return { key, label, value: String(value == null ? "" : value), json: false, mono, actions: actions ? FIELD_ACTIONS : [] };
   }
 
   function mapSection(title, column, map) {
     const entries = Object.entries(map || {}).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     return `<section class="logsFieldGroup">
       <h4>${esc(title)} <span>${entries.length}</span></h4>
-      ${entries.length ? entries.map(([k, v]) => fieldRow(k, `${column}.${k}`, v)).join("") : '<div class="logsField logsField--empty">none</div>'}
+      ${ns.ui.kvListHtml(entries.map(([k, v]) => fieldRow(k, `${column}.${k}`, v)), { className: "logsFields", empty: "none" })}
     </section>`;
   }
 
@@ -1282,14 +1251,16 @@
         </section>
         <section class="logsFieldGroup">
           <h4>Record</h4>
-          ${fieldRow("Timestamp", "Timestamp", fullTimeLabel(row), { actions: false })}
-          ${fieldRow("ServiceName", "ServiceName", row.service)}
-          ${fieldRow("SeverityText", "SeverityText", row.severity_text)}
-          ${fieldRow("SeverityNumber", "SeverityNumber", row.severity_number, { actions: false })}
-          ${row.trace_id ? fieldRow("TraceId", "TraceId", row.trace_id, { mono: true }) : ""}
-          ${row.span_id ? fieldRow("SpanId", "SpanId", row.span_id, { mono: true }) : ""}
-          ${row.scope_name ? fieldRow("ScopeName", "ScopeName", row.scope_name) : ""}
-          ${row.scope_version ? fieldRow("ScopeVersion", "ScopeVersion", row.scope_version) : ""}
+          ${ns.ui.kvListHtml([
+            fieldRow("Timestamp", "Timestamp", fullTimeLabel(row), { actions: false }),
+            fieldRow("ServiceName", "ServiceName", row.service),
+            fieldRow("SeverityText", "SeverityText", row.severity_text),
+            fieldRow("SeverityNumber", "SeverityNumber", row.severity_number, { actions: false }),
+            row.trace_id ? fieldRow("TraceId", "TraceId", row.trace_id, { mono: true }) : null,
+            row.span_id ? fieldRow("SpanId", "SpanId", row.span_id, { mono: true }) : null,
+            row.scope_name ? fieldRow("ScopeName", "ScopeName", row.scope_name) : null,
+            row.scope_version ? fieldRow("ScopeVersion", "ScopeVersion", row.scope_version) : null,
+          ].filter(Boolean), { className: "logsFields" })}
         </section>
         ${mapSection("Log attributes", "LogAttributes", row.log_attributes)}
         ${mapSection("Resource attributes", "ResourceAttributes", row.resource_attributes)}
@@ -1401,13 +1372,25 @@
 
   function initSidePanel() {
     detailPanel();
-    $("logsCopyJson")?.addEventListener("click", (event) => {
-      if (model.side.row) void copyText(JSON.stringify(model.side.row, null, 2), event.currentTarget);
-    });
-    $("logsSideDetails")?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-field-action]");
-      if (!button) return;
-      applyFieldAction(button.dataset.fieldAction, button.dataset.key, button.dataset.value, button);
+    // Copy JSON / Copy body / Download JSON: the shared split (ui.copySplit),
+    // like a trace's and a query's.
+    const recordJson = () => (model.side.row ? JSON.stringify(model.side.row, null, 2) : "");
+    if ($("logsCopySplit")) {
+      ns.ui.copySplit({
+        root: $("logsCopySplit"),
+        getText: recordJson,
+        items: [
+          { el: $("logsCopyBody"), copy: () => String(model.side.row?.body ?? "") },
+          { el: $("logsDownloadJson"), onSelect: () => { if (model.side.row) ns.ui.downloadText(`log-${String(model.side.row.ts_ns || model.side.row.ts_ms || "record")}.json`, recordJson()); } },
+        ],
+      });
+    }
+    // The record fields' actions (ui.kvBind): include is the field filter.
+    ns.ui.kvBind($("logsSideDetails"), {
+      onAction: (action, { key, text, button }) => {
+        applyFieldAction(action === "include" ? "filter" : action, key, text, button);
+        return true;
+      },
     });
     // Details | Surrounding context: the shared tab behaviour (app_ui_tabs.js).
     sideTabs = ns.tabs?.bind(document.querySelector(".logsSideTabs"), {

@@ -17,9 +17,12 @@ def test_trace_initial_fit_is_bounded_by_visible_span_budget() -> None:
 
 def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
     css = read("src/static/style.css")
-    assert 'html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap' in css
-    assert 'height: auto !important;' in css
-    assert 'max-height: none !important;' in css
+    # The DDL is a read-only SQL block, not an .editorWrap: the editor's
+    # initial height cannot reach it.
+    ui = read("src/static/app_explorer_detail.js")
+    ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent")]
+    assert "editorWrap" not in ddl and "ns.ui.sqlBlock(" in ddl
+    assert '.sqlBlock' in css
 
 
 def test_data_settings_cog_has_no_select_caret() -> None:

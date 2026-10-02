@@ -222,9 +222,9 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(panel(page).locator('.traceSpanPanel__title')).toContainText(service);
   await expect(panel(page).locator('#traceSpanPanelTitle')).toHaveText(operation);
   // Details from /api/traces/span: the span's attributes, with filter actions.
-  const bucketRow = panel(page).locator('.traceKv__row[data-kv-key="fixture.bucket"]');
+  const bucketRow = panel(page).locator('.kvList__row[data-kv-key="fixture.bucket"]');
   await expect(bucketRow).toBeVisible({ timeout: 15_000 });
-  await expect(panel(page).locator('.traceKv__row[data-kv-key="service.name"][data-filter-scope="resource"]')).toBeVisible();
+  await expect(panel(page).locator('.kvList__row[data-kv-key="service.name"][data-filter-scope="resource"]')).toBeVisible();
   const bucket = JSON.parse(await bucketRow.getAttribute('data-kv-json'));
   const spanId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Span ID' }).locator('code').textContent()).trim();
   const traceId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Trace ID' }).locator('code').textContent()).trim();
@@ -252,7 +252,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(panel(page)).toBeVisible();
 
   // Click-to-filter on an attribute value: a chip and a new span search.
-  await bucketRow.locator('.traceKv__v').click();
+  await bucketRow.locator('.kv__v').click();
   await expect(page.locator('#traceFilterMenu')).toBeVisible();
   await page.locator('#traceFilterMenu [data-filter-action="include"]').click();
   await expect(page.locator('#tracesFilterChips .traceFilterChip')).toHaveCount(1);
@@ -339,7 +339,7 @@ test('spans: the side panel opens under the search bar; on a phone, a bottom she
     expect(await page.evaluate(([x, y, sel]) => !!document.elementFromPoint(x, y)?.closest(sel), [box.x + box.width / 2, box.y + box.height / 2, selector]), selector).toBe(true);
   }
   // Tag values get a column a value fits in (not one character per line).
-  const value = panel(page).locator('[data-span-section="tags"] .traceKv__row:not(.traceKv__row--tree) .traceKv__cell').first();
+  const value = panel(page).locator('[data-span-section="tags"] .kvList__row:not(.kvList__row--tree) .kvList__value').first();
   await expect(value).toBeVisible({ timeout: 15_000 });
   expect((await value.boundingBox()).width).toBeGreaterThan(150);
   // The close button closes it and gives focus back to the table.
@@ -446,7 +446,7 @@ for (const theme of ['dark', 'light']) {
     expect(overflow).toBeLessThanOrEqual(0);
     await captureState(page, testInfo, `trace-spans-table-${theme}`);
     await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
-    await expect(panel(page).locator('.traceKv__row').first()).toBeVisible({ timeout: 15_000 });
+    await expect(panel(page).locator('.kvList__row').first()).toBeVisible({ timeout: 15_000 });
     const panelBox = await panel(page).boundingBox();
     const viewport = page.viewportSize();
     expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width + 1);

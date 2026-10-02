@@ -376,7 +376,7 @@ test('linked from other traces: loaded when References opens, open linked trace 
   const item = group.locator('.traceLinkedFrom__item');
   await expect(item.locator('.traceSpanRefs__main')).toContainText('checkoutretry.checkout');
   await expect(item.locator('.traceSpanRefs__ids')).toContainText(`TraceID: ${OTHER_TRACE_ID}`);
-  await expect(item.locator('.traceKv__row[data-kv-key="link.reason"]')).toContainText('retry');
+  await expect(item.locator('.kvList__row[data-kv-key="link.reason"]')).toContainText('retry');
   // The local references keep their own list and count.
   await expect(refs.locator('.traceSpanRefs__item')).toHaveCount(0);
 

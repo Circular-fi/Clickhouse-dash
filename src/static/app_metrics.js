@@ -19,6 +19,13 @@
     gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
   };
   const KIND_BADGE = { gauge: "gauge", sum: "sum", histogram: "hist", exponential_histogram: "exp hist", summary: "summary" };
+  // Kind badges are categories (ns.badge): one hue per metric type, none of
+  // them a status colour (a histogram is not an error).
+  const KIND_COLOR = {
+    gauge: ns.palette.categorical(2), sum: ns.palette.categorical(0), histogram: ns.palette.categorical(6),
+    exponential_histogram: ns.palette.categorical(6), summary: ns.palette.kind("view"),
+  };
+  const kindBadge = (kind, text, title = "") => ns.badge.html(text, { tone: KIND_COLOR[kind] ? "category" : "neutral", color: KIND_COLOR[kind] || "", title, className: `metricsBadge metricsBadge--${kind}` });
   const AGG_LABEL = {
     avg: "Average", min: "Min", max: "Max", last: "Last value", sum: "Sum", rate: "Rate (per second)", increase: "Increase",
     count_rate: "Count rate (per second)", count: "Count",
@@ -382,11 +389,11 @@
       const collapsed = !needle && model.collapsed.has(svc.name);
       const items = collapsed ? "" : metrics.map((m) => {
         const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
-        const unit = m.unit ? `<span class="metricsBadge metricsBadge--unit" title="Unit">${esc(m.unit)}</span>` : "";
+        const unit = m.unit ? ns.badge.html(m.unit, { className: "metricsBadge metricsBadge--unit", title: "Unit" }) : "";
         const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${m.unit}` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
         return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
           <span class="metricsCatalog__name">${highlight(m.name, needle)}</span>
-          <span class="metricsCatalog__badges"><span class="metricsBadge metricsBadge--${esc(m.kind)}">${esc(KIND_BADGE[m.kind] || m.kind)}</span>${unit}</span>
+          <span class="metricsCatalog__badges">${kindBadge(m.kind, KIND_BADGE[m.kind] || m.kind)}${unit}</span>
         </button>`;
       }).join("");
       groups.push(`<div class="metricsCatalog__service${collapsed ? " is-collapsed" : ""}" role="group">
@@ -625,7 +632,7 @@
         </div>
         <div class="metricsControl metricsControl--filters">
           <div class="metricsFilters">
-            <div class="metricsFilters__chips"></div>
+            <div class="metricsFilters__chips" role="list" aria-label="Filters"></div>
             <button type="button" class="button metricsFilters__add" aria-expanded="false">+ Filter</button>
           </div>
         </div>
@@ -808,11 +815,11 @@
     const monotonic = data?.monotonic ?? entry?.monotonic ?? null;
     const badges = [];
     if (hasMetric) {
-      badges.push(`<span class="metricsBadge metricsBadge--${esc(panel.kind)}" title="Metric type">${esc(KIND_LABEL[panel.kind] || panel.kind || "?")}</span>`);
-      if (unit) badges.push(`<span class="metricsBadge metricsBadge--unit" title="Unit">${esc(unit)}</span>`);
-      if (temporality) badges.push(`<span class="metricsBadge" title="Aggregation temporality">${esc(temporality)}</span>`);
-      if (panel.kind === "sum" && monotonic != null) badges.push(`<span class="metricsBadge" title="Monotonic">${monotonic ? "monotonic" : "non-monotonic"}</span>`);
-      badges.push(`<span class="metricsPanel__service" title="Service">${esc(panel.service)}</span>`);
+      badges.push(kindBadge(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
+      if (unit) badges.push(ns.badge.html(unit, { className: "metricsBadge metricsBadge--unit", title: "Unit" }));
+      if (temporality) badges.push(ns.badge.html(temporality, { className: "metricsBadge", title: "Aggregation temporality" }));
+      if (panel.kind === "sum" && monotonic != null) badges.push(ns.badge.html(monotonic ? "monotonic" : "non-monotonic", { className: "metricsBadge", title: "Monotonic" }));
+      badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
     }
     el.querySelector(".metricsPanel__badges").innerHTML = badges.join("");
     const description = el.querySelector(".metricsPanel__description");
@@ -896,8 +903,12 @@
   function renderFilters(panel) {
     const chips = panel.el?.querySelector(".metricsFilters__chips");
     if (!chips) return;
-    chips.innerHTML = panel.filters.map((f, index) =>
-      `<span class="metricsChip${f.op === "!=" ? " metricsChip--not" : ""}" title="${esc(`${f.key} ${f.op} ${f.value}`)}"><span class="metricsChip__key">${esc(f.key)}</span><span class="metricsChip__op">${esc(f.op)}</span><span class="metricsChip__value">${esc(f.value === "" ? "(empty)" : f.value)}</span><button type="button" class="metricsChip__remove" data-remove-filter="${index}" aria-label="Remove filter ${esc(`${f.key} ${f.op} ${f.value}`)}">×</button></span>`).join("");
+    // The shared filter chips (ns.badge.chipHtml).
+    chips.innerHTML = panel.filters.map((f, index) => ns.badge.chipHtml({
+      key: f.key, op: f.op, value: f.value === "" ? "(empty)" : f.value, negated: f.op === "!=", className: "metricsChip",
+      title: `${f.key} ${f.op} ${f.value}`,
+      remove: { label: `Remove filter ${f.key} ${f.op} ${f.value}`, attrs: { "data-remove-filter": index } },
+    })).join("");
   }
 
   // --- Chart ----------------------------------------------------------------

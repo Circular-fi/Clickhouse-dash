@@ -1382,7 +1382,7 @@
           // so only a kind badge that adds information is kept.
           button.appendChild(node("span", "explorerTreeObject__name explorerFunctionObject__name", item.name || "\u2014"));
           const badge = functionKindBadge(item, category);
-          if (badge) button.appendChild(node("span", "explorerFunctionObject__badge", badge));
+          if (badge) button.appendChild(ns.badge.el(badge, { shape: "pill", className: "explorerFunctionObject__badge" }));
           button.title = item.name || "";
           button.addEventListener("click", () => { selectFunction(item, category); setTreeDrawerOpen(false); });
           children.appendChild(button);
