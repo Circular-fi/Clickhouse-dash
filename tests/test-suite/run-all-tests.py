@@ -283,6 +283,11 @@ def main() -> int:
         'specs/design.spec.js',
         'specs/accessibility.spec.js',
         'specs/visual-regression.spec.js',
+        'specs/page-chrome.spec.js',
+        'specs/ui-layers.spec.js',
+        'specs/ui-popover.spec.js',
+        'specs/ui-panels.spec.js',
+        'specs/ui-components.spec.js',
     ]
     if quick:
         design_cmd.append('--project=desktop-1440')

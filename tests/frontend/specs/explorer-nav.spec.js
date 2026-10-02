@@ -477,10 +477,16 @@ test.describe('explorer reserved routes', () => {
         await route.fulfill({ json: { databases: [name], tables: [] } });
         return;
       }
-      const response = await route.fetch();
-      const json = await response.json();
-      json.databases = [...new Set([...(json.databases || []), name])].sort();
-      await route.fulfill({ response, json });
+      // The page may navigate away while the real answer is in flight: a
+      // disposed response is then ignored instead of failing the test.
+      try {
+        const response = await route.fetch();
+        const json = await response.json();
+        json.databases = [...new Set([...(json.databases || []), name])].sort();
+        await route.fulfill({ response, json });
+      } catch (error) {
+        if (!/disposed|closed|Target page/i.test(String(error?.message || error))) throw error;
+      }
     });
   }
 
