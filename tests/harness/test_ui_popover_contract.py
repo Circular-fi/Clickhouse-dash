@@ -70,10 +70,12 @@ def test_migrated_popovers_use_the_shell():
     assert 'document.addEventListener("click", onDocClick, true);' not in views
     traces = read("src/static/app_traces.js")
     assert "serviceTip = ns.popover.tip(root, hiddenPills, {" in traces and "servicePopover" not in traces
+    # The span columns popover and the click-to-filter menu are ns.menu
+    # menus (app_ui_menu.js: a portal and a context menu on ns.layers).
     spans = read("src/static/app_trace_spans.js")
-    assert "const popover = ns.popover.open(button, \"\", {" in spans
+    assert "columnsPopover = ns.menu?.bind(button, columnsMenu, {" in spans
     search = read("src/static/app_trace_search.js")
-    assert "ns.popover.place(anchor, menu, {" in search and "menuLayer = ns.layers.push({" in search
+    assert "menuHandle = ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in search
     css = read("src/static/style.css")
     for gone in (".traceFlame__tip {", ".explorerTreemap__tooltip {\n  position: absolute;", ".traceEventPopover__close {", ".traceSvcPopover {\n  position: fixed;", ".editorDiagnosticTooltip {\n  position: fixed;"):
         assert gone not in css, gone

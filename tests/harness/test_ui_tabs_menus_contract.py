@@ -221,11 +221,10 @@ MENU_OWNERS = {"app_ui_menu.js"}
 def test_menu_component_owns_motion_keys_focus_and_one_dismiss_layer():
     menu = read("app_ui_menu.js")
     assert "ns.menu = { bind, select, multi, split, context, submenu, place, host, closeAll, isAnyOpen: () => openHandles.size > 0 };" in menu
-    # One pointerdown and one Escape listener for every menu, behind layer():
-    # the one place that hands entries to ns.layers when it exists.
-    assert menu.count('document.addEventListener("pointerdown", onPointerDown, true);') == 1
-    assert menu.count('document.addEventListener("keydown", onKeyDown, true);') == 1
-    assert "const shared = ns.layers;" in menu
+    # Every open menu is an ns.layers layer, behind layer() only: no Escape
+    # or outside-press listener of its own.
+    assert menu.count("ns.layers?.push(") == 1
+    assert '"Escape"' not in menu and 'addEventListener("pointerdown"' not in menu
     for key in ['"ArrowDown"', '"ArrowUp"', '"Home"', '"End"', '"Tab"', "event.key.length === 1"]:
         assert key in menu, key
     assert "const CLOSE_MS = 160;" in menu

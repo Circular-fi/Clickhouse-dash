@@ -22,9 +22,9 @@
   //    takes the focus, from a pointer the list itself; on
   //    a close by Escape or a pick the button gets it back, unless the pick
   //    moved it somewhere else (a dialog it opened);
-  //  - dismissal: ONE pointerdown listener closes what the pointer lands
-  //    outside of and ONE Escape listener the top menu, for every menu
-  //    (layer() below is the only code that knows that stack).
+  //  - dismissal: every open menu is an ns.layers layer (the one Escape and
+  //    outside-press listener of the page); layer() below is the only code
+  //    that knows it.
   //
   //   bind(button, menu, options)  -> handle   an action or settings menu
   //   select(selectEl, options)    -> handle   a single-choice picker over a
@@ -52,57 +52,14 @@
   const MARGIN = 8;
 
   // ---- Dismiss layer -------------------------------------------------------
-  // The stack of open menus. When the shared dismiss layer (ns.layers) is
-  // there, every entry goes to it instead: layer() is the one place to
-  // switch. An entry is { el(): the elements that count as inside,
-  // onDismiss(reason: "outside" | "escape") }; push() returns { release() }.
-  const localLayers = (() => {
-    const stack = [];
-    const inside = (entry, path, target) => entry.el().some((el) => el && (path.includes(el) || (target instanceof Node && el.contains(target))));
-    function onPointerDown(event) {
-      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-      for (const entry of [...stack].reverse()) {
-        if (inside(entry, path, event.target)) break;
-        entry.onDismiss("outside");
-      }
-    }
-    function onKeyDown(event) {
-      if (event.key !== "Escape" || !stack.length || event.defaultPrevented) return;
-      event.preventDefault();
-      event.stopPropagation();
-      stack[stack.length - 1].onDismiss("escape");
-    }
-    // The two document listeners exist only while a menu is open.
-    return {
-      push(entry) {
-        stack.push(entry);
-        if (stack.length === 1) {
-          document.addEventListener("pointerdown", onPointerDown, true);
-          document.addEventListener("keydown", onKeyDown, true);
-        }
-        return {
-          release() {
-            const at = stack.indexOf(entry);
-            if (at < 0) return;
-            stack.splice(at, 1);
-            if (!stack.length) {
-              document.removeEventListener("pointerdown", onPointerDown, true);
-              document.removeEventListener("keydown", onKeyDown, true);
-            }
-          },
-        };
-      },
-    };
-  })();
-
+  // Every open menu is an ns.layers layer (app_ui_layers.js: the page's one
+  // Escape and outside-press listener, the stack shared with popovers,
+  // panels and dialogs). layer() is the only code here that knows it. An
+  // entry is { el(): the elements that count as inside, onDismiss(reason:
+  // "outside" | "escape" | ...) }; ns.menu moves the focus itself.
   function layer(entry) {
-    const shared = ns.layers;
-    if (shared && typeof shared.push === "function") {
-      // ns.menu moves the focus itself (back to the button on Escape).
-      const handle = shared.push({ el: entry.el, onDismiss: entry.onDismiss, returnFocus: false, name: "menu" });
-      return { release: () => { (handle?.release || handle?.pop || handle?.remove)?.call(handle); } };
-    }
-    return localLayers.push(entry);
+    const handle = ns.layers?.push({ el: entry.el, onDismiss: (reason) => { entry.onDismiss(reason); }, returnFocus: false, name: "menu" }) || null;
+    return { release: () => { handle?.release?.(); } };
   }
 
   // ---- Shared state --------------------------------------------------------
