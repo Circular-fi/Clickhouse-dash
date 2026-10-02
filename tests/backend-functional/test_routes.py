@@ -144,6 +144,24 @@ WHERE database = 'otel'
     )
 
 
+def test_hosts_report_the_server_timezone_with_the_version():
+    # The UI shows Explorer DateTime text (system tables print it in the
+    # server's timezone()) in the browser's zone: api/hosts carries the zone.
+    deadline = time.monotonic() + 20
+    local = {}
+    while time.monotonic() < deadline:
+        rows = get("/api/hosts").json().get("hosts") or []
+        local = next((row for row in rows if row.get("id") == "local"), {})
+        if local.get("clickhouse_version"):
+            break
+        time.sleep(0.5)
+    assert local.get("clickhouse_version"), local
+    _, events = run_sql("SELECT timezone() AS tz")
+    rows = [row for event in events if event["event"] == "result_rows" for row in event["data"].get("rows", [])]
+    assert rows, events
+    assert local.get("clickhouse_timezone") == rows[0][0]
+
+
 def test_hosts_stream_emits_hosts_event():
     with SESSION.get(f"{BASE_URL}/api/hosts/stream", stream=True, timeout=(10, 10)) as response:
         assert response.status_code == 200

@@ -13,6 +13,8 @@
   //   time       Sep 12 16:29:57[.123], 24 h, browser-local zone, year
   //              only when it is not the current year
   //   range      2026-09-12 16:00 \u2192 17:00, "Last 1 hour" for presets
+  //   serverTime ClickHouse DateTime text from the server's zone, shown in
+  //              the browser's (time + timeTitle + iso)
   //   EMPTY      \u2014 for every absent value
   //
   // Sources stay Latin-1 (tests/harness/test_static_sources_latin1_contract.py):
@@ -111,6 +113,13 @@
     if (abs >= 1e4) return compact(n);
     if (abs >= 1e-4) return NUMBER.format(Number(n.toPrecision(4)));
     return n.toExponential(1).replace(/\.0e/, "e");
+  }
+
+  // "1 row", "120,064 rows": a grouped count and the word that agrees with it.
+  function countLabel(value, singular, pluralWord = `${singular}s`) {
+    const text = count(value);
+    if (text === EMPTY) return EMPTY;
+    return `${text} ${num(value) === 1 ? singular : pluralWord}`;
   }
 
   // One byte format for the whole app (util.formatBytes delegates here):
@@ -350,6 +359,55 @@
     return lines.join("\n");
   }
 
+  // ClickHouse DateTime text ("2026-09-12 16:29:57", DateTime64 ".123456")
+  // as epoch ms. A zone-less value is wall-clock time in `zone`: an IANA name
+  // (the server's timezone()), "UTC" or "local"; a value with "Z" or an offset
+  // is absolute. NaN for other text, an unknown zone and the epoch-0 time
+  // ClickHouse prints for an unset value ("1970-01-01 00:00:00" in UTC).
+  const CH_TIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?\s*(Z|[+-]\d{2}:?\d{2})?$/;
+
+  // Epoch ms of ClickHouse DateTime text, 0 included (NaN when it does not parse).
+  function chTimeMs(text, zone) {
+    const m = CH_TIME.exec(String(text ?? "").trim());
+    if (!m) return NaN;
+    const [, y, mo, d, h, mi, s, frac = "", offset] = m;
+    const millis = frac ? Number(`0.${frac}`) * 1000 : 0;
+    const wall = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)) + millis;
+    if (offset) {
+      if (offset === "Z") return wall;
+      const sign = offset[0] === "-" ? -1 : 1;
+      const digits = offset.slice(1).replace(":", "");
+      return wall - sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60000;
+    }
+    if (zone === "UTC") return wall;
+    // The zone's offset at that wall clock: guess with the offset at the wall
+    // time read as UTC, then once more across a DST change.
+    const first = fields(wall, zone);
+    if (!first) return NaN;
+    let ms = wall - first.offset * 60000;
+    const second = fields(ms, zone);
+    if (second && second.offset !== first.offset) ms = wall - second.offset * 60000;
+    return ms;
+  }
+
+  function parseTime(text, { zone = "UTC" } = {}) {
+    const ms = chTimeMs(text, zone);
+    return ms === 0 ? NaN : ms;
+  }
+
+  // A server instant for display: { ms, text, title, iso }. text is
+  // format.time() in the browser zone, title is format.timeTitle() with the
+  // server line, iso is for copies. An unset (epoch 0) time is EMPTY. Text
+  // that does not parse (or an unknown server zone) is shown as sent.
+  function serverTime(value, { serverTz = "", precision = "s" } = {}) {
+    const raw = String(value ?? "").trim();
+    const zone = String(serverTz || "").trim();
+    const ms = raw && zone ? chTimeMs(raw, zone) : NaN;
+    if (ms === 0) return { ms: NaN, text: EMPTY, title: "", iso: "" };
+    if (!Number.isFinite(ms)) return { ms: NaN, text: raw || EMPTY, title: "", iso: raw };
+    return { ms, text: time(ms, { precision }), title: timeTitle(ms, { serverTz: zone }), iso: iso(ms) };
+  }
+
   // ---------------------------------------------------------- time ranges
 
   const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
@@ -420,6 +478,7 @@
   ns.format = Object.freeze({
     EMPTY,
     count,
+    countLabel,
     compact,
     number,
     bytes,
@@ -430,6 +489,8 @@
     time,
     timeTitle,
     iso,
+    parseTime,
+    serverTime,
     range,
     ago,
     emptyIfNull,

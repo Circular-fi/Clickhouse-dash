@@ -80,6 +80,12 @@ eq("count UInt64 string", format.count("18446744073709551615"), "18,446,744,073,
 eq("count BigInt", format.count(12345678901234567890n), "12,345,678,901,234,567,890");
 eq("count null", format.count(null), DASH);
 eq("count text", format.count("abc"), DASH);
+eq("countLabel one", format.countLabel(1, "row"), "1 row");
+eq("countLabel many", format.countLabel(120064, "row"), "120,064 rows");
+eq("countLabel zero", format.countLabel(0, "row"), "0 rows");
+eq("countLabel irregular", format.countLabel(2, "query", "queries"), "2 queries");
+eq("countLabel string", format.countLabel("1", "part"), "1 part");
+eq("countLabel null", format.countLabel(null, "row"), DASH);
 
 // ----------------------------------------------------------------- number
 const numbers = [
@@ -239,6 +245,33 @@ else {
   eq("ago days", format.ago(NOW - 3 * 86400000, { now: NOW }), "3 days ago");
   eq("ago future", format.ago(NOW + 5000, { now: NOW }), "0 seconds ago");
   eq("ago null", format.ago(null), DASH);
+
+  // ------------------------------------------------- server DateTime text
+  eq("parseTime UTC", format.parseTime("2026-09-12 14:29:57"), Date.UTC(2026, 8, 12, 14, 29, 57));
+  eq("parseTime DateTime64", Math.abs(format.parseTime("2026-09-12 14:29:57.123456", { zone: "UTC" }) - (T + 0.456)) < 1e-6, true);
+  eq("parseTime Paris", format.parseTime("2026-09-12 16:29:57.123", { zone: "Europe/Paris" }), T);
+  eq("parseTime New York", format.parseTime("2026-09-12 10:29:57.123", { zone: "America/New_York" }), T);
+  eq("parseTime Kolkata", format.parseTime("2026-09-12 19:59:57.123", { zone: "Asia/Kolkata" }), T);
+  eq("parseTime ISO Z", format.parseTime("2026-09-12T14:29:57.123Z", { zone: "Asia/Kolkata" }), T);
+  eq("parseTime offset", format.parseTime("2026-09-12 16:29:57.123+02:00"), T);
+  const wall = new Date(T);
+  const two = (v) => String(v).padStart(2, "0");
+  const localText = `${wall.getFullYear()}-${two(wall.getMonth() + 1)}-${two(wall.getDate())} ${two(wall.getHours())}:${two(wall.getMinutes())}:${two(wall.getSeconds())}.123`;
+  eq("parseTime local", format.parseTime(localText, { zone: "local" }), T);
+  eq("parseTime DST spring gap", format.parseTime("2026-03-29 03:30:00", { zone: "Europe/Paris" }), Date.UTC(2026, 2, 29, 1, 30));
+  eq("parseTime DST autumn", format.parseTime("2026-10-25 03:30:00", { zone: "Europe/Paris" }), Date.UTC(2026, 9, 25, 2, 30));
+  eq("parseTime unset UTC", Number.isNaN(format.parseTime("1970-01-01 00:00:00")), true);
+  eq("parseTime unset Paris", Number.isNaN(format.parseTime("1970-01-01 01:00:00", { zone: "Europe/Paris" })), true);
+  eq("parseTime unknown zone", Number.isNaN(format.parseTime("2026-09-12 14:29:57", { zone: "Mars/Olympus" })), true);
+  eq("parseTime text", Number.isNaN(format.parseTime("yesterday")), true);
+  const server = format.serverTime("2026-09-12 10:29:57", { serverTz: "America/New_York" });
+  eq("serverTime text", server.text, format.time(Date.UTC(2026, 8, 12, 14, 29, 57)));
+  eq("serverTime iso", server.iso, "2026-09-12T14:29:57.000Z");
+  eq("serverTime title server line", server.title.split("\n")[3], "Sep 12, 2026 10:29:57.000 server (America/New_York, UTC-04:00)");
+  eq("serverTime unset", format.serverTime("1969-12-31 19:00:00", { serverTz: "America/New_York" }).text, DASH);
+  eq("serverTime no zone keeps the text", format.serverTime("2026-09-12 10:29:57").text, "2026-09-12 10:29:57");
+  eq("serverTime no zone has no title", format.serverTime("2026-09-12 10:29:57").title, "");
+  eq("serverTime empty", format.serverTime("", { serverTz: "UTC" }).text, DASH);
 }
 
 // ---------------------------------------------------------------- palette

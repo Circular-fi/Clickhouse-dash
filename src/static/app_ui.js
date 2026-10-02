@@ -84,13 +84,27 @@
     window.dispatchEvent(new CustomEvent("chdash:features"));
   }
 
+  // A host's ping in ns.format's duration ("12 ms"), whole milliseconds.
   function formatPingMsLabel(pingMs) {
     const ms = Number(pingMs);
-    if (!Number.isFinite(ms)) return "-";
-    if (ms > 0 && ms < 1) return "<1ms";
+    if (pingMs == null || !Number.isFinite(ms)) return ns.format.EMPTY;
     const rounded = Math.round(ms);
-    if (rounded < 1) return "<1ms";
-    return `${rounded} ms`;
+    return rounded < 1 ? "<1 ms" : ns.format.duration.fromMs(rounded);
+  }
+
+  // timeZone() of a host (default: the selected one), from the health
+  // snapshot (api/hosts): the zone of the DateTime text its system tables
+  // print, for ns.format.serverTime. "" until the first version check.
+  function serverTimeZone(hostId = state.selectedHostId) {
+    const hosts = state.hostsSnapshot && Array.isArray(state.hostsSnapshot.hosts) ? state.hostsSnapshot.hosts : [];
+    const host = hostId ? hosts.find((h) => h && String(h.id) === String(hostId)) : null;
+    return host && host.clickhouse_timezone ? String(host.clickhouse_timezone) : "";
+  }
+
+  // A DateTime text of a host's system tables, for display: browser-local
+  // text, the tooltip with the server's zone, ISO for copies.
+  function serverTime(value, { hostId, precision } = {}) {
+    return ns.format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });
   }
 
   function pickDefaultHostId(snapshot) {
@@ -151,11 +165,11 @@
 
     if (dom.hostPickerPing) {
       if (!apiOnline) {
-        dom.hostPickerPing.textContent = "-";
+        dom.hostPickerPing.textContent = ns.format.EMPTY;
       } else if (healthy && pingMs != null && Number.isFinite(pingMs)) {
         dom.hostPickerPing.textContent = formatPingMsLabel(pingMs);
       } else {
-        dom.hostPickerPing.textContent = healthy ? "-" : "down";
+        dom.hostPickerPing.textContent = healthy ? ns.format.EMPTY : "down";
       }
     }
 
@@ -265,7 +279,7 @@
 
       const meta = document.createElement("span");
       meta.className = "pickerOption__meta";
-      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? formatPingMsLabel(pingMs) : (healthy ? "-" : "down");
+      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? formatPingMsLabel(pingMs) : (healthy ? ns.format.EMPTY : "down");
 
       btn.appendChild(dot);
       btn.appendChild(text);
@@ -1527,5 +1541,6 @@
     init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
     applyProductFeatures, applyRunOptionsUi, setRunOption, setEditorError, clearEditorError,
     loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
+    serverTimeZone, serverTime,
   };
 })();

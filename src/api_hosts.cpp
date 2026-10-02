@@ -32,6 +32,9 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("clickhouse_version");
     if (!h.clickhouse_version.empty()) w.String(h.clickhouse_version.c_str());
     else w.Null();
+    w.Key("clickhouse_timezone");
+    if (!h.clickhouse_timezone.empty()) w.String(h.clickhouse_timezone.c_str());
+    else w.Null();
     w.Key("version_checked_at_ms");
     if (h.version_checked_at_ms > 0) w.Int64(h.version_checked_at_ms);
     else w.Null();

@@ -44,6 +44,8 @@ struct HostHealth {
   int64_t ping_ms = -1;
   int64_t checked_at_ms = 0;
   std::string clickhouse_version;
+  // timezone() of the server, the zone of its DateTime text ("" until known).
+  std::string clickhouse_timezone;
   int64_t version_checked_at_ms = 0;
   HostSystemTables system_tables;
 };

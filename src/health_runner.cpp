@@ -59,21 +59,30 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
   return out;
 }
 
-static std::string detect_host_version(clickhouse::Client* client) {
-  std::string out;
+struct HostVersion {
+  std::string version;
+  // The server's timezone(): ClickHouse prints DateTime values of system
+  // tables in it, and the UI converts them to the browser's zone.
+  std::string timezone;
+};
+
+static HostVersion detect_host_version(clickhouse::Client* client) {
+  HostVersion out;
   if (!client) return out;
   try {
     client->Select(
-      "SELECT version()",
+      "SELECT version(), timezone()",
       [&](const clickhouse::Block& b) {
-        if (!out.empty() || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
-        auto col = b[0]->As<clickhouse::ColumnString>();
-        if (!col) return;
-        out = std::string(col->At(0));
+        if (!out.version.empty() || b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
+        auto version = b[0]->As<clickhouse::ColumnString>();
+        auto timezone = b[1]->As<clickhouse::ColumnString>();
+        if (!version) return;
+        out.version = std::string(version->At(0));
+        if (timezone) out.timezone = std::string(timezone->At(0));
       }
     );
   } catch (...) {
-    return std::string();
+    return HostVersion{};
   }
   return out;
 }
@@ -355,7 +364,7 @@ void HealthRunner::loop() {
       }
     }
 
-    std::vector<std::pair<size_t, std::string>> version_results;
+    std::vector<std::pair<size_t, HostVersion>> version_results;
     version_results.reserve(version_jobs.size());
     for (const auto& job : version_jobs) {
       if (job.index < ping_ok.size() && ping_ok[job.index]) {
@@ -390,7 +399,8 @@ void HealthRunner::loop() {
         if (result.first >= ctx_.size()) continue;
         auto& health = ctx_[result.first].last;
         health.version_checked_at_ms = ts;
-        if (!result.second.empty()) health.clickhouse_version = std::move(result.second);
+        if (!result.second.version.empty()) health.clickhouse_version = std::move(result.second.version);
+        if (!result.second.timezone.empty()) health.clickhouse_timezone = std::move(result.second.timezone);
       }
       ++version_;
     }
