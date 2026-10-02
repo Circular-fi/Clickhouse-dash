@@ -264,6 +264,47 @@ once in the "Page shell" block of `style.css`:
   on every page to the bottom of the header and the nav row. Do not use a
   literal header height.
 
+## Building elements
+
+`app_dom.js` (in `common`, right after the format and palette modules) gives
+every page one way to build and find elements.
+
+- **`ns.h(tag, props, ...children)`** returns an element. `props` is `null`
+  or an object: `class` (a string, an array with falsy entries skipped, or
+  `{ name: on }`), `dataset` (`{ spanId: id }` gives `data-span-id`), `style`
+  (a string or `{ left: "4px", "--trace-service-color": c }`), `aria`
+  (`{ label, pressed: false }`: aria values print `"false"`), `on`
+  (`{ click: fn }`, removed by `signal`: an `AbortSignal` or an
+  `ns.lifecycle` scope), the properties `value`, `checked`, `selected` and
+  `indeterminate` (set after the children, so a `<select>` value finds its
+  option), and any other key as an attribute (`true` present, `false` or
+  `null` absent). A URL attribute never takes a `javascript:` URL.
+  Children are strings and numbers (always text, never markup), nodes and
+  arrays of children; `null`, `undefined`, `false`, `true` and `""` add
+  nothing. `h.svg(tag, props, ...children)` builds in the SVG namespace.
+- **`h.frag(...children)`** returns a `DocumentFragment`;
+  **`h.replace(container, ...children)`** replaces a container's children
+  (none clears it).
+- **`h.html(trusted)`** returns a fragment parsed from markup: the one,
+  greppable way to insert markup next to `h()`, for trusted strings only
+  (the SQL highlighter output, icons, the escaped string renderers below).
+- **Lookups**: `dom.byId(id)`, `dom.$(selector, root)` (the first match) and
+  `dom.$$(selector, root)` (every match, an array). `root` defaults to the
+  document only when it is left out; an explicit `null` root finds nothing,
+  so a component never searches the whole page by mistake. The `dom.*`
+  registry keeps the page shell's ids.
+
+**String renderers.** Lists drawn thousands of times (the trace waterfall,
+the span list, the Logs grid, Query results) and the panels built from the
+data components' `*Html` functions stay HTML strings: every value goes
+through `util.escapeHtml` (a module's `esc` alias) or a component that
+escapes. Each module that still writes `innerHTML` or calls
+`insertAdjacentHTML` is on the allow-list of
+`tests/harness/test_dom_builder_contract.py`, with its reason and its
+count; a template literal written straight into `innerHTML` interpolates
+only escaped values, component markup or numbers. Everything else uses
+`h()`.
+
 ## Layers, popovers and panels
 
 Three modules load right after `app_dom.js` on every page (the `common`
