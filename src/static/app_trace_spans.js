@@ -55,6 +55,8 @@
     maxDurationNs: 0,
     selected: -1,
     panelOpen: false,
+    // span= of a link or a reload, opened once its row is listed.
+    pendingSpan: "",
     details: new Map(),
     detailSeq: 0,
     savedScrollTop: 0,
@@ -104,6 +106,10 @@
     // span_* in the URL: min/max_duration_ms there are trace durations.
     if (state.minMs) params.set("span_min_duration_ms", state.minMs);
     if (state.maxMs) params.set("span_max_duration_ms", state.maxMs);
+    // The span in the side panel (ns.detailPanel): span=<span id>.
+    const open = state.panelOpen ? state.rows[state.selected] : null;
+    const span = open ? String(open.span_id || "") : state.pendingSpan;
+    if (span) params.set("span", span);
   }
 
   function cleanMs(value) {
@@ -121,9 +127,34 @@
     state.maxMs = cleanMs(params.get("span_max_duration_ms"));
     if (mode !== state.mode) {
       state.mode = mode;
-      if (!active()) closePanel({ focus: false });
+      if (!active()) closePanel({ focus: false, url: "none" });
     }
     syncControls();
+    // On a trace URL span= is the trace's span, not this panel's.
+    if (!onTracePath()) syncPanelFromUrl(mode === "spans" ? params.get("span") || "" : "");
+  }
+
+  function onTracePath() {
+    return /\/observability\/traces\/[^/]+/.test(window.location.pathname);
+  }
+
+  // span= of the URL (Back / Forward, a link, a reload): the panel shows
+  // that span when it is listed and closes when there is none.
+  function syncPanelFromUrl(span) {
+    if (!span) {
+      state.pendingSpan = "";
+      if (state.panelOpen) closePanel({ focus: false, url: "none" });
+      return;
+    }
+    const open = state.panelOpen ? state.rows[state.selected] : null;
+    if (open && String(open.span_id) === span) return;
+    const index = state.rows.findIndex((row) => String(row.span_id) === span);
+    if (index >= 0) {
+      state.pendingSpan = "";
+      select(index, { open: true, url: "none" });
+    } else {
+      state.pendingSpan = span;
+    }
   }
 
   function syncControls() {
@@ -211,7 +242,7 @@
     state.details.clear();
     state.searched = true;
     state.latencyMs = NaN;
-    closePanel({ focus: false });
+    closePanel({ focus: false, url: "none" });
     if (ctx.dom.tracesSearchView) ctx.dom.tracesSearchView.scrollTop = 0;
     await loadPage({ first: true });
   }
@@ -251,6 +282,13 @@
     state.emptyPages = rows.length ? 0 : state.emptyPages + 1;
     state.loading = false;
     render();
+    if (first && state.pendingSpan) {
+      const span = state.pendingSpan;
+      const index = state.rows.findIndex((row) => String(row.span_id) === span);
+      state.pendingSpan = "";
+      if (index >= 0) select(index, { open: true, url: "none" });
+      else ns.traceSearch?.writeUrl?.("replace");
+    }
   }
 
   // ----------------------------------------------------------- rendering
@@ -460,13 +498,19 @@
     else if (top + ROW_HEIGHT > bottomLimit) view.scrollTop = top + ROW_HEIGHT * 2 - view.clientHeight;
   }
 
-  function select(index, { open = false } = {}) {
+  // url: how span= follows the panel: "push" when it opens, "replace" when
+  // it moves to another span (the defaults), "none" (from the URL).
+  function select(index, { open = false, url = null } = {}) {
     if (!state.rows.length) return;
     const next = Math.max(0, Math.min(state.rows.length - 1, index));
     state.selected = next;
     ensureVisible(next);
     updateWindow(true);
-    if (open || state.panelOpen) openPanel(next);
+    if (!open && !state.panelOpen) return;
+    const moving = state.panelOpen;
+    openPanel(next);
+    const mode = url || (moving ? "replace" : "push");
+    if (mode !== "none") ns.traceSearch?.writeUrl?.(mode, mode === "push" ? { detail: PANEL_ENTRY } : null);
   }
 
   function onTableClick(event) {
@@ -508,29 +552,38 @@
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       select(state.selected < 0 ? 0 : state.selected, { open: true });
-    } else if (event.key === "Escape" && state.panelOpen) {
-      event.preventDefault();
-      closePanel();
     }
   }
 
   // ----------------------------------------------------------- side panel
 
+  // The side panel: a docked ns.detailPanel beside the results, sticky under
+  // the search bar (a bottom sheet on narrow windows). Escape (ns.layers) and
+  // its close button give the focus back to the table. Its span= is pushed
+  // when it opens (PANEL_ENTRY marks that history entry), replaced when it
+  // moves, and Back closes it.
+  const PANEL_ENTRY = "detail:span";
+  let detail = null;
+
+  function panelApi() {
+    if (detail) return detail;
+    detail = ns.detailPanel.create({
+      // Inside the Search tab's panel: another Traces tab hides it with it.
+      host: document.querySelector(".traceSearchBody") || ctx.dom.tracesSearchView || document.body,
+      id: "traceSpanPanel",
+      className: "uiDetail--sticky traceSpanPanel",
+      closeLabel: "Close span details",
+      returnFocus: () => byId("traceSpanTable"),
+      onClose: () => { if (state.panelOpen) closePanel({ focus: false }); },
+    });
+    detail.title?.closest(".uiDetail__titles")?.classList.add("traceSpanPanel__title");
+    detail.closeButton?.classList.add("traceSpanPanel__close");
+    detail.el.addEventListener("click", onPanelClick);
+    return detail;
+  }
+
   function panelEl() {
-    let panel = byId("traceSpanPanel");
-    if (panel) return panel;
-    panel = document.createElement("aside");
-    panel.id = "traceSpanPanel";
-    panel.className = "traceSpanPanel";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "false");
-    panel.setAttribute("aria-labelledby", "traceSpanPanelTitle");
-    panel.hidden = true;
-    panel.addEventListener("click", onPanelClick);
-    panel.addEventListener("keydown", onPanelKeydown);
-    // Inside the Search tab's panel: another Traces tab hides it with it.
-    (document.querySelector(".traceSearchBody") || ctx.dom.tracesSearchView || document.body).appendChild(panel);
-    return panel;
+    return panelApi().el;
   }
 
   function detailKey(row) {
@@ -542,9 +595,9 @@
     if (!row) return;
     state.panelOpen = true;
     const panel = panelEl();
-    // Its place is CSS: under the sticky search bar (--shell-top +
-    // --trace-bar-h), a bottom sheet on narrow windows.
-    panel.hidden = false;
+    // Its place is CSS: sticky under the search bar (--trace-bar-h), a
+    // bottom sheet on narrow windows.
+    panelApi().open({ opener: byId("traceSpanTable") });
     panel.dataset.spanIndex = String(index);
     renderPanel(row);
     const key = detailKey(row);
@@ -569,14 +622,17 @@
     });
   }
 
-  function closePanel({ focus = true } = {}) {
-    const panel = byId("traceSpanPanel");
+  // url: "clear" drops span= (Back when the entry is the panel's own),
+  // "none" when the URL already has none (Back, a new search).
+  function closePanel({ focus = true, url = "clear" } = {}) {
+    const wasOpen = state.panelOpen;
     state.panelOpen = false;
     ++state.detailSeq;
-    if (panel && !panel.hidden) {
-      panel.hidden = true;
-      if (focus) byId("traceSpanTable")?.focus({ preventScroll: true });
-    }
+    if (detail?.isOpen()) detail.close("closed", { restoreFocus: false });
+    if (focus && wasOpen) byId("traceSpanTable")?.focus({ preventScroll: true });
+    if (!wasOpen || url !== "clear" || !active()) return;
+    if (window.history.state?.detail === PANEL_ENTRY && new URLSearchParams(window.location.search).has("span")) window.history.back();
+    else ns.traceSearch?.writeUrl?.("replace");
   }
 
   function copyButton(value, label) {
@@ -641,24 +697,22 @@
     const href = ctx.spanTraceUrl(row.trace_id, row.span_id);
     // A re-render keeps the focus on the same panel control.
     const focusedNav = panel.contains(document.activeElement) ? document.activeElement?.getAttribute?.("data-span-panel-nav") : "";
+    const api = panelApi();
     panel.style.setProperty("--trace-service-color", palette.service(row.service_name));
-    panel.innerHTML = `<header class="traceSpanPanel__head">
-        <div class="traceSpanPanel__title">
-          <span class="traceSpanPanel__service"><i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>
-          <strong id="traceSpanPanelTitle">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</strong>
-        </div>
-        <div class="traceSpanPanel__actions">
-          <span class="traceSpanPanel__position">${index + 1} / ${fmt.count(state.rows.length)}${state.hasMore ? "+" : ""}</span>
-          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
-          <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
-          <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>
-          <button type="button" class="traceSpanPanel__close" data-span-panel-close aria-label="Close span details" title="Close (Esc)">×</button>
-        </div>
-      </header>
-      <div class="traceSpanPanel__body">${panelBodyHtml(row, entry)}</div>`;
+    // Eyebrow: the service; title: the operation (both click-to-filter).
+    api.setHead({
+      eyebrow: `<i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}`,
+      title: filterValueHtml("operation", row.span_name || "", row.span_name || "span"),
+      html: true,
+    });
+    api.setActions(`<span class="uiDetail__position traceSpanPanel__position">${index + 1} / ${fmt.count(state.rows.length)}${state.hasMore ? "+" : ""}</span>
+          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
+          <button type="button" class="uiDetail__nav traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
+          <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>`);
+    api.body.innerHTML = panelBodyHtml(row, entry);
     if (focusedNav) {
       const nav = panel.querySelector(`[data-span-panel-nav="${focusedNav}"]`);
-      (nav && !nav.disabled ? nav : panel.querySelector("[data-span-panel-close]"))?.focus({ preventScroll: true });
+      (nav && !nav.disabled ? nav : api.closeButton)?.focus({ preventScroll: true });
     }
   }
 
@@ -674,7 +728,6 @@
     if (!target) return;
     const index = Number(panelEl().dataset.spanIndex);
     const row = state.rows[index];
-    if (target.closest("[data-span-panel-close]")) { closePanel(); return; }
     const nav = target.closest("[data-span-panel-nav]");
     if (nav) { select(index + (nav.getAttribute("data-span-panel-nav") === "next" ? 1 : -1), { open: true }); return; }
     const open = target.closest("[data-span-open-trace]");
@@ -705,13 +758,6 @@
     ctx.spanDetailClick(event);
   }
 
-  function onPanelKeydown(event) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closePanel();
-    }
-  }
-
   // The open panel when it is on screen (not under a hidden tab or view).
   function shownPanel() {
     const panel = byId("traceSpanPanel");
@@ -726,14 +772,10 @@
   // on the page, not in a field or a menu).
   function onDocumentKeydown(event) {
     if (!active() || !state.panelOpen || ctx.dom.tracesSearchView?.hidden || shownPanel() === null) return;
-    if (ns.observability && !ns.observability.isActive("traces")) return;
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target === byId("traceSpanTable") || editable(target)) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closePanel();
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const index = Number(panelEl().dataset.spanIndex);
       select(index + (event.key === "ArrowDown" ? 1 : -1), { open: true });
@@ -875,8 +917,12 @@
     root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
     root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); });
     ctx.dom.tracesSearchView?.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
-    document.addEventListener("keydown", onDocumentKeydown);
+    // While Traces shows (ns.lifecycle): the window resize and the panel's
+    // Up / Down keys.
+    ns.lifecycle.bind("traces", (scope) => {
+      scope.listen(window, "resize", onScroll, { passive: true });
+      scope.listen(document, "keydown", onDocumentKeydown);
+    });
     const tools = byId("traceSpanTools");
     const kind = byId("traceSpanKind");
     if (kind) ctx.enhanceTraceSelect(kind);

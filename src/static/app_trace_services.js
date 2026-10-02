@@ -304,7 +304,13 @@
     else if (!count) body = `<div class="tracesEmpty">No ${view.scope === "root" ? "root" : "entry"} spans match in this range.</div>`;
     else body = tableHtml(rows);
     releaseDetailCharts();
-    root.innerHTML = `<div class="traceSvc${view.loading ? " is-loading" : ""}" aria-busy="${view.loading ? "true" : "false"}">
+    // A re-render (Back / Forward, a new answer) keeps the focus on its row.
+    const active = document.activeElement;
+    const focusedRow = active instanceof Element && root.contains(active) && active.matches("[data-svc-row]") ? active.getAttribute("data-svc-row") : null;
+    const shell = skeleton();
+    shell.classList.toggle("is-loading", view.loading);
+    shell.setAttribute("aria-busy", view.loading ? "true" : "false");
+    shell.querySelector(":scope > .traceSvc__main").innerHTML = `
       <div class="traceSvc__toolbar">
         <h2 id="traceSvcCount">${payload ? `${fmt.count(count)} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
         <span class="traceSvc__meta" title="Entry spans: SpanKind Server / Consumer (and SPAN_KIND_* spellings) or root spans. The search filters apply to these spans.">${esc(meta)}</span>
@@ -312,10 +318,32 @@
         ${scopeHtml()}
       </div>
       ${view.error && payload ? `<div class="traceSvc__error" role="alert">${esc(view.error)}</div>` : ""}
-      <div class="traceSvc__table">${body}</div>
-      <aside id="traceSvcDetail" class="traceSvcDetail" role="dialog" aria-modal="false" aria-labelledby="traceSvcDetailTitle" hidden></aside>
-    </div>`;
+      <div class="traceSvc__table">${body}</div>`;
+    if (focusedRow != null) root.querySelector(`[data-svc-row="${CSS.escape(focusedRow)}"]`)?.focus({ preventScroll: true });
     renderDetail();
+  }
+
+  // The view: the list (.traceSvc__main) and, beside it, the service
+  // detail, a docked ns.detailPanel sticky under the search bar (a bottom
+  // sheet on narrow windows). Built once; renders fill them.
+  let detailPanel = null;
+  const PANEL_ENTRY = "detail:svc";
+
+  function skeleton() {
+    let shell = root.querySelector(":scope > .traceSvc");
+    if (shell) return shell;
+    root.innerHTML = '<div class="traceSvc"><div class="traceSvc__main"></div></div>';
+    shell = root.firstElementChild;
+    detailPanel = ns.detailPanel.create({
+      host: shell,
+      id: "traceSvcDetail",
+      className: "uiDetail--sticky traceSvcDetail",
+      closeLabel: "Close service details",
+      returnFocus: () => (view.detailName ? root.querySelector(`[data-svc-row="${CSS.escape(view.detailName)}"]`) : null),
+      onClose: () => { if (view.detailName) closeDetail({ fromPanel: true }); },
+    });
+    detailPanel.closeButton?.setAttribute("data-svc-close", "");
+    return shell;
   }
 
   // ------------------------------------------------------------ the detail
@@ -365,11 +393,11 @@
 
   // The detail's charts leave with it (their engine state is released).
   function releaseDetailCharts() {
-    root?.querySelectorAll("#traceSvcDetail [data-svc-chart]").forEach((el) => ctx.chart.unmountChart(el));
+    detailPanel?.el.querySelectorAll("[data-svc-chart]").forEach((el) => ctx.chart.unmountChart(el));
   }
 
   function drawDetailCharts() {
-    const panel = root?.querySelector("#traceSvcDetail");
+    const panel = detailPanel?.el;
     const payload = view.detail.payload;
     if (!panel || panel.hidden || !payload) return;
     const points = seriesOf(payload, view.detailName);
@@ -459,13 +487,17 @@
   }
 
   function renderDetail() {
-    const panel = root?.querySelector("#traceSvcDetail");
-    if (!panel) return;
+    if (!root || !detailPanel) return;
+    const panel = detailPanel.el;
     const name = view.detailName;
-    panel.hidden = !name;
     root.querySelector(".traceSvc")?.classList.toggle("has-detail", !!name);
     releaseDetailCharts();
-    if (!name) { panel.innerHTML = ""; return; }
+    if (!name) {
+      detailPanel.close("closed", { restoreFocus: false });
+      detailPanel.body.innerHTML = "";
+      return;
+    }
+    detailPanel.open();
     const detail = view.detail;
     const payload = detail.payload;
     const row = detailRow(payload, name);
@@ -489,23 +521,36 @@
         <section class="traceSvcSection"><h4>Slowest spans</h4>${slowestHtml(payload)}</section>
         <section class="traceSvcSection"><h4>Database statements</h4>${dbHtml()}</section>`;
     }
-    panel.innerHTML = `<header class="traceSvcDetail__head" style="--trace-service-color:${palette.service(name)}">
-        <span class="traceSvcDot" aria-hidden="true"></span>
-        <h3 id="traceSvcDetailTitle" title="${esc(name)}">${esc(name)}</h3>
-        ${detail.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}
-        <button type="button" class="traceSvcAction" data-svc-search="${esc(name)}" title="Search the traces of ${esc(name)}">Search traces</button>
-        <button type="button" class="traceSvcDetail__close" data-svc-close aria-label="Close service details" title="Close (Esc)">×</button>
-      </header>
-      ${stats ? `<div class="traceSvcStats">${stats}</div>` : ""}
-      <div class="traceSvcDetail__body">${body}</div>`;
+    // The shell's head: eyebrow, the service (its colour dot), its actions.
+    panel.style.setProperty("--trace-service-color", palette.service(name));
+    detailPanel.setHead({ eyebrow: "Service", title: `<span class="traceSvcDot" aria-hidden="true"></span>${esc(name)}`, html: true });
+    detailPanel.title.setAttribute("title", name);
+    detailPanel.setActions(`${detail.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}<button type="button" class="button button--primary button--small" data-svc-search="${esc(name)}" title="Search the traces of ${esc(name)}">Search traces</button>`);
+    // The totals strip between the head and the body (it does not scroll).
+    let strip = panel.querySelector(":scope > .traceSvcStats");
+    if (stats) {
+      if (!strip) {
+        strip = document.createElement("div");
+        strip.className = "traceSvcStats";
+        detailPanel.head.after(strip);
+      }
+      strip.innerHTML = stats;
+    } else {
+      strip?.remove();
+    }
+    detailPanel.body.innerHTML = body;
     drawDetailCharts();
   }
 
   // --------------------------------------------------------------- actions
 
+  // Opening the detail pushes a history entry (svc=); another service in the
+  // open detail replaces it; closing goes Back to the entry before it (or
+  // replaces, when the entry is not the detail's own: a link, a reload).
   function openDetail(name, { push = true } = {}) {
+    const opening = !view.detailName;
     view.detailName = name || "";
-    if (push) ns.traceSearch?.writeUrl?.("push");
+    if (push && view.detailName) ns.traceSearch?.writeUrl?.(opening ? "push" : "replace", opening ? { detail: PANEL_ENTRY } : null);
     const table = root?.querySelector(".traceSvcTable");
     table?.querySelectorAll("[data-svc-row]").forEach((tr) => {
       const on = tr.getAttribute("data-svc-row") === view.detailName;
@@ -516,11 +561,17 @@
     if (view.detailName) void loadDetail();
   }
 
-  // The drawer's × and Escape: focus goes back to the service's row.
-  function closeDetail() {
+  // The close button, Escape (ns.layers) and a click on the open service's
+  // row: focus goes back to the service's row.
+  function closeDetail({ fromPanel = false } = {}) {
     const name = view.detailName;
-    openDetail("");
-    if (name) root?.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
+    if (!name) return;
+    const back = window.history.state?.detail === PANEL_ENTRY;
+    view.detailName = "";
+    openDetail("", { push: false });
+    if (back) window.history.back();
+    else ns.traceSearch?.writeUrl?.("replace");
+    if (fromPanel || !back) root?.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
   }
 
   function searchFor(spec) {
@@ -567,7 +618,6 @@
     if (operation) { searchFor({ service: view.detailName, operation: operation.getAttribute("data-svc-operation-search") || "" }); return; }
     const searchButton = target.closest("[data-svc-search]");
     if (searchButton) { searchFor({ service: searchButton.getAttribute("data-svc-search") || "" }); return; }
-    if (target.closest("[data-svc-close]")) { closeDetail(); return; }
     const trace = target.closest("[data-svc-trace]");
     if (trace) {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
@@ -579,19 +629,14 @@
     const row = target.closest("[data-svc-row]");
     if (row) {
       const name = row.getAttribute("data-svc-row") || "";
-      openDetail(name === view.detailName ? "" : name);
+      if (name === view.detailName) closeDetail();
+      else openDetail(name);
     }
   }
 
+  // Enter / Space on a row opens its detail (Escape closes it: ns.layers).
   function onKeydown(event) {
     const target = event.target instanceof Element ? event.target : null;
-    if (event.key === "Escape" && view.detailName && root && !root.hidden && !event.defaultPrevented
-      && (!ns.observability || ns.observability.isActive("traces"))
-      && !document.querySelector(".tracePicker.themeSelect--open, .traceSearchBar [aria-expanded='true']")) {
-      event.preventDefault();
-      closeDetail();
-      return;
-    }
     const row = target?.closest?.("[data-svc-row]");
     if (row && row === target && (event.key === "Enter" || event.key === " ")) {
       event.preventDefault();
@@ -627,7 +672,7 @@
     ctx = context;
     root = element;
     root.addEventListener("click", onClick);
-    document.addEventListener("keydown", onKeydown);
+    root.addEventListener("keydown", onKeydown);
     render();
   }
 

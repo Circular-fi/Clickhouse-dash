@@ -56,6 +56,8 @@
     fitted: true,
     // { kind: "node" | "edge", id } | null
     selected: null,
+    // A selection was showing when the current one was made (a move, not an open).
+    panelWasOpen: false,
     hovered: null,
   };
 
@@ -426,7 +428,7 @@
     const data = map.data;
     if (!data || !data.nodes.length) {
       map.layout = null;
-      closePanel();
+      closePanel({ url: "none" });
       ctl?.scheduleDraw();
       return;
     }
@@ -513,9 +515,28 @@
 
   // A click on a service recentres on it and selects it (side panel); on a
   // call, selects the call; on the background, closes the panel.
-  function select(target, { center = true } = {}) {
+  // The selected service in the URL (node=, a view parameter of the tab):
+  // pushed when the panel opens on a service, replaced when the selection
+  // moves, and Back closes the panel (closePanel goes Back when the entry is
+  // the panel's own).
+  const NODE_ENTRY = "detail:node";
+  let pendingNode = "";
+  const selectedNode = () => (map.selected?.kind === "node" ? map.selected.id : "");
+
+  function writeNodeUrl(previous) {
+    const next = selectedNode();
+    if (next === previous) return;
+    if (next && !previous && !map.panelWasOpen) ns.traceSearch?.writeUrl?.("push", { detail: NODE_ENTRY });
+    else ns.traceSearch?.writeUrl?.("replace");
+  }
+
+  // url: false when the URL already names the selection (Back / Forward).
+  function select(target, { center = true, url = true } = {}) {
+    const previous = selectedNode();
+    map.panelWasOpen = !!map.selected;
     map.selected = target;
     renderPanel();
+    if (url) writeNodeUrl(previous);
     if (target?.kind === "node" && center) {
       const item = map.layout?.items.get(target.id);
       if (item) ctl?.centerOn(item);
@@ -523,10 +544,25 @@
     ctl?.scheduleDraw();
   }
 
-  function closePanel() {
-    map.selected = null;
+  // The panel: the floating detail panel shell (kit.panelShell: Escape
+  // through ns.layers, focus back to the canvas).
+  let mapPanel = null;
+  function panelShell() {
     const panel = byId("traceMapPanel");
-    if (panel) { panel.hidden = true; panel.replaceChildren(); }
+    if (!mapPanel && panel) mapPanel = kit.panelShell(panel, { opener: () => canvas(), onClose: () => { if (map.selected) closePanel(); } });
+    return mapPanel;
+  }
+
+  // url: "clear" drops node= (Back when the entry is the panel's own),
+  // "none" when the URL already has none.
+  function closePanel({ url = "clear" } = {}) {
+    const previous = selectedNode();
+    map.selected = null;
+    panelShell()?.hide();
+    if (previous && url === "clear" && shown()) {
+      if (window.history.state?.detail === NODE_ENTRY && new URLSearchParams(window.location.search).get("node") === previous) window.history.back();
+      else ns.traceSearch?.writeUrl?.("replace");
+    }
     byId("traceMapPane")?.classList.remove("graphKitPane--panel");
     ctl?.scheduleDraw();
   }
@@ -600,8 +636,7 @@
         + ((Number(edge.errors) || 0) > 0 ? `<button type="button" class="button button--small" data-map-search-edge-errors="${esc(item.id)}">Search errors</button>` : "")
         + "</div>"));
     }
-    panel.replaceChildren(body);
-    panel.hidden = false;
+    panelShell().show(body);
     panel.dataset.panelType = target.kind;
     byId("traceMapPane")?.classList.add("graphKitPane--panel");
   }
@@ -664,12 +699,17 @@
       // The legend and the status line first: the fit leaves room for them.
       renderMeta();
       renderLegend();
-      // A selection that still exists stays open.
+      // A selection that still exists stays open; node= of a link or a
+      // reload opens its service.
       map.selected = null;
-      if (previous && map.layout && (previous.kind === "node" ? map.layout.items.has(previous.id) : map.layout.edgeById.has(previous.id))) {
+      if (pendingNode && map.layout?.items.has(pendingNode)) map.selected = { kind: "node", id: pendingNode };
+      else if (previous && map.layout && (previous.kind === "node" ? map.layout.items.has(previous.id) : map.layout.edgeById.has(previous.id))) {
         map.selected = previous;
       }
-      if (map.selected) renderPanel(); else closePanel();
+      const dropped = pendingNode && !map.selected;
+      pendingNode = "";
+      if (map.selected) renderPanel(); else closePanel({ url: "none" });
+      if (dropped || (previous?.kind === "node" && !map.selected)) ns.traceSearch?.writeUrl?.("replace");
       fit();
     } catch (error) {
       if (seq !== map.seq) return;
@@ -733,13 +773,6 @@
     });
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
     byId("traceMapPanel")?.addEventListener("click", onActionClick);
-    // Escape closes the panel even when its focused button was re-rendered away.
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || !map.selected || !shown() || event.defaultPrevented) return;
-      if (event.target instanceof Element && event.target !== document.body && !event.target.closest(".traceMap")) return;
-      event.preventDefault();
-      closePanel();
-    });
     byId("traceMapState")?.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-map-retry]")) void ctx.runSearch({ url: "none" });
     });
@@ -801,6 +834,19 @@
     onSearch: (filters, options) => load(filters, options),
     onShow,
     onHide: () => { map.hovered = null; },
+    params: ["node"],
+    writeParams: (params) => { const id = selectedNode() || pendingNode; if (id) params.set("node", id); },
+    applyParams: (params) => {
+      const id = params.get("node") || "";
+      if (!id) {
+        pendingNode = "";
+        if (map.selected) closePanel({ url: "none" });
+        return;
+      }
+      if (selectedNode() === id) return;
+      if (map.layout?.items.has(id)) select({ kind: "node", id }, { url: false });
+      else pendingNode = id;
+    },
   });
 
   // For tests and other modules: the layout of a payload (no DOM), and the

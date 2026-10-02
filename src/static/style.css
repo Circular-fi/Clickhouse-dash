@@ -9858,6 +9858,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 
 /* Trace search dashboard - dense full-width search, analytics and result rows. */
 .traceSearchView {
+  /* Detail panels stick under the search bar (app_ui_panel.js). */
+  --detail-top: var(--trace-bar-h, 0px);
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -15074,7 +15076,6 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
   min-width: 290px !important;
   right: auto !important;
 }
-.logsSidePanel__headerActions .button--small { height: 26px; min-height: 26px; padding: 0 10px; font-size: 11px; }
 
 .logsMultiPicker__menu {
   min-width: 240px;
@@ -15369,28 +15370,13 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
 .logsSparkline__line { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
 .logsSparkline__line[data-sev] { stroke: var(--sev-color); }
 
-.logsSidePanel {
-  flex: 0 0 auto;
-  width: clamp(380px, 44%, 660px);
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--borderStrong);
-  background: var(--panelBg);
-}
-.logsSidePanel[hidden] { display: none !important; }
-.logsSidePanel__header { display: flex; align-items: center; gap: 8px; padding: 8px 10px 6px; border-bottom: 1px solid var(--border); }
-.logsSidePanel__title { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; font-size: 11.5px; white-space: nowrap; }
+/* The record panel: a docked .uiDetail (app_ui_panel.js); its title is the
+   severity, the service and the time on one line. */
+.logsSidePanel .logsSidePanel__title { flex-wrap: nowrap; gap: 8px; overflow: hidden; font-size: 12.5px; white-space: nowrap; }
 .logsSideTitle__service { display: inline-flex; align-items: center; font-weight: 700; }
 .logsSideTitle__time { overflow: hidden; color: var(--muted); font-family: var(--mono); text-overflow: ellipsis; }
-.logsSidePanel__headerActions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .logsOpenTrace { text-decoration: none; }
-.logsSidePanel__close { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
-.logsSidePanel__close:hover { border-color: var(--border); color: var(--text); }
-.logsSidePanel__close svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 .logsSideTabs { padding: 0 8px; border-bottom: 1px solid var(--border); }
-.logsSidePanel__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 10px 12px; }
-.logsSidePanel__body[hidden] { display: none; }
 .logsFieldGroup { margin-bottom: 12px; }
 .logsFieldGroup h4 { display: flex; gap: 6px; margin: 0 0 4px; color: var(--muted); font: 700 10px/1.4 Arial, Helvetica, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
 .logsFieldGroup h4 span { font-weight: 600; letter-spacing: 0; text-transform: none; }
@@ -16230,7 +16216,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 /* Services view (app_trace_services.js) */
 .traceTabView--services { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; }
-.traceSvc { position: relative; min-width: 0; padding: 0 12px 16px; }
+/* The list (.traceSvc__main) and the service detail docked beside it. */
+.traceSvc { display: flex; align-items: flex-start; min-width: 0; }
+.traceSvc__main { flex: 1 1 auto; min-width: 0; padding: 0 12px 16px; }
 .traceSvc.is-loading .traceSvc__table { opacity: .6; transition: opacity .15s; }
 .traceSvc__toolbar {
   min-height: 38px;
@@ -16270,7 +16258,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 }
 .traceSvcAction:hover { border-color: var(--accentBorder); }
 .traceSvcAction:focus-visible, .traceSvcLink:focus-visible, .traceSvcSort:focus-visible, .traceSvcScope__option:focus-visible,
-.traceSvcRow:focus-visible, .traceSvcDetail__close:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
+.traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
 .traceSvcScope { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--buttonBorder); border-radius: 6px; background: var(--inputBg); }
 .traceSvcScope__option {
   height: 21px;
@@ -16298,7 +16286,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcRow:hover { background: var(--rowHover); }
 .traceSvcRow.is-selected { background: color-mix(in srgb, var(--accentBorder) 12%, transparent); }
 .traceSvcRow__name { max-width: 280px; font-weight: 650; }
-.traceSvcRow__cell, .traceSvcDetail__head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.traceSvcRow__cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .traceSvcRow__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .traceSvcDot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 2px; background: var(--trace-service-color, var(--muted)); }
 .traceSvcShare { position: relative; min-width: 96px; width: 200px; }
@@ -16313,36 +16301,19 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }
 
 /* Service detail: a drawer over the table (HyperDX side panels). */
-.traceSvcDetail {
-  position: fixed;
-  top: calc(var(--shell-top, 0px) + var(--trace-bar-h, 0px));
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  width: min(780px, calc(100vw - 48px));
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--border);
-  background: var(--panelBg);
-  box-shadow: var(--obs-shadow-drawer);
-}
-.traceSvcDetail[hidden] { display: none; }
-.traceSvcDetail__head { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.traceSvcDetail__head h3 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.traceSvcDetail__close { width: 26px; height: 26px; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
-.traceSvcDetail__close:hover { color: var(--text); border-color: var(--border); }
+/* The service detail: a docked, sticky .uiDetail (app_ui_panel.js). */
+.traceSvcDetail .uiDetail__title { flex-wrap: nowrap; }
 .traceSvcStats { flex: 0 0 auto; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
 .traceSvcStat { display: flex; flex-direction: column; gap: 3px; padding: 7px 10px; background: var(--panelBg); min-width: 0; }
 .traceSvcStat span { color: var(--muted); font-size: 10px; }
 .traceSvcStat b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.traceSvcDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px 18px; }
 .traceSvcNote { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: color-mix(in srgb, var(--warning) 75%, var(--text)); font-size: 11.5px; }
 .traceSvcCharts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .traceSvcChart { min-height: 158px; }
 .traceSvcChart > .tracesEmpty { min-height: 140px; }
 .chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
 .chartCore__annotation.traceSvcRelease > span { color: var(--accentBorder); }
-.traceSvcDetail__head + .traceSvcStats + .traceSvcDetail__body .traceAnalyticsCard > header .traceChartLegend--quantiles span { font-size: 9.5px; }
+.traceSvcDetail .traceAnalyticsCard > header .traceChartLegend--quantiles span { font-size: 9.5px; }
 .traceSvcSection { margin-top: 14px; }
 .traceSvcSection h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; }
 .traceSvcEmpty { padding: 6px 0; color: var(--muted); font-size: 11.5px; }
@@ -16479,62 +16450,11 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 @keyframes traceSpanSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .traceSpanTable__spinner { animation: none; } }
 
-.traceSpanPanel {
-  position: fixed;
-  /* Under the page chrome and the sticky search bar (app_observability.js,
-     app_traces.js measure both). */
-  top: calc(var(--shell-top, 0px) + var(--trace-bar-h, 0px));
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-  width: min(600px, 48vw);
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--borderStrong);
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-}
-.traceSpanPanel[hidden] { display: none; }
-.traceSpanPanel__head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border-top: 3px solid var(--trace-service-color);
-  border-bottom: 1px solid var(--border);
-}
-.traceSpanPanel__title { min-width: 0; display: grid; gap: 3px; }
-.traceSpanPanel__service { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
-.traceSpanPanel__title strong { min-width: 0; overflow: hidden; font-size: 14px; white-space: nowrap; text-overflow: ellipsis; }
-.traceSpanPanel__actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.traceSpanPanel__position { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.traceSpanPanel__nav,
-.traceSpanPanel__close {
-  width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 4px;
-  background: var(--buttonBg);
-  color: var(--text);
-  font-size: 17px;
-  line-height: 1;
-  cursor: pointer;
-}
-.traceSpanPanel__nav svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.traceSpanPanel__nav:disabled { opacity: .4; cursor: default; }
-.traceSpanPanel__nav:not(:disabled):hover,
-.traceSpanPanel__close:hover { border-color: var(--buttonBorderHover); background: var(--buttonBgHover); }
-.traceSpanPanel__nav:focus-visible,
-.traceSpanPanel__close:focus-visible,
-.traceSpanPanel__open:focus-visible { box-shadow: var(--ring); }
+/* The span side panel: a docked, sticky .uiDetail (app_ui_panel.js) beside
+   the results; the head carries the service colour. */
+.traceSpanPanel .uiDetail__head { border-top: 3px solid var(--trace-service-color); }
+.traceSpanPanel .uiDetail__eyebrow { display: flex; align-items: center; gap: 5px; }
 .traceSpanPanel__open { white-space: nowrap; text-decoration: none; }
-.traceSpanPanel__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px 18px; scrollbar-gutter: stable; }
 .traceSpanPanel__facts { margin: 0 0 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 .traceSpanPanel__fact { min-width: 0; }
 .traceSpanPanel__fact dt { color: var(--muted); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
@@ -16545,65 +16465,24 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanPanel__status.is-error { color: var(--danger); }
 
 /* ==========================================================================
-   Observability drawers: the span panel (Search tab, Spans mode), the
-   service detail (Services tab) and the log record panel (Logs view).
-   Their offsets come from the page: --shell-top (header + #obsNav,
-   app_dom.js) and --trace-bar-h (the search bar, app_traces.js),
-   never from a literal height that a wrapped header outgrows.
+   Observability detail panels: the span panel (Search tab, Spans mode), the
+   service detail (Services tab) and the log record panel (Logs view) are
+   docked ns.detailPanel shells (Components: panels). In the Traces search
+   view they stick under the search bar: --detail-top is --trace-bar-h
+   (app_traces.js), never a literal height a wrapped bar outgrows.
    ========================================================================== */
 /* At most 1100 px the search bar scrolls with the results (it is not
-   sticky): the drawers start under the page chrome, the facets sidebar
-   sticks at the top (at most 760 px it is a block above the results). */
+   sticky): the panels and the facets sidebar stick at the top (at most
+   760 px the facets are a block above the results). */
 @media (max-width: 1100px) {
-  .traceSpanPanel,
-  .traceSvcDetail { top: var(--shell-top, 0px); }
+  /* The search bar scrolls with the results: panels stick at the top. */
+  .traceSearchView { --detail-top: 0px; }
 }
 @media (min-width: 761px) and (max-width: 1100px) {
   .traceFacets { top: 8px; max-height: calc(100dvh - var(--shell-top, 0px) - 20px); }
 }
-/* Narrow windows: a bottom sheet over the lower part of the view, the full
-   width (a value column a value fits in), its head and close button in
-   reach under the page chrome. */
+/* Narrow windows: the panels are bottom sheets (Components: panels). */
 @media (max-width: 820px) {
-  .traceSpanPanel,
-  .traceSvcDetail,
-  .logsSidePanel {
-    position: fixed;
-    top: auto;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 45;
-    width: auto;
-    min-width: 0;
-    max-width: none;
-    height: min(80dvh, calc(100dvh - var(--shell-top, 0px) - 16px));
-    border: 0;
-    border-top: 1px solid var(--borderStrong);
-    border-radius: 12px 12px 0 0;
-    overflow: hidden;
-    background: var(--panelBg);
-    box-shadow: var(--obs-shadow-sheet);
-  }
-  .traceSpanPanel__head,
-  .traceSvcDetail__head,
-  .logsSidePanel__header { position: relative; padding-top: 16px; }
-  .traceSpanPanel__head::before,
-  .traceSvcDetail__head::before,
-  .logsSidePanel__header::before {
-    content: "";
-    position: absolute;
-    top: 6px;
-    left: calc(50% - 18px);
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--borderStrong);
-  }
-  .traceSpanPanel__nav,
-  .traceSpanPanel__close,
-  .traceSvcDetail__close,
-  .logsSidePanel__close { width: 32px; height: 32px; }
   /* No hover here: the row actions show over the value's end on focus
      instead of taking a column of their own. */
   .traceKv__actions {
@@ -17340,7 +17219,8 @@ html[data-theme="light"] {
   --graph-minimap-bg: var(--panelBg);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
-  --graph-panel-width: min(340px, 42%);
+  /* The detail panel width (--detail-w), within the canvas. */
+  --graph-panel-width: min(var(--detail-w), 42%);
 }
 @media (prefers-color-scheme: light) {
   :root {
@@ -17627,71 +17507,16 @@ html[data-theme="light"] {
 .graphKitMinimap[hidden] { display: none; }
 .graphKitPane--panel .graphKitMinimap { right: calc(var(--graph-panel-width) + 20px); }
 
-/* Side panel shell: eyebrow, title, subtitle, close; actions; sections. */
-.graphKitPanel {
-  position: absolute;
-  z-index: 8;
-  top: 56px;
-  right: 10px;
-  bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  width: var(--graph-panel-width);
-  min-width: 260px;
-  border: 1px solid var(--borderStrong);
-  border-radius: 10px;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-  color: var(--text);
-  font-size: 13px;
-  cursor: default;
-}
-.graphKitPanel[hidden] { display: none !important; }
+/* The side panel: a floating .uiDetail (Components: panels) under the
+   toolbar; its head is the shell's (graphKitPanel__* names kept for the
+   content). */
+.uiDetail.graphKitPanel { font-size: 13px; }
 .graphKitPanel__body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 12px 14px 16px;
-}
-.graphKitPanel__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.graphKitPanel__titles {
-  display: grid;
-  flex: 1 1 auto;
-  gap: 2px;
-  min-width: 0;
-}
-.graphKitPanel__eyebrow,
-.graphKitPanel__subtitle {
-  color: var(--graph-muted);
-  font-size: 12px;
-}
-.graphKitPanel__title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.3;
-}
-.graphKitPanel__dot {
-  flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.graphKitPanel__close {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  margin: -4px -6px 0 0;
 }
 .graphKitPanel__actions {
   display: flex;
@@ -17800,17 +17625,6 @@ html[data-theme="light"] {
     bottom: 8px;
     width: 130px;
     height: 80px;
-  }
-  /* The side panel becomes a bottom sheet. */
-  .graphKitPanel {
-    top: auto;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-    width: auto;
-    min-width: 0;
-    max-height: 72%;
-    border-radius: 12px 12px 10px 10px;
   }
   .graphKitPane--panel .graphKitMinimap { display: none; }
 }
@@ -19060,6 +18874,307 @@ body {
   color: var(--text);
 }
 /* ==== /Components: popover ================================================= */
+
+/* ==== Components: panels (app_ui_panel.js) ================================
+   ns.sidePanel (.uiSide): the left list of a page, --side-w wide: a head
+   (title or collapse toggle, count / meta, a 30 px search, an optional chip
+   row) over a body that scrolls on its own. Wide windows fold it to a 32 px
+   rail (.is-collapsed); at --bp-md and below it is a drawer over the content
+   (.is-open), opened by its toggle.
+   ns.detailPanel (.uiDetail): the right panel showing one entity, docked
+   beside the content (.uiDetail--docked) or floating over a canvas
+   (.uiDetail--floating), --detail-w wide; one head (eyebrow, title,
+   subtitle, actions, the .closeCross close button); a bottom sheet under
+   --shell-top at --bp-md and below.
+   ========================================================================== */
+:root {
+  --side-w: 288px;
+  --side-rail-w: 32px;
+  --detail-w: min(600px, 45vw);
+  --panel-scrim: rgba(2, 6, 23, 0.38);
+  --panel-shadow-drawer: 8px 0 24px rgba(2, 6, 23, 0.28);
+  --panel-shadow-sheet: 0 -14px 36px rgba(0, 0, 0, 0.32);
+}
+
+/* -- Side panel ------------------------------------------------------------ */
+.uiSide {
+  box-sizing: border-box;
+  flex: 0 0 var(--side-w);
+  width: var(--side-w);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--shell-border);
+  background: var(--panelBg);
+  overflow: hidden;
+}
+.uiSide[hidden] { display: none; }
+.uiSide__head {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: var(--shell-border);
+}
+.uiSide__bar {
+  min-width: 0;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.uiSide__title,
+.uiSide__toggle {
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.uiSide__toggle {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.uiSide__toggle:hover { background: var(--rowHover); }
+.uiSide__toggle svg,
+.uiSide__drawerToggle svg { width: 13px; height: 13px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+.uiSide__meta {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.uiSide__search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  color: var(--text);
+  font: 500 11.5px/1 Arial, Helvetica, sans-serif;
+}
+.uiSide__search:hover,
+.uiSide__search:focus { border-color: var(--buttonBorderHover); }
+.uiSide__search:focus-visible { box-shadow: var(--ring); }
+.uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.uiSide__drawerToggle,
+.uiSide__backdrop { display: none; }
+
+/* Folded to a rail: the collapse toggle only. Before the scripts run the
+   page's head script sets the <html> class the panel's collapse names. */
+@media (min-width: 821px) {
+  .uiSide.is-collapsed,
+  html.chdash-trace-facets-collapsed #traceFacets,
+  html.chdash-logs-facets-collapsed #logsFacets {
+    flex-basis: var(--side-rail-w);
+    width: var(--side-rail-w);
+  }
+  .uiSide.is-collapsed > :not(.uiSide__head),
+  .uiSide.is-collapsed .uiSide__head > :not(.uiSide__bar),
+  .uiSide.is-collapsed .uiSide__bar > :not(.uiSide__toggle),
+  .uiSide.is-collapsed .uiSide__toggle > span { display: none; }
+  .uiSide.is-collapsed .uiSide__head { justify-items: center; padding: 4px 0; border-bottom: 0; }
+  .uiSide.is-collapsed .uiSide__toggle { width: 26px; justify-content: center; margin: 0; padding: 0; }
+}
+
+/* Narrow windows: a drawer over the content, opened by its toggle. */
+@media (max-width: 820px) {
+  .uiSide {
+    position: absolute;
+    z-index: var(--z-drawer);
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 86%);
+    box-shadow: var(--panel-shadow-drawer);
+    transform: translateX(-104%);
+    visibility: hidden;
+    transition: transform 160ms ease, visibility 0s linear 160ms;
+  }
+  .uiSide.is-open {
+    transform: none;
+    visibility: visible;
+    transition: transform 160ms ease;
+  }
+  .uiSide__drawerToggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
+  .uiSide__backdrop:not([hidden]) {
+    display: block;
+    position: absolute;
+    z-index: calc(var(--z-drawer) - 1);
+    inset: 0;
+    background: var(--panel-scrim);
+  }
+}
+@media (max-width: 820px) and (prefers-reduced-motion: reduce) {
+  .uiSide,
+  .uiSide.is-open { transition: none; }
+}
+
+/* -- Detail panel ---------------------------------------------------------- */
+.uiDetail {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panelBg);
+  color: var(--text);
+  font-size: 12px;
+}
+.uiDetail[hidden] { display: none !important; }
+.uiDetail--docked {
+  flex: 0 0 var(--detail-w);
+  width: var(--detail-w);
+  min-width: 320px;
+  border-left: var(--shell-border);
+}
+.uiDetail--floating {
+  position: absolute;
+  z-index: var(--z-panel);
+  top: 56px;
+  right: 10px;
+  bottom: 10px;
+  width: var(--graph-panel-width, var(--detail-w));
+  min-width: 260px;
+  border: 1px solid var(--borderStrong);
+  border-radius: 8px;
+  box-shadow: var(--shadow2);
+  cursor: default;
+}
+/* Sticky beside a page that scrolls (the Traces search view): under its
+   sticky bar (--detail-top), the height of what is left of the view. */
+@media (min-width: 821px) {
+  .uiDetail--docked.uiDetail--sticky {
+    position: sticky;
+    top: var(--detail-top, 0px);
+    align-self: flex-start;
+    height: calc(100dvh - var(--shell-top, 0px) - var(--detail-top, 0px));
+  }
+}
+.uiDetail__head {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: var(--shell-border);
+}
+.uiDetail__titles { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.uiDetail__eyebrow,
+.uiDetail__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.uiDetail__eyebrow { font-weight: 650; }
+.uiDetail__title {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.uiDetail__dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; }
+.uiDetail__actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.uiDetail__position { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.uiDetail__nav {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 4px;
+  background: var(--buttonBg);
+  color: var(--text);
+  cursor: pointer;
+}
+.uiDetail__nav svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.uiDetail__nav:disabled { opacity: .4; cursor: default; }
+.uiDetail__nav:not(:disabled):hover { border-color: var(--buttonBorderHover); background: var(--buttonBgHover); }
+.uiDetail__close { flex: 0 0 auto; width: 28px; height: 28px; margin: -2px -4px 0 0; }
+.uiDetail__actions .button--small { height: 26px; min-height: 26px; padding: 0 10px; font-size: 11px; text-decoration: none; }
+.uiDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 18px; }
+
+/* Narrow windows: a bottom sheet over the lower part of the view, its head
+   and close button in reach under the page chrome. */
+@media (max-width: 820px) {
+  .uiDetail--docked {
+    position: fixed;
+    z-index: var(--z-drawer);
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    height: min(80dvh, calc(100dvh - var(--shell-top, 0px) - 16px));
+    border: 0;
+    border-top: 1px solid var(--borderStrong);
+    border-radius: 12px 12px 0 0;
+    overflow: hidden;
+    box-shadow: var(--panel-shadow-sheet);
+  }
+  .uiDetail--floating {
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    min-width: 0;
+    max-height: 72%;
+    border-radius: 12px 12px 8px 8px;
+  }
+  .uiDetail__head { position: relative; padding-top: 16px; }
+  .uiDetail__head::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: calc(50% - 18px);
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--borderStrong);
+  }
+  .uiDetail__nav,
+  .uiDetail__close { width: 32px; height: 32px; }
+}
+/* ==== /Components: panels ================================================== */
 
 /* ==== Query page revamp (2026-10) ===========================================
    Query library panel (Saved / History), toolbar hierarchy, running state,

@@ -42,7 +42,7 @@
   // Namespace each core module registers, by file.
   const CORE_MODULES = {
     format: "app_format.js", palette: "app_palette.js",
-    dom: "app_dom.js", layers: "app_ui_layers.js", popover: "app_ui_popover.js", ui: "app_ui.js", run: "app_run.js", results: "app_results.js", api: "app_api.js", sql: "app_sql.js",
+    dom: "app_dom.js", layers: "app_ui_layers.js", popover: "app_ui_popover.js", detailPanel: "app_ui_panel.js", ui: "app_ui.js", run: "app_run.js", results: "app_results.js", api: "app_api.js", sql: "app_sql.js",
     util: "app_util.js", storage: "app_state.js", pipelineViewer: "app_pipeline_viewer.js", analysisData: "app_analysis_data.js",
     analysis: "app_analysis.js", download: "app_download.js", massExport: "app_export.js", graphKit: "app_graph_kit.js", explorerGraph: "app_explorer_graph.js",
     explorerTreemap: "app_explorer_treemap.js", explorerStorage: "app_explorer_storage.js", explorerOps: "app_explorer_ops.js",
@@ -94,6 +94,7 @@
       "app_dom.js",
       "app_ui_layers.js",
       "app_ui_popover.js",
+      "app_ui_panel.js",
       "app_state.js",
       "app_util.js",
       "app_sql.js",

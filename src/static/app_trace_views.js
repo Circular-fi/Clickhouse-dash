@@ -937,16 +937,6 @@
       if (graphShown()) graphUi.ctl.drawNow();
     });
     pane.addEventListener("click", onGraphActionClick);
-    // Escape in the panel or the list, or after the focused panel button was
-    // re-rendered away, closes the panel (the canvas has its own).
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || !graphUi.selected || event.defaultPrevented || event.target === canvas || !graphShown()) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (target && target !== document.body && !pane.contains(target)) return;
-      event.preventDefault();
-      closeGraphPanel();
-      canvas.focus({ preventScroll: true });
-    });
     return pane;
   }
 
@@ -1225,10 +1215,18 @@
     graphUi.ctl?.scheduleDraw();
   }
 
+  // The floating detail panel shell (kit.panelShell: Escape through
+  // ns.layers, focus back to the canvas).
+  let graphPanelShell = null;
+  function graphPanelCtl() {
+    const panel = graphPanel();
+    if (!graphPanelShell && panel) graphPanelShell = graphKit().panelShell(panel, { opener: () => graphCanvas(), onClose: () => { if (graphUi.selected) closeGraphPanel(); } });
+    return graphPanelShell;
+  }
+
   function closeGraphPanel() {
     graphUi.selected = null;
-    const panel = graphPanel();
-    if (panel) { panel.hidden = true; panel.replaceChildren(); }
+    graphPanelCtl()?.hide();
     graphUi.pane?.classList.remove("graphKitPane--panel");
     graphUi.ctl?.scheduleDraw();
   }
@@ -1283,8 +1281,7 @@
         ? `<ul class="traceGraphPanel__list">${children.map((child) => `<li>${graphNodeButton(child, `<small>×${esc(fmt.compact(child.count))} · ${esc(fmt.duration(child.time))}</small>`)}</li>`).join("")}</ul>`
         : '<p class="graphKitPanel__note">None</p>')
       + "</section>"));
-    panel.replaceChildren(body);
-    panel.hidden = false;
+    graphPanelCtl().show(body);
     graphUi.pane.classList.add("graphKitPane--panel");
   }
 

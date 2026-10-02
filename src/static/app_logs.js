@@ -119,6 +119,8 @@
       if (button) {
         button.classList.add("is-copied");
         setTimeout(() => button.classList.remove("is-copied"), 900);
+        // An icon button also gets the "Copied" flash (ns.popover.flash).
+        if (!button.textContent.trim()) ns.popover?.flash(button);
       }
     } catch (_) {
       const area = document.createElement("textarea");
@@ -149,7 +151,8 @@
     model.denoise = params.get("denoise") === "1";
   }
 
-  function urlParams() {
+  // withRecord: the open record's log= too (writeUrl keeps it).
+  function urlParams({ withRecord = true } = {}) {
     const params = new URLSearchParams();
     params.set("from", model.timeRange.from);
     params.set("to", model.timeRange.to);
@@ -162,6 +165,8 @@
     if (model.tab !== "results") params.set("tab", model.tab);
     if (model.cols.join(",") !== DEFAULT_COLUMNS.join(",")) params.set("cols", model.cols.join(","));
     if (model.denoise) params.set("denoise", "1");
+    const record = withRecord ? model.side.row?.id || pendingLogId : "";
+    if (record) params.set("log", record);
     return params;
   }
 
@@ -661,7 +666,8 @@
       model.lastPayload = payload;
       renderTable();
       renderStatus();
-      if (model.selectedId && !model.rowIds.has(model.selectedId)) closeSidePanel();
+      if (model.selectedId && !model.rowIds.has(model.selectedId)) closeSidePanel({ url: pendingLogId ? "none" : "clear" });
+      openPendingSidePanel();
     } catch (error) {
       if (seq !== model.seq.search) return;
       model.rows = [];
@@ -1224,33 +1230,77 @@
 
   // --- Side panel --------------------------------------------------------------------------
 
-  function openSidePanel(row, { tab = null } = {}) {
+  // The record panel: a docked ns.detailPanel. Its log= URL parameter (the
+  // record's id) is pushed when it opens, replaced when another record shows
+  // in it, and Back closes it. Escape (ns.layers) and the close button give
+  // the focus back to the record table, whose arrow keys move through the
+  // records.
+  let sidePanel = null;
+  const logParam = ns.detailPanel.urlParam("log");
+  // A log= of a reload or a link: opened when its record is listed.
+  let pendingLogId = "";
+
+  function detailPanel() {
+    if (sidePanel || !$("logsSidePanel")) return sidePanel;
+    sidePanel = ns.detailPanel.create({
+      el: $("logsSidePanel"),
+      layout: "docked",
+      returnFocus: () => $("logsTable"),
+      onClose: () => { if (model.side.row) closeSidePanel(); },
+    });
+    return sidePanel;
+  }
+
+  // url: "push" | "replace" (another record in the open panel) | "none".
+  function openSidePanel(row, { tab = null, url = null } = {}) {
     if (!row) return;
+    const moving = !!model.side.row;
     model.selectedId = row.id;
     model.side.row = row;
     if (tab) model.side.tab = tab;
     model.side.context = null;
     model.side.contextError = "";
-    const panel = $("logsSidePanel");
-    if (panel) panel.hidden = false;
+    detailPanel()?.open({ opener: $("logsTable") });
     document.querySelector(".logsBody")?.classList.add("has-side");
     renderSidePanel();
     renderWindow(true);
     if (model.side.tab === "context") void loadContext();
+    const mode = url || (moving ? "replace" : "push");
+    if (ownsUrl() && mode === "push") logParam.open(row.id);
+    else if (ownsUrl() && mode === "replace") logParam.move(row.id);
   }
 
-  function closeSidePanel() {
+  // url: "clear" (drop log=, Back when the entry is the panel's own) or
+  // "none" (the URL already has no log=: Back, a new search).
+  function closeSidePanel({ url = "clear" } = {}) {
+    const wasOpen = !!model.side.row;
     model.selectedId = "";
     model.side.row = null;
-    const panel = $("logsSidePanel");
-    // Focus inside the panel (its close button, a tab, Escape there) goes
-    // back to the record table, whose arrow keys move through the records.
-    const active = document.activeElement;
-    const refocus = !!panel && !panel.hidden && (!active || active === document.body || panel.contains(active));
-    if (panel) panel.hidden = true;
+    if (sidePanel?.isOpen()) sidePanel.close("closed", { restoreFocus: true });
     document.querySelector(".logsBody")?.classList.remove("has-side");
     renderWindow(true);
-    if (refocus) $("logsTable")?.focus({ preventScroll: true });
+    if (wasOpen && url === "clear" && ownsUrl()) logParam.clear();
+  }
+
+  // Back / Forward: the panel follows log=.
+  function syncSidePanelFromUrl(id = logParam.get()) {
+    if (!id) {
+      pendingLogId = "";
+      if (model.side.row) closeSidePanel({ url: "none" });
+      return;
+    }
+    if (model.side.row?.id === id) return;
+    const row = model.rows.find((item) => item.id === id);
+    if (row) openSidePanel(row, { url: "none" });
+    else pendingLogId = id;
+  }
+
+  function openPendingSidePanel() {
+    if (!pendingLogId) return;
+    const row = model.rows.find((item) => item.id === pendingLogId);
+    pendingLogId = "";
+    if (row) openSidePanel(row, { url: "none" });
+    else if (logParam.get()) logParam.clear();
   }
 
   const ACTION_ICONS = {
@@ -1435,7 +1485,7 @@
   }
 
   function initSidePanel() {
-    $("logsSideClose")?.addEventListener("click", closeSidePanel);
+    detailPanel();
     $("logsCopyJson")?.addEventListener("click", (event) => {
       if (model.side.row) void copyText(JSON.stringify(model.side.row, null, 2), event.currentTarget);
     });
@@ -1470,11 +1520,6 @@
       model.side.context = context;
       renderSidePanel();
       renderWindow(true);
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || $("logsSidePanel")?.hidden || document.querySelector(".tracePicker.themeSelect--open")) return;
-      if (ns.observability && !ns.observability.isActive("logs")) return;
-      closeSidePanel();
     });
   }
 
@@ -1619,12 +1664,19 @@
   // view shown again on the URL it left keeps its results, scroll and side
   // panel (a live tail resumes polling).
   function onLocation() {
-    const before = urlParams().toString();
+    // log= first: the URL writes below keep the open record's log=.
+    const logId = logParam.get();
+    const before = urlParams({ withRecord: false }).toString();
     readUrl();
+    const same = urlParams({ withRecord: false }).toString() === before && model.lastSearch && !model.metaError;
+    if (same) syncSidePanelFromUrl(logId);
+    else {
+      pendingLogId = logId;
+      if (model.side.row && model.side.row.id !== logId) closeSidePanel({ url: "none" });
+    }
     syncControls();
     setTab(model.tab, { push: false });
-    if (urlParams().toString() === before && model.lastSearch && !model.metaError) return;
-    void search({ push: false });
+    if (!same) void search({ push: false });
   }
 
   // A host change while another view is shown reloads when this one comes back.
@@ -1661,6 +1713,7 @@
 
   function init() {
     readUrl();
+    pendingLogId = logParam.get();
     initTimePicker();
     initServicePicker();
     initColumnsPicker();

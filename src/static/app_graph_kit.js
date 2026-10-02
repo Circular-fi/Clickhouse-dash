@@ -2449,28 +2449,34 @@
     return control.auto;
   }
 
-  // Side-panel header: eyebrow (kind), title, subtitle and the close button.
+  // Side-panel header: the detail panel shell's head (ns.detailPanel.head:
+  // eyebrow, title, subtitle, the one close button), with the graphKitPanel__*
+  // names the panel content styles use.
   function panelHeader({ eyebrow, title, subtitle, dot, onClose, closeLabel = "Close details" }) {
-    const header = el("header", "graphKitPanel__head");
-    const titles = el("div", "graphKitPanel__titles");
-    if (eyebrow) titles.append(el("span", "graphKitPanel__eyebrow", eyebrow));
-    const heading = el("h2", "graphKitPanel__title");
-    if (dot) {
-      const swatch = el("span", "graphKitPanel__dot");
-      swatch.style.background = dot;
-      heading.append(swatch);
-    }
-    if (title instanceof Node) heading.append(title);
-    else heading.append(document.createTextNode(String(title ?? "")));
-    titles.append(heading);
-    if (subtitle) titles.append(el("span", "graphKitPanel__subtitle", subtitle));
-    const close = el("button", "closeCross graphKitPanel__close", "×");
-    close.type = "button";
-    close.setAttribute("aria-label", closeLabel);
-    close.title = closeLabel;
-    close.addEventListener("click", onClose);
-    header.append(titles, close);
-    return header;
+    return ns.detailPanel.head({ eyebrow, title, subtitle, dot, onClose, closeLabel, graphKit: true });
+  }
+
+  // The floating detail panel over a canvas (ns.detailPanel, layout
+  // "floating"): show(body) puts the body's head above it (the head stays
+  // while the body scrolls) and opens the panel as an ns.layers layer
+  // (Escape closes it, the focus goes back to the canvas); hide() closes it.
+  // onClose(reason) runs however it closed.
+  function panelShell(panel, { onClose = null, opener = null } = {}) {
+    const shell = ns.detailPanel.create({ el: panel, layout: "floating", onClose, returnFocus: opener });
+    return {
+      shell,
+      show(body) {
+        const head = body.querySelector(":scope > .uiDetail__head");
+        if (head) panel.replaceChildren(head, body);
+        else panel.replaceChildren(body);
+        shell.open({ opener: typeof opener === "function" ? opener() : opener });
+      },
+      hide() {
+        shell.close("closed", { restoreFocus: false });
+        panel.replaceChildren();
+      },
+      isOpen: () => shell.isOpen(),
+    };
   }
 
   function panelSection(title) {
@@ -2538,6 +2544,7 @@
     legendToggle,
     foldLegendToFit,
     panelHeader,
+    panelShell,
     panelSection,
     panelFacts,
   };

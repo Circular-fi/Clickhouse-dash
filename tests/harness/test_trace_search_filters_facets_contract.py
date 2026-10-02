@@ -57,7 +57,7 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     for name in ('"from"', '"to"', '"status"', '"service"', '"operation"', '"limit"', '"sort"', '"results"',
                  '"tag"', '"tag_not"', '"tag_exists"', '"tag_missing"', '"service_not"', '"operation_not"', '"status_not"'):
         assert name in js[js.index("const SEARCH_PARAMS"):js.index("const PIN_STORE_KEY")]
-    assert "window.history.pushState({ workspace: \"traces\" }, \"\", next)" in js
+    assert "window.history.pushState({ ...(state || {}), workspace: \"traces\" }, \"\", next)" in js
     assert "ns.traceSearch?.applyLocation?.({ initial: true });" in traces
     assert "ns.traceSearch?.contextQuery?.()" in traces  # trace URLs keep the search context
     # The sidebar is the facets panel shared with the Logs Fields panel.

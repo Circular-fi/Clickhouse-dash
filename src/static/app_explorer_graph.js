@@ -2765,7 +2765,7 @@
   // by init().
 
   const chrome = {
-    root: null, isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null,
+    root: null, isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null, panelShell: null,
   };
 
   function el(tag, className, text) {
@@ -2799,6 +2799,9 @@
     panel.append(chrome.panelBody);
     chrome.panel = panel;
     pane.append(panel);
+    // The floating detail panel shell (kit.panelShell): Escape through
+    // ns.layers, the focus back to the canvas.
+    chrome.panelShell = kit.panelShell(panel, { opener: () => dom.explorerGraphCanvas, onClose: () => { if (model.panel) closePanel(); } });
   }
 
   function renderGraphChrome() {
@@ -3096,8 +3099,11 @@
       const edge = visibleEdges().find((candidate) => candidate.id === model.panel.id);
       if (edge) { renderEdgePanel(body, edge); rendered = true; }
     }
-    panel.hidden = !rendered;
-    if (!rendered) model.panel = null;
+    if (rendered) chrome.panelShell.show(body);
+    else {
+      model.panel = null;
+      chrome.panelShell.hide();
+    }
     chrome.root?.classList.toggle("graphKitPane--panel", rendered);
     panel.dataset.panelType = rendered ? model.panel.type : "";
     if (keepScroll) body.scrollTop = scrollTop;
@@ -3843,7 +3849,6 @@
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeGraphTypeMenu({ immediate: true });
-      if (event.key === "Escape" && !event.defaultPrevented && model.active && model.panel && !graphTypeMenuOpen()) closePanel();
     });
     setDetailMode(model.detailMode);
     renderGraphChrome();

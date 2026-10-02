@@ -451,21 +451,25 @@
         <section id="logsPatternsPane" class="logsPane logsPatterns" role="tabpanel" aria-labelledby="logsTabPatterns" hidden>
           <div id="logsPatterns" class="logsPatterns__body"><div class="tracesEmpty">Open this tab to mine the patterns of the current search.</div></div>
         </section>
-        <aside id="logsSidePanel" class="logsSidePanel" aria-label="Log record" hidden>
-          <header class="logsSidePanel__header">
-            <div id="logsSideTitle" class="logsSidePanel__title"></div>
-            <div class="logsSidePanel__headerActions">
-              <a id="logsOpenTrace" class="button button--small logsOpenTrace" href="#" hidden>Open trace</a>
-              <button id="logsCopyJson" class="button button--small" type="button">Copy JSON</button>
-              <button id="logsSideClose" class="logsSidePanel__close" type="button" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+        <!-- The record panel: a docked ns.detailPanel (app_ui_panel.js); its log= URL parameter names the record. -->
+        <aside id="logsSidePanel" class="uiDetail uiDetail--docked logsSidePanel" role="dialog" aria-modal="false" aria-labelledby="logsSideTitle" tabindex="-1" hidden>
+          <header class="uiDetail__head logsSidePanel__header">
+            <div class="uiDetail__titles">
+              <span class="uiDetail__eyebrow">Log record</span>
+              <h2 id="logsSideTitle" class="uiDetail__title logsSidePanel__title"></h2>
             </div>
+            <div class="uiDetail__actions logsSidePanel__headerActions">
+              <a id="logsOpenTrace" class="button button--primary button--small logsOpenTrace" href="#" hidden>Open trace</a>
+              <button id="logsCopyJson" class="button button--small" type="button">Copy JSON</button>
+            </div>
+            <button id="logsSideClose" class="closeCross uiDetail__close" type="button" aria-label="Close log record" title="Close (Esc)">&times;</button>
           </header>
           <div class="logsSideTabs" role="tablist" aria-label="Log record view">
             <button id="logsSideTabDetails" class="logsTabs__tab is-active" type="button" role="tab" aria-selected="true" data-side-tab="details">Details</button>
             <button id="logsSideTabContext" class="logsTabs__tab" type="button" role="tab" aria-selected="false" data-side-tab="context">Surrounding context</button>
           </div>
-          <div id="logsSideDetails" class="logsSidePanel__body"></div>
-          <div id="logsSideContext" class="logsSidePanel__body logsContext" hidden>
+          <div id="logsSideDetails" class="uiDetail__body logsSidePanel__body"></div>
+          <div id="logsSideContext" class="uiDetail__body logsSidePanel__body logsContext" hidden>
             <div class="logsContext__bar">
               <div class="logsSegmented" role="group" aria-label="Context scope">
                 <button type="button" data-context-preset="anything" aria-pressed="true">Anything</button>

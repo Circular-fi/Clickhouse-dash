@@ -281,12 +281,18 @@
   }
 
   // The search context carried by trace detail URLs.
+  // The search a trace URL carries: not the span of the Spans side panel
+  // (span= names the trace's own span there).
   function contextQuery() {
-    return ctx ? currentParams().toString() : "";
+    if (!ctx) return "";
+    const params = currentParams();
+    params.delete("span");
+    return params.toString();
   }
 
   function searchKey() {
     const params = currentParams();
+    params.delete("span");
     params.delete("sort");
     params.delete("results");
     params.delete("tab");
@@ -302,14 +308,16 @@
 
   // mode: "push" (a new search), "replace" (same entry, e.g. the page-load
   // search or a view toggle) or "none" (restored from history).
-  function writeUrl(mode = "push") {
+  // state: more history state for a pushed entry ({ detail }: the entry a
+  // detail panel opened, which its close takes Back).
+  function writeUrl(mode = "push", state = null) {
     if (mode === "none" || !ctx) return;
     // Another Observability view owns the location (app_observability.js).
     if (ns.observability && !ns.observability.isActive("traces")) return;
     const next = searchUrl();
     const current = `${window.location.pathname}${window.location.search}`;
     if (next === current) return;
-    if (mode === "push") window.history.pushState({ workspace: "traces" }, "", next);
+    if (mode === "push") window.history.pushState({ ...(state || {}), workspace: "traces" }, "", next);
     else window.history.replaceState({ ...(window.history.state || {}), workspace: "traces" }, "", next);
   }
 
