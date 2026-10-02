@@ -25,8 +25,8 @@
   const COLLAPSED_STORE_KEY = ns.storage.KEYS.traceFacetsCollapsed;
 
   let ctx = null;
+  const { h } = ns;
   const byId = (id) => document.getElementById(id);
-  const esc = (value) => ctx.esc(value);
 
   const search = {
     chips: [],
@@ -403,11 +403,10 @@
     menu.dataset.field = JSON.stringify(field);
     menu.dataset.value = value;
     const text = value === "" ? '""' : value;
-    menu.innerHTML = `<div class="traceFilterMenu__title" title="${esc(`${fieldLabel(field)} = ${value}`)}"><span>${esc(fieldLabel(field))}</span><b>${esc(text)}</b></div>`
-      + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="include">Filter for this value</button>'
-      + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="exclude">Exclude this value</button>'
-      + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="only">Search only this</button>'
-      + '<button type="button" class="traceFilterMenu__item" role="menuitem" data-filter-action="copy">Copy</button>';
+    const item = (action, label) => h("button", { type: "button", class: "traceFilterMenu__item", role: "menuitem", "data-filter-action": action }, label);
+    h.replace(menu,
+      h("div", { class: "traceFilterMenu__title", title: `${fieldLabel(field)} = ${value}` }, h("span", null, fieldLabel(field)), h("b", null, text)),
+      item("include", "Filter for this value"), item("exclude", "Exclude this value"), item("only", "Search only this"), item("copy", "Copy"));
     menuTarget = anchor;
     menuHandle = ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false, onClose: () => { menuTarget = null; menuHandle = null; } }) || null;
   }

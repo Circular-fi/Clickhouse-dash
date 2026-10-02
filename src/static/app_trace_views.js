@@ -150,7 +150,7 @@
     const signature = JSON.stringify(options);
     if (select.dataset.optionsSignature !== signature) {
       select.dataset.optionsSignature = signature;
-      select.innerHTML = options.map(([v, text]) => `<option value="${esc(v)}">${esc(text)}</option>`).join("");
+      h.replace(select, options.map(([v, text]) => h("option", { value: v }, text)));
     }
     select.value = options.some(([v]) => v === value) ? value : (options[0]?.[0] ?? "");
     select.dispatchEvent(new Event("tracepicker-refresh"));

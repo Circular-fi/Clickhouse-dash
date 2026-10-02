@@ -2,7 +2,8 @@
   "use strict";
   const ns = window.ChDash;
   if (!ns) return;
-  const { dom, state, api, util, ui } = ns;
+  const { dom, state, api, util, ui, h } = ns;
+  const { byId } = dom;
   // Formats and colours (docs/ui-foundations.md): durations, counts and
   // instants through ns.format; service, percentile and status colours
   // through ns.palette (a service keeps one colour across Traces, Logs and
@@ -305,7 +306,7 @@
     // stays selectable even when the discovered pairs do not list it.
     const wanted = String(select.dataset.wanted || "");
     const unique = [...new Set([...(values || []), wanted].map((value) => String(value || "")).filter(Boolean))].sort();
-    select.innerHTML = `<option value="">${esc(allLabel || "ALL")}</option>` + unique.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+    h.replace(select, h("option", { value: "" }, allLabel || "ALL"), unique.map((value) => h("option", { value }, value)));
     select.value = wanted || (unique.includes(previous) ? previous : "");
     select.dispatchEvent(new Event("tracepicker-refresh"));
   }
@@ -754,7 +755,7 @@
     const errors = Number(stat.errors || 0);
     const errorTitle = errors ? ` · ${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` : "";
     // A service chip: the shared badge with the service's left bar.
-    return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? ns.badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
+    return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${esc(stat.spans)}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? ns.badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
   }
 
   // One line of service pills; layoutServicePills hides the ones that do not
@@ -947,13 +948,13 @@
   }
 
   function renderResultCount(rows) {
-    const count = document.getElementById("tracesResultCount");
+    const count = byId("tracesResultCount");
     if (!count) return;
     const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
     const latency = model.searched && Number.isFinite(model.searchLatencyMs)
-      ? ` <span class="tracesResultCount__latency" title="Search request time, measured in the browser">(in ${esc(fmt.duration.fromMs(model.searchLatencyMs))})</span>`
-      : "";
-    count.innerHTML = `${fmt.count(rows.length)} Trace${rows.length === 1 ? "" : "s"}${latency}${withErrors ? ` <span class="tracesResultCount__errors" title="${fmt.count(withErrors)} of the listed traces have error spans">· ${fmt.count(withErrors)} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
+      && [" ", h("span", { class: "tracesResultCount__latency", title: "Search request time, measured in the browser" }, `(in ${fmt.duration.fromMs(model.searchLatencyMs)})`)];
+    h.replace(count, `${fmt.count(rows.length)} Trace${rows.length === 1 ? "" : "s"}`, latency,
+      withErrors > 0 && [" ", h("span", { class: "tracesResultCount__errors", title: `${fmt.count(withErrors)} of the listed traces have error spans` }, `· ${fmt.count(withErrors)} with error${withErrors === 1 ? "" : "s"}`)]);
   }
 
   let resultsResizeObserver = null;
@@ -1420,7 +1421,7 @@
 
   function renderTraceOverview(spans, bounds) {
     if (!dom.traceOverview) return;
-    if (!spans.length) { dom.traceOverview.innerHTML = ""; return; }
+    if (!spans.length) { dom.traceOverview.replaceChildren(); return; }
     const range = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
     const lo = Math.max(0, Math.min(1, Number(range[0] || 0)));
     const hi = Math.max(lo + 0.005, Math.min(1, Number(range[1] == null ? 1 : range[1])));
@@ -1561,13 +1562,13 @@
     if (!spans.length) {
       const failed = model.traceError;
       if (dom.traceDetailTitle) {
-        dom.traceDetailTitle.innerHTML = failed
-          ? `<strong>Trace</strong><code class="tracePageHeader__id" title="Trace ID">${esc(failed.id)}</code>`
-          : '<strong>Trace</strong><span>Select a trace to inspect its spans.</span>';
+        h.replace(dom.traceDetailTitle, h("strong", null, "Trace"), failed
+          ? h("code", { class: "tracePageHeader__id", title: "Trace ID" }, failed.id)
+          : h("span", null, "Select a trace to inspect its spans."));
       }
-      if (dom.traceDetailStats) dom.traceDetailStats.innerHTML = "";
-      if (dom.traceServiceFilters) dom.traceServiceFilters.innerHTML = "";
-      if (dom.traceOverview) dom.traceOverview.innerHTML = "";
+      if (dom.traceDetailStats) dom.traceDetailStats.replaceChildren();
+      if (dom.traceServiceFilters) dom.traceServiceFilters.replaceChildren();
+      if (dom.traceOverview) dom.traceOverview.replaceChildren();
       ns.traceInsights?.renderHighlights(null);
       if (address.active()) document.title = TRACES_PAGE_TITLE;
       return;
@@ -2732,7 +2733,7 @@
   function renderInspector() {
     if (!dom.traceInspector) return;
     dom.traceInspector.hidden = true;
-    dom.traceInspector.innerHTML = "";
+    dom.traceInspector.replaceChildren();
   }
 
   function renderTrace() {
@@ -3044,7 +3045,7 @@
     setView(true);
     dom.traceDetail?.classList.remove("is-unavailable");
     if (dom.traceWaterfall) ns.uiState.loading(dom.traceWaterfall, { label: "Loading trace\u2026" });
-    if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.innerHTML = ""; }
+    if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.replaceChildren(); }
     void ns.traceLogs?.load?.(null);
     // The entry is pushed once the answer is in (the search stays the current
     // entry while it loads), whether the trace was found or not.

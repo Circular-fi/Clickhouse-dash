@@ -437,7 +437,7 @@
     const v = current();
     const visible = !!v && v.panelOpen && v.status !== "disabled" && v.status !== "idle";
     panel.hidden = !visible;
-    if (!visible) { panel.innerHTML = ""; delete panel.dataset.traceLogsState; return; }
+    if (!visible) { panel.replaceChildren(); delete panel.dataset.traceLogsState; return; }
     panel.dataset.traceLogsState = v.status;
     if (v.status === "loading") {
       panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", { label: "Loading the logs of this trace\u2026" })}`;

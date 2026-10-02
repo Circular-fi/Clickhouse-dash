@@ -501,7 +501,7 @@
     releaseDetailCharts();
     if (!name) {
       detailPanel.close("closed", { restoreFocus: false });
-      detailPanel.body.innerHTML = "";
+      detailPanel.body.replaceChildren();
       return;
     }
     detailPanel.open();

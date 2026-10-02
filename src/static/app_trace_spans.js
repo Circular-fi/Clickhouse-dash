@@ -16,6 +16,7 @@
   if (!ns) return;
   const fmt = ns.format;
   const palette = ns.palette;
+  const { h } = ns;
 
   const PAGE_SIZE = 100;
   // Rows are --row-regular tall (ns.table.rowHeight, read once the CSS is in).
@@ -433,10 +434,9 @@
     if (!state.searched) { count.textContent = "0 Spans"; return; }
     const n = state.rows.length;
     const latency = Number.isFinite(state.latencyMs)
-      ? ` <span class="tracesResultCount__latency" title="First page request time, measured in the browser">(in ${esc(fmt.duration.fromMs(state.latencyMs))})</span>`
-      : "";
-    const more = state.hasMore ? ' <span class="tracesResultCount__more" title="Scroll to load older spans">· more available</span>' : "";
-    count.innerHTML = `${fmt.count(n)}${state.hasMore ? "+" : ""} Span${n === 1 ? "" : "s"}${latency}${more}`;
+      && [" ", h("span", { class: "tracesResultCount__latency", title: "First page request time, measured in the browser" }, `(in ${fmt.duration.fromMs(state.latencyMs)})`)];
+    const more = state.hasMore && [" ", h("span", { class: "tracesResultCount__more", title: "Scroll to load older spans" }, "· more available")];
+    h.replace(count, `${fmt.count(n)}${state.hasMore ? "+" : ""} Span${n === 1 ? "" : "s"}`, latency, more);
   }
 
   // The results area: the table shell (header, sized body, footer); the
@@ -843,18 +843,30 @@
 
   function renderColumns() {
     if (!columnsMenu) return;
+    const last = state.columns.length - 1;
+    const move = (index, dir, label, glyph, disabled) => h("button", {
+      type: "button", class: "traceSpanColumns__move", "data-column-move": index, "data-dir": dir, "aria-label": label, title: dir < 0 ? "Move left" : "Move right", disabled,
+    }, glyph);
     const list = state.columns.length
-      ? state.columns.map((column, index) => `<li class="traceSpanColumns__item"><span class="traceSpanColumns__scope">${esc(column.scope === "any" ? "any" : column.scope)}</span><span class="traceSpanColumns__key" title="${esc(column.key)}">${esc(column.key)}</span><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="-1" aria-label="Move ${esc(column.key)} left" title="Move left"${index === 0 ? " disabled" : ""}>\u2190</button><button type="button" class="traceSpanColumns__move" data-column-move="${index}" data-dir="1" aria-label="Move ${esc(column.key)} right" title="Move right"${index === state.columns.length - 1 ? " disabled" : ""}>\u2192</button><button type="button" class="traceSpanColumns__remove" data-column-remove="${index}" aria-label="Remove column ${esc(column.key)}" title="Remove column">×</button></li>`).join("")
-      : '<li class="traceSpanColumns__empty">No attribute columns yet.</li>';
-    const options = columnSuggestions().map((label) => `<option value="${esc(label)}"></option>`).join("");
-    columnsMenu.innerHTML = `<div class="traceSpanColumns__title">Attribute columns</div>
-      <ul class="traceSpanColumns__list">${list}</ul>
-      <form class="traceSpanColumns__add" data-column-add>
-        <input id="traceSpanColumnInput" type="text" list="traceSpanColumnKeys" placeholder="span:http.route or resource:host.name" aria-label="Attribute column to add" autocomplete="off" spellcheck="false"${state.columns.length >= MAX_COLUMNS ? " disabled" : ""}>
-        <datalist id="traceSpanColumnKeys">${options}</datalist>
-        <button type="submit" class="button button--small"${state.columns.length >= MAX_COLUMNS ? " disabled" : ""}>Add</button>
-      </form>
-      <small class="traceSpanColumns__note">Prefix span: or resource: to read one attribute map; columns are kept in this browser.</small>`;
+      ? state.columns.map((column, index) => h("li", { class: "traceSpanColumns__item" },
+        h("span", { class: "traceSpanColumns__scope" }, column.scope === "any" ? "any" : column.scope),
+        h("span", { class: "traceSpanColumns__key", title: column.key }, column.key),
+        move(index, -1, `Move ${column.key} left`, "\u2190", index === 0),
+        move(index, 1, `Move ${column.key} right`, "\u2192", index === last),
+        h("button", { type: "button", class: "traceSpanColumns__remove", "data-column-remove": index, "aria-label": `Remove column ${column.key}`, title: "Remove column" }, "\u00d7")))
+      : h("li", { class: "traceSpanColumns__empty" }, "No attribute columns yet.");
+    const full = state.columns.length >= MAX_COLUMNS;
+    h.replace(columnsMenu,
+      h("div", { class: "traceSpanColumns__title" }, "Attribute columns"),
+      h("ul", { class: "traceSpanColumns__list" }, list),
+      h("form", { class: "traceSpanColumns__add", "data-column-add": true },
+        h("input", {
+          id: "traceSpanColumnInput", type: "text", list: "traceSpanColumnKeys", placeholder: "span:http.route or resource:host.name",
+          "aria-label": "Attribute column to add", autocomplete: "off", spellcheck: "false", disabled: full,
+        }),
+        h("datalist", { id: "traceSpanColumnKeys" }, columnSuggestions().map((label) => h("option", { value: label }))),
+        h("button", { type: "submit", class: "button button--small", disabled: full }, "Add")),
+      h("small", { class: "traceSpanColumns__note" }, "Prefix span: or resource: to read one attribute map; columns are kept in this browser."));
   }
 
   function initColumns() {

@@ -523,7 +523,7 @@
     const sel = hm.selection;
     const show = active() && !!sel && ctx.model.meta?.analytics_enabled === true;
     panel.hidden = !show;
-    if (!show) { panel.innerHTML = ""; return; }
+    if (!show) { panel.replaceChildren(); return; }
     const when = fmt.range(sel.t0, sel.t0 + Math.max(1, sel.t1 - sel.t0));
     const duration = sel.d0 > 0 ? `${fmt.duration(sel.d0)} \u2013 ${fmt.duration(sel.d1)}` : `\u2264 ${fmt.duration(sel.d1)}`;
     const durationFilter = ctx.model.meta?.features?.duration_filter !== false;

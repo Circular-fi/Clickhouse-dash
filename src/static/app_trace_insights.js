@@ -499,7 +499,7 @@
     contextLayer = null;
     layer?.close();
     const el = document.getElementById("traceContextPanel");
-    if (el) { el.hidden = true; el.innerHTML = ""; }
+    if (el) { el.hidden = true; el.replaceChildren(); }
     document.body.classList.remove("has-trace-context");
     context.returnFocus = null;
   }

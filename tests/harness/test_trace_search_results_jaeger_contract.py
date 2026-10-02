@@ -28,7 +28,7 @@ def test_result_items_follow_jaeger_result_item():
     assert '<code class="traceResult__fullId">${esc(trace.trace_id)}</code>' in js
     assert "function layoutServicePills(scope)" in js
     assert "traceSvcPill__error" in js and "traceSvcMore" in js and ".traceSvcPopover" in css
-    assert "(in ${esc(fmt.duration.fromMs(model.searchLatencyMs))})" in js
+    assert "(in ${fmt.duration.fromMs(model.searchLatencyMs)})" in js
     assert "data-results-zoom-out" in js and "dom.tracesRangeZoomOut?.click()" in js
 
 
