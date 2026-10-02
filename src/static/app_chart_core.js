@@ -1145,10 +1145,17 @@
       return x - xs[i - 1] <= xs[i] - x ? i - 1 : i;
     }
 
+    // The x readout (tooltip title, x badge). A time axis of buckets
+    // (bucketMs) reads the bucket's range (ns.format.range: one format for
+    // every chart); bucketAlign "center" when xs are bucket middles.
     function xReadout(i) {
       if (typeof opts.xReadout === "function") return opts.xReadout(i);
       if (opts.xKind === "category") return String(opts.categories[i] ?? "");
       const x = opts.xs[i];
+      if (opts.xKind === "time" && Number(opts.bucketMs) > 0 && ns.format?.range) {
+        const start = opts.bucketAlign === "center" ? x - Number(opts.bucketMs) / 2 : x;
+        return ns.format.range(start, start + Number(opts.bucketMs));
+      }
       if (opts.xKind === "time") return opts.xDateOnly ? dateText(x) : formatInstant(x, opts.xFractionDigits);
       if (opts.xKind === "index") return `Row ${formatExact(x)}`;
       return formatExact(x);
@@ -1525,6 +1532,23 @@
       return `<button type="button" class="chartCore__legendItem${s.dash ? " is-dashed" : ""}" data-index="${index}" aria-pressed="${on}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span></button>`;
     }
 
+    // "totals" legend: each series with its total over the whole range; a
+    // click goes to opts.onLegendClick(series, event) (a filter, say) and
+    // opts.legendPressed(series) says which are on.
+    function seriesTotal(s) {
+      let sum = 0;
+      for (let i = 0; i < s.values.length; i++) { const v = s.values[i]; if (v === v) sum += v; }
+      return sum;
+    }
+
+    function legendTotalItemHtml(s, index) {
+      const pressed = typeof opts.legendPressed === "function" ? !!opts.legendPressed(s) : false;
+      const c = rgba(seriesColor(s));
+      const total = typeof opts.legendTotal === "function" ? opts.legendTotal(s, seriesTotal(s)) : formatValue(seriesTotal(s));
+      const title = typeof opts.legendTitle === "function" ? opts.legendTitle(s, pressed) : s.label;
+      return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
+    }
+
     // The legend markup is rebuilt only when it changes (a resize or a theme
     // change redraws the plot, not the legend).
     let legendHtml = null;
@@ -1534,9 +1558,21 @@
       legendEl.innerHTML = html;
     }
 
+    // The legend shows by default as soon as there is more than one series
+    // ("always": even for one; false: never; "totals": the totals legend).
     function renderLegend() {
-      if (!opts.legend || !opts.series.length) { setLegendHtml(""); legendEl.hidden = true; return; }
+      const totals = opts.legend === "totals";
+      const shown = totals || opts.legend === "always" || (!!opts.legend && opts.series.length > 1);
+      if (!shown || !opts.series.length) { setLegendHtml(""); legendEl.hidden = true; return; }
       legendEl.hidden = false;
+      if (totals) {
+        legendEl.dataset.mode = "totals";
+        // legendOrder "reverse": a stack's top series first.
+        const items = opts.series.map(legendTotalItemHtml);
+        if (opts.legendOrder === "reverse") items.reverse();
+        setLegendHtml(`<div class="chartCore__legendList">${items.join("")}</div>`);
+        return;
+      }
       legendEl.dataset.mode = legendMode;
       const modeBtn = `<button type="button" class="chartCore__legendMode" aria-pressed="${legendMode === "table"}" title="${legendMode === "table" ? "Show the legend as a list" : "Show min / max / mean / last per series"}">${legendMode === "table" ? "List" : "Values"}</button>`;
       if (legendMode === "table") {
@@ -1578,6 +1614,10 @@
       const index = Number(item.dataset.index);
       const s = opts.series[index];
       if (!s) return;
+      if (opts.legend === "totals") {
+        if (typeof opts.onLegendClick === "function") opts.onLegendClick(s, ev);
+        return;
+      }
       const ids = opts.series.map((x) => x.id);
       const next = new Set(hidden);
       if (legendToggles(ev)) {

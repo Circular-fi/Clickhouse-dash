@@ -917,17 +917,10 @@
     });
     return {
       xs,
+      bucketMs,
       xDomain: Array.isArray(h.range) ? [Number(h.range[0]), Number(h.range[1])] : null,
       series: SEV_STACK.map((sev) => ({ id: sev, label: SEV_LABELS[sev], color: SEV_COLORS[sev], values: columns[sev], nulls: null, group: 0 })),
     };
-  }
-
-  function bucketTitle(i) {
-    const h = model.histogram;
-    const bucketMs = Number(h?.bucket_ms) || 60000;
-    const start = Number(h?.buckets?.[i]?.[0]);
-    if (!Number.isFinite(start)) return "";
-    return fmt.range(start, start + bucketMs);
   }
 
   // A drag over the bars searches that time range (whole seconds).
@@ -948,10 +941,6 @@
     const meta = $("logsHistogramMeta");
     if (!box) return;
     const h = model.histogram;
-    for (const sev of SEV_CLASSES) {
-      const node = document.querySelector(`[data-sev-count="${sev}"]`);
-      if (node) node.textContent = h ? fmt.compact(h.totals?.[sev] || 0) : "";
-    }
     ns.uiState.busy(box, model.histogramLoading && !!h);
     if (model.histogramLoading && !h) {
       histogramMessage(box, "Loading volume\u2026");
@@ -979,12 +968,18 @@
         stack: true,
         height: HISTOGRAM_HEIGHT,
         xFractionDigits: 0,
-        legend: false,
+        // The engine's totals legend: each severity with its count over the
+        // range; a click filters by it (a server search), pressed when on.
+        legend: "totals",
+        legendOrder: "reverse",
+        legendTotal: (s) => fmt.compact(Number(model.histogram?.totals?.[s.id] || 0)),
+        legendPressed: (s) => model.sev.includes(s.id),
+        legendTitle: (s, pressed) => (pressed ? `Show every severity` : `Only ${s.label} logs`),
+        onLegendClick: (s) => toggleSeverity(s.id),
         barWidthRatio: 0.86,
         cursorPoints: false,
         tooltipSort: "reverse",
-        tooltipTitle: bucketTitle,
-        xReadout: bucketTitle,
+        bucketAlign: "center",
         formatValue: (v) => fmt.count(v),
         formatY: (v) => fmt.count(Math.max(0, v)),
         onZoom: onHistogramZoom,
@@ -997,22 +992,16 @@
     }
   }
 
-  function initHistogram() {
-    document.getElementById("logsLegend")?.addEventListener("click", (event) => {
-      const item = event.target.closest("[data-sev]");
-      if (!item) return;
-      const sev = item.dataset.sev;
-      model.sev = model.sev.includes(sev) ? model.sev.filter((s) => s !== sev) : SEV_CLASSES.filter((s) => s === sev || model.sev.includes(s));
-      void search({ push: true });
-    });
+  function toggleSeverity(sev) {
+    model.sev = model.sev.includes(sev) ? model.sev.filter((s) => s !== sev) : SEV_CLASSES.filter((s) => s === sev || model.sev.includes(s));
+    void search({ push: true });
   }
 
+  function initHistogram() {}
+
+  // The legend's pressed severities follow the filter (a redraw rebuilds it).
   function syncLegend() {
-    for (const item of document.querySelectorAll("#logsLegend [data-sev]")) {
-      const on = model.sev.includes(item.dataset.sev);
-      item.setAttribute("aria-pressed", String(on));
-      item.classList.toggle("is-dimmed", model.sev.length > 0 && !on);
-    }
+    histogramChart?.redraw?.();
   }
 
   // --- Patterns -----------------------------------------------------------------------------

@@ -577,13 +577,16 @@
     else closePanel();
   }
 
+  // The panel's stat tiles (ns.ui.statTileHtml), boxed.
+  const SEVERITY_TONES = { err: "error", warn: "warn", ok: "" };
   function statsHtml(item, countLabel, count) {
-    return '<dl class="graphKitPanel__stats">'
-      + `<div><dt>${esc(countLabel)}</dt><dd>${esc(fmt.compact(count))}<small>${esc(perSecond(count))}</small></dd></div>`
-      + `<div><dt>Errors</dt><dd class="is-${severity(item.error_rate)}">${esc(fmt.percent(item.error_rate))}<small>${esc(fmt.compact(item.errors))}</small></dd></div>`
-      + `<div><dt>p50</dt><dd>${esc(fmt.duration(item.p50_ns))}</dd></div>`
-      + `<div><dt>p95</dt><dd>${esc(fmt.duration(item.p95_ns))}</dd></div>`
-      + `<div><dt>p99</dt><dd>${esc(fmt.duration(item.p99_ns))}</dd></div>`
+    const tile = (label, value, sub = "", tone = "") => ns.ui.statTileHtml({ label, value, sub, tone, dl: true });
+    return '<dl class="statTiles statTiles--boxed graphKitPanel__stats">'
+      + tile(countLabel, fmt.compact(count), perSecond(count))
+      + tile("Errors", fmt.percent(item.error_rate), fmt.compact(item.errors), SEVERITY_TONES[severity(item.error_rate)])
+      + tile("p50", fmt.duration(item.p50_ns))
+      + tile("p95", fmt.duration(item.p95_ns))
+      + tile("p99", fmt.duration(item.p99_ns))
       + "</dl>";
   }
 

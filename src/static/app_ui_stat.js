@@ -7,7 +7,8 @@
   // the pipeline columns draw them.
   //
   //   ui.statTileHtml({ label, value, sub, tone, title, inline, tag, className,
-  //                     valueHtml, subHtml, attrs }) -> HTML
+  //                     valueHtml, subHtml, attrs, dl }) -> HTML
+  //     dl: true writes the parts as dt / dd (a tile inside a <dl>)
   //   ui.statTile(options) -> element
   //   ui.statTilesHtml(tiles, { className, label }) -> the tiles in a .statTiles
   // tone: "error" | "warn" | "ok" colours the value.
@@ -21,15 +22,16 @@
 
   function statTileHtml({
     label = "", value = "", sub = "", tone = "", title = "", inline = false, tag = "div", className = "",
-    valueHtml = null, subHtml = null, labelHtml = null, attrs = {},
+    valueHtml = null, subHtml = null, labelHtml = null, attrs = {}, dl = false,
   } = {}) {
     const cls = ["statTile", inline ? "statTile--inline" : "", TONES[tone] || "", className].filter(Boolean).join(" ");
     const extra = Object.entries(attrs).map(([name, v]) => ` ${name}="${esc(v)}"`).join("");
     const subPart = subHtml != null ? subHtml : sub !== "" && sub != null ? esc(sub) : "";
+    const [labelTag, valueTag] = dl ? ["dt", "dd"] : ["span", "span"];
     return `<${tag} class="${esc(cls)}"${title ? ` title="${esc(title)}"` : ""}${extra}>`
-      + `<span class="statTile__label">${labelHtml != null ? labelHtml : esc(label)}</span>`
-      + `<span class="statTile__value">${valueHtml != null ? valueHtml : esc(value)}</span>`
-      + (subPart ? `<span class="statTile__sub">${subPart}</span>` : "")
+      + `<${labelTag} class="statTile__label">${labelHtml != null ? labelHtml : esc(label)}</${labelTag}>`
+      + `<${valueTag} class="statTile__value">${valueHtml != null ? valueHtml : esc(value)}</${valueTag}>`
+      + (subPart ? `<${valueTag} class="statTile__sub">${subPart}</${valueTag}>` : "")
       + `</${tag}>`;
   }
 

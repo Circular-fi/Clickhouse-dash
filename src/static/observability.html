@@ -451,18 +451,12 @@
         </div>
       </aside>
       <div class="logsSearchMain">
-      <section id="logsHistogramCard" class="logsHistogram" aria-label="Log volume">
-        <header class="logsHistogram__header">
-          <strong id="logsTotal" class="logsHistogram__total">–</strong>
-          <span id="logsHistogramMeta" class="logsHistogram__meta">logs over time</span>
-          <div id="logsLegend" class="logsLegend" role="group" aria-label="Severity classes">
-            <button type="button" class="logsLegend__item" data-sev="error" aria-pressed="false"><i class="logsSevSwatch logsSev--error"></i><span>Error</span><b data-sev-count="error"></b></button>
-            <button type="button" class="logsLegend__item" data-sev="warn" aria-pressed="false"><i class="logsSevSwatch logsSev--warn"></i><span>Warn</span><b data-sev-count="warn"></b></button>
-            <button type="button" class="logsLegend__item" data-sev="info" aria-pressed="false"><i class="logsSevSwatch logsSev--info"></i><span>Info</span><b data-sev-count="info"></b></button>
-            <button type="button" class="logsLegend__item" data-sev="debug" aria-pressed="false"><i class="logsSevSwatch logsSev--debug"></i><span>Debug</span><b data-sev-count="debug"></b></button>
-          </div>
+      <section id="logsHistogramCard" class="logsHistogram chartCard" aria-label="Log volume">
+        <header class="logsHistogram__header chartCard__head">
+          <strong id="logsTotal" class="logsHistogram__total chartCard__title">–</strong>
+          <span id="logsHistogramMeta" class="logsHistogram__meta chartCard__meta">logs over time</span>
         </header>
-        <div id="logsHistogram" class="logsHistogram__chart"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load the log volume.</p></div></div>
+        <div id="logsHistogram" class="logsHistogram__chart chartCard__body"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load the log volume.</p></div></div>
       </section>
 
       <div class="logsToolbar" role="toolbar" aria-label="Results">

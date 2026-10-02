@@ -1253,7 +1253,7 @@
       subtitle: node.operation,
       onClose: () => { closeGraphPanel(); graphCanvas()?.focus?.({ preventScroll: true }); },
     }));
-    const stat = (label, value, note = "", cls = "") => `<div><dt>${esc(label)}</dt><dd${cls ? ` class="${cls}"` : ""}>${esc(value)}${note ? `<small>${esc(note)}</small>` : ""}</dd></div>`;
+    const stat = (label, value, note = "", cls = "") => ns.ui.statTileHtml({ label, value, sub: note, tone: cls === "is-err" ? "error" : "", dl: true });
     const errorSpan = node.spans.find((span) => isError(span));
     const spans = node.spans.slice().sort((a, b) => spanStart(a) - spanStart(b));
     const spanRows = spans.slice(0, GRAPH_PANEL_SPANS).map((span) => `<li><button type="button" class="traceGraphPanel__span${isError(span) ? " is-err" : ""}" data-graph-span="${esc(span.span_id)}" title="Show this span in the timeline"><span>+${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</span><span>${esc(fmt.duration(spanDuration(span)))}</span><code>${esc(span.span_id)}</code></button></li>`).join("");
@@ -1261,7 +1261,7 @@
     const ancestors = [];
     for (let parent = node.parent; parent; parent = parent.parent) ancestors.unshift(parent);
     const children = node.children.slice().sort((a, b) => b.time - a.time);
-    body.append(graphFragment('<dl class="graphKitPanel__stats">'
+    body.append(graphFragment('<dl class="statTiles statTiles--boxed graphKitPanel__stats">'
       + stat("Spans", fmt.count(node.count))
       + stat("Errors", fmt.count(node.errors), node.count ? fmt.percent(node.errors / node.count) : "", node.errors ? "is-err" : "")
       + stat("Avg", fmt.duration(node.time / Math.max(1, node.count)))

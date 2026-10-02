@@ -342,9 +342,9 @@
       <div class="metricColumn">
 
         <div class="metricCompact metricCompact--elapsed">
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Elapsed</div>
-            <div class="metricCompact__value" id="elapsedSecondsText">&mdash;</div>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Elapsed</div>
+            <div class="metricCompact__value statTile__value" id="elapsedSecondsText">&mdash;</div>
             <div id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden>
               <span>System</span><strong id="clickhouseElapsedText"></strong>
             </div>
@@ -352,63 +352,63 @@
         </div>
 
         <div class="metricCompact metricCompact--progress" id="progressCard">
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Progress</div>
-            <div class="metricCompact__value" id="progressPercentText">&mdash;</div>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Progress</div>
+            <div class="metricCompact__value statTile__value" id="progressPercentText">&mdash;</div>
           </div>
         </div>
 
         <div class="metricCompact">
-          <canvas id="readRowsChart" class="metricCompact__bgChart" aria-label="Read rows per second"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Rows</div>
-            <div class="metricCompact__value" id="readRowsRateText">&mdash;</div>
-            <div class="metricCompact__sub" id="readRowsTotalText">&mdash;</div>
+          <span id="readRowsChart" class="metricCompact__bgChart" role="img" aria-label="Read rows per second"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Rows</div>
+            <div class="metricCompact__value statTile__value" id="readRowsRateText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="readRowsTotalText">&mdash;</div>
           </div>
         </div>
 
         <div class="metricCompact">
-          <canvas id="readBytesChart" class="metricCompact__bgChart" aria-label="Read bytes per second"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Disk</div>
-            <div class="metricCompact__value" id="readBytesRateText">&mdash;</div>
-            <div class="metricCompact__sub" id="readBytesTotalText">&mdash;</div>
+          <span id="readBytesChart" class="metricCompact__bgChart" role="img" aria-label="Read bytes per second"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Disk</div>
+            <div class="metricCompact__value statTile__value" id="readBytesRateText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="readBytesTotalText">&mdash;</div>
           </div>
         </div>
 
         <div id="writtenRowsCard" class="metricCompact is-hidden">
-          <canvas id="writtenRowsChart" class="metricCompact__bgChart" aria-label="Written rows per second"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Rows written</div>
-            <div class="metricCompact__value" id="writtenRowsRateText">&mdash;</div>
-            <div class="metricCompact__sub" id="writtenRowsTotalText">&mdash;</div>
+          <span id="writtenRowsChart" class="metricCompact__bgChart" role="img" aria-label="Written rows per second"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Rows written</div>
+            <div class="metricCompact__value statTile__value" id="writtenRowsRateText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="writtenRowsTotalText">&mdash;</div>
           </div>
         </div>
 
         <div id="writtenBytesCard" class="metricCompact is-hidden">
-          <canvas id="writtenBytesChart" class="metricCompact__bgChart" aria-label="Written bytes per second"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Bytes written</div>
-            <div class="metricCompact__value" id="writtenBytesRateText">&mdash;</div>
-            <div class="metricCompact__sub" id="writtenBytesTotalText">&mdash;</div>
+          <span id="writtenBytesChart" class="metricCompact__bgChart" role="img" aria-label="Written bytes per second"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Bytes written</div>
+            <div class="metricCompact__value statTile__value" id="writtenBytesRateText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="writtenBytesTotalText">&mdash;</div>
           </div>
         </div>
 
         <div class="metricCompact">
-          <canvas id="cpuChart" class="metricCompact__bgChart" aria-label="CPU progression"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">CPU</div>
-            <div class="metricCompact__value" id="cpuText">&mdash;</div>
-            <div class="metricCompact__sub" id="cpuMaxText">&mdash;</div>
+          <span id="cpuChart" class="metricCompact__bgChart" role="img" aria-label="CPU progression"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">CPU</div>
+            <div class="metricCompact__value statTile__value" id="cpuText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="cpuMaxText">&mdash;</div>
           </div>
         </div>
 
         <div class="metricCompact">
-          <canvas id="memoryChart" class="metricCompact__bgChart" aria-label="Memory progression"></canvas>
-          <div class="metricCompact__content">
-            <div class="metricCompact__label">Memory</div>
-            <div class="metricCompact__value" id="memoryText">&mdash;</div>
-            <div class="metricCompact__sub" id="memoryMaxText">&mdash;</div>
+          <span id="memoryChart" class="metricCompact__bgChart" role="img" aria-label="Memory progression"></span>
+          <div class="metricCompact__content statTile">
+            <div class="metricCompact__label statTile__label">Memory</div>
+            <div class="metricCompact__value statTile__value" id="memoryText">&mdash;</div>
+            <div class="metricCompact__sub statTile__sub" id="memoryMaxText">&mdash;</div>
           </div>
         </div>
 

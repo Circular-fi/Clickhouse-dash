@@ -665,7 +665,7 @@
       ["Trace ID", `<code>${esc(row.trace_id)}</code>${copyButton(row.trace_id, "Trace ID")}`],
       ["Span ID", `<code>${esc(row.span_id)}</code>${copyButton(row.span_id, "Span ID")}`],
       ["Parent", row.parent_span_id ? `<code>${esc(row.parent_span_id)}</code>` : "<code>root</code>"],
-    ].map(([label, value]) => `<div class="traceSpanPanel__fact"><dt>${esc(label)}</dt><dd>${value}</dd></div>`).join("");
+    ].map(([label, value]) => ns.ui.statTileHtml({ label, valueHtml: value, className: "traceSpanPanel__fact", dl: true })).join("");
     let details = "";
     if (!entry || entry.status === "loading") {
       details = '<div class="traceSpanPanel__status" role="status">Loading span details\u2026</div>';
@@ -680,7 +680,7 @@
         ${eventsHtml(span, startNs)}
         ${linksHtml(span)}`;
     }
-    return `<dl class="traceSpanPanel__facts">${summary}</dl>
+    return `<dl class="statTiles traceSpanPanel__facts">${summary}</dl>
       ${statusMessage ? `<div class="traceInspectorStatusMessage"><b>Status message</b><span>${esc(statusMessage)}</span></div>` : ""}
       <div class="traceInspector traceInspector--jaeger traceSpanPanel__card" data-inspector-span="${esc(row.span_id)}">${details}</div>`;
   }

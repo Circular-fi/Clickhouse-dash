@@ -45,25 +45,6 @@
     }
   }
 
-  function prepareCanvas(canvas) {
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
-
-    const w = Math.max(1, Math.floor(rect.width * dpr));
-    const h = Math.max(1, Math.floor(rect.height * dpr));
-
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w;
-      canvas.height = h;
-    }
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    return { ctx, w, h };
-  }
-
   function quantile(values, q) {
     if (!Array.isArray(values) || values.length === 0) return null;
     const sorted = values.slice().sort((a, b) => a - b);
@@ -91,100 +72,32 @@
     return out;
   }
 
-  function releaseCanvasBuffer(canvas) {
-    if (!canvas) return;
-    if (canvas.width !== 1) canvas.width = 1;
-    if (canvas.height !== 1) canvas.height = 1;
+  // An empty sparkline (a hidden tab keeps no drawing).
+  function releaseCanvasBuffer(el) {
+    if (!el || !el.__sparkline) return;
+    el.__sparkline = "";
+    el.replaceChildren();
   }
 
-  function drawSparkline(canvas, points, opts = {}) {
-    if (!Array.isArray(points) || points.length === 0 || document.hidden) {
-      releaseCanvasBuffer(canvas);
+  // The shared sparkline (ui.sparkline, --sparkline-color): the series
+  // decimated, from opts.min, its top the max (or a quantile of it), never
+  // under opts.minMax.
+  function drawSparkline(el, points, opts = {}) {
+    if (!el || !Array.isArray(points) || points.length === 0 || document.hidden) {
+      releaseCanvasBuffer(el);
       return;
     }
-
-    const prepared = prepareCanvas(canvas);
-    if (!prepared) return;
-    const { ctx, w, h } = prepared;
-
-    ctx.clearRect(0, 0, w, h);
-
-    const pad = Math.round(h * 0.10);
-    const topReserved = Math.round(h * 0.46);
-    const x0 = pad;
-    const y0 = topReserved;
-    const x1 = w - pad;
-    const y1 = h - pad;
-
-    const border = ns.palette.resolve("--border");
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = border;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(Math.floor(x0) + 0.5, Math.floor(y0) + 0.5, Math.floor(x1 - x0), Math.floor(y1 - y0));
-
-    let drawable = decimate(points, Math.max(80, Math.floor(w * 1.2)));
-    if (drawable.length === 1) {
-      const p0 = drawable[0];
-      drawable = [p0, { t: p0.t + 1, v: p0.v }];
-    }
-
-    const tMin = drawable[0].t;
-    const tMax = drawable[drawable.length - 1].t;
-    const tSpan = Math.max(1e-12, tMax - tMin);
-
+    let drawable = decimate(points, 120);
+    if (drawable.length === 1) drawable = [drawable[0], { t: drawable[0].t + 1, v: drawable[0].v }];
     const vMin = opts.min ?? 0;
-
-    let vMax = null;
-    if (opts.max != null && Number.isFinite(opts.max)) {
-      vMax = opts.max;
-    } else {
-      const auto = computeAutoMax(drawable, opts);
-      if (auto != null && Number.isFinite(auto)) vMax = auto;
-      else {
-        let m = -Infinity;
-        for (const p of drawable) if (Number.isFinite(p.v)) m = Math.max(m, p.v);
-        vMax = Number.isFinite(m) ? m : (vMin + 1);
-      }
+    let vMax = opts.max != null && Number.isFinite(opts.max) ? opts.max : computeAutoMax(drawable, opts);
+    if (vMax == null || !Number.isFinite(vMax)) {
+      vMax = -Infinity;
+      for (const p of drawable) if (Number.isFinite(p.v)) vMax = Math.max(vMax, p.v);
     }
-
-    const minMax = opts.minMax ?? null;
-    if (minMax != null && Number.isFinite(minMax)) vMax = Math.max(vMax, minMax);
+    if (opts.minMax != null && Number.isFinite(opts.minMax)) vMax = Math.max(vMax, opts.minMax);
     if (!Number.isFinite(vMax) || vMax <= vMin) vMax = vMin + 1;
-
-    const line = opts.lineColor || ns.palette.resolve("--accent-fill");
-    const fillAlpha = opts.fillAlpha ?? 0.12;
-
-    function X(t) {
-      return x0 + ((t - tMin) / tSpan) * (x1 - x0);
-    }
-
-    function Y(v) {
-      const vv = opts.clampMax ? Math.min(v, vMax) : v;
-      return y1 - ((vv - vMin) / (vMax - vMin)) * (y1 - y0);
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(X(drawable[0].t), y1);
-    for (const p of drawable) ctx.lineTo(X(p.t), Y(p.v));
-    ctx.lineTo(X(drawable[drawable.length - 1].t), y1);
-    ctx.closePath();
-    ctx.globalAlpha = fillAlpha;
-    ctx.fillStyle = line;
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(X(drawable[0].t), Y(drawable[0].v));
-    for (let i = 1; i < drawable.length; i++) ctx.lineTo(X(drawable[i].t), Y(drawable[i].v));
-    ctx.globalAlpha = 0.90;
-    ctx.strokeStyle = line;
-    ctx.lineWidth = 2;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.stroke();
-
-    ctx.globalAlpha = 0.16;
-    ctx.lineWidth = 6;
-    ctx.stroke();
+    ns.ui.sparkline.draw(el, drawable.map((p) => p.v), { xs: drawable.map((p) => p.t), min: vMin, max: vMax, area: true });
   }
 
   const chartCanvases = () => [

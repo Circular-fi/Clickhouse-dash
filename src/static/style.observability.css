@@ -1017,8 +1017,6 @@ button.button:not(:disabled):hover {
   box-shadow: 0 0.0625rem 0 rgba(255, 255, 255, 0.02);
 }
 .metricCompact__value {
-  font-size: 0.95rem;
-  font-weight: 950;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   display: inline-block;
@@ -1651,8 +1649,7 @@ html.chdash-line-numbers-hidden .editorWrap,
   border-radius: var(--radiusSm);
 }
 .panel__title,
-.statusPill__label,
-.metricCompact__label {
+.statusPill__label {
   font-weight: 700;
 }
 @keyframes explorerTreeHealthPulse {
@@ -1891,10 +1888,6 @@ html.chdash-page-select-hidden .pageSelect {
   height: 4.5rem;
   min-height: 4.5rem;
   padding: .68rem .75rem;
-}
-.metricCompact__value {
-  font-size: .95rem;
-  font-weight: 950;
 }
 .runSettings {
   position: relative;
@@ -6044,26 +6037,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 }
 .logsHistogram__total { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .logsHistogram__meta { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.logsLegend { display: flex; gap: 4px; flex: 0 0 auto; }
-.logsLegend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text);
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.logsLegend__item:hover { border-color: var(--border); }
-.logsLegend__item[aria-pressed="true"] { border-color: var(--buttonBorderHover); background: var(--rowHover); }
-.logsLegend__item.is-dimmed { opacity: .45; }
-.logsLegend__item b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
-.logsSevSwatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
-.logsSevSwatch { background: var(--sev-color); }
 .logsHistogram__chart { position: relative; z-index: 2; height: 120px; }
 .logsHistogram__chart .chartCore__plot { overflow: visible; }
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; }
@@ -6170,8 +6143,8 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .logsOpenTrace { text-decoration: none; }
 .logsSideTabs { padding: 0 8px; border-bottom: 1px solid var(--border); }
 .logsFieldGroup { margin-bottom: 12px; }
-.logsFieldGroup h4 { display: flex; gap: 6px; margin: 0 0 4px; color: var(--muted); font: 700 10px/1.4 Arial, Helvetica, sans-serif; letter-spacing: .04em; text-transform: uppercase; }
-.logsFieldGroup h4 span { font-weight: 600; letter-spacing: 0; text-transform: none; }
+.logsFieldGroup h4 { display: flex; gap: 6px; margin: 0 0 4px; color: var(--muted); font-size: var(--dt-head-font); font-weight: var(--dt-head-weight); line-height: 1.4; }
+.logsFieldGroup h4 span { font-weight: 600; }
 .logsBodyText {
   max-height: 260px;
   margin: 0;
@@ -6894,11 +6867,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanPanel__open { white-space: nowrap; text-decoration: none; }
 .traceSearchMain { overflow-x: clip; }
 .traceResultsSection .traceSearchResults__toolbar { flex-wrap: wrap; row-gap: 6px; }
-.traceSpanPanel__facts { margin: 0 0 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
-.traceSpanPanel__fact { min-width: 0; }
-.traceSpanPanel__fact dt { color: var(--muted); font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
-.traceSpanPanel__fact dd { min-width: 0; margin: 2px 0 0; display: flex; align-items: center; gap: 4px; overflow: hidden; font-size: 12px; }
-.traceSpanPanel__fact dd code { min-width: 0; overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
+.statTiles.traceSpanPanel__facts { margin: 0 0 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+.traceSpanPanel__fact .statTile__value { display: flex; align-items: center; gap: 4px; font-size: 12.5px; }
+.traceSpanPanel__fact .statTile__value code { min-width: 0; overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
 .traceSpanPanel__card.traceInspector { max-height: none; min-height: 0; margin: 0; overflow: visible; border: 0; background: transparent; }
 .traceSpanPanel__status { padding: 12px 0; color: var(--muted); font-size: 12px; }
 .traceSpanPanel__status.is-error { color: var(--danger); }
@@ -7298,34 +7269,11 @@ html[data-theme="light"] {
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
-.graphKitPanel__stats {
+.statTiles.graphKitPanel__stats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: 6px;
   margin: 0 0 12px;
-}
-.graphKitPanel__stats div {
-  padding: 6px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--metricBg, transparent);
-}
-.graphKitPanel__stats dt {
-  color: var(--graph-muted);
-  font-size: 11px;
-}
-.graphKitPanel__stats dd {
-  margin: 3px 0 0;
-  font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.graphKitPanel__stats small {
-  display: block;
-  margin-top: 2px;
-  color: var(--graph-muted);
-  font-size: 11px;
-  font-weight: 500;
 }
 .graphKitPanel__note {
   margin: 4px 0;
@@ -8284,7 +8232,7 @@ th[aria-sort="descending"] > .dataTable__sort::after {
   --dt-row: var(--row-compact);
 }
 .dataList__head {
-  min-height: var(--dt-row);
+  min-height: var(--dt-row, var(--row-regular));
   border-bottom: 1px solid var(--border);
   background: var(--theadBg);
   color: var(--muted);
@@ -8303,7 +8251,7 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 }
 .dataList__row {
   box-sizing: border-box;
-  height: var(--dt-row);
+  height: var(--dt-row, var(--row-regular));
   border-bottom: 1px solid var(--dt-divider);
 }
 .dataList__row:hover,

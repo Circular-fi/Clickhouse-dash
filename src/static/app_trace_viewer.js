@@ -447,7 +447,7 @@
     const head = document.createElement("div");
     head.className = "traceViewer__head";
     const nameHead = document.createElement("div");
-    nameHead.className = "traceViewer__nameHead";
+    nameHead.className = "traceViewer__nameHead dataList__head";
     nameHead.textContent = "Operation";
     const columnResize = document.createElement("div");
     columnResize.className = "traceViewer__columnResize";

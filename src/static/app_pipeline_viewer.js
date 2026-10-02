@@ -668,6 +668,7 @@
     const table = element("div", "table");
     const body = element("div", "scroll");
     const head = element("div", "head");
+    head.classList.add("dataList__head");
     const timelineHead = element("div", "timelineHead");
     const workHead = element("div", "workHead", "Work \u03a3 · share");
     workHead.title = "Accumulated active processor time and share of total recorded work. This is not elapsed query time.";

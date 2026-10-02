@@ -1089,8 +1089,6 @@ button.button:not(:disabled):hover {
   box-shadow: 0 0.0625rem 0 rgba(255, 255, 255, 0.02);
 }
 .metricCompact__value {
-  font-size: 0.95rem;
-  font-weight: 950;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   display: inline-block;
@@ -2061,8 +2059,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
   border-radius: var(--radiusSm);
 }
 .panel__title,
-.statusPill__label,
-.metricCompact__label {
+.statusPill__label {
   font-weight: 700;
 }
 .explorerTableList {
@@ -3353,10 +3350,6 @@ html.chdash-page-select-hidden .pageSelect {
   min-height: 4.5rem;
   padding: .68rem .75rem;
 }
-.metricCompact__value {
-  font-size: .95rem;
-  font-weight: 950;
-}
 .explorerFunctionGroup .explorerTreeDatabase__count {
   font-variant-numeric: tabular-nums;
 }
@@ -4516,19 +4509,12 @@ html[data-theme="light"] {
   border-top: 1px solid var(--border);
 }
 .explorerAboutTile__label {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  white-space: normal;
 }
 .explorerAboutTile__value {
   margin-top: 2px;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 650;
   overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
+  white-space: normal;
 }
 .explorerAboutTile__value.is-code {
   font-family: var(--mono);
@@ -4536,10 +4522,8 @@ html[data-theme="light"] {
   font-weight: 550;
 }
 .explorerAboutTile__context {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 12px;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 .explorerAboutTile__rules {
   margin: 4px 0 0;
@@ -5235,34 +5219,11 @@ html[data-theme="light"] {
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
-.graphKitPanel__stats {
+.statTiles.graphKitPanel__stats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: 6px;
   margin: 0 0 12px;
-}
-.graphKitPanel__stats div {
-  padding: 6px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--metricBg, transparent);
-}
-.graphKitPanel__stats dt {
-  color: var(--graph-muted);
-  font-size: 11px;
-}
-.graphKitPanel__stats dd {
-  margin: 3px 0 0;
-  font-size: 13px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.graphKitPanel__stats small {
-  display: block;
-  margin-top: 2px;
-  color: var(--graph-muted);
-  font-size: 11px;
-  font-weight: 500;
 }
 .graphKitPanel__note {
   margin: 4px 0;

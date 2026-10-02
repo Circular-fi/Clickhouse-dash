@@ -462,17 +462,18 @@
     }
 
     function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false } = {}) {
-      const tile = node("div", `explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}`);
+      // A stat tile (ui.statTile classes): label, value, context lines.
+      const tile = node("div", `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}`);
       if (id) tile.dataset.tile = id;
-      tile.appendChild(node("div", "explorerAboutTile__label", label));
-      const valueEl = node("div", `explorerAboutTile__value${mono ? " is-code" : ""}`);
+      tile.appendChild(node("div", "statTile__label explorerAboutTile__label", label));
+      const valueEl = node("div", `statTile__value explorerAboutTile__value${mono ? " is-code" : ""}`);
       if (value instanceof Node) valueEl.appendChild(value);
       else valueEl.textContent = String(value);
       if (title || (!(value instanceof Node) && String(value).length > 28)) valueEl.title = title || String(value);
       tile.appendChild(valueEl);
       const contexts = (Array.isArray(context) ? context : [context]).filter((item) => item != null && item !== "");
       for (const item of contexts) {
-        const el = item instanceof Node ? item : node("div", "explorerAboutTile__context", item);
+        const el = item instanceof Node ? item : node("div", "statTile__sub explorerAboutTile__context", item);
         if (!(item instanceof Node) && String(item).length > 36) el.title = String(item);
         tile.appendChild(el);
       }
