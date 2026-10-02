@@ -384,7 +384,21 @@
     };
   }
 
+  // The Explorer view or Catalog mode on screen is an ns.lifecycle scope
+  // ("explorer:browse", "explorer:graph", "explorer:storage",
+  // "explorer:functions", "explorer:operations"): what a mode binds while it
+  // shows (ns.lifecycle.bind) goes when another one shows.
+  let lifecycleName = "";
+  function syncLifecycle() {
+    const next = model.section === "functions" ? "explorer:functions" : model.section === "operations" ? "explorer:operations" : `explorer:${model.mode}`;
+    if (next === lifecycleName) return;
+    if (lifecycleName) ns.lifecycle?.leave(lifecycleName);
+    lifecycleName = next;
+    ns.lifecycle?.enter(next);
+  }
+
   function syncViewTabs() {
+    syncLifecycle();
     const view = currentView();
     const available = { catalog: true, functions: true, operations: operationsAvailable() };
     for (const button of shellEl("explorerViewTabs")?.querySelectorAll?.(".explorerViewTab[data-view]") || []) {
@@ -517,19 +531,44 @@
     return !!ns.shell?.isAtMost("md");
   }
 
+  // The tree and the Functions list: ns.sidePanel shells (a 32 px rail when
+  // folded on wide windows; a drawer over the content on phones, which
+  // #explorerTreeToggle opens for the view's pane: an ns.layers layer, so
+  // Escape and a press outside close it).
+  const sidePanels = {};
+  function sidePanel(id) {
+    if (sidePanels[id] || !document.getElementById(id)) return sidePanels[id] || null;
+    const pane = document.getElementById(id);
+    const tree = id === "explorerListPane";
+    sidePanels[id] = ns.sidePanel.mount(pane, {
+      label: tree ? "Objects" : "Functions",
+      collapse: { button: document.getElementById(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? "chdash.explorerTreeCollapsed.v1" : "chdash.explorerFunctionsCollapsed.v1" },
+      drawer: {
+        toggle: shellEl("explorerTreeToggle"),
+        backdrop: pane.nextElementSibling?.classList.contains("explorerTreeBackdrop") ? pane.nextElementSibling : null,
+        // The toggle is shared by both panes: the Explorer names it (syncViewTabs).
+        bind: false,
+        manageToggle: false,
+        onChange: (open) => { if (!open && model.treeOpen && drawerPane()?.id === id) setTreeDrawerOpen(false); },
+      },
+    });
+    return sidePanels[id];
+  }
+
   // Mobile: the tree is an off-canvas drawer over the content.
   function setTreeDrawerOpen(open) {
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     const value = !!open && isMobileShell();
     model.treeOpen = value;
     shell?.classList.toggle("is-tree-open", value);
+    const current = drawerPane()?.id || "";
+    for (const id of ["explorerListPane", "explorerFunctionListPane"]) sidePanel(id)?.setDrawerOpen(value && id === current);
     const toggle = shellEl("explorerTreeToggle");
     if (toggle) {
       const label = (drawerPane()?.label || "Objects").toLowerCase();
       toggle.setAttribute("aria-expanded", String(value));
       toggle.setAttribute("aria-label", value ? `Hide ${label}` : `Show ${label}`);
     }
-    for (const backdrop of shell?.querySelectorAll?.(".explorerTreeBackdrop") || []) backdrop.hidden = !value;
   }
 
   // show: false only switches the panes; the caller applies the selection
@@ -1304,6 +1343,7 @@
     if (!dom.explorerFunctionList) return;
     const items = visibleFunctions();
     clear(dom.explorerFunctionList);
+    setSideMeta("explorerFunctionMeta", items.length ? format.countLabel(items.length, "function") : "");
     if (!items.length) {
       dom.explorerFunctionList.appendChild(node("div", "explorerListEmpty", model.loadingFunctions ? "Loading\u2026" : "No functions found"));
       renderFunctionDetail();
@@ -1884,6 +1924,7 @@
 
     if (!databases.length) {
       dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading\u2026" : "No accessible databases"));
+      setSideMeta("explorerTreeMeta", "");
       return;
     }
 
@@ -2018,6 +2059,13 @@
       dom.explorerTableList.appendChild(section);
     }
     if (!shown) dom.explorerTableList.appendChild(node("div", "explorerListEmpty", "No matching databases or objects"));
+    setSideMeta("explorerTreeMeta", format.countLabel(shown, "database"));
+  }
+
+  // The count in a side panel's head.
+  function setSideMeta(id, text) {
+    const meta = document.getElementById(id);
+    if (meta && meta.textContent !== text) meta.textContent = text;
   }
 
   function catalogContainsTable(payload, database, table) {
@@ -2448,10 +2496,9 @@
     for (const chip of shellEl("explorerTreeFilters")?.querySelectorAll?.(".explorerFilterChip[data-filter]") || []) {
       chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });
     }
+    sidePanel("explorerListPane");
+    sidePanel("explorerFunctionListPane");
     shellEl("explorerTreeToggle")?.addEventListener("click", () => setTreeDrawerOpen(!model.treeOpen));
-    for (const backdrop of document.querySelectorAll(".explorerShell .explorerTreeBackdrop")) {
-      backdrop.addEventListener("click", () => setTreeDrawerOpen(false));
-    }
     try {
       window.matchMedia(ns.shell.mediaQuery("md")).addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
     } catch {}
@@ -2486,10 +2533,6 @@
     }
     window.addEventListener("chdash:host-changed", resetForHost);
     window.addEventListener("chdash:features-changed", applyExplorerFeatures);
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      if (model.treeOpen) setTreeDrawerOpen(false);
-    });
     loadVisibilityOptions();
     model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
     syncVisibilityOptionLocks({ propagate: true });

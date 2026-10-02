@@ -567,6 +567,8 @@
     return ns.facetPanel.create({
       ids: { panel: "traceFacets", toggle: "traceFacetsToggle", meta: "traceFacetsMeta", search: "traceFacetsSearch", list: "traceFacetsList" },
       collapsedClass: "chdash-trace-facets-collapsed",
+      // A phone: the panel is a drawer, toggled from the top of the results.
+      drawerHost: document.querySelector(".traceSearchMain"),
       collapsedStoreKey: COLLAPSED_STORE_KEY,
       pinStoreKey: PIN_STORE_KEY,
       label: "attributes",

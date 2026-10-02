@@ -69,7 +69,7 @@ def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
     ui = read("src/static/app_explorer.js")
     # The former cog menu became chips like the object tree's type chips.
     assert 'id="explorerFunctionSettings"' not in html
-    assert 'id="explorerFunctionFilters" class="explorerTreeFilters" role="group" aria-label="Function kinds"' in html
+    assert 'id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds"' in html
     for kind in ["Function", "Aggregate Function", "Table Function", "user-defined"]:
         assert f'class="explorerFilterChip" type="button" data-function-kind="{kind}" aria-pressed="false"' in html
     assert 'const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;' in ui

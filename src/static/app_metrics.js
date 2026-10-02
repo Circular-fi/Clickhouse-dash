@@ -667,6 +667,9 @@
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     openPickers.add(root);
+    // An ns.layers layer: Escape and a press outside close it, the focus
+    // goes back to its button.
+    root._pickerLayer = ns.layers.push({ el: root, name: "metricsPicker", opener: button, onDismiss: () => closePicker(root) });
     requestAnimationFrame(() => {
       if (button.getAttribute("aria-expanded") !== "true") return;
       root.classList.add("themeSelect--open");
@@ -677,6 +680,9 @@
     const button = root.querySelector(":scope > .tracePicker__button");
     const menu = root.querySelector(":scope > .tracePicker__menu");
     openPickers.delete(root);
+    const layer = root._pickerLayer;
+    root._pickerLayer = null;
+    layer?.close();
     if (root._closeTimer) { clearTimeout(root._closeTimer); root._closeTimer = null; }
     button?.setAttribute("aria-expanded", "false");
     if (immediate || menu?.hidden) {
@@ -745,12 +751,6 @@
       loadPanel(panel);
     });
 
-    for (const picker of [aggPicker, groupPicker]) {
-      picker.querySelector(".tracePicker__menu").addEventListener("keydown", (event) => {
-        if (event.key === "Escape") { event.preventDefault(); closePicker(picker); picker.querySelector(".tracePicker__button")?.focus({ preventScroll: true }); }
-      });
-    }
-
     const chips = el.querySelector(".metricsFilters__chips");
     chips.addEventListener("click", (event) => {
       const remove = event.target.closest("[data-remove-filter]");
@@ -771,11 +771,21 @@
       for (const b of opButtons) { b.classList.toggle("is-active", b.dataset.op === op); b.setAttribute("aria-pressed", String(b.dataset.op === op)); }
     };
     setOp("=");
-    const closeForm = () => { form.hidden = true; addButton.setAttribute("aria-expanded", "false"); };
+    // The open form is an ns.layers layer: Escape closes it, the focus goes
+    // back to the add button.
+    let formLayer = null;
+    const closeForm = () => {
+      form.hidden = true;
+      addButton.setAttribute("aria-expanded", "false");
+      const layer = formLayer;
+      formLayer = null;
+      layer?.close();
+    };
     addButton.addEventListener("click", async () => {
       if (!form.hidden) { closeForm(); return; }
       form.hidden = false;
       addButton.setAttribute("aria-expanded", "true");
+      formLayer = ns.layers.push({ el: form, name: "metricsFilterForm", opener: addButton, docked: true, onDismiss: () => closeForm() });
       keyInput.value = "";
       valueInput.value = "";
       setOp("=");
@@ -808,7 +818,6 @@
       loadPanel(panel);
     });
     form.querySelector(".metricsFilterForm__cancel").addEventListener("click", closeForm);
-    form.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); closeForm(); addButton.focus(); } });
 
     el.querySelector(".metricsExemplarToggle").addEventListener("change", (event) => {
       panel.exemplars = !!event.target.checked;
@@ -1221,6 +1230,13 @@
     writeUrl();
     renderPanels();
 
+    // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
+    // windows (remembered), a drawer on phones opened from the charts' top.
+    ns.sidePanel.mount(document.getElementById("metricsSidebar"), {
+      label: "Metrics",
+      collapse: { button: document.getElementById("metricsSidebarToggle"), storeKey: "chdash.metricsCatalogCollapsed.v1", rootClass: "chdash-metrics-catalog-collapsed" },
+      drawer: { host: document.querySelector(".metricsMain") },
+    });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);
     const search = document.getElementById("metricsSearch");
     search?.addEventListener("input", () => { model.search = search.value; renderCatalog(); });
@@ -1232,17 +1248,6 @@
     });
     document.getElementById("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
     dom.metricsAddPanelButton?.addEventListener("click", addPanel);
-    document.addEventListener("click", (event) => {
-      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-      for (const root of [...openPickers]) if (!root.contains(event.target) && !path.includes(root)) closePicker(root);
-    });
-    // Escape closes the open pickers of this view only (the others have their own).
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || !openPickers.size || (ns.observability && !ns.observability.isActive("metrics"))) return;
-      const inside = [...openPickers].find((root) => root.contains(document.activeElement));
-      closePickers();
-      inside?.querySelector(".tracePicker__button")?.focus({ preventScroll: true });
-    });
     window.addEventListener("chdash:host-changed", () => {
       started = true;
       if (!ownsUrl()) { reloadWhenShown = true; return; }

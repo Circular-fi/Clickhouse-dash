@@ -365,7 +365,7 @@ def test_view_like_details_have_no_preview_and_lineage_tab_is_conditional() -> N
 def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     html = read("src/static/explorer.html")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    assert 'class="explorerSidebarToolbar"' in html
+    assert 'class="uiSide__head explorerSideHead"' in html
     assert 'id="explorerFunctionSearchInput"' in html
     assert 'id="explorerFunctionCategorySelect"' in html
     assert 'id="explorerFunctionRefreshButton"' in html

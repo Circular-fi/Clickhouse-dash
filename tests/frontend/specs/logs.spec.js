@@ -455,11 +455,12 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await openLogs(page, logsUrl(win));
   const panel = fieldsPanel(page);
   await expect(panel).toBeVisible();
-  // Left of the histogram and the results, the Traces Attributes width and look.
+  // Left of the histogram and the results: the side panel shell (ns.sidePanel,
+  // --side-w), as the Traces Attributes.
   const box = await panel.boundingBox();
   const histogramBox = await page.locator('#logsHistogramCard').boundingBox();
   const tableBox = await page.locator('#logsTable').boundingBox();
-  expect(Math.round(box.width)).toBe(248);
+  expect(Math.round(box.width)).toBe(288);
   expect(box.x + box.width).toBeLessThanOrEqual(histogramBox.x);
   expect(box.x + box.width).toBeLessThanOrEqual(tableBox.x);
   expect(Math.abs(box.y - histogramBox.y)).toBeLessThanOrEqual(1);
@@ -593,23 +594,38 @@ test('logs: the Results / Patterns tabs are the in-content tab component (arrow,
   await expect(patterns).toHaveAttribute('aria-selected', 'true');
 });
 
-test('logs: on a phone the Fields panel starts folded and stacks above the histogram', async ({ page, request }) => {
+test('logs: on a phone the Fields panel is a drawer, opened from the top of the records', async ({ page, request }) => {
   await freshFields(page);
   const win = await logsWindow(request);
   await page.setViewportSize({ width: 390, height: 844 });
   await openLogs(page, logsUrl(win));
   const panel = fieldsPanel(page);
-  await expect(page.locator('#logsFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('#logsFacetsList')).toBeHidden();
-  await page.locator('#logsFacetsToggle').click();
+  const toggle = page.locator('#logsFacetsDrawerToggle');
+  await expect(panel).toBeHidden();
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveAttribute('aria-controls', 'logsFacets');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(panel.locator('.traceFacet').first()).toBeVisible({ timeout: 30_000 });
+  // Over the records from the left edge, under the page chrome.
+  await expect.poll(async () => Math.round((await panel.boundingBox()).x)).toBe(0);
   const box = await panel.boundingBox();
-  const histogramBox = await page.locator('#logsHistogramCard').boundingBox();
-  expect(box.width).toBeGreaterThan(300);
-  expect(box.y + box.height).toBeLessThanOrEqual(histogramBox.y + 1);
-  expect(box.height).toBeLessThanOrEqual(844 / 2 + 1);
+  const nav = await page.locator('#obsNav').boundingBox();
+  expect(box.width).toBeLessThanOrEqual(390 * 0.86 + 1);
+  expect(box.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
+  expect(Math.round(box.y + box.height)).toBe(844);
   await field(page, 'SeverityText').locator('[data-facet-expand]').click();
   await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').check();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN']);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // Escape closes it (ns.layers) and gives the focus back to its toggle.
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(toggle).toBeFocused();
+  // A press on the scrim closes it too.
+  await toggle.click();
+  await expect(panel).toBeVisible();
+  await page.mouse.click(380, 600);
+  await expect(panel).toBeHidden();
 });

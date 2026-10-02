@@ -97,10 +97,14 @@ def test_tree_rows_chips_and_drawer() -> None:
     assert 'if (query && loaded && !items.length && !databaseMatches) continue;' in tree
     assert 'setTreeDrawerOpen(false);' in tree
     assert 'function toggleTypeFilter(key)' in ui
-    assert '.explorerShell.is-tree-open > .explorerGrid > .explorerListPane' in css
+    # The panes are ns.sidePanel shells: their drawer opens for the view's pane.
+    html = read("src/static/explorer.html")
+    assert '<aside id="explorerListPane" class="uiSide explorerListPane" aria-label="Objects">' in html
+    assert '<aside id="explorerFunctionListPane" class="uiSide explorerListPane" aria-label="Functions">' in html
+    assert 'sidePanel(id)?.setDrawerOpen(value && id === current);' in ui
     # Every Catalog mode slides the same tree in, under the mode bar.
     assert 'if (view === "catalog") return { id: "explorerListPane", label: "Objects" };' in ui
-    assert ".explorerShell > #explorerListView > .explorerListPane,\n  #explorerTreeBackdrop {\n    top: var(--nav-row-h);" in css
+    assert "#explorerListView {\n    --side-drawer-top: calc(var(--shell-top, 0px) + var(--nav-row-h));" in css
     assert "--explorer-mode-bar-height" not in css
     # The header wraps on a phone through the one unscoped rule every shell shares.
     narrow = css[css.index("/* -- Narrow windows: the header wraps"):]

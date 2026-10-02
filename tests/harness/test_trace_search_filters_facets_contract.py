@@ -91,7 +91,7 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     js = read("src/static/app_logs.js")
     html = read("src/static/observability.html")
     assert "fields = ns.facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js
-    assert 'id="logsFacets" class="traceFacets logsFacets"' in html
+    assert 'id="logsFacets" class="uiSide traceFacets logsFacets"' in html
     assert "chdash-logs-facets-collapsed" in html
 
 

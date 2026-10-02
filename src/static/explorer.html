@@ -184,24 +184,26 @@
       <div id="explorerError" class="errorBanner explorerError" hidden></div>
 
       <div id="explorerListView" class="explorerGrid">
-        <aside id="explorerListPane" class="explorerListPane" aria-label="Objects">
-          <div class="explorerSidebarToolbar">
-            <label class="explorerSearch explorerSearch--sidebar">
-              <span class="srOnly">Search objects</span>
-              <input id="explorerSearchInput" type="search" placeholder="Search objects" autocomplete="off" />
-            </label>
+        <!-- The object tree: an ns.sidePanel shell (app_ui_panel.js): folded to a 32 px rail on wide windows, a drawer on phones. -->
+        <aside id="explorerListPane" class="uiSide explorerListPane" aria-label="Objects">
+          <div class="uiSide__head explorerSideHead">
+          <div class="uiSide__bar">
+            <button id="explorerTreeCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerListPane" title="Hide objects"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h4M5 3.5v9M5 8h4.5M5 12.5h4.5M10.5 6.5h3v3h-3zM10.5 11h3v3h-3z"/></svg><span>Objects</span></button>
+            <span id="explorerTreeMeta" class="uiSide__meta"></span>
             <button id="explorerRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh tables" title="Refresh tables"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
           </div>
-          <div id="explorerTreeFilters" class="explorerTreeFilters" role="group" aria-label="Object types">
+          <input id="explorerSearchInput" class="uiSide__search" type="search" placeholder="Search objects" aria-label="Search objects" autocomplete="off" />
+          <div id="explorerTreeFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Object types">
             <button id="explorerFilterTables" class="explorerFilterChip" type="button" data-filter="tables" aria-pressed="true" title="Tables: MergeTree, Log, Memory, Buffer, Distributed and other engines">Tables</button>
             <button id="explorerFilterViews" class="explorerFilterChip" type="button" data-filter="views" aria-pressed="true" title="Views and parameterized views">Views</button>
             <button id="explorerFilterMv" class="explorerFilterChip" type="button" data-filter="mv" aria-pressed="true" title="Materialized views">MV</button>
             <button id="explorerFilterDict" class="explorerFilterChip" type="button" data-filter="dict" aria-pressed="true" title="Dictionaries">Dict</button>
             <button id="explorerFilterSystem" class="explorerFilterChip" type="button" data-filter="system" aria-pressed="false" title="Include the system and information_schema databases">System</button>
           </div>
-          <div id="explorerTableList" class="explorerTableList"></div>
+          </div>
+          <div id="explorerTableList" class="uiSide__body explorerTableList"></div>
         </aside>
-        <div id="explorerTreeBackdrop" class="explorerTreeBackdrop" hidden></div>
+        <div id="explorerTreeBackdrop" class="uiSide__backdrop explorerTreeBackdrop" hidden></div>
 
         <div id="explorerCatalogMain" class="explorerCatalogMain">
         <!-- Catalog modes: the tree selection is the scope of all three. -->
@@ -281,12 +283,11 @@
       </div>
 
       <div id="explorerFunctionsPane" class="explorerGrid" hidden>
-        <aside id="explorerFunctionListPane" class="explorerListPane" aria-label="Functions">
-          <div id="explorerFunctionToolbar" class="explorerSidebarToolbar explorerSidebarToolbar--functions">
-            <label class="explorerSearch explorerSearch--sidebar">
-              <span class="srOnly">Search functions</span>
-              <input id="explorerFunctionSearchInput" type="search" placeholder="Search functions" autocomplete="off" />
-            </label>
+        <aside id="explorerFunctionListPane" class="uiSide explorerListPane" aria-label="Functions">
+          <div id="explorerFunctionToolbar" class="uiSide__head explorerSideHead">
+          <div class="uiSide__bar">
+            <button id="explorerFunctionCollapse" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="explorerFunctionListPane" title="Hide functions"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5c-1.8 0-2.3 1-2.6 2.6L6.6 11c-.3 1.6-.8 2.5-2.6 2.5M4.5 6.5h6"/></svg><span>Functions</span></button>
+            <span id="explorerFunctionMeta" class="uiSide__meta"></span>
             <select id="explorerFunctionCategorySelect" class="explorerSelect explorerFunctionFilter explorerFunctionFilter--native" aria-label="Filter function kind" hidden>
               <option value="">All</option>
               <option value="Function">Function</option>
@@ -296,15 +297,17 @@
             </select>
             <button id="explorerFunctionRefreshButton" class="button button--small explorerRefreshButton" type="button" aria-label="Refresh functions" title="Refresh functions"><svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg></button>
           </div>
-          <div id="explorerFunctionFilters" class="explorerTreeFilters" role="group" aria-label="Function kinds">
+          <input id="explorerFunctionSearchInput" class="uiSide__search" type="search" placeholder="Search functions" aria-label="Search functions" autocomplete="off" />
+          <div id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds">
             <button class="explorerFilterChip" type="button" data-function-kind="Function" aria-pressed="false" title="Regular functions only">Functions</button>
             <button class="explorerFilterChip" type="button" data-function-kind="Aggregate Function" aria-pressed="false" title="Aggregate functions only">Aggregate</button>
             <button class="explorerFilterChip" type="button" data-function-kind="Table Function" aria-pressed="false" title="Table functions only">Table</button>
             <button class="explorerFilterChip" type="button" data-function-kind="user-defined" aria-pressed="false" title="User-defined functions only">UDF</button>
           </div>
-          <div id="explorerFunctionList" class="explorerTableList"></div>
+          </div>
+          <div id="explorerFunctionList" class="uiSide__body explorerTableList"></div>
         </aside>
-        <div class="explorerTreeBackdrop" hidden></div>
+        <div class="uiSide__backdrop explorerTreeBackdrop" hidden></div>
         <section class="explorerDetailPane" aria-live="polite">
           <div id="explorerFunctionEmpty" class="explorerEmptyState">
             <strong>Select a function</strong>

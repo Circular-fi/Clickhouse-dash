@@ -19,11 +19,13 @@
   //                       wide windows fold the panel to a 32 px rail
   //                       (.is-collapsed, and rootClass on <html> for the
   //                       first paint, which the page's head script sets)
-  //     drawer            { toggle, host, backdrop, bind = true, onChange(open) }:
+  //     drawer            { toggle, host, backdrop, bind = true, manageToggle = true, icon, onChange(open) }:
   //                       at --bp-md and below the panel is a drawer over the
-  //                       content, opened by `toggle` (or a .uiSide__drawerToggle
-  //                       built at the start of `host`); an ns.layers layer
-  //                       (Escape, a press outside, focus back to the toggle)
+  //                       content (fixed under --side-drawer-top, default
+  //                       --shell-top), opened by `toggle` (or a
+  //                       .uiSide__drawerToggle in a bar built at the start
+  //                       of `host`); an ns.layers layer (Escape, a press
+  //                       outside, focus back to the toggle)
   //
   // ns.detailPanel.create(options) -> panel
   //   The right panel that shows one entity. Two layouts:
@@ -132,7 +134,7 @@
     }
 
     function syncDrawerToggle() {
-      if (!drawerToggle) return;
+      if (!drawerToggle || drawer?.manageToggle === false) return;
       const open = drawerOpen();
       drawerToggle.setAttribute("aria-expanded", String(open));
       if (panel.id) drawerToggle.setAttribute("aria-controls", panel.id);
@@ -165,13 +167,17 @@
     if (drawer) {
       drawerToggle = drawer.toggle || null;
       if (!drawerToggle && drawer.host) {
+        // A bar at the start of the main column, shown at --bp-md and below.
+        const bar = el("div", "uiSide__drawerBar");
         drawerToggle = el("button", "button button--small uiSide__drawerToggle");
         drawerToggle.type = "button";
-        drawerToggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11"/></svg>';
+        if (panel.id) drawerToggle.id = `${panel.id}DrawerToggle`;
+        drawerToggle.innerHTML = drawer.icon || '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11"/></svg>';
         drawerToggle.append(el("span", "uiSide__drawerToggleText", label));
-        drawer.host.prepend(drawerToggle);
+        bar.append(drawerToggle);
+        drawer.host.prepend(bar);
       }
-      if (!backdrop && drawer.host !== undefined) {
+      if (!backdrop) {
         backdrop = el("div", "uiSide__backdrop");
         backdrop.hidden = true;
         panel.after(backdrop);

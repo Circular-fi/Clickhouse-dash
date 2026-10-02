@@ -6444,40 +6444,10 @@ button.explorerStorageStrip__segment:focus-visible {
 
 /* Search/filter/refresh belong to the left browser, leaving the content pane
    free to start at the top edge. */
-.explorerSidebarToolbar {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panelBg);
-}
 
-.explorerSidebarToolbar--functions {
-  grid-template-columns: 1fr 32px;
-}
 
-.explorerSidebarToolbar--functions .explorerFunctionToolbar__count,
-.explorerSidebarToolbar--functions .explorerSearch,
-.explorerSidebarToolbar--functions .explorerFunctionFilter {
-  grid-column: 1 / -1;
-}
 
-.explorerSidebarToolbar .explorerSearch,
-.explorerSidebarToolbar .explorerSearch input,
-.explorerSidebarToolbar .explorerSelect {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-}
 
-.explorerSidebarToolbar--functions .explorerFunctionToolbar__count {
-  padding: 0 2px;
-}
 
 /* The graph pane is a mode of the Catalog, under its mode bar. */
 .explorerCatalogMain > .explorerGraphPane {
@@ -6554,16 +6524,6 @@ button.explorerStorageStrip__segment:focus-visible {
   display: none !important;
 }
 
-.explorerSidebarToolbar--functions {
-  grid-template-columns: minmax(0, 1fr) minmax(92px, 118px) 32px;
-}
-.explorerSidebarToolbar--functions .explorerFunctionToolbar__count {
-  grid-column: 1 / -1;
-}
-.explorerSidebarToolbar--functions .explorerSearch,
-.explorerSidebarToolbar--functions .explorerFunctionFilter {
-  grid-column: auto;
-}
 
 /* 2026-09-06 resize follow-up: keep the historical query-panel sizing model,
    but expose a centered bottom drag handle instead of the browser corner grip.
@@ -6727,11 +6687,6 @@ html.chdash-page-select-hidden .pageSelect {
   margin-left: 2px;
 }
 
-.explorerSidebarToolbar {
-  position: relative;
-  top: auto;
-  z-index: 3;
-}
 
 /* Graph type is another connected dropdown; viewport/depth controls remain
    directly on the graph because they describe the canvas rather than Explorer
@@ -7407,9 +7362,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 
 /* Release 15: Explorer table visibility settings live between search and refresh. */
-.explorerSidebarToolbar {
-  grid-template-columns: minmax(0, 1fr) 28px 32px;
-}
 .explorerTableSettings { position: relative; }
 .explorerTableSettings__button {
   width: 28px;
@@ -7455,9 +7407,6 @@ html.chdash-page-select-hidden .pageSelect {
 
 /* Release 16: function-filter cog uses the exact same compact menu language as
    the Run-settings cog. The native select remains only as a state bridge. */
-.explorerSidebarToolbar--functions {
-  grid-template-columns: minmax(0, 1fr) 28px 32px;
-}
 .explorerFunctionFilter--native[hidden] { display: none !important; }
 .explorerFunctionSettings { position: relative; }
 .explorerFunctionSettings .runSettings__button {
@@ -9859,7 +9808,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 /* Trace search dashboard - dense full-width search, analytics and result rows. */
 .traceSearchView {
   /* Detail panels stick under the search bar (app_ui_panel.js). */
-  --detail-top: var(--trace-bar-h, 0px);
+  --panel-top: var(--trace-bar-h, 0px);
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -14215,33 +14164,20 @@ html[data-theme="light"] {
 .traceInspectorIdentity__context { margin-left: 0; }
 
 /* Surrounding context: a side panel over the trace page. */
+/* The surrounding-context drawer over the trace: the detail panel shell's
+   head and close button (.uiDetail), fixed under the page chrome. */
 .traceContextPanel {
   position: fixed;
-  z-index: 60;
-  top: 0;
+  z-index: var(--z-drawer);
+  top: var(--shell-top, 0px);
   right: 0;
   bottom: 0;
   width: min(720px, 100vw);
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--borderStrong, var(--border));
-  background: var(--bg);
-  color: var(--text);
+  border-left: var(--shell-border);
   box-shadow: var(--obs-shadow-drawer);
-  font-size: 12px;
+  /* Focused on open (a programmatic focus, no ring): Tab moves into it. */
   outline: none;
 }
-.traceContextPanel[hidden] { display: none; }
-.traceContextPanel__head {
-  padding: 10px 12px 8px 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  border-bottom: 1px solid var(--border);
-}
-.traceContextPanel__title { min-width: 0; flex: 1 1 auto; display: grid; gap: 2px; }
-.traceContextPanel__title > strong { font-size: 14px; }
-.traceContextPanel__title > span { min-width: 0; overflow: hidden; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
 .traceContextPanel__title b { color: var(--text); }
 .traceContextPanel__title b::before,
 .traceContextRow__service > span::before {
@@ -14253,20 +14189,6 @@ html[data-theme="light"] {
   border-radius: 1px;
   background: var(--trace-service-color, var(--muted));
 }
-.traceContextPanel__close {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-.traceContextPanel__close:hover,
-.traceContextPanel__close:focus-visible { color: var(--text); border-color: var(--accentBorder); }
 .traceContextPanel__controls { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); }
 .traceContextSeg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .traceContextSeg__button {
@@ -14483,64 +14405,9 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceSearchBody { display: flex; align-items: flex-start; min-width: 0; }
 .traceSearchMain { flex: 1 1 auto; min-width: 0; }
-.traceFacets {
-  position: sticky;
-  top: calc(var(--trace-bar-h, 0px) + 8px);
-  flex: 0 0 248px;
-  width: 248px;
-  max-height: calc(100dvh - var(--shell-top, 0px) - var(--trace-bar-h, 0px) - 20px);
-  display: flex;
-  flex-direction: column;
-  margin: 8px 0 12px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panelBg);
-  overflow: hidden;
-}
-.traceFacets[hidden] { display: none; }
-.traceFacets__head {
-  flex: 0 0 auto;
-  height: 31px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 0 8px 0 4px;
-  border-bottom: 1px solid var(--border);
-}
-.traceFacets__toggle {
-  min-width: 0;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.traceFacets__toggle:hover { background: var(--rowHover); }
-.traceFacets__toggle svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
-.traceFacets__meta { color: var(--muted); font-size: 9px; white-space: nowrap; }
-.traceFacets__body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.traceFacets__search {
-  flex: 0 0 auto;
-  height: 26px;
-  margin: 7px 8px 4px;
-  padding: 0 8px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 4px;
-  outline: none;
-  background: var(--inputBg);
-  color: var(--text);
-  font-size: 11px;
-}
-.traceFacets__search:focus { border-color: var(--accentBorder); }
-.traceFacets__list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 0 8px; }
+/* The Attributes / Fields sidebar: an ns.sidePanel shell (.uiSide,
+   Components: panels); its list scrolls in the shell's body. */
+.traceFacets__list { padding: 2px 0 8px; }
 .traceFacets__empty { padding: 12px 10px; color: var(--muted); font-size: 11px; }
 .traceFacets__empty.is-error,
 .traceFacet__status.is-error { color: var(--danger); }
@@ -14629,28 +14496,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacets__more { margin: 4px 8px 0; }
 .traceFacet__more:hover,
 .traceFacets__more:hover { text-decoration: underline; }
-
-/* Hidden sidebar: a narrow rail with the toggle only (the Traces
-   Attributes and the Logs Fields panels fold separately). */
-html.chdash-trace-facets-collapsed #traceFacets,
-html.chdash-logs-facets-collapsed #logsFacets { flex-basis: 32px; width: 32px; }
-html.chdash-trace-facets-collapsed #traceFacets .traceFacets__body,
-html.chdash-trace-facets-collapsed #traceFacets .traceFacets__meta,
-html.chdash-trace-facets-collapsed #traceFacets .traceFacets__toggle > span,
-html.chdash-logs-facets-collapsed #logsFacets .traceFacets__body,
-html.chdash-logs-facets-collapsed #logsFacets .traceFacets__meta,
-html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle > span { display: none; }
-html.chdash-trace-facets-collapsed #traceFacets .traceFacets__head,
-html.chdash-logs-facets-collapsed #logsFacets .traceFacets__head { justify-content: center; padding: 0; border-bottom: 0; }
-html.chdash-trace-facets-collapsed #traceFacets .traceFacets__toggle,
-html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px; justify-content: center; padding: 0; }
-
-@media (max-width: 760px) {
-  .traceSearchBody { flex-direction: column; align-items: stretch; }
-  .traceFacets { position: static; flex-basis: auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
-  html.chdash-trace-facets-collapsed #traceFacets { width: auto; }
-}
-
 
 /* ==========================================================================
    Trace logs (app_trace_logs.js): header toggle, logs panel, span row badges
@@ -14769,17 +14614,7 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
 }
 .traceLogsPanel__filter:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 .traceLogsPanel__source { min-width: 0; margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.traceLogsPanel__close {
-  width: 22px;
-  height: 22px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-.traceLogsPanel__bar > .traceLogsPanel__title + .traceLogsPanel__close { margin-left: auto; }
+.traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
 .traceLogsPanel__open {
   flex: 0 0 auto;
   height: 22px;
@@ -14797,8 +14632,6 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
 }
 .traceLogsPanel__open:hover,
 .traceLogsPanel__open:focus-visible { border-color: var(--buttonBorderHover); }
-.traceLogsPanel__close:hover,
-.traceLogsPanel__close:focus-visible { color: var(--text); }
 .traceLogsPanel__notice {
   padding: 3px 10px;
   display: flex;
@@ -15449,24 +15282,18 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
 
 /* ==========================================================================
    Logs Fields panel (app_facet_panel.js, the Traces Attributes sidebar's
-   component and .traceFacets look): a full-height column left of the
-   histogram and the results, its list scrolling; folded, a 32 px rail. At
-   most 760 px it stacks above the histogram, as on Traces.
+   component, an ns.sidePanel shell): a full-height column left of the
+   histogram and the results, its list scrolling; folded, a 32 px rail; a
+   drawer on phones, as on Traces.
    ========================================================================== */
 .logsSearchBody { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch; min-width: 0; }
 .logsSearchMain { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.traceFacets.logsFacets { position: relative; top: auto; max-height: none; align-self: stretch; }
 .traceFacet__scope--column { color: var(--accentText); background: color-mix(in srgb, var(--accentBorder) 16%, transparent); }
 .traceFacet__scope--log { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
 /* Beside the panel the results are narrower: a long pattern wraps (two
    lines at most) instead of running past the pane under a clip. */
 .logsPattern { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 .logsPattern .logsSevBadge { display: inline-block; margin-right: 7px; vertical-align: 1px; }
-@media (max-width: 760px) {
-  .logsSearchBody { flex-direction: column; }
-  .traceFacets.logsFacets { flex: 0 0 auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
-  html.chdash-logs-facets-collapsed #logsFacets { width: auto; }
-}
 
 /* Trace detail views: the tab row (.contentTabs) in the view bar; below
    820 px (--bp-md) the "View" dropdown instead. */
@@ -15488,49 +15315,14 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
   min-height: 0;
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  /* The catalog column is its ns.sidePanel width (--side-w, the rail). */
+  grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 .metricsWorkspace > .obsFilterBar { grid-column: 1 / -1; }
-@media (min-width: 1700px) {
-  .metricsWorkspace { grid-template-columns: 320px minmax(0, 1fr); }
-}
-.metricsSidebar {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
-}
-.metricsSidebar__head {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 6px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--border);
-}
-.metricsSearch {
-  box-sizing: border-box;
-  width: 100%;
-  height: 31px;
-  padding: 0 9px;
-  border: 1px solid var(--buttonBorder);
-  border-radius: 6px;
-  outline: none;
-  background: var(--inputBg);
-  color: var(--text);
-  font: 500 11.5px/1 Arial, Helvetica, sans-serif;
-}
-.metricsSearch:hover,
-.metricsSearch:focus { border-color: var(--buttonBorderHover); }
-.metricsSearch:focus-visible { box-shadow: var(--ring); }
-.metricsSidebar__summary { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* The catalog tree: the body of the ns.sidePanel shell. */
 .metricsCatalog {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
   overflow-x: hidden;
   padding: 4px 0 12px;
 }
@@ -15840,9 +15632,9 @@ html.chdash-logs-facets-collapsed #logsFacets .traceFacets__toggle { width: 26px
 .metricsTip__trace code { font-size: 10px; overflow-wrap: anywhere; }
 .metricsTip__attr { color: var(--text); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metricsTip__attr em { color: var(--muted); font-style: normal; }
-@media (max-width: 900px) {
-  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(180px, 34vh) minmax(0, 1fr); }
-  .metricsSidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+/* Phones: the catalog is a drawer (Components: panels), the charts fill the view. */
+@media (max-width: 820px) {
+  .metricsWorkspace { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ==========================================================================
@@ -16468,18 +16260,14 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
    Observability detail panels: the span panel (Search tab, Spans mode), the
    service detail (Services tab) and the log record panel (Logs view) are
    docked ns.detailPanel shells (Components: panels). In the Traces search
-   view they stick under the search bar: --detail-top is --trace-bar-h
+   view they stick under the search bar: --panel-top is --trace-bar-h
    (app_traces.js), never a literal height a wrapped bar outgrows.
    ========================================================================== */
 /* At most 1100 px the search bar scrolls with the results (it is not
-   sticky): the panels and the facets sidebar stick at the top (at most
-   760 px the facets are a block above the results). */
+   sticky): the panels and the facets sidebar stick at the top. */
 @media (max-width: 1100px) {
   /* The search bar scrolls with the results: panels stick at the top. */
-  .traceSearchView { --detail-top: 0px; }
-}
-@media (min-width: 761px) and (max-width: 1100px) {
-  .traceFacets { top: 8px; max-height: calc(100dvh - var(--shell-top, 0px) - 20px); }
+  .traceSearchView { --panel-top: 0px; }
 }
 /* Narrow windows: the panels are bottom sheets (Components: panels). */
 @media (max-width: 820px) {
@@ -17884,24 +17672,14 @@ html[data-theme="light"] {
   flex: 1 1 auto;
 }
 
-.explorerTreeBackdrop[hidden] {
-  display: none;
-}
 
 /* --- Tree toolbar + type filter chips ----------------------------------------- */
-#explorerListPane > .explorerSidebarToolbar {
-  grid-template-columns: minmax(0, 1fr) 32px;
-  border-bottom: 0;
-  padding-bottom: 6px;
-}
 
+/* The type / kind chips: the chip row of the side panel head. */
 .explorerTreeFilters {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 0 8px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panelBg);
 }
 
 .explorerFilterChip {
@@ -18200,11 +17978,6 @@ html[data-theme="light"] {
 }
 
 /* Functions list: the tree pane's toolbar (search + refresh) and chips. */
-#explorerFunctionListPane > .explorerSidebarToolbar {
-  grid-template-columns: minmax(0, 1fr) 32px;
-  border-bottom: 0;
-  padding-bottom: 6px;
-}
 
 /* Storage mode: one summary line next to its actions. */
 .explorerSystemPane .explorerStorageView__header {
@@ -18472,19 +18245,18 @@ body {
   margin: var(--gutter) var(--gutter) 0;
 }
 
+/* The tree / Functions column is its ns.sidePanel width (--side-w, the
+   32 px rail when folded). */
 .explorerGrid {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(260px, 310px) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
+/* The tree and the Functions list: ns.sidePanel shells (Components: panels). */
 .explorerListPane {
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: var(--shell-border);
-  background: color-mix(in srgb, var(--tableBg) 58%, transparent);
 }
 
 .explorerCatalogMain {
@@ -18524,45 +18296,10 @@ body {
     flex: 1 1 auto;
   }
 
-  .explorerShell > .explorerGrid > .explorerListPane {
-    position: absolute;
-    z-index: var(--z-drawer);
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: min(320px, 86%);
-    border-right: var(--shell-border);
-    background: var(--panelBg);
-    box-shadow: 8px 0 24px rgba(2, 6, 23, 0.28);
-    transform: translateX(-104%);
-    visibility: hidden;
-    transition: transform 160ms ease, visibility 0s linear 160ms;
-  }
-
-  .explorerShell.is-tree-open > .explorerGrid > .explorerListPane {
-    transform: none;
-    visibility: visible;
-    transition: transform 160ms ease;
-  }
-
-  .explorerTreeBackdrop {
-    position: absolute;
-    z-index: calc(var(--z-drawer) - 1);
-    inset: 0;
-    background: rgba(2, 6, 23, 0.38);
-  }
-
-  /* The Catalog tree opens under the mode bar, which stays in reach. */
-  .explorerShell > #explorerListView > .explorerListPane,
-  #explorerTreeBackdrop {
-    top: var(--nav-row-h);
-  }
-}
-
-@media (max-width: 820px) and (prefers-reduced-motion: reduce) {
-  .explorerShell > .explorerGrid > .explorerListPane,
-  .explorerShell.is-tree-open > .explorerGrid > .explorerListPane {
-    transition: none;
+  /* The tree drawer (an ns.sidePanel drawer) opens under the Catalog mode
+     bar, which stays in reach; the Functions list under the top bar. */
+  #explorerListView {
+    --side-drawer-top: calc(var(--shell-top, 0px) + var(--nav-row-h));
   }
 }
 
@@ -18974,35 +18711,49 @@ body {
 .uiSide__search:focus-visible { box-shadow: var(--ring); }
 .uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.uiSide__drawerBar,
 .uiSide__drawerToggle,
 .uiSide__backdrop { display: none; }
+
+/* Sticky beside a page that scrolls (the Traces search view): under its
+   sticky bar (--panel-top), the height of what is left of the view. The
+   detail panels take it too (.uiDetail--sticky). */
+@media (min-width: 821px) {
+  .uiSide.uiSide--sticky,
+  .uiDetail--docked.uiDetail--sticky {
+    position: sticky;
+    top: var(--panel-top, 0px);
+    align-self: flex-start;
+    height: calc(100dvh - var(--shell-top, 0px) - var(--panel-top, 0px));
+  }
+}
 
 /* Folded to a rail: the collapse toggle only. Before the scripts run the
    page's head script sets the <html> class the panel's collapse names. */
 @media (min-width: 821px) {
-  .uiSide.is-collapsed,
-  html.chdash-trace-facets-collapsed #traceFacets,
-  html.chdash-logs-facets-collapsed #logsFacets {
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) {
     flex-basis: var(--side-rail-w);
     width: var(--side-rail-w);
   }
-  .uiSide.is-collapsed > :not(.uiSide__head),
-  .uiSide.is-collapsed .uiSide__head > :not(.uiSide__bar),
-  .uiSide.is-collapsed .uiSide__bar > :not(.uiSide__toggle),
-  .uiSide.is-collapsed .uiSide__toggle > span { display: none; }
-  .uiSide.is-collapsed .uiSide__head { justify-items: center; padding: 4px 0; border-bottom: 0; }
-  .uiSide.is-collapsed .uiSide__toggle { width: 26px; justify-content: center; margin: 0; padding: 0; }
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) > :not(.uiSide__head),
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__head > :not(.uiSide__bar),
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__bar > :not(.uiSide__toggle),
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__toggle > span { display: none; }
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__head { justify-items: center; padding: 4px 0; border-bottom: 0; }
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__toggle { width: 26px; justify-content: center; margin: 0; padding: 0; }
 }
 
 /* Narrow windows: a drawer over the content, opened by its toggle. */
 @media (max-width: 820px) {
   .uiSide {
-    position: absolute;
+    position: fixed;
     z-index: var(--z-drawer);
-    top: 0;
+    top: var(--side-drawer-top, var(--shell-top, 0px));
     bottom: 0;
     left: 0;
     width: min(320px, 86%);
+    height: auto;
+    border-top: var(--shell-border);
     box-shadow: var(--panel-shadow-drawer);
     transform: translateX(-104%);
     visibility: hidden;
@@ -19013,12 +18764,16 @@ body {
     visibility: visible;
     transition: transform 160ms ease;
   }
-  .uiSide__drawerToggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
+  .uiSide__drawerBar { display: flex; align-items: center; gap: 8px; padding: 6px var(--gutter) 0; }
+  .uiSide__drawerToggle { display: inline-flex; align-items: center; gap: 6px; }
   .uiSide__backdrop:not([hidden]) {
     display: block;
-    position: absolute;
+    position: fixed;
     z-index: calc(var(--z-drawer) - 1);
-    inset: 0;
+    top: var(--side-drawer-top, var(--shell-top, 0px));
+    right: 0;
+    bottom: 0;
+    left: 0;
     background: var(--panel-scrim);
   }
 }
@@ -19057,16 +18812,6 @@ body {
   border-radius: 8px;
   box-shadow: var(--shadow2);
   cursor: default;
-}
-/* Sticky beside a page that scrolls (the Traces search view): under its
-   sticky bar (--detail-top), the height of what is left of the view. */
-@media (min-width: 821px) {
-  .uiDetail--docked.uiDetail--sticky {
-    position: sticky;
-    top: var(--detail-top, 0px);
-    align-self: flex-start;
-    height: calc(100dvh - var(--shell-top, 0px) - var(--detail-top, 0px));
-  }
 }
 .uiDetail__head {
   flex: 0 0 auto;

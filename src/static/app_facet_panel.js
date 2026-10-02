@@ -4,8 +4,8 @@
   // Traces search (Attributes, app_trace_search.js) and Logs (Fields,
   // app_logs.js): a key search, the top keys of the matching rows with their
   // sampled counts and a scope badge, top values per key with include
-  // (checkbox) and exclude, pinned keys, load more, and a collapsed 32 px
-  // rail on wide windows. The page owns the filters: it hands the panel its
+  // (checkbox) and exclude, pinned keys, load more, in the ns.sidePanel shell
+  // (a collapsed 32 px rail on wide windows, a drawer on phones). The page owns the filters: it hands the panel its
   // current filters after every search and answers which values are
   // filtered; the panel calls back on include / exclude.
   const ns = window.ChDash;
@@ -28,7 +28,9 @@
   };
 
   // options:
-  //   ids: { panel, toggle, meta, search, list } element ids
+  //   ids: { panel, toggle, meta, search, list } element ids (the panel is an
+  //     ns.sidePanel shell: .uiSide markup, observability.html)
+  //   drawerHost: the main column whose top holds the phone drawer toggle
   //   collapsedClass: the <html> class of the folded rail; collapsedStoreKey, pinStoreKey
   //   label: "attributes" / "fields" (toggle titles, empty states)
   //   noun: ["span", "spans"] / ["log", "logs"]
@@ -75,24 +77,26 @@
       try { localStorage.setItem(o.pinStoreKey, JSON.stringify(state.pins.map((id) => { const { scope, key } = splitId(id); return [scope, key]; }))); } catch (_) { /* optional */ }
     }
 
+    // The panel shell (ns.sidePanel): the 32 px rail on wide windows (the
+    // <html> class the head script sets before the first paint), a drawer
+    // opened from the main column's toggle on narrow ones.
+    const unfolded = () => {
+      if (state.filters && state.filterKey !== o.filterKey(state.filters)) void load(state.filters);
+      else render();
+    };
+    const side = ns.sidePanel.mount(byId("panel"), {
+      label: o.label.charAt(0).toUpperCase() + o.label.slice(1),
+      collapse: { button: byId("toggle"), storeKey: o.collapsedStoreKey, rootClass: o.collapsedClass, onChange: (value) => { if (!value) unfolded(); } },
+      drawer: o.drawerHost ? { host: o.drawerHost, onChange: (open) => { if (open) unfolded(); } } : null,
+    });
+
+    // Folded to the rail (a drawer on a phone is never folded).
     function collapsed() {
-      return document.documentElement.classList.contains(o.collapsedClass);
+      return side.collapsed() && !ns.shell?.isAtMost?.("md");
     }
 
     function setCollapsed(value) {
-      document.documentElement.classList.toggle(o.collapsedClass, value);
-      try { localStorage.setItem(o.collapsedStoreKey, value ? "1" : "0"); } catch (_) { /* optional */ }
-      syncToggle();
-      if (!value && state.filters && state.filterKey !== o.filterKey(state.filters)) void load(state.filters);
-      else if (!value) render();
-    }
-
-    function syncToggle() {
-      const button = byId("toggle");
-      if (!button) return;
-      const open = !collapsed();
-      button.setAttribute("aria-expanded", open ? "true" : "false");
-      button.title = open ? `Hide ${o.label}` : `Show ${o.label}`;
+      side.setCollapsed(value);
     }
 
     // After every search: the keys for the new filters, then the values of
@@ -212,7 +216,6 @@
     function render() {
       const list = byId("list");
       const meta = byId("meta");
-      syncToggle();
       if (!list) return;
       if (meta) {
         meta.textContent = state.loading ? "Loading\u2026" : state.keys.length ? `${state.estimated ? "\u2248" : ""}${compact(state.sampled)} ${state.sampled === 1 ? one : many}` : "";
@@ -300,11 +303,9 @@
       render();
     }
 
-    byId("toggle")?.addEventListener("click", () => setCollapsed(!collapsed()));
     byId("list")?.addEventListener("click", onClick);
     byId("list")?.addEventListener("change", onChange);
     byId("search")?.addEventListener("input", (event) => { state.query = String(event.target.value || ""); state.shown = KEYS_PAGE; render(); });
-    syncToggle();
 
     return {
       load,

@@ -219,8 +219,13 @@
 
   const pickers = new Set();
 
+  // An open picker is an ns.layers layer: Escape and a press outside it
+  // close it, the focus goes back to its button.
   function closePicker(root, { immediate = false } = {}) {
     if (!root) return;
+    const layer = root._pickerLayer;
+    root._pickerLayer = null;
+    layer?.close();
     const button = root.querySelector(":scope > .tracePicker__button");
     const menu = root.querySelector(":scope > .tracePicker__menu");
     clearTimeout(root._closeTimer);
@@ -253,6 +258,7 @@
     root.classList.remove("themeSelect--closing");
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    root._pickerLayer = ns.layers.push({ el: root, name: "logsPicker", opener: button, onDismiss: () => closePicker(root) });
     requestAnimationFrame(() => {
       if (button.getAttribute("aria-expanded") !== "true") return;
       root.classList.add("themeSelect--open");
@@ -269,14 +275,6 @@
       event.stopPropagation();
       if (button.getAttribute("aria-expanded") === "true") closePicker(root);
       else { onOpen?.(); openPicker(root); }
-    });
-    menu.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closePicker(root);
-        button.focus({ preventScroll: true });
-      }
     });
   }
 
@@ -545,6 +543,8 @@
     fields = ns.facetPanel.create({
       ids: { panel: "logsFacets", toggle: "logsFacetsToggle", meta: "logsFacetsMeta", search: "logsFacetsSearch", list: "logsFacetsList" },
       collapsedClass: "chdash-logs-facets-collapsed",
+      // A phone: the panel is a drawer, toggled from the top of the records.
+      drawerHost: document.querySelector(".logsSearchMain"),
       collapsedStoreKey: "chdash.logsFacetsCollapsed.v1",
       pinStoreKey: "chdash.logsFacetPins.v1",
       label: "fields",
@@ -1731,11 +1731,6 @@
     $("logsWorkspace")?.addEventListener("click", onRetryClick);
     syncControls();
     setTab(model.tab, { push: false });
-
-    document.addEventListener("click", (event) => {
-      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-      if (![...pickers].some((root) => root.contains(event.target) || path.includes(root))) closePickers();
-    });
 
     $("logsForm")?.addEventListener("submit", (event) => {
       event.preventDefault();
