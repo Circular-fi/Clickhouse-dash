@@ -80,6 +80,7 @@ specs_for() {
     src/static/app_ui_popover.js) echo ui-popover ui-layers ui-foundations ;;
     src/static/app_ui_panel.js) echo ui-panels ui-layers ui-foundations explorer-nav logs metrics-browser trace-spans ;;
     src/static/app_ui_state.js|src/static/app_ui_search.js) echo ui-infrastructure ui-foundations ui-consistency explorer-nav observability logs metrics-browser trace-search-filters query-library ;;
+    src/static/app_router.js) echo ui-router ui-panels observability explorer-nav trace-views logs metrics-browser ;;
     src/static/app_loader.js|src/static/modules.json|src/shell/*|tools/page_shells.py|tools/build_page_css.py)
       echo ui-infrastructure ui-foundations page-chrome design functional observability ;;
     src/static/app_state.js|src/static/app_api.js|src/static/app_util.js) echo ui-infrastructure functional ui-foundations page-chrome ;;
