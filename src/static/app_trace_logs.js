@@ -11,6 +11,8 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { state, api } = ns;
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   const PANEL_OPEN_KEY = "chdash.traceLogs.panelOpen";
   const PANEL_PAGE = 300;
@@ -64,23 +66,13 @@
     return trace && view.trace === trace ? view : null;
   }
 
-  // OTel SeverityNumber ranges, else the SeverityText.
+  // The palette's level of the OTel SeverityNumber, else the SeverityText;
+  // "unset" when the log has neither.
   function severityOf(record) {
     const n = Number(record.severity_number || 0);
-    if (n >= 21) return "fatal";
-    if (n >= 17) return "error";
-    if (n >= 13) return "warn";
-    if (n >= 9) return "info";
-    if (n >= 5) return "debug";
-    if (n >= 1) return "trace";
-    const text = String(record.severity_text || "").trim().toUpperCase();
-    if (/^(FATAL|CRIT|EMERG|ALERT|PANIC)/.test(text)) return "fatal";
-    if (/^ERR/.test(text)) return "error";
-    if (/^WARN/.test(text)) return "warn";
-    if (/^(INFO|NOTICE)/.test(text)) return "info";
-    if (/^DEBUG/.test(text)) return "debug";
-    if (/^TRACE/.test(text)) return "trace";
-    return "unset";
+    const text = String(record.severity_text || "").trim();
+    if (!(n > 0) && !text) return "unset";
+    return palette.severityLevel(n > 0 ? n : text);
   }
 
   const severityRank = (sev) => SEVERITIES.indexOf(sev);
@@ -206,8 +198,8 @@
   function offsetText(record) {
     const start = Number(ctx.activeTraceCache().bounds.start);
     const delta = record.ns - start;
-    if (!Number.isFinite(delta)) return "\u2014";
-    return `${delta < 0 ? "\u2212" : "+"}${ctx.formatDuration(Math.abs(delta))}`;
+    if (!Number.isFinite(delta)) return fmt.EMPTY;
+    return `${delta < 0 ? "\u2212" : "+"}${fmt.duration(Math.abs(delta))}`;
   }
 
   function absoluteText(record) {
@@ -229,7 +221,7 @@
   }
 
   function countLabel(n) {
-    return `${n} log${n === 1 ? "" : "s"}`;
+    return `${fmt.count(n)} log${n === 1 ? "" : "s"}`;
   }
 
   function parseAttributes(raw) {
@@ -269,7 +261,7 @@
     const meta = [
       `<span>Time: <b>${esc(absoluteText(record))}</b></span>`,
       `<span>Severity: <b>${esc(record.severity_text || SEVERITY_LABELS[record.sev])}${record.severity_number ? ` (${esc(String(record.severity_number))})` : ""}</b></span>`,
-      `<span>Service: <b class="traceLog__metaService" style="--trace-service-color:${ctx.serviceColor(record.service_name)}">${esc(record.service_name || "unknown")}</b></span>`,
+      `<span>Service: <b class="traceLog__metaService" style="--trace-service-color:${palette.service(record.service_name)}">${esc(record.service_name || "unknown")}</b></span>`,
       record.scope_name ? `<span>Scope: <b>${esc(record.scope_name)}</b></span>` : "",
       record.event_name ? `<span>Event: <b>${esc(record.event_name)}</b></span>` : "",
       `<span>SpanID: <code>${esc(record.span_id || "none")}</code>${record.span_id && !span ? " <small>(not in this trace)</small>" : ""}</span>`,
@@ -294,7 +286,7 @@
       ? `data-log-open-span="${esc(span.span_id)}" title="Open the span of this log"`
       : `data-log-expand aria-expanded="${open ? "true" : "false"}"`;
     const columns = mode === "panel"
-      ? `<span class="traceLog__service" style="--trace-service-color:${ctx.serviceColor(record.service_name)}">${esc(record.service_name || "unknown")}</span><span class="traceLog__span${span ? "" : " is-missing"}" title="${esc(span ? `${span.service_name || "unknown"}: ${span.span_name || "span"}` : (record.span_id ? "Span not in this trace" : "No span context"))}">${esc(span ? span.span_name || "span" : (record.span_id ? "span not in trace" : "no span"))}</span>`
+      ? `<span class="traceLog__service" style="--trace-service-color:${palette.service(record.service_name)}">${esc(record.service_name || "unknown")}</span><span class="traceLog__span${span ? "" : " is-missing"}" title="${esc(span ? `${span.service_name || "unknown"}: ${span.span_name || "span"}` : (record.span_id ? "Span not in this trace" : "No span context"))}">${esc(span ? span.span_name || "span" : (record.span_id ? "span not in trace" : "no span"))}</span>`
       : "";
     return `<div class="traceLog traceLog--${mode}${open ? " is-open" : ""}${view.target === record.index ? " is-target" : ""}" data-log-index="${record.index}" data-sev="${record.sev}">
       <div class="traceLog__row" role="button" tabindex="0" ${rowAttrs}><button type="button" class="traceLog__toggle" data-log-expand aria-expanded="${open ? "true" : "false"}" aria-label="${open ? "Hide" : "Show"} log details"></button>${sevHtml(record)}<time class="traceLog__offset" title="${esc(absoluteText(record))}">${esc(offsetText(record))}</time>${columns}<code class="traceLog__body">${esc(record.body || "")}</code></div>
@@ -317,13 +309,13 @@
     let extra = "";
     if (v.status === "loading") { value = '<span class="traceButtonSpinner" aria-hidden="true"></span>'; title = "Loading the logs of this trace"; cls = " is-loading"; }
     else if (v.status === "error") { value = "!"; title = `Logs could not be loaded: ${v.message}`; cls = " is-error"; }
-    else if (v.status === "unavailable") { value = "\u2014"; title = v.message; cls = " is-unavailable"; }
+    else if (v.status === "unavailable") { value = fmt.EMPTY; title = v.message; cls = " is-unavailable"; }
     else {
       const n = v.records.length;
       const errors = v.records.filter((r) => r.sev === "error" || r.sev === "fatal").length;
-      value = `${n}${v.payload?.truncated ? "+" : ""}`;
-      title = `${countLabel(n)}${errors ? `, ${errors} error${errors === 1 ? "" : "s"}` : ""}${v.payload?.truncated ? " (first logs only)" : ""}. ${v.panelOpen ? "Hide" : "Show"} the logs panel.`;
-      if (errors) extra = `<span class="traceLogsToggle__errors" data-trace-logs-errors>${errors} ERR</span>`;
+      value = `${fmt.count(n)}${v.payload?.truncated ? "+" : ""}`;
+      title = `${countLabel(n)}${errors ? `, ${fmt.count(errors)} error${errors === 1 ? "" : "s"}` : ""}${v.payload?.truncated ? " (first logs only)" : ""}. ${v.panelOpen ? "Hide" : "Show"} the logs panel.`;
+      if (errors) extra = `<span class="traceLogsToggle__errors" data-trace-logs-errors>${fmt.count(errors)} ERR</span>`;
     }
     return `<div class="tracePageOverviewItem tracePageOverviewItem--logs" data-trace-header-item="Logs"><span>Logs</span><strong><button type="button" class="traceLogsToggle${cls}${v.panelOpen ? " is-open" : ""}" data-trace-logs-toggle aria-expanded="${v.panelOpen ? "true" : "false"}" aria-controls="traceLogsPanel" title="${esc(title)}" aria-label="${esc(`Logs: ${title}`)}">${LOG_ICON}<span data-trace-logs-count>${value}</span>${extra}</button></strong></div>`;
   }
@@ -366,7 +358,7 @@
   function windowText(v) {
     const w = v.payload?.window;
     if (!w) return "";
-    return `from ${w.margin_before_s} s before the trace to ${w.margin_after_s} s after it`;
+    return `from ${fmt.duration.fromSeconds(w.margin_before_s)} before the trace to ${fmt.duration.fromSeconds(w.margin_after_s)} after it`;
   }
 
   // The Logs view of the Observability page on this trace and its log window
@@ -389,16 +381,16 @@
     const counts = severityCounts(v.records);
     const chips = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => {
       const pressed = v.filters.severities.has(sev);
-      return `<button type="button" class="traceLogsChip" data-sev="${sev}" data-log-severity="${sev}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Show all severities" : `Only ${SEVERITY_LABELS[sev]} logs`}"><i aria-hidden="true"></i>${SEVERITY_LABELS[sev]}<b>${counts.get(sev)}</b></button>`;
+      return `<button type="button" class="traceLogsChip" data-sev="${sev}" data-log-severity="${sev}" aria-pressed="${pressed ? "true" : "false"}" title="${pressed ? "Show all severities" : `Only ${SEVERITY_LABELS[sev]} logs`}"><i aria-hidden="true"></i>${SEVERITY_LABELS[sev]}<b>${fmt.count(counts.get(sev))}</b></button>`;
     }).join("");
     const services = new Map();
     for (const record of v.records) services.set(record.service_name, (services.get(record.service_name) || 0) + 1);
-    const options = [["", `ALL (${v.records.length})`], ...[...services.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([name, n]) => [name, `${name || "unknown"} (${n})`])];
+    const options = [["", `ALL (${fmt.count(v.records.length)})`], ...[...services.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([name, n]) => [name, `${name || "unknown"} (${fmt.count(n)})`])];
     const serviceSelect = `<div class="themeSelect tracePicker traceLogsPanel__service"><select id="traceLogsService" class="tracePicker__native" tabindex="-1" aria-hidden="true" data-field-label="Service" aria-label="Filter logs by service">${options.map(([value, label]) => `<option value="${esc(value)}"${value === v.filters.service ? " selected" : ""}>${esc(label)}</option>`).join("")}</select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Service · ALL</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div>`;
     const logsUrl = logsViewUrl(v);
     const openInLogs = logsUrl ? `<a class="traceLogsPanel__open" href="${esc(logsUrl)}" data-trace-logs-open title="Search these logs in the Logs view">Open in Logs</a>` : "";
     const elapsed = Number(v.payload?.elapsed_ms);
-    const source = v.payload ? `${v.payload.database}.${v.payload.table}${Number.isFinite(elapsed) ? ` · ${elapsed} ms` : ""}` : "";
+    const source = v.payload ? `${v.payload.database}.${v.payload.table}${Number.isFinite(elapsed) ? ` · ${fmt.duration.fromMs(elapsed)}` : ""}` : "";
     return `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><div class="traceLogsPanel__chips" role="group" aria-label="Filter logs by severity">${chips}</div>${serviceSelect}<input id="traceLogsFilter" class="traceLogsPanel__filter" type="search" placeholder="Filter loaded logs" aria-label="Filter loaded logs" autocomplete="off" spellcheck="false" value="${esc(v.filters.text)}" /><span class="traceLogsPanel__source" title="${esc(`Read from ${source} ${windowText(v)}`)}">${esc(source)}</span>${openInLogs}<button type="button" class="traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>`;
   }
 
@@ -410,18 +402,18 @@
     if (!rows.length) return panelStateHtml("filtered", 'No loaded log matches the filters. <button type="button" class="traceLogsState__action" data-trace-logs-clear>Clear filters</button>');
     const shown = rows.slice(0, v.shown);
     const more = rows.length > shown.length
-      ? `<button type="button" class="traceLogsPanel__more" data-trace-logs-more>Show ${Math.min(PANEL_PAGE, rows.length - shown.length)} more of ${rows.length - shown.length}</button>`
+      ? `<button type="button" class="traceLogsPanel__more" data-trace-logs-more>Show ${fmt.count(Math.min(PANEL_PAGE, rows.length - shown.length))} more of ${fmt.count(rows.length - shown.length)}</button>`
       : "";
     return `${shown.map((record) => logItemHtml(record, "panel")).join("")}${more}`;
   }
 
   function panelNoticeHtml(v) {
     const notes = [];
-    if (v.payload?.truncated) notes.push(`Showing the first ${esc(String(v.records.length))} logs of this trace (logs.trace_logs_limit); filters apply to these only.`);
+    if (v.payload?.truncated) notes.push(`Showing the first ${fmt.count(v.records.length)} logs of this trace (logs.trace_logs_limit); filters apply to these only.`);
     if (v.payload?.window?.clamped) notes.push("The trace is longer than logs.max_lookback_minutes: logs after that window are not shown.");
-    if (v.orphans) notes.push(`${esc(String(v.orphans))} log${v.orphans === 1 ? " has" : "s have"} no span of this trace.`);
+    if (v.orphans) notes.push(`${fmt.count(v.orphans)} log${v.orphans === 1 ? " has" : "s have"} no span of this trace.`);
     const shown = filteredRecords(v).length;
-    const filtered = shown !== v.records.length ? `<span class="traceLogsPanel__matches">${shown} of ${v.records.length} shown</span>` : "";
+    const filtered = shown !== v.records.length ? `<span class="traceLogsPanel__matches">${fmt.count(shown)} of ${fmt.count(v.records.length)} shown</span>` : "";
     if (!notes.length && !filtered) return "";
     return `<div class="traceLogsPanel__notice${v.payload?.truncated ? " is-truncated" : ""}" data-trace-logs-notice>${filtered}${notes.map((note) => `<span>${note}</span>`).join("")}</div>`;
   }
@@ -484,8 +476,8 @@
     const id = String(span.span_id || "");
     const open = view.inline.has(id);
     const errors = records.filter((r) => r.sev === "error" || r.sev === "fatal").length;
-    const title = `${countLabel(records.length)}${errors ? ` (${errors} error${errors === 1 ? "" : "s"})` : ""}: ${open ? "hide them" : "list them under this span"}`;
-    return `<button type="button" class="traceSpanLogsBadge" data-sev="${worst}" data-span-logs-toggle aria-expanded="${open ? "true" : "false"}" title="${esc(title)}" aria-label="${esc(title)}">${LOG_ICON}<span>${records.length}</span></button>`;
+    const title = `${countLabel(records.length)}${errors ? ` (${fmt.count(errors)} error${errors === 1 ? "" : "s"})` : ""}: ${open ? "hide them" : "list them under this span"}`;
+    return `<button type="button" class="traceSpanLogsBadge" data-sev="${worst}" data-span-logs-toggle aria-expanded="${open ? "true" : "false"}" title="${esc(title)}" aria-label="${esc(title)}">${LOG_ICON}<span>${fmt.count(records.length)}</span></button>`;
   }
 
   // One marker per 0.2 % of the view, in the colour of its worst log.
@@ -542,7 +534,7 @@
     const more = records.length > shown.length
       ? `<button type="button" class="traceSpanLogsRow__more" data-trace-logs-span-more="${esc(span.span_id)}">${records.length - shown.length} more: open the logs panel</button>`
       : "";
-    return `<div class="traceSpanLogsRow" data-span-logs-for="${esc(span.span_id)}" style="--trace-service-color:${ctx.serviceColor(span.service_name)}" role="list" aria-label="${esc(`Logs of ${span.span_name || "span"}`)}">${shown.map((record) => inlineLineHtml(record, win, indentPx, guidesHtml(depth))).join("")}${more}</div>`;
+    return `<div class="traceSpanLogsRow" data-span-logs-for="${esc(span.span_id)}" style="--trace-service-color:${palette.service(span.service_name)}" role="list" aria-label="${esc(`Logs of ${span.span_name || "span"}`)}">${shown.map((record) => inlineLineHtml(record, win, indentPx, guidesHtml(depth))).join("")}${more}</div>`;
   }
 
   // Virtual list estimate until the row has been measured.
@@ -579,8 +571,8 @@
     const id = String(span.span_id || "");
     const open = !!ctx.model.spanSections.get(id)?.has("logs");
     const counts = severityCounts(records);
-    const summary = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => `<span class="traceSpanLogs__sev" data-sev="${sev}">${SEVERITY_LABELS[sev]} ${counts.get(sev)}</span>`).join("");
-    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanLogs" data-span-section="logs"${open ? " open" : ""}><summary><b>Logs</b><span class="traceJaegerGroup__count">(${records.length})</span><span class="traceSpanLogs__summary">${summary}</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanLogs__list">${records.map((record) => logItemHtml(record, "inspector")).join("")}</div><small class="traceSpanEvents__note">Log timestamps are relative to the start time of the full trace.</small></div></details>`;
+    const summary = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => `<span class="traceSpanLogs__sev" data-sev="${sev}">${SEVERITY_LABELS[sev]} ${fmt.count(counts.get(sev))}</span>`).join("");
+    return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanLogs" data-span-section="logs"${open ? " open" : ""}><summary><b>Logs</b><span class="traceJaegerGroup__count">(${fmt.count(records.length)})</span><span class="traceSpanLogs__summary">${summary}</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanLogs__list">${records.map((record) => logItemHtml(record, "inspector")).join("")}</div><small class="traceSpanEvents__note">Log timestamps are relative to the start time of the full trace.</small></div></details>`;
   }
 
   // ------------------------------------------------------------ events

@@ -8,6 +8,7 @@
   // app_traces.js calls install(ctx) with its model and helpers at init.
   const ns = window.ChDash;
   if (!ns) return;
+  const fmt = ns.format;
 
   const TAG_OPS = ["=", "!=", "exists", "missing"];
   const TAG_PARAMS = { "=": "tag", "!=": "tag_not", exists: "tag_exists", missing: "tag_missing" };
@@ -127,7 +128,7 @@
   }
 
   function durationText(ms) {
-    return ctx?.formatDuration ? ctx.formatDuration(ms * 1e6) : `${ms} ms`;
+    return fmt.duration.fromMs(ms);
   }
 
   function durationLabel(duration) {
@@ -584,14 +585,6 @@
     button.title = open ? "Hide attributes" : "Show attributes";
   }
 
-  function compactCount(value) {
-    const n = Number(value || 0);
-    if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, "")}B`;
-    if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, "")}k`;
-    return String(n);
-  }
-
   function facetFilterParams(filters) {
     const out = { ...(filters || {}) };
     for (const name of ["limit", "min_duration_ms", "max_duration_ms", "align_buckets", "bucket_origin_ms", "charts", "tag_scope", "tag_key", "tag_value"]) delete out[name];
@@ -693,8 +686,8 @@
       const included = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "="));
       const excluded = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "!="));
       const shown = item.value === "" ? '""' : item.value;
-      const count = item.count == null ? "\u2014" : `${estimated || entry.estimated ? "\u2248" : ""}${compactCount(item.count)}`;
-      return `<div class="traceFacetValue${excluded ? " is-excluded" : ""}" data-facet-value="${esc(item.value)}"><label class="traceFacetValue__label" title="${esc(item.value)}"><input type="checkbox" data-facet-include${included ? " checked" : ""}><span class="traceFacetValue__text">${esc(shown)}</span></label><span class="traceFacetValue__count" title="${item.count == null ? "Not in the sampled top values" : `${Number(item.count).toLocaleString()} span${item.count === 1 ? "" : "s"}${estimated || entry.estimated ? " (estimated from a sample)" : ""}`}">${esc(count)}</span><button type="button" class="traceFacetValue__exclude" data-facet-exclude aria-pressed="${excluded ? "true" : "false"}" title="${excluded ? "Stop excluding this value" : "Exclude this value"}" aria-label="${excluded ? "Stop excluding" : "Exclude"} ${esc(shown)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/><path d="M4.4 11.6 11.6 4.4"/></svg></button></div>`;
+      const count = item.count == null ? fmt.EMPTY : `${estimated || entry.estimated ? "\u2248" : ""}${fmt.compact(item.count)}`;
+      return `<div class="traceFacetValue${excluded ? " is-excluded" : ""}" data-facet-value="${esc(item.value)}"><label class="traceFacetValue__label" title="${esc(item.value)}"><input type="checkbox" data-facet-include${included ? " checked" : ""}><span class="traceFacetValue__text">${esc(shown)}</span></label><span class="traceFacetValue__count" title="${item.count == null ? "Not in the sampled top values" : `${fmt.count(item.count)} span${item.count === 1 ? "" : "s"}${estimated || entry.estimated ? " (estimated from a sample)" : ""}`}">${esc(count)}</span><button type="button" class="traceFacetValue__exclude" data-facet-exclude aria-pressed="${excluded ? "true" : "false"}" title="${excluded ? "Stop excluding this value" : "Exclude this value"}" aria-label="${excluded ? "Stop excluding" : "Exclude"} ${esc(shown)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/><path d="M4.4 11.6 11.6 4.4"/></svg></button></div>`;
     }).join("");
     const next = VALUE_LIMITS.find((limit) => limit > entry.limit);
     const more = entry.hasMore && next ? `<button type="button" class="traceFacet__more" data-facet-more-values>Load more values</button>` : "";
@@ -706,8 +699,8 @@
     const entry = facets.expanded.get(id);
     const open = !!entry;
     const active = search.chips.some((chip) => chip.kind === "tag" && chip.key === item.key && (chip.scope === item.scope || chip.scope === "any"));
-    const count = item.count == null ? "" : `${facets.estimated ? "\u2248" : ""}${compactCount(item.count)}`;
-    const title = item.count == null ? item.key : `${item.key}: ${Number(item.count).toLocaleString()} span${item.count === 1 ? "" : "s"}${facets.estimated ? " in the sample" : ""}`;
+    const count = item.count == null ? "" : `${facets.estimated ? "\u2248" : ""}${fmt.compact(item.count)}`;
+    const title = item.count == null ? item.key : `${item.key}: ${fmt.count(item.count)} span${item.count === 1 ? "" : "s"}${facets.estimated ? " in the sample" : ""}`;
     return `<section class="traceFacet${open ? " is-open" : ""}${active ? " is-active" : ""}" data-facet-scope="${esc(item.scope)}" data-facet-key="${esc(item.key)}">
       <div class="traceFacet__head"><button type="button" class="traceFacet__expand" data-facet-expand aria-expanded="${open ? "true" : "false"}" title="${esc(title)}"><svg class="traceFacet__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg><span class="traceFacet__scope traceFacet__scope--${esc(item.scope)}" title="${item.scope === "resource" ? "Resource attribute" : "Span attribute"}">${item.scope === "resource" ? "R" : "S"}</span><span class="traceFacet__key">${esc(item.key)}</span><span class="traceFacet__count">${esc(count)}</span></button><button type="button" class="traceFacet__pin" data-facet-pin aria-pressed="${pinned ? "true" : "false"}" title="${pinned ? "Unpin" : "Pin to the top"}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(item.key)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.6 2.2v1H4v-1l2.6-2.2zM8 9.7V14"/></svg></button></div>
       ${open ? `<div class="traceFacet__values">${facetValuesHtml(item.scope, item.key, entry, facets.estimated)}</div>` : ""}
@@ -720,10 +713,10 @@
     syncToggle();
     if (!list) return;
     if (meta) {
-      meta.textContent = facets.loading ? "Loading\u2026" : facets.keys.length ? `${facets.estimated ? "\u2248" : ""}${compactCount(facets.sampled)} spans` : "";
+      meta.textContent = facets.loading ? "Loading\u2026" : facets.keys.length ? `${facets.estimated ? "\u2248" : ""}${fmt.compact(facets.sampled)} spans` : "";
       meta.title = facets.estimated
-        ? `Estimated: counted over a sample of ${facets.sampled.toLocaleString()} matching spans${facets.timedOut ? " (the time budget stopped the scan)" : ""}.`
-        : facets.keys.length ? `Counted over all ${facets.sampled.toLocaleString()} matching spans of the range.` : "";
+        ? `Estimated: counted over a sample of ${fmt.count(facets.sampled)} matching spans${facets.timedOut ? " (the time budget stopped the scan)" : ""}.`
+        : facets.keys.length ? `Counted over all ${fmt.count(facets.sampled)} matching spans of the range.` : "";
       meta.classList.toggle("is-estimated", facets.estimated);
     }
     if (!facets.supported) { list.innerHTML = '<div class="traceFacets__empty">Attributes are not stored as Map columns.</div>'; return; }

@@ -261,7 +261,7 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page, request
   await expect(patternRows.first().locator('.logsSparkline polyline')).toHaveCount(1);
   await expect(patternRows.first().locator('.logsPattern__var').first()).toHaveText('<*>');
   const all = await patternRows.count();
-  const shares = async () => (await page.locator('#logsPatterns .logsPatternRow__share').allInnerTexts()).map((t) => parseFloat(t));
+  const shares = async () => (await page.locator('#logsPatterns .logsPatternRow__share').allInnerTexts()).map((t) => (t.startsWith('<') ? 0 : parseFloat(t)));
   expect((await shares()).some((s) => s > 10)).toBe(true);
   await page.locator('#logsDenoise').check();
   await expect.poll(() => param(page, 'denoise')).toEqual(['1']);

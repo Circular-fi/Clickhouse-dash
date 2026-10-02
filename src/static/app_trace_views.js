@@ -29,7 +29,8 @@
 
   const byId = (id) => document.getElementById(id);
   const esc = (value) => ctx.esc(value);
-  const fmt = (value) => ctx.formatDuration(value);
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   function derived() {
     const cache = ctx.activeTraceCache();
@@ -383,9 +384,9 @@
   }
 
   function formatStat(key, value) {
-    if (key === "count") return String(value);
-    if (key === "percent") return `${(Math.round(value * 100) / 100).toFixed(2)}%`;
-    return fmt(value);
+    if (key === "count") return fmt.count(value);
+    if (key === "percent") return fmt.percent(value / 100);
+    return fmt.duration(value);
   }
 
   // Jaeger's heat colouring: 8 % to 60 % of the heat colour by the row's share
@@ -424,7 +425,7 @@
     const ariaSort = (key) => (view.stats.sortKey === key ? (view.stats.sortAsc ? "ascending" : "descending") : "none");
     const head = `<tr><th aria-sort="${ariaSort("name")}"><button type="button" data-stats-sort="name">${esc(GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`)}${sortMark("name")}</button></th>${STAT_COLUMNS.map(([key, label, title]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-stats-sort="${key}" title="${esc(title)}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
     const rowHtml = (row) => {
-      const style = [row.service ? `--trace-service-color:${ctx.serviceColor(row.service)}` : "", heat(row)].filter(Boolean).join(";");
+      const style = [row.service ? `--trace-service-color:${palette.service(row.service)}` : "", heat(row)].filter(Boolean).join(";");
       const cls = `traceStats__row${row.detail ? " traceStats__row--detail" : ""}${row.service ? " has-service" : ""}${view.stats.colorBy ? " is-heat" : ""}`;
       return `<tr class="${cls}" style="${esc(style)}" data-stats-group="${esc(row.name)}"><th scope="row"><span>${esc(row.name)}</span></th>${STAT_COLUMNS.map(([key]) => `<td data-stat="${key}">${esc(formatStat(key, row.stats[key]))}</td>`).join("")}</tr>`;
     };
@@ -489,7 +490,7 @@
     const head = `<tr>${SPAN_COLUMNS.map(([key, label]) => `<th aria-sort="${ariaSort(key)}"><button type="button" data-spans-sort="${key}">${esc(label)}${sortMark(key)}</button></th>`).join("")}</tr>`;
     const body = shown.map((span) => {
       const status = String(span.status_code || "Unset");
-      return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="0" title="Show in the timeline"><td data-col="service"><span class="traceSpansTable__service" style="--trace-service-color:${ctx.serviceColor(span.service_name)}">${esc(span.service_name || "unknown")}</span></td><td data-col="operation">${esc(span.span_name || "span")}</td><td data-col="duration">${esc(fmt(spanDuration(span)))}</td><td data-col="start">${esc(fmt(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status"><span class="traceSpansTable__status traceSpansTable__status--${esc(status.toLowerCase())}">${esc(status)}</span></td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td data-col="id"><code>${esc(span.span_id)}</code></td></tr>`;
+      return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="0" title="Show in the timeline"><td data-col="service"><span class="traceSpansTable__service" style="--trace-service-color:${palette.service(span.service_name)}">${esc(span.service_name || "unknown")}</span></td><td data-col="operation">${esc(span.span_name || "span")}</td><td data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status"><span class="traceSpansTable__status traceSpansTable__status--${esc(status.toLowerCase())}">${esc(status)}</span></td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td data-col="id"><code>${esc(span.span_id)}</code></td></tr>`;
     }).join("");
     const more = rows.length > shown.length ? `<div class="traceSpansTable__more">Showing the first ${shown.length} of ${rows.length} spans: refine the filter to see the others.</div>` : "";
     alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${more}</div>`;
@@ -578,8 +579,8 @@
     const total = Math.max(1, root.value);
     const frame = (node, left, width, row, ancestor) => {
       const share = (node.value / total) * 100;
-      const color = node.service ? ctx.serviceColor(node.service) : "";
-      bars.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt(node.duration))}" data-flame-count="${node.count}" data-flame-share="${share.toFixed(2)}"><span>${esc(node.name)}</span></div>`);
+      const color = node.service ? palette.service(node.service) : "";
+      bars.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt.duration(node.duration))}" data-flame-count="${node.count}" data-flame-share="${esc(sharePct(share))}"><span>${esc(node.name)}</span></div>`);
     };
     ancestors.forEach((node, row) => frame(node, 0, 100, row, true));
     let rows = ancestors.length;
@@ -643,7 +644,8 @@
     return entry.graph;
   }
 
-  function round2(value) { return Math.round(value * 100) / 100; }
+  // Time shares of the graph nodes are in percent (0-100).
+  const sharePct = (value) => fmt.percent(Number(value || 0) / 100);
 
   // Drawn with the shared canvas graph kit (app_graph_kit.js), like the
   // Explorer graph and the Service map: one card per call path (the service
@@ -702,13 +704,6 @@
   };
 
   const graphKit = () => ns.graphKit;
-  const compactCount = (() => {
-    const format = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-    return (value) => {
-      const n = Number(value) || 0;
-      return n < 1000 ? String(Math.round(n)) : format.format(n);
-    };
-  })();
 
   function graphEdgeKind(node) {
     const span = node.spans?.[0];
@@ -721,9 +716,9 @@
     return "sync";
   }
 
-  function graphCountText(node) { return `${node.count} / ${node.errors} · avg ${fmt(node.time / Math.max(1, node.count))}`; }
-  function graphTimeText(node) { return `${fmt(node.time)} (${round2(node.percent)}%) · self ${fmt(node.selfTime)} (${round2(node.percentSelf)}%)`; }
-  function graphLabelText(node) { return `×${compactCount(node.count)}`; }
+  function graphCountText(node) { return `${fmt.count(node.count)} / ${fmt.count(node.errors)} · avg ${fmt.duration(node.time / Math.max(1, node.count))}`; }
+  function graphTimeText(node) { return `${fmt.duration(node.time)} (${sharePct(node.percent)}) · self ${fmt.duration(node.selfTime)} (${sharePct(node.percentSelf)})`; }
+  function graphLabelText(node) { return `×${fmt.compact(node.count)}`; }
   function graphPathText(node) { return `${node.service} ${node.operation}`; }
 
   // The heat of a node in the current colour mode, 0..1 (null in Service mode).
@@ -1074,7 +1069,7 @@
       fill: graphFill(node),
       border: selected || hovered ? kit.color("halo") : node.errors ? kit.color("error") : kit.color("border"),
       borderWidth: selected ? 2.4 : hovered || node.errors ? 1.8 : 1.2,
-      strip: kit.theme.resolveColor(ctx.serviceColor(node.service)),
+      strip: palette.resolve(palette.service(node.service)),
       status: node.errors ? "error" : null,
       rows: [],
     };
@@ -1209,7 +1204,7 @@
   function describeGraphNode(id) {
     const node = graphUi.layout?.items.get(id)?.node;
     if (!node) return "";
-    return `${node.service} ${node.operation}: ${node.count} span${node.count === 1 ? "" : "s"}, ${node.errors} error${node.errors === 1 ? "" : "s"}, ${fmt(node.time)} (${round2(node.percent)}% of the trace), self time ${round2(node.percentSelf)}%. Enter selects it.`;
+    return `${node.service} ${node.operation}: ${fmt.count(node.count)} span${node.count === 1 ? "" : "s"}, ${fmt.count(node.errors)} error${node.errors === 1 ? "" : "s"}, ${fmt.duration(node.time)} (${sharePct(node.percent)} of the trace), self time ${sharePct(node.percentSelf)}. Enter selects it.`;
   }
 
   // ---------------------------------------------------------- graph panel
@@ -1240,7 +1235,7 @@
   }
 
   function graphNodeButton(node, extra = "") {
-    return `<button type="button" class="graphKitPanel__link traceGraphPanel__path" data-graph-select="${esc(node.id)}" title="${esc(graphPathText(node))}"><span class="traceGraph__dot" style="background:${ctx.serviceColor(node.service)}"></span>${esc(node.service)} <span>${esc(node.operation)}</span>${extra}</button>`;
+    return `<button type="button" class="graphKitPanel__link traceGraphPanel__path" data-graph-select="${esc(node.id)}" title="${esc(graphPathText(node))}"><span class="traceGraph__dot" style="background:${palette.service(node.service)}"></span>${esc(node.service)} <span>${esc(node.operation)}</span>${extra}</button>`;
   }
 
   function renderGraphPanel() {
@@ -1253,24 +1248,24 @@
     body.append(kit.panelHeader({
       eyebrow: "Call path",
       title: node.service,
-      dot: ctx.serviceColor(node.service),
+      dot: palette.service(node.service),
       subtitle: node.operation,
       onClose: () => { closeGraphPanel(); graphCanvas()?.focus?.({ preventScroll: true }); },
     }));
     const stat = (label, value, note = "", cls = "") => `<div><dt>${esc(label)}</dt><dd${cls ? ` class="${cls}"` : ""}>${esc(value)}${note ? `<small>${esc(note)}</small>` : ""}</dd></div>`;
     const errorSpan = node.spans.find((span) => isError(span));
     const spans = node.spans.slice().sort((a, b) => spanStart(a) - spanStart(b));
-    const spanRows = spans.slice(0, GRAPH_PANEL_SPANS).map((span) => `<li><button type="button" class="traceGraphPanel__span${isError(span) ? " is-err" : ""}" data-graph-span="${esc(span.span_id)}" title="Show this span in the timeline"><span>+${esc(fmt(Math.max(0, spanStart(span) - traceStart)))}</span><span>${esc(fmt(spanDuration(span)))}</span><code>${esc(span.span_id)}</code></button></li>`).join("");
+    const spanRows = spans.slice(0, GRAPH_PANEL_SPANS).map((span) => `<li><button type="button" class="traceGraphPanel__span${isError(span) ? " is-err" : ""}" data-graph-span="${esc(span.span_id)}" title="Show this span in the timeline"><span>+${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</span><span>${esc(fmt.duration(spanDuration(span)))}</span><code>${esc(span.span_id)}</code></button></li>`).join("");
     const more = spans.length > GRAPH_PANEL_SPANS ? `<p class="graphKitPanel__note">+${spans.length - GRAPH_PANEL_SPANS} more in the timeline</p>` : "";
     const ancestors = [];
     for (let parent = node.parent; parent; parent = parent.parent) ancestors.unshift(parent);
     const children = node.children.slice().sort((a, b) => b.time - a.time);
     body.append(graphFragment('<dl class="graphKitPanel__stats">'
-      + stat("Spans", String(node.count))
-      + stat("Errors", String(node.errors), node.count ? `${round2((node.errors / node.count) * 100)}%` : "", node.errors ? "is-err" : "")
-      + stat("Avg", fmt(node.time / Math.max(1, node.count)))
-      + stat("Time", fmt(node.time), `${round2(node.percent)}% of the trace`)
-      + stat("Self time", fmt(node.selfTime), `${round2(node.percentSelf)}% of its time`)
+      + stat("Spans", fmt.count(node.count))
+      + stat("Errors", fmt.count(node.errors), node.count ? fmt.percent(node.errors / node.count) : "", node.errors ? "is-err" : "")
+      + stat("Avg", fmt.duration(node.time / Math.max(1, node.count)))
+      + stat("Time", fmt.duration(node.time), `${sharePct(node.percent)} of the trace`)
+      + stat("Self time", fmt.duration(node.selfTime), `${sharePct(node.percentSelf)} of its time`)
       + "</dl>"
       + '<div class="graphKitPanel__actions">'
       + `<button type="button" class="button button--primary button--small" data-graph-span="${esc(spans[0]?.span_id || "")}">${node.count > 1 ? "Show the first span in the timeline" : "Show in the timeline"}</button>`
@@ -1280,7 +1275,7 @@
       + (ancestors.length ? `<section class="graphKitPanel__section"><h3 class="graphKitPanel__sectionTitle">Called from</h3><ol class="traceGraphPanel__list">${ancestors.map((parent) => `<li>${graphNodeButton(parent)}</li>`).join("")}</ol></section>` : "")
       + `<section class="graphKitPanel__section"><h3 class="graphKitPanel__sectionTitle">Calls <small>spans · time</small></h3>`
       + (children.length
-        ? `<ul class="traceGraphPanel__list">${children.map((child) => `<li>${graphNodeButton(child, `<small>×${esc(compactCount(child.count))} · ${esc(fmt(child.time))}</small>`)}</li>`).join("")}</ul>`
+        ? `<ul class="traceGraphPanel__list">${children.map((child) => `<li>${graphNodeButton(child, `<small>×${esc(fmt.compact(child.count))} · ${esc(fmt.duration(child.time))}</small>`)}</li>`).join("")}</ul>`
         : '<p class="graphKitPanel__note">None</p>')
       + "</section>"));
     panel.replaceChildren(body);
@@ -1388,7 +1383,7 @@
           id: node.id, label: graphPathText(node), service: node.service, operation: node.operation, depth: node.depth, row: node.row,
           parent: node.parent?.id || null, count: node.count, errors: node.errors, status: node.errors ? "error" : null,
           countText: graphCountText(node), timeText: graphTimeText(node), heat: graphHeat(node),
-          fill: graphFill(node), strip: graphKit().theme.resolveColor(ctx.serviceColor(node.service)), ...toClient(item),
+          fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(item),
         };
       }) : [],
       edges: layout ? layout.edges.map((item) => ({
@@ -1458,7 +1453,7 @@
     popover.className = "traceEventPopover";
     popover.setAttribute("role", "dialog");
     popover.setAttribute("aria-label", "Span events");
-    popover.style.setProperty("--trace-service-color", ctx.serviceColor(node.span.service_name));
+    popover.style.setProperty("--trace-service-color", palette.service(node.span.service_name));
     const count = group.events.length;
     popover.innerHTML = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="traceEventPopover__close" data-event-popover-close aria-label="Close">×</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
     document.body.appendChild(popover);
@@ -1580,7 +1575,7 @@
       document.body.appendChild(flameTip);
     }
     const count = Number(frame.getAttribute("data-flame-count") || 1);
-    flameTip.innerHTML = `<b>${ctx.esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${ctx.esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${count} span${count === 1 ? "" : "s"} · ${ctx.esc(frame.getAttribute("data-flame-share"))}% of the trace</span>`;
+    flameTip.innerHTML = `<b>${ctx.esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${ctx.esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${fmt.count(count)} span${count === 1 ? "" : "s"} · ${ctx.esc(frame.getAttribute("data-flame-share"))} of the trace</span>`;
     flameTip.hidden = false;
     const width = flameTip.offsetWidth;
     const height = flameTip.offsetHeight;

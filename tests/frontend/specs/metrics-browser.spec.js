@@ -326,8 +326,9 @@ test('metrics: values and axes follow the OpenTelemetry unit', async ({ page, re
     };
   });
   expect(formatted).toEqual({
-    seconds: '250 ms', micro: '52 µs', minutes: '2.08 min', millis: '1.5 s',
-    bytes: '1.5 KB', mebibytes: '5 MB', byteRate: '2 KB/s',
+    // ns.format: whole units past a minute, bytes with one decimal from KB.
+    seconds: '250 ms', micro: '52 µs', minutes: '2 min 5 s', millis: '1.5 s',
+    bytes: '1.5 KB', mebibytes: '5.0 MB', byteRate: '2.0 KB/s',
     calls: '12 call/s', requests: '25K request', ratio: '0.5', percent: '42%',
     axisSeconds: '150 ms', axisBytes: '2 MB',
   });

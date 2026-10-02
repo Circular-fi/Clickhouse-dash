@@ -10,7 +10,8 @@
 
   let ctx = null;
   const esc = (value) => ctx.esc(value);
-  const fmt = (value) => ctx.formatDuration(value);
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   // ------------------------------------------------------------ exceptions
   // OTel semantic conventions: an event named "exception" with
@@ -198,7 +199,7 @@
     if (!list.length) return "";
     const id = String(span.span_id || "");
     const items = list.map((item, index) => {
-      const offset = Number.isFinite(item.ns) && bounds ? fmt(Math.max(0, item.ns - bounds.start)) : "";
+      const offset = Number.isFinite(item.ns) && bounds ? fmt.duration(Math.max(0, item.ns - bounds.start)) : "";
       const badges = [
         item.escaped === true ? '<span class="traceException__badge" title="exception.escaped: the exception left the span">escaped</span>' : "",
         item.source === "attributes" ? '<span class="traceException__badge is-muted" title="Read from the span attributes (exception.*)">span attributes</span>' : "",
@@ -324,32 +325,31 @@
 
   function windowText(range) {
     if (!Array.isArray(range) || range.length !== 2) return "";
-    const f = (ms) => new Date(Number(ms)).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    return `${f(range[0])} \u2013 ${f(range[1])}`;
+    return fmt.range(Number(range[0]), Number(range[1]));
   }
 
   function linkedFromBodyHtml(state, cache) {
     const margin = Number(ctx.model.meta?.linked_from_margin_minutes || 60);
     const head = (extra = "") => `<div class="traceLinkedFrom__head"><b>Linked from (other traces)</b>${extra}</div>`;
     if (!state || state.status === "idle") {
-      return `${head()}<p class="traceLinkedFrom__note">Spans of other traces whose links point to this span, searched within ±${margin} min of this trace. <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Search</button></p>`;
+      return `${head()}<p class="traceLinkedFrom__note">Spans of other traces whose links point to this span, searched within ±${fmt.duration.fromSeconds(margin * 60)} of this trace. <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Search</button></p>`;
     }
     if (state.status === "loading") return `${head('<span class="traceLinkedFrom__status" role="status">Searching\u2026</span>')}`;
     if (state.status === "error") {
       return `${head()}<p class="traceLinkedFrom__note is-error">${esc(state.error)} <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Retry</button></p>`;
     }
     const rows = state.rows || [];
-    const scope = `between ${windowText(state.range)} (±${Number(state.margin || margin)} min around this trace)`;
+    const scope = `between ${windowText(state.range)} (±${fmt.duration.fromSeconds(Number(state.margin || margin) * 60)} around this trace)`;
     if (!rows.length) return `${head('<span class="traceJaegerGroup__count">(0)</span>')}<p class="traceLinkedFrom__note" data-linked-from-empty>No span of another trace links here ${esc(scope)}.</p>`;
     const items = rows.map((row) => {
       const attrs = ctx.parseStructuredValue(row.link_attributes);
       const attrTable = Array.isArray(attrs) && attrs.some((a) => ctx.attributeEntries(a).length)
         ? `<div class="traceSpanRefs__attrs">${attrs.map((a) => ctx.renderAttributeTable(a, "")).join("")}</div>` : "";
-      const when = new Date(Math.floor(Number(row.start_ns) / 1e6)).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const whenMs = Math.floor(Number(row.start_ns) / 1e6);
       const error = String(row.status_code || "").toLowerCase() === "error";
-      return `<li class="traceLinkedFrom__item" data-linked-from-trace="${esc(row.trace_id)}"><span class="traceSpanRefs__kind traceSpanRefs__kind--linked-from">linked from</span><span class="traceSpanRefs__main"><span class="traceSpanRefs__svc" style="--trace-service-color:${ctx.serviceColor(row.service_name)}">${esc(row.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(row.span_name || "span")}</small>${error ? '<span class="traceStatus traceStatus--error">Error</span>' : ""}<small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(row.trace_id)}</code></span><span>SpanID: <code>${esc(row.span_id)}</code></span><span>${esc(when)} · ${esc(fmt(row.duration_ns))}</span></small></span><a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(ctx.spanTraceUrl(row.trace_id, row.span_id))}" data-linked-trace="${esc(row.trace_id)}" data-linked-span="${esc(row.span_id)}" title="Open the linking span in its trace">Open linked trace</a>${attrTable}</li>`;
+      return `<li class="traceLinkedFrom__item" data-linked-from-trace="${esc(row.trace_id)}"><span class="traceSpanRefs__kind traceSpanRefs__kind--linked-from">linked from</span><span class="traceSpanRefs__main"><span class="traceSpanRefs__svc" style="--trace-service-color:${palette.service(row.service_name)}">${esc(row.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(row.span_name || "span")}</small>${error ? '<span class="traceStatus traceStatus--error">Error</span>' : ""}<small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(row.trace_id)}</code></span><span>SpanID: <code>${esc(row.span_id)}</code></span><span><time title="${esc(fmt.timeTitle(whenMs))}">${esc(fmt.time(whenMs))}</time> · ${esc(fmt.duration(row.duration_ns))}</span></small></span><a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(ctx.spanTraceUrl(row.trace_id, row.span_id))}" data-linked-trace="${esc(row.trace_id)}" data-linked-span="${esc(row.span_id)}" title="Open the linking span in its trace">Open linked trace</a>${attrTable}</li>`;
     }).join("");
-    const more = state.truncated ? `<p class="traceLinkedFrom__note">Showing the newest ${rows.length} linking spans.</p>` : "";
+    const more = state.truncated ? `<p class="traceLinkedFrom__note">Showing the newest ${fmt.count(rows.length)} linking spans.</p>` : "";
     return `${head(`<span class="traceJaegerGroup__count">(${rows.length}${state.truncated ? "+" : ""})</span>`)}<ul class="traceSpanRefs__list traceLinkedFrom__list">${items}</ul>${more}`;
   }
 
@@ -554,19 +554,16 @@
       const delta = BigInt(row.start_ns_text) - BigInt(context.anchor.ns);
       const n = Number(delta);
       if (n === 0) return "0";
-      return `${n > 0 ? "+" : "\u2212"}${fmt(Math.abs(n))}`;
+      return `${n > 0 ? "+" : "\u2212"}${fmt.duration(Math.abs(n))}`;
     } catch (_) {
       return "";
     }
   }
 
+  // The local time of day of a span start, to the millisecond.
   function clockText(row) {
-    const m = /(\d{2}:\d{2}:\d{2})\.(\d{3})/.exec(String(row.timestamp || ""));
     const ms = Math.floor(Number(row.start_ns) / 1e6);
-    if (!Number.isFinite(ms)) return m ? `${m[1]}.${m[2]}` : "";
-    const d = new Date(ms);
-    const pad = (v, n = 2) => String(v).padStart(n, "0");
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+    return Number.isFinite(ms) ? fmt.time(ms, { precision: "ms", date: "never" }) : String(row.timestamp || "");
   }
 
   function renderContext() {
@@ -600,10 +597,10 @@
       return `<tr class="traceContextRow${anchor ? " is-anchor" : ""}${error ? " is-error" : ""}" data-context-trace="${esc(row.trace_id)}" data-context-span="${esc(row.span_id)}" tabindex="0" title="${esc(`Open ${row.service_name}::${row.span_name} in ${sameTrace ? "this trace" : `trace ${row.trace_id}`}`)}">
         <td class="traceContextRow__offset">${esc(signedOffset(row))}</td>
         <td class="traceContextRow__time">${esc(clockText(row))}</td>
-        <td class="traceContextRow__service"><span style="--trace-service-color:${ctx.serviceColor(row.service_name)}">${esc(row.service_name || "unknown")}</span></td>
+        <td class="traceContextRow__service"><span style="--trace-service-color:${palette.service(row.service_name)}">${esc(row.service_name || "unknown")}</span></td>
         <td class="traceContextRow__op">${esc(row.span_name || "span")}${sameTrace && !anchor ? '<small class="traceContextRow__same" title="Span of the open trace">this trace</small>' : ""}</td>
-        <td class="traceContextRow__duration">${esc(fmt(row.duration_ns))}</td>
-        <td class="traceContextRow__status">${status === "Unset" ? '<span class="traceContextRow__unset">\u2014</span>' : `<span class="traceStatus traceStatus--${esc(status.toLowerCase())}">${esc(status)}</span>`}</td>
+        <td class="traceContextRow__duration">${esc(fmt.duration(row.duration_ns))}</td>
+        <td class="traceContextRow__status">${status === "Unset" ? `<span class="traceContextRow__unset">${fmt.EMPTY}</span>` : `<span class="traceStatus traceStatus--${esc(status.toLowerCase())}">${esc(status)}</span>`}</td>
       </tr>`;
     }).join("");
     const pageButton = (direction, label, shown) => (shown
@@ -616,10 +613,10 @@
       : context.loading === "around"
         ? '<p class="traceContextPanel__status" role="status">Loading spans\u2026</p>'
         : context.rows.length
-          ? `<p class="traceContextPanel__status" role="status" data-context-summary>${context.rows.length} span${context.rows.length === 1 ? "" : "s"} · ${esc(windowLabel)} · ${esc(filterLabel)}${Number.isFinite(context.elapsedMs) ? ` · ${Math.round(context.elapsedMs)} ms` : ""}</p>`
+          ? `<p class="traceContextPanel__status" role="status" data-context-summary>${fmt.count(context.rows.length)} span${context.rows.length === 1 ? "" : "s"} · ${esc(windowLabel)} · ${esc(filterLabel)}${Number.isFinite(context.elapsedMs) ? ` · ${fmt.duration.fromMs(context.elapsedMs)}` : ""}</p>`
           : `<p class="traceContextPanel__status" role="status" data-context-summary>No spans ${esc(windowLabel)} around this span (${esc(filterLabel)}).</p>`;
     el.innerHTML = `<header class="traceContextPanel__head">
-        <div class="traceContextPanel__title"><strong id="traceContextTitle">Surrounding context</strong><span title="${esc(a.timestamp)} UTC"><b style="--trace-service-color:${ctx.serviceColor(a.service)}">${esc(a.service || "unknown")}</b> ${esc(a.name)} · ${esc(clockText({ timestamp: a.timestamp, start_ns: Number(a.ns) }))}</span></div>
+        <div class="traceContextPanel__title"><strong id="traceContextTitle">Surrounding context</strong><span title="${esc(fmt.timeTitle(Math.floor(Number(a.ns) / 1e6)))}"><b style="--trace-service-color:${palette.service(a.service)}">${esc(a.service || "unknown")}</b> ${esc(a.name)} · ${esc(clockText({ timestamp: a.timestamp, start_ns: Number(a.ns) }))}</span></div>
         <button type="button" class="traceContextPanel__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
       </header>
       <div class="traceContextPanel__controls">

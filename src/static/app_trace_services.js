@@ -20,7 +20,8 @@
   let ctx = null;
   let root = null;
   const esc = (value) => ctx.esc(value);
-  const fmt = (ns_) => ctx.formatDuration(ns_);
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   const view = {
     seq: 0,
@@ -54,25 +55,11 @@
   function rateText(perSecond, unit = rateUnit(perSecond)) {
     const value = Number(perSecond);
     if (!Number.isFinite(value) || value <= 0) return `0${unit.suffix}`;
-    return `${compact(value * unit.per)}${unit.suffix}`;
+    return `${fmt.compact(value * unit.per)}${unit.suffix}`;
   }
 
-  function compact(value) {
-    const n = Number(value || 0);
-    if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\.0$/, "")}B`;
-    if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "")}M`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, "")}k`;
-    if (n >= 100) return String(Math.round(n));
-    if (n >= 10) return n.toFixed(1).replace(/\.0$/, "");
-    return n.toFixed(2).replace(/\.?0+$/, "");
-  }
-
-  function percentText(value) {
-    const n = Number(value || 0);
-    if (!n) return "0%";
-    if (n < 0.01) return "<0.01%";
-    return `${n >= 10 ? n.toFixed(1) : n.toFixed(2)}%`.replace(/\.0+%$/, "%");
-  }
+  // Error rates and time shares are kept in percent (0-100).
+  const percentText = (value) => fmt.percent(Number(value || 0) / 100);
 
   // Axis ticks of a detail chart (app_chart_core.js yAxis): round values in
   // [0, max], each labelled by the table's own formatter, so the axis, the
@@ -157,7 +144,7 @@
       const payload = await ctx.api.getTraceServices(ctx.currentHost(), params);
       if (seq !== view.seq) return;
       view.payload = payload;
-      ctx.registerServiceColors((payload?.services || []).map((row) => row[0]));
+      palette.registerServices((payload?.services || []).map((row) => row[0]));
     } catch (error) {
       if (seq !== view.seq) return;
       view.payload = null;
@@ -261,22 +248,22 @@
   }
 
   function p99Cell(row, service, operation = "") {
-    if (!durationFilterEnabled() || !(row.p99 > 0)) return esc(fmt(row.p99));
-    return `<button type="button" class="traceSvcLink traceSvcLink--p99" data-svc-p99="${esc(row.p99)}" data-svc-service="${esc(service)}" data-svc-operation="${esc(operation)}" title="Search traces${operation ? ` of ${esc(operation)}` : ""} lasting at least the P99 (${esc(fmt(row.p99))})">${esc(fmt(row.p99))}</button>`;
+    if (!durationFilterEnabled() || !(row.p99 > 0)) return esc(fmt.duration(row.p99));
+    return `<button type="button" class="traceSvcLink traceSvcLink--p99" data-svc-p99="${esc(row.p99)}" data-svc-service="${esc(service)}" data-svc-operation="${esc(operation)}" title="Search traces${operation ? ` of ${esc(operation)}` : ""} lasting at least the P99 (${esc(fmt.duration(row.p99))})">${esc(fmt.duration(row.p99))}</button>`;
   }
 
   function tableHtml(rows) {
     const body = sortRows(rows).map((row) => {
       const points = seriesOf(view.payload, row.name);
       const selected = row.name === view.detailName;
-      return `<tr class="traceSvcRow${selected ? " is-selected" : ""}" data-svc-row="${esc(row.name)}" tabindex="0" aria-selected="${selected ? "true" : "false"}" style="--trace-service-color:${ctx.serviceColor(row.name)}">
+      return `<tr class="traceSvcRow${selected ? " is-selected" : ""}" data-svc-row="${esc(row.name)}" tabindex="0" aria-selected="${selected ? "true" : "false"}" style="--trace-service-color:${palette.service(row.name)}">
         <th scope="row" class="traceSvcRow__name"><span class="traceSvcRow__cell"><span class="traceSvcDot" aria-hidden="true"></span><span class="traceSvcRow__label" title="${esc(row.name)}">${esc(row.name)}</span></span></th>
-        <td class="is-num" data-svc-col="rate" title="${esc(`${Math.round(row.spans).toLocaleString()} entry spans`)}">${esc(rateText(row.rate))}</td>
-        <td class="is-num${row.errors ? " has-errors" : ""}" data-svc-col="errors" title="${esc(`${Math.round(row.errors).toLocaleString()} errors`)}">${esc(percentText(row.errorPct))}</td>
-        <td class="is-num" data-svc-col="p50">${esc(fmt(row.p50))}</td>
-        <td class="is-num" data-svc-col="p95">${esc(fmt(row.p95))}</td>
+        <td class="is-num" data-svc-col="rate" title="${esc(`${fmt.count(row.spans)} entry spans`)}">${esc(rateText(row.rate))}</td>
+        <td class="is-num${row.errors ? " has-errors" : ""}" data-svc-col="errors" title="${esc(`${fmt.count(row.errors)} errors`)}">${esc(percentText(row.errorPct))}</td>
+        <td class="is-num" data-svc-col="p50">${esc(fmt.duration(row.p50))}</td>
+        <td class="is-num" data-svc-col="p95">${esc(fmt.duration(row.p95))}</td>
         <td class="is-num" data-svc-col="p99">${p99Cell(row, row.name)}</td>
-        <td class="traceSvcShare" data-svc-col="time" title="${esc(`${fmt(row.total)} in total`)}"><span class="traceSvcShare__bar" style="--share:${Math.min(100, row.share).toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(percentText(row.share))}</span></td>
+        <td class="traceSvcShare" data-svc-col="time" title="${esc(`${fmt.duration(row.total)} in total`)}"><span class="traceSvcShare__bar" style="--share:${Math.min(100, row.share).toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(percentText(row.share))}</span></td>
         <td class="traceSvcTrend" title="Requests over time (errors in red)">${sparkline(points, "spans", "traceSvcSpark--rate")}</td>
         <td class="traceSvcTrend" title="P95 over time">${sparkline(points, "p95", "traceSvcSpark--p95")}</td>
       </tr>`;
@@ -291,7 +278,7 @@
     const bits = [];
     const fraction = Number(payload.sample_fraction || 1);
     if (payload.estimated) {
-      bits.push(`<span class="traceSvcBadge traceSvcBadge--estimated" title="${esc(`The window holds about ${Number(payload.estimated_rows || 0).toLocaleString()} spans (over ${Number(payload.exact_rows_limit || 0).toLocaleString()}): one time slice per chart bucket was read and the counts scaled up. Percentiles come from the sampled spans.`)}">\u2248 Estimated from ${esc(percentText(fraction * 100))} of the window</span><button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button>`);
+      bits.push(`<span class="traceSvcBadge traceSvcBadge--estimated" title="${esc(`The window holds about ${fmt.count(Number(payload.estimated_rows || 0))} spans (over ${fmt.count(Number(payload.exact_rows_limit || 0))}): one time slice per chart bucket was read and the counts scaled up. Percentiles come from the sampled spans.`)}">\u2248 Estimated from ${esc(fmt.percent(fraction))} of the window</span><button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button>`);
     }
     if (payload.partial) bits.push('<span class="traceSvcBadge traceSvcBadge--partial" title="The query reached its time budget before reading the whole window: the numbers cover only part of it.">Partial: time budget reached</span>');
     if (view.exact && !payload.estimated) bits.push('<button type="button" class="traceSvcAction" data-svc-sampled title="Go back to the time-sampled answer on large windows">Allow sampling</button>');
@@ -308,8 +295,8 @@
     const payload = view.payload;
     const rows = payload ? withRates((payload.services || []).map(statsRow), payload) : [];
     const count = rows.length;
-    const bucket = payload ? fmt(Number(payload.bucket_ms || 60000) * 1e6) : "";
-    const timing = payload?.timing_ms?.total != null ? ` · ${(Number(payload.timing_ms.total) / 1000).toFixed(2)} s` : "";
+    const bucket = payload ? fmt.duration.fromMs(Number(payload.bucket_ms || 60000)) : "";
+    const timing = payload?.timing_ms?.total != null ? ` · ${fmt.duration.fromMs(Number(payload.timing_ms.total))}` : "";
     const meta = payload ? `${view.scope === "root" ? "root spans" : "entry spans"} · ${bucket} buckets${timing}` : "";
     let body;
     if (view.error && !payload) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(view.error)} ${RETRY("list")}</div>`;
@@ -319,7 +306,7 @@
     releaseDetailCharts();
     root.innerHTML = `<div class="traceSvc${view.loading ? " is-loading" : ""}" aria-busy="${view.loading ? "true" : "false"}">
       <div class="traceSvc__toolbar">
-        <h2 id="traceSvcCount">${payload ? `${count} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
+        <h2 id="traceSvcCount">${payload ? `${fmt.count(count)} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
         <span class="traceSvc__meta" title="Entry spans: SpanKind Server / Consumer (and SPAN_KIND_* spellings) or root spans. The search filters apply to these spans.">${esc(meta)}</span>
         <span class="traceSvc__status">${statusHtml(payload)}${view.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}</span>
         ${scopeHtml()}
@@ -368,7 +355,7 @@
       height: DETAIL_CHART_HEIGHT, xKind: "time", xs, xDomain: [start, end], zoom: null,
       series: columns, type, stack: type === "bar", legend: false, syncKey: "traces-service", tooltipNulls: false,
       yAxis, annotations: releases,
-      xReadout: (i) => chart.bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
+      xReadout: (i) => fmt.range(xs[i] - bucketMs / 2, xs[i] + bucketMs / 2),
       formatValue: (v) => format(v),
       formatY: (v) => format(Math.max(0, v)),
       tooltipFooter: footer ? (i) => { const p = byIndex.get(i); return p ? footer(p) : ""; } : null,
@@ -390,8 +377,8 @@
     const start = Number(range[0]), end = Math.max(start + 1000, Number(range[1]));
     const bucketMs = Math.max(1000, Number(payload.bucket_ms || 60000));
     const bucketSeconds = bucketMs / 1000;
-    const releases = (payload.releases || []).map((r) => ({ label: String(r[0]), x: Number(r[1]), title: `Release ${r[0]}: first span ${new Date(Number(r[1])).toLocaleString()}`, className: "traceSvcRelease" }));
-    const spansText = (p) => `${Math.round(p.spans).toLocaleString()} spans${p.errors ? `, ${Math.round(p.errors).toLocaleString()} errors` : ""}`;
+    const releases = (payload.releases || []).map((r) => ({ label: String(r[0]), x: Number(r[1]), title: `Release ${r[0]}: first span ${fmt.time(Number(r[1]))}`, className: "traceSvcRelease" }));
+    const spansText = (p) => `${fmt.count(p.spans)} spans${p.errors ? `, ${fmt.count(p.errors)} errors` : ""}`;
     // The rate chart counts in the unit of the service's Requests figure
     // (table row and detail header): 29/min there, a per-minute axis here.
     const unit = rateUnit(detailRow(payload, view.detailName)?.rate);
@@ -400,19 +387,19 @@
     if (rate) detailChart(rate, {
       start, end, bucketMs, points, type: "bar", axis: "rate", releases, footer: spansText, format: (v) => rateText(v / unit.per, unit),
       series: [
-        { id: "ok", label: "Successful", color: ctx.serviceColor(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
-        { id: "errors", label: "Errors", color: "var(--traceError)", value: (p) => p.errors * perUnit },
+        { id: "ok", label: "Successful", color: palette.service(view.detailName), value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
+        { id: "errors", label: "Errors", color: "var(--danger)", value: (p) => p.errors * perUnit },
       ],
     });
     const errors = panel.querySelector('[data-svc-chart="errors"]');
     if (errors) detailChart(errors, {
       start, end, bucketMs, points, type: "line", axis: "percent", releases, footer: spansText, format: percentText,
-      series: [{ id: "error_rate", label: "Error rate", color: "var(--traceError)", value: (p) => (p.spans ? (p.errors / p.spans) * 100 : 0) }],
+      series: [{ id: "error_rate", label: "Error rate", color: "var(--danger)", value: (p) => (p.spans ? (p.errors / p.spans) * 100 : 0) }],
     });
     const latency = panel.querySelector('[data-svc-chart="latency"]');
     if (latency) detailChart(latency, {
-      start, end, bucketMs, points, type: "line", axis: "duration", releases, format: fmt,
-      series: [["p50", "P50", "#54a24b"], ["p95", "P95", "#f58518"], ["p99", "P99", "#b279a2"]].map(([id, label, color]) => ({ id, label, color, value: (p) => p[id] })),
+      start, end, bucketMs, points, type: "line", axis: "duration", releases, format: fmt.duration,
+      series: [["p50", "P50"], ["p95", "P95"], ["p99", "P99"]].map(([id, label]) => ({ id, label, color: palette.quantile(id), value: (p) => p[id] })),
     });
   }
 
@@ -423,9 +410,9 @@
       <th scope="row"><button type="button" class="traceSvcLink" data-svc-operation-search="${esc(row.name)}" title="Search traces of ${esc(service)} / ${esc(row.name)}">${esc(row.name)}</button></th>
       <td class="is-num">${esc(rateText(row.rate))}</td>
       <td class="is-num${row.errors ? " has-errors" : ""}">${esc(percentText(row.errorPct))}</td>
-      <td class="is-num">${esc(fmt(row.p95))}</td>
+      <td class="is-num">${esc(fmt.duration(row.p95))}</td>
       <td class="is-num">${p99Cell(row, service, row.name)}</td>
-      <td class="traceSvcShare" title="${esc(`${fmt(row.total)} in total`)}"><span class="traceSvcShare__bar" style="--share:${Math.min(100, row.share).toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt(row.total))}</span></td>
+      <td class="traceSvcShare" title="${esc(`${fmt.duration(row.total)} in total`)}"><span class="traceSvcShare__bar" style="--share:${Math.min(100, row.share).toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt.duration(row.total))}</span></td>
     </tr>`).join("");
     return `<table class="traceSvcTable traceSvcTable--compact" aria-label="Most time-consuming endpoints"><thead><tr><th scope="col">Endpoint</th><th scope="col" class="is-num">Requests</th><th scope="col" class="is-num">Errors</th><th scope="col" class="is-num">P95</th><th scope="col" class="is-num">P99</th><th scope="col">Total time</th></tr></thead><tbody>${body}</tbody></table>${payload.endpoints_truncated ? '<div class="traceSvcEmpty">Only the 100 most time-consuming endpoints are listed.</div>' : ""}`;
   }
@@ -436,7 +423,7 @@
     return `<ol class="traceSvcSlowest">${rows.map((row) => {
       const [traceId, spanId, operation, startMs, durationNs, status] = row;
       const href = ctx.spanTraceUrl(String(traceId), String(spanId || ""));
-      return `<li><a class="traceSvcSlowest__link" href="${esc(href)}" data-svc-trace="${esc(traceId)}" data-svc-span="${esc(spanId)}" title="Open trace ${esc(traceId)}"><b class="traceSvcSlowest__duration">${esc(fmt(durationNs))}</b><span class="traceSvcSlowest__op">${esc(operation)}</span>${status === "Error" ? '<span class="traceSvcSlowest__error">ERROR</span>' : ""}<time class="traceSvcSlowest__time">${esc(new Date(Number(startMs)).toLocaleString())}</time><code>${esc(String(traceId).slice(0, 12))}</code></a></li>`;
+      return `<li><a class="traceSvcSlowest__link" href="${esc(href)}" data-svc-trace="${esc(traceId)}" data-svc-span="${esc(spanId)}" title="Open trace ${esc(traceId)}"><b class="traceSvcSlowest__duration">${esc(fmt.duration(durationNs))}</b><span class="traceSvcSlowest__op">${esc(operation)}</span>${status === "Error" ? '<span class="traceSvcSlowest__error">ERROR</span>' : ""}<time class="traceSvcSlowest__time" title="${esc(fmt.timeTitle(Number(startMs)))}">${esc(fmt.time(Number(startMs)))}</time><code>${esc(String(traceId).slice(0, 12))}</code></a></li>`;
     }).join("")}</ol>`;
   }
 
@@ -444,7 +431,7 @@
     if (payload.releases_supported === false) return "";
     const rows = Array.isArray(payload.releases) ? payload.releases : [];
     const items = rows.length
-      ? rows.map((r) => `<li data-release-version="${esc(r[0])}"><b>${esc(r[0])}</b><span>${esc(new Date(Number(r[1])).toLocaleString())}</span></li>`).join("")
+      ? rows.map((r) => `<li data-release-version="${esc(r[0])}"><b>${esc(r[0])}</b><span title="${esc(fmt.timeTitle(Number(r[1])))}">${esc(fmt.time(Number(r[1])))}</span></li>`).join("")
       : '<li class="traceSvcEmpty">No ResourceAttributes[\'service.version\'] on this service\'s spans in range.</li>';
     return `<section class="traceSvcSection"><h4>Releases${payload.releases_estimated ? ' <span class="traceSvcBadge traceSvcBadge--estimated" title="The read cap stopped the scan: later versions may be missing.">\u2248</span>' : ""}</h4><ul class="traceSvcReleases">${items}</ul></section>`;
   }
@@ -462,7 +449,7 @@
     const total = rows.reduce((sum, r) => sum + Number(r[5] || 0), 0) || 1;
     return `<table class="traceSvcTable traceSvcTable--compact traceSvcDb" aria-label="Database statements"><thead><tr><th scope="col">Statement</th><th scope="col">System</th><th scope="col" class="is-num">Count</th><th scope="col" class="is-num">Throughput</th><th scope="col" class="is-num">P95</th><th scope="col">Total time</th></tr></thead><tbody>${rows.map((r) => {
       const share = (Number(r[5] || 0) / total) * 100;
-      return `<tr data-db-statement="${esc(r[1])}"><th scope="row"><code class="traceSvcDb__stmt" title="${esc(r[1])}">${esc(r[1])}</code></th><td>${esc(r[2] || "\u2014")}</td><td class="is-num">${Number(r[3] || 0).toLocaleString()}</td><td class="is-num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="is-num">${esc(fmt(r[6]))}</td><td class="traceSvcShare"><span class="traceSvcShare__bar" style="--share:${share.toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt(r[5]))}</span></td></tr>`;
+      return `<tr data-db-statement="${esc(r[1])}"><th scope="row"><code class="traceSvcDb__stmt" title="${esc(r[1])}">${esc(r[1])}</code></th><td>${esc(r[2] || fmt.EMPTY)}</td><td class="is-num">${fmt.count(Number(r[3] || 0))}</td><td class="is-num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="is-num">${esc(fmt.duration(r[6]))}</td><td class="traceSvcShare"><span class="traceSvcShare__bar" style="--share:${share.toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt.duration(r[5]))}</span></td></tr>`;
     }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcEmpty">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
   }
 
@@ -484,14 +471,14 @@
     const row = detailRow(payload, name);
     const stat = (labelText, value, extra = "") => `<div class="traceSvcStat${extra}"><span>${esc(labelText)}</span><b>${value}</b></div>`;
     const stats = row
-      ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), row.errors ? " has-errors" : "") + stat("P50", esc(fmt(row.p50))) + stat("P95", esc(fmt(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt(row.total)))
+      ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), row.errors ? " has-errors" : "") + stat("P50", esc(fmt.duration(row.p50))) + stat("P95", esc(fmt.duration(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt.duration(row.total)))
       : "";
     let body;
     if (detail.error) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(detail.error)} ${RETRY("detail")}</div>`;
     else if (!payload) body = '<div class="tracesEmpty">Loading service\u2026</div>';
     else if (!row) body = '<div class="tracesEmpty">No entry spans of this service match in this range.</div>';
     else {
-      body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(percentText(Number(payload.sample_fraction || 1) * 100))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
+      body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">
           <article class="traceAnalyticsCard"><header><strong>Requests</strong><span>${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word} · errors in red</span></header><div class="traceChart traceSvcChart" data-svc-chart="rate"></div></article>
           <article class="traceAnalyticsCard"><header><strong>Error rate</strong><span>% of entry spans with status Error</span></header><div class="traceChart traceSvcChart" data-svc-chart="errors"></div></article>
@@ -502,7 +489,7 @@
         <section class="traceSvcSection"><h4>Slowest spans</h4>${slowestHtml(payload)}</section>
         <section class="traceSvcSection"><h4>Database statements</h4>${dbHtml()}</section>`;
     }
-    panel.innerHTML = `<header class="traceSvcDetail__head" style="--trace-service-color:${ctx.serviceColor(name)}">
+    panel.innerHTML = `<header class="traceSvcDetail__head" style="--trace-service-color:${palette.service(name)}">
         <span class="traceSvcDot" aria-hidden="true"></span>
         <h3 id="traceSvcDetailTitle" title="${esc(name)}">${esc(name)}</h3>
         ${detail.loading && payload ? '<span class="traceSvcBadge">Loading\u2026</span>' : ""}

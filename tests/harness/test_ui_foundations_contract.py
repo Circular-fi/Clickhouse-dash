@@ -125,8 +125,7 @@ def test_semantic_tokens_are_defined_in_every_theme_block() -> None:
 def test_old_families_alias_the_semantic_tokens_only_where_the_value_is_the_same() -> None:
     blocks = theme_blocks(read("style.css"))
     aliases = {
-        "--error-bg": "--danger-bg", "--accentText": "--accent-text", "--log-sev-fatal": "--sev-fatal",
-        "--log-sev-error": "--sev-error", "--log-sev-info": "--sev-info", "--graph-error": "--danger",
+        "--error-bg": "--danger-bg", "--accentText": "--accent-text", "--graph-error": "--danger",
     }
     for name, tokens in blocks.items():
         for old, new in aliases.items():

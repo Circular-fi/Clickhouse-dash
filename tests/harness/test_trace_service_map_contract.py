@@ -81,7 +81,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
         assert text not in mapjs, text
     assert "<svg" not in mapjs and "createElementNS" not in mapjs
     assert "ns.traceSearch.applyFilter({ kind: \"service\" }, service, \"include\")" in mapjs
-    assert "ctx.serviceColor(node.service)" in mapjs
+    assert "palette.service(node.service)" in mapjs
 
 
 def test_service_map_is_documented_and_tested():

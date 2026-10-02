@@ -2328,7 +2328,8 @@ test.describe('traces analytics in a UTC+2 browser', () => {
       for (let i = 0; i <= 30; i += 1) {
         await page.mouse.move(box.x + 1 + (box.width - 2) * (i / 30), box.y + box.height * (0.15 + 0.7 * ((i % 4) / 3)));
         await expect(tooltip).toBeVisible();
-        await expect(tooltip).toContainText(/[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d/);
+        // A bucket reads its range (format.range), a picked dot its start (format.time).
+        await expect(tooltip).toContainText(/\d{4}-\d\d-\d\d \d\d:\d\d \u2192 |Start [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d/);
         await expect(tooltip).not.toContainText(decimalUnits);
         // Near a listed trace's dot the dot is picked instead of the bucket.
         await expect.poll(marked).toBe(1);
@@ -2383,7 +2384,7 @@ test('traces: a result shows its error span count next to its title and the head
   // The total is shown once, next to the title (per-service badges stay).
   await expect(page.locator('#tracesResults .traceErrorCount--total')).toHaveCount(0);
   const color = await page.locator('#tracesResults .traceErrorCount--title').first().evaluate((node) => getComputedStyle(node).color);
-  expect(color).toBe('rgb(214, 69, 69)');
+  expect(color).toBe('rgb(248, 113, 113)'); // --danger, dark theme
 });
 
 // --- Traces search results: Jaeger result items, table view, scatter -------
@@ -2423,7 +2424,7 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
     if (trace.errors) {
       await expect(errorTag).toHaveText(`${trace.errors} Error${trace.errors === 1 ? '' : 's'}`);
       await expect(errorTag).toHaveAttribute('title', `${trace.errors} error span${trace.errors === 1 ? '' : 's'}`);
-      expect(await errorTag.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(214, 69, 69)');
+      expect(await errorTag.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(248, 113, 113)'); // --danger
     } else {
       await expect(item.locator('.traceErrorCount--title')).toHaveCount(0);
     }
@@ -2537,11 +2538,13 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   expect(Math.abs(percent - (420 / 610) * 100)).toBeLessThan(0.05);
   await expect(table.locator('tr[data-trace-id="5b8efff798038103d269b633813fc60c"] .traceTag--incomplete')).toHaveCount(1);
   const start = failing.locator('[data-cell="start"]');
-  await expect(start).toHaveText(/^[A-Z][a-z]{2} \d{1,2}, \d\d:\d\d:\d\d [AP]M$/);
-  await expect(start).toHaveAttribute('title', /ago$/);
+  // One 24 h format (ns.format.time), the year only when it is not this one;
+  // the tooltip says how long ago, then ISO, local and UTC (format.timeTitle).
+  await expect(start).toHaveText(/^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d$/);
+  await expect(start).toHaveAttribute('title', /^\d+ \w+ ago\n\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\n/);
   await table.locator('[data-start-toggle]').click();
   await expect(start).toHaveText(/^\d+ minutes? ago$/);
-  await expect(start).toHaveAttribute('title', /^[A-Z][a-z]{2} \d{1,2}/);
+  await expect(start).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\n[A-Z][a-z]{2} \d{1,2}, \d{4} \d\d:\d\d:\d\d\.\d{3} local/);
   // Sorting by Start is numeric, not by the displayed text.
   await table.locator('th[data-table-sort="start"]').click();
   expect(await order()).toEqual(expectedOrder('start', 'desc'));
@@ -2618,7 +2621,7 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
   await expect(tooltip).toContainText(`Spans ${target.spans}`);
   await expect(tooltip).toContainText(`Services ${target.services.length}`);
   await expect(tooltip).toContainText('Duration 610 ms');
-  await expect(tooltip).toContainText(/Start [A-Z][a-z]{2} \d{1,2}, \d\d:\d\d:\d\d/);
+  await expect(tooltip).toContainText(/Start [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d/);
   const order = (await page.evaluate(() => window.ChDash.traces.scatterDots().map((d) => d.trace_id))).indexOf(target.trace_id);
   await expect(root).toHaveAttribute('data-pick', `traces:${order}`);
   await expect(root.locator('.chartCore__pick')).toBeVisible();
@@ -2676,7 +2679,7 @@ test('traces: an empty result names the searched range and zooms out from there'
   await expect(empty).toBeVisible();
   await expect(empty).toContainText('No traces found');
   const first = searches[searches.length - 1];
-  const format = (ms) => page.evaluate((value) => window.ChDash.timeRange.formatDateTime(value), ms);
+  const format = (ms) => page.evaluate((value) => window.ChDash.format.time(value), ms);
   await expect(empty).toContainText(`No traces match these filters between ${await format(Number(first.start_ms))} and ${await format(Number(first.end_ms))}.`);
   await expect(page.locator('#tracesResultCount')).toHaveText(/^0 Traces \(in [\d.]+ (µs|ms|s)\)$/);
   const next = page.waitForRequest(isSearch, { timeout: 60_000 });

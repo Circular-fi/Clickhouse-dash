@@ -22,11 +22,13 @@ def palette(block):
 def test_service_colours_are_jaegers_palette_without_red_in_first_seen_order():
     js = read('src/static/app_traces.js')
     css = read('src/static/style.css')
-    assert 'const SPAN_COLOR_COUNT = 18;' in js
-    assert 'slot = serviceColorSlots.size % SPAN_COLOR_COUNT;' in js
-    assert 'return `var(--trace-span-color-${serviceColorSlot(service) + 1})`;' in js
-    assert 'registerServiceColors(services);' in js
-    assert 'SERVICE_COLORS' not in js
+    # The assignment is ns.palette's (app_palette.js), shared with Logs and Metrics.
+    shared = read('src/static/app_palette.js')
+    assert 'const SERVICE_SLOTS = 18;' in shared
+    assert 'slot = map.size % SERVICE_SLOTS;' in shared
+    assert 'return tokenRef(`--trace-span-color-${serviceSlot(name, options) + 1}`);' in shared
+    assert 'palette.service(span.service_name)' in js and 'palette.registerServices(' in read('src/static/app_trace_spans.js')
+    assert 'SERVICE_COLORS' not in js and 'SPAN_COLOR_COUNT' not in js and 'trace-span-color-' not in js
     dark = css.split('html[data-theme="dark"] {\n  --trace-span-color-1', 1)[1].split('}', 1)[0]
     light = css.split('html[data-theme="light"] {\n  --trace-span-color-1', 1)[1].split('}', 1)[0]
     assert palette('--trace-span-color-1' + dark) == JAEGER_DARK

@@ -175,12 +175,12 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   const serviceRgb = await page.evaluate(() => {
     const probe = document.createElement('div');
     document.body.append(probe);
-    probe.style.color = window.ChDash.traceTabs.context().serviceColor('checkout');
+    probe.style.color = window.ChDash.palette.service('checkout');
     const rgb = getComputedStyle(probe).color.match(/[\d.]+/g).slice(0, 3).map(Number);
     probe.remove();
     return rgb;
   });
-  expect(await page.evaluate(() => window.ChDash.traceTabs.context().serviceColor('checkout'))).toMatch(/^var\(--trace-span-color-\d+\)$/);
+  expect(await page.evaluate(() => window.ChDash.palette.service('checkout'))).toMatch(/^var\(--trace-span-color-\d+\)$/);
   expect(colorDistance(strip, serviceRgb)).toBeLessThan(12);
   // Health: checkout (6 %) and payment (2 %) carry the dot, cart (0 %) not.
   expect(at.checkout.health).toBe(true);

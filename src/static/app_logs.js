@@ -10,6 +10,10 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { state, api, util, ui } = ns;
+  // Formats and colours (docs/ui-foundations.md): a service keeps the colour
+  // it has on Traces and Metrics (palette.service), severities are --sev-*.
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   const $ = (id) => document.getElementById(id);
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
@@ -38,8 +42,6 @@
     body: { label: "Body", width: "minmax(0, 1fr)" },
   };
   const OPTIONAL_COLUMNS = ["time", "severity", "service", "host", "trace", "span", "scope"];
-  const SPAN_COLOR_COUNT = 18;
-  const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";
 
   const model = {
     meta: null,
@@ -83,45 +85,32 @@
 
   // --- Small helpers -------------------------------------------------------
 
-  const pad2 = (value) => String(value).padStart(2, "0");
-  const pad3 = (value) => String(value).padStart(3, "0");
-  const numberFormat = new Intl.NumberFormat("en-US");
-  const formatCount = (n) => numberFormat.format(Math.round(Number(n) || 0));
-
-  function compactCount(n) {
-    const value = Number(n) || 0;
-    if (value >= 1e9) return `${(value / 1e9).toFixed(value >= 1e10 ? 0 : 1)}B`;
-    if (value >= 1e6) return `${(value / 1e6).toFixed(value >= 1e7 ? 0 : 1)}M`;
-    if (value >= 1e4) return `${(value / 1e3).toFixed(value >= 1e5 ? 0 : 1)}k`;
-    return formatCount(value);
-  }
-
   function currentHost() { return state.selectedHostId || ""; }
 
-  function severityClass(number, text) {
-    const n = Number(number) || 0;
-    if (n >= 17) return "error";
-    if (n >= 13) return "warn";
-    if (n >= 9) return "info";
-    if (n > 0) return "debug";
-    const t = String(text || "").toLowerCase();
-    if (/^(fatal|crit|err)/.test(t)) return "error";
-    if (/^warn/.test(t)) return "warn";
-    if (/^info/.test(t)) return "info";
-    return "debug";
+  // The displayed severity: the palette's level (fatal, error, warn, info,
+  // debug, trace), coloured by [data-sev] (--sev-*).
+  function severityLevel(row) {
+    const n = Number(row.severity_number) || 0;
+    return palette.severityLevel(n > 0 ? n : row.severity_text);
   }
 
+  function sevBadgeHtml(row, title = "") {
+    const level = severityLevel(row);
+    return `<span class="logsSevBadge" data-sev="${level}"${title ? ` title="${esc(title)}"` : ""}>${esc(row.severity_text || level.toUpperCase())}</span>`;
+  }
+
+  // A log time: to the millisecond in the table, every nanosecond in the
+  // detail and the tooltip (fmt.time / fmt.timeTitle, browser-local).
   function timeLabel(row) {
-    const ms = Number(row.ts_ms);
-    const d = new Date(ms);
-    return `${d.toLocaleDateString("en-US", { month: "short", day: "2-digit" })} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${pad3(d.getMilliseconds())}`;
+    return fmt.time(Number(row.ts_ms), { precision: "ms" });
   }
 
   function fullTimeLabel(row) {
-    const ms = Number(row.ts_ms);
-    const d = new Date(ms);
-    const ns9 = String(row.ts_ns || "").slice(-9).padStart(9, "0");
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${ns9}`;
+    return fmt.time(Number(row.ts_ms), { precision: "ns", ns: row.ts_ns });
+  }
+
+  function timeTitle(row) {
+    return fmt.timeTitle(Number(row.ts_ms), { precision: "ns", ns: row.ts_ns });
   }
 
   async function copyText(text, button) {
@@ -139,38 +128,6 @@
       try { document.execCommand("copy"); } catch (__) { /* ignore */ }
       area.remove();
     }
-  }
-
-  // Same colour assignment as the Traces page (session-wide, Jaeger's
-  // ColorGenerator): a service keeps its colour across both pages.
-  const serviceColorSlots = (() => {
-    const slots = new Map();
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(SERVICE_COLOR_STORE_KEY) || "null");
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-        for (const [service, slot] of Object.entries(saved)) {
-          if (Number.isInteger(slot) && slot >= 0 && slot < SPAN_COLOR_COUNT) slots.set(service, slot);
-        }
-      }
-    } catch (_) { /* no session storage */ }
-    return slots;
-  })();
-
-  function saveServiceColors() {
-    try { window.sessionStorage.setItem(SERVICE_COLOR_STORE_KEY, JSON.stringify(Object.fromEntries(serviceColorSlots))); } catch (_) { /* best effort */ }
-  }
-
-  function registerServiceColors(services) {
-    const names = [...new Set((services || []).map((s) => String(s || "unknown")))].sort();
-    const before = serviceColorSlots.size;
-    for (const name of names) if (!serviceColorSlots.has(name)) serviceColorSlots.set(name, serviceColorSlots.size % SPAN_COLOR_COUNT);
-    if (serviceColorSlots.size !== before) saveServiceColors();
-  }
-
-  function serviceColor(service) {
-    const key = String(service || "unknown");
-    if (!serviceColorSlots.has(key)) { serviceColorSlots.set(key, serviceColorSlots.size % SPAN_COLOR_COUNT); saveServiceColors(); }
-    return `var(--trace-span-color-${serviceColorSlots.get(key) + 1})`;
   }
 
   // --- URL state -------------------------------------------------------------
@@ -391,15 +348,15 @@
     if (!menu) return;
     const names = [...new Set([...model.serviceChoices.map((s) => s.name), ...model.services])].sort();
     const counts = new Map(model.serviceChoices.map((s) => [s.name, s.count]));
-    registerServiceColors(names);
+    palette.registerServices(names);
     const selected = new Set(model.services);
     menu.innerHTML = `<div class="logsMultiPicker__actions"><button type="button" class="logsMiniButton" data-service-all>All services</button></div>` +
       (names.length ? names.map((name) => `
         <label class="logsMultiPicker__option" role="option" aria-selected="${selected.has(name)}">
           <input type="checkbox" value="${esc(name)}" ${selected.has(name) ? "checked" : ""} />
-          <i class="logsServiceDot" style="background:${serviceColor(name)}"></i>
+          <i class="logsServiceDot" style="background:${palette.service(name)}"></i>
           <span class="logsMultiPicker__name">${esc(name)}</span>
-          <span class="logsMultiPicker__count">${counts.has(name) ? compactCount(counts.get(name)) : ""}</span>
+          <span class="logsMultiPicker__count">${counts.has(name) ? fmt.compact(counts.get(name)) : ""}</span>
         </label>`).join("") : '<div class="logsMultiPicker__empty">No services in this range.</div>');
   }
 
@@ -443,7 +400,7 @@
       const payload = await api.getLogs("services", params);
       if (seq !== model.seq.services) return;
       model.serviceChoices = Array.isArray(payload.services) ? payload.services : [];
-      registerServiceColors(model.serviceChoices.map((s) => s.name));
+      palette.registerServices(model.serviceChoices.map((s) => s.name));
       if ($("logsServiceMenu") && !$("logsServiceMenu").hidden) renderServiceMenu();
     } catch (_) { /* the picker keeps the selected services */ }
   }
@@ -606,7 +563,7 @@
       model.rows.push(row);
       services.push(row.service);
     }
-    registerServiceColors(services);
+    palette.registerServices(services);
   }
 
   async function loadMore() {
@@ -642,15 +599,15 @@
       setStatus(model.lastSearch ? "No matching logs" : "");
       return;
     }
-    parts.push(`${formatCount(n)} log${n === 1 ? "" : "s"} shown`);
+    parts.push(`${fmt.count(n)} log${n === 1 ? "" : "s"} shown`);
     if (model.nextCursor && model.lastPayload?.budget_exhausted) {
-      parts.push(`scan paused at ${ns.timeRange.formatDateTime(model.lastPayload.scanned_from_ms)} · scroll to continue`);
+      parts.push(`scan paused at ${fmt.time(model.lastPayload.scanned_from_ms)} · scroll to continue`);
     } else if (model.nextCursor) {
-      parts.push(model.rows.length >= MAX_ROWS ? `display limit ${formatCount(MAX_ROWS)} reached` : "more available · scroll to load");
+      parts.push(model.rows.length >= MAX_ROWS ? `display limit ${fmt.count(MAX_ROWS)} reached` : "more available · scroll to load");
     }
     else parts.push("end of range");
     if (model.live) parts.push(model.liveGap ? "live · burst: older new logs skipped" : "live");
-    if (Number.isFinite(model.searchMs)) parts.push(`${Math.round(model.searchMs)} ms`);
+    if (Number.isFinite(model.searchMs)) parts.push(fmt.duration.fromMs(model.searchMs));
     setStatus(parts.join(" · "));
   }
 
@@ -674,12 +631,9 @@
 
   function cellHtml(row, col) {
     switch (col) {
-      case "time": return `<span class="logsCell logsCell--time" title="${esc(fullTimeLabel(row))}">${esc(timeLabel(row))}</span>`;
-      case "severity": {
-        const sev = severityClass(row.severity_number, row.severity_text);
-        return `<span class="logsCell logsCell--sev"><span class="logsSevBadge logsSev--${sev}" title="SeverityNumber ${esc(row.severity_number)}">${esc(row.severity_text || sev.toUpperCase())}</span></span>`;
-      }
-      case "service": return `<span class="logsCell logsCell--service" title="${esc(row.service)}"><i class="logsServiceDot" style="background:${serviceColor(row.service)}"></i>${esc(row.service)}</span>`;
+      case "time": return `<span class="logsCell logsCell--time" title="${esc(timeTitle(row))}">${esc(timeLabel(row))}</span>`;
+      case "severity": return `<span class="logsCell logsCell--sev">${sevBadgeHtml(row, `SeverityNumber ${row.severity_number}`)}</span>`;
+      case "service": return `<span class="logsCell logsCell--service" title="${esc(row.service)}"><i class="logsServiceDot" style="background:${palette.service(row.service)}"></i>${esc(row.service)}</span>`;
       case "host": return `<span class="logsCell" title="${esc(attrValue(row, "host.name"))}">${esc(attrValue(row, "host.name"))}</span>`;
       case "trace": return `<span class="logsCell logsCell--mono" title="${esc(row.trace_id)}">${esc(row.trace_id)}</span>`;
       case "span": return `<span class="logsCell logsCell--mono" title="${esc(row.span_id)}">${esc(row.span_id)}</span>`;
@@ -703,7 +657,7 @@
     const bounds = model.meta?.time_bounds;
     let hint = "";
     if (bounds && model.lastSearch && (model.lastSearch.start_ms > bounds.max_ms || model.lastSearch.end_ms < bounds.min_ms)) {
-      hint = `<p>The table holds logs from ${esc(ns.timeRange.formatDateTime(bounds.min_ms))} to ${esc(ns.timeRange.formatDateTime(bounds.max_ms))}.</p>
+      hint = `<p>The table holds logs from ${esc(fmt.time(bounds.min_ms))} to ${esc(fmt.time(bounds.max_ms))}.</p>
         <button type="button" class="button button--small" data-jump-latest>Show the last hour of data</button>`;
     }
     const filtered = model.services.length || model.level || model.sev.length || model.q || model.attrs.length || model.traceId;
@@ -758,11 +712,10 @@
     let html = "";
     for (let i = first; i < last; i += 1) {
       const row = model.rows[i];
-      const sev = severityClass(row.severity_number, row.severity_text);
-      const classes = ["logsRow", `logsRow--${sev}`];
+      const classes = ["logsRow"];
       if (row.id === model.selectedId) classes.push("is-selected");
       if (model.newIds.has(row.id)) classes.push("is-new");
-      html += `<div class="${classes.join(" ")}" role="row" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
+      html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
       html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? '<span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading older logs\u2026' : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
@@ -874,10 +827,10 @@
   const SEV_STACK = ["debug", "info", "warn", "error"];
   const SEV_COLUMN = { error: 1, warn: 2, info: 3, debug: 4 };
   const SEV_COLORS = {
-    error: "var(--log-sev-error)",
-    warn: "var(--log-sev-warn)",
-    info: "color-mix(in srgb, var(--log-sev-info) 78%, transparent)",
-    debug: "color-mix(in srgb, var(--log-sev-debug) 60%, transparent)",
+    error: palette.severity("error"),
+    warn: palette.severity("warn"),
+    info: `color-mix(in srgb, ${palette.severity("info")} 78%, transparent)`,
+    debug: `color-mix(in srgb, ${palette.severity("debug")} 60%, transparent)`,
   };
   const HISTOGRAM_HEIGHT = 120;
   let histogramChart = null;
@@ -944,8 +897,7 @@
     const bucketMs = Number(h?.bucket_ms) || 60000;
     const start = Number(h?.buckets?.[i]?.[0]);
     if (!Number.isFinite(start)) return "";
-    const tr = ns.timeRange;
-    return `${tr.formatDateTime(start)} \u2192 ${tr.formatDateTime(start + bucketMs).slice(11)}`;
+    return fmt.range(start, start + bucketMs);
   }
 
   // A drag over the bars searches that time range (whole seconds).
@@ -968,23 +920,23 @@
     const h = model.histogram;
     for (const sev of SEV_CLASSES) {
       const node = document.querySelector(`[data-sev-count="${sev}"]`);
-      if (node) node.textContent = h ? compactCount(h.totals?.[sev] || 0) : "";
+      if (node) node.textContent = h ? fmt.compact(h.totals?.[sev] || 0) : "";
     }
     box.classList.toggle("is-loading", model.histogramLoading && !!h);
     if (model.histogramLoading && !h) {
       histogramMessage(box, "Loading volume\u2026");
-      if (total) total.textContent = "\u2013";
+      if (total) total.textContent = fmt.EMPTY;
       return;
     }
     if (model.histogramError) {
       histogramMessage(box, model.histogramError, true);
-      if (total) total.textContent = "\u2013";
+      if (total) total.textContent = fmt.EMPTY;
       return;
     }
     if (!h) return;
     const count = Number(h.totals?.total || 0);
-    if (total) total.textContent = `${formatCount(count)} log${count === 1 ? "" : "s"}`;
-    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${Math.round(h.bucket_ms / 1000) >= 60 ? `${Math.round(h.bucket_ms / 60000)} min` : `${Math.round(h.bucket_ms / 1000)} s`} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
+    if (total) total.textContent = `${fmt.count(count)} log${count === 1 ? "" : "s"}`;
+    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(h.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
     // While a refetch runs, the previous bars stay (dimmed) until it answers.
     if (model.histogramLoading || !ns.chartCore) return;
     for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .tracesEmpty")) note.hidden = true;
@@ -1002,8 +954,9 @@
         cursorPoints: false,
         tooltipSort: "reverse",
         tooltipTitle: bucketTitle,
-        formatValue: (v) => formatCount(v),
-        formatY: (v) => formatCount(Math.max(0, v)),
+        xReadout: bucketTitle,
+        formatValue: (v) => fmt.count(v),
+        formatY: (v) => fmt.count(Math.max(0, v)),
         onZoom: onHistogramZoom,
       });
       histogramChart.root.setAttribute("role", "group");
@@ -1067,7 +1020,7 @@
     const max = Math.max(1, ...values);
     const step = values.length > 1 ? w / (values.length - 1) : w;
     const points = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`).join(" ");
-    return `<svg class="logsSparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline class="logsSparkline__line logsSevStroke--${sev}" points="${points}"></polyline></svg>`;
+    return `<svg class="logsSparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline class="logsSparkline__line" data-sev="${esc(sev)}" points="${points}"></polyline></svg>`;
   }
 
   function patternHtml(text) {
@@ -1093,7 +1046,7 @@
     const hidden = model.denoise ? all.filter((item) => item.noisy).length : 0;
     const shown = model.denoise ? all.filter((item) => !item.noisy) : all;
     const summary = p.total
-      ? `${formatCount(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${formatCount(p.sample_size)} of ${formatCount(p.total)} logs (counts ×${p.scale >= 10 ? Math.round(p.scale) : p.scale.toFixed(1)})` : `${formatCount(p.total)} logs`}${hidden ? ` · denoise hides ${hidden} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating\u2026" : ""}`
+      ? `${fmt.count(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${fmt.count(p.sample_size)} of ${fmt.count(p.total)} logs (counts ×${fmt.compact(p.scale)})` : `${fmt.count(p.total)} logs`}${hidden ? ` · denoise hides ${fmt.count(hidden)} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating\u2026" : ""}`
       : "";
     if (!all.length) {
       box.innerHTML = `<div class="logsEmpty"><strong>No logs to mine in this range.</strong></div>`;
@@ -1104,12 +1057,12 @@
         <div class="logsPatterns__head" role="row"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
         ${shown.map((item) => `
           <button type="button" class="logsPatternRow" role="row" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}">
-            <span class="logsPatternRow__count">${compactCount(item.count)}</span>
-            <span class="logsPatternRow__share"><span class="logsShareBar"><i style="width:${Math.max(1, Math.round(item.share * 100))}%"></i></span>${(item.share * 100).toFixed(item.share >= 0.1 ? 0 : 1)}%</span>
+            <span class="logsPatternRow__count">${fmt.compact(item.count)}</span>
+            <span class="logsPatternRow__share"><span class="logsShareBar"><i style="width:${Math.max(1, Math.round(item.share * 100))}%"></i></span>${fmt.percent(item.share)}</span>
             <span class="logsPatternRow__trend">${sparklineSvg(item.sparkline || [], item.severity)}</span>
             <span class="logsPatternRow__text">
-              <span class="logsPattern"><span class="logsSevBadge logsSev--${item.severity}">${esc(item.severity.toUpperCase())}</span>${patternHtml(item.pattern)}</span>
-              <span class="logsPattern__sample"><i class="logsServiceDot" style="background:${serviceColor(item.service)}"></i>${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
+              <span class="logsPattern"><span class="logsSevBadge" data-sev="${esc(item.severity)}">${esc(item.severity.toUpperCase())}</span>${patternHtml(item.pattern)}</span>
+              <span class="logsPattern__sample"><i class="logsServiceDot" style="background:${palette.service(item.service)}"></i>${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
             </span>
           </button>`).join("")}
       </div>`;
@@ -1220,12 +1173,11 @@
   function renderSidePanel() {
     const row = model.side.row;
     if (!row) return;
-    const sev = severityClass(row.severity_number, row.severity_text);
     const title = $("logsSideTitle");
     if (title) {
-      title.innerHTML = `<span class="logsSevBadge logsSev--${sev}">${esc(row.severity_text || sev.toUpperCase())}</span>
-        <span class="logsSideTitle__service"><i class="logsServiceDot" style="background:${serviceColor(row.service)}"></i>${esc(row.service)}</span>
-        <span class="logsSideTitle__time">${esc(fullTimeLabel(row))}</span>`;
+      title.innerHTML = `${sevBadgeHtml(row)}
+        <span class="logsSideTitle__service"><i class="logsServiceDot" style="background:${palette.service(row.service)}"></i>${esc(row.service)}</span>
+        <time class="logsSideTitle__time" title="${esc(timeTitle(row))}">${esc(fullTimeLabel(row))}</time>`;
     }
     const openTrace = $("logsOpenTrace");
     if (openTrace) {
@@ -1244,7 +1196,7 @@
     if (details) {
       details.innerHTML = `
         <section class="logsFieldGroup logsFieldGroup--body">
-          <h4>Body${row.body_truncated ? ` <span>first ${formatCount(row.body.length)} of ${formatCount(row.body_length)} characters</span>` : ""}</h4>
+          <h4>Body${row.body_truncated ? ` <span>first ${fmt.count(row.body.length)} of ${fmt.count(row.body_length)} characters</span>` : ""}</h4>
           <pre class="logsBodyText">${esc(row.body)}</pre>
         </section>
         <section class="logsFieldGroup">
@@ -1330,7 +1282,7 @@
       const payload = await api.getLogs("context", params);
       if (seq !== model.seq.context) return;
       model.side.context = payload;
-      registerServiceColors((payload.rows || []).map((r) => r.service));
+      palette.registerServices((payload.rows || []).map((r) => r.service));
     } catch (error) {
       if (seq !== model.seq.context) return;
       model.side.context = null;
@@ -1355,11 +1307,10 @@
     const anchor = model.side.anchorId;
     box.innerHTML = `${ctx.more_after ? '<div class="logsContext__more">Newer logs continue past the window</div>' : ""}
       ${rows.map((r) => {
-        const sev = severityClass(r.severity_number, r.severity_text);
         return `<button type="button" class="logsContextRow${r.id === anchor ? " is-anchor" : ""}" data-context-id="${esc(r.id)}">
-          <span class="logsContextRow__time">${esc(timeLabel(r).slice(7))}</span>
-          <span class="logsSevBadge logsSev--${sev}">${esc(r.severity_text || sev.toUpperCase())}</span>
-          <span class="logsContextRow__service"><i class="logsServiceDot" style="background:${serviceColor(r.service)}"></i>${esc(r.service)}</span>
+          <span class="logsContextRow__time" title="${esc(timeTitle(r))}">${esc(fmt.time(Number(r.ts_ms), { precision: "ms", date: "never" }))}</span>
+          ${sevBadgeHtml(r)}
+          <span class="logsContextRow__service"><i class="logsServiceDot" style="background:${palette.service(r.service)}"></i>${esc(r.service)}</span>
           <span class="logsContextRow__body">${esc(r.body)}</span>
         </button>`;
       }).join("") || '<div class="logsEmpty">No other logs in this window.</div>'}
@@ -1482,7 +1433,7 @@
     const atTop = !viewport || viewport.scrollTop < ROW_HEIGHT;
     for (const row of fresh) model.rowIds.add(row.id);
     model.newIds = new Set(fresh.map((row) => row.id));
-    registerServiceColors(fresh.map((row) => row.service));
+    palette.registerServices(fresh.map((row) => row.service));
     model.rows = [...fresh, ...model.rows];
     if (model.rows.length > MAX_ROWS) {
       const dropped = model.rows.splice(MAX_ROWS);

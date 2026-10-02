@@ -53,6 +53,7 @@ other non-numbers. A `null` duration is never read as 0.
 | `format.duration.fromUs(us)` | microseconds | `format.duration(us * 1e3)` |
 | `format.count(n)` | integer | `120,064`. Rounds to an integer. Integer strings of 16 digits or more, and BigInts, keep every digit (UInt64). |
 | `format.compact(n)` | number | `120.1K`, `3.4M`, `1.2B`, `1.5T`. Uppercase suffix, one decimal with `.0` dropped. A value that rounds to 1000 of a unit moves up (`999,960` gives `1M`). Below 1000: whole numbers, and a fraction under 100 keeps one decimal (`42.4`). |
+| `format.number(n)` | measured value | `1,235`, `3.142`, `0.5`, `25K`, `4.2e-5`: four significant digits, en-US grouping, `format.compact` from 10,000, an exponent below 0.0001. For gauges, ratios and metric values, where `compact` would drop the fraction. |
 | `format.bytes(n)` | bytes | `0 B`, `205 B`, `1.7 KB`, `10.3 MB`. 1024 base, one decimal from KB up. `util.formatBytes` delegates here. |
 | `format.bytesRate(n)` | bytes per second | `1.7 KB/s` |
 | `format.percent(ratio)` | ratio, 1 = 100 % | `50%`, `12.3%`, `1.23%`, `100%`: up to three significant digits. `<0.1%` for a value too small to show, and `0%` only for exactly 0. |
@@ -146,7 +147,7 @@ Text in a kind colour mixes it with `--text`.
 
 Where they come from:
 
-- **Status and severity** reuse `--log-sev-*`, `--exd-*` and `--graph-error`.
+- **Status and severity** reuse the former Logs `--log-sev-*`, `--exd-*` and `--graph-error`.
   The light values are darker where those failed 4.5:1, either on the
   surface or on their own tint: `--sev-warn`, `--sev-debug` and `--sev-trace`
   in light, `--sev-trace` in dark, and `--danger`, `--warning`, `--success`
@@ -165,12 +166,42 @@ Where they come from:
   attribute table (`--traceKv*`) mixes the same hues at slightly different
   ratios.
 
-Aliases: `--error-bg`, `--accentText`, the light `--accent`,
-`--log-sev-fatal`, `--log-sev-error`, `--log-sev-info` and `--graph-error`
-are now `var()` references to the token with the same value in both themes.
-Families whose values differ (`--exd-*`, `--trace-error`, `--traceError`,
-`--log-sev-warn/debug/trace`, the dark `--accent`) keep their values until
-their callers move to the semantic tokens.
+Aliases: `--error-bg`, `--accentText`, the light `--accent` and
+`--graph-error` are now `var()` references to the token with the same value
+in both themes. Families whose values differ (`--exd-*`, the dark `--accent`)
+keep their values until their callers move to the semantic tokens.
+
+## Observability
+
+Traces (`app_traces.js`, `app_trace_*.js`), Logs (`app_logs.js`), Metrics
+(`app_metrics.js`) and the page controller (`app_observability.js`) use the
+foundations only. `tests/harness/test_observability_foundations_contract.py`
+fails on a local formatter (`toLocaleString()`, an `Intl` formatter, a
+`toFixed()` that is not a CSS length or an SVG coordinate, `pad2`,
+`"\u2014"`), a hex, `rgb()` or `hsl()` colour, a palette copy in those
+modules, and on a raw colour in a style rule that only Observability can
+match. Its allow-lists name the two justified `toFixed()` texts: waterfall
+ticks of a deep zoom and metric axis ticks, which share one decimal count.
+
+- **Times**: lists and headers print `fmt.time` (`.SSS` for spans and logs),
+  the log detail every nanosecond (`fmt.time(ms, { precision: "ns", ns })`),
+  and every shown instant carries `fmt.timeTitle` as its `title`. A chart
+  bucket reads `fmt.range(start, end)`; a relative start reads `fmt.ago`.
+  Range picker values and URLs keep `ns.timeRange.formatDateTime`.
+- **Counts and units**: `fmt.count`, `fmt.compact`, `fmt.duration` (and
+  `.fromMs` / `.fromSeconds`), `fmt.percent` and `fmt.bytes`; Metrics values
+  without a unit read `fmt.number`.
+- **Colours**: a service is `palette.service` everywhere (a Metrics series
+  grouped by `service.name` too), latency percentiles `palette.quantile`, the
+  heatmap `palette.sequential`, canvases `palette.resolve`. Logs and trace
+  logs colour by `[data-sev]`, which sets `--sev-color` from the `--sev-*`
+  tokens (`unset` reads as trace). Status is `--danger` / `--warning` /
+  `--success`; a solid status badge prints its glyph in `--panel`. The
+  `--obs-*` tokens hold what no semantic token names: text on an accent fill
+  (`--obs-on-fill`) and the menu, popover, drawer and sheet shadows.
+- **Gone**: `--log-sev-*`, `--trace-log-*`, `--trace-error`,
+  `--trace-warning`, `--traceError`, `--traceWarn` and `--traceKv*` (attribute
+  values are `--json-*`; a NULL attribute is `format.nullToken()`).
 
 ## Migrating a module
 
@@ -196,3 +227,8 @@ Visible changes to expect, all intended:
   grey.
 - The light status and severity colours listed above get darker, and the
   dark `--accent` fill becomes `#2563eb`.
+- Observability times are 24 h everywhere (`Sep 12 16:29:57`, never
+  `04:29:57 PM` or `9/12/2026, 1:30:00 PM`), and grouped counts read `1,234`
+  on every browser locale.
+- Solid error badges are `--danger` with a `--panel` glyph: light red with a
+  dark glyph in dark mode.

@@ -14,6 +14,8 @@
   // search() while the mode is "spans".
   const ns = window.ChDash;
   if (!ns) return;
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   const PAGE_SIZE = 100;
   const ROW_HEIGHT = 30;
@@ -235,7 +237,7 @@
     if (seq !== state.seq) return;
     if (first) state.latencyMs = performance.now() - started;
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-    ctx.registerServiceColors(rows.map((row) => row.service_name));
+    palette.registerServices(rows.map((row) => row.service_name));
     for (const row of rows) {
       row.duration_ns = Number(row.duration_ns || 0);
       if (row.duration_ns > state.maxDurationNs) state.maxDurationNs = row.duration_ns;
@@ -253,17 +255,16 @@
 
   // ----------------------------------------------------------- rendering
 
-  const timeFormat = new Intl.DateTimeFormat([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-
-  // "Sep 19, 12:59:59.999" in local time from the exact UTC text.
+  // "Sep 19 12:59:59.999" in local time from the exact UTC text, and its
+  // tooltip (fmt.timeTitle, to the nanosecond): computed once per row.
   function localTime(row) {
-    if (row._time) return row._time;
-    const parts = String(row.timestamp || "").match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
-    if (!parts) return (row._time = String(row.timestamp || ""));
-    const fraction = (parts[3] || "").padEnd(9, "0");
-    const ms = Date.parse(`${parts[1]}T${parts[2]}.${fraction.slice(0, 3)}Z`);
-    row._time = Number.isFinite(ms) ? `${timeFormat.format(new Date(ms))}.${fraction.slice(0, 3)}` : String(row.timestamp);
+    if (row._time == null) row._time = ctx.absoluteTimeText(Number(row.start_ns), row.timestamp, { withRaw: false });
     return row._time;
+  }
+
+  function timeTitle(row) {
+    if (row._timeTitle == null) row._timeTitle = ctx.absoluteTimeText(Number(row.start_ns), row.timestamp);
+    return row._timeTitle;
   }
 
   function nsDate(nsText) {
@@ -301,15 +302,15 @@
     const selected = index === state.selected;
     const percent = state.maxDurationNs > 0 ? Math.max(0.5, Math.min(100, (row.duration_ns / state.maxDurationNs) * 100)) : 0;
     const error = String(row.status_code || "").toLowerCase() === "error";
-    const duration = ctx.formatDuration(row.duration_ns);
+    const duration = fmt.duration(row.duration_ns);
     const attrs = state.loadedColumns.map((column, i) => {
       const value = Array.isArray(row.attributes) ? row.attributes[i] : null;
-      if (value == null) return '<span class="traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">\u2014</span>';
+      if (value == null) return `<span class="traceSpanListRow__cell traceSpanListRow__cell--attr is-missing" role="gridcell">${fmt.EMPTY}</span>`;
       const scope = column.scope === "any" ? "any" : column.scope;
       return `<span class="traceSpanListRow__cell traceSpanListRow__cell--attr" role="gridcell">${filterValueHtml("tag", value, value === "" ? '""' : value, ` data-filter-scope="${esc(scope)}" data-filter-key="${esc(column.key)}"`)}</span>`;
     }).join("");
-    return `<div class="traceSpanListRow${selected ? " is-selected" : ""}${error ? " is-error" : ""}" role="row" id="traceSpanListRow-${index}" data-span-index="${index}" aria-rowindex="${index + 2}" aria-selected="${selected ? "true" : "false"}" style="top:${index * ROW_HEIGHT}px;--trace-service-color:${ctx.serviceColor(row.service_name)}">`
-      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(`${row.timestamp} UTC`)}">${esc(localTime(row))}</span>`
+    return `<div class="traceSpanListRow${selected ? " is-selected" : ""}${error ? " is-error" : ""}" role="row" id="traceSpanListRow-${index}" data-span-index="${index}" aria-rowindex="${index + 2}" aria-selected="${selected ? "true" : "false"}" style="top:${index * ROW_HEIGHT}px;--trace-service-color:${palette.service(row.service_name)}">`
+      + `<span class="traceSpanListRow__cell traceSpanListRow__cell--time" role="gridcell" title="${esc(timeTitle(row))}">${esc(localTime(row))}</span>`
       + `<span class="traceSpanListRow__cell traceSpanListRow__cell--service" role="gridcell"><i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>`
       + `<span class="traceSpanListRow__cell traceSpanListRow__cell--operation" role="gridcell">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</span>`
       + `<span class="traceSpanListRow__cell traceSpanListRow__cell--duration" role="gridcell" title="${esc(duration)}"><span class="traceSpanListRow__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%"></i></span><span class="traceSpanListRow__durationText">${esc(duration)}</span></span>`
@@ -320,9 +321,8 @@
   }
 
   function footHtml() {
-    const tr = ns.timeRange;
     const searchedTo = nsDate(state.searchedToNs);
-    const when = searchedTo ? (tr ? tr.formatDateTime(searchedTo.getTime()) : searchedTo.toISOString()) : "";
+    const when = searchedTo ? fmt.time(searchedTo.getTime()) : "";
     if (state.error) {
       return `<div class="traceSpanTable__foot is-error" role="alert"><span>${esc(state.error)}</span><button type="button" class="button button--small" data-span-retry>Retry</button></div>`;
     }
@@ -335,14 +335,13 @@
       return `<div class="traceSpanTable__foot" data-span-more-available><span>${note}</span><button type="button" class="button button--small" data-span-load-more>${asked || state.incomplete ? "Keep searching" : "Load more"}</button></div>`;
     }
     if (!state.rows.length) return "";
-    const capped = state.rows.length >= MAX_ROWS ? ` The table keeps the newest ${MAX_ROWS.toLocaleString()} spans: narrow the range or filters for older ones.` : "";
-    return `<div class="traceSpanTable__foot is-end" data-span-end>End of results · ${state.rows.length.toLocaleString()} span${state.rows.length === 1 ? "" : "s"}.${esc(capped)}</div>`;
+    const capped = state.rows.length >= MAX_ROWS ? ` The table keeps the newest ${fmt.count(MAX_ROWS)} spans: narrow the range or filters for older ones.` : "";
+    return `<div class="traceSpanTable__foot is-end" data-span-end>End of results · ${fmt.count(state.rows.length)} span${state.rows.length === 1 ? "" : "s"}.${esc(capped)}</div>`;
   }
 
   function emptyHtml() {
     const range = state.base ? { start: Number(state.base.start_ms), end: Number(state.base.end_ms) } : null;
-    const tr = ns.timeRange;
-    const when = range && tr ? `between ${tr.formatDateTime(range.start)} and ${tr.formatDateTime(range.end)}` : "in this range";
+    const when = range ? `between ${fmt.time(range.start)} and ${fmt.time(range.end)}` : "in this range";
     const zoom = ctx.dom.tracesRangeZoomOut;
     const canZoom = !!zoom && !zoom.disabled;
     return `<div class="tracesEmpty tracesEmpty--search" data-empty-results data-span-empty>
@@ -358,10 +357,10 @@
     if (!state.searched) { count.textContent = "0 Spans"; return; }
     const n = state.rows.length;
     const latency = Number.isFinite(state.latencyMs)
-      ? ` <span class="tracesResultCount__latency" title="First page request time, measured in the browser">(in ${esc(ctx.formatDuration(state.latencyMs * 1e6))})</span>`
+      ? ` <span class="tracesResultCount__latency" title="First page request time, measured in the browser">(in ${esc(fmt.duration.fromMs(state.latencyMs))})</span>`
       : "";
     const more = state.hasMore ? ' <span class="tracesResultCount__more" title="Scroll to load older spans">· more available</span>' : "";
-    count.innerHTML = `${n.toLocaleString()}${state.hasMore ? "+" : ""} Span${n === 1 ? "" : "s"}${latency}${more}`;
+    count.innerHTML = `${fmt.count(n)}${state.hasMore ? "+" : ""} Span${n === 1 ? "" : "s"}${latency}${more}`;
   }
 
   // The results area: the table shell (header, sized body, footer); the
@@ -608,8 +607,8 @@
     const status = String(span.status_code || "Unset");
     const statusMessage = String(span.status_message || "").trim();
     const summary = [
-      ["Start", `<span title="${esc(`${row.timestamp} UTC`)}">${esc(ctx.absoluteTimeText(startNs, row.timestamp, { withRaw: false }))}</span>`],
-      ["Duration", `<b>${esc(ctx.formatDuration(span.duration_ns))}</b>`],
+      ["Start", `<time title="${esc(timeTitle(row))}">${esc(localTime(row))}</time>`],
+      ["Duration", `<b>${esc(fmt.duration(span.duration_ns))}</b>`],
       ["Kind", esc(ctx.spanKindLabel(span.span_kind))],
       ["Status", statusHtml(status)],
       ["Trace ID", `<code>${esc(row.trace_id)}</code>${copyButton(row.trace_id, "Trace ID")}`],
@@ -642,14 +641,14 @@
     const href = ctx.spanTraceUrl(row.trace_id, row.span_id);
     // A re-render keeps the focus on the same panel control.
     const focusedNav = panel.contains(document.activeElement) ? document.activeElement?.getAttribute?.("data-span-panel-nav") : "";
-    panel.style.setProperty("--trace-service-color", ctx.serviceColor(row.service_name));
+    panel.style.setProperty("--trace-service-color", palette.service(row.service_name));
     panel.innerHTML = `<header class="traceSpanPanel__head">
         <div class="traceSpanPanel__title">
           <span class="traceSpanPanel__service"><i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}</span>
           <strong id="traceSpanPanelTitle">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</strong>
         </div>
         <div class="traceSpanPanel__actions">
-          <span class="traceSpanPanel__position">${index + 1} / ${state.rows.length.toLocaleString()}${state.hasMore ? "+" : ""}</span>
+          <span class="traceSpanPanel__position">${index + 1} / ${fmt.count(state.rows.length)}${state.hasMore ? "+" : ""}</span>
           <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="prev" aria-label="Previous span" title="Previous span (\u2191)"${index <= 0 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 10 8 5.5l4.5 4.5"/></svg></button>
           <button type="button" class="traceSpanPanel__nav" data-span-panel-nav="next" aria-label="Next span" title="Next span (\u2193)"${index >= state.rows.length - 1 ? " disabled" : ""}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6 8 10.5 12.5 6"/></svg></button>
           <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>

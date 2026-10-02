@@ -28,7 +28,7 @@ def test_result_items_follow_jaeger_result_item():
     assert '<code class="traceResult__fullId">${esc(trace.trace_id)}</code>' in js
     assert "function layoutServicePills(scope)" in js
     assert "traceSvcPill__error" in js and "traceSvcMore" in js and ".traceSvcPopover" in css
-    assert "(in ${esc(formatDuration(model.searchLatencyMs * 1e6))})" in js
+    assert "(in ${esc(fmt.duration.fromMs(model.searchLatencyMs))})" in js
     assert "data-results-zoom-out" in js and "dom.tracesRangeZoomOut?.click()" in js
 
 
@@ -52,7 +52,7 @@ def test_duration_chart_plots_listed_traces_over_a_padded_axis():
     engine = read("src/static/app_chart_core.js")
     # One dot per listed trace on the engine's scatter (own x column, radius
     # by span count, red with errors), picked under the pointer.
-    assert 'pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--traceError)" : null),' in js
+    assert 'pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--danger)" : null),' in js
     assert 'id: "traces", label: "Listed traces", type: "points", xs: dotXs' in js
     assert "function pickPoint(p)" in engine and "const score = d / (r + 3) + r / 100;" in engine
     assert ".chartCore__tipRow.is-error" in css

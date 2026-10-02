@@ -31,7 +31,10 @@
   // The Metrics view of the Observability page (app_observability.js) writes
   // the location only while it is the shown view.
   const ownsUrl = () => !ns.observability || ns.observability.isActive("metrics");
-  const pad2 = (value) => String(value).padStart(2, "0");
+  // Formats and colours (docs/ui-foundations.md): a series grouped by
+  // service keeps the service's colour of Traces and Logs.
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   function localMidnight(ms) {
     const d = new Date(ms);
@@ -54,6 +57,8 @@
   const BYTE_SCALE = { By: 1, B: 1, bit: 1 / 8, kBy: 1e3, KBy: 1e3, MBy: 1e6, GBy: 1e9, TBy: 1e12, KiBy: 1024, MiBy: 1024 ** 2, GiBy: 1024 ** 3, TiBy: 1024 ** 4 };
   const DURATION_STEPS = [[1e-9, "ns"], [1e-6, "µs"], [1e-3, "ms"], [1, "s"], [60, "min"], [3600, "h"], [86400, "d"]];
   const BYTE_STEPS = [[1, "B"], [1024, "KB"], [1024 ** 2, "MB"], [1024 ** 3, "GB"], [1024 ** 4, "TB"]];
+  // Group keys that name the service: such a series takes palette.service.
+  const SERVICE_KEYS = new Set(["service.name", "ServiceName", "service_name"]);
 
   function parseUnit(unitText) {
     let text = String(unitText == null ? "" : unitText).trim();
@@ -76,50 +81,25 @@
     return rawUnit ? String(rawUnit) : rate ? "per second" : "";
   }
 
-  // Up to three significant digits, trailing zeros dropped: 182, 18.2, 1.82.
-  function significant(value) {
-    const abs = Math.abs(value);
-    const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : 2;
-    const fixed = value.toFixed(digits);
-    return digits ? fixed.replace(/\.?0+$/, "") : fixed;
-  }
-
   function pickStep(steps, magnitude) {
     let chosen = steps[0];
     for (const step of steps) if (magnitude >= step[0]) chosen = step;
     return chosen;
   }
 
-  function formatNumber(value) {
-    const abs = Math.abs(value);
-    if (abs === 0) return "0";
-    if (abs >= 1e4) {
-      const unit = ns.chartCore ? ns.chartCore.compactUnitFor(abs) : { factor: 1, suffix: "" };
-      return `${significant(value / unit.factor)}${unit.suffix}`;
-    }
-    if (abs >= 1) return Number(value.toPrecision(4)).toLocaleString("en-US", { maximumFractionDigits: 3 });
-    if (abs >= 1e-4) return Number(value.toPrecision(3)).toString();
-    return value.toExponential(2);
-  }
-
-  // One value with its unit, for tooltips and the legend.
+  // One value with its unit, for tooltips and the legend (ns.format).
   function formatValue(value, info) {
-    if (value == null || !Number.isFinite(value)) return "\u2014";
+    if (value == null || !Number.isFinite(value)) return fmt.EMPTY;
     const rate = info.perSecond ? "/s" : "";
     if (info.kind === "duration") {
       const seconds = value * info.scale;
       if (seconds === 0) return `0 s${rate}`;
-      const [factor, name] = pickStep(DURATION_STEPS, Math.abs(seconds));
-      return `${significant(seconds / factor)} ${name}${rate}`;
+      return `${seconds < 0 ? "-" : ""}${fmt.duration.fromSeconds(Math.abs(seconds))}${rate}`;
     }
-    if (info.kind === "bytes") {
-      const bytes = value * info.scale;
-      const [factor, name] = pickStep(BYTE_STEPS, Math.abs(bytes));
-      return `${factor === 1 ? formatNumber(bytes) : significant(bytes / factor)} ${name}${rate}`;
-    }
-    if (info.kind === "percent") return `${formatNumber(value)}%${rate}`;
+    if (info.kind === "bytes") return `${fmt.bytes(value * info.scale)}${rate}`;
+    if (info.kind === "percent") return `${fmt.number(value)}%${rate}`;
     const label = info.label ? ` ${info.label}` : "";
-    return `${formatNumber(value)}${label}${rate}`;
+    return `${fmt.number(value)}${label}${rate}`;
   }
 
   // Axis scale: every tick shares one display unit and one decimal count.
@@ -146,19 +126,6 @@
     return `${/^-0(?:\.0*)?$/.test(text) ? "0" : text}${formatter.suffix}`;
   }
 
-  function formatInstant(ms) {
-    if (!Number.isFinite(ms)) return "\u2014";
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-  }
-
-  function formatBucket(ms) {
-    const minutes = ms / 60000;
-    if (minutes < 1) return `${Math.round(ms / 1000)} s`;
-    if (minutes < 60) return `${Math.round(minutes)} min`;
-    if (minutes < 1440) return `${Math.round(minutes / 60)} h`;
-    return `${Math.round(minutes / 1440)} d`;
-  }
 
   // --- State ----------------------------------------------------------------
 
@@ -419,7 +386,7 @@
       const items = collapsed ? "" : metrics.map((m) => {
         const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
         const unit = m.unit ? `<span class="metricsBadge metricsBadge--unit" title="Unit">${esc(m.unit)}</span>` : "";
-        const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${m.unit}` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${Number(m.points || 0).toLocaleString("en-US")} points${m.description ? `\n${m.description}` : ""}`;
+        const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${m.unit}` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
         return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
           <span class="metricsCatalog__name">${highlight(m.name, needle)}</span>
           <span class="metricsCatalog__badges"><span class="metricsBadge metricsBadge--${esc(m.kind)}">${esc(KIND_BADGE[m.kind] || m.kind)}</span>${unit}</span>
@@ -459,7 +426,7 @@
     if (!Number.isFinite(max) || max <= 0) return "";
     const range = model.resolved;
     if (range && max >= range.start_ms && max <= range.end_ms) return "";
-    return `<button type="button" class="button metricsEmpty__jump" data-jump-to-data="${max}">Show the last 24 h with data (until ${esc(formatInstant(max))})</button>`;
+    return `<button type="button" class="button metricsEmpty__jump" data-jump-to-data="${max}">Show the last 24 h with data (until ${esc(fmt.time(max))})</button>`;
   }
 
   function jumpToData(maxMs) {
@@ -635,7 +602,7 @@
         <div class="metricsControl metricsControl--agg">
           <span class="metricsControl__label">Aggregation</span>
           <div class="themeSelect tracePicker metricsPicker metricsPicker--agg">
-            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">\u2014</button>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">${fmt.EMPTY}</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
@@ -823,7 +790,7 @@
       if (!key || !(panel.keys || []).includes(key)) { list.innerHTML = ""; return; }
       const values = await ensureValues(panel, key);
       if (keyInput.value.trim() !== key) return;
-      list.innerHTML = values.map((v) => `<option value="${esc(v.value)}">${esc(`${Number(v.points || 0).toLocaleString("en-US")} points`)}</option>`).join("");
+      list.innerHTML = values.map((v) => `<option value="${esc(v.value)}">${esc(`${fmt.count(Number(v.points || 0))} points`)}</option>`).join("");
     };
     keyInput.addEventListener("change", refreshValues);
     keyInput.addEventListener("input", () => { if ((panel.keys || []).includes(keyInput.value.trim())) refreshValues(); });
@@ -981,11 +948,19 @@
     return labels.map(([k, v]) => `${k}=${v === "" ? "(none)" : v}`).join(", ");
   }
 
-  function slotStyle(index, other) {
-    if (other) return { color: "var(--qchart-other)", dash: [4, 3] };
-    const color = `var(--qchart-${(index % COLOR_SLOTS) + 1})`;
+  // The service a series stands for: its only label is the service name.
+  function seriesService(series) {
+    const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
+    return labels.length === 1 && SERVICE_KEYS.has(labels[0][0]) && labels[0][1] !== "" ? String(labels[0][1]) : null;
+  }
+
+  // A service series takes the service's colour (Traces, Logs); the others
+  // the chart slots, dashed past the eighth.
+  function slotStyle(index, other, service = null) {
+    if (other) return { color: palette.categorical(-1), dash: [4, 3] };
+    if (service) return { color: palette.service(service), dash: null };
     const cycle = Math.floor(index / COLOR_SLOTS);
-    return { color, dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
+    return { color: palette.categorical(index), dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
   }
 
   // Exemplar values share the metric unit: they sit on the value axis when the
@@ -1000,7 +975,7 @@
   function exemplarTip(ex, metricInfo) {
     const attrs = ex.attributes && typeof ex.attributes === "object" ? Object.entries(ex.attributes).slice(0, 4) : [];
     return `<strong>Exemplar · ${esc(formatValue(Number(ex.value), metricInfo))}</strong>` +
-      `<span class="metricsTip__bucket">${esc(formatInstant(Number(ex.t)))}</span>` +
+      `<span class="metricsTip__bucket">${esc(fmt.time(Number(ex.t)))}</span>` +
       `<div class="metricsTip__trace">Trace <code>${esc(ex.trace_id)}</code></div>` +
       (ex.span_id ? `<div class="metricsTip__trace">Span <code>${esc(ex.span_id)}</code></div>` : "") +
       attrs.map(([k, v]) => `<div class="metricsTip__attr"><em>${esc(k)}</em> ${esc(v)}</div>`).join("") +
@@ -1024,7 +999,7 @@
         y: onAxis && Number.isFinite(value) ? value : null,
         href,
         className: "metricsExemplar",
-        label: `Exemplar ${formatValue(value, metricInfo)} at ${formatInstant(t)}: open trace ${ex.trace_id}`,
+        label: `Exemplar ${formatValue(value, metricInfo)} at ${fmt.time(t)}: open trace ${ex.trace_id}`,
         attrs: { "data-trace-id": ex.trace_id, "data-span-id": ex.span_id || "" },
         tooltip: () => exemplarTip(ex, metricInfo),
       });
@@ -1038,7 +1013,7 @@
     const startMs = Math.floor(range[0] / 1000) * 1000;
     const endMs = Math.ceil(range[1] / 1000) * 1000;
     if (endMs - startMs < 1000) return;
-    applyRange({ from: formatInstant(startMs), to: formatInstant(endMs) });
+    applyRange({ from: ns.timeRange.formatDateTime(startMs), to: ns.timeRange.formatDateTime(endMs) });
   }
 
   function drawChart(panel) {
@@ -1056,7 +1031,7 @@
       return;
     }
     const valueInfo = parseUnit(data.value_unit ?? data.unit);
-    axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${formatBucket(Number(data.bucket_ms || 0))} buckets`;
+    axisTitle.textContent = `${aggLabel(data.agg)}${unitTitle(valueInfo, data.value_unit) ? ` · ${unitTitle(valueInfo, data.value_unit)}` : ""} · ${fmt.duration.fromMs(Number(data.bucket_ms || 0))} buckets`;
 
     const n = timestamps.length;
     const xs = new Float64Array(n);
@@ -1066,8 +1041,9 @@
     const x1 = Math.max(Number(data.range?.[1] ?? xs[n - 1] + bucketMs), x0 + 1);
     // A series exported less often than the bucket has regular empty buckets:
     // bridgeGaps joins those, longer gaps break the line, a lone point is a dot.
+    palette.registerServices(series.map(seriesService).filter(Boolean));
     const lines = series.map((s, index) => {
-      const style = slotStyle(index, !!s.other);
+      const style = slotStyle(index, !!s.other, s.other ? null : seriesService(s));
       const values = new Float64Array(n);
       const raw = Array.isArray(s.values) ? s.values : [];
       for (let i = 0; i < n; i++) {
@@ -1089,7 +1065,9 @@
       yUnit: (maxAbs) => axisFormatter(valueInfo, maxAbs),
       formatValue: (v) => formatValue(v, valueInfo),
       formatY: (v) => formatValue(v, valueInfo),
-      tooltipFooter: () => `${formatBucket(bucketMs)} bucket`,
+      // The bucket a cursor position stands for, like the Traces charts.
+      xReadout: (i) => fmt.range(xs[i], xs[i] + bucketMs),
+      tooltipFooter: () => `${fmt.duration.fromMs(bucketMs)} bucket`,
     };
     if (!panel.chart) {
       panel.chart = core.create(plot, {
@@ -1151,7 +1129,7 @@
     const r = model.resolved;
     // A relative range ("Last 6 hours") shows what it resolved to; an
     // absolute one already reads as dates on the picker.
-    info.textContent = r && ns.timeRange?.isRelative?.(model.range) ? `${formatInstant(r.start_ms)} \u2192 ${formatInstant(r.end_ms)}` : "";
+    info.textContent = r && ns.timeRange?.isRelative?.(model.range) ? fmt.range(r.start_ms, r.end_ms) : "";
   }
 
   // --- Lifecycle ------------------------------------------------------------

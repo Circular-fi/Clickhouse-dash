@@ -299,7 +299,7 @@ test('mocked: severities use the Logs view palette (info blue) in both themes; E
     document.body.appendChild(probe);
     const out = {};
     for (const sev of ['error', 'warn', 'info', 'debug']) {
-      probe.style.background = `var(--log-sev-${sev})`;
+      probe.style.background = `var(--sev-${sev})`;
       const chip = document.querySelector(`#traceLogsPanel [data-log-severity="${sev}"] > i`);
       out[sev] = { logs: getComputedStyle(probe).backgroundColor, trace: chip ? getComputedStyle(chip).backgroundColor : null };
     }
@@ -327,9 +327,9 @@ test('mocked: many logs, truncated: the notice, paging, trace-level logs and the
   }));
   await routeLogs(page, (route) => json(route, logsAnswer(records, { truncated: true, limit: 1000 })));
   await openMocked(page);
-  await expect(headerToggle(page).locator('[data-trace-logs-count]')).toHaveText('1000+');
+  await expect(headerToggle(page).locator('[data-trace-logs-count]')).toHaveText('1,000+');
   await headerToggle(page).click();
-  await expect(panel(page).locator('[data-trace-logs-notice]')).toContainText('Showing the first 1000 logs');
+  await expect(panel(page).locator('[data-trace-logs-notice]')).toContainText('Showing the first 1,000 logs');
   await expect(panel(page).locator('[data-trace-logs-notice]')).toContainText('20 logs have no span of this trace');
   await expect(panelRows(page)).toHaveCount(300);
   await panel(page).locator('[data-trace-logs-more]').click();
@@ -340,7 +340,7 @@ test('mocked: many logs, truncated: the notice, paging, trace-level logs and the
   await expect(panel(page).locator('[data-log-severity="error"] b')).toHaveText('200');
   await panel(page).locator('#traceLogsFilter').fill('record 99 of');
   await expect(panelRows(page)).toHaveCount(1);
-  await expect(panel(page).locator('.traceLogsPanel__matches')).toHaveText('1 of 1000 shown');
+  await expect(panel(page).locator('.traceLogsPanel__matches')).toHaveText('1 of 1,000 shown');
   await panel(page).locator('#traceLogsFilter').fill('no such text');
   await expect(panel(page).locator('[data-trace-logs-state="filtered"]')).toBeVisible();
   await panel(page).locator('[data-trace-logs-clear]').click();

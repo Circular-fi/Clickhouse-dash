@@ -246,7 +246,7 @@ test('span inspector: events relative to the trace start, sorted, first three th
   await expect(events.locator('.traceSpanEvents__list > .traceSpanEvent:visible > summary > time')).toHaveText(['(1 ms)', '(2 ms)', '(3 ms)']);
   await expect(events.locator('.traceSpanEvents__note')).toHaveText('Event timestamps are relative to the start time of the full trace.');
   // Absolute time in the tooltip.
-  await expect(items.first().locator('time')).toHaveAttribute('title', /12:00:00\.001.*2026-09-19 12:00:00\.001000000 UTC/);
+  await expect(items.first().locator('time')).toHaveAttribute('title', /^2026-09-19T12:00:00\.001Z\n.*\nSep 19, 2026 12:00:00\.001000000 UTC$/);
   await events.locator('[data-events-more]').click();
   await expect(events.locator('.traceSpanEvents__list > .traceSpanEvent:visible > summary > b')).toHaveText(['request.received', 'session.found', 'auth.checked', 'render.start', 'cart.loaded']);
   await expect(items.nth(4).locator('time')).toHaveText('(50.1 ms)');
@@ -340,7 +340,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
   await expect(meta).toContainText('Start Time: 30 ms');
   await expect(meta).toContainText('Kind: Client');
   await expect(meta.locator('.traceStatus')).toHaveText('Error');
-  await expect(meta.locator('[title*="2026-09-19 12:00:00.030000000 UTC"]')).toHaveCount(1);
+  await expect(meta.locator('[title*="Sep 19, 2026 12:00:00.030000000 UTC"]')).toHaveCount(1);
   await expect(card.locator('.traceInspectorStatusMessage')).toContainText('card declined');
   const identity = card.locator('.traceInspectorIdentity');
   await expect(identity).toContainText(`SpanID: ${ID.D}`);
@@ -392,12 +392,12 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
   await expect(table.locator('tbody tr > th')).toHaveText(['checkout', 'frontend', 'payments', 'fraud']);
   // By hand: frontend = A (100 ms, self 100 - 80 = 20), G (20 ms; child H
   // clipped at G's end: self 15), H (15 ms, self 15).
-  await expect(cells('frontend')).toHaveText(['frontend', '3', '135 ms', '45 ms', '15 ms', '100 ms', '50 ms', '16.7 ms', '15 ms', '20 ms', '37.04%']);
+  await expect(cells('frontend')).toHaveText(['frontend', '3', '135 ms', '45 ms', '15 ms', '100 ms', '50 ms', '16.7 ms', '15 ms', '20 ms', '37%']);
   // checkout = B (60 ms; children cover [15, 60]: self 15), C (20), C2 (5).
-  await expect(cells('checkout')).toHaveText(['checkout', '3', '85 ms', '28.3 ms', '5 ms', '60 ms', '40 ms', '13.3 ms', '5 ms', '20 ms', '47.06%']);
+  await expect(cells('checkout')).toHaveText(['checkout', '3', '85 ms', '28.3 ms', '5 ms', '60 ms', '40 ms', '13.3 ms', '5 ms', '20 ms', '47.1%']);
   // payments = D (30 ms, child E 8 ms: self 22), E (8 ms, child F 5 ms: self 3).
-  await expect(cells('payments')).toHaveText(['payments', '2', '38 ms', '19 ms', '8 ms', '30 ms', '25 ms', '12.5 ms', '3 ms', '22 ms', '65.79%']);
-  await expect(cells('fraud')).toHaveText(['fraud', '1', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '100.00%']);
+  await expect(cells('payments')).toHaveText(['payments', '2', '38 ms', '19 ms', '8 ms', '30 ms', '25 ms', '12.5 ms', '3 ms', '22 ms', '65.8%']);
+  await expect(cells('fraud')).toHaveText(['fraud', '1', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '5 ms', '100%']);
   // Service colour on the group cell.
   expect(await table.locator('tr[data-stats-group="frontend"] > th').evaluate((el) => getComputedStyle(el).boxShadow)).toMatch(/inset/);
 
@@ -562,12 +562,12 @@ test('trace graph: the graph kit canvas, one card per call path with counts and 
   const at = Object.fromEntries(state.nodes.map((n) => [n.label, n]));
   // Card rows: service (title), operation, "count / errors · avg", "time % · self %".
   expect(at['checkout SELECT orders'].countText).toBe('2 / 0 · avg 12.5 ms');
-  expect(at['checkout SELECT orders'].timeText).toBe('25 ms (23.81%) · self 25 ms (100%)');
+  expect(at['checkout SELECT orders'].timeText).toBe('25 ms (23.8%) · self 25 ms (100%)');
   expect(at['payments charge'].countText).toBe('1 / 1 · avg 30 ms');
-  expect(at['payments charge'].timeText).toBe('30 ms (28.57%) · self 22 ms (73.33%)');
+  expect(at['payments charge'].timeText).toBe('30 ms (28.6%) · self 22 ms (73.3%)');
   expect(at['payments charge'].status).toBe('error');
   expect(at['checkout SELECT orders'].status).toBe(null);
-  expect(at['frontend GET /checkout'].timeText).toMatch(/^100 ms \(95\.24%\) · self 20 ms/);
+  expect(at['frontend GET /checkout'].timeText).toMatch(/^100 ms \(95\.2%\) · self 20 ms/);
   // Rectangular cards of one size.
   expect(new Set(state.nodes.map((n) => `${Math.round(n.width)}x${Math.round(n.height)}`)).size).toBe(1);
   // Left to right in call order: a callee right of its caller, the first one
@@ -609,7 +609,7 @@ test('trace graph: the graph kit canvas, one card per call path with counts and 
   const serviceRgb = await page.evaluate(() => {
     const probe = document.createElement('div');
     document.body.append(probe);
-    probe.style.color = window.ChDash.traceTabs.context().serviceColor('checkout');
+    probe.style.color = window.ChDash.palette.service('checkout');
     const rgb = getComputedStyle(probe).color.match(/[\d.]+/g).slice(0, 3).map(Number);
     probe.remove();
     return rgb;
@@ -734,7 +734,7 @@ test('trace graph: hover outlines the card; a click recentres on it and opens it
   await expect(panel.locator('.graphKitPanel__eyebrow')).toHaveText('Call path');
   await expect(panel.locator('.graphKitPanel__title')).toHaveText('payments');
   await expect(panel.locator('.graphKitPanel__subtitle')).toHaveText('charge');
-  await expect(panel.locator('.graphKitPanel__stats')).toContainText('73.33%');
+  await expect(panel.locator('.graphKitPanel__stats')).toContainText('73.3%');
   await expect(panel).toContainText('Called from');
   await expect(panel.locator('[data-graph-select]')).toHaveText([/frontend\s*GET \/checkout/, /checkout\s*POST \/cart\/checkout/, /payments\s*fraud\.check/]);
   await cameraIdle(page, 'ChDash.traceGraph');

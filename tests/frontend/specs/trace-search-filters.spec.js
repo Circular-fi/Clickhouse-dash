@@ -406,7 +406,7 @@ test('facets: keys and values, include / exclude, pins, load more and key search
   await expect(facets).toHaveCount(20);
   await expect(panel.locator('#traceFacetsMeta')).toHaveText('≈3M spans');
   await expect(facets.first().locator('.traceFacet__key')).toHaveText('http.method');
-  await expect(facets.first().locator('.traceFacet__count')).toHaveText('≈1.2k');
+  await expect(facets.first().locator('.traceFacet__count')).toHaveText('≈1.2K');
   await expect(facets.nth(1).locator('.traceFacet__scope')).toHaveText('R');
   // Load more keys.
   await panel.locator('[data-facet-more-keys]').click();

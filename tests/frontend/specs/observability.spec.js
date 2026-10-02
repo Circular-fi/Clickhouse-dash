@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
+import { nestedTrace, largeTrace, routeSearch, routeTrace } from '../helpers/trace-mocks.js';
+import { mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 
 // The Observability page: Traces, Logs and Metrics as views of /observability
 // (app_observability.js). Covers the view tabs, the shared time range and
@@ -501,4 +503,122 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
   const brand = await page.locator('.appBrand').boundingBox();
   const host = await page.locator('#hostPicker').boundingBox();
   expect(host.y).toBeGreaterThan(brand.y + brand.height - 1);
+});
+
+// --- Shared formats (docs/ui-foundations.md) --------------------------------
+// One 24 h time in the browser's zone with an ISO tooltip, and en-US counts,
+// whatever the browser's locale: Traces showed "Sep 12, 04:29:57 PM",
+// Services "9/12/2026, 1:30:00 PM", the span inspector "Sep 12, 2026,
+// 04:29:57.462 PM", and counts followed the locale ("2 000").
+test.describe('observability formats on a French browser in Paris', () => {
+  test.use({ locale: 'fr-FR', timezoneId: 'Europe/Paris' });
+  // The year shows only when it is not the current one.
+  const sep20 = (clock) => `Sep 20${new Date().getFullYear() === 2026 ? '' : ', 2026'} ${clock}`;
+  const TIME = /^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d{2}:\d{2}:\d{2}$/;
+
+  test('observability formats: trace list, table, header and span times are 24 h local with an ISO tooltip', async ({ page }) => {
+    const trace = nestedTrace();
+    await routeSearch(page, [trace]);
+    await routeTrace(page, trace);
+    await page.goto('/observability/traces');
+    const result = page.locator(`#tracesResults [data-trace-id="${trace.trace_id}"]`);
+    await expect(result).toBeVisible({ timeout: 20_000 });
+    // 2026-09-20 01:22:52 UTC is 03:22:52 in Paris.
+    await expect(result.locator('.traceResult__when time')).toHaveText(sep20('03:22:52'));
+    await expect(result.locator('.traceResult__when small')).toHaveText(/^\d+ (?:second|minute|hour|day|week|month|year)s? ago$/);
+    const title = await result.locator('.traceResult__when').getAttribute('title');
+    expect(title.split('\n')).toContain('2026-09-20T01:22:52.000Z');
+    expect(title).toMatch(/Europe\/Paris, UTC\+02:00/);
+    await expect(result.locator('.traceTag--spans')).toHaveText('13 Spans');
+
+    await result.click();
+    await expect(page.locator('#traceDetail')).toBeVisible();
+    const start = page.locator('#traceDetailStats [data-trace-header-item="Trace Start"] > strong');
+    await expect(start).toHaveText(sep20('03:22:52.000'));
+    expect(await start.locator('time').getAttribute('title')).toContain('2026-09-20T01:22:52.000Z');
+    // The span inspector: the start offset, then the local time to the ms.
+    await page.locator('#traceWaterfall .traceSpanRow[data-span-id="0000000000000002"]').click();
+    const inspector = page.locator('[data-inspector-span="0000000000000002"]');
+    await expect(inspector.locator('.traceInspectorHead__abs')).toHaveText(sep20('03:22:52.002'));
+    const abs = await inspector.locator('.traceInspectorHead__abs').evaluate((el) => el.parentElement.getAttribute('title'));
+    expect(abs.split('\n')[0]).toBe('2026-09-20T01:22:52.002Z');
+    expect(abs).toContain('Sep 20, 2026 01:22:52.002000000 UTC');
+  });
+
+  test('observability formats: counts are grouped en-US on a French browser', async ({ page }) => {
+    const trace = largeTrace(2000);
+    await routeTrace(page, trace);
+    await page.goto(`/observability/traces/${trace.trace_id}`);
+    await expect(page.locator('#traceDetailStats [data-trace-header-item="Total Spans"] > strong')).toHaveText('2,000', { timeout: 30_000 });
+  });
+
+  test('observability formats: Services releases and slowest spans print 24 h local times', async ({ page }) => {
+    await mockTraceServices(page);
+    await mockTraceResults(page);
+    await page.goto('/observability/traces?tab=services&svc=checkout');
+    const drawer = page.locator('#traceSvcDetail');
+    await expect(drawer.locator('.traceSvcReleases li')).toHaveCount(2, { timeout: 30_000 });
+    for (const when of await drawer.locator('.traceSvcReleases li span, .traceSvcSlowest__time').all()) {
+      await expect(when).toHaveText(TIME);
+      expect(await when.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\n/);
+    }
+  });
+
+  test('observability formats: a log reads to the ms in the table and every nanosecond in its detail', async ({ page }) => {
+    // 2026-09-20 01:22:55.742983150 UTC.
+    const row = {
+      id: '1789867375742983150-1', ts_ns: '1789867375742983150', ts_ms: 1789867375742, service: 'fmt_service', severity_text: 'FATAL', severity_number: 21,
+      body: 'format check', trace_id: '', span_id: '', trace_flags: 0, scope_name: '', scope_version: '',
+      log_attributes: {}, resource_attributes: {}, scope_attributes: {},
+    };
+    await page.route('**/api/logs/search**', (route) => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ v: 1, rows: [row], row_count: 1, next_cursor: null, exhausted: true, truncated: false, mode: 'page', tail_gap: false, windows: [], text_search: { active: false } }),
+    }));
+    await page.goto('/observability/logs?from=2026-09-20%2000:00:00&to=2026-09-20%2006:00:00');
+    const tableRow = page.locator('#logsTableRows .logsRow[data-row-id]').first();
+    await expect(tableRow.locator('.logsCell--time')).toHaveText(sep20('03:22:55.742'), { timeout: 30_000 });
+    expect(await tableRow.locator('.logsCell--time').getAttribute('title')).toContain('Sep 20, 2026 01:22:55.742983150 UTC');
+    // Severity 21 is fatal: its own colour, not the error one.
+    await expect(tableRow.locator('.logsSevBadge')).toHaveAttribute('data-sev', 'fatal');
+    const colours = await tableRow.locator('.logsSevBadge').evaluate((badge) => {
+      const probe = document.createElement('i');
+      probe.style.color = 'var(--sev-fatal)';
+      document.body.appendChild(probe);
+      const out = { badge: getComputedStyle(badge).color, fatal: getComputedStyle(probe).color };
+      probe.remove();
+      return out;
+    });
+    expect(colours.badge).toBe(colours.fatal);
+    await tableRow.click();
+    await expect(page.locator('#logsSideTitle .logsSideTitle__time')).toHaveText(sep20('03:22:55.742983150'));
+  });
+});
+
+test('observability formats: a Metrics series grouped by service takes the service colour of Traces and Logs', async ({ page, request }) => {
+  const meta = await (await request.get('/api/metrics/meta')).json();
+  test.skip(!meta.enabled, 'metrics are disabled');
+  const bounds = meta.kinds.gauge?.time_bounds || meta.kinds.histogram.time_bounds;
+  const end = Math.floor(Number(bounds.max_ms) / 60000) * 60000;
+  const stamp = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+  // Real series, relabelled as two services (the panel used to colour them
+  // with the chart slots, unlike Traces and Logs).
+  const names = ['checkout', 'frontend'];
+  await page.route('**/api/metrics/series?**', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.series = (body.series || []).filter((s) => !s.other).slice(0, 2).map((s, i) => ({ ...s, key: names[i], labels: { 'service.name': names[i] } }));
+    body.group_by = ['service.name'];
+    body.other_series_count = 0;
+    await route.fulfill({ response, json: body });
+  });
+  const params = new URLSearchParams({ from: stamp(end - 6 * 3600000), to: stamp(end), service: 'api_service', metric: 'process.cpu.utilization', kind: 'gauge', group_by: 'host.name', exemplars: '0' });
+  await page.goto(`/observability/metrics?${params}`);
+  const legend = page.locator('.metricsPanel .chartCore__legendItem');
+  await expect(legend).toHaveCount(2, { timeout: 30_000 });
+  for (const name of names) {
+    const swatch = await legend.filter({ hasText: name }).locator('i').evaluate((el) => getComputedStyle(el).backgroundColor);
+    const expected = await page.evaluate((service) => window.ChDash.palette.resolve(window.ChDash.palette.service(service, { assign: false })), name);
+    expect(swatch, name).toBe(expected);
+  }
 });

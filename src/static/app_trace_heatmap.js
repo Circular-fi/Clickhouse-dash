@@ -49,7 +49,8 @@
   }
 
   const esc = (value) => ctx.esc(value);
-  const fmt = (ns) => ctx.formatDuration(ns);
+  const fmt = ns.format;
+  const palette = ns.palette;
   const active = () => hm.mode === "heatmap";
 
   function filtersKey(filters) {
@@ -159,18 +160,19 @@
   }
 
   function traceCount(n) {
-    return `${Number(n).toLocaleString()} trace${Number(n) === 1 ? "" : "s"}`;
+    return `${fmt.count(n)} trace${Number(n) === 1 ? "" : "s"}`;
   }
 
   function rowRangeLabel(r0, r1) {
-    const lo = r0 === 0 && Number(hm.data?.below_min_count || 0) > 0 ? `\u2264 ${fmt(geo.edges[1])}` : null;
+    const lo = r0 === 0 && Number(hm.data?.below_min_count || 0) > 0 ? `\u2264 ${fmt.duration(geo.edges[1])}` : null;
     if (lo && r1 === 0) return lo;
-    return `${r0 === 0 && lo ? "0" : fmt(geo.edges[r0])} \u2013 ${fmt(geo.edges[r1 + 1])}`;
+    return `${r0 === 0 && lo ? "0" : fmt.duration(geo.edges[r0])} \u2013 ${fmt.duration(geo.edges[r1 + 1])}`;
   }
 
   // ---------------------------------------------------------------- render
 
-  const PALETTE = Array.from({ length: HEAT_LEVELS }, (_, i) => `var(--trace-heat-${i + 1})`);
+  // The one-hue ramp of ns.palette, one step per level.
+  const PALETTE = Array.from({ length: HEAT_LEVELS }, (_, i) => palette.sequential(i / (HEAT_LEVELS - 1)));
 
   // The heatmap draws on the shared canvas engine (app_chart_core.js): one
   // canvas rect per cell, a log duration axis with the server's uneven bin
@@ -233,14 +235,14 @@
     // with the count chart).
     const xs = new Float64Array(cols);
     for (let col = 0; col < cols; col += 1) xs[col] = colStart(col) + bucketMs / 2;
-    const ticks = niceLogTicks(lo, hi).map((value) => ({ v: value, label: fmt(value) }));
+    const ticks = niceLogTicks(lo, hi).map((value) => ({ v: value, label: fmt.duration(value) }));
     chart = ctx.mountChart(container, "heatmap", {
       xKind: "time", xs, xDomain: [xMin, xMax], zoom: null, series: [], type: "line", legend: false,
       syncKey: ctx.CHART_SYNC_KEY, keyboard: false, zoomable: false,
       yScale: "log", yAxis: () => ({ min: lo, max: hi, ticks }),
       cells: box,
-      xReadout: (i) => ctx.bucketRangeLabel(colStart(i), bucketMs),
-      formatY: (value) => fmt(value),
+      xReadout: (i) => fmt.range(colStart(i), colStart(i) + bucketMs),
+      formatY: (value) => fmt.duration(value),
       pick: (pt) => { const cell = cellAt(pt.x, pt.y); return { key: `${cell.col}:${cell.row}`, cell, x: colStart(cell.col) + bucketMs / 2 }; },
       pickTooltip: (hit) => cellTooltip(hit.cell),
       brush: "xy", brushClass: "traceHeatDrag",
@@ -258,12 +260,12 @@
       live.setAttribute("aria-live", "polite");
       container.append(legend, live);
     }
-    const ramp = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}"></i>`).join("");
-    legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${ramp}</span><span data-heat-max>${esc(maxCount.toLocaleString())}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
+    const ramp = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}" style="background:${PALETTE[i]}"></i>`).join("");
+    legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${ramp}</span><span data-heat-max>${esc(fmt.count(maxCount))}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
     container.dataset.heatRows = String(rows);
     container.dataset.heatCols = String(cols);
     if (meta) {
-      meta.textContent = `${traceCount(Number(data.total || 0))} · ${fmt(bucketMs * 1e6)} × log duration`;
+      meta.textContent = `${traceCount(Number(data.total || 0))} · ${fmt.duration.fromMs(bucketMs)} × log duration`;
       meta.title = String(data.unit_label || "Traces with a matching span, at their first span start");
     }
     renderPanel();
@@ -296,7 +298,7 @@
 
   function cellText(cell) {
     const count = geo.counts.get(`${cell.col}:${cell.row}`) || 0;
-    return { when: ctx.bucketRangeLabel(geo.colStart(cell.col), geo.bucketMs), duration: rowRangeLabel(cell.row, cell.row), count };
+    return { when: fmt.range(geo.colStart(cell.col), geo.colStart(cell.col) + geo.bucketMs), duration: rowRangeLabel(cell.row, cell.row), count };
   }
 
   // The selection, the keyboard cursor and the keyboard box.
@@ -333,7 +335,7 @@
     return {
       title: `\u2248 ${traceCount(boxCount(box))} in the box`,
       rows: [
-        { label: "Start", value: ctx.bucketRangeLabel(geo.colStart(box.c0), (box.c1 - box.c0 + 1) * geo.bucketMs) },
+        { label: "Start", value: fmt.range(geo.colStart(box.c0), geo.colStart(box.c0) + (box.c1 - box.c0 + 1) * geo.bucketMs) },
         { label: "Duration", value: rowRangeLabel(box.r0, box.r1) },
       ],
     };
@@ -472,12 +474,8 @@
 
   // ------------------------------------------------------- comparison panel
 
-  function pct(value) {
-    const n = Number(value || 0);
-    if (n <= 0) return "0%";
-    if (n < 1) return "<1%";
-    return `${n < 10 ? n.toFixed(1).replace(/\.0$/, "") : Math.round(n)}%`;
-  }
+  // Shares of the selection and the baseline come in percent (0-100).
+  const pct = (value) => fmt.percent(Math.max(0, Number(value || 0)) / 100);
 
   const COLUMN_LABELS = { ServiceName: "service", SpanName: "operation", StatusCode: "status" };
 
@@ -522,8 +520,8 @@
     if (!data) return "";
     const sel = data.selection || {}, base = data.baseline_sample || {};
     const baseline = data.baseline === "all" ? "all traces of that time" : "the other traces of that time";
-    const sampled = data.window_sampled ? ` · time sampled as ${(data.sampled_windows || []).length} slices of ${fmt(Number(data.sampled_ms || 0) / Math.max(1, (data.sampled_windows || []).length) * 1e6)}` : "";
-    return `${Number(sel.sampled || 0).toLocaleString()} of ${traceCount(sel.traces || 0)} in the box vs ${Number(base.sampled || 0).toLocaleString()} of ${traceCount(base.traces || 0)} (${baseline})${sampled}`;
+    const sampled = data.window_sampled ? ` · time sampled as ${(data.sampled_windows || []).length} slices of ${fmt.duration.fromMs(Number(data.sampled_ms || 0) / Math.max(1, (data.sampled_windows || []).length))}` : "";
+    return `${fmt.count(Number(sel.sampled || 0))} of ${traceCount(sel.traces || 0)} in the box vs ${fmt.count(Number(base.sampled || 0))} of ${traceCount(base.traces || 0)} (${baseline})${sampled}`;
   }
 
   function renderPanel() {
@@ -533,8 +531,8 @@
     const show = active() && !!sel && ctx.model.meta?.analytics_enabled === true;
     panel.hidden = !show;
     if (!show) { panel.innerHTML = ""; return; }
-    const when = ctx.bucketRangeLabel(sel.t0, Math.max(1, sel.t1 - sel.t0));
-    const duration = sel.d0 > 0 ? `${fmt(sel.d0)} \u2013 ${fmt(sel.d1)}` : `\u2264 ${fmt(sel.d1)}`;
+    const when = fmt.range(sel.t0, sel.t0 + Math.max(1, sel.t1 - sel.t0));
+    const duration = sel.d0 > 0 ? `${fmt.duration(sel.d0)} \u2013 ${fmt.duration(sel.d1)}` : `\u2264 ${fmt.duration(sel.d1)}`;
     const durationFilter = ctx.model.meta?.features?.duration_filter !== false;
     panel.innerHTML = `<header class="traceDeltaPanel__head"><div class="traceDeltaPanel__title"><strong>Selection vs baseline</strong><span>Traces starting <b>${esc(when)}</b> lasting <b>${esc(duration)}</b></span></div>`
       + `<div class="traceDeltaPanel__actions"><label class="traceDeltaPanel__baseline"><span>Baseline</span><select data-delta-baseline aria-label="Baseline traces"><option value="outside"${deltas.baseline === "outside" ? " selected" : ""}>Other traces of that time</option><option value="all"${deltas.baseline === "all" ? " selected" : ""}>All traces of that time</option></select></label>`

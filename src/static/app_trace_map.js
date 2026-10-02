@@ -40,6 +40,8 @@
   let ctl = null;
   const byId = (id) => document.getElementById(id);
   const esc = (value) => ctx.esc(value);
+  const fmt = ns.format;
+  const palette = ns.palette;
 
   const map = {
     seq: 0,
@@ -59,30 +61,14 @@
 
   // ---------------------------------------------------------------- format
 
-  const compactFormat = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-  function compact(value) {
-    const n = Number(value) || 0;
-    return n < 1000 ? String(Math.round(n)) : compactFormat.format(n);
-  }
-
-  function percent(rate) {
-    const p = (Number(rate) || 0) * 100;
-    if (p === 0) return "0%";
-    if (p < 0.01) return "<0.01%";
-    if (p < 10) return `${p.toFixed(2).replace(/\.?0+$/, "")}%`;
-    return `${Math.round(p)}%`;
-  }
-
+  // Calls of the range per second, per minute below 1/s (like the Services
+  // table's rates).
   function perSecond(count) {
     const range = map.data?.range || [0, 0];
     const seconds = Math.max(1, (Number(range[1]) - Number(range[0])) / 1000);
     const rate = (Number(count) || 0) / seconds;
-    if (rate >= 100) return `${compact(rate)}/s`;
-    if (rate >= 1) return `${rate.toFixed(1).replace(/\.0$/, "")}/s`;
-    return `${(rate * 60).toFixed(1).replace(/\.0$/, "")}/min`;
+    return rate >= 1 ? `${fmt.compact(rate)}/s` : `${fmt.compact(rate * 60)}/min`;
   }
-
-  const duration = (ns) => ctx.formatDuration(ns);
 
   function severity(rate) {
     if (rate >= ERROR_HIGH) return "err";
@@ -96,16 +82,16 @@
   }
 
   function factorText(value) {
-    const n = Number(value) || 1;
-    return n >= 100 ? compact(n) : n >= 10 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, "");
+    return fmt.compact(Number(value) || 1);
   }
 
+  // The resolved colour of a service, for the canvas.
   function serviceColor(service) {
-    return kit.theme.resolveColor(ctx.serviceColor(service));
+    return palette.resolve(palette.service(service));
   }
 
   function edgeLabelText(edge) {
-    return `${compact(edge.calls)} · p95 ${duration(edge.p95_ns)}`;
+    return `${fmt.compact(edge.calls)} · p95 ${fmt.duration(edge.p95_ns)}`;
   }
 
   // ---------------------------------------------------------------- data
@@ -272,11 +258,11 @@
       card.rows.push(
         { text: node.service, size: 13, weight: 600, y: 22 },
         {
-          text: `${compact(node.spans)} spans · ${percent(rate)} errors`,
+          text: `${fmt.compact(node.spans)} spans · ${fmt.percent(rate)} errors`,
           y: 41,
           color: level === "err" ? kit.color("error") : level === "warn" ? kit.color("warn") : kit.color("muted"),
         },
-        { text: `p95 ${duration(node.p95_ns)}`, y: 59 },
+        { text: `p95 ${fmt.duration(node.p95_ns)}`, y: 59 },
       );
     }
     kit.drawCard(context, item, card);
@@ -366,7 +352,7 @@
       if (!data) meta.textContent = "";
       else {
         const parts = [`${data.nodes.length} service${data.nodes.length === 1 ? "" : "s"}`, `${data.edges.length} call path${data.edges.length === 1 ? "" : "s"}`];
-        if (Number.isFinite(Number(data.timing_ms?.total))) parts.push(`${Math.round(Number(data.timing_ms.total))} ms`);
+        if (Number.isFinite(Number(data.timing_ms?.total))) parts.push(fmt.duration.fromMs(Number(data.timing_ms.total)));
         if (data.truncated) parts.push("busiest shown");
         meta.textContent = parts.join(" · ");
       }
@@ -382,7 +368,7 @@
         const traceFactor = Number(sampling.trace_factor) || 1;
         const parts = [];
         if (traceFactor > 1) parts.push(`1 trace in ${traceFactor}`);
-        if (slices > 0) parts.push(`${slices} time slices covering ${percent(coverage)} of the range`);
+        if (slices > 0) parts.push(`${fmt.count(slices)} time slices covering ${fmt.percent(coverage)} of the range`);
         badge.title = `Estimated from ${parts.join(" and ")}: counts are scaled ×${factor}. Error rates and durations come from the sampled spans.`;
       } else {
         badge.removeAttribute("title");
@@ -520,7 +506,7 @@
   function describeNode(id) {
     const node = map.layout?.items.get(id)?.node?.node;
     if (!node) return "";
-    return `${node.service}: ${compact(node.spans)} spans, ${percent(node.error_rate)} errors, p95 ${duration(node.p95_ns)}. Enter selects it.`;
+    return `${node.service}: ${fmt.compact(node.spans)} spans, ${fmt.percent(node.error_rate)} errors, p95 ${fmt.duration(node.p95_ns)}. Enter selects it.`;
   }
 
   // ------------------------------------------------------- hover / selection
@@ -553,11 +539,11 @@
 
   function statsHtml(item, countLabel, count) {
     return '<dl class="graphKitPanel__stats">'
-      + `<div><dt>${esc(countLabel)}</dt><dd>${esc(compact(count))}<small>${esc(perSecond(count))}</small></dd></div>`
-      + `<div><dt>Errors</dt><dd class="is-${severity(item.error_rate)}">${esc(percent(item.error_rate))}<small>${esc(compact(item.errors))}</small></dd></div>`
-      + `<div><dt>p50</dt><dd>${esc(duration(item.p50_ns))}</dd></div>`
-      + `<div><dt>p95</dt><dd>${esc(duration(item.p95_ns))}</dd></div>`
-      + `<div><dt>p99</dt><dd>${esc(duration(item.p99_ns))}</dd></div>`
+      + `<div><dt>${esc(countLabel)}</dt><dd>${esc(fmt.compact(count))}<small>${esc(perSecond(count))}</small></dd></div>`
+      + `<div><dt>Errors</dt><dd class="is-${severity(item.error_rate)}">${esc(fmt.percent(item.error_rate))}<small>${esc(fmt.compact(item.errors))}</small></dd></div>`
+      + `<div><dt>p50</dt><dd>${esc(fmt.duration(item.p50_ns))}</dd></div>`
+      + `<div><dt>p95</dt><dd>${esc(fmt.duration(item.p95_ns))}</dd></div>`
+      + `<div><dt>p99</dt><dd>${esc(fmt.duration(item.p99_ns))}</dd></div>`
       + "</dl>";
   }
 
@@ -565,7 +551,7 @@
     if (!items.length) return `<section class="graphKitPanel__section traceMapPanel__list"><h3 class="graphKitPanel__sectionTitle">${esc(title)}</h3><p class="graphKitPanel__note">None</p></section>`;
     const rows = items.slice(0, PANEL_EDGES).map((item) => {
       const service = item.edge[other];
-      return `<li><button type="button" class="traceMapPanel__edge" data-map-select-edge="${esc(item.id)}" title="${esc(`${item.edge.source} \u2192 ${item.edge.target}`)}"><span class="traceMap__dot" style="background:${ctx.serviceColor(service)}"></span><span class="traceMapPanel__edgeName">${esc(service)}</span><span>${esc(compact(item.edge.calls))}</span><span class="is-${severity(item.edge.error_rate)}">${esc(percent(item.edge.error_rate))}</span><span>${esc(duration(item.edge.p95_ns))}</span></button></li>`;
+      return `<li><button type="button" class="traceMapPanel__edge" data-map-select-edge="${esc(item.id)}" title="${esc(`${item.edge.source} \u2192 ${item.edge.target}`)}"><span class="traceMap__dot" style="background:${palette.service(service)}"></span><span class="traceMapPanel__edgeName">${esc(service)}</span><span>${esc(fmt.compact(item.edge.calls))}</span><span class="is-${severity(item.edge.error_rate)}">${esc(fmt.percent(item.edge.error_rate))}</span><span>${esc(fmt.duration(item.edge.p95_ns))}</span></button></li>`;
     }).join("");
     const more = items.length > PANEL_EDGES ? `<p class="graphKitPanel__note">+${items.length - PANEL_EDGES} more</p>` : "";
     return `<section class="graphKitPanel__section traceMapPanel__list"><h3 class="graphKitPanel__sectionTitle">${esc(title)} <small>calls · errors · p95</small></h3><ul class="traceMapPanel__edges">${rows}</ul>${more}</section>`;
@@ -591,7 +577,7 @@
       const byCalls = (a, b) => (Number(b.edge.calls) || 0) - (Number(a.edge.calls) || 0);
       const inbound = map.layout.edges.filter((edge) => edge.to === target.id).sort(byCalls);
       const outbound = map.layout.edges.filter((edge) => edge.from === target.id).sort(byCalls);
-      body.append(kit.panelHeader({ eyebrow: "Service", title: node.service, dot: ctx.serviceColor(node.service), subtitle: `${compact(node.spans)} spans · ${perSecond(node.spans)}`, onClose }));
+      body.append(kit.panelHeader({ eyebrow: "Service", title: node.service, dot: palette.service(node.service), subtitle: `${fmt.compact(node.spans)} spans · ${perSecond(node.spans)}`, onClose }));
       body.append(fragment(statsHtml(node, "Spans", node.spans)
         + '<div class="graphKitPanel__actions">'
         + `<button type="button" class="button button--primary button--small" data-map-search-service="${esc(node.service)}">Search this service</button>`
@@ -606,7 +592,7 @@
       const edge = item.edge;
       const title = document.createDocumentFragment();
       title.append(fragment(`<button type="button" class="graphKitPanel__link" data-map-select-node="${esc(edge.source)}">${esc(edge.source)}</button><span class="graphKitPanel__arrow" aria-hidden="true">\u2192</span><button type="button" class="graphKitPanel__link" data-map-select-node="${esc(edge.target)}">${esc(edge.target)}</button>`));
-      body.append(kit.panelHeader({ eyebrow: KIND_LABELS[item.kind] || KIND_LABELS.sync, title, subtitle: `${compact(edge.calls)} calls · ${perSecond(edge.calls)}`, onClose }));
+      body.append(kit.panelHeader({ eyebrow: KIND_LABELS[item.kind] || KIND_LABELS.sync, title, subtitle: `${fmt.compact(edge.calls)} calls · ${perSecond(edge.calls)}`, onClose }));
       body.append(fragment(statsHtml(edge, "Calls", edge.calls)
         + `<p class="graphKitPanel__note">Durations and errors of the ${esc(edge.target)} spans whose parent span is a ${esc(edge.source)} span.</p>`
         + '<div class="graphKitPanel__actions">'
@@ -672,7 +658,7 @@
       if (seq !== map.seq) return;
       const previous = map.selected;
       map.data = normalize(payload);
-      ctx.registerServiceColors?.(map.data.nodes.map((node) => node.service));
+      palette.registerServices(map.data.nodes.map((node) => node.service));
       map.loading = false;
       renderGraph();
       // The legend and the status line first: the fit leaves room for them.

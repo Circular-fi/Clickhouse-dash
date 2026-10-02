@@ -3,13 +3,12 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { dom, state, api, util, ui } = ns;
-
-  // Service colours: Jaeger UI's span palette (its --span-color-1..20, the
-  // IBM Carbon categorical sequence, light and dark variants) without its two
-  // reds (6 and 16), since red marks errors. They are the
-  // --trace-span-color-1..18 custom properties of style.css.
-  const SPAN_COLOR_COUNT = 18;
-  const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";
+  // Formats and colours (docs/ui-foundations.md): durations, counts and
+  // instants through ns.format; service, percentile and status colours
+  // through ns.palette (a service keeps one colour across Traces, Logs and
+  // Metrics) and the semantic tokens.
+  const fmt = ns.format;
+  const palette = ns.palette;
   const TRACES_PAGE_TITLE = "ClickHouse Dash \u00b7 Traces";
 
   const model = {
@@ -60,43 +59,6 @@
   const SEARCH_ROUTE = "observability/traces";
   const ownsUrl = () => !ns.observability || ns.observability.isActive("traces");
 
-  // Up to three significant digits, trailing zeros dropped: 182, 18.2, 1.82, 12.
-  function significant(value) {
-    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
-    const fixed = value.toFixed(digits);
-    return digits ? fixed.replace(/\.?0+$/, "") : fixed;
-  }
-
-  // One convention everywhere (axis ticks, tooltips, result list, trace
-  // detail): decimal ns / µs / ms / s below a minute, then whole units two at
-  // a time ("8 min 30 s", "2 h 5 min", "3 d 4 h"), never "8.5 min".
-  function formatDuration(nsValue) {
-    const n = Number(nsValue);
-    if (!Number.isFinite(n) || n < 0) return "\u2014";
-    const decimal = [[1e9, "s"], [1e6, "ms"], [1e3, "µs"]];
-    if (n < 1e3) return `${Math.round(n)} ns`;
-    if (n < 59.95e9) {
-      for (const [factor, unit] of decimal) {
-        if (n < factor) continue;
-        const text = significant(n / factor);
-        // 999.7 ms rounds to "1000 ms": say "1 s" instead.
-        if (Number(text) >= 1000 && unit !== "s") return `${significant(n / (factor * 1000))} ${unit === "ms" ? "s" : "ms"}`;
-        return `${text} ${unit}`;
-      }
-    }
-    const pairs = [[86400, "d", 3600, "h"], [3600, "h", 60, "min"], [60, "min", 1, "s"]];
-    for (const [bigS, big, smallS, small] of pairs) {
-      if (n < bigS * 1e9 && big !== "min") continue;
-      const total = Math.round(n / (smallS * 1e9));
-      const ratio = bigS / smallS;
-      const whole = Math.floor(total / ratio);
-      const rest = total % ratio;
-      // 59 min 59.6 s rounds to "60 min": move up to hours.
-      if (whole >= (big === "min" ? 60 : big === "h" ? 24 : Infinity)) continue;
-      return rest ? `${whole} ${big} ${rest} ${small}` : `${whole} ${big}`;
-    }
-    return `${Math.round(n / 3600e9)} h`;
-  }
 
   // Duration axis steps: 1-2-5 below a second, then clock-friendly steps
   // (seconds, minutes, hours, days), so minute axes read 2 min, 5 min, 15 min.
@@ -130,12 +92,12 @@
       const values = [];
       for (let i = 0; axisMin + i * step <= axisMax + step * 1e-6; i += 1) {
         const value = axisMin + i * step;
-        values.push({ value, label: value ? formatDuration(value) : "0" });
+        values.push({ value, label: value ? fmt.duration(value) : "0" });
       }
       const distinct = new Set(values.map((tick) => tick.label)).size === values.length;
       if (distinct || step === last) return { axisMin, axisMax, values };
     }
-    return { axisMin: 0, axisMax: last, values: [{ value: 0, label: "0" }, { value: last, label: formatDuration(last) }] };
+    return { axisMin: 0, axisMax: last, values: [{ value: 0, label: "0" }, { value: last, label: fmt.duration(last) }] };
   }
 
   // Evenly spaced ticks over a window of `durationNs` that starts `offsetNs`
@@ -149,14 +111,14 @@
     return Array.from({ length: n }, (_, index) => {
       const ratio = index / (n - 1);
       const ns = offset + duration * ratio;
-      return { ratio, ns, label: offset ? tickDurationLabel(ns, step) : formatDuration(ns) };
+      return { ratio, ns, label: offset ? tickDurationLabel(ns, step) : fmt.duration(ns) };
     });
   }
 
-  // formatDuration, with the extra decimals a deep zoom needs so adjacent
+  // fmt.duration, with the extra decimals a deep zoom needs so adjacent
   // ticks never read the same ("50.003 ms", "50.005 ms").
   function tickDurationLabel(ns, stepNs) {
-    const text = formatDuration(ns);
+    const text = fmt.duration(ns);
     const match = /^(\d+(?:\.(\d+))?) (µs|ms|s)$/.exec(text);
     if (!match || !(stepNs > 0)) return text;
     const factor = match[3] === "s" ? 1e9 : match[3] === "ms" ? 1e6 : 1e3;
@@ -176,45 +138,23 @@
     // read one millisecond early.
     const withinNs = Math.round(Math.max(0, startNs - startMs * 1e6) + offsetNs);
     const ms = startMs + Math.floor(withinNs / 1e6);
-    const d = new Date(ms);
-    const base = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+    const base = fmt.time(ms, { precision: "ms", date: "never" });
     if (!(stepNs < 1e6)) return base;
     const micros = Math.max(0, Math.min(999, Math.floor((withinNs % 1e6) / 1e3)));
     return `${base}${String(micros).padStart(3, "0")}`;
   }
 
-  // --- Chart labels (browser-local time, like the range picker) -----------
-  const MINUTE_MS = 60000;
-  const pad2 = (value) => String(value).padStart(2, "0");
 
+  // Start of the local day of `ms`: the server's bucket grid origin.
   function localMidnight(ms) {
     const d = new Date(Number(ms));
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   }
 
-  function clockLabel(ms, withSeconds = false) {
-    const d = new Date(ms);
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}${withSeconds ? `:${pad2(d.getSeconds())}` : ""}`;
-  }
-
-  // One formatter for every label ("Sep 13"): the cursor readouts call it on
-  // each bucket change, and toLocaleDateString builds a formatter per call.
-  let dayFormat = null;
-  function dayLabel(ms) {
-    if (!dayFormat) dayFormat = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
-    return dayFormat.format(new Date(ms));
-  }
-
-  // Tooltip span of a bucket: "Sep 13, 14:00 -> 15:00" (or both dates when
-  // it crosses midnight).
+  // The readout of a chart bucket: the time range it covers.
   function bucketRangeLabel(startMs, sizeMs) {
-    const end = startMs + sizeMs;
-    const withSeconds = sizeMs < MINUTE_MS || new Date(startMs).getSeconds() !== 0;
-    const from = `${dayLabel(startMs)}, ${clockLabel(startMs, withSeconds)}`;
-    const sameDay = localMidnight(startMs) === localMidnight(end - 1);
-    const to = sameDay ? clockLabel(end, withSeconds) : `${dayLabel(end)}, ${clockLabel(end, withSeconds)}`;
-    return `${from} \u2192 ${to}`;
+    return fmt.range(startMs, startMs + sizeMs);
   }
 
   function timestampToNs(value) {
@@ -259,26 +199,6 @@
     return Number.isFinite(ms) ? ms : NaN;
   }
 
-  function formatStart(value) {
-    const ms = parseStartMs(value);
-    if (!Number.isFinite(ms)) return String(value || "");
-    const d = new Date(ms);
-    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  }
-
-  function formatAgo(value) {
-    const ms = parseStartMs(value);
-    if (!Number.isFinite(ms)) return "";
-    const delta = Math.max(0, Date.now() - ms);
-    const units = [[31536000000, "year"], [2592000000, "month"], [604800000, "week"], [86400000, "day"], [3600000, "hour"], [60000, "minute"], [1000, "second"]];
-    for (const [size, label] of units) {
-      if (delta >= size || label === "second") {
-        const count = Math.max(0, Math.floor(delta / size));
-        return `${count} ${label}${count === 1 ? "" : "s"} ago`;
-      }
-    }
-    return "now";
-  }
 
   function currentHost() { return state.selectedHostId || ""; }
 
@@ -334,58 +254,6 @@
     if (!detail && ownsUrl()) document.title = TRACES_PAGE_TITLE;
   }
 
-  // Like Jaeger's ColorGenerator: a service takes the next palette colour the
-  // first time it is seen and keeps it. One assignment for the browser session
-  // (sessionStorage), so the result list, its charts and every opened trace
-  // agree; a search registers its services in name order first.
-  const serviceColorSlots = (() => {
-    const slots = new Map();
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(SERVICE_COLOR_STORE_KEY) || "null");
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-        for (const [service, slot] of Object.entries(saved)) {
-          if (Number.isInteger(slot) && slot >= 0 && slot < SPAN_COLOR_COUNT) slots.set(service, slot);
-        }
-      }
-    } catch (_) { /* no session storage: the colours last for this page */ }
-    return slots;
-  })();
-
-  function saveServiceColors() {
-    try {
-      window.sessionStorage.setItem(SERVICE_COLOR_STORE_KEY, JSON.stringify(Object.fromEntries(serviceColorSlots)));
-    } catch (_) { /* best effort */ }
-  }
-
-  function serviceColorSlot(service, save = true) {
-    const key = String(service || "unknown");
-    let slot = serviceColorSlots.get(key);
-    if (slot == null) {
-      slot = serviceColorSlots.size % SPAN_COLOR_COUNT;
-      serviceColorSlots.set(key, slot);
-      if (save) saveServiceColors();
-    }
-    return slot;
-  }
-
-  function registerServiceColors(services) {
-    const names = [...new Set((services || []).map((service) => String(service || "unknown")))]
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    const before = serviceColorSlots.size;
-    for (const name of names) serviceColorSlot(name, false);
-    if (serviceColorSlots.size !== before) saveServiceColors();
-  }
-
-  // A var() reference, so the colour follows the light / dark theme.
-  function serviceColor(service) {
-    return `var(--trace-span-color-${serviceColorSlot(service) + 1})`;
-  }
-
-  // The resolved colour, for canvas drawing.
-  function serviceColorValue(service) {
-    const name = `--trace-span-color-${serviceColorSlot(service) + 1}`;
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#8d8d8d";
-  }
 
   function setButtonLoading(button, loading) {
     if (!button) return;
@@ -515,7 +383,7 @@
         item.className = "themeSelect__option tracePicker__option";
         item.setAttribute("role", "option");
         item.dataset.value = option.value;
-        item.textContent = option.textContent || option.value || "\u2014";
+        item.textContent = option.textContent || option.value || fmt.EMPTY;
         item.disabled = !!option.disabled;
         item.setAttribute("aria-selected", option.value === select.value ? "true" : "false");
         item.addEventListener("click", () => {
@@ -712,7 +580,7 @@
 
   function unpackSearch(payload) {
     const services = Array.isArray(payload?.services) ? payload.services : [];
-    registerServiceColors(services);
+    palette.registerServices(services);
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
     model.traces = rows.map((row) => ({
       trace_id: String(row?.[0] || ""),
@@ -758,7 +626,6 @@
   // by the two charts and the heatmap (one crosshair on the same time axis).
   const CHART_HEIGHT = 196;
   const CHART_SYNC_KEY = "traces-analytics";
-  const QUANTILE_COLORS = { p50: "#54a24b", p90: "#4c78a8", p95: "#f58518", p99: "#b279a2" };
   const mountedCharts = new WeakMap(); // card body -> { kind, chart }
 
   // The chart of kind `kind` in `container` with these options: the same
@@ -834,27 +701,23 @@
     const values = new Float64Array(grid.starts.length);
     for (let i = 0; i < xs.length; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
     buckets.forEach(([, count], k) => { values[grid.slot[k]] += count; });
-    const countText = (value) => countFormat.format(Math.round(value));
     mountChart(container, "counts", {
       xKind: "time", xs, xDomain: [start, end], zoom: null,
-      series: [{ id: "traces", label: "Matching traces", color: "var(--accentBorder)", values, nulls: null }],
+      series: [{ id: "traces", label: "Matching traces", color: "var(--accent-fill)", values, nulls: null }],
       type: "bar", legend: false, syncKey: CHART_SYNC_KEY,
       xReadout: (i) => bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
-      formatValue: (value) => countText(value),
-      formatY: (value) => countText(Math.max(0, value)),
+      formatValue: (value) => fmt.count(value),
+      formatY: (value) => fmt.count(Math.max(0, value)),
       onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); },
     });
     if (dom.traceServiceChartMeta) {
       const fromIndex = a.trace_count_source === "trace_index";
-      dom.traceServiceChartMeta.textContent = `${formatDuration(bucketMs * 1e6)} buckets · ${fromIndex ? "trace index" : "spans"}`;
+      dom.traceServiceChartMeta.textContent = `${fmt.duration.fromMs(bucketMs)} buckets · ${fromIndex ? "trace index" : "spans"}`;
       dom.traceServiceChartMeta.title = fromIndex
         ? "Counted from the trace index (each trace at its first span start). Exact span counts replace it once the duration percentiles are computed."
         : "Traces with at least one matching span in the range, each counted at its first span start.";
     }
   }
-
-  // toLocaleString builds a formatter per call; the readouts format on every move.
-  const countFormat = new Intl.NumberFormat();
 
   // Legend choices (shown / hidden percentiles) survive new answers.
   let durationHidden = [];
@@ -901,11 +764,11 @@
     const spanCounts = scatterTraces.map((trace) => Number(trace.span_count || 0));
     const spanMin = Math.min(...spanCounts), spanMax = Math.max(...spanCounts);
     const radius = new Float64Array(spanCounts.map((spans) => (spanMax > spanMin ? 2.5 + 6.5 * ((spans - spanMin) / (spanMax - spanMin)) : 3.5)));
-    const series = [["p50", "P50"], ["p90", "P90"], ["p95", "P95"], ["p99", "P99"]].map(([id, label], c) => ({ id, label, color: QUANTILE_COLORS[id], values: columns[c], nulls }));
+    const series = [["p50", "P50"], ["p90", "P90"], ["p95", "P95"], ["p99", "P99"]].map(([id, label], c) => ({ id, label, color: palette.quantile(id), values: columns[c], nulls }));
     if (scatterTraces.length) {
       series.unshift({
         id: "traces", label: "Listed traces", type: "points", xs: dotXs, values: dotYs, radius, color: "var(--traceDot)", pickable: true,
-        pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--traceError)" : null),
+        pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--danger)" : null),
       });
     }
     const traceAt = (hit) => (hit?.seriesId === "traces" ? scatterTraces[hit.index] : null);
@@ -919,26 +782,26 @@
         return { min: durationScaleAxis.axisMin, max: durationScaleAxis.axisMax, ticks: durationScaleAxis.values.map((tick) => ({ v: tick.value, label: tick.label })) };
       },
       xReadout: (i) => bucketRangeLabel(xs[i] - qBucketMs / 2, qBucketMs),
-      formatValue: (value) => formatDuration(value),
-      formatY: (value) => formatDuration(Math.max(0, value)),
+      formatValue: (value) => fmt.duration(value),
+      formatY: (value) => fmt.duration(Math.max(0, value)),
       pickTooltip: (hit) => {
         const trace = traceAt(hit);
         if (!trace) return null;
         const ms = parseStartMs(trace.start_ms);
         const errors = Number(trace.error_count || 0);
         const rows = [
-          { label: "Spans", value: String(Number(trace.span_count || 0)) },
-          { label: "Services", value: String((trace.service_stats || []).length) },
+          { label: "Spans", value: fmt.count(Number(trace.span_count || 0)) },
+          { label: "Services", value: fmt.count((trace.service_stats || []).length) },
         ];
-        if (errors) rows.push({ label: "Errors", value: String(errors), className: "is-error", color: "var(--traceError)" });
-        rows.push({ label: "Duration", value: formatDuration(trace.duration_ns) });
-        rows.push({ label: "Start", value: Number.isFinite(ms) ? `${dayLabel(ms)}, ${clockLabel(ms, true)}` : "" });
+        if (errors) rows.push({ label: "Errors", value: fmt.count(errors), className: "is-error", color: "var(--danger)" });
+        rows.push({ label: "Duration", value: fmt.duration(trace.duration_ns) });
+        rows.push({ label: "Start", value: fmt.time(ms) });
         return { title: traceName(trace), rows, footer: "Click to open the trace" };
       },
       onPick: (hit) => { const trace = traceAt(hit); if (trace) loadTrace(trace.trace_id, { push: true }); },
       onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); },
     });
-    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${scatterTraces.length ? `${scatterTraces.length} listed trace${scatterTraces.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${formatDuration(qBucketMs * 1e6)} buckets`;
+    if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${scatterTraces.length ? `${fmt.count(scatterTraces.length)} listed trace${scatterTraces.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${fmt.duration.fromMs(qBucketMs)} buckets`;
   }
 
   // The scatter dots as drawn (test and debugging hook): client coordinates.
@@ -1072,8 +935,9 @@
   }
 
   function errorTagHtml(errors) {
-    const label = `${errors} Error${errors === 1 ? "" : "s"}`;
-    return `<span class="traceErrorCount traceErrorCount--title traceTag traceTag--error" title="${errors} error span${errors === 1 ? "" : "s"}" aria-label="${errors} error span${errors === 1 ? "" : "s"}">${label}</span>`;
+    const label = `${fmt.count(errors)} Error${errors === 1 ? "" : "s"}`;
+    const title = `${fmt.count(errors)} error span${errors === 1 ? "" : "s"}`;
+    return `<span class="traceErrorCount traceErrorCount--title traceTag traceTag--error" title="${title}" aria-label="${title}">${label}</span>`;
   }
 
   function incompleteTagHtml(missing) {
@@ -1082,14 +946,14 @@
 
   function servicePillHtml(stat) {
     const errors = Number(stat.errors || 0);
-    const errorTitle = errors ? ` · ${errors} error span${errors === 1 ? "" : "s"}` : "";
-    return `<span class="traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${serviceColor(stat.service)}" title="${esc(stat.service)} · ${stat.spans} span${stat.spans === 1 ? "" : "s"}${errorTitle}">${errors ? '<i class="traceSvcPill__error" aria-label="has errors">!</i>' : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${stat.spans})</span></span>`;
+    const errorTitle = errors ? ` · ${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` : "";
+    return `<span class="traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${stat.spans}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} · ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}">${errors ? '<i class="traceSvcPill__error" aria-label="has errors">!</i>' : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
   }
 
   // One line of service pills; layoutServicePills hides the ones that do not
   // fit and shows them behind a "+N" chip.
   function servicePillsHtml(stats) {
-    if (!stats.length) return '<div class="traceSvcPills is-empty">\u2014</div>';
+    if (!stats.length) return `<div class="traceSvcPills is-empty">${fmt.EMPTY}</div>`;
     return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="traceSvcMore" aria-haspopup="true" aria-expanded="false" hidden>+0</button></div>`;
   }
 
@@ -1176,11 +1040,13 @@
     servicePopover.style.top = `${Math.round(top)}px`;
   }
 
-  function startTooltip(trace) {
+  // A trace start: the shown time, how long ago, and the tooltip of both
+  // (fmt.timeTitle: ISO, local and UTC).
+  function startTexts(trace) {
     const ms = parseStartMs(trace.start_ms);
-    if (!Number.isFinite(ms)) return "";
-    const exact = ns.timeRange ? ns.timeRange.formatDateTime(ms) : new Date(ms).toISOString();
-    return `${exact} · ${formatAgo(trace.start_ms)}`;
+    if (!Number.isFinite(ms)) return { absolute: String(trace.start_ms || fmt.EMPTY), ago: "", title: "", timeTitle: "" };
+    const timeTitle = fmt.timeTitle(ms);
+    return { absolute: fmt.time(ms), ago: fmt.ago(ms), title: `${fmt.ago(ms)}\n${timeTitle}`, timeTitle };
   }
 
   function resultItemHtml(trace, maxDurationNs) {
@@ -1190,18 +1056,19 @@
     const spans = Number(trace.span_count || 0);
     const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
     const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
+    const start = startTexts(trace);
     return `<div class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}" role="button" tabindex="0">
         <div class="traceResult__line traceResult__line--main traceResultItem__title">
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
           <strong title="${esc(title)}" class="traceResult__wideTitle">${esc(title)}</strong>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
           <button type="button" class="traceCopyButton" data-copy-trace="${esc(trace.trace_id)}" title="Copy Trace ID" aria-label="Copy Trace ID"><span class="editorCopyButton__icon" aria-hidden="true"></span></button>
-          <span class="traceResult__right"><b>${esc(formatDuration(trace.duration_ns))}</b></span>
+          <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
-          <span class="traceTag traceTag--spans">${spans} Span${spans === 1 ? "" : "s"}</span>
+          <span class="traceTag traceTag--spans">${fmt.count(spans)} Span${spans === 1 ? "" : "s"}</span>
           ${servicePillsHtml(services)}
-          <span class="traceResult__when" title="${esc(startTooltip(trace))}"><time>${esc(formatStart(trace.start_ms))}</time><small>${esc(formatAgo(trace.start_ms))}</small></span>
+          <span class="traceResult__when" title="${esc(start.title)}"><time>${esc(start.absolute)}</time><small>${esc(start.ago)}</small></span>
         </div>
       </div>`;
   }
@@ -1223,15 +1090,14 @@
       const name = traceName(trace);
       const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
       const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
-      const absolute = formatStart(trace.start_ms);
-      const ago = formatAgo(trace.start_ms);
+      const { absolute, ago, title: startTitle, timeTitle: startTimeTitle } = startTexts(trace);
       return `<tr class="traceTable__row" data-trace-id="${esc(trace.trace_id)}" tabindex="0">
         <td class="traceTable__name" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}</td>
         <td class="traceTable__services" data-cell="services">${servicePillsHtml(services)}</td>
-        <td class="resultTable__numeric" data-cell="spans">${Number(trace.span_count || 0)}</td>
-        <td class="resultTable__numeric" data-cell="errors">${errors ? `<span class="traceTag traceTag--error">${errors}</span>` : "0"}</td>
-        <td class="traceTable__duration" data-cell="duration" title="${esc(formatDuration(trace.duration_ns))}"><span class="traceTable__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}"></i></span><span class="traceTable__durationText">${esc(formatDuration(trace.duration_ns))}</span></td>
-        <td class="traceTable__start" data-cell="start" title="${esc(relative ? absolute : ago)}">${esc(relative ? ago : absolute)}</td>
+        <td class="resultTable__numeric" data-cell="spans">${fmt.count(Number(trace.span_count || 0))}</td>
+        <td class="resultTable__numeric" data-cell="errors">${errors ? `<span class="traceTag traceTag--error">${fmt.count(errors)}</span>` : "0"}</td>
+        <td class="traceTable__duration" data-cell="duration" title="${esc(fmt.duration(trace.duration_ns))}"><span class="traceTable__bar" aria-hidden="true"><i style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}"></i></span><span class="traceTable__durationText">${esc(fmt.duration(trace.duration_ns))}</span></td>
+        <td class="traceTable__start" data-cell="start" title="${esc(relative ? startTimeTitle : startTitle)}">${esc(relative ? ago : absolute)}</td>
       </tr>`;
     }).join("");
     return `<div class="tableWrap traceTableWrap"><table class="resultTable traceTable"><colgroup><col class="traceTable__col--name"><col class="traceTable__col--services"><col class="traceTable__col--spans"><col class="traceTable__col--errors"><col class="traceTable__col--duration"><col class="traceTable__col--start"></colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -1277,7 +1143,7 @@
     if (!model.searched) return '<div class="tracesEmpty">Search to load traces.</div>';
     const range = model.lastSearchRange;
     const tr = ns.timeRange;
-    const when = range && tr ? `between ${tr.formatDateTime(range.start_ms)} and ${tr.formatDateTime(range.end_ms)}` : "in this range";
+    const when = range ? `between ${fmt.time(range.start_ms)} and ${fmt.time(range.end_ms)}` : "in this range";
     const zoom = dom.tracesRangeZoomOut;
     const canZoom = !!zoom && !zoom.disabled;
     return `<div class="tracesEmpty tracesEmpty--search" data-empty-results>
@@ -1292,9 +1158,9 @@
     if (!count) return;
     const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
     const latency = model.searched && Number.isFinite(model.searchLatencyMs)
-      ? ` <span class="tracesResultCount__latency" title="Search request time, measured in the browser">(in ${esc(formatDuration(model.searchLatencyMs * 1e6))})</span>`
+      ? ` <span class="tracesResultCount__latency" title="Search request time, measured in the browser">(in ${esc(fmt.duration.fromMs(model.searchLatencyMs))})</span>`
       : "";
-    count.innerHTML = `${rows.length} Trace${rows.length === 1 ? "" : "s"}${latency}${withErrors ? ` <span class="tracesResultCount__errors" title="${withErrors} of the listed traces have error spans">· ${withErrors} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
+    count.innerHTML = `${fmt.count(rows.length)} Trace${rows.length === 1 ? "" : "s"}${latency}${withErrors ? ` <span class="tracesResultCount__errors" title="${fmt.count(withErrors)} of the listed traces have error spans">· ${fmt.count(withErrors)} with error${withErrors === 1 ? "" : "s"}</span>` : ""}`;
   }
 
   let resultsResizeObserver = null;
@@ -1736,7 +1602,7 @@
       const w = Math.max(1.5, (Number(span.duration_ns || 0) / bounds.duration) * width);
       const service = String(span.service_name || "unknown");
       let fill = fills.get(service);
-      if (!fill) { fill = serviceColorValue(service); fills.set(service, fill); }
+      if (!fill) { fill = palette.resolve(palette.service(service)); fills.set(service, fill); }
       ctx.fillStyle = fill;
       ctx.fillRect(x, index * geometry.step, w, geometry.item);
     });
@@ -1786,7 +1652,7 @@
         const left = Math.max(0, Math.min(100, ((Number(span.start_ns || 0) - bounds.start) / bounds.duration) * 100));
         const width = Math.max(.08, Math.min(100 - left, (Number(span.duration_ns || 0) / bounds.duration) * 100));
         const isError = isErrorSpan(span);
-        return `<i class="traceOverview__span${isError ? " is-error" : ""}" data-span-id="${esc(spanKey(node))}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${formatDuration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${(index * geometry.step).toFixed(2)}px;height:${geometry.item.toFixed(2)}px;--trace-service-color:${serviceColor(span.service_name)}"></i>`;
+        return `<i class="traceOverview__span${isError ? " is-error" : ""}" data-span-id="${esc(spanKey(node))}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${fmt.duration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${(index * geometry.step).toFixed(2)}px;height:${geometry.item.toFixed(2)}px;--trace-service-color:${palette.service(span.service_name)}"></i>`;
       }).join("");
     dom.traceOverview.innerHTML = `<div class="traceOverview__ticks">${ticks}</div><div class="traceOverview__graph" data-trace-overview-graph data-overview-rows="${nodes.length}" data-overview-mode="${canvasMode ? "canvas" : "dom"}" style="height:${geometry.height}px">${bars}<div class="traceOverview__selection" data-trace-overview-selection style="left:${(lo * 100).toFixed(3)}%;width:${((hi-lo)*100).toFixed(3)}%"><button type="button" class="traceOverview__handle traceOverview__handle--start" data-overview-handle="start" aria-label="Resize trace range start"></button><button type="button" class="traceOverview__handle traceOverview__handle--end" data-overview-handle="end" aria-label="Resize trace range end"></button></div></div>`;
 
@@ -1866,7 +1732,7 @@
     dom.traceServiceFilters.innerHTML = `<button type="button" class="traceServiceFilterReset" data-trace-toggle-all title="${toggleLabel} services">${toggleLabel}</button>` + services.map((service) => {
       const row = stats.get(service);
       const disabled = model.disabledServices.has(service);
-      return `<button type="button" class="traceServiceStat traceServiceFilter${disabled ? " is-disabled" : ""}${row.errors ? " has-errors" : ""}" data-trace-service-filter="${esc(service)}" aria-pressed="${disabled ? "false" : "true"}" title="${esc(`${service} · ${row.spans} spans${row.errors ? ` · ${row.errors} errors` : ""}`)}"><i style="--trace-service-color:${serviceColor(service)}"></i><b>${esc(service)}</b><span>${row.spans}</span>${row.errors ? `<em title="${row.errors} error${row.errors === 1 ? "" : "s"}">${row.errors}</em>` : ""}</button>`;
+      return `<button type="button" class="traceServiceStat traceServiceFilter${disabled ? " is-disabled" : ""}${row.errors ? " has-errors" : ""}" data-trace-service-filter="${esc(service)}" aria-pressed="${disabled ? "false" : "true"}" title="${esc(`${service} · ${fmt.count(row.spans)} spans${row.errors ? ` · ${fmt.count(row.errors)} errors` : ""}`)}"><i style="--trace-service-color:${palette.service(service)}"></i><b>${esc(service)}</b><span>${fmt.count(row.spans)}</span>${row.errors ? `<em title="${fmt.count(row.errors)} error${row.errors === 1 ? "" : "s"}">${fmt.count(row.errors)}</em>` : ""}</button>`;
     }).join("");
     dom.traceServiceFilters.querySelector("[data-trace-toggle-all]")?.addEventListener("click", () => {
       model.disabledServices = allSelected ? new Set(services) : new Set();
@@ -1886,16 +1752,11 @@
     }
   }
 
-  // Jaeger's "MMM D YYYY, HH:mm:ss" plus the milliseconds, browser-local.
+  // fmt.time to the second, then the milliseconds (set smaller), browser-local.
   function traceStartParts(ns) {
     const ms = Math.floor(Number(ns) / 1e6);
     if (!Number.isFinite(ms)) return null;
-    const d = new Date(ms);
-    const month = d.toLocaleDateString("en-US", { month: "short" });
-    return {
-      main: `${month} ${d.getDate()} ${d.getFullYear()}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`,
-      fraction: `.${String(d.getMilliseconds()).padStart(3, "0")}`,
-    };
+    return { main: fmt.time(ms), fraction: fmt.time(ms, { precision: "ms", date: "never" }).slice(8), title: fmt.timeTitle(ms) };
   }
 
   const WARNING_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 15 14H1z"/><path d="M8 6.2v3.6M8 11.4v.4"/></svg>';
@@ -1941,12 +1802,12 @@
     if (dom.traceDetailStats) {
       const start = traceStartParts(bounds.start);
       const items = [
-        ["Trace Start", { html: start ? `${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small>` : "\u2014" }, "is-start"],
-        ["Duration", formatDuration(bounds.duration)],
-        ["Services", String(cache.serviceCount)],
-        ["Depth", String(cache.maxLevel + 1)],
-        ["Total Spans", String(spans.length)],
-        ["Errors", String(cache.errorCount), cache.errorCount ? "is-error" : ""],
+        ["Trace Start", { html: start ? `<time title="${esc(start.title)}">${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small></time>` : fmt.EMPTY }, "is-start"],
+        ["Duration", fmt.duration(bounds.duration)],
+        ["Services", fmt.count(cache.serviceCount)],
+        ["Depth", fmt.count(cache.maxLevel + 1)],
+        ["Total Spans", fmt.count(spans.length)],
+        ["Errors", fmt.count(cache.errorCount), cache.errorCount ? "is-error" : ""],
       ];
       const itemsHtml = items.map(([label, value, cls]) => `<div class="tracePageOverviewItem${cls ? ` ${cls}` : ""}" data-trace-header-item="${esc(label)}"><span>${esc(label)}</span><strong>${typeof value === "object" ? value.html : esc(value)}</strong></div>`).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
       const orphans = cache.orphanCount;
@@ -1977,7 +1838,7 @@
     const span = node.span;
     const depth = Math.min(node.level ?? node.depth, 40);
     const serviceLineX = TREE_LINE_X - 1 + depth * TREE_INDENT_PX;
-    return `<div class="traceSpanInspectorRow" style="--trace-service-color:${serviceColor(span.service_name)};--trace-depth-x:${serviceLineX}px"><div class="traceSpanInspectorRow__spacer"><span class="traceSpanRow__guides" aria-hidden="true">${spanRowGuides(depth)}</span></div><div class="traceSpanInspectorRow__panel">${renderSpanInspectorCard(span, cache.spans, cache.bounds)}</div></div>`;
+    return `<div class="traceSpanInspectorRow" style="--trace-service-color:${palette.service(span.service_name)};--trace-depth-x:${serviceLineX}px"><div class="traceSpanInspectorRow__spacer"><span class="traceSpanRow__guides" aria-hidden="true">${spanRowGuides(depth)}</span></div><div class="traceSpanInspectorRow__panel">${renderSpanInspectorCard(span, cache.spans, cache.bounds)}</div></div>`;
   }
 
   // Guides of every ancestor in its service colour, an elbow from the parent
@@ -1993,7 +1854,7 @@
       const ancestor = ancestors[i];
       const lastAncestor = i === ancestors.length - 1;
       const cls = lastAncestor ? (node.isLast ? " is-last" : "") : (ancestors[i + 1].isLast ? " is-terminated" : "");
-      html += `<span class="traceTreeOffset__guide${cls}" data-ancestor-id="${esc(spanKey(ancestor))}" style="color:${serviceColor(ancestor.span.service_name)}">${lastAncestor ? '<i class="traceTreeOffset__elbow"></i>' : ""}</span>`;
+      html += `<span class="traceTreeOffset__guide${cls}" data-ancestor-id="${esc(spanKey(ancestor))}" style="color:${palette.service(ancestor.span.service_name)}">${lastAncestor ? '<i class="traceTreeOffset__elbow"></i>' : ""}</span>`;
     }
     const id = spanKey(node);
     const count = node.children.length;
@@ -2225,10 +2086,10 @@
     // Jaeger's hasChildError: a collapsed span hiding an error span.
     const childError = !error && collapsed && cache.errorBelow.has(node);
     const active = model.openSpanIds.has(id);
-    const color = serviceColor(span.service_name);
+    const color = palette.service(span.service_name);
     const labelLeft = left + (width / 2) >= 62;
     const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
-    const durationText = formatDuration(span.duration_ns);
+    const durationText = fmt.duration(span.duration_ns);
     const barLabel = labelLeft
       ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
       : `<span class="traceSpanBar__label"><b>${esc(durationText)}</b><span class="traceSpanBar__sep">|</span><i class="traceSpanBar__ref">${esc(spanRef)}</i></span>`;
@@ -2796,7 +2657,8 @@
   }
 
   function scalarHtml(value) {
-    return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(value == null ? "null" : String(value))}</span>`;
+    if (value == null) return fmt.nullToken();
+    return `<span class="traceKv__v traceKv__v--${scalarKind(value)}">${esc(String(value))}</span>`;
   }
 
   // Collapsible pretty tree (Jaeger's JsonView): the top level is open, nested
@@ -2889,15 +2751,18 @@
     return events.sort((a, b) => key(a) - key(b) || a.index - b.index);
   }
 
-  // Local wall time to the millisecond (+ the stored UTC text when given).
+  // A span or event instant: the stored UTC text ("2026-09-12 14:29:57.462123456",
+  // exact) or epoch ns (a double, exact to ~256 ns only). withRaw: the
+  // tooltip (fmt.timeTitle, to the nanosecond when the text has them), else
+  // the shown text (fmt.time to the millisecond).
   function absoluteTimeText(ns, raw = "", { withRaw = true } = {}) {
     const text = String(raw || "");
     const parts = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
-    // The raw text is exact; an epoch in ns past 2^53 is not.
     const ms = parts ? Date.parse(`${parts[1]}T${parts[2]}.${(parts[3] || "").slice(0, 3).padEnd(3, "0")}Z`) : Math.floor(Math.round(ns / 1e3) / 1e3);
     if (!Number.isFinite(ms)) return text;
-    const local = new Date(ms).toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
-    return raw && withRaw ? `${local} (${raw} UTC)` : local;
+    if (!withRaw) return fmt.time(ms, { precision: "ms" });
+    const digits = parts ? (parts[3] || "").slice(0, 9).padEnd(9, "0") : "";
+    return digits ? fmt.timeTitle(ms, { precision: "ns", ns: `${Math.floor(ms / 1000)}${digits}` }) : fmt.timeTitle(ms);
   }
 
   function sectionOpen(spanId, key) {
@@ -2916,7 +2781,7 @@
   }
 
   function eventItemHtml(event, traceStartNs, { hidden = false, open = false } = {}) {
-    const offset = Number.isFinite(event.ns) ? formatDuration(Math.max(0, event.ns - traceStartNs)) : "\u2014";
+    const offset = Number.isFinite(event.ns) ? fmt.duration(Math.max(0, event.ns - traceStartNs)) : fmt.EMPTY;
     const body = event.attributes && typeof event.attributes === "object" && !Array.isArray(event.attributes)
       ? renderAttributeTable(event.attributes, "No attributes")
       : (event.attributes == null ? '<span class="traceJaegerEmpty">No attributes</span>' : `<pre class="traceJaegerRaw">${esc(typeof event.attributes === "string" ? event.attributes : JSON.stringify(event.attributes, null, 2))}</pre>`);
@@ -2979,7 +2844,7 @@
     const sameTrace = !ref.traceId || ref.traceId === traceId;
     const target = sameTrace ? cache.nodeById.get(ref.spanId)?.span : null;
     const label = target
-      ? `<span class="traceSpanRefs__svc" style="--trace-service-color:${serviceColor(target.service_name)}">${esc(target.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(target.span_name || "span")}</small>`
+      ? `<span class="traceSpanRefs__svc" style="--trace-service-color:${palette.service(target.service_name)}">${esc(target.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(target.span_name || "span")}</small>`
       : `<span class="traceSpanRefs__svc is-external">${sameTrace ? "&lt; span not in this trace &gt;" : "&lt; span in another trace &gt;"}</span>`;
     const ids = `<small class="traceSpanRefs__ids">${sameTrace ? "" : `<span>TraceID: <code>${esc(ref.traceId)}</code></span>`}<span>SpanID: <code>${esc(ref.spanId)}</code></span></small>`;
     let action = "";
@@ -3010,7 +2875,7 @@
 
   function spanKindLabel(kind) {
     const text = String(kind || "").replace(/^SPAN_KIND_/i, "").trim();
-    if (!text) return "\u2014";
+    if (!text) return fmt.EMPTY;
     return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
   }
 
@@ -3028,13 +2893,13 @@
     const statusClass = esc(String(status).toLowerCase());
     const statusBadge = String(status).toLowerCase() === "unset" ? "" : `<span class="traceStatus traceStatus--${statusClass}" title="Span status (click to filter)" data-filter-field="status" data-filter-value="${esc(status)}" tabindex="0" role="button" aria-haspopup="menu">${esc(status)}</span>`;
     const statusMessage = String(span.status_message || "").trim();
-    const color = serviceColor(span.service_name);
+    const color = palette.service(span.service_name);
     const absolute = absoluteTimeText(startNs, span.timestamp);
     const id = String(span.span_id || "");
     return `<section class="traceInspector traceInspector--jaeger traceInspector--inline" style="--trace-service-color:${color}" data-inspector-span="${esc(id)}">
       <div class="traceInspectorHead traceInspectorHead--jaeger">
         <strong title="${esc(span.span_name || "span")}"><span class="traceFilterable" data-filter-field="operation" data-filter-value="${esc(span.span_name || "")}" tabindex="0" role="button" aria-haspopup="menu">${esc(span.span_name || "span")}</span></strong>
-        <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service traceFilterable" data-filter-field="service" data-filter-value="${esc(span.service_name || "")}" tabindex="0" role="button" aria-haspopup="menu">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(formatDuration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(formatDuration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
+        <div class="traceInspectorHead__meta"><span>Service: <b class="traceInspectorHead__service traceFilterable" data-filter-field="service" data-filter-value="${esc(span.service_name || "")}" tabindex="0" role="button" aria-haspopup="menu">${esc(span.service_name || "unknown")}</b></span><i></i><span>Duration: <b>${esc(fmt.duration(span.duration_ns))}</b></span><i></i><span title="${esc(absolute)}">Start Time: <b>${esc(fmt.duration(startOffset))}</b><small class="traceInspectorHead__abs">${esc(absoluteTimeText(startNs, span.timestamp, { withRaw: false }))}</small></span><i></i><span>Kind: <b>${esc(spanKindLabel(span.span_kind))}</b></span>${statusBadge}</div>
       </div>
       ${ns.traceInsights?.exceptionSectionHtml(span, bounds) || ""}
       ${statusMessage ? `<div class="traceInspectorStatusMessage"><b>Status message</b><span>${esc(statusMessage)}</span></div>` : ""}
@@ -3487,7 +3352,7 @@
       model.traceViewRange = [0, 1];
       model.disabledServices.clear();
       model.collapsed.clear();
-      registerServiceColors((trace?.spans || []).map((span) => span.service_name));
+      palette.registerServices((trace?.spans || []).map((span) => span.service_name));
       pushEntry();
       renderTrace();
       ns.traceViews?.applyLocation?.();
@@ -3678,23 +3543,23 @@
     initWaterfallEvents();
     initSpanDetailEvents();
     ns.traceLogs?.install?.({
-      model, activeTraceCache, renderWaterfall, focusSpanInTimeline, enhanceTraceSelect, serviceColor, formatDuration, esc,
+      model, activeTraceCache, renderWaterfall, focusSpanInTimeline, enhanceTraceSelect, esc,
       parseStructuredValue, renderAttributeTable, absoluteTimeText, spanDetailClick, currentHost,
       waterfallWindow: () => waterfallContext(activeTraceCache()),
     });
     ns.traceViews?.install?.({
       model, activeTraceCache, renderWaterfall, focusSpanInTimeline, spanTraceUrl, enhanceTraceSelect,
-      serviceColor, formatDuration, esc, copyText, spanEventList, eventItemHtml, parseStructuredValue, spanDetailClick,
+      esc, copyText, spanEventList, eventItemHtml, parseStructuredValue, spanDetailClick,
       attributeEntries, spanKindLabel,
     });
     ns.traceInsights?.install?.({
-      model, activeTraceCache, focusSpanInTimeline, loadTrace, spanTraceUrl, serviceColor, formatDuration, esc, copyText,
+      model, activeTraceCache, focusSpanInTimeline, loadTrace, spanTraceUrl, esc, copyText,
       spanEventList, parseStructuredValue, attributeEntries, renderAttributeTable, sectionOpen, setSectionOpen, currentHost,
       exactStartNs: (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0))),
     });
     ns.traceSpans?.install?.({
-      model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl, serviceColor, registerServiceColors,
-      formatDuration, spanKindLabel, absoluteTimeText, renderJaegerAttributes, renderAttributeTable, attributeEntries,
+      model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl,
+      spanKindLabel, absoluteTimeText, renderJaegerAttributes, renderAttributeTable, attributeEntries,
       spanEventList, eventItemHtml, spanLinkList, spanDetailClick, enhanceTraceSelect,
       runSearch: (options) => search(options),
     });
@@ -3705,20 +3570,19 @@
       refreshServiceOperationOptions: () => { updateServiceOptions(); updateOperationOptions(); },
       syncServiceOperationPair,
       setResultsView: (view, options) => setResultsView(view, options),
-      formatDuration,
     });
     ns.traceHeatmap?.install?.({
-      model, dom, api, esc, currentHost, formatDuration, durationAxis, chartMessage, mountChart, unmountChart,
-      bucketRangeLabel, dayLabel, clockLabel, CHART_SYNC_KEY,
+      model, dom, api, esc, currentHost, durationAxis, chartMessage, mountChart, unmountChart,
+      CHART_SYNC_KEY,
       renderDurationChart: () => renderDurationChart(),
       loadDurations: () => loadDurations(),
       applyRange: (raw) => applyCustomRange(raw, "heatmap"),
     });
     ns.traceTabs?.install?.({
-      model, dom, api, esc, route, currentHost, serviceColor, registerServiceColors, formatDuration, showError,
+      model, dom, api, esc, route, currentHost, showError,
       copyText, loadTrace, spanTraceUrl, localMidnight,
       // Chart helpers of the result list charts (the Services view's RED charts).
-      chart: { mountChart, unmountChart, chartMessage, durationAxis, bucketRangeLabel, bucketGrid, zoomSearchRange },
+      chart: { mountChart, unmountChart, chartMessage, durationAxis, bucketGrid, zoomSearchRange },
       runSearch: (options) => search(options),
       // The result list tab is shown again: search when it is stale.
       showSearch: () => {

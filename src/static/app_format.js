@@ -6,6 +6,7 @@
   //
   //   count      120,064          en-US grouping on every browser
   //   compact    120.1K 3.4M 1.2B uppercase suffix, one decimal (trimmed)
+  //   number     1,235 3.142 0.5 25K, four significant digits (measurements)
   //   bytes      0 B 205 B 1.7 KB 10.3 MB, 1024 base, one decimal from KB
   //   duration   12 ns 350 \u00b5s 1.82 ms 2.5 s 8 min 30 s (never "8.5 min")
   //   percent    50% 12.3% 1.23% <0.1% 0%
@@ -95,6 +96,21 @@
       return `${sign}${trimOneDecimal(scaled)}${suffix}`;
     }
     return `${sign}${Math.round(abs)}`;
+  }
+
+  // A measured value (a gauge, a ratio, a metric sum): four significant
+  // digits grouped en-US ("1,235", "3.142", "0.5"), compact from 10,000
+  // ("25K", "1.2M"), an exponent below 0.0001 ("4.2e-5").
+  const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 10 });
+
+  function number(value) {
+    const n = num(value);
+    if (!Number.isFinite(n)) return EMPTY;
+    const abs = Math.abs(n);
+    if (abs === 0) return "0";
+    if (abs >= 1e4) return compact(n);
+    if (abs >= 1e-4) return NUMBER.format(Number(n.toPrecision(4)));
+    return n.toExponential(1).replace(/\.0e/, "e");
   }
 
   // One byte format for the whole app (util.formatBytes delegates here):
@@ -405,6 +421,7 @@
     EMPTY,
     count,
     compact,
+    number,
     bytes,
     bytesRate,
     percent,

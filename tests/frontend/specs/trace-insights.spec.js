@@ -249,7 +249,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   const typeColor = await java.locator('.traceException__type').evaluate((el) => getComputedStyle(el).color);
   const errorColor = await page.evaluate(() => {
     const probe = document.createElement('span');
-    probe.style.color = 'var(--trace-error)';
+    probe.style.color = 'var(--danger)';
     document.querySelector('#traceDetail').appendChild(probe);
     const color = getComputedStyle(probe).color;
     probe.remove();
@@ -392,7 +392,7 @@ test('linked from other traces: loaded when References opens, open linked trace 
   await expect(sRefs.locator(':scope > summary')).toHaveText('References(1)');
   await sRefs.locator(':scope > summary').click();
   await expect(sRefs.locator('[data-linked-from-empty]')).toContainText('No span of another trace links here');
-  await expect(sRefs.locator('[data-linked-from-empty]')).toContainText('±60 min around this trace');
+  await expect(sRefs.locator('[data-linked-from-empty]')).toContainText('±1 h around this trace');
 
   await item.getByRole('link', { name: 'Open linked trace' }).click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${OTHER_TRACE_ID}\\?span=${OTHER_SPAN_ID}$`));
@@ -463,7 +463,7 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   await expect(panel).toBeVisible();
   await expect(panel).toBeFocused();
   await expect(panel.locator('#traceContextTitle')).toHaveText('Surrounding context');
-  await expect(panel.locator('[data-context-summary]')).toHaveText('5 spans · ±1 min · Same service · 7 ms');
+  await expect(panel.locator('[data-context-summary]')).toHaveText('5 spans · ±1 min · Same service · 7.4 ms');
   // Default: same service, ±1 min, exact anchor nanoseconds.
   expect(requests.at(-1)).toMatchObject({ timestamp_ns: String(exactNs(10)), window_ms: '60000', filter: 'service', service: 'orders', direction: 'around', limit: '50' });
   const rows = panel.locator('tbody tr');

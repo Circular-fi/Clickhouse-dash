@@ -94,7 +94,9 @@ def test_logs_page_script_reuses_shared_pieces():
     state = read("src/static/app_state.js")
     assert "timePicker = ns.timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
     assert 'settingName: "logs.max_lookback_minutes",' in js
-    assert 'const SERVICE_COLOR_STORE_KEY = "chdash.traces.serviceColors";' in js
+    # Service colours and formats are the shared ones (ns.palette, ns.format).
+    assert "palette.service(row.service)" in js and "palette.registerServices(" in js
+    assert "chdash.traces.serviceColors" not in js and "SERVICE_COLOR_STORE_KEY" not in js
     assert 'params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));' in js
     assert "window.history.pushState({ workspace: \"logs\" }, \"\", next);" in js
     assert 'const next = `${route("observability/logs")}?${urlParams().toString()}`;' in js

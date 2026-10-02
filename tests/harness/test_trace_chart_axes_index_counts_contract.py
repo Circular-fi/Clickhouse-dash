@@ -59,7 +59,9 @@ def test_durations_use_whole_units_and_results_flag_errors_by_the_title():
     js = read("src/static/app_traces.js")
     css = read("src/static/style.css")
     assert "const DURATION_AXIS_STEPS_NS" in js
-    assert "`${whole} ${big} ${rest} ${small}`" in js
+    # Whole units ("8 min 30 s") are ns.format.duration's, which Traces uses.
+    assert "`${whole} ${big} ${rest} ${small}`" in read("src/static/app_format.js")
+    assert "const fmt = ns.format;" in js and "function formatDuration(" not in js
     assert "formatDurationScaled" not in js
     assert 'traceResult__wideTitle">${esc(title)}</strong>${errors ?' in js
     assert "traceErrorCount--title" in js and ".traceErrorCount--title" in css

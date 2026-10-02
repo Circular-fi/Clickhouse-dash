@@ -236,7 +236,7 @@ html[data-theme="light"] {
    script. Contrast, both themes, on --panel and --bg: text tokens 4.5:1 or
    more (status text also on its own -bg tint), fills 3:1 or more. Older
    families alias them where the value is the same (--error-bg,
-   --accentText, the light --accent, --log-sev-fatal/error/info, --graph-error).
+   --accentText, the light --accent, --graph-error).
    ========================================================================== */
 :root {
   /* Status: text / icon colour and its 12 % tint background. */
@@ -7666,7 +7666,7 @@ html.chdash-page-select-hidden .pageSelect {
   align-items: center;
   padding: 3px 8px;
   border-bottom: 1px solid var(--border);
-  color: color-mix(in srgb, var(--traceWarn) 74%, var(--text));
+  color: color-mix(in srgb, var(--warning) 74%, var(--text));
   font-size: .56rem;
 }
 
@@ -9715,6 +9715,16 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 
 /* OpenTelemetry trace explorer. */
+/* Observability colours the semantic tokens do not name: text on a solid
+   accent fill, and the shadows of menus, popovers, drawers and sheets. */
+:root {
+  --obs-on-fill: #fff;
+  --obs-shadow-menu: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55);
+  --obs-shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --obs-shadow-drawer: -12px 0 32px rgba(0, 0, 0, 0.28);
+  --obs-shadow-sheet: 0 -14px 36px rgba(0, 0, 0, 0.32);
+}
+
 .tracesWorkspace {
   flex: 1 1 auto;
   min-height: 0;
@@ -9819,9 +9829,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  border-bottom: 1px solid color-mix(in srgb, #ef4444 32%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
   background: var(--error-bg);
-  color: color-mix(in srgb, #ef4444 70%, var(--text));
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
   font-size: .76rem;
 }
 .tracesError[hidden] { display: none; }
@@ -9941,7 +9951,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceInspectorHead strong { overflow: hidden; text-overflow: ellipsis; font: 700 .75rem var(--mono); }
 .traceInspectorHead span { color: var(--muted); font-size: .65rem; }
 .traceStatus { flex: 0 0 auto; padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: .6rem !important; text-transform: uppercase; }
-.traceStatus--error { color: #ef4444 !important; border-color: color-mix(in srgb, #ef4444 45%, var(--border)); }
+.traceStatus--error { color: var(--danger) !important; border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .traceInspectorKv { margin: 0; padding: 8px 10px; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 5px 8px; border-bottom: 1px solid var(--border); font-size: .65rem; }
 .traceInspectorKv dt { color: var(--muted); }
 .traceInspectorKv dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
@@ -10556,10 +10566,10 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceChartLegend--quantiles .p90::before,
 .traceChartLegend--quantiles .p95::before,
 .traceChartLegend--quantiles .p99::before { content: ""; width: 12px; border-top: 2px solid currentColor; }
-.traceChartLegend--quantiles .p50 { color: #54a24b; }
-.traceChartLegend--quantiles .p90 { color: #4c78a8; }
-.traceChartLegend--quantiles .p95 { color: #f58518; }
-.traceChartLegend--quantiles .p99 { color: #b279a2; }
+.traceChartLegend--quantiles .p50 { color: var(--pct-p50); }
+.traceChartLegend--quantiles .p90 { color: var(--pct-p90); }
+.traceChartLegend--quantiles .p95 { color: var(--pct-p95); }
+.traceChartLegend--quantiles .p99 { color: var(--pct-p99); }
 .traceChartLegend .point { border-radius: 50%; background: var(--accentBorder); }
 
 .traceResultsSection { padding: 8px 12px 20px; }
@@ -10595,8 +10605,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceServiceStat > i { width: 5px; height: 5px; border-radius: 50%; background: var(--trace-service-color, var(--accentBorder)); }
 .traceServiceStat > b { color: var(--text); font-size: 8px; font-weight: 700; }
 .traceServiceStat > span { color: var(--muted); font-size: 8px; }
-.traceServiceStat.is-error { border-color: color-mix(in srgb, #e45756 38%, var(--border)); }
-.traceServiceStat.is-error > span { color: #e45756; }
+.traceServiceStat.is-error { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
+.traceServiceStat.is-error > span { color: var(--danger); }
 
 @media (max-width: 1100px) {
   .traceSearchBar__source { grid-column: 1 / -1; }
@@ -10799,7 +10809,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font-size: 10.5px;
   font-weight: 760;
 }
-.tracePageOverviewItem.is-error > strong { color: #e45756; }
+.tracePageOverviewItem.is-error > strong { color: var(--danger); }
 .tracePageOverviewDivider {
   width: 1px;
   margin: 8px 0;
@@ -11487,8 +11497,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   display: inline-grid;
   place-items: center;
   border-radius: 50%;
-  background: #d64545;
-  color: #fff !important;
+  background: var(--danger);
+  color: var(--panel) !important;
   font: 700 9px/1 Arial, Helvetica, sans-serif !important;
   font-style: normal;
 }
@@ -11502,12 +11512,12 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   cursor: help;
 }
 .tracesResultCount__errors {
-  color: #d64545;
+  color: var(--danger);
   font-weight: 600;
 }
-.traceChartError { color: #d64545; padding: 0 16px; text-align: center; }
+.traceChartError { color: var(--danger); padding: 0 16px; text-align: center; }
 .traceServiceStat.is-error > span { color: var(--muted); }
-.traceServiceStat.is-error { border-color: color-mix(in srgb, #d64545 35%, var(--border)); }
+.traceServiceStat.is-error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 
 /* Denser individual trace while preserving Jaeger-like vertical guides. */
 .traceSpanRow,
@@ -12173,8 +12183,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   display: inline-grid;
   place-items: center;
   border-radius: 999px;
-  background: #d94747;
-  color: #fff;
+  background: var(--danger);
+  color: var(--panel);
   font: 700 9px/1 Arial, Helvetica, sans-serif;
 }
 .traceServiceFilter.is-disabled {
@@ -12186,7 +12196,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 }
 
 .traceOverview__graph > i.is-error {
-  box-shadow: 0 0 0 1px #d94747;
+  box-shadow: 0 0 0 1px var(--danger);
   z-index: 2;
 }
 
@@ -12211,10 +12221,10 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   margin-left: 2px;
 }
 .traceSpanRow.is-error .traceSpanRow__name {
-  color: color-mix(in srgb, #d94747 78%, var(--text));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
 }
 .traceSpanRow.is-error .traceSpanRow__label {
-  background: color-mix(in srgb, #d94747 4%, transparent);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
 }
 
 .traceSpanEventMarker {
@@ -12230,7 +12240,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   pointer-events: auto;
 }
 .traceSpanRow.is-error .traceSpanEventMarker {
-  background: #8f1f1f;
+  background: color-mix(in srgb, var(--danger) 50%, var(--trace-critical-path));
 }
 
 .traceSpanBar > .traceSpanBar__label {
@@ -12285,7 +12295,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceServiceFilter.traceServiceStat > i { width:7px; height:7px; border-radius:1px; flex:0 0 7px; }
 .traceServiceFilter.traceServiceStat > b { font-size:9px; }
 .traceServiceFilter.traceServiceStat > span { font-size:9px; }
-.traceServiceFilter.traceServiceStat > em { min-width:15px; height:15px; padding:0 4px; display:inline-grid; place-items:center; border-radius:999px; background:#d94747; color:#fff; font:700 9px/1 Arial,sans-serif; font-style:normal; }
+.traceServiceFilter.traceServiceStat > em { min-width:15px; height:15px; padding:0 4px; display:inline-grid; place-items:center; border-radius:999px; background:var(--danger); color:var(--panel); font:700 9px/1 Arial,sans-serif; font-style:normal; }
 .tracePageBack { width:36px !important; height:36px !important; background:transparent !important; border:0 !important; color:var(--muted); }
 .tracePageBack:hover { background:transparent !important; color:var(--text) !important; }
 .tracePageBack svg { width:24px; height:24px; display:block; }
@@ -12542,7 +12552,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   border-top-left-radius: 0 !important;
   border-top-right-radius: 0 !important;
   background: var(--panel) !important;
-  box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, .55) !important;
+  box-shadow: var(--obs-shadow-menu) !important;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
@@ -12632,7 +12642,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   border-top: 0 !important;
   border-radius: var(--radiusSm) !important;
   background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
-  box-shadow: 0 1.4rem 2.2rem -1.2rem rgba(0, 0, 0, 0.55) !important;
+  box-shadow: var(--obs-shadow-menu) !important;
   transform-origin: top !important;
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
@@ -13034,11 +13044,11 @@ html[data-obs-view="traces"] .tracesResults--wide {
   border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--buttonBorder));
 }
 .traceSearchBar .timeRangeField__input[aria-invalid="true"] {
-  border-color: color-mix(in srgb, #ef4444 70%, var(--buttonBorder));
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--buttonBorder));
 }
 .timeRangeField__error,
 .timeRangePanel__error {
-  color: color-mix(in srgb, #ef4444 70%, var(--text));
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
   font-size: 10.5px;
   line-height: 1.3;
 }
@@ -13047,7 +13057,7 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .timeRangePanel__error {
   grid-column: 1 / -1;
   padding: 7px 9px;
-  border: 1px solid color-mix(in srgb, #ef4444 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
   border-radius: 6px;
   background: var(--error-bg);
 }
@@ -13166,8 +13176,8 @@ html[data-obs-view="traces"] .tracesResults--wide {
 }
 .traceSearchBar .timeCalendar__day.is-start,
 .traceSearchBar .timeCalendar__day.is-end {
-  background: var(--accentBorder);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--obs-on-fill);
 }
 .traceSearchBar .timeCalendar__day.is-start { border-radius: 6px 0 0 6px; }
 .traceSearchBar .timeCalendar__day.is-end { border-radius: 0 6px 6px 0; }
@@ -13279,12 +13289,7 @@ html[data-obs-view="traces"] .tracesResults--wide {
    duration bar behind each title, Spans / Errors / Incomplete tags, one line
    of service pills with a "+N" overflow chip, a sortable table view, and the
    listed traces as dots on the duration chart. */
-:root { --traceWarn: #f0a33a; --traceError: #d64545; --traceDot: #12939a; }
-html[data-theme="dark"] { --traceWarn: #f0a33a; --traceError: #d64545; }
-html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
-@media (prefers-color-scheme: light) {
-  html:not([data-theme="dark"]) { --traceWarn: #b56200; --traceError: #b42318; }
-}
+:root { --traceDot: #12939a; }
 
 .traceSearchResults__toolbar { gap: 12px; }
 .tracesResultCount__latency { color: var(--muted); font-weight: 500; }
@@ -13366,16 +13371,16 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
   width: auto;
   min-width: 0;
   padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--traceError) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--traceError) 10%, transparent);
-  color: var(--traceError) !important;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger) !important;
   font: 700 10.5px/1 Arial, Helvetica, sans-serif !important;
 }
 .traceTag--incomplete {
-  border-color: color-mix(in srgb, var(--traceWarn) 60%, transparent);
-  background: color-mix(in srgb, var(--traceWarn) 12%, transparent);
-  color: var(--traceWarn);
+  border-color: color-mix(in srgb, var(--warning) 60%, transparent);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
   cursor: help;
 }
 .traceTag--incomplete svg { width: 12px; height: 12px; }
@@ -13421,8 +13426,8 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
   display: inline-grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--traceError);
-  color: #fff;
+  background: var(--danger);
+  color: var(--panel);
   font: 800 9.5px/1 Arial, Helvetica, sans-serif;
   font-style: normal;
 }
@@ -13451,7 +13456,7 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+  box-shadow: var(--obs-shadow-popover);
   pointer-events: none;
 }
 .traceSvcPopover .traceSvcPill { max-width: 100%; }
@@ -13552,7 +13557,7 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
 .traceChartLegend--quantiles .traces::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--traceDot) 55%, transparent); border: 1px solid var(--traceDot); }
 .traceChartLegend--quantiles .traces { color: var(--muted); }
 .chartCore__tipRow.is-error em,
-.chartCore__tipRow.is-error b { color: var(--traceError); }
+.chartCore__tipRow.is-error b { color: var(--danger); }
 
 /* ==========================================================================
    Trace detail, Jaeger behaviour (TracePage of Jaeger UI) in ChDash's look.
@@ -13581,8 +13586,6 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
   --trace-span-color-16: #9f1853;
   --trace-span-color-17: #002d9c;
   --trace-span-color-18: #6929c4;
-  --trace-error: #e5484d;
-  --trace-warning: #e0a526;
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
@@ -13608,8 +13611,6 @@ html[data-theme="light"] { --traceWarn: #b56200; --traceError: #b42318; }
     --trace-span-color-16: #510224;
     --trace-span-color-17: #001141;
     --trace-span-color-18: #491d8b;
-    --trace-error: #d02c34;
-    --trace-warning: #a86b00;
     --trace-critical-path: #000;
     --trace-critical-outline: rgba(255, 255, 255, 0.85);
     --trace-clip-shadow: rgba(25, 25, 25, 0.25);
@@ -13635,8 +13636,6 @@ html[data-theme="dark"] {
   --trace-span-color-16: #9f1853;
   --trace-span-color-17: #002d9c;
   --trace-span-color-18: #6929c4;
-  --trace-error: #e5484d;
-  --trace-warning: #e0a526;
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
@@ -13661,8 +13660,6 @@ html[data-theme="light"] {
   --trace-span-color-16: #510224;
   --trace-span-color-17: #001141;
   --trace-span-color-18: #491d8b;
-  --trace-error: #d02c34;
-  --trace-warning: #a86b00;
   --trace-critical-path: #000;
   --trace-critical-outline: rgba(255, 255, 255, 0.85);
   --trace-clip-shadow: rgba(25, 25, 25, 0.25);
@@ -13675,7 +13672,7 @@ html[data-theme="light"] {
   font-size: inherit;
   font-weight: 500;
 }
-.tracePageOverviewItem.is-error > strong { color: var(--trace-error); }
+.tracePageOverviewItem.is-error > strong { color: var(--danger); }
 .tracePageHeader__incomplete {
   height: 20px;
   margin: 0 4px 0 8px;
@@ -13685,10 +13682,10 @@ html[data-theme="light"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--trace-warning) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--trace-warning) 12%, transparent);
-  color: var(--trace-warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
   font: 700 9.5px/1 Arial, Helvetica, sans-serif;
   white-space: nowrap;
   cursor: help;
@@ -13712,7 +13709,7 @@ html[data-theme="light"] {
   opacity: .8;
 }
 .traceOverview__graph > i.traceOverview__span.is-error {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--trace-error) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 80%, transparent);
 }
 .traceOverview__canvas {
   position: absolute;
@@ -13937,9 +13934,9 @@ html[data-theme="light"] {
   white-space: nowrap;
 }
 .traceSpanPill.is-error {
-  border-color: color-mix(in srgb, var(--trace-error) 60%, transparent);
-  background: color-mix(in srgb, var(--trace-error) 14%, transparent);
-  color: var(--trace-error);
+  border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
 }
 
 /* Errors (SpanBarRow hasOwnError / hasChildError): the bar keeps its service
@@ -13947,16 +13944,16 @@ html[data-theme="light"] {
    hiding an error span. */
 .traceWaterfall--jaeger .traceSpanRow__errorBadge {
   margin-left: 0;
-  background: var(--trace-error);
+  background: var(--danger);
 }
 .traceWaterfall--jaeger .traceSpanRow__errorBadge--hollow {
   background: transparent;
-  color: var(--trace-error);
-  box-shadow: inset 0 0 0 1.5px var(--trace-error);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1.5px var(--danger);
 }
 .traceWaterfall--jaeger .traceSpanBar--error {
   background: var(--trace-service-color, var(--accentBorder));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--trace-error) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 80%, transparent);
 }
 
 /* Clipped span edges when zoomed (span-row clipping-left / clipping-right). */
@@ -13994,13 +13991,6 @@ html[data-theme="light"] {
 /* Span detail after Jaeger's SpanDetail: typed attribute table with JSON
    trees and per-row copy, sections whose k=v preview shows only while
    collapsed, events relative to the trace start, references. */
-.traceSpanInspectorRow__panel,
-.traceEventPopover {
-  --traceKvString: color-mix(in srgb, var(--text) 74%, #22c55e);
-  --traceKvNumber: color-mix(in srgb, var(--text) 70%, #f59e0b);
-  --traceKvBool: color-mix(in srgb, var(--text) 70%, #a78bfa);
-  --traceKvNull: color-mix(in srgb, var(--muted) 75%, var(--text));
-}
 .traceJaegerGroup--summary[open] > summary .traceJaegerSummaryPreview,
 .traceJaegerGroup--summary[open] > summary .traceJaegerGroup__colon { display: none; }
 .traceJaegerGroup__colon { font-style: normal; }
@@ -14093,10 +14083,10 @@ html[data-theme="light"] {
 }
 .traceKv__row--tree > .traceKv__key { grid-column: 1 / -1; padding-bottom: 0; color: var(--text); font-weight: 600; }
 .traceKv__row--tree > .traceKv__cell { grid-column: 1 / -1; padding: 1px 8px 4px; }
-.traceKv__v--string { color: var(--traceKvString); }
-.traceKv__v--number { color: var(--traceKvNumber); }
-.traceKv__v--bool { color: var(--traceKvBool); }
-.traceKv__v--null { color: var(--traceKvNull); font-style: italic; }
+.traceKv__v--string { color: var(--json-string); }
+.traceKv__v--number { color: var(--json-number); }
+.traceKv__v--bool { color: var(--json-bool); }
+.traceKv__v--null { color: var(--json-null); font-style: italic; }
 .traceKv__listSep { color: var(--muted); }
 .traceKv__actions {
   float: right;
@@ -14224,7 +14214,7 @@ html[data-theme="light"] {
   white-space: nowrap;
 }
 .traceSpanRefs__kind--follows-from { color: color-mix(in srgb, var(--accentBorder) 75%, var(--text)); border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border)); }
-.traceSpanRefs__kind--linked-from { color: var(--traceKvBool); }
+.traceSpanRefs__kind--linked-from { color: var(--json-bool); }
 .traceSpanRefs__main { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
 .traceSpanRefs__svc { font-weight: 650; }
 .traceSpanRefs__svc::before {
@@ -14341,7 +14331,6 @@ html[data-theme="light"] {
   overflow: auto;
   scrollbar-gutter: stable;
   background: var(--panelBg);
-  --traceKvString: color-mix(in srgb, var(--text) 74%, #22c55e);
 }
 
 /* Trace Statistics and Trace Spans Table. */
@@ -14399,7 +14388,7 @@ html[data-theme="light"] {
 .traceStats__row--detail > th { padding-left: 28px !important; color: color-mix(in srgb, var(--text) 85%, var(--muted)); font-weight: 450 !important; }
 .traceStats__row--detail { background: color-mix(in srgb, var(--theadBg) 40%, transparent); }
 .traceStats__row:hover { background: var(--rowHover); }
-.traceStats__row.is-heat > * { background: color-mix(in srgb, #e45756 var(--trace-heat-weight, 0%), transparent); }
+.traceStats__row.is-heat > * { background: color-mix(in srgb, var(--danger) var(--trace-heat-weight, 0%), transparent); }
 .traceSpansTable__table th:nth-child(-n + 2),
 .traceSpansTable__table td:nth-child(-n + 2),
 .traceSpansTable__table th:nth-child(n + 5),
@@ -14408,7 +14397,7 @@ html[data-theme="light"] {
 .traceSpansTable__row:hover,
 .traceSpansTable__row:focus-visible { background: var(--rowHover); }
 .traceSpansTable__row td[data-col="operation"] { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
-.traceSpansTable__row.is-error td[data-col="operation"] { color: #ef4444; }
+.traceSpansTable__row.is-error td[data-col="operation"] { color: var(--danger); }
 .traceSpansTable__service { font-weight: 600; }
 .traceSpansTable__service::before {
   content: "";
@@ -14420,8 +14409,8 @@ html[data-theme="light"] {
   background: var(--trace-service-color);
 }
 .traceSpansTable__status { color: var(--muted); }
-.traceSpansTable__status--error { color: #ef4444; font-weight: 650; }
-.traceSpansTable__status--ok { color: var(--traceKvString); }
+.traceSpansTable__status--error { color: var(--danger); font-weight: 650; }
+.traceSpansTable__status--ok { color: var(--json-string); }
 .traceSpansTable__table code { color: var(--muted); font-size: 10.5px; }
 .traceSpansTable__empty { color: var(--muted); font-style: italic; text-align: center !important; }
 .traceSpansTable__more { padding: 8px 10px; color: var(--muted); font-size: 11px; }
@@ -14445,7 +14434,7 @@ html[data-theme="light"] {
 .traceFlame__frame:hover { filter: brightness(1.15); }
 .traceFlame__frame.is-root { background: color-mix(in srgb, var(--muted) 30%, var(--panelBg)); }
 .traceFlame__frame.is-ancestor { opacity: .55; }
-.traceFlame__frame.has-error { box-shadow: inset 0 -2px 0 #ef4444; }
+.traceFlame__frame.has-error { box-shadow: inset 0 -2px 0 var(--danger); }
 .traceFlame__tip {
   position: fixed;
   z-index: 1200;
@@ -14615,15 +14604,15 @@ html[data-theme="light"] {
   padding: 6px 10px 8px;
   display: grid;
   gap: 8px;
-  border: 1px solid color-mix(in srgb, var(--trace-error) 45%, var(--border));
-  border-left: 3px solid var(--trace-error);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-left: 3px solid var(--danger);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--trace-error) 7%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
   font-size: 11px;
 }
-.traceException__head { display: flex; align-items: baseline; gap: 4px; color: var(--trace-error); font-size: 11px; }
+.traceException__head { display: flex; align-items: baseline; gap: 4px; color: var(--danger); font-size: 11px; }
 .traceException__item { min-width: 0; display: grid; gap: 4px; }
-.traceException__item + .traceException__item { padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--trace-error) 35%, var(--border)); }
+.traceException__item + .traceException__item { padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .traceException__title { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .traceException__title > svg,
 .traceSpanRow__exception > svg,
@@ -14634,14 +14623,14 @@ html[data-theme="light"] {
   fill: currentColor;
   stroke: none;
 }
-.traceException__title > svg { color: var(--trace-error); }
-.traceException__type { color: var(--trace-error); font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
+.traceException__title > svg { color: var(--danger); }
+.traceException__type { color: var(--danger); font-size: 12.5px; font-weight: 700; overflow-wrap: anywhere; }
 .traceException__message { margin: 0; color: var(--text); font-size: 12px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
 .traceException__badge {
   padding: 0 6px;
-  border: 1px solid color-mix(in srgb, var(--trace-error) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
   border-radius: 999px;
-  color: var(--trace-error);
+  color: var(--danger);
   font-size: 9.5px;
   font-weight: 650;
   line-height: 16px;
@@ -14695,7 +14684,7 @@ html[data-theme="light"] {
 .traceStack__frame.is-library .traceStack__fn,
 .traceStack__frame.is-library .traceStack__loc { color: var(--muted); font-weight: 400; }
 .traceStack__row--text { color: var(--muted); }
-.traceStack__row--cause { margin-top: 3px; color: var(--trace-error); font-weight: 600; }
+.traceStack__row--cause { margin-top: 3px; color: var(--danger); font-weight: 600; }
 .traceStack__row--omitted { color: var(--muted); font-style: italic; }
 .traceStack__hidden { display: block; padding: 0 8px 4px; color: var(--muted); font-size: 10px; font-style: italic; }
 .traceStack__raw {
@@ -14717,7 +14706,7 @@ html[data-theme="light"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--trace-error);
+  color: var(--danger);
 }
 .tracePageHeader__exceptions {
   height: 20px;
@@ -14728,17 +14717,17 @@ html[data-theme="light"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid color-mix(in srgb, var(--trace-error) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--trace-error) 12%, transparent);
-  color: var(--trace-error);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
   font: 700 9.5px/1 Arial, Helvetica, sans-serif;
   white-space: nowrap;
   cursor: pointer;
 }
 .tracePageHeader__exceptions small { max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-weight: 500; font-size: 9.5px; }
 .tracePageHeader__exceptions:hover,
-.tracePageHeader__exceptions:focus-visible { background: color-mix(in srgb, var(--trace-error) 20%, transparent); }
+.tracePageHeader__exceptions:focus-visible { background: color-mix(in srgb, var(--danger) 20%, transparent); }
 
 /* Highlighted attributes: key: value chips under the trace title. */
 .traceHighlights {
@@ -14783,7 +14772,7 @@ html[data-theme="light"] {
 .traceLinkedFrom__head { display: flex; align-items: baseline; gap: 6px; font-size: 11px; }
 .traceLinkedFrom__status { color: var(--muted); font-size: 10.5px; font-style: italic; }
 .traceLinkedFrom__note { margin: 0; color: var(--muted); font-size: 10.5px; }
-.traceLinkedFrom__note.is-error { color: var(--trace-error); }
+.traceLinkedFrom__note.is-error { color: var(--danger); }
 .traceLinkedFrom__load {
   height: 18px;
   margin-left: 4px;
@@ -14823,7 +14812,7 @@ html[data-theme="light"] {
   border-left: 1px solid var(--borderStrong, var(--border));
   background: var(--bg);
   color: var(--text);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--obs-shadow-drawer);
   font-size: 12px;
   outline: none;
 }
@@ -14893,7 +14882,7 @@ html[data-theme="light"] {
 }
 .traceContextPanel__status,
 .traceContextPanel__error { margin: 0; padding: 6px 16px; color: var(--muted); font-size: 11px; }
-.traceContextPanel__error { color: var(--trace-error); }
+.traceContextPanel__error { color: var(--danger); }
 .traceContextPanel__body { min-height: 0; flex: 1 1 auto; padding: 0 8px 12px; overflow: auto; }
 .traceContextPanel__more { margin: 6px 8px; }
 .traceContextTable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
@@ -14915,7 +14904,7 @@ html[data-theme="light"] {
 .traceContextRow:hover td,
 .traceContextRow:focus-visible td { background: var(--rowHover); }
 .traceContextRow.is-anchor td { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); font-weight: 650; }
-.traceContextRow.is-error .traceContextRow__op { color: var(--trace-error); }
+.traceContextRow.is-error .traceContextRow__op { color: var(--danger); }
 .traceContextRow__offset,
 .traceContextRow__time,
 .traceContextRow__duration { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -14947,7 +14936,7 @@ html[data-theme="light"] {
 .traceTagSearch__op:hover:not(:disabled) { background: var(--buttonBgHover); border-color: var(--buttonBorderHover); }
 .traceTagSearch__op:disabled { color: var(--muted); cursor: default; }
 .traceTagSearch__op[data-op="!="],
-.traceTagSearch__op[data-op="missing"] { color: #e45756; }
+.traceTagSearch__op[data-op="missing"] { color: var(--danger); }
 .traceTagSearch__inputs--op > input:disabled { opacity: .6; }
 
 .traceFilterChips {
@@ -14973,8 +14962,8 @@ html[data-theme="light"] {
   font-size: 11px;
 }
 .traceFilterChip.is-negated {
-  border-color: color-mix(in srgb, #e45756 45%, var(--border));
-  background: color-mix(in srgb, #e45756 9%, var(--panelBg));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 9%, var(--panelBg));
 }
 .traceFilterChip__scope {
   padding: 1px 4px;
@@ -14997,7 +14986,7 @@ html[data-theme="light"] {
 }
 button.traceFilterChip__op { cursor: pointer; }
 button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--text); }
-.traceFilterChip.is-negated .traceFilterChip__op { color: #e45756; }
+.traceFilterChip.is-negated .traceFilterChip__op { color: var(--danger); }
 .traceFilterChip__remove {
   width: 18px;
   height: 18px;
@@ -15046,7 +15035,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   border: 1px solid var(--borderStrong, var(--border));
   border-radius: 6px;
   background: var(--panelBg);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
+  box-shadow: var(--obs-shadow-popover);
   color: var(--text);
   font-size: 11px;
 }
@@ -15139,7 +15128,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacets__list { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 0 8px; }
 .traceFacets__empty { padding: 12px 10px; color: var(--muted); font-size: 11px; }
 .traceFacets__empty.is-error,
-.traceFacet__status.is-error { color: #e45756; }
+.traceFacet__status.is-error { color: var(--danger); }
 .traceFacets__group--pinned { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
 .traceFacet__head { display: flex; align-items: center; min-width: 0; padding: 0 4px 0 2px; }
 .traceFacet__expand {
@@ -15173,7 +15162,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   color: var(--muted);
   background: color-mix(in srgb, var(--muted) 14%, transparent);
 }
-.traceFacet__scope--resource { color: #b279a2; background: color-mix(in srgb, #b279a2 16%, transparent); }
+.traceFacet__scope--resource { color: var(--kind-mv); background: color-mix(in srgb, var(--kind-mv) 16%, transparent); }
 .traceFacet__key { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traceFacet.is-active .traceFacet__key { font-weight: 700; color: var(--accentText); }
 .traceFacet__count,
@@ -15201,7 +15190,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacetValue__exclude:focus-visible { opacity: 1; }
 .traceFacet__pin[aria-pressed="true"] { opacity: 1; color: var(--accentText); }
 .traceFacet__pin[aria-pressed="true"] svg { fill: currentColor; }
-.traceFacetValue__exclude[aria-pressed="true"] { opacity: 1; color: #e45756; }
+.traceFacetValue__exclude[aria-pressed="true"] { opacity: 1; color: var(--danger); }
 .traceFacet__pin:hover,
 .traceFacetValue__exclude:hover { background: var(--rowHover); color: var(--text); }
 .traceFacet__values { padding: 0 6px 5px 22px; }
@@ -15209,7 +15198,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacetValue__label { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; }
 .traceFacetValue__label input { flex: 0 0 auto; width: 12px; height: 12px; margin: 0; accent-color: var(--accentBorder); }
 .traceFacetValue__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
-.traceFacetValue.is-excluded .traceFacetValue__text { color: #e45756; text-decoration: line-through; }
+.traceFacetValue.is-excluded .traceFacetValue__text { color: var(--danger); text-decoration: line-through; }
 .traceFacet__status { padding: 3px 0; color: var(--muted); font-size: 10px; }
 .traceFacet__more,
 .traceFacets__more {
@@ -15245,24 +15234,16 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
    Trace logs (app_trace_logs.js): header toggle, logs panel, span row badges
    and markers, logs listed under a span, inspector Logs group.
    ========================================================================== */
-/* One severity palette for every log on the page: the Logs view's
-   --log-sev-* set ("Logs explorer" below holds both themes), info blue. */
-:root {
-  --trace-log-fatal: var(--log-sev-fatal);
-  --trace-log-error: var(--log-sev-error);
-  --trace-log-warn: var(--log-sev-warn);
-  --trace-log-info: var(--log-sev-info);
-  --trace-log-debug: var(--log-sev-debug);
-  --trace-log-trace: var(--log-sev-trace);
-  --trace-log-unset: var(--log-sev-trace);
-}
-[data-sev="fatal"] { --trace-log-color: var(--trace-log-fatal); }
-[data-sev="error"] { --trace-log-color: var(--trace-log-error); }
-[data-sev="warn"] { --trace-log-color: var(--trace-log-warn); }
-[data-sev="info"] { --trace-log-color: var(--trace-log-info); }
-[data-sev="debug"] { --trace-log-color: var(--trace-log-debug); }
-[data-sev="trace"] { --trace-log-color: var(--trace-log-trace); }
-[data-sev="unset"] { --trace-log-color: var(--trace-log-unset); }
+/* One severity palette for every log of Traces and Logs (ns.palette.severity,
+   the --sev-* tokens, info blue): an element carrying data-sev colours itself
+   and its children with --sev-color. */
+[data-sev="fatal"] { --sev-color: var(--sev-fatal); }
+[data-sev="error"] { --sev-color: var(--sev-error); }
+[data-sev="warn"] { --sev-color: var(--sev-warn); }
+[data-sev="info"] { --sev-color: var(--sev-info); }
+[data-sev="debug"] { --sev-color: var(--sev-debug); }
+[data-sev="trace"],
+[data-sev="unset"] { --sev-color: var(--sev-trace); }
 
 /* Header item: "Logs" with a count button toggling the panel. */
 .traceLogsToggle {
@@ -15273,7 +15254,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   gap: 3px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: color-mix(in srgb, var(--trace-log-info) 10%, transparent);
+  background: color-mix(in srgb, var(--sev-info) 10%, transparent);
   color: var(--text);
   font: inherit;
   font-variant-numeric: tabular-nums;
@@ -15293,14 +15274,14 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
 }
 .traceLogsToggle:hover,
 .traceLogsToggle:focus-visible { border-color: var(--accentBorder); }
-.traceLogsToggle.is-open { border-color: color-mix(in srgb, var(--trace-log-info) 70%, transparent); background: color-mix(in srgb, var(--trace-log-info) 20%, transparent); }
+.traceLogsToggle.is-open { border-color: color-mix(in srgb, var(--sev-info) 70%, transparent); background: color-mix(in srgb, var(--sev-info) 20%, transparent); }
 .traceLogsToggle__errors {
   margin-left: 3px;
-  color: var(--trace-error);
+  color: var(--danger);
   font-size: .9em;
   font-weight: 700;
 }
-.traceLogsToggle.is-error { color: var(--trace-error); border-color: color-mix(in srgb, var(--trace-error) 60%, transparent); }
+.traceLogsToggle.is-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 60%, transparent); }
 .traceLogsToggle.is-unavailable { color: var(--muted); background: transparent; }
 .traceLogsToggle.is-loading .traceButtonSpinner { display: inline-block; margin: 0; width: 8px; height: 8px; }
 
@@ -15313,10 +15294,6 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   flex-direction: column;
   border-bottom: 1px solid var(--border);
   background: var(--panelBg);
-  --traceKvString: color-mix(in srgb, var(--text) 74%, #22c55e);
-  --traceKvNumber: color-mix(in srgb, var(--text) 70%, #f59e0b);
-  --traceKvBool: color-mix(in srgb, var(--text) 70%, #a78bfa);
-  --traceKvNull: color-mix(in srgb, var(--muted) 75%, var(--text));
 }
 .traceLogsPanel__bar {
   flex: 0 0 auto;
@@ -15345,13 +15322,13 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   font: 650 10px/1 var(--mono);
   cursor: pointer;
 }
-.traceLogsChip > i { width: 7px; height: 7px; border-radius: 2px; background: var(--trace-log-color); }
+.traceLogsChip > i { width: 7px; height: 7px; border-radius: 2px; background: var(--sev-color); }
 .traceLogsChip > b { color: var(--text); font-weight: 650; }
 .traceLogsChip:hover,
-.traceLogsChip:focus-visible { border-color: var(--trace-log-color); }
+.traceLogsChip:focus-visible { border-color: var(--sev-color); }
 .traceLogsChip[aria-pressed="true"] {
-  border-color: var(--trace-log-color);
-  background: color-mix(in srgb, var(--trace-log-color) 16%, transparent);
+  border-color: var(--sev-color);
+  background: color-mix(in srgb, var(--sev-color) 16%, transparent);
   color: var(--text);
 }
 .traceLogsPanel__bar > .traceLogsPanel__service { width: auto; flex: 0 0 auto; position: relative; }
@@ -15409,7 +15386,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   color: var(--muted);
   font-size: 10.5px;
 }
-.traceLogsPanel__notice.is-truncated { color: var(--trace-warning); }
+.traceLogsPanel__notice.is-truncated { color: var(--warning); }
 .traceLogsPanel__matches { color: var(--text); font-weight: 600; }
 .traceLogsPanel__list { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; }
 .traceLogsPanel__more,
@@ -15439,7 +15416,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   color: var(--muted);
   font-size: 11.5px;
 }
-.traceLogsState.is-error { color: var(--trace-error); }
+.traceLogsState.is-error { color: var(--danger); }
 .traceLogsState .traceButtonSpinner { display: inline-block; margin: 0; }
 
 /* One log: toggle, severity, offset, [service, span], body. */
@@ -15452,7 +15429,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   grid-template-columns: 16px 50px 76px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  box-shadow: inset 2px 0 0 var(--trace-log-color);
+  box-shadow: inset 2px 0 0 var(--sev-color);
   font-size: 11.5px;
   cursor: pointer;
 }
@@ -15483,7 +15460,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
 .traceLog.is-open > .traceLog__row .traceLog__toggle::before { transform: rotate(90deg); }
 .traceLog__sev {
   min-width: 0;
-  color: var(--trace-log-color);
+  color: var(--sev-color);
   font: 700 10px/1 var(--mono);
   letter-spacing: .02em;
 }
@@ -15520,7 +15497,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   display: grid;
   gap: 6px;
   background: color-mix(in srgb, var(--theadBg) 30%, transparent);
-  box-shadow: inset 2px 0 0 var(--trace-log-color);
+  box-shadow: inset 2px 0 0 var(--sev-color);
   font-size: 11px;
   cursor: auto;
 }
@@ -15537,7 +15514,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   white-space: pre-wrap;
   word-break: break-word;
 }
-.traceLog__cut { color: var(--trace-warning); }
+.traceLog__cut { color: var(--warning); }
 .traceLog__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 14px; color: var(--muted); }
 .traceLog__meta b { color: var(--text); font-weight: 600; }
 .traceLog__meta code { font-size: 10.5px; }
@@ -15566,18 +15543,18 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--trace-log-color) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sev-color) 55%, transparent);
   border-radius: 3px;
-  background: color-mix(in srgb, var(--trace-log-color) 12%, transparent);
-  color: var(--trace-log-color);
+  background: color-mix(in srgb, var(--sev-color) 12%, transparent);
+  color: var(--sev-color);
   font: 650 9.5px/1 Arial, Helvetica, sans-serif;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 .traceSpanLogsBadge svg { width: 10px; height: 10px; }
 .traceSpanLogsBadge:hover,
-.traceSpanLogsBadge:focus-visible { border-color: var(--trace-log-color); }
-.traceSpanLogsBadge[aria-expanded="true"] { background: color-mix(in srgb, var(--trace-log-color) 26%, transparent); }
+.traceSpanLogsBadge:focus-visible { border-color: var(--sev-color); }
+.traceSpanLogsBadge[aria-expanded="true"] { background: color-mix(in srgb, var(--sev-color) 26%, transparent); }
 .traceSpanLogMarker {
   position: absolute;
   z-index: 5;
@@ -15586,7 +15563,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   height: 5px;
   margin-left: -2.5px;
   border-radius: 50%;
-  background: var(--trace-log-color);
+  background: var(--sev-color);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--panelBg) 80%, transparent);
   cursor: pointer;
 }
@@ -15596,7 +15573,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
 .traceSpanLogsRow {
   min-width: 0;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--trace-log-info) 4%, var(--panelBg));
+  background: color-mix(in srgb, var(--sev-info) 4%, var(--panelBg));
 }
 .traceLogLine {
   height: 22px !important;
@@ -15621,7 +15598,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   height: 8px;
   flex: 0 0 auto;
   border-radius: 2px;
-  background: var(--trace-log-color);
+  background: var(--sev-color);
 }
 .traceLogLine .traceLog__sev { flex: 0 0 38px; }
 .traceLogLine .traceLog__body { flex: 1 1 auto; }
@@ -15634,7 +15611,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
   margin: -3.5px 0 0 -3.5px;
   transform: rotate(45deg);
   border-radius: 1px;
-  background: var(--trace-log-color);
+  background: var(--sev-color);
 }
 .traceLogLine__offset {
   position: absolute;
@@ -15652,7 +15629,7 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
 
 /* Inspector Logs group. */
 .traceSpanLogs__summary { min-width: 0; display: inline-flex; gap: 6px; overflow: hidden; }
-.traceSpanLogs__sev { color: var(--trace-log-color); font: 650 9.5px/1 var(--mono); }
+.traceSpanLogs__sev { color: var(--sev-color); font: 650 9.5px/1 var(--mono); }
 .traceSpanLogs[open] > summary .traceSpanLogs__summary { display: none; }
 .traceSpanLogs__list {
   max-height: 320px;
@@ -15665,43 +15642,9 @@ html.chdash-trace-facets-collapsed .traceFacets__toggle { width: 26px; justify-c
 /* ==========================================================================
    Logs explorer (/logs): search bar, volume histogram, virtualised table,
    side panel, patterns. The search bar reuses the Traces pickers
-   (.traceSearchBar surfaces); --log-sev-* is the severity palette of every
-   log on the page (the trace Logs tab aliases it as --trace-log-*).
+   (.traceSearchBar surfaces). Severities colour by [data-sev] (--sev-color,
+   the --sev-* tokens; see "Trace logs").
    ========================================================================== */
-:root {
-  --log-sev-fatal: var(--sev-fatal);
-  --log-sev-error: var(--sev-error);
-  --log-sev-warn: #fbbf24;
-  --log-sev-info: var(--sev-info);
-  --log-sev-debug: #8b95a5;
-  --log-sev-trace: #6e7681;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --log-sev-fatal: var(--sev-fatal);
-    --log-sev-error: var(--sev-error);
-    --log-sev-warn: #d97706;
-    --log-sev-info: var(--sev-info);
-    --log-sev-debug: #64748b;
-    --log-sev-trace: #8c959f;
-  }
-}
-html[data-theme="dark"] {
-  --log-sev-fatal: var(--sev-fatal);
-  --log-sev-error: var(--sev-error);
-  --log-sev-warn: #fbbf24;
-  --log-sev-info: var(--sev-info);
-  --log-sev-debug: #8b95a5;
-  --log-sev-trace: #6e7681;
-}
-html[data-theme="light"] {
-  --log-sev-fatal: var(--sev-fatal);
-  --log-sev-error: var(--sev-error);
-  --log-sev-warn: #d97706;
-  --log-sev-info: var(--sev-info);
-  --log-sev-debug: #64748b;
-  --log-sev-trace: #8c959f;
-}
 
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 
@@ -15786,8 +15729,8 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   font: 600 11px/1 var(--mono);
 }
 .logsChip.is-negated {
-  border-color: color-mix(in srgb, var(--log-sev-error) 50%, var(--border));
-  background: color-mix(in srgb, var(--log-sev-error) 10%, transparent);
+  border-color: color-mix(in srgb, var(--sev-error) 50%, var(--border));
+  background: color-mix(in srgb, var(--sev-error) 10%, transparent);
 }
 .logsChip__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logsChip__remove {
@@ -15839,15 +15782,12 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .logsLegend__item.is-dimmed { opacity: .45; }
 .logsLegend__item b { color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
 .logsSevSwatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; }
-.logsSevSwatch.logsSev--error { background: var(--log-sev-error); }
-.logsSevSwatch.logsSev--warn { background: var(--log-sev-warn); }
-.logsSevSwatch.logsSev--info { background: var(--log-sev-info); }
-.logsSevSwatch.logsSev--debug { background: var(--log-sev-debug); }
+.logsSevSwatch { background: var(--sev-color); }
 /* The tooltip may float past the short plot, over the results below. */
 .logsHistogram__chart { position: relative; z-index: 2; height: 120px; }
 .logsHistogram__chart .chartCore__plot { overflow: visible; }
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; color: var(--muted); font-size: 11px; }
-.logsHistogram__placeholder.is-error { color: var(--log-sev-error); }
+.logsHistogram__placeholder.is-error { color: var(--sev-error); }
 .logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity 120ms ease; }
 
 .logsToolbar {
@@ -15928,8 +15868,9 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   box-shadow: inset 3px 0 0 transparent;
 }
 .logsRow:hover { background: var(--rowHover); }
-.logsRow--error { box-shadow: inset 3px 0 0 var(--log-sev-error); }
-.logsRow--warn { box-shadow: inset 3px 0 0 var(--log-sev-warn); }
+.logsRow[data-sev="fatal"],
+.logsRow[data-sev="error"],
+.logsRow[data-sev="warn"] { box-shadow: inset 3px 0 0 var(--sev-color); }
 .logsRow.is-selected { background: color-mix(in srgb, var(--accentBorder) 18%, transparent); }
 .logsRow.is-new { animation: logsNewRow 1.5s ease-out; }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
@@ -15949,15 +15890,12 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   text-align: center;
   text-transform: uppercase;
 }
-.logsSevBadge.logsSev--error { background: color-mix(in srgb, var(--log-sev-error) 20%, transparent); color: var(--log-sev-error); }
-.logsSevBadge.logsSev--warn { background: color-mix(in srgb, var(--log-sev-warn) 20%, transparent); color: var(--log-sev-warn); }
-.logsSevBadge.logsSev--info { background: color-mix(in srgb, var(--log-sev-info) 16%, transparent); color: var(--log-sev-info); }
-.logsSevBadge.logsSev--debug { background: color-mix(in srgb, var(--log-sev-debug) 18%, transparent); color: var(--log-sev-debug); }
+.logsSevBadge[data-sev] { background: color-mix(in srgb, var(--sev-color) 18%, transparent); color: var(--sev-color); }
 .logsEmpty { display: grid; justify-items: center; gap: 8px; padding: 36px 16px; color: var(--muted); font-size: 12px; text-align: center; }
 .logsEmpty strong { color: var(--text); font-size: 12.5px; }
 .logsEmpty p { margin: 0; }
 .logsEmpty--loading { display: flex; justify-content: center; align-items: center; }
-.logsEmpty--error strong { color: var(--log-sev-error); }
+.logsEmpty--error strong { color: var(--sev-error); }
 .traceButtonSpinner.is-visible { display: inline-block; }
 
 .logsPatterns { overflow: hidden; }
@@ -16007,10 +15945,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .logsPattern__sample { min-width: 0; overflow: hidden; color: var(--muted); font: 10.5px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .logsSparkline { display: block; }
 .logsSparkline__line { fill: none; stroke-width: 1.5; stroke-linejoin: round; }
-.logsSevStroke--error { stroke: var(--log-sev-error); }
-.logsSevStroke--warn { stroke: var(--log-sev-warn); }
-.logsSevStroke--info { stroke: var(--log-sev-info); }
-.logsSevStroke--debug { stroke: var(--log-sev-debug); }
+.logsSparkline__line[data-sev] { stroke: var(--sev-color); }
 
 .logsSidePanel {
   flex: 0 0 auto;
@@ -16069,7 +16004,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .logsField:focus-within .logsField__actions { opacity: 1; }
 .logsFieldAction { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
 .logsFieldAction:hover { border-color: var(--border); background: var(--buttonBg); color: var(--text); }
-.logsFieldAction.is-copied { color: #22c55e; }
+.logsFieldAction.is-copied { color: var(--success); }
 .logsFieldAction svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 
 .logsContext { display: flex; flex-direction: column; gap: 8px; }
@@ -16215,7 +16150,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 }
 .metricsCatalog__name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metricsCatalog__name mark,
-.metricsCatalog__serviceName mark { background: color-mix(in srgb, #f59e0b 36%, transparent); color: inherit; border-radius: 2px; }
+.metricsCatalog__serviceName mark { background: color-mix(in srgb, var(--warning) 36%, transparent); color: inherit; border-radius: 2px; }
 .metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 3px; }
 .metricsBadge {
   display: inline-flex;
@@ -16236,7 +16171,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .metricsBadge--exponential_histogram { color: color-mix(in srgb, var(--qchart-2) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-2) 40%, transparent); }
 .metricsBadge--summary { color: color-mix(in srgb, var(--qchart-7) 80%, var(--text)); border-color: color-mix(in srgb, var(--qchart-7) 40%, transparent); }
 .metricsEmpty { padding: 16px 12px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
-.metricsEmpty--error { color: color-mix(in srgb, #ef4444 70%, var(--text)); }
+.metricsEmpty--error { color: color-mix(in srgb, var(--danger) 70%, var(--text)); }
 .metricsEmpty__jump { display: flex; margin-top: 10px; height: auto; min-height: 28px; padding: 5px 10px; white-space: normal; text-align: left; font-size: 11px; }
 .metricsEmpty--panel { display: grid; place-items: center; min-height: 220px; font-size: 12px; }
 
@@ -16360,7 +16295,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   font-size: 11px;
   min-width: 0;
 }
-.metricsChip--not { border-color: color-mix(in srgb, #ef4444 45%, var(--border)); background: color-mix(in srgb, #ef4444 9%, transparent); }
+.metricsChip--not { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .metricsChip__key { font-weight: 700; white-space: nowrap; }
 .metricsChip__op { color: var(--muted); font-weight: 700; font-family: var(--mono); }
 .metricsChip__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
@@ -16425,8 +16360,8 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   gap: 2px;
   margin: 0 12px 6px;
   padding: 5px 8px;
-  border-left: 2px solid color-mix(in srgb, #f59e0b 70%, var(--border));
-  background: color-mix(in srgb, #f59e0b 8%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--warning) 70%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
   color: var(--text);
   font-size: 11px;
   line-height: 1.4;
@@ -16447,7 +16382,7 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
   text-align: center;
   pointer-events: none;
 }
-.metricsChart__state--error { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 8px; color: color-mix(in srgb, #ef4444 72%, var(--text)); font-size: 12px; pointer-events: auto; }
+.metricsChart__state--error { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 8px; color: color-mix(in srgb, var(--danger) 72%, var(--text)); font-size: 12px; pointer-events: auto; }
 .metricsChart__state--loading::after {
   content: "";
   display: block;
@@ -16778,14 +16713,6 @@ html[data-theme="light"] {
 .traceDurationViews__button:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: 1px; }
 
 .traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
-.traceHeatLegend__ramp .lvl-1 { background: var(--trace-heat-1); }
-.traceHeatLegend__ramp .lvl-2 { background: var(--trace-heat-2); }
-.traceHeatLegend__ramp .lvl-3 { background: var(--trace-heat-3); }
-.traceHeatLegend__ramp .lvl-4 { background: var(--trace-heat-4); }
-.traceHeatLegend__ramp .lvl-5 { background: var(--trace-heat-5); }
-.traceHeatLegend__ramp .lvl-6 { background: var(--trace-heat-6); }
-.traceHeatLegend__ramp .lvl-7 { background: var(--trace-heat-7); }
-.traceHeatLegend__ramp .lvl-8 { background: var(--trace-heat-8); }
 .chartCore__box.traceHeatDrag,
 .chartCore__region.traceHeatBrush { background: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); border: 1.5px dashed var(--trace-delta-selection); }
 .chartCore__region.traceHeatSelection { background: color-mix(in srgb, var(--trace-delta-selection) 12%, transparent); border: 2px solid var(--trace-delta-selection); }
@@ -16864,7 +16791,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvc__toolbar h2 { margin: 0; font-size: 13px; font-weight: 650; }
 .traceSvc__meta { color: var(--muted); font-size: 11px; }
 .traceSvc__status { flex: 1 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-.traceSvc__error { margin: 8px 0 0; color: var(--traceError); font-size: 12px; }
+.traceSvc__error { margin: 8px 0 0; color: var(--danger); font-size: 12px; }
 .traceSvcBadge {
   display: inline-flex;
   align-items: center;
@@ -16876,8 +16803,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   font-size: 10.5px;
   white-space: nowrap;
 }
-.traceSvcBadge--estimated { border-color: color-mix(in srgb, var(--traceWarn) 55%, var(--border)); color: color-mix(in srgb, var(--traceWarn) 75%, var(--text)); background: color-mix(in srgb, var(--traceWarn) 10%, transparent); }
-.traceSvcBadge--partial { border-color: color-mix(in srgb, var(--traceError) 55%, var(--border)); color: var(--traceError); }
+.traceSvcBadge--estimated { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); color: color-mix(in srgb, var(--warning) 75%, var(--text)); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.traceSvcBadge--partial { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); color: var(--danger); }
 .traceSvcAction {
   height: 22px;
   padding: 0 8px;
@@ -16911,7 +16838,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcTable th, .traceSvcTable td { padding: 5px 8px; border-bottom: 1px solid var(--rowDivider); text-align: left; white-space: nowrap; }
 .traceSvcTable thead th { position: sticky; top: 0; z-index: 1; padding-top: 7px; padding-bottom: 5px; background: var(--bg); color: var(--muted); font-size: 10.5px; font-weight: 650; }
 .traceSvcTable .is-num { text-align: right; }
-.traceSvcTable td.has-errors, .traceSvcStat.has-errors b { color: var(--traceError); }
+.traceSvcTable td.has-errors, .traceSvcStat.has-errors b { color: var(--danger); }
 .traceSvcSort { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .traceSvcSort:hover, .traceSvcSort.is-active { color: var(--text); }
 .traceSvcSort__dir { font-size: 8px; }
@@ -16928,8 +16855,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcTrend { width: 118px; padding-top: 2px !important; padding-bottom: 2px !important; }
 .traceSvcSpark { display: block; width: 112px; height: 24px; overflow: visible; }
 .traceSvcSpark__line { fill: none; stroke: var(--trace-service-color, var(--accentBorder)); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.traceSvcSpark--p95 .traceSvcSpark__line { stroke: #f58518; }
-.traceSvcSpark__errors { fill: none; stroke: var(--traceError); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.traceSvcSpark--p95 .traceSvcSpark__line { stroke: var(--pct-p95); }
+.traceSvcSpark__errors { fill: none; stroke: var(--danger); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .traceSvcLink { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted color-mix(in srgb, var(--muted) 70%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }
 
@@ -16945,7 +16872,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--panelBg);
-  box-shadow: -12px 0 32px rgba(0, 0, 0, .22);
+  box-shadow: var(--obs-shadow-drawer);
 }
 .traceSvcDetail[hidden] { display: none; }
 .traceSvcDetail__head { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -16957,7 +16884,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcStat span { color: var(--muted); font-size: 10px; }
 .traceSvcStat b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .traceSvcDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 12px 18px; }
-.traceSvcNote { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: color-mix(in srgb, var(--traceWarn) 75%, var(--text)); font-size: 11.5px; }
+.traceSvcNote { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: color-mix(in srgb, var(--warning) 75%, var(--text)); font-size: 11.5px; }
 .traceSvcCharts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .traceSvcChart { min-height: 158px; }
 .traceSvcChart > .tracesEmpty { min-height: 140px; }
@@ -16977,7 +16904,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcSlowest__link:hover { background: var(--rowHover); }
 .traceSvcSlowest__duration { text-align: right; font-variant-numeric: tabular-nums; }
 .traceSvcSlowest__op { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.traceSvcSlowest__error { color: var(--traceError); font-size: 10px; font-weight: 700; }
+.traceSvcSlowest__error { color: var(--danger); font-size: 10px; font-weight: 700; }
 .traceSvcSlowest__time { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .traceSvcSlowest code { color: var(--muted); font-size: 10.5px; }
 .traceSvcReleases { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -17048,7 +16975,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   cursor: pointer;
 }
 .traceSpanListRow:hover { background: var(--rowHover); }
-.traceSpanListRow.is-error { box-shadow: inset 2px 0 0 #ef4444; }
+.traceSpanListRow.is-error { box-shadow: inset 2px 0 0 var(--danger); }
 .traceSpanListRow.is-selected { background: color-mix(in srgb, var(--accentBorder) 16%, transparent); box-shadow: inset 3px 0 0 var(--accentBorder); }
 .traceSpanListRow__cell--time { color: var(--muted); font: 11.5px var(--mono); font-variant-numeric: tabular-nums; }
 .traceSpanListRow__cell--service { font-weight: 650; }
@@ -17088,7 +17015,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   color: var(--muted);
   font-size: 12px;
 }
-.traceSpanTable__foot.is-error { color: #ef4444; }
+.traceSpanTable__foot.is-error { color: var(--danger); }
 .traceSpanTable__spinner {
   width: 12px;
   height: 12px;
@@ -17163,7 +17090,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSpanPanel__fact dd code { min-width: 0; overflow: hidden; font-size: 11.5px; white-space: nowrap; text-overflow: ellipsis; }
 .traceSpanPanel__card.traceInspector { max-height: none; min-height: 0; margin: 0; overflow: visible; border: 0; background: transparent; }
 .traceSpanPanel__status { padding: 12px 0; color: var(--muted); font-size: 12px; }
-.traceSpanPanel__status.is-error { color: #ef4444; }
+.traceSpanPanel__status.is-error { color: var(--danger); }
 
 /* ==========================================================================
    Observability drawers: the span panel (Search tab, Spans mode), the
@@ -17204,7 +17131,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
     border-radius: 12px 12px 0 0;
     overflow: hidden;
     background: var(--panelBg);
-    box-shadow: 0 -14px 36px rgba(0, 0, 0, .32);
+    box-shadow: var(--obs-shadow-sheet);
   }
   .traceSpanPanel__head,
   .traceSvcDetail__head,
