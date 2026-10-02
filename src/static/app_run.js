@@ -609,6 +609,26 @@
     }
   }
 
+  // The server ends the response right after "done" (api_query_stream.cpp):
+  // closing the EventSource on "done" can beat the response's last chunk and
+  // abort a finished request (net::ERR_ABORTED). A stream that said "done" is
+  // closed once the server has ended it (the error event of an ended stream,
+  // fired before the browser would reconnect), or after STREAM_END_GRACE_MS
+  // if the server never ends it.
+  const STREAM_END_GRACE_MS = 2000;
+  function retireStream(es) {
+    if (activeEventSource === es) activeEventSource = null;
+    let timer = 0;
+    const close = () => {
+      clearTimeout(timer);
+      es.onerror = null;
+      try { es.close(); } catch { /* already closed */ }
+    };
+    if (es.readyState !== EventSource.OPEN) { close(); return; }
+    es.onerror = close;
+    timer = setTimeout(close, STREAM_END_GRACE_MS);
+  }
+
   function isFormatLocked() {
     const ta = dom.queryTextArea;
     if (!ta) return false;
@@ -1427,6 +1447,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       es.addEventListener("done", (ev) => {
         const data = parseSseJson(ev) || {};
         doneReceived = true;
+        // "done" is the last event: the stream closes once the server ends it.
+        retireStream(es);
         const st = data && data.status ? String(data.status) : "done";
 
         if (st) setQueryStatusText(st);
@@ -1462,7 +1484,6 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         // partially ingested response.
         Promise.resolve(streamSink.finalizeAfterDone()).then(() => {
           if (agg) agg.terminal = true;
-          closeActiveStream();
           resolve({ ...data, status: st });
         });
       });
