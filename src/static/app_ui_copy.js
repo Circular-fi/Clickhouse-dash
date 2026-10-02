@@ -20,6 +20,7 @@
   // announced "Copied" tip (ns.popover.flash; data-copied holds the state).
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
   const ui = (ns.ui = ns.ui || {});
 
   const FEEDBACK_MS = 1200;
@@ -53,7 +54,7 @@
   // The text a text button shows: its .uiCopy__label, or its own text when it
   // has no element children (an icon button keeps its icon and gets a bubble).
   function labelOf(control) {
-    const label = control.querySelector(":scope > .uiCopy__label");
+    const label = $(":scope > .uiCopy__label", control);
     if (label) return label;
     return control.children.length === 0 && control.textContent.trim() ? control : null;
   }
@@ -112,7 +113,7 @@
     if (className) el.classList.add(...className.split(/\s+/).filter(Boolean));
     if (!el.title) el.title = label;
     if (!el.getAttribute("aria-label")) el.setAttribute("aria-label", label);
-    if (!el.querySelector(".uiCopy__icon")) el.insertAdjacentHTML("afterbegin", ICON);
+    if (!$(".uiCopy__icon", el)) el.insertAdjacentHTML("afterbegin", ICON);
     el.addEventListener("click", async (event) => {
       event.stopPropagation();
       const text = await getText?.(event);
@@ -161,9 +162,9 @@
     let el = root;
     let main, toggle, menu;
     if (el) {
-      main = el.querySelector(".runSplit__main");
-      toggle = el.querySelector(".runSplit__toggle");
-      menu = el.querySelector(".runMenu");
+      main = $(".runSplit__main", el);
+      toggle = $(".runSplit__toggle", el);
+      menu = $(".runMenu", el);
     } else {
       el = document.createElement("div");
       el.className = `runSplit copySplit${className ? ` ${className}` : ""}`;
@@ -192,7 +193,7 @@
     const driver = menuDriver(el, main, toggle, menu);
     const byKey = {};
     for (const spec of items) {
-      const item = spec.el || (spec.id && el.querySelector(`#${CSS.escape(spec.id)}`)) || menu.appendChild(menuItem(spec));
+      const item = spec.el || (spec.id && $(`#${CSS.escape(spec.id)}`, el)) || menu.appendChild(menuItem(spec));
       byKey[spec.key || spec.id || spec.label] = item;
       item.addEventListener("click", async (event) => {
         driver.close({ immediate: true });

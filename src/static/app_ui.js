@@ -3,6 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { byId, $, $$ } = ns.dom;
 
   const { dom, state, storage, util, api } = ns;
 
@@ -452,7 +453,7 @@
     const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
     if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
     if (dom.pageSelectMenu) {
-      for (const b of dom.pageSelectMenu.querySelectorAll(".themeSelect__option[data-value]")) {
+      for (const b of $$(".themeSelect__option[data-value]", dom.pageSelectMenu)) {
         b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));
       }
     }
@@ -473,7 +474,7 @@
     if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);
 
     if (dom.themeSelectMenu) {
-      const btns = dom.themeSelectMenu.querySelectorAll(".themeSelect__option[data-value]");
+      const btns = $$(".themeSelect__option[data-value]", dom.themeSelectMenu);
       for (const b of btns) {
         const m = b.getAttribute("data-value");
         b.setAttribute("aria-selected", String(m === mode));
@@ -640,7 +641,7 @@
       <div id="queryLibraryViewSaved" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved">${ns.uiState.loadingHtml({ label: "Loading the library\u2026", compact: true })}</div>
       <div id="queryLibraryViewHistory" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden>${ns.uiState.loadingHtml({ label: "Loading the history\u2026", compact: true })}</div>`;
     for (const id of ["queryLibraryMenu", "queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
-      dom[id] = document.getElementById(id);
+      dom[id] = byId(id);
     }
     dom.queryLibraryButton.setAttribute("aria-controls", "queryLibraryMenu");
     queryLibraryDialog = ns.dialog.bind(parts.dialog, {
@@ -725,7 +726,7 @@
   function initQueryLibrary() {
     const mod = modifierKeyLabel();
     if (mod !== "Ctrl") {
-      for (const kbd of document.querySelectorAll(".queryKbd--mod")) kbd.textContent = mod;
+      for (const kbd of $$(".queryKbd--mod")) kbd.textContent = mod;
     }
     // The shortcut is told by the Run button's tooltip (no hint beside it).
     if (dom.runButton) dom.runButton.title = `Run (${mod}+Enter)`;
@@ -1131,7 +1132,7 @@
         }
       }
 
-      const handle = document.querySelector(".editorResizeHandle");
+      const handle = $(".editorResizeHandle");
       const target = getTarget();
       if (handle && target) {
         let drag = null;
@@ -1212,7 +1213,7 @@
     menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
     menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;
     if (dom.themeSelectMenu) {
-      const buttons = dom.themeSelectMenu.querySelectorAll(".themeSelect__option[data-value]");
+      const buttons = $$(".themeSelect__option[data-value]", dom.themeSelectMenu);
       for (const b of buttons) {
         b.addEventListener("click", () => {
           const mode = b.getAttribute("data-value");

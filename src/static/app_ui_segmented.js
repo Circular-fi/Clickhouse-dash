@@ -19,6 +19,7 @@
   // trusted inner markup, e.g. an icon before the label).
   const ns = window.ChDash;
   if (!ns) return;
+  const { $$ } = ns.dom;
 
   const dataKey = (attr) => `data-${attr.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
   // util.escapeHtml (app_util.js loads after this module, before any markup is built).
@@ -29,7 +30,7 @@
   }
 
   function optionsOf(group, attr) {
-    return group ? [...group.querySelectorAll(`[${dataKey(attr)}]`)] : [];
+    return group ? [...$$(`[${dataKey(attr)}]`, group)] : [];
   }
 
   function set(group, value, attr = "value") {

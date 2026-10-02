@@ -16,7 +16,7 @@
   const modePref = () => ns.storage.pref(ns.storage.KEYS.traceDurationView, "percentiles", { allowed: MODES });
   const MODES = ["percentiles", "heatmap"];
   const HEAT_LEVELS = 8;
-  const byId = (id) => document.getElementById(id);
+  const { byId, $ } = ns.dom;
 
   let ctx = null;
   let geo = null;
@@ -56,7 +56,7 @@
   // ------------------------------------------------------------ mode + URL
 
   function syncToggle() {
-    ns.segmented?.set(document.querySelector(".traceDurationViews"), hm.mode, "durationView");
+    ns.segmented?.set($(".traceDurationViews"), hm.mode, "durationView");
     const chart = ctx?.dom?.traceDurationChart;
     if (!chart) return;
     if (active()) {
@@ -187,7 +187,7 @@
     if (hm.error) {
       ctx.unmountChart(container);
       container.innerHTML = ns.uiState.errorHtml({ body: hm.error, compact: true, retry: { attrs: { "data-heatmap-retry": "" } } });
-      container.querySelector("[data-heatmap-retry]")?.addEventListener("click", () => { void load(); });
+      $("[data-heatmap-retry]", container)?.addEventListener("click", () => { void load(); });
       renderPanel();
       return;
     }
@@ -243,7 +243,7 @@
       onBrush: (r) => { hm.anchor = null; hm.cursor = null; select(r.box); },
       regions: regions(),
     });
-    let legend = container.querySelector(":scope > .traceHeatLegend");
+    let legend = $(":scope > .traceHeatLegend", container);
     if (!legend) {
       legend = document.createElement("div");
       legend.className = "traceChartLegend traceHeatLegend";
@@ -252,8 +252,8 @@
       live.setAttribute("aria-live", "polite");
       container.append(legend, live);
     }
-    const ramp = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}" style="background:${PALETTE[i]}"></i>`).join("");
-    legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${ramp}</span><span data-heat-max>${esc(fmt.count(maxCount))}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
+    const rampHtml = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}" style="background:${PALETTE[i]}"></i>`).join("");
+    legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${rampHtml}</span><span data-heat-max>${esc(fmt.count(maxCount))}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
     container.dataset.heatRows = String(rows);
     container.dataset.heatCols = String(cols);
     if (meta) {
@@ -336,7 +336,7 @@
   // ------------------------------------------------------- keys
 
   function announce(text) {
-    const live = ctx.dom.traceDurationChart?.querySelector(".traceHeatLive");
+    const live = $(".traceHeatLive", ctx.dom.traceDurationChart);
     if (live) live.textContent = text;
   }
 
@@ -575,7 +575,7 @@
   function install(context) {
     ctx = context;
     // Percentiles | Heatmap: the shared segmented control (app_ui_segmented.js).
-    ns.segmented?.bind(document.querySelector(".traceDurationViews"), { attr: "durationView", onChange: (mode) => { setMode(mode); return false; } });
+    ns.segmented?.bind($(".traceDurationViews"), { attr: "durationView", onChange: (mode) => { setMode(mode); return false; } });
     ctx.dom.traceDurationChart?.addEventListener("keydown", onKeydown);
     // The canvas keeps the pointer: a press focuses the card for the keys.
     ctx.dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) ctx.dom.traceDurationChart.focus({ preventScroll: true }); });

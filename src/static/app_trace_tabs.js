@@ -28,14 +28,14 @@
   let ctx = null;
   let meta = null;
 
-  const byId = (id) => document.getElementById(id);
+  const { byId, $ } = ns.dom;
   const find = (id) => tabs.find((tab) => tab.id === id) || null;
   const available = (tab) => !!tab && (!meta || typeof tab.available !== "function" || tab.available(meta) !== false);
   const valid = (id) => (available(find(id)) ? id : SEARCH_TAB);
 
   function panelOf(tab) {
     if (tab.panelId) return byId(tab.panelId);
-    return tab.panelSelector ? document.querySelector(tab.panelSelector) : null;
+    return tab.panelSelector ? $(tab.panelSelector) : null;
   }
 
   function register(tab) {
@@ -56,7 +56,7 @@
     ns.tabs?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", tier: "view", selected: current });
     // A narrow window scrolls the tab row sideways: keep the selected tab in view.
     const row = bar.parentElement;
-    const active = bar.querySelector(".is-active");
+    const active = $(".is-active", bar);
     if (active && row && row.scrollWidth > row.clientWidth) active.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 

@@ -67,6 +67,7 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
   if (ns.layers) return;
+  const { $$ } = ns.dom;
 
   // ------------------------------------------------------------ lifecycle
 
@@ -161,7 +162,7 @@
   }
 
   function tabbables(root) {
-    return [...root.querySelectorAll(FOCUSABLE)].filter((node) => focusable(node) && node.tabIndex >= 0);
+    return [...$$(FOCUSABLE, root)].filter((node) => focusable(node) && node.tabIndex >= 0);
   }
 
   function textField(node) {

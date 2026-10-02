@@ -33,6 +33,7 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
   if (ns.dialog) return;
+  const { $, $$ } = ns.dom;
   const { h } = ns;
 
   // Open dialogs, bottom first (the top layer order).
@@ -123,7 +124,7 @@
       if (index < 0) return;
       stack.splice(index, 1);
       // Toasts and other floating children move to the dialog now on top.
-      for (const node of dialog.querySelectorAll(":scope > [data-dialog-float]")) host().appendChild(node);
+      for (const node of $$(":scope > [data-dialog-float]", dialog)) host().appendChild(node);
       // The layer gives the focus back: to the opener, else to the first
       // usable element of fallbackFocus.
       layer?.close({ restoreFocus: restore, force: true });
@@ -157,7 +158,7 @@
       pressedBackdrop = false;
       if (backdrop) close();
     });
-    (closeButton || dialog.querySelector(":scope > .uiDialog__frame > .uiDialog__head .uiDialog__close"))?.addEventListener("click", () => close());
+    (closeButton || $(":scope > .uiDialog__frame > .uiDialog__head .uiDialog__close", dialog))?.addEventListener("click", () => close());
 
     function isOpen() {
       return dialog.open;
@@ -236,8 +237,8 @@
       const showError = (err) => {
         error.textContent = err instanceof Error ? err.message : String(err || "The change failed.");
         error.hidden = false;
-        for (const input of frame.querySelectorAll("[aria-invalid]")) input.removeAttribute("aria-invalid");
-        const field = err && err.field ? frame.querySelector(`[data-field="${String(err.field).replace(/["\\]/g, "")}"]`) : null;
+        for (const input of $$("[aria-invalid]", frame)) input.removeAttribute("aria-invalid");
+        const field = err && err.field ? $(`[data-field="${String(err.field).replace(/["\\]/g, "")}"]`, frame) : null;
         if (field) {
           field.setAttribute("aria-invalid", "true");
           field.focus();
@@ -272,8 +273,8 @@
       }
       controller.open({
         focus: () => (typeof focus === "function" ? focus(frame) : focus)
-          || frame.querySelector("[autofocus]")
-          || frame.querySelector(".uiDialog__body input, .uiDialog__body textarea, .uiDialog__body select")
+          || $("[autofocus]", frame)
+          || $(".uiDialog__body input, .uiDialog__body textarea, .uiDialog__body select", frame)
           || submit?.button,
       });
       const first = document.activeElement;
@@ -292,7 +293,7 @@
         { label: cancelLabel, value: null },
         { label: confirmLabel, value: "confirm", kind: danger ? "danger" : "primary", submit: true },
       ],
-      focus: danger ? (frame) => frame.querySelector(".uiDialog__foot .button:not(.uiDialog__submit)") : null,
+      focus: danger ? (frame) => $(".uiDialog__foot .button:not(.uiDialog__submit)", frame) : null,
     });
     return answer !== null;
   }

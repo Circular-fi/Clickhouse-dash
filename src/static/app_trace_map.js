@@ -39,7 +39,7 @@
 
   let ctx = null;
   let ctl = null;
-  const byId = (id) => document.getElementById(id);
+  const { byId, $ } = ns.dom;
   const esc = (value) => ctx.esc(value);
   const fmt = ns.format;
   const palette = ns.palette;
@@ -766,7 +766,7 @@
       describe: describeNode,
       onActivate: (id) => {
         select({ kind: "node", id });
-        byId("traceMapPanel")?.querySelector("button")?.focus?.({ preventScroll: true });
+        $("button", byId("traceMapPanel"))?.focus?.({ preventScroll: true });
       },
       onEscape: () => {
         if (!map.selected) return false;

@@ -33,6 +33,7 @@
   //       region (pages never mark whole panes live).
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : String(value));
 
@@ -87,7 +88,7 @@
     container.innerHTML = blockHtml(kind, options);
     const block = container.lastElementChild;
     const actions = actionsOf(options);
-    const buttons = block ? block.querySelectorAll(".uiState__action") : [];
+    const buttons = block ? $$(".uiState__action", block) : [];
     actions.forEach((action, i) => {
       if (typeof action.onClick === "function" && buttons[i]) buttons[i].addEventListener("click", (event) => action.onClick(event));
     });
@@ -155,7 +156,7 @@
     else el.removeAttribute("aria-busy");
     if (el.tagName === "BUTTON") {
       el.disabled = active;
-      if (active && !el.querySelector(":scope > .uiSpin")) el.insertAdjacentHTML("afterbegin", SPINNER);
+      if (active && !$(":scope > .uiSpin", el)) el.insertAdjacentHTML("afterbegin", SPINNER);
     }
     if (active && label) announce(label);
   }

@@ -7,6 +7,7 @@
   // app_traces.js calls install(ctx) with its model and helpers at init.
   const ns = window.ChDash;
   if (!ns) return;
+  const { byId, $, $$ } = ns.dom;
 
   let ctx = null;
   const esc = (value) => ctx.esc(value);
@@ -294,7 +295,7 @@
   }
 
   function renderHighlights(cache) {
-    const host = document.getElementById("traceHighlights");
+    const host = byId("traceHighlights");
     if (!host) return;
     const list = cache ? traceHighlights(cache) : [];
     host.hidden = !list.length;
@@ -357,7 +358,7 @@
     const cache = ctx.activeTraceCache();
     const traceId = String(cache.trace?.trace_id || "");
     const state = linkedFromState.get(linkKey(traceId, spanId));
-    document.querySelectorAll(".traceLinkedFrom[data-linked-from-span]").forEach((el) => {
+    $$(".traceLinkedFrom[data-linked-from-span]").forEach((el) => {
       if (el.getAttribute("data-linked-from-span") === spanId) el.innerHTML = linkedFromBodyHtml(state, cache);
     });
   }
@@ -420,7 +421,7 @@
   };
 
   function panel() {
-    let el = document.getElementById("traceContextPanel");
+    let el = byId("traceContextPanel");
     if (el) return el;
     el = document.createElement("aside");
     el.id = "traceContextPanel";
@@ -498,7 +499,7 @@
     const layer = contextLayer;
     contextLayer = null;
     layer?.close();
-    const el = document.getElementById("traceContextPanel");
+    const el = byId("traceContextPanel");
     if (el) { el.hidden = true; el.replaceChildren(); }
     document.body.classList.remove("has-trace-context");
     context.returnFocus = null;
@@ -553,7 +554,7 @@
     }
     context.loading = "";
     renderContext();
-    if (direction === "around") document.querySelector("#traceContextPanel tr.is-anchor")?.scrollIntoView?.({ block: "center" });
+    if (direction === "around") $("#traceContextPanel tr.is-anchor")?.scrollIntoView?.({ block: "center" });
   }
 
   function signedOffset(row) {
@@ -574,11 +575,11 @@
   }
 
   function renderContext() {
-    const el = document.getElementById("traceContextPanel");
+    const el = byId("traceContextPanel");
     if (!el || !context.open || !context.anchor) return;
     const a = context.anchor;
     // The window and filter rows: shared segmented controls (app_ui_segmented.js).
-    const windows = ns.segmented.html(CONTEXT_WINDOWS.map(([ms, label]) => ({ value: ms, label })), { attr: "contextWindow", value: context.windowMs, size: "compact", label: "Time window", className: "traceContextSeg" });
+    const windowsHtml = ns.segmented.html(CONTEXT_WINDOWS.map(([ms, label]) => ({ value: ms, label })), { attr: "contextWindow", value: context.windowMs, size: "compact", label: "Time window", className: "traceContextSeg" });
     const unavailable = {
       service: a.service ? "" : "This span has no service name",
       host: a.host ? "" : "This span has no host.name resource attribute",
@@ -586,9 +587,9 @@
       attribute: a.attributes.length ? "" : "This span has no attributes",
     };
     const describe = { any: "Every span in the window", service: `service = ${a.service}`, host: `host.name = ${a.host}`, pod: `k8s.pod.name = ${a.pod}`, attribute: "The attribute picked below" };
-    const filters = ns.segmented.html(CONTEXT_FILTERS.map(([value, label]) => ({ value, label, disabled: !!unavailable[value], title: unavailable[value] || describe[value] })),
+    const filtersHtml = ns.segmented.html(CONTEXT_FILTERS.map(([value, label]) => ({ value, label, disabled: !!unavailable[value], title: unavailable[value] || describe[value] })),
       { attr: "contextFilter", value: context.filter, size: "compact", label: "Filter", className: "traceContextSeg traceContextSeg--filters" });
-    const attributePicker = context.filter === "attribute"
+    const attributePickerHtml = context.filter === "attribute"
       ? `<label class="traceContextPanel__attr"><span>Attribute</span><select data-context-attribute>${a.attributes.map((item) => {
           const value = `${item.scope}\u001f${item.key}`;
           return `<option value="${esc(value)}"${value === context.attribute ? " selected" : ""}>${esc(`${item.scope === "resource" ? "resource" : "span"} · ${item.key} = ${item.value.length > 60 ? `${item.value.slice(0, 60)}\u2026` : item.value}`)}</option>`;
@@ -608,12 +609,12 @@
         <td class="traceContextRow__status">${status === "Unset" ? `<span class="traceContextRow__unset">${fmt.EMPTY}</span>` : ns.badge.statusHtml(status)}</td>
       </tr>`;
     }).join("");
-    const pageButton = (direction, label, shown) => (shown
+    const pageButtonHtml = (direction, label, shown) => (shown
       ? `<button type="button" class="button button--small traceContextPanel__more" data-context-more="${direction}"${context.loading ? " disabled" : ""}>${context.loading === direction ? "Loading\u2026" : label}</button>`
       : "");
     const filterLabel = CONTEXT_FILTERS.find(([value]) => value === context.filter)?.[1] || "";
     const windowLabel = CONTEXT_WINDOWS.find(([ms]) => ms === context.windowMs)?.[1] || "";
-    const status = context.error
+    const statusHtml = context.error
       ? `<p class="traceContextPanel__error" role="alert">${esc(context.error)} <button type="button" class="button button--small" data-context-retry>Retry</button></p>`
       : context.loading === "around"
         ? '<p class="traceContextPanel__status" role="status">Loading spans\u2026</p>'
@@ -625,15 +626,15 @@
         <button type="button" class="closeCross uiDetail__close" data-context-close aria-label="Close surrounding context" title="Close (Esc)">×</button>
       </header>
       <div class="traceContextPanel__controls">
-        ${windows}
-        ${filters}
-        ${attributePicker}
+        ${windowsHtml}
+        ${filtersHtml}
+        ${attributePickerHtml}
       </div>
-      ${status}
+      ${statusHtml}
       <div class="traceContextPanel__body">
-        ${pageButton("newer", "Load newer", context.hasNewer)}
+        ${pageButtonHtml("newer", "Load newer", context.hasNewer)}
         ${context.rows.length ? `<table class="traceContextTable dataTable dataTable--compact"><thead><tr><th scope="col" class="num" title="Start time relative to this span">Offset</th><th scope="col" class="num">Time</th><th scope="col">Service</th><th scope="col">Operation</th><th scope="col" class="num">Duration</th><th scope="col">Status</th></tr></thead><tbody>${rowsHtml}</tbody></table>` : ""}
-        ${pageButton("older", "Load older", context.hasOlder)}
+        ${pageButtonHtml("older", "Load older", context.hasOlder)}
       </div>`;
   }
 
@@ -722,7 +723,7 @@
       const holder = toggle.closest(".traceStack");
       if (item && holder) {
         holder.outerHTML = stackHtml(item, spanId, index);
-        card.querySelector(`[data-exception-index="${index}"] [data-stack-${raw ? "raw" : "toggle"}]`)?.focus({ preventScroll: true });
+        $(`[data-exception-index="${index}"] [data-stack-${raw ? "raw" : "toggle"}]`, card)?.focus({ preventScroll: true });
       }
       return true;
     }
@@ -753,7 +754,7 @@
 
   function install(appCtx) {
     ctx = appCtx;
-    document.getElementById("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
+    byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
     window.addEventListener("chdash:host-changed", () => { linkedFromState.clear(); if (context.open) closeContext(); });
   }
 

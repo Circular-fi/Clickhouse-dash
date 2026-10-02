@@ -12,6 +12,7 @@
   // tiles beside it (above it when the pane is narrow).
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const PREVIEW_LIMITS = [50, 100, 500];
   const previewLimitPref = () => ns.storage.pref(ns.storage.KEYS.explorerPreviewLimit, 100);
@@ -796,7 +797,7 @@
                 toggle.textContent = opening ? "\u2304" : "\u203a";
                 toggle.setAttribute("aria-expanded", String(opening));
                 toggle.setAttribute("aria-label", `${opening ? "Collapse" : "Expand"} ${item.tuple_root}`);
-                for (const row of table?.querySelectorAll?.("tbody tr[data-tuple-parent]") || []) {
+                for (const row of $$("tbody tr[data-tuple-parent]", table) || []) {
                   if (row.dataset.tupleParent === item.tuple_root) row.hidden = !opening;
                 }
               });
@@ -893,7 +894,7 @@
           tr.dataset.tupleParent = item.tuple_parent;
           tr.classList.add("explorerStorageTupleChild");
           tr.hidden = !tupleExpanded.has(item.tuple_parent);
-          const indexCell = tr.querySelector(".dataTable__rowNum");
+          const indexCell = $(".dataTable__rowNum", tr);
           if (indexCell) {
             indexCell.textContent = "";
             indexCell.setAttribute("aria-hidden", "true");
@@ -1771,9 +1772,9 @@
       // The shared read-only SQL block (ui.sqlBlock): the editor's highlighter,
       // a line gutter and the copy button; it grows with the DDL.
       const wrap = ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" });
-      wrap.querySelector(".sqlBlock__gutter")?.classList.add("explorerDdlGutter");
-      wrap.querySelector(".sqlBlock__body")?.classList.add("explorerDdl");
-      wrap.querySelector(".sqlBlock__copy")?.classList.add("explorerDdlCopy");
+      $(".sqlBlock__gutter", wrap)?.classList.add("explorerDdlGutter");
+      $(".sqlBlock__body", wrap)?.classList.add("explorerDdl");
+      $(".sqlBlock__copy", wrap)?.classList.add("explorerDdlCopy");
       container.appendChild(wrap);
     }
 

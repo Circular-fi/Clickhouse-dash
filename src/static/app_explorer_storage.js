@@ -25,6 +25,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
 
   const STORAGE_CLIENT_TTL_MS = 30000;
   const TABLE_CLIENT_TTL_MS = 30000;
@@ -400,7 +401,7 @@
     refresh.type = "button";
     refresh.title = "Refresh storage";
     refresh.setAttribute("aria-label", "Refresh storage");
-    refresh.innerHTML = '<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>';
+    h.replace(refresh, h.html('<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>'));
     actions.append(openTable, refresh);
     header.append(heading, actions);
 
@@ -458,7 +459,7 @@
     render();
     void ensureViewData(false);
     if (notify) view.options.onScopeChange?.({ ...next });
-    view.root.querySelector(".explorerStorageView__list")?.scrollIntoView?.({ block: "nearest" });
+    $(".explorerStorageView__list", view.root)?.scrollIntoView?.({ block: "nearest" });
   }
 
   function sortedRows(level, rows, total) {

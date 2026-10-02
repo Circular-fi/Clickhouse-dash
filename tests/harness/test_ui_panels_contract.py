@@ -98,8 +98,8 @@ def test_the_left_lists_are_side_panel_shells():
             assert head
         assert html.count('class="uiSide__search') == html.count('class="uiSide__head')
     facets = read("src/static/app_facet_panel.js")
-    assert "const side = ns.sidePanel.mount(byId(\"panel\"), {" in facets
-    assert "ns.sidePanel.mount(document.getElementById(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
+    assert "const side = ns.sidePanel.mount(part(\"panel\"), {" in facets
+    assert "ns.sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
     assert "sidePanels[id] = ns.sidePanel.mount(pane, {" in read("src/static/app_explorer.js")
     css = read("src/static/style.css")
     # The former per-panel frames are gone.

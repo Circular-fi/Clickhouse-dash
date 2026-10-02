@@ -10,6 +10,7 @@
   // filtered; the panel calls back on include / exclude.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
 
   const KEYS_PAGE = 20;
   const VALUE_LIMITS = [10, 50, 200, 500];
@@ -43,7 +44,7 @@
   //   onInclude(scope, key, value, checked), onExclude(scope, key, value)
   function create(options) {
     const o = options;
-    const byId = (name) => document.getElementById(o.ids[name]);
+    const part = (name) => ns.dom.byId(o.ids[name]);
     const [one, many] = o.noun;
     // util.latest keys: this panel's keys request, and one per expanded key.
     const latestKey = `facets.${o.ids.panel}`;
@@ -81,9 +82,9 @@
       if (state.filters && state.filterKey !== o.filterKey(state.filters)) void load(state.filters);
       else render();
     };
-    const side = ns.sidePanel.mount(byId("panel"), {
+    const side = ns.sidePanel.mount(part("panel"), {
       label: o.label.charAt(0).toUpperCase() + o.label.slice(1),
-      collapse: { button: byId("toggle"), storeKey: o.collapsedStoreKey, rootClass: o.collapsedClass, onChange: (value) => { if (!value) unfolded(); } },
+      collapse: { button: part("toggle"), storeKey: o.collapsedStoreKey, rootClass: o.collapsedClass, onChange: (value) => { if (!value) unfolded(); } },
       drawer: o.drawerHost ? { host: o.drawerHost, onChange: (open) => { if (open) unfolded(); } } : null,
     });
 
@@ -100,7 +101,7 @@
     // the expanded keys. Skipped while the sidebar is folded.
     async function load(filters) {
       state.filters = filters;
-      const panel = byId("panel");
+      const panel = part("panel");
       const enabled = o.enabled ? o.enabled() !== false : true;
       if (panel) panel.hidden = !enabled;
       if (!enabled || collapsed()) return;
@@ -212,8 +213,8 @@
     }
 
     function render() {
-      const list = byId("list");
-      const meta = byId("meta");
+      const list = part("list");
+      const meta = part("meta");
       if (!list) return;
       if (meta) {
         meta.textContent = state.loading ? "Loading\u2026" : state.keys.length ? `${state.estimated ? "\u2248" : ""}${compact(state.sampled)} ${state.sampled === 1 ? one : many}` : "";
@@ -240,10 +241,10 @@
             : ui.emptyHtml({ body: `No ${o.label} in the matching ${many}.`, compact: true });
         return;
       }
-      const more = rest.length > shown.length
+      const moreHtml = rest.length > shown.length
         ? `<button type="button" class="traceFacets__more" data-facet-more-keys>Load more (${rest.length - shown.length})</button>`
         : "";
-      list.innerHTML = `${pinned.length ? `<div class="traceFacets__group traceFacets__group--pinned">${pinned.map((item) => facetHtml(item, true)).join("")}</div>` : ""}<div class="traceFacets__group">${shown.map((item) => facetHtml(item, false)).join("")}</div>${more}`;
+      list.innerHTML = `${pinned.length ? `<div class="traceFacets__group traceFacets__group--pinned">${pinned.map((item) => facetHtml(item, true)).join("")}</div>` : ""}<div class="traceFacets__group">${shown.map((item) => facetHtml(item, false)).join("")}</div>${moreHtml}`;
     }
 
     function facetOf(element) {
@@ -258,7 +259,7 @@
       if (!target) return;
       if (target.closest("[data-facet-more-keys]")) { state.shown += KEYS_PAGE; render(); return; }
       if (target.closest("[data-facets-retry]")) { if (state.filters) void load(state.filters); return; }
-      if (target.closest("[data-facets-clear-query]")) { searchField?.clear(); byId("search")?.focus(); return; }
+      if (target.closest("[data-facets-clear-query]")) { searchField?.clear(); part("search")?.focus(); return; }
       const facet = facetOf(target);
       if (!facet) return;
       const id = facetId(facet.scope, facet.key);
@@ -269,7 +270,7 @@
           void loadValues(facet.scope, facet.key);
         }
         render();
-        byId("list")?.querySelector(`[data-facet-key="${CSS.escape(facet.key)}"][data-facet-scope="${CSS.escape(facet.scope)}"] [data-facet-expand]`)?.focus({ preventScroll: true });
+        $(`[data-facet-key="${CSS.escape(facet.key)}"][data-facet-scope="${CSS.escape(facet.scope)}"] [data-facet-expand]`, part("list"))?.focus({ preventScroll: true });
         return;
       }
       if (target.closest("[data-facet-pin]")) {
@@ -309,9 +310,9 @@
       render();
     }
 
-    byId("list")?.addEventListener("click", onClick);
-    byId("list")?.addEventListener("change", onChange);
-    searchField = ns.search.bind(byId("search"), (value) => { state.query = String(value || ""); state.shown = KEYS_PAGE; render(); });
+    part("list")?.addEventListener("click", onClick);
+    part("list")?.addEventListener("change", onChange);
+    searchField = ns.search.bind(part("search"), (value) => { state.query = String(value || ""); state.shown = KEYS_PAGE; render(); });
 
     return {
       load,

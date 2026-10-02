@@ -7,6 +7,7 @@
   // so relative ranges follow the clock. All dates are browser-local time,
   // like the timestamps the page displays.
   const ns = (window.ChDash = window.ChDash || {});
+  const { $, $$ } = ns.dom;
 
   const UNITS = "yMwdhms";
   const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
@@ -284,8 +285,8 @@
         <button type="button" class="timeCalendar__nav" data-cal-nav="12" aria-label="Next year" title="Next year">${ICONS.nextYear}</button>
       </div>
       <div class="timeCalendar__grid" role="grid" aria-label="Calendar"></div>`;
-    const title = calendar.querySelector(".timeCalendar__title");
-    const grid = calendar.querySelector(".timeCalendar__grid");
+    const title = $(".timeCalendar__title", calendar);
+    const grid = $(".timeCalendar__grid", calendar);
 
     const midnight = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d; };
     const selection = () => {
@@ -326,7 +327,7 @@
       const preview = picking && cal.hover != null && cal.hover >= startDay && cal.hover - startMs < limit ? cal.hover : null;
       const hi = preview != null ? preview : (Number.isFinite(endDay) && (!picking || endMs - startMs <= limit) ? endDay : NaN);
       const focusMs = cal.focus ? cal.focus.getTime() : NaN;
-      for (const day of grid.querySelectorAll("[data-day]")) {
+      for (const day of $$("[data-day]", grid)) {
         const t = Number(day.dataset.ms);
         const disabled = picking && t - startMs >= limit;
         day.classList.toggle("is-today", t === today);
@@ -340,7 +341,7 @@
         day.setAttribute("aria-selected", t === startDay || t === hi ? "true" : "false");
         day.tabIndex = t === focusMs ? 0 : -1;
       }
-      if (!grid.querySelector('[data-day][tabindex="0"]')) grid.querySelector("[data-day]:not(.is-outside)")?.setAttribute("tabindex", "0");
+      if (!$('[data-day][tabindex="0"]', grid)) $("[data-day]:not(.is-outside)", grid)?.setAttribute("tabindex", "0");
     }
 
     function showMonth(date) {
@@ -365,7 +366,7 @@
       cal.focus = midnight(date.getTime());
       if (cal.mode === "end") cal.hover = cal.focus.getTime();
       showMonth(cal.focus);
-      if (moveFocus) grid.querySelector(`[data-day="${dayKey(cal.focus)}"]`)?.focus({ preventScroll: true });
+      if (moveFocus) $(`[data-day="${dayKey(cal.focus)}"]`, grid)?.focus({ preventScroll: true });
     }
 
     function setError(node, input, message) {
@@ -636,10 +637,10 @@
     quickSearch.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        lists.querySelector(".timeRangeList__item")?.click();
+        $(".timeRangeList__item", lists)?.click();
       } else if (event.key === "ArrowDown") {
         event.preventDefault();
-        lists.querySelector(".timeRangeList__item")?.focus({ preventScroll: true });
+        $(".timeRangeList__item", lists)?.focus({ preventScroll: true });
       }
     });
     lists.addEventListener("click", (event) => {
@@ -651,7 +652,7 @@
     });
     lists.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      const items = [...lists.querySelectorAll(".timeRangeList__item")];
+      const items = [...$$(".timeRangeList__item", lists)];
       const index = items.indexOf(document.activeElement);
       if (index < 0) return;
       event.preventDefault();
@@ -710,15 +711,15 @@
   // Returns the picker and its elements (el).
   function create(root, options) {
     const p = String(options.idPrefix || "timeRange");
-    const select = root.querySelector(":scope > select");
-    const button = root.querySelector(":scope > .tracePicker__button");
-    let menu = root.querySelector(":scope > .timeRangePanel");
+    const select = $(":scope > select", root);
+    const button = $(":scope > .tracePicker__button", root);
+    let menu = $(":scope > .timeRangePanel", root);
     if (!menu) {
       root.insertAdjacentHTML("beforeend", panelHtml(p));
       menu = root.lastElementChild;
     }
     button.setAttribute("aria-controls", menu.id);
-    const part = (suffix) => menu.querySelector(`#${p}${suffix}`);
+    const part = (suffix) => $(`#${p}${suffix}`, menu);
     const el = {
       button, menu, select,
       fromInput: part("RangeStart"),

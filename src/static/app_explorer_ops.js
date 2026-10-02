@@ -14,6 +14,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
 
   const AUTO_REFRESH_MS = 5000;
   const autoRefreshPref = () => ns.storage.pref(ns.storage.KEYS.explorerOpsAutoRefresh, false);
@@ -432,7 +433,7 @@
     const withData = sections.filter((item) => item.items.length && !unavailable.has(item.key));
     withData.sort((a, b) => Number(b.warn(b.items)) - Number(a.warn(a.items)));
     const keeper = renderKeeper();
-    const keeperProblem = keeper && keeper.querySelector(".explorerOpsSection__count.is-warning");
+    const keeperProblem = keeper && $(".explorerOpsSection__count.is-warning", keeper);
     if (keeper && keeperProblem) body.appendChild(keeper);
     for (const item of withData) body.appendChild(item.render(item.items));
     if (keeper && !keeperProblem) body.appendChild(keeper);
@@ -464,7 +465,7 @@
     refresh.id = "explorerOpsRefreshButton";
     refresh.title = "Refresh server operations";
     refresh.setAttribute("aria-label", "Refresh server operations");
-    refresh.innerHTML = '<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>';
+    h.replace(refresh, h.html('<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>'));
     actions.append(option, refresh);
     header.append(heading, actions);
     // Not a live region: the auto-refresh would read the tables again every time.
@@ -474,7 +475,7 @@
     view = {
       container,
       root,
-      meta: heading.querySelector(".explorerOpsView__meta"),
+      meta: $(".explorerOpsView__meta", heading),
       body,
       refresh,
       autoRefreshInput,

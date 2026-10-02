@@ -10,6 +10,7 @@
   // range, pickers and chips apply here as span filters of the entry spans.
   const ns = window.ChDash;
   if (!ns?.traceTabs) return;
+  const { byId, $, $$ } = ns.dom;
 
   const SORT_KEYS = ["name", "rate", "errors", "p50", "p95", "p99", "time"];
   const DEFAULT_SORT = { key: "time", dir: "desc" };
@@ -303,11 +304,11 @@
     const bucket = payload ? fmt.duration.fromMs(Number(payload.bucket_ms || 60000)) : "";
     const timing = payload?.timing_ms?.total != null ? ` · ${fmt.duration.fromMs(Number(payload.timing_ms.total))}` : "";
     const meta = payload ? `${view.scope === "root" ? "root spans" : "entry spans"} · ${bucket} buckets${timing}` : "";
-    let body;
-    if (view.error && !payload) body = failedHtml(view.error, "list");
-    else if (!payload) body = view.loading ? ns.uiState.loadingHtml({ label: "Loading services\u2026" }) : emptyHtml("Search to load services.");
-    else if (!count) body = emptyHtml(`No ${view.scope === "root" ? "root" : "entry"} spans match in this range.`);
-    else body = tableHtml(rows);
+    let bodyHtml;
+    if (view.error && !payload) bodyHtml = failedHtml(view.error, "list");
+    else if (!payload) bodyHtml = view.loading ? ns.uiState.loadingHtml({ label: "Loading services\u2026" }) : emptyHtml("Search to load services.");
+    else if (!count) bodyHtml = emptyHtml(`No ${view.scope === "root" ? "root" : "entry"} spans match in this range.`);
+    else bodyHtml = tableHtml(rows);
     releaseDetailCharts();
     // A re-render (Back / Forward, a new answer) keeps the focus on its row.
     const active = document.activeElement;
@@ -315,7 +316,7 @@
     const shell = skeleton();
     shell.classList.toggle("is-loading", view.loading);
     shell.setAttribute("aria-busy", view.loading ? "true" : "false");
-    shell.querySelector(":scope > .traceSvc__main").innerHTML = `
+    $(":scope > .traceSvc__main", shell).innerHTML = `
       <div class="traceSvc__toolbar">
         <h2 id="traceSvcCount">${payload ? `${fmt.count(count)} Service${count === 1 ? "" : "s"}` : "Services"}</h2>
         <span class="traceSvc__meta" title="Entry spans: SpanKind Server / Consumer (and SPAN_KIND_* spellings) or root spans. The search filters apply to these spans.">${esc(meta)}</span>
@@ -323,8 +324,8 @@
         ${scopeHtml()}
       </div>
       ${view.error && payload ? `<div class="traceSvc__error" role="alert">${esc(view.error)}</div>` : ""}
-      <div class="traceSvc__table">${body}</div>`;
-    if (focusedRow != null) root.querySelector(`[data-svc-row="${CSS.escape(focusedRow)}"]`)?.focus({ preventScroll: true });
+      <div class="traceSvc__table">${bodyHtml}</div>`;
+    if (focusedRow != null) $(`[data-svc-row="${CSS.escape(focusedRow)}"]`, root)?.focus({ preventScroll: true });
     renderDetail();
   }
 
@@ -336,7 +337,7 @@
   const svcParam = ns.router.owner("traces").panel("svc");
 
   function skeleton() {
-    let shell = root.querySelector(":scope > .traceSvc");
+    let shell = $(":scope > .traceSvc", root);
     if (shell) return shell;
     root.innerHTML = '<div class="traceSvc"><div class="traceSvc__main"></div></div>';
     shell = root.firstElementChild;
@@ -345,7 +346,7 @@
       id: "traceSvcDetail",
       className: "uiDetail--sticky traceSvcDetail",
       closeLabel: "Close service details",
-      returnFocus: () => (view.detailName ? root.querySelector(`[data-svc-row="${CSS.escape(view.detailName)}"]`) : null),
+      returnFocus: () => (view.detailName ? $(`[data-svc-row="${CSS.escape(view.detailName)}"]`, root) : null),
       onClose: () => { if (view.detailName) closeDetail({ fromPanel: true }); },
     });
     detailPanel.closeButton?.setAttribute("data-svc-close", "");
@@ -400,7 +401,7 @@
 
   // The detail's charts leave with it (their engine state is released).
   function releaseDetailCharts() {
-    detailPanel?.el.querySelectorAll("[data-svc-chart]").forEach((el) => ctx.chart.unmountChart(el));
+    $$("[data-svc-chart]", detailPanel?.el).forEach((el) => ctx.chart.unmountChart(el));
   }
 
   function drawDetailCharts() {
@@ -418,7 +419,7 @@
     // (table row and detail header): 29/min there, a per-minute axis here.
     const unit = rateUnit(detailRow(payload, view.detailName)?.rate);
     const perUnit = unit.per / bucketSeconds;
-    const rate = panel.querySelector('[data-svc-chart="rate"]');
+    const rate = $('[data-svc-chart="rate"]', panel);
     if (rate) detailChart(rate, {
       start, end, bucketMs, points, type: "bar", axis: "rate", releases, footer: spansText, format: (v) => rateText(v / unit.per, unit),
       series: [
@@ -426,12 +427,12 @@
         { id: "errors", label: "Errors", color: "var(--danger)", value: (p) => p.errors * perUnit },
       ],
     });
-    const errors = panel.querySelector('[data-svc-chart="errors"]');
+    const errors = $('[data-svc-chart="errors"]', panel);
     if (errors) detailChart(errors, {
       start, end, bucketMs, points, type: "line", axis: "percent", releases, footer: spansText, format: percentText,
       series: [{ id: "error_rate", label: "Error rate", color: "var(--danger)", value: (p) => (p.spans ? (p.errors / p.spans) * 100 : 0) }],
     });
-    const latency = panel.querySelector('[data-svc-chart="latency"]');
+    const latency = $('[data-svc-chart="latency"]', panel);
     if (latency) detailChart(latency, {
       start, end, bucketMs, points, type: "line", axis: "duration", releases, format: fmt.duration,
       series: [["p50", "P50"], ["p95", "P95"], ["p99", "P99"]].map(([id, label]) => ({ id, label, color: palette.quantile(id), value: (p) => p[id] })),
@@ -497,7 +498,7 @@
     if (!root || !detailPanel) return;
     const panel = detailPanel.el;
     const name = view.detailName;
-    root.querySelector(".traceSvc")?.classList.toggle("has-detail", !!name);
+    $(".traceSvc", root)?.classList.toggle("has-detail", !!name);
     releaseDetailCharts();
     if (!name) {
       detailPanel.close("closed", { restoreFocus: false });
@@ -534,7 +535,7 @@
     detailPanel.title.setAttribute("title", name);
     detailPanel.setActions(`${detail.loading && payload ? ns.badge.html("Loading\u2026", { size: "md" }) : ""}<button type="button" class="button button--primary button--small" data-svc-search="${esc(name)}" title="Search the traces of ${esc(name)}">Search traces</button>`);
     // The totals strip between the head and the body (it does not scroll).
-    let strip = panel.querySelector(":scope > .traceSvcStats");
+    let strip = $(":scope > .traceSvcStats", panel);
     if (stats) {
       if (!strip) {
         strip = document.createElement("div");
@@ -561,8 +562,8 @@
       if (opening) svcParam.open(view.detailName);
       else svcParam.move(view.detailName);
     }
-    const table = root?.querySelector(".traceSvcTable");
-    table?.querySelectorAll("[data-svc-row]").forEach((tr) => {
+    const table = $(".traceSvcTable", root);
+    $$("[data-svc-row]", table).forEach((tr) => {
       const on = tr.getAttribute("data-svc-row") === view.detailName;
       tr.classList.toggle("is-selected", on);
       tr.setAttribute("aria-selected", on ? "true" : "false");
@@ -581,7 +582,7 @@
     let back = false;
     if (svcParam.get()) back = svcParam.close();
     else ns.router.owner("traces").replace();
-    if (fromPanel || !back) root?.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
+    if (fromPanel || !back) $(`[data-svc-row="${CSS.escape(name)}"]`, root)?.focus({ preventScroll: true });
   }
 
   function searchFor(spec) {
@@ -598,7 +599,7 @@
       view.sort = view.sort.key === key ? { key, dir: view.sort.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "name" ? "asc" : "desc" };
       ns.router.owner("traces").replace();
       render();
-      root.querySelector(`[data-svc-sort="${key}"] .dataTable__sort`)?.focus({ preventScroll: true });
+      $(`[data-svc-sort="${key}"] .dataTable__sort`, root)?.focus({ preventScroll: true });
       return;
     }
     const scope = target.closest("[data-svc-scope]");
@@ -694,7 +695,7 @@
     order: 10,
     panelId: "traceServicesView",
     available: (meta) => meta?.analytics_enabled === true,
-    install: (context) => { const element = document.getElementById("traceServicesView"); if (element) mount(element, context); },
+    install: (context) => { const element = byId("traceServicesView"); if (element) mount(element, context); },
     onSearch: (filters, options) => run(filters, options),
     onShow,
     params: ["svc", "svc_sort"],

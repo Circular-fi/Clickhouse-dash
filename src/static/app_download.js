@@ -3,6 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
 
   const { dom, api } = ns;
   const encoder = new TextEncoder();
@@ -516,7 +517,7 @@
       if (dom.copyMenuButton) dom.copyMenuButton.disabled = !hasEntries;
       if (dom.copyCsvButton) dom.copyCsvButton.hidden = true;
     }
-    const text = dom.downloadReceivedZipButton ? dom.downloadReceivedZipButton.querySelector(".runMenu__optText") : null;
+    const text = dom.downloadReceivedZipButton ? $(".runMenu__optText", dom.downloadReceivedZipButton) : null;
     if (text) {
       if (partial) text.textContent = "Download Debug (partial)";
       else text.textContent = "Download Debug";
@@ -553,7 +554,7 @@
   function flashDownloadLabel(text, durationMs = 1200) {
     const button = dom.downloadReceivedZipButton;
     if (!button) return;
-    const label = button.querySelector(".runMenu__optText");
+    const label = $(".runMenu__optText", button);
     if (!label) return;
     const previous = label.textContent;
     label.textContent = String(text || "");

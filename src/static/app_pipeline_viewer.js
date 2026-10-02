@@ -3,6 +3,8 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  // The lookups of app_dom.js; absent when a test loads the model without a page.
+  const { $ } = ns.dom || {};
   const { h } = ns;
   const cleanupByContainer = new WeakMap();
   function dispose(container) {
@@ -766,7 +768,7 @@
       for (const item of rowViews) fragment.appendChild(item.row);
       body.insertBefore(fragment, afterRows);
       if (focusedOrder != null) {
-        const focus = rowViews.find(item => item.order === focusedOrder)?.row.querySelector("button");
+        const focus = $("button", rowViews.find(item => item.order === focusedOrder)?.row);
         (focus || body).focus({ preventScroll: true });
       }
       drawTimelines();

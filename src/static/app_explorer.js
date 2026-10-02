@@ -3,6 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { byId, $, $$ } = ns.dom;
 
   const { dom, state, api, util, ui, storage, h } = ns;
   const graph = ns.explorerGraph;
@@ -320,7 +321,7 @@
   const VIEWS = ["catalog", "functions", "operations"];
 
   function shellEl(id) {
-    return dom[id] || document.getElementById(id);
+    return dom[id] || byId(id);
   }
 
   function operationsAvailable() {
@@ -386,7 +387,7 @@
     const view = currentView();
     const available = { catalog: true, functions: true, operations: operationsAvailable() };
     const viewTabs = shellEl("explorerViewTabs");
-    for (const button of viewTabs?.querySelectorAll?.("[data-view]") || []) button.hidden = !available[String(button.dataset.view || "")];
+    for (const button of $$("[data-view]", viewTabs) || []) button.hidden = !available[String(button.dataset.view || "")];
     ns.tabs?.select(viewTabs, view, "view");
     const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
     if (shell) {
@@ -401,7 +402,7 @@
       if (pane) {
         toggle.setAttribute("aria-controls", pane.id);
         toggle.title = pane.label;
-        const text = toggle.querySelector(".explorerTreeToggle__text");
+        const text = $(".explorerTreeToggle__text", toggle);
         if (text) text.textContent = pane.label;
       }
     }
@@ -417,7 +418,7 @@
     const available = modeAvailability();
     const tabs = shellEl("explorerModeTabs");
     let shown = 0;
-    for (const button of tabs?.querySelectorAll?.("[data-mode]") || []) {
+    for (const button of $$("[data-mode]", tabs) || []) {
       button.hidden = !available[String(button.dataset.mode || "")];
       if (!button.hidden) shown += 1;
     }
@@ -509,12 +510,12 @@
   // Escape and a press outside close it).
   const sidePanels = {};
   function sidePanel(id) {
-    if (sidePanels[id] || !document.getElementById(id)) return sidePanels[id] || null;
-    const pane = document.getElementById(id);
+    if (sidePanels[id] || !byId(id)) return sidePanels[id] || null;
+    const pane = byId(id);
     const tree = id === "explorerListPane";
     sidePanels[id] = ns.sidePanel.mount(pane, {
       label: tree ? "Objects" : "Functions",
-      collapse: { button: document.getElementById(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? ns.storage.KEYS.explorerTreeCollapsed : ns.storage.KEYS.explorerFunctionsCollapsed },
+      collapse: { button: byId(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? ns.storage.KEYS.explorerTreeCollapsed : ns.storage.KEYS.explorerFunctionsCollapsed },
       drawer: {
         toggle: shellEl("explorerTreeToggle"),
         backdrop: pane.nextElementSibling?.classList.contains("explorerTreeBackdrop") ? pane.nextElementSibling : null,
@@ -777,7 +778,7 @@
   function syncFilterChips(required) {
     const root = shellEl("explorerTreeFilters");
     if (!root) return;
-    for (const chip of root.querySelectorAll(".explorerFilterChip[data-filter]")) {
+    for (const chip of $$(".explorerFilterChip[data-filter]", root)) {
       const key = String(chip.dataset.filter || "");
       const system = key === "system";
       const pressed = system ? model.includeSystem : model.filters[key] !== false;
@@ -1174,7 +1175,7 @@
   ];
 
   function revealSelectedFunction(block = "nearest") {
-    dom.explorerFunctionList?.querySelector(".explorerFunctionObject.is-selected")?.scrollIntoView?.({ block });
+    $(".explorerFunctionObject.is-selected", dom.explorerFunctionList)?.scrollIntoView?.({ block });
   }
 
   function selectFunction(item, category) {
@@ -1241,9 +1242,9 @@
       button.addEventListener("click", () => {
         model.expandedFunctionCategories.add(category);
         renderFunctionList();
-        const group = [...(dom.explorerFunctionList?.querySelectorAll(".explorerFunctionGroup") || [])].find((el) => el.dataset.category === category);
+        const group = [...($$(".explorerFunctionGroup", dom.explorerFunctionList) || [])].find((el) => el.dataset.category === category);
         group?.scrollIntoView?.({ block: "start" });
-        group?.querySelector(".explorerTreeDatabase")?.focus({ preventScroll: true });
+        $(".explorerTreeDatabase", group)?.focus({ preventScroll: true });
       });
       grid.appendChild(button);
     }
@@ -2026,7 +2027,7 @@
 
   // The count in a side panel's head.
   function setSideMeta(id, text) {
-    const meta = document.getElementById(id);
+    const meta = byId(id);
     if (meta && meta.textContent !== text) meta.textContent = text;
   }
 
@@ -2432,7 +2433,7 @@
       },
     });
     shellEl("explorerScopeUp")?.addEventListener("click", scopeUp);
-    for (const chip of shellEl("explorerTreeFilters")?.querySelectorAll?.(".explorerFilterChip[data-filter]") || []) {
+    for (const chip of $$(".explorerFilterChip[data-filter]", shellEl("explorerTreeFilters")) || []) {
       chip.addEventListener("click", () => { if (!chip.disabled) toggleTypeFilter(String(chip.dataset.filter || "")); });
     }
     sidePanel("explorerListPane");
@@ -2453,7 +2454,7 @@
     dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
     // Function kind chips, like the tree's type chips: one kind at a time,
     // pressing the pressed chip again lists every function.
-    const functionChips = [...(shellEl("explorerFunctionFilters")?.querySelectorAll?.(".explorerFilterChip[data-function-kind]") || [])];
+    const functionChips = [...($$(".explorerFilterChip[data-function-kind]", shellEl("explorerFunctionFilters")) || [])];
     for (const chip of functionChips) {
       chip.addEventListener("click", () => {
         const kind = String(chip.dataset.functionKind || "");

@@ -55,7 +55,7 @@ def test_storage_includes_buffer_and_automatically_retains_flush_destination() -
     assert 'edge.kind === "buffer" && target.layer === "logical"' in projection
     assert 'return !isNonStoringNode(node) || node.kind === "buffer";' in projection
     assert '"contains", "buffer"' in graph
-    assert 'const bufferIds = logicalIds.filter((id) => byId.get(id)?.kind === "buffer");' in graph
+    assert 'const bufferIds = logicalIds.filter((id) => itemById.get(id)?.kind === "buffer");' in graph
 
 
 def test_storage_sidebar_keeps_buffer_available_while_other_non_storing_objects_are_blocked() -> None:

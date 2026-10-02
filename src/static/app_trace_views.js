@@ -28,7 +28,7 @@
   // attributes, flame and graph trees.
   const derivedByCache = new WeakMap();
 
-  const byId = (id) => document.getElementById(id);
+  const { byId, $, $$ } = ns.dom;
   const esc = (value) => ctx.esc(value);
   const fmt = ns.format;
   const palette = ns.palette;
@@ -160,14 +160,14 @@
   function toolsFor(name, build) {
     const host = byId("traceViewTools");
     if (!host) return null;
-    let box = host.querySelector(`:scope > [data-view-tools="${name}"]`);
+    let box = $(`:scope > [data-view-tools="${name}"]`, host);
     if (!box) {
       box = document.createElement("div");
       box.className = "traceViewBar__group";
       box.dataset.viewTools = name;
       box.innerHTML = build();
       host.appendChild(box);
-      box.querySelectorAll("select").forEach((select) => ctx.enhanceTraceSelect(select));
+      $$("select", box).forEach((select) => ctx.enhanceTraceSelect(select));
     }
     return box;
   }
@@ -175,7 +175,7 @@
   function showTools() {
     const host = byId("traceViewTools");
     if (!host) return;
-    for (const box of host.querySelectorAll(":scope > [data-view-tools]")) box.hidden = box.dataset.viewTools !== view.current;
+    for (const box of $$(":scope > [data-view-tools]", host)) box.hidden = box.dataset.viewTools !== view.current;
   }
 
   // ---------------------------------------------------------------- views
@@ -195,7 +195,7 @@
     }
     const detail = byId("traceDetail");
     if (detail) detail.dataset.traceView = next;
-    const frame = detail?.querySelector(".traceTimelineFrame");
+    const frame = $(".traceTimelineFrame", detail);
     const alt = byId("traceAltView");
     if (frame) frame.hidden = next !== "timeline";
     if (alt) alt.hidden = next === "timeline";
@@ -293,11 +293,11 @@
     const root = ctx?.model && byId("traceWaterfall");
     if (!root) return;
     const id = String(ctx.model.focusedSpanId || "");
-    for (const row of root.querySelectorAll(".traceSpanRow.is-deep-linked")) {
+    for (const row of $$(".traceSpanRow.is-deep-linked", root)) {
       if (row.getAttribute("data-span-id") !== id) row.classList.remove("is-deep-linked");
     }
     if (!id) return;
-    for (const row of root.querySelectorAll(".traceSpanRow[data-span-id]")) {
+    for (const row of $$(".traceSpanRow[data-span-id]", root)) {
       if (row.getAttribute("data-span-id") === id) row.classList.add("is-deep-linked");
     }
   }
@@ -434,21 +434,21 @@
     const options = statisticsOptions();
     if (!options.groupBy.some(([v]) => v === view.stats.groupBy)) view.stats.groupBy = "service";
     if (!options.subGroup.some(([v]) => v === view.stats.subGroup) || view.stats.subGroup === view.stats.groupBy) view.stats.subGroup = "";
-    setSelectOptions(tools?.querySelector("#traceStatsGroupBy"), options.groupBy, view.stats.groupBy);
-    setSelectOptions(tools?.querySelector("#traceStatsSubGroup"), options.subGroup.filter(([v]) => v !== view.stats.groupBy), view.stats.subGroup);
+    setSelectOptions($("#traceStatsGroupBy", tools), options.groupBy, view.stats.groupBy);
+    setSelectOptions($("#traceStatsSubGroup", tools), options.subGroup.filter(([v]) => v !== view.stats.groupBy), view.stats.subGroup);
     const rows = statisticsRows();
     const all = rows.flatMap((row) => [row, ...row.details]);
     const heat = heatBackground(all, view.stats.colorBy);
     // Sortable headers (ns.table): the state in aria-sort, one glyph.
     const sort = { key: view.stats.sortKey, dir: view.stats.sortAsc ? "asc" : "desc" };
-    const head = `<tr>${ns.table.sortHeadHtml({ key: "name", label: GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`, sort, attrs: { "data-stats-sort": "name" } })}${STAT_COLUMNS.map(([key, label, title]) => ns.table.sortHeadHtml({ key, label, title, sort, num: true, attrs: { "data-stats-sort": key } })).join("")}</tr>`;
+    const headHtml = `<tr>${ns.table.sortHeadHtml({ key: "name", label: GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`, sort, attrs: { "data-stats-sort": "name" } })}${STAT_COLUMNS.map(([key, label, title]) => ns.table.sortHeadHtml({ key, label, title, sort, num: true, attrs: { "data-stats-sort": key } })).join("")}</tr>`;
     const rowHtml = (row) => {
       const style = [row.service ? `--trace-service-color:${palette.service(row.service)}` : "", heat(row)].filter(Boolean).join(";");
       const cls = `traceStats__row${row.detail ? " traceStats__row--detail" : ""}${row.service ? " has-service" : ""}${view.stats.colorBy ? " is-heat" : ""}`;
       return `<tr class="${cls}" style="${esc(style)}" data-stats-group="${esc(row.name)}"><th scope="row" title="${esc(row.name)}"><span>${esc(row.name)}</span></th>${STAT_COLUMNS.map(([key]) => `<td class="num" data-stat="${key}">${esc(formatStat(key, row.stats[key]))}</td>`).join("")}</tr>`;
     };
-    const body = rows.map((row) => rowHtml(row) + row.details.map(rowHtml).join("")).join("");
-    alt.innerHTML = `<div class="traceStats"><table class="traceStats__table dataTable dataTable--compact"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+    const bodyHtml = rows.map((row) => rowHtml(row) + row.details.map(rowHtml).join("")).join("");
+    alt.innerHTML = `<div class="traceStats"><table class="traceStats__table dataTable dataTable--compact"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>`;
   }
 
   // ---------------------------------------------------------------- spans table
@@ -483,8 +483,8 @@
       '<span id="traceSpansCount" class="traceViewBar__count"></span>',
     ].join(""));
     if (!services.includes(view.spans.service)) view.spans.service = "";
-    setSelectOptions(tools?.querySelector("#traceSpansService"), [["", "All services"], ...services.map((s) => [s, s])], view.spans.service);
-    const filterInput = tools?.querySelector("#traceSpansFilter");
+    setSelectOptions($("#traceSpansService", tools), [["", "All services"], ...services.map((s) => [s, s])], view.spans.service);
+    const filterInput = $("#traceSpansFilter", tools);
     if (filterInput && filterInput.value !== view.spans.text) filterInput.value = view.spans.text;
     const traceStart = cache.bounds.start;
     const text = view.spans.text.trim().toLowerCase();
@@ -500,19 +500,19 @@
       const diff = typeof va === "number" ? va - vb : String(va).localeCompare(String(vb));
       return (sortAsc ? diff : -diff) || spanStart(a) - spanStart(b) || String(a.span_id || "").localeCompare(String(b.span_id || ""));
     });
-    const count = tools?.querySelector("#traceSpansCount");
+    const count = $("#traceSpansCount", tools);
     if (count) count.textContent = `${rows.length} of ${cache.spans.length} span${cache.spans.length === 1 ? "" : "s"}`;
     const shown = rows.slice(0, SPANS_TABLE_LIMIT);
     const sort = { key: sortKey, dir: sortAsc ? "asc" : "desc" };
     const NUM = new Set(["duration", "start"]);
-    const head = `<tr>${SPAN_COLUMNS.map(([key, label]) => ns.table.sortHeadHtml({ key, label, sort, num: NUM.has(key), attrs: { "data-spans-sort": key } })).join("")}</tr>`;
-    const body = shown.map((span) => {
+    const headHtml = `<tr>${SPAN_COLUMNS.map(([key, label]) => ns.table.sortHeadHtml({ key, label, sort, num: NUM.has(key), attrs: { "data-spans-sort": key } })).join("")}</tr>`;
+    const bodyHtml = shown.map((span) => {
       const status = String(span.status_code || "Unset");
       const name = span.span_name || "span";
       return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="-1" title="Show in the timeline"><td data-col="service" style="--trace-service-color:${palette.service(span.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(span.service_name || "unknown")}</td><td data-col="operation" title="${esc(name)}">${esc(name)}</td><td class="num" data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td class="num" data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status">${ns.badge.statusHtml(status)}</td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td class="mono" data-col="id">${esc(span.span_id)}</td></tr>`;
     }).join("");
-    const more = rows.length > shown.length ? `<div class="traceSpansTable__more">Showing the first ${shown.length} of ${rows.length} spans: refine the filter to see the others.</div>` : "";
-    alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table dataTable dataTable--compact"><thead>${head}</thead><tbody>${body || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${more}</div>`;
+    const moreHtml = rows.length > shown.length ? `<div class="traceSpansTable__more">Showing the first ${shown.length} of ${rows.length} spans: refine the filter to see the others.</div>` : "";
+    alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table dataTable dataTable--compact"><thead>${headHtml}</thead><tbody>${bodyHtml || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${moreHtml}</div>`;
   }
 
   // ---------------------------------------------------------------- flamegraph
@@ -587,11 +587,11 @@
     const root = flameTree();
     const zoom = findFlameNode(root, view.flame.zoomKey);
     const tools = toolsFor("flamegraph", () => '<span id="traceFlameCrumb" class="traceViewBar__crumb"></span><button type="button" id="traceFlameReset" class="button button--small traceViewBar__button" data-flame-reset>Reset zoom</button>');
-    const crumb = tools?.querySelector("#traceFlameCrumb");
+    const crumb = $("#traceFlameCrumb", tools);
     if (crumb) crumb.textContent = zoom === root ? "Click a frame to zoom into it" : `Zoomed: ${zoom.name}`;
-    const reset = tools?.querySelector("#traceFlameReset");
+    const reset = $("#traceFlameReset", tools);
     if (reset) reset.disabled = zoom === root;
-    const bars = [];
+    const barsHtml = [];
     // Ancestors of the zoomed frame stay on top at full width (zoom out).
     const ancestors = [];
     for (let node = zoom.parent; node; node = node.parent) ancestors.unshift(node);
@@ -599,7 +599,7 @@
     const frame = (node, left, width, row, ancestor) => {
       const share = (node.value / total) * 100;
       const color = node.service ? palette.service(node.service) : "";
-      bars.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt.duration(node.duration))}" data-flame-count="${node.count}" data-flame-share="${esc(sharePct(share))}"><span>${esc(node.name)}</span></div>`);
+      barsHtml.push(`<div class="traceFlame__frame${ancestor ? " is-ancestor" : ""}${node === root ? " is-root" : ""}${node.errors ? " has-error" : ""}" data-flame-key="${esc(node.key)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${row * 20}px${color ? `;--trace-service-color:${color}` : ""}" data-flame-name="${esc(node.name)}" data-flame-duration="${esc(fmt.duration(node.duration))}" data-flame-count="${node.count}" data-flame-share="${esc(sharePct(share))}"><span>${esc(node.name)}</span></div>`);
     };
     ancestors.forEach((node, row) => frame(node, 0, 100, row, true));
     let rows = ancestors.length;
@@ -614,7 +614,7 @@
       }
     };
     layout(zoom, 0, 100, ancestors.length);
-    alt.innerHTML = `<div class="traceFlame"><div class="traceFlame__canvas" style="height:${rows * 20}px">${bars.join("")}</div></div>`;
+    alt.innerHTML = `<div class="traceFlame"><div class="traceFlame__canvas" style="height:${rows * 20}px">${barsHtml.join("")}</div></div>`;
   }
 
   // ---------------------------------------------------------------- graph
@@ -903,14 +903,14 @@
       + '<canvas id="traceGraphMinimap" class="graphKitMinimap" width="180" height="110" aria-hidden="true" hidden></canvas>'
       + '<aside id="traceGraphPanel" class="graphKitPanel" aria-label="Call path details" hidden></aside>';
     graphUi.pane = pane;
-    const select = pane.querySelector("#traceGraphMode");
+    const select = $("#traceGraphMode", pane);
     ctx.enhanceTraceSelect(select);
     select.addEventListener("change", () => {
       view.graph.mode = GRAPH_MODES.some(([value]) => value === select.value) ? select.value : "service";
       renderGraphLegend();
       graphUi.ctl?.scheduleDraw();
     });
-    const canvas = pane.querySelector("#traceGraphCanvas");
+    const canvas = $("#traceGraphCanvas", pane);
     graphUi.ctl = kit.mount({
       canvas,
       view: graphUi.view,
@@ -931,7 +931,7 @@
       describe: describeGraphNode,
       onActivate: (id) => {
         selectGraphNode(id);
-        graphPanel()?.querySelector("button[data-graph-span]")?.focus?.({ preventScroll: true });
+        $("button[data-graph-span]", graphPanel())?.focus?.({ preventScroll: true });
       },
       onEscape: () => {
         if (!graphUi.selected) return false;
@@ -944,7 +944,7 @@
         const panel = graphPanel();
         return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
       },
-      toolbar: { zoomIn: pane.querySelector("#traceGraphZoomIn"), zoomOut: pane.querySelector("#traceGraphZoomOut"), fit: pane.querySelector("#traceGraphFit") },
+      toolbar: { zoomIn: $("#traceGraphZoomIn", pane), zoomOut: $("#traceGraphZoomOut", pane), fit: $("#traceGraphFit", pane) },
     });
     kit.theme.onChange(() => {
       graphUi.fills.clear();
@@ -954,8 +954,8 @@
     return pane;
   }
 
-  const graphCanvas = () => graphUi.pane?.querySelector("#traceGraphCanvas") || null;
-  const graphPanel = () => graphUi.pane?.querySelector("#traceGraphPanel") || null;
+  const graphCanvas = () => $("#traceGraphCanvas", graphUi.pane) || null;
+  const graphPanel = () => $("#traceGraphPanel", graphUi.pane) || null;
 
   function graphShown() {
     const alt = byId("traceAltView");
@@ -963,7 +963,7 @@
   }
 
   function renderGraphMeta() {
-    const meta = graphUi.pane?.querySelector("#traceGraphMeta");
+    const meta = $("#traceGraphMeta", graphUi.pane);
     const graph = graphUi.graph;
     if (!meta || !graph) return;
     const spans = graph.roots.reduce((sum, root) => sum + subtreeCount(root), 0);
@@ -978,7 +978,7 @@
   }
 
   function renderGraphLegend() {
-    const legend = graphUi.pane?.querySelector("#traceGraphLegend");
+    const legend = $("#traceGraphLegend", graphUi.pane);
     if (!legend) return;
     const kinds = new Set((graphUi.layout?.edges || []).map((edge) => edge.kind));
     const row = (marks, text) => `<span class="graphKitLegend__row">${marks}<span>${text}</span></span>`;
@@ -1101,7 +1101,7 @@
   function drawGraph(context, frame) {
     const kit = graphKit();
     const layout = graphUi.layout;
-    const minimap = graphUi.pane?.querySelector("#traceGraphMinimap");
+    const minimap = $("#traceGraphMinimap", graphUi.pane);
     if (!layout) {
       if (minimap) minimap.hidden = true;
       return false;
@@ -1337,7 +1337,7 @@
     }
     const pane = graphPane();
     if (alt.firstElementChild !== pane || alt.childElementCount !== 1) alt.replaceChildren(pane);
-    const select = pane.querySelector("#traceGraphMode");
+    const select = $("#traceGraphMode", pane);
     if (select && select.value !== view.graph.mode) {
       select.value = view.graph.mode;
       select.dispatchEvent(new Event("tracepicker-refresh"));
@@ -1379,7 +1379,7 @@
       height: rect.height * v.scale,
     });
     const layout = graphShown() ? graphUi.layout : null;
-    const minimap = graphUi.pane?.querySelector("#traceGraphMinimap");
+    const minimap = $("#traceGraphMinimap", graphUi.pane);
     return {
       kit: true,
       scale: v.scale,

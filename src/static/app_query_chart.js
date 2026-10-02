@@ -11,6 +11,7 @@
   // engine (app_chart_core.js), loaded on the first Chart view.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
   const { h } = ns;
 
   const viewPref = () => ns.storage.pref(ns.storage.KEYS.resultsView, "table", { allowed: ["table", "chart"] });
@@ -519,23 +520,23 @@
         <div class="queryChart__message" hidden></div>
         <div class="queryChart__numbers" hidden></div>
       </div>`;
-    const typesEl = hostEl.querySelector(".queryChart__types");
-    const xSelect = hostEl.querySelector(".queryChart__x");
-    const seriesButton = hostEl.querySelector(".queryChart__seriesButton");
-    const seriesMenu = hostEl.querySelector(".queryChart__seriesMenu");
-    const groupSelect = hostEl.querySelector(".queryChart__group");
+    const typesEl = $(".queryChart__types", hostEl);
+    const xSelect = $(".queryChart__x", hostEl);
+    const seriesButton = $(".queryChart__seriesButton", hostEl);
+    const seriesMenu = $(".queryChart__seriesMenu", hostEl);
+    const groupSelect = $(".queryChart__group", hostEl);
     // X axis, Y values and Split by: ns.menu pickers (app_ui_menu.js), the
     // label inside the button ("X axis \u00b7 Auto (time)").
     ns.menu?.select(xSelect, { className: "queryChart__picker" });
     ns.menu?.select(groupSelect, { className: "queryChart__picker" });
     const seriesPicker = ns.menu?.multi(seriesButton, seriesMenu, { root: seriesButton.parentElement }) || null;
-    const noteEl = hostEl.querySelector(".queryChart__note");
-    const rangeEl = hostEl.querySelector(".queryChart__range");
-    const rangeText = hostEl.querySelector(".queryChart__rangeText");
-    const resetZoomBtn = hostEl.querySelector(".queryChart__resetZoom");
-    const stageEl = hostEl.querySelector(".queryChart__stage");
-    const messageEl = hostEl.querySelector(".queryChart__message");
-    const numbersEl = hostEl.querySelector(".queryChart__numbers");
+    const noteEl = $(".queryChart__note", hostEl);
+    const rangeEl = $(".queryChart__range", hostEl);
+    const rangeText = $(".queryChart__rangeText", hostEl);
+    const resetZoomBtn = $(".queryChart__resetZoom", hostEl);
+    const stageEl = $(".queryChart__stage", hostEl);
+    const messageEl = $(".queryChart__message", hostEl);
+    const numbersEl = $(".queryChart__numbers", hostEl);
     const typeButtons = new Map();
     for (const [type, label, title] of CHART_TYPES) {
       const btn = document.createElement("button");
@@ -717,7 +718,7 @@
       cfg.series.sort((a, b) => a - b);
       normalizeConfig(cfg, meta);
       configChanged({ keepMenu: true });
-      const again = seriesMenu.querySelector(`input[value="${col}"]`);
+      const again = $(`input[value="${col}"]`, seriesMenu);
       if (again) again.focus({ preventScroll: true });
     });
 

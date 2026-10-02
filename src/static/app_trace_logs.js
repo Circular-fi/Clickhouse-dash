@@ -42,7 +42,7 @@
     shown: PANEL_PAGE,
   };
 
-  const byId = (id) => document.getElementById(id);
+  const { byId, $, $$ } = ns.dom;
   const esc = (value) => ctx.esc(value);
   const cssEscape = (value) => (window.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&"));
 
@@ -189,7 +189,7 @@
     const root = byId("traceWaterfall");
     const focusedId = document.activeElement?.closest?.("#traceWaterfall [data-span-id]")?.getAttribute("data-span-id") || "";
     ctx.renderWaterfall();
-    if (focusedId && root) root.querySelector(`.traceSpanRow[data-span-id="${cssEscape(focusedId)}"]`)?.focus({ preventScroll: true });
+    if (focusedId && root) $(`.traceSpanRow[data-span-id="${cssEscape(focusedId)}"]`, root)?.focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ formatting
@@ -327,7 +327,7 @@
   function updateHeaderItem() {
     const stats = byId("traceDetailStats");
     if (!stats) return;
-    const item = stats.querySelector('[data-trace-header-item="Logs"]');
+    const item = $('[data-trace-header-item="Logs"]', stats);
     const v = current();
     const show = v && v.status !== "disabled" && v.status !== "idle";
     if (!show) {
@@ -340,7 +340,7 @@
     }
     if (item) { item.outerHTML = headerItemInner(v); return; }
     const html = `<i class="tracePageOverviewDivider" aria-hidden="true"></i>${headerItemInner(v)}`;
-    const incomplete = stats.querySelector("[data-trace-incomplete]");
+    const incomplete = $("[data-trace-incomplete]", stats);
     if (incomplete) incomplete.insertAdjacentHTML("beforebegin", html);
     else stats.insertAdjacentHTML("beforeend", html);
   }
@@ -451,7 +451,7 @@
       return;
     }
     panel.innerHTML = `${panelToolbarHtml(v)}<div data-trace-logs-notice-slot>${panelNoticeHtml(v)}</div><div class="traceLogsPanel__list" data-trace-logs-list role="list" aria-label="Trace logs">${panelListHtml(v)}</div>`;
-    const select = panel.querySelector("#traceLogsService");
+    const select = $("#traceLogsService", panel);
     if (select) ctx.enhanceTraceSelect(select);
   }
 
@@ -460,11 +460,11 @@
     const panel = byId("traceLogsPanel");
     const v = current();
     if (!panel || !v || v.status !== "ready") return;
-    const list = panel.querySelector("[data-trace-logs-list]");
-    const slot = panel.querySelector("[data-trace-logs-notice-slot]");
+    const list = $("[data-trace-logs-list]", panel);
+    const slot = $("[data-trace-logs-notice-slot]", panel);
     if (list) list.innerHTML = panelListHtml(v);
     if (slot) slot.innerHTML = panelNoticeHtml(v);
-    for (const chip of panel.querySelectorAll("[data-log-severity]")) {
+    for (const chip of $$("[data-log-severity]", panel)) {
       const pressed = v.filters.severities.has(chip.getAttribute("data-log-severity"));
       chip.setAttribute("aria-pressed", pressed ? "true" : "false");
     }
@@ -573,13 +573,13 @@
     const opening = !view.inline.has(id);
     if (opening) view.inline.add(id); else view.inline.delete(id);
     const node = cache.nodeById.get(id);
-    const virtual = !!byId("traceWaterfall")?.querySelector("[data-virtual-rows]");
+    const virtual = !!$("[data-virtual-rows]", byId("traceWaterfall"));
     if (!node || cache.duplicateIds.has(id) || virtual) { rerenderWaterfall(); return; }
     let anchor = row;
     if (anchor.nextElementSibling?.classList.contains("traceSpanInspectorRow")) anchor = anchor.nextElementSibling;
     if (anchor.nextElementSibling?.classList.contains("traceSpanLogsRow")) anchor.nextElementSibling.remove();
     if (opening) anchor.insertAdjacentHTML("afterend", inlineRowHtml(node, ctx.waterfallWindow()));
-    for (const badge of row.querySelectorAll(".traceSpanLogsBadge")) badge.setAttribute("aria-expanded", opening ? "true" : "false");
+    for (const badge of $$(".traceSpanLogsBadge", row)) badge.setAttribute("aria-expanded", opening ? "true" : "false");
   }
 
   // ------------------------------------------------------------ inspector hook
@@ -606,9 +606,9 @@
     const opening = !view.expanded.has(record.index);
     if (opening) view.expanded.add(record.index); else view.expanded.delete(record.index);
     item.classList.toggle("is-open", opening);
-    item.querySelector(":scope > .traceLog__details")?.remove();
+    $(":scope > .traceLog__details", item)?.remove();
     if (opening) item.insertAdjacentHTML("beforeend", detailsHtml(record, mode));
-    for (const el of item.querySelectorAll(":scope > .traceLog__row [data-log-expand], :scope > .traceLog__row[data-log-expand]")) {
+    for (const el of $$(":scope > .traceLog__row [data-log-expand], :scope > .traceLog__row[data-log-expand]", item)) {
       el.setAttribute("aria-expanded", opening ? "true" : "false");
       if (el.classList.contains("traceLog__toggle")) el.setAttribute("aria-label", `${opening ? "Hide" : "Show"} log details`);
     }
@@ -624,7 +624,7 @@
     view.target = record ? record.index : -1;
     ctx.focusSpanInTimeline(id, { push: true });
     if (record) {
-      const target = byId("traceWaterfall")?.querySelector(`.traceSpanInspectorRow .traceLog[data-log-index="${record.index}"]`);
+      const target = $(`.traceSpanInspectorRow .traceLog[data-log-index="${record.index}"]`, byId("traceWaterfall"));
       target?.scrollIntoView?.({ block: "nearest" });
     }
   }
@@ -703,7 +703,7 @@
   // header's Logs button that opened it.
   function closePanelToToggle() {
     togglePanel(false);
-    document.querySelector("#traceDetailHeader [data-trace-logs-toggle]")?.focus({ preventScroll: true });
+    $("#traceDetailHeader [data-trace-logs-toggle]")?.focus({ preventScroll: true });
   }
 
   function onPanelKeydown(event) {

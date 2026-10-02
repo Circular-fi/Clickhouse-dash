@@ -24,6 +24,7 @@
   // the line connects across it. nulls === null means every NaN breaks.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
 
   const DEFAULT_HEIGHT = 300;
   const FONT_SIZE = 11;
@@ -419,20 +420,20 @@
       </div>
       <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
     host.appendChild(root);
-    const plotEl = root.querySelector(".chartCore__plot");
-    const baseCanvas = root.querySelector("canvas");
-    const overCanvas = root.querySelector(".chartCore__overlay");
-    const cursorEl = root.querySelector(".chartCore__cursor");
-    const selectEl = cursorEl.querySelector(".chartCore__select");
-    const xLine = cursorEl.querySelector(".chartCore__xline");
-    const yLine = cursorEl.querySelector(".chartCore__yline");
-    const selectBadge = cursorEl.querySelector(".chartCore__selectBadge");
-    const xBadge = cursorEl.querySelector(".chartCore__xbadge");
-    const yBadge = cursorEl.querySelector(".chartCore__ybadge");
+    const plotEl = $(".chartCore__plot", root);
+    const baseCanvas = $("canvas", root);
+    const overCanvas = $(".chartCore__overlay", root);
+    const cursorEl = $(".chartCore__cursor", root);
+    const selectEl = $(".chartCore__select", cursorEl);
+    const xLine = $(".chartCore__xline", cursorEl);
+    const yLine = $(".chartCore__yline", cursorEl);
+    const selectBadge = $(".chartCore__selectBadge", cursorEl);
+    const xBadge = $(".chartCore__xbadge", cursorEl);
+    const yBadge = $(".chartCore__ybadge", cursorEl);
     const cursorDots = [];
-    const tooltipEl = root.querySelector(".chartCore__tooltip");
-    const probe = root.querySelector(".chartCore__probe");
-    const legendEl = root.querySelector(".chartCore__legend");
+    const tooltipEl = $(".chartCore__tooltip", root);
+    const probe = $(".chartCore__probe", root);
+    const legendEl = $(".chartCore__legend", root);
     const baseCtx = baseCanvas.getContext("2d");
 
     const opts = {
@@ -1324,7 +1325,7 @@
       const key = `${i}|${cursor.nearest}|${opts.tooltip}`;
       if (key !== tooltipKey) {
         tooltipKey = key;
-        const rows = [];
+        const rowsHtml = [];
         let total = 0, any = false;
         for (const s of tooltipSeries(i)) {
           if (s.xs || (opts.tooltip === "single" && s.id !== cursor.nearest)) continue;
@@ -1335,16 +1336,16 @@
           if (has) { total += v; any = true; }
           const c = seriesColor(s);
           const text = has ? (typeof opts.formatValue === "function" ? opts.formatValue(v, s) : formatValue(v)) : "NULL";
-          rows.push(`<span class="chartCore__tipRow${has ? "" : " is-empty"}${s.id === cursor.nearest ? " is-nearest" : ""}"><i style="background:${rgba(c)}"></i><em>${esc(s.label)}</em><b>${esc(text)}</b></span>`);
+          rowsHtml.push(`<span class="chartCore__tipRow${has ? "" : " is-empty"}${s.id === cursor.nearest ? " is-nearest" : ""}"><i style="background:${rgba(c)}"></i><em>${esc(s.label)}</em><b>${esc(text)}</b></span>`);
         }
-        if (isStacked() && opts.tooltip !== "single" && rows.length > 1 && any) {
-          rows.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(typeof opts.formatValue === "function" ? opts.formatValue(total, null) : formatValue(total))}</b></span>`);
+        if (isStacked() && opts.tooltip !== "single" && rowsHtml.length > 1 && any) {
+          rowsHtml.push(`<span class="chartCore__tipRow chartCore__tipRow--total"><i></i><em>Total</em><b>${esc(typeof opts.formatValue === "function" ? opts.formatValue(total, null) : formatValue(total))}</b></span>`);
         }
-        if (!rows.length) rows.push(`<span class="chartCore__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
-        capTooltipRows(rows);
+        if (!rowsHtml.length) rowsHtml.push(`<span class="chartCore__tipRow is-empty"><i></i><em>No value</em><b>\u2014</b></span>`);
+        capTooltipRows(rowsHtml);
         const footer = typeof opts.tooltipFooter === "function" ? opts.tooltipFooter(i) : "";
         const title = typeof opts.tooltipTitle === "function" ? opts.tooltipTitle(i) : xReadout(i);
-        tooltipEl.innerHTML = `<strong>${esc(title)}</strong>${rows.join("")}${footer ? `<small>${esc(footer)}</small>` : ""}`;
+        tooltipEl.innerHTML = `<strong>${esc(title)}</strong>${rowsHtml.join("")}${footer ? `<small>${esc(footer)}</small>` : ""}`;
         tooltipEl.dataset.index = String(i);
         tooltipEl.hidden = false;
       }
@@ -1594,7 +1595,7 @@
       if (typeof opts.onHiddenChange === "function") opts.onHiddenChange(new Set(hidden));
       draw();
       if (focusIndex != null) {
-        const again = legendEl.querySelector(`.chartCore__legendItem[data-index="${focusIndex}"]`);
+        const again = $(`.chartCore__legendItem[data-index="${focusIndex}"]`, legendEl);
         if (again) again.focus({ preventScroll: true });
       }
     }
@@ -1605,7 +1606,7 @@
         legendMode = legendMode === "table" ? "list" : "table";
         storeLegendMode(legendMode);
         renderLegend();
-        const again = legendEl.querySelector(".chartCore__legendMode");
+        const again = $(".chartCore__legendMode", legendEl);
         if (again) again.focus({ preventScroll: true });
         return;
       }
@@ -2526,7 +2527,7 @@
     logTicks,
     // The chart drawn in (or at) an element: tests and hosts reach its API.
     of(el) {
-      const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && el.querySelector(".chartCore"));
+      const node = el && (el.classList && el.classList.contains("chartCore") ? el : el.querySelector && $(".chartCore", el));
       return (node && instances.get(node)) || null;
     },
   });

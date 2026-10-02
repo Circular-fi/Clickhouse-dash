@@ -15,6 +15,7 @@
   // ("Graph kit" block), never from literals.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $ } = ns.dom;
   const { h } = ns;
 
   const FONT = "Arial, Helvetica, sans-serif";
@@ -476,14 +477,14 @@
     const yGap = options.yGap ?? 34;
     const origin = options.origin ?? 70;
     const minColumnWidth = options.minColumnWidth ?? 0;
-    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const itemById = new Map(nodes.map((node) => [node.id, node]));
     const backEdges = options.breakCycles ? cycleBackEdges(nodes, options.edges || []) : new Set();
     const edges = backEdges.size ? (options.edges || []).filter((edge) => !backEdges.has(edge.id)) : (options.edges || []);
     const indegree = new Map(nodes.map((node) => [node.id, 0]));
     const next = new Map(nodes.map((node) => [node.id, []]));
 
     for (const edge of edges) {
-      if (!byId.has(edge.from) || !byId.has(edge.to) || edge.from === edge.to) continue;
+      if (!itemById.has(edge.from) || !itemById.has(edge.to) || edge.from === edge.to) continue;
       indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
       next.get(edge.from)?.push(edge.to);
     }
@@ -529,7 +530,7 @@
     const predecessors = new Map(nodes.map((node) => [node.id, []]));
     const successors = new Map(nodes.map((node) => [node.id, []]));
     for (const edge of edges) {
-      if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+      if (!itemById.has(edge.from) || !itemById.has(edge.to)) continue;
       predecessors.get(edge.to)?.push(edge.from);
       successors.get(edge.from)?.push(edge.to);
     }
@@ -1976,11 +1977,11 @@
     let top = 0;
     let bottom = rect.height;
     let right = rect.width;
-    const bar = pane?.querySelector(":scope > .graphKitBar");
+    const bar = $(":scope > .graphKitBar", pane);
     for (const group of bar?.children || []) {
       if (shown(group)) top = Math.max(top, group.getBoundingClientRect().bottom - rect.top + SAFE_GAP);
     }
-    const dock = pane?.querySelector(":scope > .graphKitDock");
+    const dock = $(":scope > .graphKitDock", pane);
     if (shown(dock)) {
       const box = dock.getBoundingClientRect();
       if (box.height > 0) bottom = Math.min(bottom, box.top - rect.top - SAFE_GAP);
@@ -2388,15 +2389,15 @@
     return legendPref().get();
   }
   function legendToggle(pane, onToggle) {
-    const dock = pane?.querySelector?.(":scope > .graphKitDock");
-    const legend = dock?.querySelector(".graphKitLegend");
-    const status = dock?.querySelector(".graphKitStatus");
-    if (!legend || !status || status.querySelector(".graphKitLegendToggle")) return null;
+    const dock = $(":scope > .graphKitDock", pane);
+    const legend = $(".graphKitLegend", dock);
+    const status = $(".graphKitStatus", dock);
+    if (!legend || !status || $(".graphKitLegendToggle", status)) return null;
     if (!legend.id) legend.id = `graphKitLegend${(legendSerial += 1)}`;
     const button = h("button", { class: "graphKitLegendToggle" });
     button.type = "button";
     button.setAttribute("aria-controls", legend.id);
-    button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h2M6.5 4h7M2.5 8h2M6.5 8h7M2.5 12h2M6.5 12h4"/></svg>';
+    h.replace(button, h.html('<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h2M6.5 4h7M2.5 8h2M6.5 8h7M2.5 12h2M6.5 12h4"/></svg>'));
     const preference = legendPreference();
     const control = {
       // The viewer chose (this session or a stored preference): no auto fold.
@@ -2431,7 +2432,7 @@
   // room, or is larger than the view and the minimap takes over); it opens
   // again once the graph fits with it. Returns whether the legend is folded.
   function foldLegendToFit(canvas, bounds, { readableScale = 1, margin = 0.92 } = {}) {
-    const dock = canvas?.parentElement?.querySelector(":scope > .graphKitDock");
+    const dock = $(":scope > .graphKitDock", canvas?.parentElement);
     const control = dock ? legendControls.get(dock) : null;
     if (!control || !bounds || control.chosen) return !!control?.collapsed();
     const fits = () => {
@@ -2462,7 +2463,7 @@
     return {
       shell,
       show(body) {
-        const head = body.querySelector(":scope > .uiDetail__head");
+        const head = $(":scope > .uiDetail__head", body);
         if (head) panel.replaceChildren(head, body);
         else panel.replaceChildren(body);
         shell.open({ opener: typeof opener === "function" ? opener() : opener });

@@ -16,12 +16,13 @@
   // test_ui_tabs_menus_contract.py).
   const ns = window.ChDash;
   if (!ns) return;
+  const { $$ } = ns.dom;
 
   const KEYS = ["ArrowRight", "ArrowLeft", "Home", "End"];
   const TAB_CLASS = { view: "viewTab", content: "contentTabs__tab" };
 
   function tabsOf(list) {
-    return [...list.querySelectorAll('[role="tab"]')];
+    return [...$$('[role="tab"]', list)];
   }
 
   function shownTabs(list) {

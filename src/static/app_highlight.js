@@ -3,6 +3,8 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  // The lookups of app_dom.js; absent when a test loads the model without a page.
+  const { $ } = ns.dom || {};
 
   const tabSize = 4;
   // util.escapeHtml is the one escaper (app_util.js loads first).
@@ -711,8 +713,8 @@
     if (!ta) return null;
 
     const existingWrap = ta.closest ? ta.closest(".editorWrap") : null;
-    const existingPre = existingWrap ? existingWrap.querySelector(".editorHighlight") : null;
-    const existingGutter = existingWrap ? existingWrap.querySelector(".editorGutter") : null;
+    const existingPre = existingWrap ? $(".editorHighlight", existingWrap) : null;
+    const existingGutter = existingWrap ? $(".editorGutter", existingWrap) : null;
 
     if (existingWrap && existingPre && existingGutter) {
       ta.classList.add("editorInput");
@@ -762,8 +764,8 @@
     if (!ta) return null;
 
     const overlay = createOverlay(ta);
-    const pre = overlay ? overlay.pre : ta.parentNode && ta.parentNode.querySelector(".editorHighlight");
-    const gutter = overlay ? overlay.gutter : ta.parentNode && ta.parentNode.querySelector(".editorGutter");
+    const pre = overlay ? overlay.pre : ta.parentNode && $(".editorHighlight", ta.parentNode);
+    const gutter = overlay ? overlay.gutter : ta.parentNode && $(".editorGutter", ta.parentNode);
     if (!pre) return null;
 
     let prevText = String(ta.value || "");

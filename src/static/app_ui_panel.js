@@ -58,6 +58,7 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
   if (ns.sidePanel && ns.detailPanel) return;
+  const { $ } = ns.dom;
   const { h } = ns;
 
   let uid = 0;
@@ -273,17 +274,17 @@
 
     let layer = null;
     let openState = !panel.hidden;
-    const part = (name) => panel.querySelector(`:scope > .uiDetail__head .uiDetail__${name}, :scope > .uiDetail__head > .uiDetail__${name}`);
+    const part = (name) => $(`:scope > .uiDetail__head .uiDetail__${name}, :scope > .uiDetail__head > .uiDetail__${name}`, panel);
 
     const api = {
       el: panel,
-      get head() { return panel.querySelector(":scope > .uiDetail__head"); },
+      get head() { return $(":scope > .uiDetail__head", panel); },
       get eyebrow() { return part("eyebrow"); },
       get title() { return part("title"); },
       get subtitle() { return part("subtitle"); },
       get actions() { return part("actions"); },
-      get closeButton() { return panel.querySelector(":scope > .uiDetail__head > .uiDetail__close"); },
-      get body() { return panel.querySelector(":scope > .uiDetail__body"); },
+      get closeButton() { return $(":scope > .uiDetail__head > .uiDetail__close", panel); },
+      get body() { return $(":scope > .uiDetail__body", panel); },
       setHead({ eyebrow, title, subtitle, html = false } = {}) {
         if (eyebrow !== undefined) fill(api.eyebrow, eyebrow, html);
         if (title !== undefined) { const node = api.title; fill(node, title, html); if (node) node.hidden = false; }

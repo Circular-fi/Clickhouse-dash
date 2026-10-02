@@ -44,6 +44,7 @@
   //           place(), button, menu, root } (+ refresh(), set(value) for select)
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const CLOSE_MS = 160;
   const ITEMS = '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]';
@@ -77,10 +78,10 @@
   const enabled = (el) => !el.disabled && el.getAttribute("aria-disabled") !== "true";
 
   function itemsOf(menu, selector = ITEMS) {
-    return [...menu.querySelectorAll(selector)].filter((el) => {
+    return [...$$(selector, menu)].filter((el) => {
       const owner = el.closest(LISTS);
       if (owner && owner !== menu && menu.contains(owner)) return false;
-      if (el.matches(ITEMS) && el.querySelector('input[type="checkbox"], input[type="radio"]')) return false;
+      if (el.matches(ITEMS) && $('input[type="checkbox"], input[type="radio"]', el)) return false;
       return visible(el) && enabled(el);
     });
   }
@@ -387,8 +388,8 @@
     if (selectEl._chdashMenu) return selectEl._chdashMenu;
     const shipped = selectEl.parentElement?.classList.contains("tracePicker") ? selectEl.parentElement : null;
     const root = shipped || document.createElement("div");
-    let button = shipped?.querySelector(":scope > .tracePicker__button") || null;
-    let list = shipped?.querySelector(":scope > .tracePicker__menu") || null;
+    let button = $(":scope > .tracePicker__button", shipped) || null;
+    let list = $(":scope > .tracePicker__menu", shipped) || null;
     if (!shipped) {
       root.className = `themeSelect tracePicker${options.className ? ` ${options.className}` : ""}`;
       selectEl.parentNode.insertBefore(root, selectEl);

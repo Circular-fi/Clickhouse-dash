@@ -8,6 +8,7 @@
   // access (arrows, Enter, the live region) is the accessible path.
   const ns = window.ChDash;
   if (!ns || !ns.graphKit) return;
+  const { byId, $ } = ns.dom;
 
   const { dom, state, api, h } = ns;
   // Counts, sizes and shares from ns.format (docs/ui-foundations.md).
@@ -383,13 +384,13 @@
     if (!id || !model.graph) return false;
     const nodes = model.graph.nodes || [];
     const edges = model.graph.edges || [];
-    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const itemById = new Map(nodes.map((node) => [node.id, node]));
     const outgoing = new Map();
     for (const edge of edges) {
       if (!outgoing.has(edge.from)) outgoing.set(edge.from, []);
       outgoing.get(edge.from).push(edge);
     }
-    const root = byId.get(id);
+    const root = itemById.get(id);
     if (!root || root.layer !== "logical") return false;
     // Logical-only graph responses deliberately omit the physical layer. The
     // backend derives this flag from the complete cached topology so the UI can
@@ -404,9 +405,9 @@
     const visit = (currentId) => {
       if (!currentId || seen.has(currentId)) return false;
       seen.add(currentId);
-      const current = byId.get(currentId);
+      const current = itemById.get(currentId);
       if (!current || current.layer !== "logical") return false;
-      if ((outgoing.get(currentId) || []).some((edge) => byId.get(edge.to)?.layer === "physical")) return true;
+      if ((outgoing.get(currentId) || []).some((edge) => itemById.get(edge.to)?.layer === "physical")) return true;
       if (current.kind !== "buffer") return false;
       return (outgoing.get(currentId) || []).some((edge) => edge.kind === "buffer" && visit(edge.to));
     };
@@ -428,7 +429,7 @@
   function rawStorageProjection() {
     const nodes = Array.isArray(model.graph?.nodes) ? model.graph.nodes : [];
     const edgesAll = Array.isArray(model.graph?.edges) ? model.graph.edges : [];
-    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const itemById = new Map(nodes.map((node) => [node.id, node]));
     const outgoing = new Map();
     const incoming = new Map();
     for (const edge of edgesAll) {
@@ -451,14 +452,14 @@
     const keep = new Set();
     const addBufferRoute = (bufferId, trail = new Set()) => {
       if (!bufferId || trail.has(bufferId)) return;
-      const buffer = byId.get(bufferId);
+      const buffer = itemById.get(bufferId);
       if (!buffer || buffer.kind !== "buffer" || !storageLogicalAllowed(buffer)) return;
       const nextTrail = new Set(trail);
       nextTrail.add(bufferId);
       keep.add(bufferId);
       for (const edge of outgoing.get(bufferId) || []) {
         if (edge.kind !== "buffer") continue;
-        const target = byId.get(edge.to);
+        const target = itemById.get(edge.to);
         if (!target || target.layer !== "logical" || !storageLogicalAllowed(target)) continue;
         keep.add(target.id);
         if (target.kind === "buffer") addBufferRoute(target.id, nextTrail);
@@ -471,7 +472,7 @@
       nextTrail.add(targetId);
       for (const edge of incoming.get(targetId) || []) {
         if (edge.kind !== "buffer") continue;
-        const source = byId.get(edge.from);
+        const source = itemById.get(edge.from);
         if (!source || source.kind !== "buffer" || !storageLogicalAllowed(source)) continue;
         addBufferRoute(source.id);
         addBuffersFeeding(source.id, nextTrail);
@@ -479,7 +480,7 @@
     };
 
     if (rootId) {
-      const root = byId.get(rootId);
+      const root = itemById.get(rootId);
       if (root?.kind === "buffer") addBufferRoute(rootId);
       else if (root && storageLogicalAllowed(root) && canUseStorageForId(rootId)) {
         keep.add(rootId);
@@ -508,7 +509,7 @@
       changed = false;
       for (const edge of edgesAll) {
         if (!keep.has(edge.from) || keep.has(edge.to)) continue;
-        const target = byId.get(edge.to);
+        const target = itemById.get(edge.to);
         if (!target) continue;
         if (edge.kind === "buffer" && target.layer === "logical" && storageLogicalAllowed(target)) {
           keep.add(edge.to);
@@ -525,8 +526,8 @@
     const ids = new Set(visible.map((node) => node.id));
     const edges = edgesAll.filter((edge) => {
       if (!ids.has(edge.from) || !ids.has(edge.to)) return false;
-      const source = byId.get(edge.from);
-      const target = byId.get(edge.to);
+      const source = itemById.get(edge.from);
+      const target = itemById.get(edge.to);
       if (edge.kind === "buffer" && source?.kind === "buffer" && target?.layer === "logical") return true;
       return target?.layer === "physical" && ["contains", "storage_policy", "policy_volume", "volume_tier", "volume_disk"].includes(edge.kind);
     });
@@ -1070,10 +1071,10 @@
   function alignPhysicalStorageRows(positions, nodes, edges, level) {
     if (model.detailMode !== "physical" || positions.size < 2) return;
 
-    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const itemById = new Map(nodes.map((node) => [node.id, node]));
     const adjacency = new Map(nodes.map((node) => [node.id, []]));
     for (const edge of edges) {
-      if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+      if (!itemById.has(edge.from) || !itemById.has(edge.to)) continue;
       adjacency.get(edge.from)?.push(edge.to);
       adjacency.get(edge.to)?.push(edge.from);
     }
@@ -1081,7 +1082,7 @@
     const components = [];
     const seen = new Set();
     const stableId = (id) => {
-      const node = byId.get(id);
+      const node = itemById.get(id);
       return `${node?.database || ""}.${node?.name || ""}.${id}`;
     };
     for (const node of nodes.slice().sort((a, b) => stableId(a.id).localeCompare(stableId(b.id)))) {
@@ -1112,14 +1113,14 @@
     let cursorY = 70;
 
     for (const component of components) {
-      const logicalIds = component.filter((id) => byId.get(id)?.layer === "logical").sort((a, b) => stableId(a).localeCompare(stableId(b)));
-      const tierIds = component.filter((id) => byId.get(id)?.kind === "storage_tier").sort((a, b) => {
-        const an = byId.get(a);
-        const bn = byId.get(b);
+      const logicalIds = component.filter((id) => itemById.get(id)?.layer === "logical").sort((a, b) => stableId(a).localeCompare(stableId(b)));
+      const tierIds = component.filter((id) => itemById.get(id)?.kind === "storage_tier").sort((a, b) => {
+        const an = itemById.get(a);
+        const bn = itemById.get(b);
         return Number(an?.volume_priority || 0) - Number(bn?.volume_priority || 0)
           || stableId(a).localeCompare(stableId(b));
       });
-      const expiredIds = component.filter((id) => byId.get(id)?.kind === "ttl_expired").sort((a, b) => stableId(a).localeCompare(stableId(b)));
+      const expiredIds = component.filter((id) => itemById.get(id)?.kind === "ttl_expired").sort((a, b) => stableId(a).localeCompare(stableId(b)));
       const customStorage = tierIds.length > 0;
 
       if (!customStorage) {
@@ -1155,7 +1156,7 @@
         const componentSet = new Set(component);
         const bufferEdges = edges.filter((edge) => edge.kind === "buffer"
           && componentSet.has(edge.from) && componentSet.has(edge.to)
-          && byId.get(edge.from)?.kind === "buffer");
+          && itemById.get(edge.from)?.kind === "buffer");
         for (let pass = 0; pass < component.length; pass += 1) {
           let changed = false;
           for (const edge of bufferEdges) {
@@ -1191,8 +1192,8 @@
       // in one column, and the terminal sits to the right of the last tier.
       // This prevents a ClickHouse policy from looking like an extra storage
       // hop and keeps connected card tops aligned by row.
-      const bufferIds = logicalIds.filter((id) => byId.get(id)?.kind === "buffer");
-      const storedLogicalIds = logicalIds.filter((id) => byId.get(id)?.kind !== "buffer");
+      const bufferIds = logicalIds.filter((id) => itemById.get(id)?.kind === "buffer");
+      const storedLogicalIds = logicalIds.filter((id) => itemById.get(id)?.kind !== "buffer");
 
       // Logical cards stacked vertically belong to one storage lane. Keep the
       // cards the same width so their centres line up and vertical Buffer ->
@@ -1216,7 +1217,7 @@
         const logicalSet = new Set(logicalIds);
         const bufferRoutingEdges = edges.filter((edge) => edge.kind === "buffer"
           && logicalSet.has(edge.from) && logicalSet.has(edge.to)
-          && byId.get(edge.from)?.kind === "buffer");
+          && itemById.get(edge.from)?.kind === "buffer");
         const indegree = new Map(logicalIds.map((id) => [id, 0]));
         const outgoing = new Map(logicalIds.map((id) => [id, []]));
         for (const edge of bufferRoutingEdges) {
@@ -1224,8 +1225,8 @@
           indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
         }
         const priority = (a, b) => {
-          const aBuffer = byId.get(a)?.kind === "buffer" ? 0 : 1;
-          const bBuffer = byId.get(b)?.kind === "buffer" ? 0 : 1;
+          const aBuffer = itemById.get(a)?.kind === "buffer" ? 0 : 1;
+          const bBuffer = itemById.get(b)?.kind === "buffer" ? 0 : 1;
           return aBuffer - bBuffer || stableId(a).localeCompare(stableId(b));
         };
         const queue = logicalIds.filter((id) => (indegree.get(id) || 0) === 0).sort(priority);
@@ -1268,7 +1269,7 @@
         .reduce((best, value) => Math.min(best, value), Number.POSITIVE_INFINITY);
       const storageRowY = Number.isFinite(storedAnchorY) ? storedAnchorY : cursorY;
       const middleIds = component.filter((id) => {
-        const node = byId.get(id);
+        const node = itemById.get(id);
         return node && node.layer === "physical" && node.kind !== "storage_tier" && node.kind !== "ttl_expired";
       });
       let middleRight = logicalRight;
@@ -1291,7 +1292,7 @@
       const lastTierByRoot = new Map();
       for (const id of tierIds) {
         const item = positions.get(id);
-        const node = byId.get(id);
+        const node = itemById.get(id);
         if (!item || !node) continue;
         item.x = tierX;
         item.y = tierY;
@@ -1304,7 +1305,7 @@
       let terminalFallbackY = cursorY;
       for (const id of expiredIds) {
         const item = positions.get(id);
-        const node = byId.get(id);
+        const node = itemById.get(id);
         if (!item || !node) continue;
         const lastTier = positions.get(lastTierByRoot.get(node.root_logical_id));
         item.x = terminalX;
@@ -2670,14 +2671,14 @@
   function hitEdge(clientX, clientY) {
     if (!dom.explorerGraphCanvas || !model.edgeGeometry || model.scale < 0.2) return null;
     const point = eventWorldPoint(clientX, clientY);
-    const byId = new Map(visibleEdges().map((edge) => [edge.id, edge]));
+    const itemById = new Map(visibleEdges().map((edge) => [edge.id, edge]));
     for (const hit of model.edgeLabelHits || []) {
-      if (pointInRect(point, hit, 2 / model.scale) && byId.has(hit.edge.id)) return byId.get(hit.edge.id);
+      if (pointInRect(point, hit, 2 / model.scale) && itemById.has(hit.edge.id)) return itemById.get(hit.edge.id);
     }
     const tolerance = 6 / model.scale;
     let best = null;
     for (const [id, points] of model.edgeGeometry) {
-      const edge = byId.get(id);
+      const edge = itemById.get(id);
       if (!edge || !Array.isArray(points)) continue;
       for (let i = 1; i < points.length; i += 1) {
         const distance = distanceToSegment(point, points[i - 1], points[i]);
@@ -2737,7 +2738,7 @@
     const pane = dom.explorerGraphPane;
     if (!pane || chrome.root) return;
     chrome.root = pane;
-    const controls = pane.querySelector(".explorerGraphViewportControls");
+    const controls = $(".explorerGraphViewportControls", pane);
 
     const isolated = h("label", { class: "graphKitGroup explorerGraphIsolatedToggle" });
     chrome.isolatedInput = h("input");
@@ -3295,13 +3296,13 @@
 
   function logicalFocusId(id) {
     if (!id || !model.graph) return id || null;
-    const byId = new Map((model.graph.nodes || []).map((node) => [node.id, node]));
-    const initial = byId.get(id) || null;
+    const itemById = new Map((model.graph.nodes || []).map((node) => [node.id, node]));
+    const initial = itemById.get(id) || null;
     if (!initial) return null;
     if (initial.layer === "logical") return initial.id;
     // Clicking a physical child should not jump away from an already selected
     // logical table, especially for a shared disk with multiple parents.
-    if (model.focusedId && byId.get(model.focusedId)?.layer === "logical") return model.focusedId;
+    if (model.focusedId && itemById.get(model.focusedId)?.layer === "logical") return model.focusedId;
 
     const incoming = new Map();
     for (const edge of model.graph.edges || []) {
@@ -3315,7 +3316,7 @@
       if (!current || seen.has(current)) continue;
       seen.add(current);
       for (const parentId of incoming.get(current) || []) {
-        const parent = byId.get(parentId);
+        const parent = itemById.get(parentId);
         if (!parent) continue;
         if (parent.layer === "logical") return parent.id;
         queue.push(parent.id);
@@ -3619,7 +3620,7 @@
     ns.segmented?.set(dom.explorerGraphTypeSelect, next);
     // TTL lifecycle only exists in the Storage projection. Keep the legend
     // contextual so Lineage does not advertise an edge type it never renders.
-    const ttlLegend = document.getElementById("explorerGraphLegendTtl");
+    const ttlLegend = byId("explorerGraphLegendTtl");
     if (ttlLegend) ttlLegend.hidden = next !== "physical";
     if (!changed) return;
     if (model.panel?.type === "edge") closePanel();

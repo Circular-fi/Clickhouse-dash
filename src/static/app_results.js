@@ -3,6 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const { dom, util, state } = ns;
   const queryChart = ns.queryChart || null;
@@ -310,7 +311,7 @@
     if (resultsStackElement || !dom.resultsPanel) return;
     resultsStackElement = document.createElement("div");
     resultsStackElement.className = "resultsStack";
-    const header = dom.resultsPanel.querySelector(".panel__header");
+    const header = $(".panel__header", dom.resultsPanel);
     const anchor = header ? header.nextSibling : dom.resultsPanel.firstChild;
     dom.resultsPanel.insertBefore(resultsStackElement, anchor);
   }
@@ -336,7 +337,7 @@
   function removeIds(root) {
     if (!root) return;
     if (root.removeAttribute) root.removeAttribute("id");
-    const nodes = root.querySelectorAll("[id]");
+    const nodes = $$("[id]", root);
     for (const n of nodes) n.removeAttribute("id");
   }
 
@@ -1406,7 +1407,7 @@
 
   function updateLiveSortIndicators() {
     if (!dom.resultTableHead) return;
-    const ths = dom.resultTableHead.querySelectorAll("th.is-sortable");
+    const ths = $$("th.is-sortable", dom.resultTableHead);
     for (const th of ths) {
       const k = Number(th.dataset.sortKey || "");
       ns.table.setSort(th, sortKey !== null && sortDir && k === sortKey ? sortDir : "");
@@ -1596,7 +1597,7 @@
     replaceVirtualBodyRows(tbody, frag);
     refreshRowDetailsAfterRender(tbody);
 
-    const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)");
+    const firstRow = $("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)", tbody);
     if (firstRow) {
       const h = firstRow.getBoundingClientRect().height;
       if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 0.05) {
@@ -1956,13 +1957,13 @@
     dom.resultTableHead.replaceChildren();
     dom.resultTableHead.appendChild(headRow);
 
-    let tr = dom.resultTableBody.querySelector("tr");
+    let tr = $("tr", dom.resultTableBody);
     if (!tr) {
       tr = document.createElement("tr");
       dom.resultTableBody.appendChild(tr);
     }
 
-    let td = tr.querySelector("td:not(.dataTable__rowNum)");
+    let td = $("td:not(.dataTable__rowNum)", tr);
     if (!td) td = document.createElement("td");
 
     tr.replaceChildren();
@@ -1987,7 +1988,7 @@
       renderSingleValueCell(cell, raw, 0, resultTypeAsts);
     };
 
-    const td = dom.resultTableBody.querySelector("tr td:not(.dataTable__rowNum)");
+    const td = $("tr td:not(.dataTable__rowNum)", dom.resultTableBody);
     if (!td) {
       requestAnimationFrame(() => apply());
       return;
@@ -2247,7 +2248,7 @@
       ns.uiState.banner(eb, { message: err, verbatim: true });
     }
 
-    const wrap = dom.liveResultsWrap || (dom.resultsPanel ? dom.resultsPanel.querySelector(".tableWrap") : null);
+    const wrap = dom.liveResultsWrap || (dom.resultsPanel ? $(".tableWrap", dom.resultsPanel) : null);
     if (wrap) {
       const clone = wrap.cloneNode(true);
       removeIds(clone);
@@ -2296,9 +2297,9 @@
 
   function findTablePartsIn(wrap) {
     if (!wrap) return { thead: null, tbody: null, table: null };
-    const table = wrap.querySelector("table");
-    const thead = wrap.querySelector("thead");
-    const tbody = wrap.querySelector("tbody");
+    const table = $("table", wrap);
+    const thead = $("thead", wrap);
+    const tbody = $("tbody", wrap);
     return { thead, tbody, table };
   }
 
@@ -2310,7 +2311,7 @@
 
   function ensureLocalErrorBanner(body) {
     if (!body) return null;
-    let el = body.querySelector(".uiBanner");
+    let el = $(".uiBanner", body);
     if (!el) {
       el = document.createElement("div");
       body.insertBefore(el, body.firstChild);
@@ -2386,7 +2387,7 @@
       setBlockExpandedLocal(blockObj, expanded);
     });
 
-    const wrap = dom.liveResultsWrap || (dom.resultsPanel ? dom.resultsPanel.querySelector(".tableWrap") : null);
+    const wrap = dom.liveResultsWrap || (dom.resultsPanel ? $(".tableWrap", dom.resultsPanel) : null);
     let wrapClone = null;
     if (wrap) {
       wrapClone = wrap.cloneNode(true);
@@ -2545,7 +2546,7 @@
 
     function updateLocalSortIndicators() {
       if (!local.wrap) return;
-      const ths = local.wrap.querySelectorAll("thead th.is-sortable");
+      const ths = $$("thead th.is-sortable", local.wrap);
       for (const th of ths) {
         const k = Number(th.dataset.sortKey || "");
         ns.table.setSort(th, local.sortKey !== null && local.sortDir && k === local.sortKey ? local.sortDir : "");
@@ -2647,7 +2648,7 @@
       replaceVirtualBodyRows(tbody, frag);
       refreshRowDetailsAfterRender(tbody);
 
-      const firstRow = tbody.querySelector("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)");
+      const firstRow = $("tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)", tbody);
       if (firstRow) {
         const h = firstRow.getBoundingClientRect().height;
         if (Number.isFinite(h) && h >= 22 && h <= 72 && Math.abs(h - rowH) > 0.05) {
@@ -2807,13 +2808,13 @@
       thead.replaceChildren();
       thead.appendChild(headRow);
 
-      let tr = tbody.querySelector("tr");
+      let tr = $("tr", tbody);
       if (!tr) {
         tr = document.createElement("tr");
         tbody.appendChild(tr);
       }
 
-      let td = tr.querySelector("td:not(.dataTable__rowNum)");
+      let td = $("td:not(.dataTable__rowNum)", tr);
       if (!td) td = document.createElement("td");
 
       tr.replaceChildren();
@@ -2835,7 +2836,7 @@
         const td = simplifySingleValueTableLocal();
         if (td) renderSingleValueCell(td, raw, 0, local.typeAsts);
       };
-      const td = tbody.querySelector("tr td:not(.dataTable__rowNum)");
+      const td = $("tr td:not(.dataTable__rowNum)", tbody);
       if (!td) {
         requestAnimationFrame(() => apply());
         return;
@@ -3662,12 +3663,12 @@
   // per distinct trace id.
   function rowTraceLinks(ctx, row) {
     if (!ns.features.get("traces.enabled") || !ctx || !Array.isArray(row)) return [];
-    const byId = new Map();
+    const itemById = new Map();
     for (const place of traceCandidates(ctx, row)) {
-      let link = byId.get(place.traceId);
+      let link = itemById.get(place.traceId);
       if (!link) {
         link = { traceId: place.traceId, label: place.label, columnIndex: place.columnIndex, others: [], spans: new Set(), ambiguous: false };
-        byId.set(place.traceId, link);
+        itemById.set(place.traceId, link);
       } else {
         link.others.push(place.label);
       }
@@ -3675,7 +3676,7 @@
       if (span === AMBIGUOUS) link.ambiguous = true;
       else if (span) link.spans.add(span);
     }
-    return [...byId.values()].map(({ spans, ambiguous, ...link }) => {
+    return [...itemById.values()].map(({ spans, ambiguous, ...link }) => {
       const spanId = !ambiguous && spans.size === 1 ? [...spans][0] : "";
       const path = `observability/traces/${encodeURIComponent(link.traceId)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;
       return { ...link, spanId, href: ns.api ? ns.api.resolveUrl(path) : `/${path}` };
@@ -4041,7 +4042,7 @@
         if (view === "table" && isVirtualResults && !isVerticalResults) renderVirtualRows(true);
       },
     });
-    const headerMeta = dom.resultsPanel.querySelector(".panel__header .panel__meta");
+    const headerMeta = $(".panel__header .panel__meta", dom.resultsPanel);
     if (headerMeta) headerMeta.insertBefore(mainChart.toggleEl, dom.copySplit && dom.copySplit.parentElement === headerMeta ? dom.copySplit : null);
     dom.liveResultsWrap.after(mainChart.hostEl);
   }

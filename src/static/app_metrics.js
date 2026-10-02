@@ -8,6 +8,7 @@
   // picks (range, panels, aggregation, group-by, filters) lives in the URL.
   const ns = window.ChDash;
   if (!ns) return;
+  const { byId, $ } = ns.dom;
   const { dom, state, api, ui, util, h } = ns;
 
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
@@ -407,7 +408,7 @@
       });
     } else {
       root.innerHTML = groups.join("");
-      if (focus) root.querySelector(`[data-service-toggle="${CSS.escape(focus)}"]`)?.scrollIntoView?.({ block: "nearest" });
+      if (focus) $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
     }
     if (summary) {
       const total = Number(model.catalog?.metric_count || 0);
@@ -438,7 +439,7 @@
   function onCatalogClick(event) {
     if (event.target.closest("[data-metrics-retry=\"catalog\"]")) { void loadCatalog(); return; }
     if (event.target.closest("[data-metrics-clear-search]")) {
-      const input = document.getElementById("metricsSearch");
+      const input = byId("metricsSearch");
       if (input) { input.value = ""; input.focus(); }
       model.search = "";
       renderCatalog();
@@ -653,12 +654,12 @@
         </div>
       </div>
       <div class="metricsPanel__empty">${ns.uiState.emptyHtml({ body: "Pick a metric in the catalog to chart it." })}</div>`;
-    const keysList = el.querySelector(".metricsFilterForm__keys");
-    const valuesList = el.querySelector(".metricsFilterForm__values");
+    const keysList = $(".metricsFilterForm__keys", el);
+    const valuesList = $(".metricsFilterForm__values", el);
     keysList.id = `metricsFilterKeys${panel.id}`;
     valuesList.id = `metricsFilterValues${panel.id}`;
-    el.querySelector(".metricsFilterForm__key").setAttribute("list", keysList.id);
-    el.querySelector(".metricsFilterForm__value").setAttribute("list", valuesList.id);
+    $(".metricsFilterForm__key", el).setAttribute("list", keysList.id);
+    $(".metricsFilterForm__value", el).setAttribute("list", valuesList.id);
     bindPanel(panel, el);
     return el;
   }
@@ -666,19 +667,19 @@
   // Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
   // owns their motion, keys, focus and the outside click / Escape layer.
   const closePickers = () => ns.menu?.closeAll();
-  const pickerParts = (root) => [root.querySelector(":scope > .tracePicker__button"), root.querySelector(":scope > .tracePicker__menu")];
+  const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
   function bindPanel(panel, el) {
     el.addEventListener("pointerdown", () => setActive(panel));
     el.addEventListener("focusin", () => setActive(panel));
-    el.querySelector(".metricsPanel__remove").addEventListener("click", () => removePanel(panel));
+    $(".metricsPanel__remove", el).addEventListener("click", () => removePanel(panel));
     el.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest("[data-metrics-retry=\"panel\"]")) void loadPanel(panel);
     });
 
-    const aggPicker = el.querySelector(".metricsPicker--agg");
+    const aggPicker = $(".metricsPicker--agg", el);
     ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });
-    aggPicker.querySelector(".tracePicker__menu").addEventListener("click", (event) => {
+    $(".tracePicker__menu", aggPicker).addEventListener("click", (event) => {
       const option = event.target.closest("[data-agg]");
       if (!option) return;
       if (option.dataset.agg === panel.agg) return;
@@ -688,7 +689,7 @@
       loadPanel(panel);
     });
 
-    const groupPicker = el.querySelector(".metricsPicker--group");
+    const groupPicker = $(".metricsPicker--group", el);
     ns.menu?.multi(...pickerParts(groupPicker), {
       root: groupPicker,
       onOpen: () => renderGroupMenu(panel, true),
@@ -697,7 +698,7 @@
         renderGroupMenu(panel, false);
       },
     });
-    groupPicker.querySelector(".tracePicker__menu").addEventListener("change", (event) => {
+    $(".tracePicker__menu", groupPicker).addEventListener("change", (event) => {
       const box = event.target.closest("input[data-group-key]");
       if (!box) return;
       const key = box.dataset.groupKey;
@@ -711,7 +712,7 @@
     });
 
 
-    const chips = el.querySelector(".metricsFilters__chips");
+    const chips = $(".metricsFilters__chips", el);
     chips.addEventListener("click", (event) => {
       const remove = event.target.closest("[data-remove-filter]");
       if (!remove) return;
@@ -721,12 +722,12 @@
       loadPanel(panel);
     });
 
-    const form = el.querySelector(".metricsFilterForm");
-    const addButton = el.querySelector(".metricsFilters__add");
-    const keyInput = form.querySelector(".metricsFilterForm__key");
-    const valueInput = form.querySelector(".metricsFilterForm__value");
+    const form = $(".metricsFilterForm", el);
+    const addButton = $(".metricsFilters__add", el);
+    const keyInput = $(".metricsFilterForm__key", form);
+    const valueInput = $(".metricsFilterForm__value", form);
     // = | !=: the shared segmented control (app_ui_segmented.js).
-    const ops = ns.segmented?.bind(form.querySelector(".metricsFilterForm__ops"), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
+    const ops = ns.segmented?.bind($(".metricsFilterForm__ops", form), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
     const setOp = (op) => {
       form.dataset.op = op;
       ops?.set(op);
@@ -752,11 +753,11 @@
       setOp("=");
       keyInput.focus({ preventScroll: true });
       const keys = await ensureKeys(panel);
-      h.replace(form.querySelector(".metricsFilterForm__keys"), keys.map((k) => h("option", { value: k })));
+      h.replace($(".metricsFilterForm__keys", form), keys.map((k) => h("option", { value: k })));
     });
     const refreshValues = async () => {
       const key = keyInput.value.trim();
-      const list = form.querySelector(".metricsFilterForm__values");
+      const list = $(".metricsFilterForm__values", form);
       if (!key || !(panel.keys || []).includes(key)) { list.replaceChildren(); return; }
       const values = await ensureValues(panel, key);
       if (keyInput.value.trim() !== key) return;
@@ -777,9 +778,9 @@
       renderFilters(panel);
       loadPanel(panel);
     });
-    form.querySelector(".metricsFilterForm__cancel").addEventListener("click", closeForm);
+    $(".metricsFilterForm__cancel", form).addEventListener("click", closeForm);
 
-    el.querySelector(".metricsExemplarToggle").addEventListener("change", (event) => {
+    $(".metricsExemplarToggle", el).addEventListener("change", (event) => {
       panel.exemplars = !!event.target.checked;
       address.replace();
       if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
@@ -794,12 +795,12 @@
     const data = panel.data;
     const hasMetric = !!panel.metric;
     el.classList.toggle("is-empty", !hasMetric);
-    el.querySelector(".metricsPanel__remove").hidden = model.panels.length <= 1;
-    el.querySelector(".metricsPanel__header").hidden = !hasMetric && model.panels.length <= 1;
-    el.querySelector(".metricsPanel__controls").hidden = !hasMetric;
-    el.querySelector(".metricsChart").hidden = !hasMetric;
-    el.querySelector(".metricsPanel__empty").hidden = hasMetric;
-    const name = el.querySelector(".metricsPanel__name");
+    $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
+    $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
+    $(".metricsPanel__controls", el).hidden = !hasMetric;
+    $(".metricsChart", el).hidden = !hasMetric;
+    $(".metricsPanel__empty", el).hidden = hasMetric;
+    const name = $(".metricsPanel__name", el);
     name.textContent = hasMetric ? panel.metric : "Empty panel";
     name.title = hasMetric ? panel.metric : "";
     const unit = data?.unit ?? entry?.unit ?? "";
@@ -813,8 +814,8 @@
       if (panel.kind === "sum" && monotonic != null) badges.push(ns.badge.html(monotonic ? "monotonic" : "non-monotonic", { className: "metricsBadge", title: "Monotonic" }));
       badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
     }
-    el.querySelector(".metricsPanel__badges").innerHTML = badges.join("");
-    const description = el.querySelector(".metricsPanel__description");
+    $(".metricsPanel__badges", el).innerHTML = badges.join("");
+    const description = $(".metricsPanel__description", el);
     const text = data?.description || entry?.description || "";
     description.textContent = text;
     description.hidden = !text;
@@ -822,24 +823,24 @@
 
     // Aggregation picker: the server lists what fits the metric type.
     const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
-    const aggPicker = el.querySelector(".metricsPicker--agg");
-    const aggButton = aggPicker.querySelector(".tracePicker__button");
+    const aggPicker = $(".metricsPicker--agg", el);
+    const aggButton = $(".tracePicker__button", aggPicker);
     aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
     aggButton.disabled = !aggs.length;
-    h.replace(aggPicker.querySelector(".tracePicker__menu"), aggs.map((agg) => h("button", {
+    h.replace($(".tracePicker__menu", aggPicker), aggs.map((agg) => h("button", {
       type: "button", class: "themeSelect__option tracePicker__option", role: "option", "data-agg": agg, "aria-selected": agg === panel.agg,
     }, aggLabel(agg))));
     renderGroupButton(panel);
     const perSeries = !!data?.per_series;
-    el.querySelector(".metricsPicker--group .tracePicker__button").disabled = perSeries;
+    $(".metricsPicker--group .tracePicker__button", el).disabled = perSeries;
     renderFilters(panel);
-    const exemplarControl = el.querySelector(".metricsControl--exemplars");
+    const exemplarControl = $(".metricsControl--exemplars", el);
     exemplarControl.hidden = !EXEMPLAR_KINDS.has(panel.kind);
-    exemplarControl.querySelector("input").checked = panel.exemplars;
+    $("input", exemplarControl).checked = panel.exemplars;
     renderPanelNote(panel);
 
-    const stateEl = el.querySelector(".metricsChart__state");
-    ns.uiState.busy(el.querySelector(".metricsChart"), panel.loading);
+    const stateEl = $(".metricsChart__state", el);
+    ns.uiState.busy($(".metricsChart", el), panel.loading);
     const ui = ns.uiState;
     if (panel.loading && !data) {
       stateEl.hidden = false;
@@ -861,7 +862,7 @@
   }
 
   function renderPanelNote(panel) {
-    const note = panel.el?.querySelector(".metricsPanel__note");
+    const note = $(".metricsPanel__note", panel.el);
     if (!note) return;
     const data = panel.data;
     const parts = [];
@@ -875,14 +876,14 @@
   }
 
   function renderGroupButton(panel) {
-    const button = panel.el?.querySelector(".metricsPicker--group .tracePicker__button");
+    const button = $(".metricsPicker--group .tracePicker__button", panel.el);
     if (!button) return;
     button.textContent = `Group by \u00b7 ${panel.groupBy.length ? panel.groupBy.join(", ") : "None"}`;
     button.title = panel.groupBy.length ? `Group by ${panel.groupBy.join(", ")}` : "No grouping: one series";
   }
 
   function renderGroupMenu(panel, loading) {
-    const menu = panel.el?.querySelector(".metricsPicker--group .tracePicker__menu");
+    const menu = $(".metricsPicker--group .tracePicker__menu", panel.el);
     if (!menu) return;
     const keys = [...new Set([...(panel.keys || []), ...panel.groupBy])];
     if (loading && !panel.keys) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "Loading attributes\u2026")); return; }
@@ -895,7 +896,7 @@
   }
 
   function renderFilters(panel) {
-    const chips = panel.el?.querySelector(".metricsFilters__chips");
+    const chips = $(".metricsFilters__chips", panel.el);
     if (!chips) return;
     // The shared filter chips (ns.badge.chipHtml).
     chips.innerHTML = panel.filters.map((f, index) => ns.badge.chipHtml({
@@ -997,8 +998,8 @@
     const el = panel.el;
     const data = panel.data;
     if (!el) return;
-    const plot = el.querySelector(".metricsChart__plot");
-    const axisTitle = el.querySelector(".metricsChart__axisTitle");
+    const plot = $(".metricsChart__plot", el);
+    const axisTitle = $(".metricsChart__axisTitle", el);
     const series = Array.isArray(data?.series) ? data.series : [];
     const timestamps = Array.isArray(data?.timestamps) ? data.timestamps : [];
     const core = ns.chartCore;
@@ -1080,9 +1081,9 @@
   let timePicker = null;
 
   function initTimeRangePicker() {
-    const unit = document.getElementById("metricsRangeUnit");
+    const unit = byId("metricsRangeUnit");
     const root = unit?.parentElement;
-    if (!ns.timeRange || !root?.querySelector(":scope > .tracePicker__button")) return;
+    if (!ns.timeRange || !$(":scope > .tracePicker__button", root)) return;
     timePicker = ns.timeRange.create(root, {
       idPrefix: "metrics",
       getValue: () => model.range,
@@ -1099,7 +1100,7 @@
   }
 
   function renderRangeInfo() {
-    const info = document.getElementById("metricsRangeInfo");
+    const info = byId("metricsRangeInfo");
     if (!info) return;
     const r = model.resolved;
     // A relative range ("Last 6 hours") shows what it resolved to; an
@@ -1185,11 +1186,11 @@
   }
 
   function init() {
-    dom.metricsCatalog = document.getElementById("metricsCatalog");
-    dom.metricsCatalogSummary = document.getElementById("metricsCatalogSummary");
-    dom.metricsPanels = document.getElementById("metricsPanels");
-    dom.metricsError = document.getElementById("metricsError");
-    dom.metricsAddPanelButton = document.getElementById("metricsAddPanelButton");
+    dom.metricsCatalog = byId("metricsCatalog");
+    dom.metricsCatalogSummary = byId("metricsCatalogSummary");
+    dom.metricsPanels = byId("metricsPanels");
+    dom.metricsError = byId("metricsError");
+    dom.metricsAddPanelButton = byId("metricsAddPanelButton");
 
     readUrl();
     initTimeRangePicker();
@@ -1198,22 +1199,22 @@
 
     // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
     // windows (remembered), a drawer on phones opened from the charts' top.
-    ns.sidePanel.mount(document.getElementById("metricsSidebar"), {
+    ns.sidePanel.mount(byId("metricsSidebar"), {
       label: "Metrics",
-      collapse: { button: document.getElementById("metricsSidebarToggle"), storeKey: ns.storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
-      drawer: { host: document.querySelector(".metricsMain") },
+      collapse: { button: byId("metricsSidebarToggle"), storeKey: ns.storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
+      drawer: { host: $(".metricsMain") },
     });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);
-    const search = document.getElementById("metricsSearch");
+    const search = byId("metricsSearch");
     // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
     ns.search.bind(search, (value) => { model.search = value; renderCatalog(); });
     search?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        dom.metricsCatalog?.querySelector(".metricsCatalog__metric")?.click();
+        $(".metricsCatalog__metric", dom.metricsCatalog)?.click();
       }
     });
-    document.getElementById("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
+    byId("metricsToolbar")?.addEventListener("submit", (event) => { event.preventDefault(); reloadAll(); });
     dom.metricsAddPanelButton?.addEventListener("click", addPanel);
     window.addEventListener("chdash:host-changed", () => {
       started = true;

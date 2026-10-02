@@ -52,7 +52,7 @@ def test_ttl_lifecycle_dash_is_documented_in_vertical_legend() -> None:
     assert 'id="explorerGraphLegendTtl"' in html and "hidden" in html
     assert ".graphKitLegend__line--dashed" in css
     assert 'edge.kind === "ttl_delete" || edge.kind === "ttl_move"' in graph
-    assert 'document.getElementById("explorerGraphLegendTtl")' in graph
+    assert 'byId("explorerGraphLegendTtl")' in graph
     assert 'ttlLegend.hidden = next !== "physical"' in graph
     # The legend remains a vertical one-column grid.
     assert "grid-template-columns: 1fr;" in css

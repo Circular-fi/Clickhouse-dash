@@ -23,6 +23,7 @@
   //               open one.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const esc = (value) => ns.util.escapeHtml(value ?? "");
 
@@ -42,7 +43,7 @@
   // on the button). Returns the button.
   function sortHeader(th, { key, dir = "", onSort = null, title = "" } = {}) {
     if (!th) return null;
-    let button = th.querySelector(":scope > .dataTable__sort");
+    let button = $(":scope > .dataTable__sort", th);
     if (!button) {
       button = document.createElement("button");
       button.type = "button";
@@ -235,7 +236,7 @@
   } = {}) {
     if (!container) return { refresh() {}, destroy() {} };
     const indexMode = typeof count === "function";
-    const list = () => [...container.querySelectorAll(rows)].filter((row) => !row.hidden);
+    const list = () => [...$$(rows, container)].filter((row) => !row.hidden);
     const rowOf = (el) => {
       const row = el instanceof Element ? el.closest(rows) : null;
       return row && container.contains(row) ? row : null;

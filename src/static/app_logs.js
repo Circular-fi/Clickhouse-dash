@@ -15,7 +15,7 @@
   const fmt = ns.format;
   const palette = ns.palette;
 
-  const $ = (id) => document.getElementById(id);
+  const { byId, $, $$ } = ns.dom;
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
   // The Logs view's address (ns.router): /observability/logs and its search
   // parameters, written only while the view shows (the "logs" lifecycle
@@ -197,12 +197,12 @@
   // Each picker is an ns.menu menu (motion, keys, focus, the one outside
   // click / Escape layer); a search closes them all.
   const closePickers = () => ns.menu?.closeAll();
-  const pickerParts = (root) => [root?.querySelector(":scope > .tracePicker__button"), root?.querySelector(":scope > .tracePicker__menu")];
+  const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
   let timePicker = null;
 
   function initTimePicker() {
-    const select = $("logsRangeUnit");
+    const select = byId("logsRangeUnit");
     const root = select?.parentElement;
     if (!ns.timeRange || !root) return;
     timePicker = ns.timeRange.create(root, {
@@ -222,7 +222,7 @@
   // --- Service multi picker ----------------------------------------------------
 
   function renderServiceButton() {
-    const button = $("logsServiceButton");
+    const button = byId("logsServiceButton");
     if (!button) return;
     const n = model.services.length;
     button.textContent = n === 0 ? "Service · ALL" : n === 1 ? `Service · ${model.services[0]}` : `Service · ${n} selected`;
@@ -230,7 +230,7 @@
   }
 
   function renderServiceMenu() {
-    const menu = $("logsServiceMenu");
+    const menu = byId("logsServiceMenu");
     if (!menu) return;
     const names = [...new Set([...model.serviceChoices.map((s) => s.name), ...model.services])].sort();
     const counts = new Map(model.serviceChoices.map((s) => [s.name, s.count]));
@@ -247,10 +247,10 @@
   }
 
   function initServicePicker() {
-    const root = $("logsServicePicker");
+    const root = byId("logsServicePicker");
     if (!root) return;
     ns.menu?.multi(...pickerParts(root), { root, onOpen: renderServiceMenu });
-    const menu = $("logsServiceMenu");
+    const menu = byId("logsServiceMenu");
     menu.addEventListener("change", (event) => {
       const input = event.target.closest("input[type=checkbox]");
       if (!input) return;
@@ -284,7 +284,7 @@
       if (!req.isCurrent()) return;
       model.serviceChoices = Array.isArray(payload.services) ? payload.services : [];
       palette.registerServices(model.serviceChoices.map((s) => s.name));
-      if ($("logsServiceMenu") && !$("logsServiceMenu").hidden) renderServiceMenu();
+      if (byId("logsServiceMenu") && !byId("logsServiceMenu").hidden) renderServiceMenu();
     } catch (_) { /* the picker keeps the selected services */ }
   }
 
@@ -302,7 +302,7 @@
   }
 
   function renderChips() {
-    const box = $("logsChips");
+    const box = byId("logsChips");
     if (!box) return;
     const chips = [];
     if (model.traceId) chips.push({ kind: "trace", text: `TraceId = ${model.traceId}`, title: "Trace filter" });
@@ -419,12 +419,12 @@
   }
 
   function initFields() {
-    if (!ns.facetPanel || !$("logsFacets")) return;
+    if (!ns.facetPanel || !byId("logsFacets")) return;
     fields = ns.facetPanel.create({
       ids: { panel: "logsFacets", toggle: "logsFacetsToggle", meta: "logsFacetsMeta", search: "logsFacetsSearch", list: "logsFacetsList" },
       collapsedClass: "chdash-logs-facets-collapsed",
       // A phone: the panel is a drawer, toggled from the top of the records.
-      drawerHost: document.querySelector(".logsSearchMain"),
+      drawerHost: $(".logsSearchMain"),
       collapsedStoreKey: ns.storage.KEYS.logsFacetsCollapsed,
       pinStoreKey: ns.storage.KEYS.logsFacetPins,
       label: "fields",
@@ -473,7 +473,7 @@
   // The error strip (ns.uiState.banner): a sentence (app_observability.js
   // strips the API's error codes) and, for a step that can run again, Retry.
   function showError(message, retry = null) {
-    ns.uiState.banner($("logsError"), { message, retry });
+    ns.uiState.banner(byId("logsError"), { message, retry });
   }
 
   function onRetryClick(event) {
@@ -499,13 +499,13 @@
 
   function setStatus(text) {
     model.status = text;
-    const node = $("logsStatus");
+    const node = byId("logsStatus");
     if (node) node.textContent = text;
   }
 
   function setSearching(on) {
     model.searching = on;
-    ns.uiState.busy($("logsSearchButton"), on);
+    ns.uiState.busy(byId("logsSearchButton"), on);
   }
 
   // --- Search ------------------------------------------------------------------------
@@ -661,7 +661,7 @@
   }
 
   function renderHead() {
-    const head = $("logsTableHead");
+    const head = byId("logsTableHead");
     if (!head) return;
     head.style.gridTemplateColumns = columnTemplate();
     h.replace(head, model.cols.map((col) => h("span", { class: ["logsTable__th", col === "time" && "num"], role: "columnheader" }, columnLabel(col))));
@@ -683,30 +683,30 @@
   }
 
   function renderTable({ message = null, error = "" } = {}) {
-    const viewport = $("logsTableViewport");
-    const messageBox = $("logsTableMessage");
-    const spacer = $("logsTableSpacer");
+    const viewport = byId("logsTableViewport");
+    const messageBox = byId("logsTableMessage");
+    const spacer = byId("logsTableSpacer");
     if (!viewport || !messageBox || !spacer) return;
     renderHead();
     if (message === "loading" && !model.rows.length) {
       messageBox.hidden = false;
       messageBox.innerHTML = ns.uiState.loadingHtml({ label: "Searching logs\u2026" });
       spacer.style.height = "0px";
-      $("logsTableRows").replaceChildren();
+      byId("logsTableRows").replaceChildren();
       return;
     }
     if (message === "error") {
       messageBox.hidden = false;
       messageBox.innerHTML = failedHtml("Search failed", error, "search");
       spacer.style.height = "0px";
-      $("logsTableRows").replaceChildren();
+      byId("logsTableRows").replaceChildren();
       return;
     }
     if (!model.rows.length) {
       messageBox.hidden = false;
       messageBox.innerHTML = model.lastSearch ? emptyHtml() : ns.uiState.emptyHtml({ body: "Search to load logs." });
       spacer.style.height = "0px";
-      $("logsTableRows").replaceChildren();
+      byId("logsTableRows").replaceChildren();
       return;
     }
     messageBox.hidden = true;
@@ -717,8 +717,8 @@
 
   let renderedRange = "";
   function renderWindow(force = false) {
-    const viewport = $("logsTableViewport");
-    const box = $("logsTableRows");
+    const viewport = byId("logsTableViewport");
+    const box = byId("logsTableRows");
     if (!viewport || !box || !model.rows.length) return;
     const first = Math.max(0, Math.floor(viewport.scrollTop / ROW_HEIGHT) - OVERSCAN);
     const visible = Math.ceil((viewport.clientHeight || 600) / ROW_HEIGHT) + OVERSCAN * 2;
@@ -745,9 +745,9 @@
 
   function initTable() {
     ROW_HEIGHT = ns.table.rowHeight("compact");
-    const viewport = $("logsTableViewport");
-    const box = $("logsTableRows");
-    const message = $("logsTableMessage");
+    const viewport = byId("logsTableViewport");
+    const box = byId("logsTableRows");
+    const message = byId("logsTableMessage");
     if (!viewport || !box) return;
     viewport.addEventListener("scroll", util.rafOnce(() => renderWindow()), { passive: true });
     new ResizeObserver(() => renderWindow(true)).observe(viewport);
@@ -776,17 +776,17 @@
       openSidePanel(model.rows[index]);
       scrollRowIntoView(index);
     };
-    ns.table.rovingRows($("logsTable"), {
+    ns.table.rovingRows(byId("logsTable"), {
       count: () => model.rows.length,
       current: selectedIndex,
-      page: () => Math.max(1, Math.floor(($("logsTableViewport")?.clientHeight || 600) / ROW_HEIGHT) - 1),
+      page: () => Math.max(1, Math.floor((byId("logsTableViewport")?.clientHeight || 600) / ROW_HEIGHT) - 1),
       onMove: openAt,
       onOpen: openAt,
     });
   }
 
   function scrollRowIntoView(index) {
-    const viewport = $("logsTableViewport");
+    const viewport = byId("logsTableViewport");
     if (!viewport) return;
     const top = index * ROW_HEIGHT;
     if (top < viewport.scrollTop) viewport.scrollTop = top;
@@ -797,7 +797,7 @@
   // --- Columns picker -----------------------------------------------------------------
 
   function renderColumnsMenu() {
-    const menu = $("logsColumnsMenu");
+    const menu = byId("logsColumnsMenu");
     if (!menu) return;
     const attrCols = model.cols.filter((c) => c.startsWith("attr:"));
     const option = (col, label) => h("label", { class: "logsMultiPicker__option", role: "option", "aria-selected": model.cols.includes(col) },
@@ -819,10 +819,10 @@
   }
 
   function initColumnsPicker() {
-    const root = $("logsColumnsPicker");
+    const root = byId("logsColumnsPicker");
     if (!root) return;
     ns.menu?.multi(...pickerParts(root), { root, onOpen: renderColumnsMenu });
-    const menu = $("logsColumnsMenu");
+    const menu = byId("logsColumnsMenu");
     menu.addEventListener("change", (event) => {
       const input = event.target.closest("input[type=checkbox]");
       if (!input) return;
@@ -833,7 +833,7 @@
     });
     menu.addEventListener("submit", (event) => {
       event.preventDefault();
-      const input = event.target.querySelector("input");
+      const input = $("input", event.target);
       const key = String(input?.value || "").trim();
       if (!key) return;
       setColumns([...model.cols, `attr:${key}`]);
@@ -866,7 +866,7 @@
     try {
       const params = filterParams(range);
       params.set("bucket_origin_ms", String(localMidnight(range.start_ms)));
-      const width = $("logsHistogram")?.clientWidth || 1000;
+      const width = byId("logsHistogram")?.clientWidth || 1000;
       params.set("buckets", String(Math.max(20, Math.min(160, Math.round(width / 9)))));
       const payload = await api.getLogs("histogram", params, { signal: req.signal });
       if (!req.isCurrent()) return;
@@ -886,9 +886,9 @@
   // A message in place of the bars (the chart keeps its instance, hidden).
   function histogramMessage(box, text, isError = false) {
     if (histogramChart) histogramChart.root.hidden = true;
-    let note = box.querySelector(":scope > .logsHistogram__placeholder");
+    let note = $(":scope > .logsHistogram__placeholder", box);
     if (!note) {
-      box.querySelector(":scope > .uiState")?.remove();
+      $(":scope > .uiState", box)?.remove();
       note = document.createElement("div");
       box.appendChild(note);
     }
@@ -929,9 +929,9 @@
   }
 
   function renderHistogram() {
-    const box = $("logsHistogram");
-    const total = $("logsTotal");
-    const meta = $("logsHistogramMeta");
+    const box = byId("logsHistogram");
+    const total = byId("logsTotal");
+    const meta = byId("logsHistogramMeta");
     if (!box) return;
     const hist = model.histogram;
     ns.uiState.busy(box, model.histogramLoading && !!hist);
@@ -951,7 +951,7 @@
     if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(hist.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
     // While a refetch runs, the previous bars stay (dimmed) until it answers.
     if (model.histogramLoading || !ns.chartCore) return;
-    for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .uiState")) note.hidden = true;
+    for (const note of $$(":scope > .logsHistogram__placeholder, :scope > .uiState", box)) note.hidden = true;
     const data = histogramData(hist);
     if (!histogramChart) {
       histogramChart = ns.chartCore.create(box, {
@@ -1028,7 +1028,7 @@
   }
 
   // The shared sparkline (ui.sparkline), in the pattern's severity colour.
-  function sparklineSvg(values, sev) {
+  function sparklineHtml(values, sev) {
     return `<span class="logsSparkline" data-sev="${esc(sev)}">${ns.ui.sparkline.html(values, { min: 0 })}</span>`;
   }
 
@@ -1037,9 +1037,9 @@
   }
 
   function renderPatterns() {
-    const box = $("logsPatterns");
+    const box = byId("logsPatterns");
     if (!box) return;
-    const toggle = $("logsDenoiseToggle");
+    const toggle = byId("logsDenoiseToggle");
     if (toggle) toggle.hidden = model.tab !== "patterns";
     if (model.patternsLoading && !model.patterns) {
       box.innerHTML = ns.uiState.loadingHtml({ label: "Mining patterns from a sample\u2026" });
@@ -1068,7 +1068,7 @@
           <button type="button" class="logsPatternRow" role="row" data-pattern-index="${all.indexOf(item)}" title="Filter by this pattern: ${esc(item.search)}">
             <span class="logsPatternRow__count">${fmt.compact(item.count)}</span>
             <span class="logsPatternRow__share num cellBar" style="${ns.table.cellBarStyle(Math.max(1, Math.round(item.share * 100)))}">${fmt.percent(item.share)}</span>
-            <span class="logsPatternRow__trend">${sparklineSvg(item.sparkline || [], item.severity)}</span>
+            <span class="logsPatternRow__trend">${sparklineHtml(item.sparkline || [], item.severity)}</span>
             <span class="logsPatternRow__text">
               <span class="logsPattern">${ns.badge.severityHtml(item.severity)}${patternHtml(item.pattern)}</span>
               <span class="logsPattern__sample">${ns.badge.swatchHtml(item.service)}${esc(item.service)}${item.service_count > 1 ? ` +${item.service_count - 1}` : ""} · ${esc(item.sample)}</span>
@@ -1078,18 +1078,18 @@
   }
 
   function initPatterns() {
-    $("logsPatterns")?.addEventListener("click", (event) => {
+    byId("logsPatterns")?.addEventListener("click", (event) => {
       const rowEl = event.target.closest("[data-pattern-index]");
       if (!rowEl || !model.patterns) return;
       const item = model.patterns.patterns[Number(rowEl.dataset.patternIndex)];
       if (!item) return;
       model.q = item.search;
-      const input = $("logsQuery");
+      const input = byId("logsQuery");
       if (input) input.value = model.q;
       setTab("results", { push: false });
       void search({ push: true });
     });
-    $("logsDenoise")?.addEventListener("change", (event) => {
+    byId("logsDenoise")?.addEventListener("change", (event) => {
       model.denoise = !!event.target.checked;
       address.replace();
       renderPatterns();
@@ -1104,11 +1104,11 @@
   function setTab(tab, { push = false } = {}) {
     model.tab = tab === "patterns" ? "patterns" : "results";
     viewTabs?.select(model.tab);
-    $("logsResultsPane").hidden = model.tab !== "results";
-    $("logsPatternsPane").hidden = model.tab !== "patterns";
-    const cols = $("logsColumnsPicker");
+    byId("logsResultsPane").hidden = model.tab !== "results";
+    byId("logsPatternsPane").hidden = model.tab !== "patterns";
+    const cols = byId("logsColumnsPicker");
     if (cols) cols.hidden = model.tab !== "results";
-    const denoise = $("logsDenoiseToggle");
+    const denoise = byId("logsDenoiseToggle");
     if (denoise) denoise.hidden = model.tab !== "patterns";
     address.write(push ? "push" : "replace");
     if (model.tab === "patterns") void loadPatterns();
@@ -1128,11 +1128,11 @@
   let pendingLogId = "";
 
   function detailPanel() {
-    if (sidePanel || !$("logsSidePanel")) return sidePanel;
+    if (sidePanel || !byId("logsSidePanel")) return sidePanel;
     sidePanel = ns.detailPanel.create({
-      el: $("logsSidePanel"),
+      el: byId("logsSidePanel"),
       layout: "docked",
-      returnFocus: () => $("logsTable"),
+      returnFocus: () => byId("logsTable"),
       onClose: () => { if (model.side.row) closeSidePanel(); },
     });
     return sidePanel;
@@ -1147,8 +1147,8 @@
     if (tab) model.side.tab = tab;
     model.side.context = null;
     model.side.contextError = "";
-    detailPanel()?.open({ opener: $("logsTable") });
-    document.querySelector(".logsBody")?.classList.add("has-side");
+    detailPanel()?.open({ opener: byId("logsTable") });
+    $(".logsBody")?.classList.add("has-side");
     renderSidePanel();
     renderWindow(true);
     if (model.side.tab === "context") void loadContext();
@@ -1164,7 +1164,7 @@
     model.selectedId = "";
     model.side.row = null;
     if (sidePanel?.isOpen()) sidePanel.close("closed", { restoreFocus: true });
-    document.querySelector(".logsBody")?.classList.remove("has-side");
+    $(".logsBody")?.classList.remove("has-side");
     renderWindow(true);
     if (wasOpen && url === "clear") logParam.close();
   }
@@ -1198,7 +1198,7 @@
     return { key, label, value: String(value == null ? "" : value), json: false, mono, actions: actions ? FIELD_ACTIONS : [] };
   }
 
-  function mapSection(title, column, map) {
+  function mapSectionHtml(title, column, map) {
     const entries = Object.entries(map || {}).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     return `<section class="logsFieldGroup">
       <h4>${esc(title)} <span>${entries.length}</span></h4>
@@ -1209,22 +1209,22 @@
   function renderSidePanel() {
     const row = model.side.row;
     if (!row) return;
-    const title = $("logsSideTitle");
+    const title = byId("logsSideTitle");
     if (title) {
       title.innerHTML = `${sevBadgeHtml(row)}
         <span class="logsSideTitle__service">${ns.badge.swatchHtml(row.service)}${esc(row.service)}</span>
         <time class="logsSideTitle__time" title="${esc(timeTitle(row))}">${esc(fullTimeLabel(row))}</time>`;
     }
-    const openTrace = $("logsOpenTrace");
+    const openTrace = byId("logsOpenTrace");
     if (openTrace) {
       const traced = !!row.trace_id && ns.features.get("traces.enabled");
       openTrace.hidden = !traced;
       if (traced) openTrace.href = ns.router.url(`/observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
     }
     sideTabs?.select(model.side.tab);
-    $("logsSideDetails").hidden = model.side.tab !== "details";
-    $("logsSideContext").hidden = model.side.tab !== "context";
-    const details = $("logsSideDetails");
+    byId("logsSideDetails").hidden = model.side.tab !== "details";
+    byId("logsSideContext").hidden = model.side.tab !== "context";
+    const details = byId("logsSideDetails");
     if (details) {
       details.innerHTML = `
         <section class="logsFieldGroup logsFieldGroup--body">
@@ -1244,9 +1244,9 @@
             row.scope_version ? fieldRow("ScopeVersion", "ScopeVersion", row.scope_version) : null,
           ].filter(Boolean), { className: "logsFields" })}
         </section>
-        ${mapSection("Log attributes", "LogAttributes", row.log_attributes)}
-        ${mapSection("Resource attributes", "ResourceAttributes", row.resource_attributes)}
-        ${Object.keys(row.scope_attributes || {}).length ? mapSection("Scope attributes", "ScopeAttributes", row.scope_attributes) : ""}`;
+        ${mapSectionHtml("Log attributes", "LogAttributes", row.log_attributes)}
+        ${mapSectionHtml("Resource attributes", "ResourceAttributes", row.resource_attributes)}
+        ${Object.keys(row.scope_attributes || {}).length ? mapSectionHtml("Scope attributes", "ScopeAttributes", row.scope_attributes) : ""}`;
     }
     syncContextBar();
     renderContext();
@@ -1261,7 +1261,7 @@
       model.q = "";
       model.attrs = [];
       model.traceId = "";
-      const q = $("logsQuery");
+      const q = byId("logsQuery");
       if (q) q.value = "";
       levelPicker?.set("");
     }
@@ -1279,12 +1279,12 @@
     void search({ push: true });
   }
 
-  const contextScope = () => document.querySelector(".logsContextScope");
-  const contextWindow = () => document.querySelector(".logsContextWindow");
+  const contextScope = () => $(".logsContextScope");
+  const contextWindow = () => $(".logsContextWindow");
 
   function syncContextBar() {
     const row = model.side.row;
-    for (const button of document.querySelectorAll("[data-context-preset]")) {
+    for (const button of $$("[data-context-preset]")) {
       const preset = button.dataset.contextPreset;
       button.disabled = (preset === "host" && !row?.resource_attributes?.["host.name"]) || (preset === "trace" && !row?.trace_id);
     }
@@ -1326,13 +1326,13 @@
       if (req.isCurrent()) {
         model.side.contextLoading = false;
         renderContext();
-        $("logsContextRows")?.querySelector(".is-anchor")?.scrollIntoView({ block: "center" });
+        $(".is-anchor", byId("logsContextRows"))?.scrollIntoView({ block: "center" });
       }
     }
   }
 
   function renderContext() {
-    const box = $("logsContextRows");
+    const box = byId("logsContextRows");
     if (!box || model.side.tab !== "context") return;
     if (model.side.contextLoading && !model.side.context) { box.innerHTML = ns.uiState.loadingHtml({ label: "Loading surrounding logs\u2026", compact: true }); return; }
     if (model.side.contextError) { box.innerHTML = failedHtml("", model.side.contextError, "context", { compact: true }); return; }
@@ -1357,25 +1357,25 @@
     // Copy JSON / Copy body / Download JSON: the shared split (ui.copySplit),
     // like a trace's and a query's.
     const recordJson = () => (model.side.row ? JSON.stringify(model.side.row, null, 2) : "");
-    if ($("logsCopySplit")) {
+    if (byId("logsCopySplit")) {
       ns.ui.copySplit({
-        root: $("logsCopySplit"),
+        root: byId("logsCopySplit"),
         getText: recordJson,
         items: [
-          { el: $("logsCopyBody"), copy: () => String(model.side.row?.body ?? "") },
-          { el: $("logsDownloadJson"), onSelect: () => { if (model.side.row) ns.ui.downloadText(`log-${String(model.side.row.ts_ns || model.side.row.ts_ms || "record")}.json`, recordJson()); } },
+          { el: byId("logsCopyBody"), copy: () => String(model.side.row?.body ?? "") },
+          { el: byId("logsDownloadJson"), onSelect: () => { if (model.side.row) ns.ui.downloadText(`log-${String(model.side.row.ts_ns || model.side.row.ts_ms || "record")}.json`, recordJson()); } },
         ],
       });
     }
     // The record fields' actions (ui.kvBind): include is the field filter.
-    ns.ui.kvBind($("logsSideDetails"), {
+    ns.ui.kvBind(byId("logsSideDetails"), {
       onAction: (action, { key, text, button }) => {
         applyFieldAction(action === "include" ? "filter" : action, key, text, button);
         return true;
       },
     });
     // Details | Surrounding context: the shared tab behaviour (app_ui_tabs.js).
-    sideTabs = ns.tabs?.bind(document.querySelector(".logsSideTabs"), {
+    sideTabs = ns.tabs?.bind($(".logsSideTabs"), {
       attr: "sideTab",
       onSelect: (tab) => {
         model.side.tab = tab;
@@ -1386,7 +1386,7 @@
     // Context scope and window: shared segmented controls (app_ui_segmented.js).
     ns.segmented?.bind(contextScope(), { attr: "contextPreset", onChange: (preset) => { model.side.preset = preset; void loadContext(); return false; } });
     ns.segmented?.bind(contextWindow(), { attr: "contextWindow", onChange: (ms) => { model.side.windowMs = Number(ms); void loadContext(); return false; } });
-    $("logsContextRows")?.addEventListener("click", (event) => {
+    byId("logsContextRows")?.addEventListener("click", (event) => {
       const item = event.target.closest("[data-context-id]");
       if (!item) return;
       const row = (model.side.context?.rows || []).find((r) => r.id === item.dataset.contextId);
@@ -1405,7 +1405,7 @@
   // --- Live tail -------------------------------------------------------------------------------
 
   function syncLiveButton() {
-    const button = $("logsLiveButton");
+    const button = byId("logsLiveButton");
     if (!button) return;
     button.setAttribute("aria-pressed", String(model.live));
     button.classList.toggle("is-live", model.live);
@@ -1470,7 +1470,7 @@
   }
 
   function prependRows(fresh) {
-    const viewport = $("logsTableViewport");
+    const viewport = byId("logsTableViewport");
     const atTop = !viewport || viewport.scrollTop < ROW_HEIGHT;
     for (const row of fresh) model.rowIds.add(row.id);
     model.newIds = new Set(fresh.map((row) => row.id));
@@ -1500,7 +1500,7 @@
       model.meta = null;
       model.metaError = error.message;
     }
-    const input = $("logsQuery");
+    const input = byId("logsQuery");
     const mode = model.meta?.body_search?.effective || "token";
     if (input) {
       input.disabled = mode === "off";
@@ -1515,13 +1515,13 @@
   }
 
   function syncControls() {
-    const q = $("logsQuery");
+    const q = byId("logsQuery");
     if (q) q.value = model.q;
     levelPicker?.set(model.level);
     renderServiceButton();
     renderChips();
     syncLegend();
-    const denoise = $("logsDenoise");
+    const denoise = byId("logsDenoise");
     if (denoise) denoise.checked = model.denoise;
     timePicker?.refresh();
   }
@@ -1597,7 +1597,7 @@
     initServicePicker();
     initColumnsPicker();
     initFields();
-    const level = $("logsLevel");
+    const level = byId("logsLevel");
     if (level) {
       const enhanced = ns.menu?.select(level, { onChange: (value) => { model.level = value; void search({ push: true }); } });
       levelPicker = { set: (value) => { level.value = value || ""; enhanced?.refresh(); } };
@@ -1606,31 +1606,31 @@
     initHistogram();
     initPatterns();
     initSidePanel();
-    viewTabs = ns.tabs?.bind(document.querySelector(".logsTabs"), { onSelect: (tab) => { if (tab !== model.tab) setTab(tab, { push: true }); } }) || null;
-    $("logsWorkspace")?.addEventListener("click", onRetryClick);
+    viewTabs = ns.tabs?.bind($(".logsTabs"), { onSelect: (tab) => { if (tab !== model.tab) setTab(tab, { push: true }); } }) || null;
+    byId("logsWorkspace")?.addEventListener("click", onRetryClick);
     syncControls();
     setTab(model.tab, { push: false });
 
-    $("logsForm")?.addEventListener("submit", (event) => {
+    byId("logsForm")?.addEventListener("submit", (event) => {
       event.preventDefault();
-      model.q = String($("logsQuery")?.value || "");
-      const filter = $("logsFilterInput");
+      model.q = String(byId("logsQuery")?.value || "");
+      const filter = byId("logsFilterInput");
       if (filter && filter.value.trim()) {
         if (!addFilterText(filter.value)) return;
         filter.value = "";
       }
       void search({ push: true });
     });
-    $("logsFilterInput")?.addEventListener("keydown", (event) => {
+    byId("logsFilterInput")?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       if (addFilterText(event.target.value)) {
         event.target.value = "";
-        model.q = String($("logsQuery")?.value || "");
+        model.q = String(byId("logsQuery")?.value || "");
         void search({ push: true });
       }
     });
-    $("logsChips")?.addEventListener("click", (event) => {
+    byId("logsChips")?.addEventListener("click", (event) => {
       if (event.target.closest("[data-chip-clear]")) {
         model.attrs = [];
         model.traceId = "";
@@ -1647,7 +1647,7 @@
       if (kind === "attr") model.attrs = model.attrs.filter((a) => a !== value);
       void search({ push: true });
     });
-    $("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
+    byId("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
     window.addEventListener("chdash:host-changed", () => {
       if (address.active()) void reloadForHost();
       else reloadWhenShown = true;

@@ -3,6 +3,8 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  // The lookups of app_dom.js; absent when a test loads the module without a page.
+  const { byId, $, $$ } = ns.dom || {};
 
   const { state } = ns;
 
@@ -126,7 +128,7 @@
 
   function setMenuToggleState(selector, enabled) {
     if (!autocompleteControlMenu) return;
-    const item = autocompleteControlMenu.querySelector(selector);
+    const item = $(selector, autocompleteControlMenu);
     if (!item) return;
     item.setAttribute("aria-checked", String(enabled));
     item.classList.toggle("is-checked", !!enabled);
@@ -159,23 +161,23 @@
     autocompleteControlButton.classList.toggle("has-disabled-autocomplete", !enabled);
     if (autocompleteControlMenu) {
       autocompleteControlMenu.classList.toggle("has-disabled-autocomplete", !enabled);
-      const submenu = autocompleteControlMenu.querySelector("[data-autocomplete-submenu]");
+      const submenu = $("[data-autocomplete-submenu]", autocompleteControlMenu);
       if (submenu) {
         submenu.hidden = !enabled;
         submenu.setAttribute("aria-hidden", String(!enabled));
       }
-      const autoToggle = autocompleteControlMenu.querySelector("[data-autocomplete-toggle]");
+      const autoToggle = $("[data-autocomplete-toggle]", autocompleteControlMenu);
       if (autoToggle) {
         autoToggle.setAttribute("aria-expanded", String(enabled));
         autoToggle.classList.toggle("is-expanded", enabled);
       }
       const warningsEnabledNow = isWarningsEnabled();
-      const warningsSubmenu = autocompleteControlMenu.querySelector("[data-warnings-submenu]");
+      const warningsSubmenu = $("[data-warnings-submenu]", autocompleteControlMenu);
       if (warningsSubmenu) {
         warningsSubmenu.hidden = !warningsEnabledNow;
         warningsSubmenu.setAttribute("aria-hidden", String(!warningsEnabledNow));
       }
-      const warningsToggle = autocompleteControlMenu.querySelector("[data-warnings-toggle]");
+      const warningsToggle = $("[data-warnings-toggle]", autocompleteControlMenu);
       if (warningsToggle) {
         warningsToggle.setAttribute("aria-expanded", String(warningsEnabledNow));
         warningsToggle.classList.toggle("is-expanded", warningsEnabledNow);
@@ -292,11 +294,11 @@
 
   function enhanceAutocompleteToggle() {
     if (!autocompleteControlMenu) return null;
-    const autoToggle = autocompleteControlMenu.querySelector("[data-autocomplete-toggle]");
+    const autoToggle = $("[data-autocomplete-toggle]", autocompleteControlMenu);
     if (!autoToggle) return null;
     autoToggle.classList.add("editorAutocompleteControl__opt--parent");
     autoToggle.setAttribute("aria-controls", "editorAutocompleteSubmenu");
-    autoToggle.querySelectorAll(".editorAutocompleteControl__caret").forEach((caret) => caret.remove());
+    $$(".editorAutocompleteControl__caret", autoToggle).forEach((caret) => caret.remove());
     return autoToggle;
   }
 
@@ -315,7 +317,7 @@
   function ensureAutocompleteSubmenu() {
     if (!autocompleteControlMenu) return;
     const autoToggle = enhanceAutocompleteToggle();
-    let submenu = autocompleteControlMenu.querySelector("[data-autocomplete-submenu]");
+    let submenu = $("[data-autocomplete-submenu]", autocompleteControlMenu);
     if (!submenu) {
       submenu = buildAutocompleteSubmenu();
       if (autoToggle && autoToggle.nextSibling) autocompleteControlMenu.insertBefore(submenu, autoToggle.nextSibling);
@@ -323,21 +325,21 @@
       else autocompleteControlMenu.appendChild(submenu);
     }
     submenu.id = submenu.id || "editorAutocompleteSubmenu";
-    if (!submenu.querySelector("[data-autocomplete-partial-toggle]")) {
+    if (!$("[data-autocomplete-partial-toggle]", submenu)) {
       const partial = buildEditorOption("Partial match", "data-autocomplete-partial-toggle");
       partial.classList.add("editorAutocompleteControl__opt--sub");
       submenu.appendChild(partial);
     }
-    const legacyTitle = submenu.querySelector(".editorAutocompleteControl__subtitle");
+    const legacyTitle = $(".editorAutocompleteControl__subtitle", submenu);
     if (legacyTitle) legacyTitle.remove();
-    const partialText = submenu.querySelector("[data-autocomplete-partial-toggle] .editorAutocompleteControl__text");
+    const partialText = $("[data-autocomplete-partial-toggle] .editorAutocompleteControl__text", submenu);
     if (partialText) partialText.textContent = "Partial match";
   }
 
   function enhanceWarningsToggle() {
     if (!autocompleteControlMenu) return null;
-    let warningsToggle = autocompleteControlMenu.querySelector("[data-warnings-toggle]");
-    const legacy = autocompleteControlMenu.querySelector("[data-reference-diagnostics-toggle]");
+    let warningsToggle = $("[data-warnings-toggle]", autocompleteControlMenu);
+    const legacy = $("[data-reference-diagnostics-toggle]", autocompleteControlMenu);
     if (!warningsToggle && legacy) {
       warningsToggle = legacy;
       warningsToggle.removeAttribute("data-reference-diagnostics-toggle");
@@ -346,8 +348,8 @@
     if (!warningsToggle) return null;
     warningsToggle.classList.add("editorAutocompleteControl__opt--parent");
     warningsToggle.setAttribute("aria-controls", "editorWarningsSubmenu");
-    warningsToggle.querySelectorAll(".editorAutocompleteControl__caret").forEach((caret) => caret.remove());
-    const text = warningsToggle.querySelector(".editorAutocompleteControl__text");
+    $$(".editorAutocompleteControl__caret", warningsToggle).forEach((caret) => caret.remove());
+    const text = $(".editorAutocompleteControl__text", warningsToggle);
     if (text) text.textContent = "Warnings";
     return warningsToggle;
   }
@@ -381,7 +383,7 @@
       warningsToggle.setAttribute("aria-controls", "editorWarningsSubmenu");
       autocompleteControlMenu.appendChild(warningsToggle);
     }
-    let submenu = autocompleteControlMenu.querySelector("[data-warnings-submenu]");
+    let submenu = $("[data-warnings-submenu]", autocompleteControlMenu);
     if (!submenu) {
       submenu = buildWarningsSubmenu();
       if (warningsToggle && warningsToggle.nextSibling) autocompleteControlMenu.insertBefore(submenu, warningsToggle.nextSibling);
@@ -394,7 +396,7 @@
       ["[data-warning-columns-toggle]", "Columns", "data-warning-columns-toggle"],
     ];
     for (const [selector, label, attr] of required) {
-      if (!submenu.querySelector(selector)) {
+      if (!$(selector, submenu)) {
         const opt = buildEditorOption(label, attr);
         opt.classList.add("editorAutocompleteControl__opt--sub");
         submenu.appendChild(opt);
@@ -404,14 +406,14 @@
 
   function ensureEditorOptionsMenuItems() {
     if (!autocompleteControlMenu) return;
-    if (!autocompleteControlMenu.querySelector("[data-autocomplete-toggle]")) {
+    if (!$("[data-autocomplete-toggle]", autocompleteControlMenu)) {
       autocompleteControlMenu.appendChild(buildEditorOption("Autocomplete", "data-autocomplete-toggle"));
     }
     ensureAutocompleteSubmenu();
-    if (!autocompleteControlMenu.querySelector("[data-copy-button-toggle]")) {
+    if (!$("[data-copy-button-toggle]", autocompleteControlMenu)) {
       autocompleteControlMenu.appendChild(buildEditorOption("Copy button", "data-copy-button-toggle"));
     }
-    if (!autocompleteControlMenu.querySelector("[data-line-numbers-toggle]")) {
+    if (!$("[data-line-numbers-toggle]", autocompleteControlMenu)) {
       autocompleteControlMenu.appendChild(buildEditorOption("Line numbers", "data-line-numbers-toggle"));
     }
     ensureWarningsSubmenu();
@@ -459,7 +461,7 @@
     const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
     if (!wrap) return null;
 
-    autocompleteControl = wrap.querySelector(".editorAutocompleteControl");
+    autocompleteControl = $(".editorAutocompleteControl", wrap);
     if (!autocompleteControl) {
       autocompleteControl = document.createElement("div");
       autocompleteControl.className = "editorAutocompleteControl";
@@ -488,10 +490,10 @@
       wrap.appendChild(autocompleteControl);
 
     } else {
-      autocompleteControlButton = autocompleteControl.querySelector(".editorAutocompleteControl__button");
-      autocompleteControlMenu = autocompleteControl.querySelector(".editorAutocompleteControl__menu");
+      autocompleteControlButton = $(".editorAutocompleteControl__button", autocompleteControl);
+      autocompleteControlMenu = $(".editorAutocompleteControl__menu", autocompleteControl);
       renderAutocompleteSettingsButton();
-      if (autocompleteControlMenu && !autocompleteControlMenu.querySelector(".editorAutocompleteControl__title")) {
+      if (autocompleteControlMenu && !$(".editorAutocompleteControl__title", autocompleteControlMenu)) {
         const menuTitle = document.createElement("div");
         menuTitle.className = "editorAutocompleteControl__title";
         menuTitle.textContent = "Editor options";
@@ -507,7 +509,7 @@
 
   function ensureMenu() {
     if (menu && menu.isConnected) return menu;
-    menu = document.getElementById("autocompleteMenu");
+    menu = byId("autocompleteMenu");
     if (!menu) {
       menu = document.createElement("div");
       menu.id = "autocompleteMenu";
@@ -552,7 +554,7 @@
       return;
     }
     activeIndex = index;
-    const rows = menu.querySelectorAll(".autocompleteItem");
+    const rows = $$(".autocompleteItem", menu);
     rows.forEach((candidate, i) => candidate.setAttribute("aria-selected", String(i === index)));
     showGhostForSuggestion(suggestions[index]);
   }
@@ -1884,7 +1886,7 @@
     const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
     if (!wrap) return null;
     if (diagnosticsLayer && diagnosticsLayer.isConnected) return diagnosticsLayer;
-    diagnosticsLayer = wrap.querySelector(".editorDiagnosticsLayer");
+    diagnosticsLayer = $(".editorDiagnosticsLayer", wrap);
     if (!diagnosticsLayer) {
       diagnosticsLayer = document.createElement("div");
       diagnosticsLayer.className = "editorDiagnosticsLayer";
@@ -2300,7 +2302,7 @@
     if (!currentDiagnostics.length) return;
 
     const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
-    const visual = wrap ? wrap.querySelector(".editorHighlight") : null;
+    const visual = wrap ? $(".editorHighlight", wrap) : null;
     const ref = visual || textarea;
     const cs = getComputedStyle(textarea);
     const lineHeight = Number.parseFloat(cs.lineHeight) || 21;
@@ -2719,8 +2721,8 @@
     requestAnimationFrame(() => {
       m.style.width = `${estimateSuggestionWidthPx(suggestions)}px`;
       positionMenu(ta);
-      for (const label of m.querySelectorAll(".autocompleteItem__label")) {
-        const inner = label.querySelector(".autocompleteItem__labelText");
+      for (const label of $$(".autocompleteItem__label", m)) {
+        const inner = $(".autocompleteItem__labelText", label);
         if (inner && inner.scrollWidth > label.clientWidth + 2) {
           const shift = Math.ceil((inner.scrollWidth / 2) || (inner.scrollWidth - label.clientWidth + 16));
           label.style.setProperty("--ac-label-shift", `${shift}px`);
@@ -2739,7 +2741,7 @@
   function ensureGhost() {
     const wrap = textarea && textarea.closest ? textarea.closest(".editorWrap") : null;
     if (!wrap) return null;
-    let g = wrap.querySelector(".autocompleteGhost");
+    let g = $(".autocompleteGhost", wrap);
     if (!g) {
       g = document.createElement("div");
       g.className = "autocompleteGhost";
@@ -2757,7 +2759,7 @@
     }
     const wrap = textarea && textarea.closest ? textarea.closest(".editorWrap") : null;
     if (wrap) wrap.classList.remove("autocompleteGhostActive");
-    const g = wrap ? wrap.querySelector(".autocompleteGhost") : null;
+    const g = wrap ? $(".autocompleteGhost", wrap) : null;
     if (g) {
       g.hidden = true;
       g.replaceChildren();
@@ -2857,7 +2859,7 @@
       if (!g) return;
 
       const wrap = textarea.closest(".editorWrap");
-      const highlight = wrap ? wrap.querySelector(".editorHighlight") : null;
+      const highlight = wrap ? $(".editorHighlight", wrap) : null;
       const visualEl = highlight || textarea;
       const cs = getComputedStyle(visualEl);
       const lineHeight = parseFloat(cs.lineHeight) || measureLineHeight(visualEl);
@@ -3045,7 +3047,7 @@
     if (!isOpen()) return;
     selectionArmed = true;
     activeIndex = (next + suggestions.length) % suggestions.length;
-    const rows = menu.querySelectorAll(".autocompleteItem");
+    const rows = $$(".autocompleteItem", menu);
     rows.forEach((row, i) => row.setAttribute("aria-selected", String(i === activeIndex)));
     const active = rows[activeIndex];
     if (scrollIntoView && active && typeof active.scrollIntoView === "function") active.scrollIntoView({ block: "nearest" });
@@ -3121,8 +3123,8 @@
     textarea.scrollLeft = left;
     textarea.scrollTop = top;
     const wrap = textarea.closest ? textarea.closest(".editorWrap") : null;
-    const pre = wrap ? wrap.querySelector(".editorHighlight") : null;
-    const gutter = wrap ? wrap.querySelector(".editorGutter") : null;
+    const pre = wrap ? $(".editorHighlight", wrap) : null;
+    const gutter = wrap ? $(".editorGutter", wrap) : null;
     if (pre) {
       pre.scrollLeft = left;
       pre.scrollTop = top;

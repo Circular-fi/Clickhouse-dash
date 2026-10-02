@@ -151,7 +151,7 @@ def test_search_fields_share_one_helper_one_delay_and_one_look():
     assert "debounceMs = ns.util.SEARCH_DEBOUNCE_MS" in search
     code = sources()
     for name, needle in (("app_explorer.js", "ns.search.bind(dom.explorerFunctionSearchInput"), ("app_metrics.js", "ns.search.bind(search,"),
-                         ("app_facet_panel.js", 'ns.search.bind(byId("search")'), ("app_timerange.js", "search.bind(quickSearch"),
+                         ("app_facet_panel.js", 'ns.search.bind(part("search")'), ("app_timerange.js", "search.bind(quickSearch"),
                          ("app_trace_views.js", 'ns.search.within(tools, "#traceSpansFilter"'), ("app_trace_logs.js", 'ns.search.within(panel, "#traceLogsFilter"'),
                          ("app_query_library.js", "ns.search.bind(input,")):
         assert needle in code[name], name

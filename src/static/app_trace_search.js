@@ -26,7 +26,7 @@
 
   let ctx = null;
   const { h } = ns;
-  const byId = (id) => document.getElementById(id);
+  const { byId, $ } = ns.dom;
 
   const search = {
     chips: [],
@@ -545,7 +545,7 @@
       ids: { panel: "traceFacets", toggle: "traceFacetsToggle", meta: "traceFacetsMeta", search: "traceFacetsSearch", list: "traceFacetsList" },
       collapsedClass: "chdash-trace-facets-collapsed",
       // A phone: the panel is a drawer, toggled from the top of the results.
-      drawerHost: document.querySelector(".traceSearchMain"),
+      drawerHost: $(".traceSearchMain"),
       collapsedStoreKey: COLLAPSED_STORE_KEY,
       pinStoreKey: PIN_STORE_KEY,
       label: "attributes",

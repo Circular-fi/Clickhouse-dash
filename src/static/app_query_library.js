@@ -31,6 +31,7 @@
 
   const ns = window.ChDash;
   if (!ns || ns.queryLibrary) return;
+  const { byId, $, $$ } = ns.dom;
 
   const { dom, state, storage, util, h } = ns;
 
@@ -851,7 +852,7 @@
   // when that dialog closes.
   let toastTimer = 0;
   function toast(message, kind = "info") {
-    let node = document.querySelector(".qlToast");
+    let node = $(".qlToast");
     if (!node) {
       node = h("div", { class: "qlToast" });
       node.dataset.dialogFloat = "";
@@ -1489,7 +1490,7 @@
   }
 
   function treeItems() {
-    return libraryEls.tree ? [...libraryEls.tree.querySelectorAll("li[role=treeitem]")] : [];
+    return libraryEls.tree ? [...$$("li[role=treeitem]", libraryEls.tree)] : [];
   }
 
   function itemOf(target) {
@@ -1584,7 +1585,7 @@
         ev.preventDefault();
         if (isFolder && !open) toggleFolder(li, true);
         else if (isFolder && open) {
-          const child = li.querySelector(":scope > ul > li[role=treeitem]");
+          const child = $(":scope > ul > li[role=treeitem]", li);
           if (child) select("saved", child);
         }
         return;
@@ -1679,7 +1680,7 @@
   }
 
   function clearDropMarks() {
-    for (const node of libraryEls.tree?.querySelectorAll(".is-dropTarget") || []) node.classList.remove("is-dropTarget");
+    for (const node of $$(".is-dropTarget", libraryEls.tree) || []) node.classList.remove("is-dropTarget");
     libraryEls.tree?.classList.remove("is-dropTarget");
   }
 
@@ -1736,7 +1737,7 @@
     dragItem = null;
     clearDropMarks();
     libraryEls.tree?.classList.remove("is-dragging");
-    for (const node of libraryEls.tree?.querySelectorAll(".is-dragging") || []) node.classList.remove("is-dragging");
+    for (const node of $$(".is-dragging", libraryEls.tree) || []) node.classList.remove("is-dragging");
   }
 
   // -------------------------------------------------------------- selection
@@ -1807,7 +1808,7 @@
     if (!model || !(model.actions?.length || model.tools?.length)) return;
     if (isPhone()) setPreviewStep(true);
     const pane = previewPane();
-    (pane?.querySelector(".qlPreview__foot .button--primary") || pane?.querySelector(".qlPreview__tools .button") || pane)?.focus({ preventScroll: true });
+    ($(".qlPreview__foot .button--primary", pane) || $(".qlPreview__tools .button", pane) || pane)?.focus({ preventScroll: true });
   }
 
   // Back to the list, on the selected item.
@@ -1837,7 +1838,7 @@
 
   // The pane, added beside the views the first time the dialog shows them.
   function previewPane() {
-    let pane = document.getElementById("queryLibraryPreview");
+    let pane = byId("queryLibraryPreview");
     const views = dom.queryLibraryViewSaved?.parentElement;
     if (!pane && views) {
       pane = h("aside", { class: "qlPreview" });
@@ -2029,7 +2030,7 @@
       }
       pane.appendChild(foot);
     }
-    if (refocus !== null) (pane.querySelector(`[data-action="${refocus}"]`) || pane).focus({ preventScroll: true });
+    if (refocus !== null) ($(`[data-action="${refocus}"]`, pane) || pane).focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ history view
@@ -2090,7 +2091,7 @@
   }
 
   function historyItems() {
-    return historyEls.list ? [...historyEls.list.querySelectorAll(".qhItem")] : [];
+    return historyEls.list ? [...$$(".qhItem", historyEls.list)] : [];
   }
 
   function historyItemOf(target) {

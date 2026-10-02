@@ -2,8 +2,8 @@
   "use strict";
   const ns = window.ChDash;
   if (!ns) return;
+  const { byId, $, $$ } = ns.dom;
   const { dom, state, api, util, ui, h } = ns;
-  const { byId } = dom;
   // Formats and colours (docs/ui-foundations.md): durations, counts and
   // instants through ns.format; service, percentile and status colours
   // through ns.palette (a service keeps one colour across Traces, Logs and
@@ -244,7 +244,7 @@
   function initTracePickers() {
     initTimeRangePicker();
     // The Logs and Metrics views share the search bar look: only this view's selects.
-    document.querySelectorAll("#tracesWorkspace .traceSearchBar select, #tracesWorkspace .traceResultsSort select").forEach((select) => {
+    $$("#tracesWorkspace .traceSearchBar select, #tracesWorkspace .traceResultsSort select").forEach((select) => {
       if (select !== dom.tracesRangeUnit || !timePicker) enhanceTraceSelect(select);
     });
   }
@@ -260,7 +260,7 @@
   function initTimeRangePicker() {
     const select = dom.tracesRangeUnit;
     const root = select?.parentElement;
-    if (!ns.timeRange || !root?.querySelector(":scope > .tracePicker__button")) return;
+    if (!ns.timeRange || !$(":scope > .tracePicker__button", root)) return;
     select.dataset.tracePickerReady = "1";
     timePicker = ns.timeRange.create(root, {
       idPrefix: "traces",
@@ -383,7 +383,7 @@
     const tagEnabled = model.meta?.tag_search_supported !== false;
     if (dom.tracesTagKey) dom.tracesTagKey.disabled = !tagEnabled;
     if (dom.tracesTagValue) dom.tracesTagValue.disabled = !tagEnabled;
-    const tagOp = document.getElementById("tracesTagOp");
+    const tagOp = byId("tracesTagOp");
     if (tagOp) tagOp.disabled = !tagEnabled;
     renderAnalytics();
   }
@@ -623,7 +623,7 @@
   function scatterDots() {
     const held = dom.traceDurationChart && mountedCharts.get(dom.traceDurationChart);
     if (!held || held.kind !== "percentiles") return [];
-    const box = held.chart.root.querySelector(".chartCore__plot").getBoundingClientRect();
+    const box = $(".chartCore__plot", held.chart.root).getBoundingClientRect();
     return held.chart.points("traces").map((dot) => {
       const trace = scatterTraces[dot.index];
       return { trace_id: trace.trace_id, error: Number(trace.error_count || 0) > 0, spans: Number(trace.span_count || 0), x: box.left + dot.x, y: box.top + dot.y, r: dot.r };
@@ -766,12 +766,12 @@
   }
 
   function layoutServicePills(scope) {
-    const groups = [...(scope?.querySelectorAll?.(".traceSvcPills:not(.is-empty)") || [])];
+    const groups = [...($$(".traceSvcPills:not(.is-empty)", scope) || [])];
     if (!groups.length) return;
     // Write, read, then write again: one layout pass for the whole list.
     const prepared = groups.map((group) => {
-      const pills = [...group.querySelectorAll(":scope > .traceSvcPill")];
-      const more = group.querySelector(":scope > .traceSvcMore");
+      const pills = [...$$(":scope > .traceSvcPill", group)];
+      const more = $(":scope > .traceSvcMore", group);
       for (const pill of pills) pill.hidden = false;
       if (more) { more.hidden = false; more.textContent = `+${pills.length}`; }
       // Natural widths: no pill shrinks while measuring.
@@ -818,7 +818,7 @@
   let serviceTip = null;
   function hiddenPills(more) {
     if (!more || more.hidden) return null;
-    const hidden = [...more.parentElement.querySelectorAll(":scope > .traceSvcPill[hidden]")];
+    const hidden = [...$$(":scope > .traceSvcPill[hidden]", more.parentElement)];
     if (!hidden.length) return null;
     const list = document.createDocumentFragment();
     for (const pill of hidden) { const copy = pill.cloneNode(true); copy.hidden = false; list.appendChild(copy); }
@@ -894,9 +894,9 @@
 
   function syncResultsViewControls() {
     const table = model.resultsView === "table";
-    ns.segmented?.set(document.querySelector(".traceResultsViewToggle"), model.resultsView, "resultsView");
+    ns.segmented?.set($(".traceResultsViewToggle"), model.resultsView, "resultsView");
     // Like Jaeger, the sort picker drives the list; the table sorts by its headers.
-    const sortLabel = document.querySelector(".traceResultsSort");
+    const sortLabel = $(".traceResultsSort");
     if (sortLabel) sortLabel.hidden = table;
     dom.tracesResults?.classList.toggle("tracesResults--table", table);
   }
@@ -921,7 +921,7 @@
       ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
       : { key, dir: column.numeric ? "desc" : "asc" };
     renderResults();
-    dom.tracesResults?.querySelector(`[data-table-sort="${key}"] .dataTable__sort`)?.focus({ preventScroll: true });
+    $(`[data-table-sort="${key}"] .dataTable__sort`, dom.tracesResults)?.focus({ preventScroll: true });
   }
 
   // "No traces / spans found" (the result list and the span table): the
@@ -997,7 +997,7 @@
         model.startDisplay = model.startDisplay === "relative" ? "absolute" : "relative";
         writeStored(START_DISPLAY_KEY, model.startDisplay);
         renderResults();
-        dom.tracesResults?.querySelector("[data-start-toggle]")?.focus({ preventScroll: true });
+        $("[data-start-toggle]", dom.tracesResults)?.focus({ preventScroll: true });
         return;
       }
       const th = target.closest("[data-table-sort]");
@@ -1018,7 +1018,7 @@
     ns.table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
     ns.table.bindCopy(root);
     // List | Table: the shared segmented control (app_ui_segmented.js).
-    ns.segmented?.bind(document.querySelector(".traceResultsViewToggle"), { attr: "resultsView", onChange: (view) => { setResultsView(view); return false; } });
+    ns.segmented?.bind($(".traceResultsViewToggle"), { attr: "resultsView", onChange: (view) => { setResultsView(view); return false; } });
   }
 
   function renderResults() {
@@ -1056,11 +1056,11 @@
 
   function buildTree(spans) {
     const nodes = (Array.isArray(spans) ? spans : []).map((span) => ({ span, children: [], depth: 0 }));
-    const byId = new Map(nodes.map((node) => [String(node.span.span_id || ""), node]));
+    const itemById = new Map(nodes.map((node) => [String(node.span.span_id || ""), node]));
     const roots = [];
     for (const node of nodes) {
       const parentId = parentSpanId(node.span);
-      const parent = parentId ? byId.get(parentId) : null;
+      const parent = parentId ? itemById.get(parentId) : null;
       if (parent && parent !== node) parent.children.push(node);
       else roots.push(node);
     }
@@ -1401,7 +1401,7 @@
   }
 
   function syncOverviewSelection() {
-    const selection = dom.traceOverview?.querySelector?.("[data-trace-overview-selection]");
+    const selection = $("[data-trace-overview-selection]", dom.traceOverview);
     if (!selection) return;
     const [lo, hi] = viewRangeOf();
     selection.style.left = `${(lo * 100).toFixed(3)}%`;
@@ -1425,12 +1425,12 @@
     const range = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
     const lo = Math.max(0, Math.min(1, Number(range[0] || 0)));
     const hi = Math.max(lo + 0.005, Math.min(1, Number(range[1] == null ? 1 : range[1])));
-    const ticks = durationTicks(bounds.duration, 5).map((tick) => `<span style="left:${tick.ratio * 100}%">${esc(tick.label)}</span>`).join("");
+    const ticksHtml = durationTicks(bounds.duration, 5).map((tick) => `<span style="left:${tick.ratio * 100}%">${esc(tick.label)}</span>`).join("");
     const cache = activeTraceCache();
     const nodes = cache.order.filter((node) => serviceEnabled(node.span.service_name));
     const geometry = overviewGeometry(nodes.length);
     const canvasMode = nodes.length > OVERVIEW_CANVAS_ABOVE;
-    const bars = canvasMode
+    const barsHtml = canvasMode
       ? '<canvas class="traceOverview__canvas" data-trace-overview-canvas aria-hidden="true"></canvas>'
       : nodes.map((node, index) => {
         const span = node.span;
@@ -1439,12 +1439,12 @@
         const isError = isErrorSpan(span);
         return `<i class="traceOverview__span${isError ? " is-error" : ""}" data-span-id="${esc(spanKey(node))}" title="${esc(`${span.service_name || "unknown"}: ${span.span_name || "span"} · ${fmt.duration(span.duration_ns)}${isError ? " · ERROR" : ""}`)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%;top:${(index * geometry.step).toFixed(2)}px;height:${geometry.item.toFixed(2)}px;--trace-service-color:${palette.service(span.service_name)}"></i>`;
       }).join("");
-    dom.traceOverview.innerHTML = `<div class="traceOverview__ticks">${ticks}</div><div class="traceOverview__graph" data-trace-overview-graph data-overview-rows="${nodes.length}" data-overview-mode="${canvasMode ? "canvas" : "dom"}" style="height:${geometry.height}px">${bars}<div class="traceOverview__selection" data-trace-overview-selection style="left:${(lo * 100).toFixed(3)}%;width:${((hi-lo)*100).toFixed(3)}%"><button type="button" class="traceOverview__handle traceOverview__handle--start" data-overview-handle="start" aria-label="Resize trace range start"></button><button type="button" class="traceOverview__handle traceOverview__handle--end" data-overview-handle="end" aria-label="Resize trace range end"></button></div></div>`;
+    dom.traceOverview.innerHTML = `<div class="traceOverview__ticks">${ticksHtml}</div><div class="traceOverview__graph" data-trace-overview-graph data-overview-rows="${nodes.length}" data-overview-mode="${canvasMode ? "canvas" : "dom"}" style="height:${geometry.height}px">${barsHtml}<div class="traceOverview__selection" data-trace-overview-selection style="left:${(lo * 100).toFixed(3)}%;width:${((hi-lo)*100).toFixed(3)}%"><button type="button" class="traceOverview__handle traceOverview__handle--start" data-overview-handle="start" aria-label="Resize trace range start"></button><button type="button" class="traceOverview__handle traceOverview__handle--end" data-overview-handle="end" aria-label="Resize trace range end"></button></div></div>`;
 
-    const graph = dom.traceOverview.querySelector("[data-trace-overview-graph]");
-    const selection = dom.traceOverview.querySelector("[data-trace-overview-selection]");
+    const graph = $("[data-trace-overview-graph]", dom.traceOverview);
+    const selection = $("[data-trace-overview-selection]", dom.traceOverview);
     if (!graph || !selection) return;
-    if (canvasMode) drawOverviewCanvas(graph.querySelector("[data-trace-overview-canvas]"), nodes, bounds, geometry);
+    if (canvasMode) drawOverviewCanvas($("[data-trace-overview-canvas]", graph), nodes, bounds, geometry);
     const updateSelection = (next) => {
       const a = Math.max(0, Math.min(.995, Number(next[0] || 0)));
       const b = Math.max(a + .005, Math.min(1, Number(next[1] == null ? 1 : next[1])));
@@ -1522,13 +1522,13 @@
       const errors = row.errors ? ns.badge.html(fmt.count(row.errors), { tone: "error", solid: true, className: "badge--count traceServiceFilter__errors", title: `${fmt.count(row.errors)} error${row.errors === 1 ? "" : "s"}` }) : "";
       return `<button type="button" class="badge badge--md badge--neutral traceServiceFilter${disabled ? " is-disabled" : ""}${row.errors ? " has-errors" : ""}" data-trace-service-filter="${esc(service)}" aria-pressed="${disabled ? "false" : "true"}" style="--trace-service-color:${palette.service(service)}" title="${esc(`${service} \u00b7 ${fmt.count(row.spans)} spans${row.errors ? ` \u00b7 ${fmt.count(row.errors)} errors` : ""}`)}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i><b>${esc(service)}</b><span>${fmt.count(row.spans)}</span>${errors}</button>`;
     }).join("");
-    dom.traceServiceFilters.querySelector("[data-trace-toggle-all]")?.addEventListener("click", () => {
+    $("[data-trace-toggle-all]", dom.traceServiceFilters)?.addEventListener("click", () => {
       model.disabledServices = allSelected ? new Set(services) : new Set();
       renderTraceServiceFilters(spans);
       renderTraceOverview(spans, activeTraceCache().bounds);
       renderWaterfall();
     });
-    for (const button of dom.traceServiceFilters.querySelectorAll("[data-trace-service-filter]")) {
+    for (const button of $$("[data-trace-service-filter]", dom.traceServiceFilters)) {
       button.addEventListener("click", () => {
         const service = String(button.getAttribute("data-trace-service-filter") || "");
         if (model.disabledServices.has(service)) model.disabledServices.delete(service);
@@ -1578,11 +1578,11 @@
     const root = spans.find((s) => !parentSpanId(s)) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
     if (address.active()) document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
     if (dom.traceDetailTitle) {
-      const filterable = (field, value, text) => (value
+      const filterableHtml = (field, value, text) => (value
         ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
         : text);
-      dom.traceDetailTitle.innerHTML = `<strong><span>${filterable("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterable("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>${ns.ui.copyButtonHtml({ label: "Copy full Trace ID", className: "traceCopyButton traceCopyButton--header", attrs: { "data-copy-active-trace": trace.trace_id } })}</span>`;
-      dom.traceDetailTitle.querySelector("[data-copy-active-trace]")?.addEventListener("click", (event) => {
+      dom.traceDetailTitle.innerHTML = `<strong><span>${filterableHtml("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterableHtml("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>${ns.ui.copyButtonHtml({ label: "Copy full Trace ID", className: "traceCopyButton traceCopyButton--header", attrs: { "data-copy-active-trace": trace.trace_id } })}</span>`;
+      $("[data-copy-active-trace]", dom.traceDetailTitle)?.addEventListener("click", (event) => {
         event.stopPropagation();
         copyText(trace.trace_id, event.currentTarget);
       });
@@ -1734,8 +1734,8 @@
     hoveredAncestor = null;
     if (rows.length > VIRTUAL_ROWS_ABOVE) { renderVirtualWaterfall(ctx, rows); return; }
     virtualWaterfall = null;
-    const body = rows.map((node) => waterfallRowHtml(node, ctx)).join("");
-    dom.traceWaterfall.innerHTML = `${waterfallHeadHtml(ctx)}<div class="traceWaterfallBody">${body}</div>`;
+    const bodyHtml = rows.map((node) => waterfallRowHtml(node, ctx)).join("");
+    dom.traceWaterfall.innerHTML = `${waterfallHeadHtml(ctx)}<div class="traceWaterfallBody">${bodyHtml}</div>`;
   }
 
   // --- Virtualised waterfall (Jaeger's ListView) -----------------------------
@@ -1785,14 +1785,14 @@
     root.innerHTML = `${waterfallHeadHtml(ctx)}<div class="traceWaterfallBody" data-virtual-rows="${nodes.length}" style="height:${offsets[nodes.length]}px"></div>`;
     root.scrollTop = scrollTop;
     updateVirtualWindow(true, scrollTop);
-    const body = root.querySelector(".traceWaterfallBody");
+    const body = $(".traceWaterfallBody", root);
     if (body) body.style.height = "";
   }
 
   function updateVirtualWindow(force = false, knownScrollTop = null) {
     const state = virtualWaterfall;
     const root = dom.traceWaterfall;
-    const body = root?.querySelector(".traceWaterfallBody");
+    const body = $(".traceWaterfallBody", root);
     if (!state || !body) return;
     const { nodes, offsets, ctx } = state;
     const top = Math.max(0, (knownScrollTop ?? root.scrollTop) - body.offsetTop);
@@ -1805,7 +1805,7 @@
     const focusedId = document.activeElement?.closest?.("#traceWaterfall [data-span-id]")?.getAttribute("data-span-id");
     const rowsHtml = nodes.slice(state.first, state.last).map((node) => waterfallRowHtml(node, ctx)).join("");
     body.innerHTML = `<div class="traceWaterfallSpacer" data-virtual-before style="height:${offsets[state.first]}px"></div>${rowsHtml}<div class="traceWaterfallSpacer" data-virtual-after style="height:${offsets[nodes.length] - offsets[state.last]}px"></div>`;
-    if (focusedId) body.querySelector(`[data-span-id="${window.CSS?.escape ? CSS.escape(focusedId) : focusedId}"]`)?.focus({ preventScroll: true });
+    if (focusedId) $(`[data-span-id="${window.CSS?.escape ? CSS.escape(focusedId) : focusedId}"]`, body)?.focus({ preventScroll: true });
     hoveredAncestor = null;
     watchInspectorHeights(body);
   }
@@ -1831,14 +1831,14 @@
         }
         if (!changed) return;
         state.offsets = virtualOffsets(state.nodes);
-        const before = dom.traceWaterfall?.querySelector("[data-virtual-before]");
-        const after = dom.traceWaterfall?.querySelector("[data-virtual-after]");
+        const before = $("[data-virtual-before]", dom.traceWaterfall);
+        const after = $("[data-virtual-after]", dom.traceWaterfall);
         if (before) before.style.height = `${state.offsets[state.first]}px`;
         if (after) after.style.height = `${state.offsets[state.nodes.length] - state.offsets[state.last]}px`;
       });
     }
     inspectorObserver.disconnect();
-    for (const el of body.querySelectorAll(".traceSpanInspectorRow, .traceSpanLogsRow")) inspectorObserver.observe(el);
+    for (const el of $$(".traceSpanInspectorRow, .traceSpanLogsRow", body)) inspectorObserver.observe(el);
   }
 
   function scheduleVirtualWindow() {
@@ -1924,14 +1924,14 @@
     if (!node || cache.duplicateIds.size || !row?.isConnected || virtualWaterfall) {
       // A virtualised list redraws its window (and may leave that mode).
       renderWaterfall();
-      if (refocus) dom.traceWaterfall.querySelector(`[data-toggle-span="${window.CSS?.escape ? CSS.escape(id) : id}"]`)?.focus({ preventScroll: true });
+      if (refocus) $(`[data-toggle-span="${window.CSS?.escape ? CSS.escape(id) : id}"]`, dom.traceWaterfall)?.focus({ preventScroll: true });
       return;
     }
     const template = document.createElement("template");
     template.innerHTML = spanRowHtml(node, ctx).trim();
     const fresh = template.content.firstElementChild;
     row.replaceWith(fresh);
-    if (refocus) fresh.querySelector("[data-toggle-span]")?.focus({ preventScroll: true });
+    if (refocus) $("[data-toggle-span]", fresh)?.focus({ preventScroll: true });
     // A span row's attachments (inspector, logs) stay with it.
     const isAttachment = (el) => el?.classList.contains("traceSpanInspectorRow") || el?.classList.contains("traceSpanLogsRow");
     let own = fresh;
@@ -2108,11 +2108,11 @@
   function setHoveredAncestor(id) {
     if (id === hoveredAncestor) return;
     const root = dom.traceWaterfall;
-    for (const el of root.querySelectorAll(".is-guide-hovered")) el.classList.remove("is-guide-hovered");
+    for (const el of $$(".is-guide-hovered", root)) el.classList.remove("is-guide-hovered");
     hoveredAncestor = id;
     if (id == null) return;
     const selector = `[data-ancestor-id="${window.CSS?.escape ? CSS.escape(id) : id.replace(/["\\]/g, "\\$&")}"]`;
-    for (const el of root.querySelectorAll(selector)) el.classList.add("is-guide-hovered");
+    for (const el of $$(selector, root)) el.classList.add("is-guide-hovered");
   }
 
   // Jaeger's TimelineViewingLayer: drag across the timeline header to zoom
@@ -2123,7 +2123,7 @@
     const at = (clientX) => Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const from = at(event.clientX);
     let to = from;
-    const overlay = header.querySelector("[data-trace-timeline-drag]");
+    const overlay = $("[data-trace-timeline-drag]", header);
     header.setPointerCapture?.(event.pointerId);
     const draw = () => {
       if (!overlay) return;
@@ -2213,7 +2213,7 @@
     root.addEventListener("scroll", scheduleVirtualWindow, { passive: true });
     root.addEventListener("pointermove", (event) => {
       const header = event.target instanceof Element ? event.target.closest("[data-trace-timeline-header]") : null;
-      const cursor = root.querySelector("[data-trace-timeline-cursor]");
+      const cursor = $("[data-trace-timeline-cursor]", root);
       if (!cursor) return;
       if (!header) { cursor.hidden = true; return; }
       const rect = header.getBoundingClientRect();
@@ -2221,7 +2221,7 @@
       cursor.style.left = `${Math.max(0, Math.min(rect.width, event.clientX - rect.left)).toFixed(1)}px`;
     });
     root.addEventListener("pointerleave", () => {
-      const cursor = root.querySelector("[data-trace-timeline-cursor]");
+      const cursor = $("[data-trace-timeline-cursor]", root);
       if (cursor) cursor.hidden = true;
     });
     const setWidthFromClient = (clientX) => {
@@ -2663,7 +2663,7 @@
       const expanded = more.getAttribute("aria-expanded") !== "true";
       more.setAttribute("aria-expanded", expanded ? "true" : "false");
       more.textContent = expanded ? "show less" : "show more...";
-      more.parentElement?.querySelectorAll(".traceSpanEvents__list > .traceSpanEvent").forEach((item, index) => {
+      $$(".traceSpanEvents__list > .traceSpanEvent", more.parentElement).forEach((item, index) => {
         if (index >= EVENTS_INITIAL_COUNT) item.hidden = !expanded;
       });
       setSectionOpen(more.closest("[data-inspector-span]")?.getAttribute("data-inspector-span"), "events-more", expanded);
@@ -2723,7 +2723,7 @@
       else address.replace(null, { href });
     }
     if (scroll) {
-      const row = [...(dom.traceWaterfall?.querySelectorAll(".traceSpanRow[data-span-id]") || [])].find((el) => el.getAttribute("data-span-id") === id);
+      const row = [...($$(".traceSpanRow[data-span-id]", dom.traceWaterfall) || [])].find((el) => el.getAttribute("data-span-id") === id);
       row?.scrollIntoView?.({ block: "center" });
       row?.focus?.({ preventScroll: true });
     }
@@ -3339,7 +3339,7 @@
     ns.lifecycle.bind("traces", (scope) => scope.listen(document, "keydown", onTraceKeydown));
     // The canvas overview holds resolved colours: redraw it for a new theme.
     const redrawOverview = () => {
-      const graph = dom.traceOverview?.querySelector?.('[data-overview-mode="canvas"]');
+      const graph = $('[data-overview-mode="canvas"]', dom.traceOverview);
       if (graph && model.activeTrace) renderTraceOverview(activeTraceCache().spans, activeTraceCache().bounds);
     };
     new MutationObserver(redrawOverview).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

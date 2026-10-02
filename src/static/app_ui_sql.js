@@ -19,6 +19,7 @@
   //   container gives its inline blocks the toggle.
   const ns = window.ChDash;
   if (!ns) return;
+  const { $$ } = ns.dom;
   const ui = (ns.ui = ns.ui || {});
 
   // The highlighter: in the Query and Explorer modules, a lazy group of
@@ -36,7 +37,7 @@
         for (const paint of pending) paint();
         pending.clear();
         // Blocks written as HTML strings before the highlighter loaded.
-        for (const code of document.querySelectorAll(".sqlBlock__code[data-sql-plain]")) {
+        for (const code of $$(".sqlBlock__code[data-sql-plain]")) {
           code.removeAttribute("data-sql-plain");
           code.innerHTML = ns.highlight.toHtml(code.textContent || "");
         }

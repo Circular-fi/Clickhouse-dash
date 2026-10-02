@@ -49,7 +49,7 @@ def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle()
     assert 'ResizeObserver' in ui
     assert 'root.classList.remove("chdash-has-initial-editor-height")' in ui
     assert 'root.style.removeProperty("--initialEditorHeight")' in ui
-    resize = ui[ui.index('const handle = document.querySelector(".editorResizeHandle")'):]
+    resize = ui[ui.index('const handle = $(".editorResizeHandle")'):]
     assert 'handle.addEventListener("pointerdown"' in resize
     assert 'handle.addEventListener("pointermove"' in resize
     assert 'Math.max(180' in resize

@@ -32,7 +32,7 @@
   const KINDS = ["Server", "Client", "Producer", "Consumer", "Internal"];
 
   let ctx = null;
-  const byId = (id) => document.getElementById(id);
+  const { byId, $ } = ns.dom;
   const esc = (value) => ctx.esc(value);
 
   const state = {
@@ -161,8 +161,8 @@
 
   function syncControls() {
     const spans = active();
-    ns.segmented?.set(document.querySelector(".traceModeToggle"), state.mode, "resultsMode");
-    document.querySelector(".traceResultsSection")?.classList.toggle("is-spanMode", spans);
+    ns.segmented?.set($(".traceModeToggle"), state.mode, "resultsMode");
+    $(".traceResultsSection")?.classList.toggle("is-spanMode", spans);
     const tools = byId("traceSpanTools");
     if (tools) tools.hidden = !spans;
     const kind = byId("traceSpanKind");
@@ -170,7 +170,7 @@
       kind.value = state.kind;
       kind.dispatchEvent(new Event("tracepicker-refresh"));
     }
-    const duration = document.querySelector(".traceSpanTools__duration");
+    const duration = $(".traceSpanTools__duration");
     if (duration) duration.hidden = ctx?.model?.meta?.features?.duration_filter === false;
     const min = byId("traceSpanMinDuration");
     const max = byId("traceSpanMaxDuration");
@@ -472,9 +472,9 @@
     }
     table.setAttribute("aria-rowcount", String(state.rows.length + 1));
     table.style.setProperty("--trace-span-sticky-top", `${stickyTop()}px`);
-    const body = table.querySelector(".traceSpanTable__body");
+    const body = $(".traceSpanTable__body", table);
     if (body) body.style.height = `${state.rows.length * ROW_HEIGHT}px`;
-    const foot = root.querySelector(".traceSpanTable__footWrap");
+    const foot = $(".traceSpanTable__footWrap", root);
     if (foot) foot.innerHTML = footHtml();
     updateWindow(true);
   }
@@ -487,7 +487,7 @@
 
   function updateWindow(force = false) {
     const table = byId("traceSpanTable");
-    const body = table?.querySelector(".traceSpanTable__body");
+    const body = $(".traceSpanTable__body", table);
     const view = ctx.dom.tracesSearchView;
     if (!body || !view || view.hidden) return;
     const offset = body.getBoundingClientRect().top - view.getBoundingClientRect().top;
@@ -519,7 +519,7 @@
 
   function rowTopInView(index) {
     const view = ctx.dom.tracesSearchView;
-    const body = byId("traceSpanTable")?.querySelector(".traceSpanTable__body");
+    const body = $(".traceSpanTable__body", byId("traceSpanTable"));
     if (!view || !body) return null;
     return body.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop + index * ROW_HEIGHT;
   }
@@ -528,7 +528,7 @@
     const view = ctx.dom.tracesSearchView;
     const top = rowTopInView(index);
     if (!view || top == null) return;
-    const head = byId("traceSpanTable")?.querySelector(".traceSpanTable__head");
+    const head = $(".traceSpanTable__head", byId("traceSpanTable"));
     const topLimit = view.scrollTop + stickyTop() + (head ? head.getBoundingClientRect().height : 0);
     const bottomLimit = view.scrollTop + view.clientHeight;
     if (top < topLimit) view.scrollTop = Math.max(0, top - stickyTop() - (head ? head.getBoundingClientRect().height : 0) - ROW_HEIGHT);
@@ -612,7 +612,7 @@
     if (detail) return detail;
     detail = ns.detailPanel.create({
       // Inside the Search tab's panel: another Traces tab hides it with it.
-      host: document.querySelector(".traceSearchBody") || ctx.dom.tracesSearchView || document.body,
+      host: $(".traceSearchBody") || ctx.dom.tracesSearchView || document.body,
       id: "traceSpanPanel",
       className: "uiDetail--sticky traceSpanPanel",
       closeLabel: "Close span details",
@@ -753,7 +753,7 @@
           <a class="button button--primary button--small traceSpanPanel__open" href="${esc(href)}" data-span-open-trace>Open in trace</a>`);
     api.body.innerHTML = panelBodyHtml(row, entry);
     if (focusedNav) {
-      const nav = panel.querySelector(`[data-span-panel-nav="${focusedNav}"]`);
+      const nav = $(`[data-span-panel-nav="${focusedNav}"]`, panel);
       (nav && !nav.disabled ? nav : api.closeButton)?.focus({ preventScroll: true });
     }
   }
@@ -954,7 +954,7 @@
     requestAnimationFrame(() => {
       if (view && state.savedScrollTop) view.scrollTop = state.savedScrollTop;
       render();
-      if (state.panelOpen && state.selected >= 0) panelEl().querySelector("[data-span-open-trace]")?.focus({ preventScroll: true });
+      if (state.panelOpen && state.selected >= 0) $("[data-span-open-trace]", panelEl())?.focus({ preventScroll: true });
       else byId("traceSpanTable")?.focus({ preventScroll: true });
     });
   }
@@ -962,7 +962,7 @@
   function install(context) {
     ctx = context;
     // Traces | Spans: the shared segmented control (app_ui_segmented.js).
-    ns.segmented?.bind(document.querySelector(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
+    ns.segmented?.bind($(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
     const root = ctx.dom.tracesResults;
     root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
     // Capture: the grid's own row keys (bindTableKeys) read eventOnGrid.

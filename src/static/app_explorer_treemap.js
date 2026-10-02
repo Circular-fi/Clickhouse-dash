@@ -21,6 +21,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { $, $$ } = ns.dom;
 
   const treemapMaximumRectangles = 1000;
   const treemapMaximumDepth = 5;
@@ -381,10 +382,10 @@
 
   function fitTreemapLabels(map) {
     if (!map) return;
-    map.querySelectorAll(".explorerTreemap__node").forEach((node) => {
-      const label = node.querySelector(".explorerTreemap__label");
+    $$(".explorerTreemap__node", map).forEach((node) => {
+      const label = $(".explorerTreemap__label", node);
       if (!label) return;
-      const meta = label.querySelector(".explorerTreemap__meta");
+      const meta = $(".explorerTreemap__meta", label);
       const rect = node.getBoundingClientRect();
       const headerHeight = Math.max(0, Number(node.dataset.headerHeight || 0));
       const labelHeight = node.classList.contains("is-branch") && headerHeight > 0 ? headerHeight : rect.height;
@@ -531,8 +532,8 @@
         hideTooltip();
         return;
       }
-      const nameHost = tooltip.querySelector("strong");
-      const metaHost = tooltip.querySelector("span");
+      const nameHost = $("strong", tooltip);
+      const metaHost = $("span", tooltip);
       const kind = node.dataset.kind;
       const size = Number(node.dataset.size || 0);
       const share = rootBytes > 0 ? size / rootBytes * 100 : 0;
