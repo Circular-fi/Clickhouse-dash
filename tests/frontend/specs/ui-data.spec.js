@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openApp, runSuccessfulQuery } from '../helpers/app.js';
+import { mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 
 // Shared data display components (app_ui_table.js, app_ui_badge.js,
 // app_ui_copy.js, app_ui_sql.js, app_ui_kv.js, app_ui_stat.js,
@@ -110,4 +111,180 @@ test.describe('data table', () => {
     expect(bars.temperature_c).toBe(false);
     expect(bars.humidity_pct).toBe(true);
   });
+});
+
+// --- Logs, Traces windows -------------------------------------------------------
+
+const isoSecond = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+async function logsUrl(request, minutes = 30) {
+  const meta = await (await request.get('/api/logs/meta')).json();
+  test.skip(!meta.enabled || !meta.time_bounds, 'logs are disabled or empty');
+  const end = Number(meta.time_bounds.max_ms);
+  return `/observability/logs?from=${encodeURIComponent(isoSecond(end - minutes * 60000))}&to=${encodeURIComponent(isoSecond(end + 1000))}`;
+}
+
+// Each look in both themes and at phone width, with nothing overflowing.
+const LOOKS = [
+  { theme: 'dark', width: 1440 },
+  { theme: 'light', width: 1440 },
+  { theme: 'dark', width: 390 },
+];
+
+async function look(page, { theme, width }) {
+  await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
+  await page.emulateMedia({ colorScheme: theme });
+  await page.addInitScript((mode) => { try { localStorage.setItem('chdash.theme', mode); } catch (_) {} }, theme);
+}
+
+const noPageOverflow = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+
+test.describe('badge', () => {
+  for (const view of LOOKS) {
+    test(`Logs severities and filter chips are the shared badge (${view.theme} ${view.width})`, async ({ page, request }) => {
+      await look(page, view);
+      await page.goto(await logsUrl(request));
+      const badge = page.locator('#logsTableRows .badge--sev').first();
+      await expect(badge).toBeVisible({ timeout: 30_000 });
+      const style = await badge.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        const probe = document.createElement('i');
+        probe.style.color = 'var(--sev-color)';
+        el.appendChild(probe);
+        const sev = getComputedStyle(probe).color;
+        probe.remove();
+        return { height: cs.height, transform: cs.textTransform, color: cs.color, sev, text: el.textContent };
+      });
+      expect(style.height).toBe('18px');
+      expect(style.transform).toBe('none');
+      expect(style.color).toBe(style.sev);
+      expect(style.text).toBe(style.text.toUpperCase());
+      // The histogram's totals legend filters; the filter is a .chip.
+      await page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]').click();
+      const chip = page.locator('#logsChips .chip');
+      await expect(chip).toContainText('Level: Warn');
+      await expect(page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]')).toHaveAttribute('aria-pressed', 'true');
+      await chip.locator('.chip__remove').click();
+      await expect(page.locator('#logsChips .chip')).toHaveCount(0);
+      expect(await noPageOverflow(page)).toBe(true);
+    });
+  }
+
+  test('status reads OK / Error / Unset and a metric kind is never a status hue', async ({ page }) => {
+    await openApp(page);
+    const labels = await page.evaluate(() => ['Ok', 'STATUS_CODE_ERROR', 'Unset', 2, 'ok'].map((code) => window.ChDash.badge.statusLabel(code)));
+    expect(labels).toEqual(['OK', 'Error', 'Unset', 'Error', 'OK']);
+    const meta = await (await page.request.get('/api/metrics/meta')).json();
+    test.skip(!meta.enabled || !meta.kinds?.histogram?.time_bounds, 'metrics are disabled');
+    const end = Math.floor(Number(meta.kinds.histogram.time_bounds.max_ms) / 60000) * 60000;
+    await page.goto(`/observability/metrics?from=${encodeURIComponent(isoSecond(end - 6 * 3600000))}&to=${encodeURIComponent(isoSecond(end))}`);
+    const hist = page.locator('.metricsBadge--histogram').first();
+    await expect(hist).toBeVisible({ timeout: 30_000 });
+    const hue = await hist.evaluate((el) => ({
+      badge: getComputedStyle(el).getPropertyValue('--badge-color').trim(),
+      slot: getComputedStyle(document.documentElement).getPropertyValue('--qchart-7').trim(),
+      danger: getComputedStyle(document.documentElement).getPropertyValue('--danger').trim(),
+    }));
+    expect(hue.badge).toBe(hue.slot);
+    expect(hue.badge).not.toBe(hue.danger);
+  });
+});
+
+test.describe('copy', () => {
+  test('one feedback: the Query editor icon and the Copy JSON split read Copied', async ({ page }) => {
+    await openApp(page);
+    await runSuccessfulQuery(page, 'SELECT 1 AS one');
+    const editorCopy = page.locator('#editorCopyButton');
+    await editorCopy.click();
+    await expect(editorCopy).toHaveClass(/is-copied/);
+    await expect(editorCopy).toHaveAttribute('data-copied', 'Copied');
+    await expect(editorCopy).not.toHaveClass(/is-copied/, { timeout: 3000 });
+    const main = page.locator('#copyJsonButton');
+    await main.click();
+    await expect(main).toHaveText('Copied');
+    await expect(main).toHaveText('Copy JSON', { timeout: 3000 });
+    // The menu: the first item focused, Escape back to its toggle.
+    await page.locator('#copyMenuButton').click();
+    await expect(page.locator('#copyMenu')).toBeVisible();
+    await expect(page.locator('#copyCsvButton')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#copyMenu')).toBeHidden();
+    await expect(page.locator('#copyMenuButton')).toBeFocused();
+    expect(await page.evaluate(() => !!document.getElementById('copyJsonToast'))).toBe(false);
+  });
+
+  test('Logs uses the same Copy JSON split', async ({ page, request }) => {
+    await page.goto(await logsUrl(request));
+    await page.locator('#logsTableRows .logsRow[data-row-id]').first().click({ timeout: 30_000 });
+    const split = page.locator('#logsCopySplit');
+    await expect(split).toBeVisible();
+    await split.locator('.runSplit__toggle').click();
+    await expect(page.locator('#logsCopyMenu').getByRole('menuitem')).toHaveText(['Copy body', 'Download JSON']);
+    await page.keyboard.press('Escape');
+    await split.locator('.runSplit__main').click();
+    await expect(split.locator('.runSplit__main')).toHaveText('Copied');
+  });
+});
+
+test.describe('SQL block and key/value', () => {
+  for (const view of LOOKS) {
+    test(`Explorer DDL: highlighted with a gutter and a copy button (${view.theme} ${view.width})`, async ({ page }) => {
+      await look(page, view);
+      await page.goto('/explorer/chdash_ui/weather_observations/ddl');
+      const block = page.locator('.explorerDdlWrap.sqlBlock');
+      await expect(block).toBeVisible({ timeout: 30_000 });
+      await expect(block.locator('.sqlBlock__gutter')).toContainText('1');
+      await expect(block.locator('.sqlBlock__code .tok-kw').first()).toBeVisible();
+      await block.locator('.sqlBlock__copy').click();
+      await expect(block.locator('.sqlBlock__copy')).toHaveClass(/is-copied/);
+      expect(await noPageOverflow(page)).toBe(true);
+    });
+  }
+
+  test('Services database statements: inline SQL that a click shows whole', async ({ page }) => {
+    await mockTraceServices(page);
+    await mockTraceResults(page);
+    await page.goto('/observability/traces?tab=services');
+    const row = page.locator('.traceSvcTable tbody tr.traceSvcRow').first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    const statement = page.locator('#traceSvcDetail .traceSvcDb .sqlBlock--inline').first();
+    await expect(statement).toBeVisible({ timeout: 30_000 });
+    await expect(statement).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(() => statement.locator('.tok-kw').count()).toBeGreaterThan(0);
+    await statement.click();
+    await expect(statement).toHaveAttribute('aria-expanded', 'true');
+    expect(await statement.locator('.sqlBlock__code').evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap');
+    // The detail's Requests chart has two series: the engine legend shows.
+    await expect(page.locator('#traceSvcDetail [data-svc-chart="rate"] .chartCore__legendItem')).toHaveCount(2);
+  });
+
+  test('Logs record fields: one key / value list with include / exclude / only / copy', async ({ page, request }) => {
+    await page.goto(await logsUrl(request));
+    await page.locator('#logsTableRows .logsRow[data-row-id]').first().click({ timeout: 30_000 });
+    const list = page.locator('#logsSideDetails .kvList').first();
+    await expect(list).toBeVisible();
+    const row = list.locator('.kvList__row', { has: page.locator('.kvList__key', { hasText: /^ServiceName$/ }) });
+    await row.hover();
+    await expect(row.locator('[data-kv-action]')).toHaveCount(4);
+    expect(await row.locator('.kvList__actions').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    await row.locator('[data-kv-action="copy"]').click();
+    await expect(row.locator('[data-kv-action="copy"]')).toHaveClass(/is-copied/);
+  });
+});
+
+test.describe('stat tile', () => {
+  for (const view of LOOKS) {
+    test(`sentence-case eyebrows on the Query rail and Explorer About (${view.theme} ${view.width})`, async ({ page }) => {
+      await look(page, view);
+      await openApp(page);
+      const rail = page.locator('.metricCompact__label.statTile__label').first();
+      await expect(rail).toHaveText('Elapsed');
+      expect(await rail.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
+      await page.goto('/explorer/chdash_ui/weather_observations/columns');
+      const about = page.locator('.explorerAboutTile .statTile__label').first();
+      await expect(about).toBeAttached({ timeout: 30_000 });
+      expect(await about.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
+      expect(await noPageOverflow(page)).toBe(true);
+    });
+  }
 });
