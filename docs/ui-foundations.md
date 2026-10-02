@@ -425,6 +425,7 @@ and `test_page_manifest_contract.py` fail on a local copy.
   never throws; the fallback's type keeps the stored format of the key.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): the one delay
   `util.SEARCH_DEBOUNCE_MS` (200 ms), Enter and Escape apply at once, one
-  look `.uiSearch` (`--compact` in dense bars).
+  look `.uiSearch` (`--compact` in dense bars; 30 px and full width as a
+  side panel's `.uiSide__search`).
 - **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`),
   `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.

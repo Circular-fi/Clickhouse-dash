@@ -4,6 +4,7 @@ ns.lifecycle scopes bind a view's listeners to its visibility."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -16,16 +17,19 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def common_modules() -> list[str]:
+    """The modules every page loads first (src/static/modules.json, read by
+    app_loader.js, app.js, app_observability.js and build_page_css.py)."""
+    manifest = json.loads(read("src/static/modules.json"))
+    for name, page in manifest["pages"].items():
+        listed = page["modules"] + [f for group in page.get("lazy", {}).values() for f in group] + [f for view in page.get("views", {}).values() for f in view]
+        assert not {"app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js"} & set(listed), name
+    return manifest["common"]
+
+
 def test_layers_load_first_on_every_page():
-    app = read("src/static/app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    assert files.index('"app_dom.js"') < files.index('"app_ui_layers.js"') < files.index('"app_state.js"')
-    assert 'layers: "app_ui_layers.js"' in app
-    skipped = app[app.index("PAGE_SKIPPED_MODULES = {"):app.index("};", app.index("PAGE_SKIPPED_MODULES = {"))]
-    assert "app_ui_layers.js" not in skipped
-    obs = read("src/static/app_observability.js")
-    common = obs[obs.index("const COMMON_MODULES = ["):obs.index("];", obs.index("const COMMON_MODULES = ["))]
-    assert common.index('"app_dom.js"') < common.index('"app_ui_layers.js"') < common.index('"app_ui.js"')
+    common = common_modules()
+    assert common.index("app_dom.js") < common.index("app_ui_layers.js") < common.index("app_state.js")
 
 
 def test_layers_own_one_escape_and_one_outside_listener():
@@ -55,11 +59,14 @@ def test_dialog_is_a_modal_layer():
 # consumes first (an editor's suggestions, a drag or a chart cursor to cancel,
 # a canvas selection, a filter field's text, the tooltip hide, a panel letting
 # the key go on to the layers), and the Query page's menus and editor, which
-# move onto ns.menu / ns.layers with the Query revamp. A new local Escape
+# move onto ns.menu / ns.layers with the Query revamp; ns.search empties a
+# filled search field on Escape and consumes the key (preventDefault), so the
+# layers leave it and a second Escape closes what holds the field. A new local Escape
 # handler fails here: push an ns.layers layer instead.
 ESCAPE_ALLOWED = {
     "app_ui_layers.js": 1,
     "app_ui_popover.js": 1,
+    "app_ui_search.js": 1,
     "app_autocomplete.js": 2,
     "app_chart_core.js": 3,
     "app_graph_kit.js": 1,

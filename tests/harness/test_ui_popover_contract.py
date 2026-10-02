@@ -4,6 +4,7 @@ popover shell."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -21,13 +22,9 @@ def scripts():
 
 
 def test_popover_loads_after_layers_on_every_page():
-    app = read("src/static/app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    assert files.index('"app_ui_layers.js"') < files.index('"app_ui_popover.js"') < files.index('"app_state.js"')
-    assert 'popover: "app_ui_popover.js"' in app
-    obs = read("src/static/app_observability.js")
-    common = obs[obs.index("const COMMON_MODULES = ["):obs.index("];", obs.index("const COMMON_MODULES = ["))]
-    assert common.index('"app_ui_layers.js"') < common.index('"app_ui_popover.js"') < common.index('"app_ui.js"')
+    # The modules every page loads first (src/static/modules.json).
+    common = json.loads(read("src/static/modules.json"))["common"]
+    assert common.index("app_ui_layers.js") < common.index("app_ui_popover.js") < common.index("app_state.js")
 
 
 def test_popover_api():

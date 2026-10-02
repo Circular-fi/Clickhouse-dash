@@ -532,7 +532,7 @@
     const tree = id === "explorerListPane";
     sidePanels[id] = ns.sidePanel.mount(pane, {
       label: tree ? "Objects" : "Functions",
-      collapse: { button: document.getElementById(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? "chdash.explorerTreeCollapsed.v1" : "chdash.explorerFunctionsCollapsed.v1" },
+      collapse: { button: document.getElementById(tree ? "explorerTreeCollapse" : "explorerFunctionCollapse"), storeKey: tree ? ns.storage.KEYS.explorerTreeCollapsed : ns.storage.KEYS.explorerFunctionsCollapsed },
       drawer: {
         toggle: shellEl("explorerTreeToggle"),
         backdrop: pane.nextElementSibling?.classList.contains("explorerTreeBackdrop") ? pane.nextElementSibling : null,

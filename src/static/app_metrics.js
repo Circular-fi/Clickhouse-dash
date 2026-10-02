@@ -1195,7 +1195,7 @@
     // windows (remembered), a drawer on phones opened from the charts' top.
     ns.sidePanel.mount(document.getElementById("metricsSidebar"), {
       label: "Metrics",
-      collapse: { button: document.getElementById("metricsSidebarToggle"), storeKey: "chdash.metricsCatalogCollapsed.v1", rootClass: "chdash-metrics-catalog-collapsed" },
+      collapse: { button: document.getElementById("metricsSidebarToggle"), storeKey: ns.storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
       drawer: { host: document.querySelector(".metricsMain") },
     });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);

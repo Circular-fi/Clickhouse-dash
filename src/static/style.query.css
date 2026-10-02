@@ -5154,6 +5154,11 @@ html[data-theme="light"] {
 }
 .traceLog { min-width: 0; border-bottom: 1px solid var(--rowDivider); }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
+.metricsCatalog {
+  overflow-x: hidden;
+  padding: 4px 0 12px;
+}
+.metricsCatalog .uiState__action { height: auto; min-height: 28px; white-space: normal; }
 @keyframes obsBarPulse { 50% { opacity: .45; } }
 :root {
   --trace-heat-1: #0d366b; --trace-heat-2: #104281; --trace-heat-3: #184f95; --trace-heat-4: #256abf;

@@ -6,6 +6,7 @@ shell or close-button style fails here."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -57,13 +58,9 @@ def block(css: str, name: str) -> str:
 
 
 def test_panel_module_loads_after_popover_on_every_page():
-    app = read("src/static/app.js")
-    files = app[app.index("const files = ["):app.index("];", app.index("const files = ["))]
-    assert files.index('"app_ui_popover.js"') < files.index('"app_ui_panel.js"') < files.index('"app_state.js"')
-    assert 'detailPanel: "app_ui_panel.js"' in app
-    obs = read("src/static/app_observability.js")
-    common = obs[obs.index("const COMMON_MODULES = ["):obs.index("];", obs.index("const COMMON_MODULES = ["))]
-    assert common.index('"app_ui_popover.js"') < common.index('"app_ui_panel.js"') < common.index('"app_ui.js"')
+    # The modules every page loads first (src/static/modules.json).
+    common = json.loads(read("src/static/modules.json"))["common"]
+    assert common.index("app_ui_popover.js") < common.index("app_ui_panel.js") < common.index("app_state.js")
 
 
 def test_panel_api_and_tokens():
