@@ -24,8 +24,11 @@ export async function stabilizePage(page) {
       html { scroll-behavior: auto !important; }
     `,
   });
-  await page.evaluate(async () => { if (document.fonts) await document.fonts.ready; }).catch(() => undefined);
-  await page.waitForTimeout(80);
+  // Fonts loaded, then two frames: the styles above are applied and painted.
+  await page.evaluate(async () => {
+    if (document.fonts) await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }).catch(() => undefined);
 }
 
 export async function captureState(page, testInfo, state) {
