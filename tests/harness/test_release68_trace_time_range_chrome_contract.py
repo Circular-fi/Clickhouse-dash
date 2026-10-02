@@ -36,7 +36,7 @@ def test_range_picker_has_no_internal_scrollbar_and_theme_focus_is_neutral():
     css = read("src/static/style.css")
     tail = css[css.rfind("/* Trace polish:"):]
     assert '.tracePicker--range .tracePicker__menu' in tail
-    assert 'max-height: none !important;' in tail
+    assert 'max-height: none' in tail  # the menu-family cleanup dropped !important where the value already wins
     assert 'overflow: visible !important;' in tail
     assert '.themeSelect--icons .themeSelect__button--icon:focus-visible' in tail
     assert 'border-color: var(--buttonBorderHover) !important;' in tail

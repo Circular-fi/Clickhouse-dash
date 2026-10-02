@@ -18,7 +18,8 @@
   //    jumps to the next item starting with it, Enter / Space activate,
   //    Escape closes and returns the focus to the button, Tab closes;
   //    Down / Up on the button open the list;
-  //  - focus: on open the selected item (or the first) takes the focus; on
+  //  - focus: opened from the keyboard, the selected item (or the first)
+  //    takes the focus, from a pointer the list itself; on
   //    a close by Escape or a pick the button gets it back, unless the pick
   //    moved it somewhere else (a dialog it opened);
   //  - dismissal: ONE pointerdown listener closes what the pointer lands
@@ -57,7 +58,6 @@
   // onDismiss(reason: "outside" | "escape") }; push() returns { release() }.
   const localLayers = (() => {
     const stack = [];
-    let listening = false;
     const inside = (entry, path, target) => entry.el().some((el) => el && (path.includes(el) || (target instanceof Node && el.contains(target))));
     function onPointerDown(event) {
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
@@ -72,15 +72,25 @@
       event.stopPropagation();
       stack[stack.length - 1].onDismiss("escape");
     }
+    // The two document listeners exist only while a menu is open.
     return {
       push(entry) {
         stack.push(entry);
-        if (!listening) {
-          listening = true;
+        if (stack.length === 1) {
           document.addEventListener("pointerdown", onPointerDown, true);
           document.addEventListener("keydown", onKeyDown, true);
         }
-        return { release() { const at = stack.indexOf(entry); if (at >= 0) stack.splice(at, 1); } };
+        return {
+          release() {
+            const at = stack.indexOf(entry);
+            if (at < 0) return;
+            stack.splice(at, 1);
+            if (!stack.length) {
+              document.removeEventListener("pointerdown", onPointerDown, true);
+              document.removeEventListener("keydown", onKeyDown, true);
+            }
+          },
+        };
       },
     };
   })();
@@ -217,7 +227,7 @@
       let at = list.indexOf(target);
       if (at < 0 && target?.closest(ITEMS)) at = list.indexOf(target.closest(ITEMS));
       const move = (index) => { event.preventDefault(); focusItem(list[(index + list.length) % list.length]); };
-      if (event.key === "ArrowDown") return move(at < 0 ? 0 : at + 1);
+      if (event.key === "ArrowDown") return move(at < 0 ? Math.max(0, list.indexOf(selectedItem(list))) : at + 1);
       if (event.key === "ArrowUp") return move(at < 0 ? list.length - 1 : at - 1);
       if (event.key === "Home" || event.key === "PageUp") return move(0);
       if (event.key === "End" || event.key === "PageDown") return move(list.length - 1);
@@ -373,11 +383,15 @@
       else open();
     }
 
+    // A pointer opens the list with the focus on the list itself (no ring
+    // on an item; Down / Up go on from there); Enter / Space open it on its
+    // selected or first item.
     if (options.trigger !== false) {
       button.addEventListener("click", (event) => {
         if (button.disabled) return;
         event.preventDefault();
-        toggle();
+        if (isOpen()) close();
+        else open({ focus: event.detail > 0 && typeof options.focus !== "function" && options.focus !== "none" ? "menu" : undefined });
       });
     }
     button.addEventListener("keydown", (event) => {

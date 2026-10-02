@@ -871,7 +871,7 @@ body {
 }
 
 .editorAutocompleteControl__menu[hidden] {
-  display: none !important;
+  display: none;
 }
 
 .editorAutocompleteControl__title {
@@ -3117,7 +3117,7 @@ html[data-theme="light"] .autocompleteItem__badge {
 .editorAutocompleteControl__button {
   border: 0 !important;
   outline: none;
-  box-shadow: none !important;
+  box-shadow: none;
   background: transparent !important;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   transition: color 120ms ease, opacity 120ms ease, transform 80ms ease;
@@ -3134,7 +3134,7 @@ html[data-theme="light"] .autocompleteItem__badge {
 .editorCopyButton:focus-visible,
 .editorAutocompleteControl__button:focus,
 .editorAutocompleteControl__button:focus-visible {
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .editorCopyButton__icon,
@@ -3202,12 +3202,12 @@ html[data-theme="light"] .autocompleteItem__badge {
 /* Final gear icon override: same storage model as copy icon, but with a fully URL-encoded SVG.
    The previous inline mask used raw # in fill colors, which breaks data-URI parsing in CSS. */
 .editorAutocompleteControl__gear {
-  display: block !important;
-  width: 16px !important;
-  height: 16px !important;
+  display: block;
+  width: 16px;
+  height: 16px;
   flex: 0 0 16px !important;
-  background: currentColor !important;
-  background-color: currentColor !important;
+  background: currentColor;
+  background-color: currentColor;
   -webkit-mask: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") center / 16px 16px no-repeat !important;
   mask: url("data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M12%208.00002C9.79085%208.00002%207.99999%209.79088%207.99999%2012C7.99999%2014.2092%209.79085%2016%2012%2016C14.2091%2016%2016%2014.2092%2016%2012C16%209.79088%2014.2091%208.00002%2012%208.00002ZM9.99999%2012C9.99999%2010.8955%2010.8954%2010%2012%2010C13.1046%2010%2014%2010.8955%2014%2012C14%2013.1046%2013.1046%2014%2012%2014C10.8954%2014%209.99999%2013.1046%209.99999%2012Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10.7673%201.01709C10.9925%200.999829%2011.2454%200.99993%2011.4516%201.00001L12.5484%201.00001C12.7546%200.99993%2013.0075%200.999829%2013.2327%201.01709C13.4989%201.03749%2013.8678%201.08936%2014.2634%201.26937C14.7635%201.49689%2015.1915%201.85736%2015.5007%202.31147C15.7454%202.67075%2015.8592%203.0255%2015.9246%203.2843C15.9799%203.50334%2016.0228%203.75249%2016.0577%203.9557L16.1993%204.77635L16.2021%204.77788C16.2369%204.79712%2016.2715%204.81659%2016.306%204.8363L16.3086%204.83774L17.2455%204.49865C17.4356%204.42978%2017.6693%204.34509%2017.8835%204.28543C18.1371%204.2148%2018.4954%204.13889%2018.9216%204.17026C19.4614%204.20998%2019.9803%204.39497%2020.4235%204.70563C20.7734%204.95095%2021.0029%205.23636%2021.1546%205.4515C21.2829%205.63326%2021.4103%205.84671%2021.514%206.02029L22.0158%206.86003C22.1256%207.04345%2022.2594%207.26713%2022.3627%207.47527C22.4843%207.7203%2022.6328%208.07474%2022.6777%208.52067C22.7341%209.08222%2022.6311%209.64831%2022.3803%2010.1539C22.1811%2010.5554%2021.9171%2010.8347%2021.7169%2011.0212C21.5469%2011.1795%2021.3428%2011.3417%2021.1755%2011.4746L20.5%2012L21.1755%2012.5254C21.3428%2012.6584%2021.5469%2012.8205%2021.7169%2012.9789C21.9171%2013.1653%2022.1811%2013.4446%2022.3802%2013.8461C22.631%2014.3517%2022.7341%2014.9178%2022.6776%2015.4794C22.6328%2015.9253%2022.4842%2016.2797%2022.3626%2016.5248C22.2593%2016.7329%2022.1255%2016.9566%2022.0158%2017.14L21.5138%2017.9799C21.4102%2018.1535%2021.2828%2018.3668%2021.1546%2018.5485C21.0028%2018.7637%2020.7734%2019.0491%2020.4234%2019.2944C19.9803%2019.6051%2019.4613%2019.7901%2018.9216%2019.8298C18.4954%2019.8612%2018.1371%2019.7852%2017.8835%2019.7146C17.6692%2019.6549%2017.4355%2019.5703%2017.2454%2019.5014L16.3085%2019.1623L16.306%2019.1638C16.2715%2019.1835%2016.2369%2019.2029%2016.2021%2019.2222L16.1993%2019.2237L16.0577%2020.0443C16.0228%2020.2475%2015.9799%2020.4967%2015.9246%2020.7157C15.8592%2020.9745%2015.7454%2021.3293%2015.5007%2021.6886C15.1915%2022.1427%2014.7635%2022.5032%2014.2634%2022.7307C13.8678%2022.9107%2013.4989%2022.9626%2013.2327%2022.983C13.0074%2023.0002%2012.7546%2023.0001%2012.5484%2023H11.4516C11.2454%2023.0001%2010.9925%2023.0002%2010.7673%2022.983C10.5011%2022.9626%2010.1322%2022.9107%209.73655%2022.7307C9.23648%2022.5032%208.80849%2022.1427%208.49926%2021.6886C8.25461%2021.3293%208.14077%2020.9745%208.07542%2020.7157C8.02011%2020.4967%207.97723%2020.2475%207.94225%2020.0443L7.80068%2019.2237L7.79791%2019.2222C7.7631%2019.2029%207.72845%2019.1835%207.69396%2019.1637L7.69142%2019.1623L6.75458%2019.5014C6.5645%2019.5702%206.33078%2019.6549%206.11651%2019.7146C5.86288%2019.7852%205.50463%2019.8611%205.07841%2019.8298C4.53866%2019.7901%204.01971%2019.6051%203.57654%2019.2944C3.2266%2019.0491%202.99714%2018.7637%202.84539%2018.5485C2.71718%2018.3668%202.58974%2018.1534%202.4861%2017.9798L1.98418%2017.14C1.87447%2016.9566%201.74067%2016.7329%201.63737%2016.5248C1.51575%2016.2797%201.36719%2015.9253%201.32235%2015.4794C1.26588%2014.9178%201.36897%2014.3517%201.61976%2013.8461C1.81892%2013.4446%202.08289%2013.1653%202.28308%2012.9789C2.45312%2012.8205%202.65717%2012.6584%202.82449%2012.5254L3.47844%2012.0054V11.9947L2.82445%2011.4746C2.65712%2011.3417%202.45308%2011.1795%202.28304%2011.0212C2.08285%2010.8347%201.81888%2010.5554%201.61972%2010.1539C1.36893%209.64832%201.26584%209.08224%201.3223%208.52069C1.36714%208.07476%201.51571%207.72032%201.63732%207.47528C1.74062%207.26715%201.87443%207.04347%201.98414%206.86005L2.48605%206.02026C2.58969%205.84669%202.71714%205.63326%202.84534%205.45151C2.9971%205.23637%203.22655%204.95096%203.5765%204.70565C4.01966%204.39498%204.53862%204.20999%205.07837%204.17027C5.50458%204.1389%205.86284%204.21481%206.11646%204.28544C6.33072%204.34511%206.56444%204.4298%206.75451%204.49867L7.69141%204.83775L7.69394%204.8363C7.72844%204.8166%207.7631%204.79712%207.79791%204.77788L7.80068%204.77635L7.94225%203.95571C7.97723%203.7525%208.02011%203.50334%208.07542%203.2843C8.14077%203.0255%208.25461%202.67075%208.49926%202.31147C8.80849%201.85736%209.23648%201.49689%209.73655%201.26937C10.1322%201.08936%2010.5011%201.03749%2010.7673%201.01709ZM14.0938%204.3363C14.011%203.85634%2013.9696%203.61637%2013.8476%203.43717C13.7445%203.2858%2013.6019%203.16564%2013.4352%203.0898C13.2378%203.00002%2012.9943%203.00002%2012.5073%203.00002H11.4927C11.0057%203.00002%2010.7621%203.00002%2010.5648%203.0898C10.3981%203.16564%2010.2555%203.2858%2010.1524%203.43717C10.0304%203.61637%209.98895%203.85634%209.90615%204.3363L9.75012%205.24064C9.69445%205.56333%209.66662%205.72467%209.60765%205.84869C9.54975%205.97047%209.50241%206.03703%209.40636%206.13166C9.30853%206.22804%209.12753%206.3281%208.76554%206.52822C8.73884%206.54298%208.71227%206.55791%208.68582%206.57302C8.33956%206.77078%208.16643%206.86966%208.03785%206.90314C7.91158%206.93602%207.83293%206.94279%207.70289%206.93196C7.57049%206.92094%207.42216%206.86726%207.12551%206.7599L6.11194%206.39308C5.66271%206.2305%205.43809%206.14921%205.22515%206.16488C5.04524%206.17811%204.87225%206.23978%204.72453%206.34333C4.5497%206.46589%204.42715%206.67094%204.18206%207.08103L3.72269%207.84965C3.46394%208.2826%203.33456%208.49907%203.31227%208.72078C3.29345%208.90796%203.32781%209.09665%203.41141%209.26519C3.51042%209.4648%203.7078%209.62177%204.10256%209.9357L4.82745%2010.5122C5.07927%2010.7124%205.20518%2010.8126%205.28411%2010.9199C5.36944%2011.036%205.40583%2011.1114%205.44354%2011.2504C5.47844%2011.379%205.47844%2011.586%205.47844%2012C5.47844%2012.414%205.47844%2012.621%205.44354%2012.7497C5.40582%2012.8887%205.36944%2012.9641%205.28413%2013.0801C5.20518%2013.1875%205.07927%2013.2876%204.82743%2013.4879L4.10261%2014.0643C3.70785%2014.3783%203.51047%2014.5352%203.41145%2014.7349C3.32785%2014.9034%203.29349%2015.0921%203.31231%2015.2793C3.33461%2015.501%203.46398%2015.7174%203.72273%2016.1504L4.1821%2016.919C4.4272%2017.3291%204.54974%2017.5342%204.72457%2017.6567C4.8723%2017.7603%205.04528%2017.8219%205.2252%2017.8352C5.43813%2017.8508%205.66275%2017.7695%206.11199%2017.607L7.12553%2017.2402C7.42216%2017.1328%207.5705%2017.0791%207.7029%2017.0681C7.83294%2017.0573%207.91159%2017.064%208.03786%2017.0969C8.16644%2017.1304%208.33956%2017.2293%208.68582%2017.427C8.71228%2017.4421%208.73885%2017.4571%208.76554%2017.4718C9.12753%2017.6719%209.30853%2017.772%209.40635%2017.8684C9.50241%2017.963%209.54975%2018.0296%209.60765%2018.1514C9.66662%2018.2754%209.69445%2018.4367%209.75012%2018.7594L9.90615%2019.6637C9.98895%2020.1437%2010.0304%2020.3837%2010.1524%2020.5629C10.2555%2020.7142%2010.3981%2020.8344%2010.5648%2020.9102C10.7621%2021%2011.0057%2021%2011.4927%2021H12.5073C12.9943%2021%2013.2378%2021%2013.4352%2020.9102C13.6019%2020.8344%2013.7445%2020.7142%2013.8476%2020.5629C13.9696%2020.3837%2014.011%2020.1437%2014.0938%2019.6637L14.2499%2018.7594C14.3055%2018.4367%2014.3334%2018.2754%2014.3923%2018.1514C14.4502%2018.0296%2014.4976%2017.963%2014.5936%2017.8684C14.6915%2017.772%2014.8725%2017.6719%2015.2344%2017.4718C15.2611%2017.4571%2015.2877%2017.4421%2015.3141%2017.427C15.6604%2017.2293%2015.8335%2017.1304%2015.9621%2017.0969C16.0884%2017.064%2016.167%2017.0573%2016.2971%2017.0681C16.4295%2017.0791%2016.5778%2017.1328%2016.8744%2017.2402L17.888%2017.607C18.3372%2017.7696%2018.5619%2017.8509%2018.7748%2017.8352C18.9547%2017.8219%2019.1277%2017.7603%2019.2754%2017.6567C19.4502%2017.5342%2019.5728%2017.3291%2019.8179%2016.919L20.2773%2016.1504C20.536%2015.7175%2020.6654%2015.501%2020.6877%2015.2793C20.7065%2015.0921%2020.6721%2014.9034%2020.5885%2014.7349C20.4895%2014.5353%2020.2921%2014.3783%2019.8974%2014.0643L19.1726%2013.4879C18.9207%2013.2876%2018.7948%2013.1875%2018.7159%2013.0801C18.6306%2012.9641%2018.5942%2012.8887%2018.5564%2012.7497C18.5215%2012.6211%2018.5215%2012.414%2018.5215%2012C18.5215%2011.586%2018.5215%2011.379%2018.5564%2011.2504C18.5942%2011.1114%2018.6306%2011.036%2018.7159%2010.9199C18.7948%2010.8126%2018.9207%2010.7124%2019.1725%2010.5122L19.8974%209.9357C20.2922%209.62176%2020.4896%209.46479%2020.5886%209.26517C20.6722%209.09664%2020.7065%208.90795%2020.6877%208.72076C20.6654%208.49906%2020.5361%208.28259%2020.2773%207.84964L19.8179%207.08102C19.5728%206.67093%2019.4503%206.46588%2019.2755%206.34332C19.1277%206.23977%2018.9548%206.1781%2018.7748%206.16486C18.5619%206.14919%2018.3373%206.23048%2017.888%206.39307L16.8745%206.75989C16.5778%206.86725%2016.4295%206.92093%2016.2971%206.93195C16.167%206.94278%2016.0884%206.93601%2015.9621%206.90313C15.8335%206.86965%2015.6604%206.77077%2015.3142%206.57302C15.2877%206.55791%2015.2611%206.54298%2015.2345%206.52822C14.8725%206.3281%2014.6915%206.22804%2014.5936%206.13166C14.4976%206.03703%2014.4502%205.97047%2014.3923%205.84869C14.3334%205.72467%2014.3055%205.56332%2014.2499%205.24064L14.0938%204.3363Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") center / 16px 16px no-repeat !important;
 }
@@ -3216,26 +3216,26 @@ html[data-theme="light"] .autocompleteItem__badge {
    The checked state is shown inside the menu, not by dimming the gear trigger. */
 .editorAutocompleteControl__button,
 .editorAutocompleteControl__button.has-disabled-autocomplete {
-  color: color-mix(in srgb, var(--muted) 82%, transparent) !important;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
 }
 
 .editorAutocompleteControl__button:hover,
 .editorAutocompleteControl__button.has-disabled-autocomplete:hover,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__button,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete {
-  color: var(--text) !important;
+  color: var(--text);
 }
 
 .editorAutocompleteControl__button .editorAutocompleteControl__gear,
 .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
-  opacity: 0.78 !important;
+  opacity: 0.78;
 }
 
 .editorAutocompleteControl__button:hover .editorAutocompleteControl__gear,
 .editorAutocompleteControl__button.has-disabled-autocomplete:hover .editorAutocompleteControl__gear,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__gear,
 .editorAutocompleteControl.is-open .editorAutocompleteControl__button.has-disabled-autocomplete .editorAutocompleteControl__gear {
-  opacity: 1 !important;
+  opacity: 1;
 }
 
 
@@ -3285,7 +3285,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 
 .editorAutocompleteControl__submenu[hidden],
 .editorAutocompleteControl__menu.has-disabled-autocomplete .editorAutocompleteControl__submenu {
-  display: none !important;
+  display: none;
 }
 
 .editorAutocompleteControl__subtitle {
@@ -3344,11 +3344,11 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 
 .editorAutocompleteControl__submenu[hidden],
 .editorAutocompleteControl__menu.has-disabled-autocomplete .editorAutocompleteControl__submenu {
-  display: none !important;
+  display: none;
 }
 
 .editorAutocompleteControl__subtitle {
-  display: none !important;
+  display: none;
 }
 
 .editorAutocompleteControl__opt--sub {
@@ -3361,7 +3361,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 
 /* Compact editor-options submenu: same scale as the other menu rows, no chevron. */
 .editorAutocompleteControl__caret {
-  display: none !important;
+  display: none;
 }
 
 .editorAutocompleteControl__menu {
@@ -3371,7 +3371,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 .editorAutocompleteControl__opt,
 .editorAutocompleteControl__opt--parent,
 .editorAutocompleteControl__opt--sub {
-  font-size: 0.72rem !important;
+  font-size: 0.72rem;
   line-height: 1.15;
 }
 
@@ -3384,7 +3384,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 }
 
 .editorAutocompleteControl__opt--sub .editorAutocompleteControl__text {
-  font-size: inherit !important;
+  font-size: inherit;
   font-weight: inherit;
   line-height: inherit;
   white-space: nowrap;
@@ -4661,7 +4661,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 #runMenuButton[hidden] {
-  display: none !important;
+  display: none;
 }
 
 /* Explorer section navigation and tools intentionally occupy one compact row. */
@@ -5072,7 +5072,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 
 .themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 
 /* A separator makes Tables/Functions and Browse/Graph read as two distinct
@@ -6552,7 +6552,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 .themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 
 
@@ -6634,7 +6634,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 .pageSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
 .pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 /* The page shells render the selector from the first paint; each head script
    sets this class only when the server last reported no Explorer and no
@@ -8261,7 +8261,7 @@ html.chdash-page-select-hidden .pageSelect {
   height: 28px;
   padding: 0;
   border: 0 !important;
-  background: transparent !important;
+  background: transparent;
 }
 .explorerDataSettings__menu {
   top: calc(100% + 4px);
@@ -8298,9 +8298,9 @@ html.chdash-page-select-hidden .pageSelect {
 .explorerTableSettings.themeSelect--open .explorerTableSettings__button,
 .explorerRefreshButton:hover:not(:disabled),
 .explorerRefreshButton:focus-visible {
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text);
 }
 .explorerTableSettings__button .editorAutocompleteControl__gear,
@@ -8346,9 +8346,9 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 .themeSelect__option--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
@@ -8371,7 +8371,7 @@ html.chdash-page-select-hidden .pageSelect {
   z-index: 100;
 }
 .explorerDataSettings__menu {
-  z-index: 500 !important;
+  z-index: 500;
 }
 
 /* The aggregate preview hint is intentionally visible but remains subordinate
@@ -8439,8 +8439,8 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect--icons .themeSelect__button--icon:focus-visible,
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon {
   border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
 }
 .themeSelect--icons .themeSelect__button--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
@@ -8470,53 +8470,53 @@ html.chdash-page-select-hidden .pageSelect {
    control and opening animation. Hover only strengthens the icon/control state. */
 .themeSelect--icons .themeSelect__button--icon {
   border: 1px solid var(--buttonBorder) !important;
-  background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  background: var(--buttonBg);
+  box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 120ms ease, opacity 120ms ease !important;
 }
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   border-color: var(--accentBorder) !important;
-  background: var(--buttonBg) !important;
+  background: var(--buttonBg);
   color: var(--text);
 }
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
-  box-shadow: var(--ring) !important;
+  box-shadow: var(--ring);
 }
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon,
 .themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
   border-color: var(--buttonBorder) !important;
   border-bottom-color: transparent !important;
-  background: var(--buttonBg) !important;
+  background: var(--buttonBg);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
 .themeSelect__option--icon {
-  border: 1px solid transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease !important;
 }
 .themeSelect__option--icon:hover {
-  background: var(--rowHover) !important;
-  border-color: transparent !important;
+  background: var(--rowHover);
+  border-color: transparent;
   color: var(--text);
 }
 .themeSelect__option--icon:focus-visible {
-  background: var(--rowHover) !important;
-  box-shadow: var(--ring) !important;
+  background: var(--rowHover);
+  box-shadow: var(--ring);
 }
 .themeSelect__option--icon[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent) !important;
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
 }
 
 /* Explorer Data menu is portalled to body while open, avoiding every sticky /
    overflow stacking context in the Data panel. */
 body > .explorerDataSettings__menu {
-  z-index: 2500 !important;
+  z-index: 2500;
   min-width: 168px;
   width: max-content;
   opacity: 0;
@@ -8573,7 +8573,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 /* Explorer Data's trigger is a pure cog, exactly like Query run settings; it
    does not expose the generic ThemeSelect caret. */
 .explorerDataSettings__button::after {
-  display: none !important;
+  display: none;
   content: none !important;
 }
 
@@ -9940,23 +9940,23 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   display: block;
 }
 .tracePicker__native {
-  position: absolute !important;
+  position: absolute;
   width: 1px !important;
   height: 1px !important;
   padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
+  margin: -1px;
+  overflow: hidden;
   clip: rect(0 0 0 0) !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
   border: 0 !important;
   pointer-events: none;
 }
 .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   min-width: 0;
   height: 29px;
   min-height: 29px;
-  padding: 0 29px 0 8px !important;
+  padding: 0 29px 0 8px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -10240,11 +10240,11 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   display: inline-block;
 }
 .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   min-width: 0;
   height: 30px;
   min-height: 30px;
-  padding: 0 2.15rem 0 .72rem !important;
+  padding: 0 2.15rem 0 .72rem;
   justify-content: flex-start;
   border: 1px solid var(--buttonBorder);
   border-radius: var(--radiusSm);
@@ -11423,11 +11423,11 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .tracePicker__button {
   background: var(--buttonBg) !important;
   box-shadow: none !important;
-  color: var(--text) !important;
+  color: var(--text);
 }
 .tracePicker__menu {
-  background: var(--panel) !important;
-  border-color: var(--borderStrong) !important;
+  background: var(--panel);
+  border-color: var(--borderStrong);
 }
 .tracePicker.themeSelect--open .tracePicker__button,
 .tracePicker.themeSelect--closing .tracePicker__button {
@@ -11672,10 +11672,10 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 
 /* Trace search v4: inert discovery pickers on empty ranges + compact status before service. */
 .tracePicker.is-empty .tracePicker__button::after {
-  display: none !important;
+  display: none;
 }
 .tracePicker.is-empty .tracePicker__button {
-  padding-right: 8px !important;
+  padding-right: 8px;
   cursor: default !important;
 }
 .traceSearchField--status {
@@ -11689,8 +11689,8 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceSearchField--status > .tracePicker .tracePicker__button {
   height: 27px;
   min-height: 27px;
-  padding-left: 6px !important;
-  padding-right: 21px !important;
+  padding-left: 6px;
+  padding-right: 21px;
   font-size: 9.5px;
 }
 .traceSearchField--status .traceInfoButton--inline {
@@ -11725,7 +11725,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   width: 100px;
 }
 .traceSearchField--status > .tracePicker .tracePicker__button {
-  width: 100px !important;
+  width: 100px;
 }
 
 .traceSearchField--limit,
@@ -11740,43 +11740,43 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 /* Every search selector uses the exact same tracePicker surface. Context only controls width. */
 .traceSearchBar .tracePicker {
-  height: 31px !important;
-  min-height: 31px !important;
+  height: 31px;
+  min-height: 31px;
 }
 .traceSearchBar .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   height: 31px !important;
   min-height: 31px !important;
-  padding: 0 28px 0 10px !important;
-  border: 1px solid var(--buttonBorder) !important;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--buttonBorder);
   border-radius: 6px !important;
   background: var(--buttonBg) !important;
-  color: var(--text) !important;
+  color: var(--text);
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
   font: 600 11px/1 Arial, Helvetica, sans-serif !important;
 }
 .traceSearchBar .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--accentBorder) !important;
+  border-color: var(--accentBorder);
   background: var(--buttonBgHover) !important;
-  color: var(--text) !important;
+  color: var(--text);
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--accentBorder) !important;
-  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accentBorder) 22%, transparent) !important;
+  border-color: var(--accentBorder);
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accentBorder) 22%, transparent);
 }
 .traceSearchBar .tracePicker__menu {
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
-  background: var(--panelBg) !important;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panelBg);
 }
 .traceSearchBar .tracePicker__option {
-  min-height: 28px !important;
-  padding: 0 9px !important;
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif !important;
+  min-height: 28px;
+  padding: 0 9px;
+  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
 }
 .traceSearchBar .tracePicker__option:hover:not(:disabled) {
-  background: var(--rowHover) !important;
+  background: var(--rowHover);
 }
 
 .traceSearchField--status {
@@ -11843,8 +11843,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSearchBar button:focus-visible,
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  border-color: var(--buttonBorder);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
 }
 
 /* Match pageSelectButton's connected expansion instead of a highlighted popup. */
@@ -11868,27 +11868,27 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   visibility: visible;
   pointer-events: auto;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
-  border-top-left-radius: 0 !important;
-  border-top-right-radius: 0 !important;
-  background: var(--panel) !important;
-  box-shadow: var(--obs-shadow-menu) !important;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  background: var(--panel);
+  box-shadow: var(--obs-shadow-menu);
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
   background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--buttonBorder) !important;
+  border-color: var(--buttonBorder);
   background: var(--buttonBg) !important;
 }
 
@@ -11903,7 +11903,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 /* Trace search v8: use the same connected themeSelect interaction as the page selector. */
 .traceSearchBar .tracePicker,
 .traceResultsSort .tracePicker {
-  box-sizing: border-box !important;
+  box-sizing: border-box;
 }
 
 /* Status and page-size pickers are exactly 120px, including their dropdowns. */
@@ -11912,17 +11912,17 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSearchField--limit,
 .traceSearchField--limit > .tracePicker {
   width: 120px !important;
-  min-width: 120px !important;
-  max-width: 120px !important;
+  min-width: 120px;
+  max-width: 120px;
 }
 
 .traceSearchBar .tracePicker__button,
 .traceResultsSort .tracePicker__button {
-  box-sizing: border-box !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  max-width: 100% !important;
-  border-color: var(--buttonBorder) !important;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  border-color: var(--buttonBorder);
   border-radius: 0.75rem !important;
   background: var(--buttonBg) !important;
   box-shadow: none !important;
@@ -11932,9 +11932,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 /* Same hover as pageSelectButton: only the standard button border changes. */
 .traceSearchBar .tracePicker__button:hover:not(:disabled),
 .traceResultsSort .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--buttonBorderHover) !important;
+  border-color: var(--buttonBorderHover);
   background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 /* Focus shows the global ring only; otherwise the pickers follow the page selector surface. */
@@ -11942,26 +11942,26 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSearchBar .tracePicker__button:focus-visible,
 .traceResultsSort .tracePicker__button:focus,
 .traceResultsSort .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder) !important;
-  box-shadow: none !important;
+  border-color: var(--buttonBorder);
+  box-shadow: none;
 }
 
 .traceSearchBar .tracePicker__menu,
 .traceResultsSort .tracePicker__menu {
-  box-sizing: border-box !important;
-  left: 0 !important;
-  right: 0 !important;
-  top: 100% !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  max-width: 100% !important;
-  margin-top: -1px !important;
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem !important;
-  border: 1px solid var(--borderStrong) !important;
-  border-top: 0 !important;
-  border-radius: var(--radiusSm) !important;
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
-  box-shadow: var(--obs-shadow-menu) !important;
+  box-sizing: border-box;
+  left: 0;
+  right: 0;
+  top: 100%;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  margin-top: -1px;
+  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+  border: 1px solid var(--borderStrong);
+  border-top: 0;
+  border-radius: var(--radiusSm);
+  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  box-shadow: var(--obs-shadow-menu);
   transform-origin: top !important;
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
@@ -11977,9 +11977,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   visibility: visible;
   pointer-events: auto;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
-  border-top-left-radius: 0 !important;
-  border-top-right-radius: 0 !important;
-  background: var(--panel) !important;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  background: var(--panel);
 }
 
 /* Keep the button and menu as one continuous shape until the close animation ends. */
@@ -11987,20 +11987,20 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
   background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   background: var(--buttonBg) !important;
 }
 
@@ -12009,7 +12009,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"],
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 
 /* Trace polish: neutral theme hover, borderless trace sections, and stable range menus.
@@ -12023,8 +12023,8 @@ html[data-obs-view="traces"] .tracesResults--wide {
 
 /* The time-range menu (on every filter bar) should not gain a scrollbar merely because Custom is active. */
 .traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
+  max-height: none;
+  overflow: visible;
   scrollbar-gutter: auto !important;
 }
 
@@ -12032,11 +12032,11 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   border-color: var(--buttonBorderHover) !important;
-  background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  background: var(--buttonBg);
+  box-shadow: none;
 }
 .themeSelect--icons .themeSelect__option--icon:focus-visible {
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 /* --- Row details (right-click a result row > Details) --- */
@@ -12308,24 +12308,24 @@ html[data-obs-view="traces"] .tracesResults--wide {
   white-space: nowrap;
 }
 .traceSearchBar .tracePicker--range .tracePicker__menu.timeRangePanel {
-  left: 0 !important;
-  right: auto !important;
-  width: 604px !important;
-  min-width: 0 !important;
-  max-width: calc(100vw - 24px) !important;
-  padding: 0 !important;
+  left: 0;
+  right: auto;
+  width: 604px;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  padding: 0;
   display: flex;
   flex-direction: column;
   z-index: 90;
-  border-top: 1px solid var(--borderStrong) !important;
-  border-radius: 0 var(--radiusSm) var(--radiusSm) var(--radiusSm) !important;
+  border-top: 1px solid var(--borderStrong);
+  border-radius: 0 var(--radiusSm) var(--radiusSm) var(--radiusSm);
   color: var(--text);
   font: 500 11px/1.35 Arial, Helvetica, sans-serif;
   text-align: left;
   cursor: default;
 }
 .traceSearchBar .tracePicker--range.themeSelect--open .tracePicker__menu.timeRangePanel {
-  border-top-right-radius: var(--radiusSm) !important;
+  border-top-right-radius: var(--radiusSm);
 }
 /* The strip under the button stays open, so button and panel read as one shape. */
 .timeRangePanel::before {
@@ -14966,7 +14966,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .logsStatus { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .logsToolbar__actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .logsColumnsPicker { width: 110px; }
-.logsColumnsPicker .tracePicker__button { height: 28px !important; min-height: 28px !important; font: 600 11px/1 Arial, Helvetica, sans-serif; text-align: left; }
+.logsColumnsPicker .tracePicker__button { height: 28px; min-height: 28px; font: 600 11px/1 Arial, Helvetica, sans-serif; text-align: left; }
 .logsColumnsPicker .tracePicker__menu { left: auto; right: 0; }
 .logsSwitch { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font: 600 11px/1 Arial, Helvetica, sans-serif; cursor: pointer; }
 .logsSwitch > input { margin: 0; accent-color: var(--accentBorder); }
@@ -15367,7 +15367,6 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   align-items: end;
 }
 .metricsControl { display: grid; gap: 3px; min-width: 0; }
-.metricsControl__label { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
 .metricsControl--agg { width: 190px; }
 .metricsControl--group { width: 220px; }
 .metricsControl--filters { flex: 1 1 260px; }
@@ -15564,7 +15563,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceSearchBar.obsFilterBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .obsFilterBar .obsFilterBar__field { display: block; flex: 1 1 150px; width: auto; min-width: 120px; max-width: 240px; }
 .obsFilterBar .obsFilterBar__field > .tracePicker,
-.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0; max-width: none; }
 .obsFilterBar .obsFilterBar__field--narrow,
 .obsFilterBar .obsFilterBar__option {
   flex: 0 0 var(--obsBarNarrow);

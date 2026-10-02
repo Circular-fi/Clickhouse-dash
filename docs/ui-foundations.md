@@ -292,3 +292,100 @@ file list and `COMMON_MODULES` of `app_observability.js`):
   `--bp-md`). A detail panel showing one entity writes one URL parameter
   (`span=`, `log=`, `node=`, `svc=`): pushed when it opens, replaced when
   it moves, and Back closes it.
+
+## Components: tabs, segmented controls and menus
+
+Every navigation or choice control is one of three components. Each loads
+on every page (the file list of `app.js` and `COMMON_MODULES` of
+`app_observability.js`, after `app_dom.js` and before `app_ui.js`) and keeps
+its CSS in one `Components: <name>` block of `style.css`.
+`tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a
+family comes back.
+
+### Tabs: `ns.tabs` (`app_ui_tabs.js`)
+
+Two tiers with one behaviour:
+
+- **Tier 1, page and view tabs**: `.viewTabs` / `.viewTab`, a pill row in a
+  nav row. The Explorer views and Catalog modes, the Observability views and
+  the Traces Search, Services and Service map tabs use it.
+- **Tier 2, in-content tabs**: `.contentTabs` / `.contentTabs__tab`, an
+  underline row inside a view. The Explorer table card, Logs Results and
+  Patterns, the log record tabs, the trace detail views and the dialog tab
+  rows use it.
+
+`ns.tabs.bind(list, { attr, onSelect })` owns `role=tablist` / `tab`,
+`aria-selected` and `.is-active`, the roving tabindex (Tab reaches the
+selected tab only), Left / Right / Home / End with automatic activation, and
+the click. The tab's value is its `data-<attr>` (`data-tab` by default).
+`onSelect` shows the panel. It may rebuild the row or return a promise; the
+selected tab keeps the focus either way. `ns.tabs.render(list, items, {
+tier, selected })` builds a row from data, and `ns.tabs.select(list, value)`
+marks one tab selected. No other module handles tab keys.
+
+### Segmented controls: `ns.segmented` (`app_ui_segmented.js`)
+
+A segmented control is a short row of exclusive choices that switch a view
+in place. Examples: Traces | Spans, List | Table, Percentiles | Heatmap,
+Table | Chart, the chart types, Lineage | Storage, the context window
+presets and the metrics `=` / `!=`.
+
+- **ARIA pattern**: `role=group`, named by `aria-label`, holding toggle
+  buttons that carry `aria-pressed`.
+- **Look**: `.segmented` / `.segmented__option`. The pressed option sits on
+  `--seg-active-bg`, which every theme block defines, with an
+  `--accentBorder` edge.
+- **Sizes**: 28 px by default, 24 px with `.segmented--compact` (in card
+  headers and dense toolbars).
+
+The API:
+
+- `html(options, { attr, value, size, label, className })` returns the
+  markup as a string.
+- `render(group, options, ...)` builds the options into an element.
+- `bind(group, { attr, onChange })` handles the clicks.
+- `set(group, value, attr)` marks the pressed option.
+
+Each option keeps its value in a data attribute the caller names
+(`data-results-view`, `data-duration-view`...).
+
+### Menus, pickers and dropdowns: `ns.menu` (`app_ui_menu.js`)
+
+Every popup list is an `ns.menu` menu: the header host, page and theme
+menus, the Run and Copy split menus, the run settings, the Observability
+pickers, the time range panel, the chart and editor menus, the
+click-to-filter, library and row context menus. Each family keeps its look
+(`themeSelect`, `tracePicker`, `runMenu`...). The module owns:
+
+- **Open and close**: `aria-expanded` on the button and the root's
+  `themeSelect--open` / `--closing` (or `is-open`) classes, with the 160 ms
+  close motion. One menu is open at a time; a submenu keeps its parents
+  open.
+- **Placement**: a list stays in the viewport (shifted, flipped above its
+  button, or capped in height). A floating menu (a portal, a context menu, a
+  submenu) mounts in the open `<dialog>` that holds its anchor, because the
+  page outside a modal dialog is inert.
+- **Keys**: Down / Up / Home / End move between items, a typed prefix jumps
+  to the next matching item, and Enter / Space activate. Escape closes and
+  gives the focus back to the button; Tab closes. Down / Up on the button
+  open the list.
+- **Focus**: opened from the keyboard, the selected item (or the first)
+  takes the focus; opened with a pointer, the list does.
+- **Dismissal**: one `pointerdown` listener and one Escape listener for
+  every menu, behind `layer()`. That function is the one place that hands
+  the stack to the shared dismiss layer (`ns.layers`) when it exists.
+
+The entry points:
+
+| Call | For |
+|---|---|
+| `bind(button, menu, options)` | an action or settings menu (`root`, `focus`, `closeOnSelect`, `canOpen`, `onOpen`, `portal`, `keys: false` for a panel with its own keys) |
+| `select(selectEl, options)` | a single-choice picker over a hidden native `<select>` (the data source: `tabindex=-1`, `aria-hidden`); the button reads `<label> · <option>` from `data-field-label` |
+| `multi(button, menu, options)` | a multi-select list that stays open on each pick |
+| `split(main, toggle, menu)` | a split button's menu (Copy JSON / Download) |
+| `context(menu, { x, y, anchor, returnFocus })` | a menu at a point or under a value |
+| `submenu(item, list, { parent, onOpen })` | a nested menu: Right / Enter / click / hover open it, Left / Escape close it back on its item |
+
+Every label sits inside the control, for example `Status · ALL`,
+`Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The graph
+depth stepper reads `- Depth 1 +`. There is no outside label.

@@ -12,10 +12,10 @@ def test_status_and_limit_dropdowns_match_button_width():
     assert ".traceSearchField--status > .tracePicker" in css
     assert ".traceSearchField--limit > .tracePicker" in css
     assert "width: 120px !important;" in css
-    assert "max-width: 120px !important;" in css
-    assert "max-width: 100% !important;" in css
+    assert "max-width: 120px" in css  # !important dropped where the value already wins
+    assert "max-width: 100%;" in css
     assert "border-top: 0 !important;" in css
-    assert "margin-top: -1px !important;" in css
+    assert "margin-top: -1px;" in css
 
 
 def test_trace_picker_hover_and_close_motion_follow_page_selector():

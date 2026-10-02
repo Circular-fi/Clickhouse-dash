@@ -1598,7 +1598,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 .editorWrap {
   height: var(--initialEditorHeight, 100%);
@@ -1641,7 +1641,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
 .themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 .editorWrap {
   resize: none;
@@ -1699,7 +1699,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .pageSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
 .pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 html.chdash-page-select-hidden .pageSelect {
   display: none !important;
@@ -1721,9 +1721,9 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect__option--icon,
 .themeSelect__option--icon:hover,
 .themeSelect__option--icon:focus-visible {
-  border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 .themeSelect__option--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
@@ -1741,8 +1741,8 @@ html.chdash-page-select-hidden .pageSelect {
 .themeSelect--icons .themeSelect__button--icon:focus-visible,
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon {
   border-color: transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
 }
 .themeSelect--icons .themeSelect__button--icon {
   color: color-mix(in srgb, var(--muted) 82%, transparent);
@@ -1754,47 +1754,47 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .themeSelect--icons .themeSelect__button--icon {
   border: 1px solid var(--buttonBorder) !important;
-  background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  background: var(--buttonBg);
+  box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
   transition: border-radius 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 120ms ease, opacity 120ms ease !important;
 }
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   border-color: var(--accentBorder) !important;
-  background: var(--buttonBg) !important;
+  background: var(--buttonBg);
   color: var(--text);
 }
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
-  box-shadow: var(--ring) !important;
+  box-shadow: var(--ring);
 }
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon,
 .themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
   border-color: var(--buttonBorder) !important;
   border-bottom-color: transparent !important;
-  background: var(--buttonBg) !important;
+  background: var(--buttonBg);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
 .themeSelect__option--icon {
-  border: 1px solid transparent !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease !important;
 }
 .themeSelect__option--icon:hover {
-  background: var(--rowHover) !important;
-  border-color: transparent !important;
+  background: var(--rowHover);
+  border-color: transparent;
   color: var(--text);
 }
 .themeSelect__option--icon:focus-visible {
-  background: var(--rowHover) !important;
-  box-shadow: var(--ring) !important;
+  background: var(--rowHover);
+  box-shadow: var(--ring);
 }
 .themeSelect__option--icon[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent) !important;
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border)) !important;
+  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
 }
 :root {
   --obs-on-fill: #fff;
@@ -1839,23 +1839,23 @@ html.chdash-page-select-hidden .pageSelect {
   display: block;
 }
 .tracePicker__native {
-  position: absolute !important;
+  position: absolute;
   width: 1px !important;
   height: 1px !important;
   padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
+  margin: -1px;
+  overflow: hidden;
   clip: rect(0 0 0 0) !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
   border: 0 !important;
   pointer-events: none;
 }
 .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   min-width: 0;
   height: 29px;
   min-height: 29px;
-  padding: 0 29px 0 8px !important;
+  padding: 0 29px 0 8px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -1916,11 +1916,11 @@ html.chdash-page-select-hidden .pageSelect {
   display: inline-block;
 }
 .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   min-width: 0;
   height: 30px;
   min-height: 30px;
-  padding: 0 2.15rem 0 .72rem !important;
+  padding: 0 2.15rem 0 .72rem;
   justify-content: flex-start;
   border: 1px solid var(--buttonBorder);
   border-radius: var(--radiusSm);
@@ -2019,11 +2019,11 @@ html.chdash-page-select-hidden .pageSelect {
 .tracePicker__button {
   background: var(--buttonBg) !important;
   box-shadow: none !important;
-  color: var(--text) !important;
+  color: var(--text);
 }
 .tracePicker__menu {
-  background: var(--panel) !important;
-  border-color: var(--borderStrong) !important;
+  background: var(--panel);
+  border-color: var(--borderStrong);
 }
 .tracePicker.themeSelect--open .tracePicker__button,
 .tracePicker.themeSelect--closing .tracePicker__button {
@@ -2033,57 +2033,57 @@ html.chdash-page-select-hidden .pageSelect {
   color: var(--text);
 }
 .tracePicker.is-empty .tracePicker__button::after {
-  display: none !important;
+  display: none;
 }
 .tracePicker.is-empty .tracePicker__button {
-  padding-right: 8px !important;
+  padding-right: 8px;
   cursor: default !important;
 }
 .traceSearchBar .tracePicker {
-  height: 31px !important;
-  min-height: 31px !important;
+  height: 31px;
+  min-height: 31px;
 }
 .traceSearchBar .tracePicker__button {
-  width: 100% !important;
+  width: 100%;
   height: 31px !important;
   min-height: 31px !important;
-  padding: 0 28px 0 10px !important;
-  border: 1px solid var(--buttonBorder) !important;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--buttonBorder);
   border-radius: 6px !important;
   background: var(--buttonBg) !important;
-  color: var(--text) !important;
+  color: var(--text);
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
   font: 600 11px/1 Arial, Helvetica, sans-serif !important;
 }
 .traceSearchBar .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--accentBorder) !important;
+  border-color: var(--accentBorder);
   background: var(--buttonBgHover) !important;
-  color: var(--text) !important;
+  color: var(--text);
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--accentBorder) !important;
-  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accentBorder) 22%, transparent) !important;
+  border-color: var(--accentBorder);
+  box-shadow: 0 0 0 0.1875rem color-mix(in srgb, var(--accentBorder) 22%, transparent);
 }
 .traceSearchBar .tracePicker__menu {
-  border: 1px solid var(--border) !important;
-  border-radius: 6px !important;
-  background: var(--panelBg) !important;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panelBg);
 }
 .traceSearchBar .tracePicker__option {
-  min-height: 28px !important;
-  padding: 0 9px !important;
-  font: 600 10.5px/1 Arial, Helvetica, sans-serif !important;
+  min-height: 28px;
+  padding: 0 9px;
+  font: 600 10.5px/1 Arial, Helvetica, sans-serif;
 }
 .traceSearchBar .tracePicker__option:hover:not(:disabled) {
-  background: var(--rowHover) !important;
+  background: var(--rowHover);
 }
 .traceSearchBar button:focus,
 .traceSearchBar button:focus-visible,
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder) !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  border-color: var(--buttonBorder);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
 }
 .traceSearchBar .tracePicker__button,
 .traceResultsSort .tracePicker__button {
@@ -2105,40 +2105,40 @@ html.chdash-page-select-hidden .pageSelect {
   visibility: visible;
   pointer-events: auto;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
-  border-top-left-radius: 0 !important;
-  border-top-right-radius: 0 !important;
-  background: var(--panel) !important;
-  box-shadow: var(--obs-shadow-menu) !important;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  background: var(--panel);
+  box-shadow: var(--obs-shadow-menu);
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 6%, transparent);
   background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--buttonBorder) !important;
+  border-color: var(--buttonBorder);
   background: var(--buttonBg) !important;
 }
 .traceSearchBar .tracePicker,
 .traceResultsSort .tracePicker {
-  box-sizing: border-box !important;
+  box-sizing: border-box;
 }
 .traceSearchBar .tracePicker__button,
 .traceResultsSort .tracePicker__button {
-  box-sizing: border-box !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  max-width: 100% !important;
-  border-color: var(--buttonBorder) !important;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  border-color: var(--buttonBorder);
   border-radius: 0.75rem !important;
   background: var(--buttonBg) !important;
   box-shadow: none !important;
@@ -2146,33 +2146,33 @@ html.chdash-page-select-hidden .pageSelect {
 }
 .traceSearchBar .tracePicker__button:hover:not(:disabled),
 .traceResultsSort .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--buttonBorderHover) !important;
+  border-color: var(--buttonBorderHover);
   background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible,
 .traceResultsSort .tracePicker__button:focus,
 .traceResultsSort .tracePicker__button:focus-visible {
-  border-color: var(--buttonBorder) !important;
-  box-shadow: none !important;
+  border-color: var(--buttonBorder);
+  box-shadow: none;
 }
 .traceSearchBar .tracePicker__menu,
 .traceResultsSort .tracePicker__menu {
-  box-sizing: border-box !important;
-  left: 0 !important;
-  right: 0 !important;
-  top: 100% !important;
-  width: 100% !important;
-  min-width: 100% !important;
-  max-width: 100% !important;
-  margin-top: -1px !important;
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem !important;
-  border: 1px solid var(--borderStrong) !important;
-  border-top: 0 !important;
-  border-radius: var(--radiusSm) !important;
-  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
-  box-shadow: var(--obs-shadow-menu) !important;
+  box-sizing: border-box;
+  left: 0;
+  right: 0;
+  top: 100%;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  margin-top: -1px;
+  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+  border: 1px solid var(--borderStrong);
+  border-top: 0;
+  border-radius: var(--radiusSm);
+  background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel);
+  box-shadow: var(--obs-shadow-menu);
   transform-origin: top !important;
   opacity: 0;
   transform: translateY(-6px) scaleY(0.98);
@@ -2187,48 +2187,48 @@ html.chdash-page-select-hidden .pageSelect {
   visibility: visible;
   pointer-events: auto;
   transition: opacity 140ms ease, transform 140ms ease, visibility 0s !important;
-  border-top-left-radius: 0 !important;
-  border-top-right-radius: 0 !important;
-  background: var(--panel) !important;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  background: var(--panel);
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   border-bottom-left-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
   background: linear-gradient(180deg, var(--panelTopSheen), transparent 22%), var(--panel) !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--buttonBorder) !important;
-  border-bottom-color: transparent !important;
+  border-color: var(--buttonBorder);
+  border-bottom-color: transparent;
   background: var(--buttonBg) !important;
 }
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"],
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"] {
-  display: none !important;
+  display: none;
 }
 .traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu {
-  max-height: none !important;
-  overflow: visible !important;
+  max-height: none;
+  overflow: visible;
   scrollbar-gutter: auto !important;
 }
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   border-color: var(--buttonBorderHover) !important;
-  background: var(--buttonBg) !important;
-  box-shadow: none !important;
+  background: var(--buttonBg);
+  box-shadow: none;
 }
 .themeSelect--icons .themeSelect__option--icon:focus-visible {
-  box-shadow: none !important;
+  box-shadow: none;
 }
 .closeCross {
   display: inline-flex;
@@ -2268,24 +2268,24 @@ html.chdash-page-select-hidden .pageSelect {
   white-space: nowrap;
 }
 .traceSearchBar .tracePicker--range .tracePicker__menu.timeRangePanel {
-  left: 0 !important;
-  right: auto !important;
-  width: 604px !important;
-  min-width: 0 !important;
-  max-width: calc(100vw - 24px) !important;
-  padding: 0 !important;
+  left: 0;
+  right: auto;
+  width: 604px;
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  padding: 0;
   display: flex;
   flex-direction: column;
   z-index: 90;
-  border-top: 1px solid var(--borderStrong) !important;
-  border-radius: 0 var(--radiusSm) var(--radiusSm) var(--radiusSm) !important;
+  border-top: 1px solid var(--borderStrong);
+  border-radius: 0 var(--radiusSm) var(--radiusSm) var(--radiusSm);
   color: var(--text);
   font: 500 11px/1.35 Arial, Helvetica, sans-serif;
   text-align: left;
   cursor: default;
 }
 .traceSearchBar .tracePicker--range.themeSelect--open .tracePicker__menu.timeRangePanel {
-  border-top-right-radius: var(--radiusSm) !important;
+  border-top-right-radius: var(--radiusSm);
 }
 .timeRangePanel::before {
   content: "";
@@ -2874,7 +2874,6 @@ html[data-theme="light"] {
   align-items: end;
 }
 .metricsControl { display: grid; gap: 3px; min-width: 0; }
-.metricsControl__label { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
 .metricsControl--agg { width: 190px; }
 .metricsControl--group { width: 220px; }
 .metricsControl--filters { flex: 1 1 260px; }
@@ -3055,7 +3054,7 @@ html[data-theme="light"] {
 .obsFilterBar__range > .tracePicker { width: 100%; margin: 0; }
 .traceSearchBar.obsFilterBar .tracePicker__button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .obsFilterBar .obsFilterBar__field > .tracePicker,
-.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0 !important; max-width: none !important; }
+.obsFilterBar .obsFilterBar__option > .tracePicker { width: 100% !important; min-width: 0; max-width: none; }
 .obsFilterBar .obsFilterBar__field--narrow,
 .obsFilterBar .obsFilterBar__option {
   flex: 0 0 var(--obsBarNarrow);

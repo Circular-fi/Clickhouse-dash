@@ -601,18 +601,17 @@
       <div class="traceSearchBar metricsPanel__controls">
         <div class="metricsControl metricsControl--agg">
           <div class="themeSelect tracePicker metricsPicker metricsPicker--agg">
-            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">${fmt.EMPTY}</button>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Aggregation \u00b7 ${fmt.EMPTY}</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div>
           </div>
         </div>
         <div class="metricsControl metricsControl--group">
           <div class="themeSelect tracePicker metricsPicker metricsPicker--group">
-            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">None</button>
+            <button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false">Group by \u00b7 None</button>
             <div class="themeSelect__menu tracePicker__menu" role="listbox" aria-multiselectable="true" tabindex="-1" hidden></div>
           </div>
         </div>
         <div class="metricsControl metricsControl--filters">
-          <span class="metricsControl__label">Filters</span>
           <div class="metricsFilters">
             <div class="metricsFilters__chips"></div>
             <button type="button" class="button metricsFilters__add" aria-expanded="false">+ Filter</button>

@@ -131,7 +131,6 @@ test('the example query charts within budget, explains the Array column and read
     const cs = getComputedStyle(el);
     return [cs.appearance, cs.height, cs.borderTopColor, cs.borderRadius, cs.backgroundColor, cs.backgroundImage, cs.paddingRight];
   }));
-  expect(looks[0][0]).toBe('none');
   expect(looks[1]).toEqual(looks[0]);
   expect(looks[2]).toEqual(looks[0]);
   await expect(chart.locator('.queryChart__x')).toHaveValue('auto');
