@@ -4,8 +4,10 @@ import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpe
 
 // Query library: the toolbar book button (between Format and the run settings
 // cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
-// same shell, size, backdrop and tabs), with two tabs, Saved (folders and saved
-// queries) and History, and its prompts stacked over it. Browser mode keeps both in localStorage (chdash.queryLibrary.v2, migrated
+// same shell, size, backdrop and tab style), with two tabs in its head (no
+// title), Saved (folders and saved queries) and History, and its prompts
+// stacked over it. A click (or the arrows) selects an item and the preview
+// pane shows it; "Load in editor" (Ctrl/Cmd+Enter) loads it. Browser mode keeps both in localStorage (chdash.queryLibrary.v2, migrated
 // once from chdash.savedQueries.v1; chdash.queryHistory.v1). Server mode
 // (features.query_library.enabled) goes through /api/query-library: here a
 // small in-memory server behind page.route, writable or read-only, plus one
@@ -56,6 +58,20 @@ const LIBRARY = {
 };
 
 const panel = (page) => page.locator('#queryLibraryMenu');
+const preview = (page) => page.locator('#queryLibraryPreview');
+const previewAction = (page, action) => preview(page).locator(`.qlPreview__foot [data-action="${action}"]`);
+const facts = (page) => preview(page).locator('.qlPreview__facts').evaluate((dl) => {
+  const out = {};
+  for (const dt of dl.querySelectorAll('dt')) out[dt.textContent] = dt.nextElementSibling.textContent;
+  return out;
+});
+
+// Selects a saved query (a click) and loads it with the preview's button.
+async function loadSaved(page, name) {
+  await node(page, name).locator(':scope > .qlRow').click();
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText(name);
+  await previewAction(page, 'load').click();
+}
 
 // Opens the panel (from a closed state) on a tab.
 async function showPanel(page, tab = 'saved') {
@@ -140,8 +156,8 @@ test('browser mode migrates chdash.savedQueries.v1 once and keeps the legacy key
   await expect(node(page, 'Late entry')).toHaveCount(0);
   expect((await libraryState(page)).queries).toHaveLength(2);
 
-  // Opening a migrated query fills the editor and closes the panel.
-  await node(page, 'Processes').locator(':scope > .qlRow').click();
+  // Loading a migrated query fills the editor and closes the panel.
+  await loadSaved(page, 'Processes');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT\n    query_id\nFROM system.processes');
   await expect(panel(page)).toBeHidden();
 });
@@ -275,9 +291,29 @@ test('save, open, edit (name, description, SQL, tags) and update the opened quer
   const saved = stored.queries.find((q) => q.name === 'Table count');
   expect(saved).toMatchObject({ folder_id: 'f_reports', description: 'How many tables', sql: 'SELECT count() FROM system.tables', tags: ['catalog', 'quick'] });
 
-  // A click opens a query in the editor (and closes the panel); the opened
-  // query is marked.
+  // A click selects a query: the preview shows it, the editor is unchanged
+  // and the dialog stays open. "Load in editor" (bottom right) loads it,
+  // closes the dialog and focuses the editor; the opened query is marked.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText('The answer');
+  await expect(preview(page).locator('.qlSql')).toHaveText('SELECT 42 AS answer');
+  await expect(panel(page)).toBeVisible();
+  await expect(editor).toHaveValue('SELECT count() FROM system.tables');
+  const load = previewAction(page, 'load');
+  await expect(load).toHaveText('Load in editor');
+  await expect(load).toHaveClass(/button--primary/);
+  const geometry = await page.evaluate(() => {
+    const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
+    const buttons = [...document.querySelectorAll('#queryLibraryPreview .qlPreview__foot .button')].map((b) => b.getBoundingClientRect());
+    const last = buttons[buttons.length - 1];
+    return { right: Math.round(pane.right - last.right), bottom: Math.round(pane.bottom - last.bottom), lastIsLoad: document.querySelector('#queryLibraryPreview .qlPreview__foot .button:last-child').dataset.action };
+  });
+  expect(geometry.lastIsLoad).toBe('load');
+  expect(geometry.right).toBeLessThanOrEqual(20);
+  expect(geometry.bottom).toBeLessThanOrEqual(20);
+  await expect(previewAction(page, 'run')).toHaveText('Run');
+  await load.click();
   await expect(editor).toHaveValue('SELECT 42 AS answer');
   await expect(panel(page)).toBeHidden();
   await expect(editor).toBeFocused();
@@ -339,7 +375,7 @@ test('move: drag and drop into a folder, Move to\u2026 for folders, no move into
   expect(stored.folders.find((f) => f.id === 'f_merges').parent_id).toBe('f_ops');
 });
 
-test('search covers names, descriptions and SQL; the hover preview shows description and highlighted SQL', async ({ page }) => {
+test('search covers names, descriptions and SQL; the selected query shows in the preview: description, folder, tags and highlighted SQL', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   const search = page.locator('#queryLibraryViewSaved .qlSearch__input');
@@ -364,41 +400,76 @@ test('search covers names, descriptions and SQL; the hover preview shows descrip
   await expect(search).toHaveValue('');
   await expect(node(page, 'Operations')).toBeVisible();
 
-  // Hover: description, folder path and the SQL with keyword highlighting.
+  // Nothing selected yet: the pane says how to fill it.
+  const pane = preview(page);
+  await expect(pane.locator('.qlPreview__empty')).toHaveText('Select a query to preview it here.');
+  // A click selects: name, description, folder, tags, update time and the SQL
+  // with keyword highlighting (ns.format time, its ISO value in the tooltip).
   await expandFolder(page, 'Operations');
-  await node(page, 'Active parts').locator(':scope > .qlRow').hover();
-  const preview = page.locator('#queryLibraryPreview');
-  await expect(preview).toBeVisible();
-  await expect(preview.locator('.qlPreview__title')).toHaveText('Active parts');
-  await expect(preview.locator('.qlPreview__path')).toHaveText('Operations');
-  await expect(preview.locator('.qlPreview__description')).toHaveText('Active data parts per table');
-  await expect(preview.locator('.qlSql')).toContainText('FROM system.parts');
-  await expect(preview.locator('.qlSql span').first()).toBeVisible();
-  await expect(preview.locator('.qlTag')).toHaveText(['storage']);
-  // The preview is a pane of the dialog, right of the list: it stays while
-  // the pointer moves to it, and the next query replaces it.
+  await node(page, 'Active parts').locator(':scope > .qlRow').click();
+  await expect(pane).toBeVisible();
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
+  await expect(pane.locator('.qlPreview__description')).toHaveText('Active data parts per table');
+  const shown = await facts(page);
+  expect(Object.keys(shown)).toEqual(['Folder', 'Tags', 'Updated']);
+  expect(shown.Folder).toBe('Operations');
+  expect(shown.Tags).toBe('storage');
+  expect(shown.Updated).toMatch(/^Oct 1(, 2026)? 12:00:00$/);
+  await expect(pane.locator('.qlPreview__facts time')).toHaveAttribute('datetime', '2026-10-01T12:00:00.000Z');
+  await expect(pane.locator('.qlSql')).toContainText('FROM system.parts');
+  await expect(pane.locator('.qlSql span').first()).toBeVisible();
+  await expect(pane.locator('.qlTag')).toHaveText(['storage']);
+  // The Back button is the phone step's only.
+  await expect(pane.locator('.qlPreview__back')).toBeHidden();
+  // The preview is a pane of the dialog, right of the list.
   const geometry = await page.evaluate(() => {
-    const pane = document.getElementById('queryLibraryPreview');
+    const el = document.getElementById('queryLibraryPreview');
     const list = document.getElementById('queryLibraryViewSaved').getBoundingClientRect();
-    return { inDialog: !!pane.closest('dialog#queryLibraryMenu'), beside: pane.getBoundingClientRect().left >= list.right - 1 };
+    return { inDialog: !!el.closest('dialog#queryLibraryMenu'), beside: el.getBoundingClientRect().left >= list.right - 1 };
   });
   expect(geometry).toEqual({ inDialog: true, beside: true });
-  await page.locator('#queryLibraryViewSaved .ql__foot').hover();
-  await preview.hover();
-  await expect(preview.locator('.qlPreview__title')).toHaveText('Active parts');
+  // Hovering another query changes nothing; selecting it does.
   await node(page, 'The answer').locator(':scope > .qlRow').hover();
-  await expect(preview.locator('.qlPreview__title')).toHaveText('The answer');
-  await expect(preview.locator('.qlPreview__description')).toHaveCount(0);
+  await page.waitForTimeout(500);
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
+  await node(page, 'The answer').locator(':scope > .qlRow').click();
+  await expect(pane.locator('.qlPreview__title')).toHaveText('The answer');
+  await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
+  expect((await facts(page)).Folder).toBe('Top level');
+  // A selected folder shows its description and contents, with no action.
+  await node(page, 'Operations').locator(':scope > .qlRow .qlRow__name').click();
+  await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'false');
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Operations');
+  await expect(pane.locator('.qlPreview__description')).toHaveText('Server health');
+  expect(await facts(page)).toEqual({ Folder: 'Top level', Contents: '2 queries \u00b7 1 subfolder' });
+  await expect(pane.locator('.qlPreview__foot')).toHaveCount(0);
+  // A renamed query stays selected and previewed under its new name.
+  await node(page, 'The answer').locator(':scope > .qlRow').click();
+  await node(page, 'The answer').press('F2');
+  await fillDialog(page, { name: 'Answer' });
+  await dialog(page).getByRole('button', { name: 'Save' }).click();
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Answer');
+  await expect(node(page, 'Answer')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('a modifier-click adds the query as a new statement and turns multiquery on', async ({ page }) => {
+test('Append to editor (item menu) adds the query as a new statement and turns multiquery on; a modifier-click only selects', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY, 'chdash.runOptions.v1': { autoFormat: false, multiQuery: false, executionStats: false, flattenTuple: true } });
   await openLibrary(page);
   const editor = page.locator('#queryTextArea');
   await closePanel(page);
   await editor.fill('SELECT 1 AS first');
   await showPanel(page);
+  // A modifier-click no longer appends: it selects, like a click.
   await node(page, 'The answer').locator(':scope > .qlRow').click({ modifiers: ['ControlOrMeta'] });
+  await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
+  await expect(panel(page)).toBeVisible();
+  await expect(editor).toHaveValue('SELECT 1 AS first');
+  await node(page, 'The answer').locator(':scope > .qlRow').click({ modifiers: ['Shift'] });
+  await expect(panel(page)).toBeVisible();
+  await expect(editor).toHaveValue('SELECT 1 AS first');
+  await rowMenu(page, 'The answer');
+  await expect(page.locator('.qlMenu [role=menuitem] .qlMenu__label')).toHaveText(['Load in editor', 'Append to editor', 'Run', 'Copy SQL', 'Edit\u2026', 'Move to\u2026', 'Delete']);
+  await menuItem(page, 'Append to editor').click();
   await expect(editor).toHaveValue('SELECT 1 AS first;\n\nSELECT 42 AS answer');
   await expect(page.locator('.qlToast')).toContainText('multiquery is now on');
   await expect(panel(page)).toBeHidden();
@@ -410,7 +481,7 @@ test('a modifier-click adds the query as a new statement and turns multiquery on
   await expect(page.locator('.resultsStack__block')).toHaveCount(2);
 });
 
-test('keyboard: tabs, tree navigation, expand / collapse, open, rename, menu and delete', async ({ page }) => {
+test('keyboard: tabs, tree navigation and selection, expand / collapse, preview and load, rename, menu and delete', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const focused = () => page.evaluate(() => {
@@ -433,9 +504,12 @@ test('keyboard: tabs, tree navigation, expand / collapse, open, rename, menu and
   await page.keyboard.press('Enter');
   await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
 
-  // Arrow keys move along the visible items.
+  // Arrow keys move the selection along the visible items; the preview
+  // follows.
   await page.keyboard.press('ArrowDown');
   expect(await focused()).toBe('Operations');
+  await expect(node(page, 'Operations')).toHaveAttribute('aria-selected', 'true');
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText('Operations');
   await page.keyboard.press('ArrowDown');
   expect(await focused()).toBe('Reports');
   await page.keyboard.press('ArrowUp');
@@ -445,6 +519,8 @@ test('keyboard: tabs, tree navigation, expand / collapse, open, rename, menu and
   expect(await focused()).toBe('Merges');
   await page.keyboard.press('ArrowDown');
   expect(await focused()).toBe('Active parts');
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText('Active parts');
+  expect(await tree(page).locator('[aria-selected="true"]').count()).toBe(1);
   await page.keyboard.press('ArrowLeft');
   expect(await focused()).toBe('Operations');
   await page.keyboard.press('ArrowLeft');
@@ -469,16 +545,40 @@ test('keyboard: tabs, tree navigation, expand / collapse, open, rename, menu and
   await expect(page.locator('.qlMenu')).toBeVisible();
   await expect(page.locator('.qlMenu [role=menuitem]').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(menuItem(page, 'Add as a new statement')).toBeFocused();
+  await expect(menuItem(page, 'Append to editor')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('.qlMenu')).toHaveCount(0);
   expect(await focused()).toBe('Answer 42');
 
-  // Enter opens the query in the editor and closes the panel.
+  // Enter moves to the preview, on "Load in editor"; Enter there loads the
+  // query and closes the panel.
+  await page.keyboard.press('Enter');
+  await expect(previewAction(page, 'load')).toBeFocused();
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText('Answer 42');
+  await expect(panel(page)).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
   await expect(page.locator('#queryTextArea')).toBeFocused();
   await expect(panel(page)).toBeHidden();
+
+  // Ctrl/Cmd+Enter loads at once, from the list or from the preview (and
+  // runs nothing).
+  const runs = () => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1') || '[]').length);
+  const before = await runs();
+  await page.locator('#queryTextArea').fill('SELECT 0');
+  await showPanel(page);
+  await node(page, 'Answer 42').focus();
+  await page.keyboard.press('Control+Enter');
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
+  await page.locator('#queryTextArea').fill('SELECT 0');
+  await showPanel(page);
+  await node(page, 'Answer 42').locator(':scope > .qlRow').click();
+  await previewAction(page, 'run').focus();
+  await page.keyboard.press('Control+Enter');
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
+  expect(await runs()).toBe(before);
 
   // Delete asks, Enter confirms.
   await showPanel(page);
@@ -498,7 +598,7 @@ test('keyboard: tabs, tree navigation, expand / collapse, open, rename, menu and
   await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
 });
 
-test('history groups runs by day with status, elapsed time, rows and host; search, re-run, save and clear', async ({ page }) => {
+test('history groups runs by day with status, elapsed time, rows and host; the preview loads, runs and saves; search and clear', async ({ page }) => {
   const day = 24 * 3600 * 1000;
   await seed(page, {
     'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
@@ -527,9 +627,36 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   await expect(ok.locator('.qhItem__time')).toHaveText(/^\d\d:\d\d:\d\d$/);
   await expect(ok.locator('.qhItem__time')).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT/);
 
+  // The rows carry no Run / Save buttons any more (they are preview
+  // actions): only the item menu button.
+  await expect(ok.locator('.qhItem__actions [data-action]')).toHaveCount(1);
+  await expect(ok.locator('.qhItem__actions [data-action="menu"]')).toHaveCount(1);
+
+  // A click selects a run: the preview shows its status, time, elapsed time,
+  // rows, host and SQL, with Save to library, Run and Load in editor.
+  const pane = preview(page);
+  await expect(pane.locator('.qlPreview__empty')).toHaveText('Select a run to preview it here.');
+  await ok.click();
+  await expect(ok).toHaveAttribute('aria-selected', 'true');
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Succeeded');
+  await expect(pane.locator('.qlPreview__title .qhItem__status--ok')).toHaveCount(1);
+  const shown = await facts(page);
+  expect(Object.keys(shown)).toEqual(['Time', 'Elapsed', 'Rows', 'Host']);
+  expect(shown.Time).toMatch(/^[A-Z][a-z]{2} \d{1,2} \d\d:\d\d:\d\d$/);
+  expect(shown.Elapsed).toMatch(/^\d+(\.\d+)? (ns|\u00b5s|ms|s)$/);
+  expect(shown.Rows).toBe('7');
+  expect(shown.Host).toBe('local');
+  await expect(pane.locator('.qlSql')).toContainText('numbers(7)');
+  await expect(pane.locator('.qlPreview__foot .button')).toHaveText(['Save to library\u2026', 'Run', 'Load in editor']);
+  await expect(panel(page)).toBeVisible();
   // The failed run's preview shows the server error.
-  await failed.hover();
-  await expect(page.locator('#queryLibraryPreview .qlPreview__error')).toContainText(/__missing_history_table/);
+  await failed.click();
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Failed');
+  await expect(pane.locator('.qlPreview__error')).toContainText(/__missing_history_table/);
+  // Arrows move the selection, the preview follows.
+  await page.keyboard.press('ArrowDown');
+  await expect(ok).toBeFocused();
+  await expect(pane.locator('.qlPreview__title')).toHaveText('Succeeded');
 
   // Search.
   const search = page.locator('#queryLibraryViewHistory .qlSearch__input');
@@ -538,25 +665,44 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   await search.fill('');
   await expect(items).toHaveCount(3);
 
-  // Re-run loads and runs it (and closes the panel).
+  // Load in editor: the SQL, no run, the panel closes.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
-  await ok.hover();
-  await ok.locator('[data-action="rerun"]').click();
+  await items.filter({ hasText: 'older' }).click();
+  await previewAction(page, 'load').click();
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT \'older\' AS tag');
+  await expect(page.locator('#queryTextArea')).toBeFocused();
+
+  // Run loads and runs it (and closes the panel).
+  await page.locator('#queryTextArea').fill('SELECT 0');
+  await showPanel(page, 'history');
+  await ok.click();
+  await previewAction(page, 'run').click();
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('#queryTextArea')).toHaveValue(/numbers\(7\)/);
   await waitForTerminal(page);
   await expect(page.locator('#resultTableBody tr:not(.resultTable__spacerRow)')).toHaveCount(7);
 
-  // Save to library from the History.
+  // Save to library from the History preview.
   await showPanel(page, 'history');
-  await items.filter({ hasText: 'older' }).hover();
-  await items.filter({ hasText: 'older' }).locator('[data-action="save"]').click();
+  await items.filter({ hasText: 'older' }).click();
+  await previewAction(page, 'save').click();
   await expect(dialog(page)).toContainText('SQL (from History)');
   await fillDialog(page, { name: 'Older one' });
   await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
   expect((await libraryState(page)).queries.map((q) => q.sql)).toEqual(['SELECT \'older\' AS tag']);
+
+  // The item menu: Load, Append, Run, Copy, Save, Remove.
+  await items.filter({ hasText: 'older' }).click({ button: 'right' });
+  await expect(page.locator('.qlMenu [role=menuitem] .qlMenu__label')).toHaveText(['Load in editor', 'Append to editor', 'Run', 'Copy SQL', 'Save to library\u2026', 'Remove from history']);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.qlMenu')).toHaveCount(0);
+  // Keyboard: Enter moves to the preview's Load in editor.
+  await items.filter({ hasText: 'older' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(previewAction(page, 'load')).toBeFocused();
 
   // Clear, after confirmation (always available in browser mode).
   await page.locator('#queryLibraryViewHistory .qh__clear').click();
@@ -565,7 +711,7 @@ test('history groups runs by day with status, elapsed time, rows and host; searc
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryHistory.v1')))).toEqual([]);
 });
 
-test('the library opens in the profiling dialog: same shell, size and tabs; Escape, backdrop and close; focus in, trapped and back', async ({ page }) => {
+test('the library opens in the profiling dialog: same shell, size and tabs, the tabs in the head instead of a title; Escape, backdrop and close; focus in, trapped and back', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const button = page.locator('#queryLibraryButton');
@@ -592,8 +738,7 @@ test('the library opens in the profiling dialog: same shell, size and tabs; Esca
     const cs = getComputedStyle(dialog);
     const round = (v) => Math.round(v * 10) / 10;
     const head = dialog.querySelector(':scope > .uiDialog__frame > .uiDialog__head');
-    const tabs = dialog.querySelector(':scope > .uiDialog__frame > .uiDialog__tabs');
-    const tab = tabs.querySelector('.uiDialog__tab[aria-selected="true"]');
+    const tab = dialog.querySelector(':scope > .uiDialog__frame .uiDialog__tabs .uiDialog__tab[aria-selected="true"]');
     const tcs = getComputedStyle(tab);
     const close = head.querySelector('.uiDialog__close');
     return {
@@ -603,9 +748,9 @@ test('the library opens in the profiling dialog: same shell, size and tabs; Esca
       box: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
       look: [cs.borderRadius, cs.backgroundColor, cs.borderTopColor, cs.boxShadow],
       backdrop: [getComputedStyle(dialog, '::backdrop').backgroundColor, getComputedStyle(dialog, '::backdrop').backdropFilter],
-      head: [Math.round(head.getBoundingClientRect().height), getComputedStyle(head.querySelector('.uiDialog__title')).fontSize],
+      head: Math.round(head.getBoundingClientRect().height),
       close: [round(close.getBoundingClientRect().width), round(close.getBoundingClientRect().height), close.className],
-      tab: [tcs.fontSize, tcs.fontWeight, tcs.borderBottomWidth, tcs.borderBottomColor, tcs.color, tcs.minHeight],
+      tab: [tcs.fontSize, tcs.fontWeight, tcs.borderBottomWidth, tcs.borderBottomColor, tcs.color],
     };
   }, selector);
 
@@ -616,6 +761,32 @@ test('the library opens in the profiling dialog: same shell, size and tabs; Esca
   const library = await shellOf('#queryLibraryMenu');
   expect(library.tag).toBe('DIALOG');
   expect(library.modal).toBe(true);
+  // Saved | History stand in the head where a title would be: no title or
+  // subtitle, the dialog is named by aria-label, the close button stays in
+  // the head, and no tab bar sits under it.
+  const head = await page.evaluate(() => {
+    const d = document.getElementById('queryLibraryMenu');
+    const h = d.querySelector(':scope > .uiDialog__frame > .uiDialog__head');
+    const tablist = h.querySelector(':scope > [role=tablist]');
+    return {
+      label: d.getAttribute('aria-label'),
+      labelledby: d.getAttribute('aria-labelledby'),
+      titles: d.querySelectorAll('.uiDialog__title, .uiDialog__subtitle, .uiDialog__heading').length,
+      tabs: tablist ? [...tablist.querySelectorAll('[role=tab]')].map((t) => t.textContent) : [],
+      tabsBelow: d.querySelectorAll(':scope > .uiDialog__frame > .uiDialog__tabs').length,
+      close: !!h.querySelector(':scope > .uiDialog__actions > #queryLibraryClose'),
+      named: d.textContent.includes('Query library'),
+    };
+  });
+  expect(head).toEqual({ label: 'Query library', labelledby: null, titles: 0, tabs: ['Saved', 'History'], tabsBelow: 0, close: true, named: false });
+  await expect(page.getByRole('dialog', { name: 'Query library' })).toBeVisible();
+  // The selected tab's underline stands on the head's bottom border.
+  const underline = await page.evaluate(() => {
+    const h = document.querySelector('#queryLibraryMenu .uiDialog__head').getBoundingClientRect();
+    const t = document.getElementById('queryLibraryTabSaved').getBoundingClientRect();
+    return Math.round(h.bottom - t.bottom);
+  });
+  expect(Math.abs(underline)).toBeLessThanOrEqual(1);
   // Focus moved in (the search), the page behind is inert.
   await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
   expect(await page.evaluate(() => document.elementFromPoint(5, 5) === document.getElementById('queryLibraryMenu'))).toBe(true);
@@ -658,9 +829,15 @@ test('the library opens in the profiling dialog: same shell, size and tabs; Esca
   await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
   await settled(page.locator('#analysisModal'));
   const profiling = await shellOf('#analysisModal');
+  // The profiling dialog keeps its title, its tabs under the head.
+  await expect(page.locator('#analysisModal .uiDialog__head .uiDialog__title')).toHaveText('Query Analysis');
+  await expect(page.locator('#analysisModal > .uiDialog__frame > .uiDialog__tabs')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(page.locator('#analysisModal')).toBeHidden();
-  expect(profiling).toEqual(library);
+  const { head: profilingHead, ...profilingShell } = profiling;
+  const { head: libraryHead, ...libraryShell } = library;
+  expect(profilingShell).toEqual(libraryShell);
+  expect(Math.abs(profilingHead - libraryHead)).toBeLessThanOrEqual(2);
   expect(library.classes).toEqual(['uiDialog', 'uiDialog--lg']);
 
   // A prompt opened from the library stacks over it: Escape closes the
@@ -930,8 +1107,8 @@ test('server mode read-only: badge, no editing controls, opening and copying sti
 
   await rowMenu(page, 'The answer');
   const labels = await page.locator('.qlMenu [role=menuitem] .qlMenu__label').allTextContents();
-  expect(labels).toEqual(['Open in editor', 'Add as a new statement', 'Run', 'Copy SQL']);
-  await menuItem(page, 'Open in editor').click();
+  expect(labels).toEqual(['Load in editor', 'Append to editor', 'Run', 'Copy SQL']);
+  await menuItem(page, 'Load in editor').click();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
 
   // Editing shortcuts are inert; Ctrl+S explains why.
@@ -949,7 +1126,8 @@ test('server mode read-only: badge, no editing controls, opening and copying sti
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
   await expect(page.locator('#queryLibraryViewHistory .qh__clear')).toBeHidden();
-  await expect(page.locator('#queryLibraryViewHistory .qhItem [data-action="save"]')).toHaveCount(0);
+  await page.locator('#queryLibraryViewHistory .qhItem').first().click();
+  await expect(preview(page).locator('.qlPreview__foot .button')).toHaveText(['Run', 'Load in editor']);
   expect(server.requests.filter((r) => r.method !== 'GET' && !r.path.startsWith('/history'))).toEqual([]);
 });
 
@@ -987,7 +1165,7 @@ test('server mode offers once to import the browser queries', async ({ page }) =
 
 // --- Phone and themes -------------------------------------------------------
 
-test('phone: the library and profiling dialogs are full-screen, a prompt is a bottom sheet, both themes', async ({ page }, testInfo) => {
+test('phone: the library and profiling dialogs are full-screen, the list and the preview are two steps, a prompt is a bottom sheet, both themes', async ({ page }, testInfo) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await page.setViewportSize({ width: 390, height: 844 });
   for (const scheme of ['dark', 'light']) {
@@ -1004,8 +1182,8 @@ test('phone: the library and profiling dialogs are full-screen, a prompt is a bo
     await expect(tree(page)).toBeVisible();
     const box = await settled(panel(page));
     expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 844]);
-    // No preview pane on a phone: the list takes the width.
-    await expect(page.locator('#queryLibraryPreview')).toBeHidden();
+    // The first step is the list alone: no preview pane beside it.
+    await expect(preview(page)).toBeHidden();
     expect(Math.round((await page.locator('#queryLibraryViewSaved').boundingBox()).width)).toBe(390);
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-${scheme}.png` });
     // A prompt is a bottom sheet over it.
@@ -1015,12 +1193,45 @@ test('phone: the library and profiling dialogs are full-screen, a prompt is a bo
     expect(sheet.y).toBeGreaterThan(100);
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
-    // Choosing a query closes the sheet and fills the editor.
+    // A tap shows the query's preview in place of the list, with a Back
+    // button; the focus is on Load in editor. Nothing is loaded yet.
     await node(page, 'The answer').locator(':scope > .qlRow').click();
+    await expect(preview(page)).toBeVisible();
+    await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
+    await expect(preview(page).locator('.qlPreview__title')).toHaveText('The answer');
+    await expect(preview(page).locator('.qlPreview__back')).toBeVisible();
+    await expect(previewAction(page, 'load')).toBeFocused();
+    expect(Math.round((await preview(page).boundingBox()).width)).toBe(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await expect(page.locator('#queryTextArea')).not.toHaveValue('SELECT 42 AS answer');
+    await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-preview-${scheme}.png` });
+    // Back (and Escape) return to the list, on the item; the dialog stays.
+    await preview(page).locator('.qlPreview__back').click();
+    await expect(preview(page)).toBeHidden();
+    await expect(node(page, 'The answer')).toBeFocused();
+    await node(page, 'The answer').locator(':scope > .qlRow').click();
+    await expect(preview(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(preview(page)).toBeHidden();
+    await expect(panel(page)).toBeVisible();
+    await expect(node(page, 'The answer')).toBeFocused();
+    // Then Load in editor closes the dialog and fills the editor.
+    await node(page, 'The answer').locator(':scope > .qlRow').click();
+    await previewAction(page, 'load').click();
     await expect(panel(page)).toBeHidden();
     await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
+    // History: the same two steps; the dialog reopens on the list.
     await button.click();
     await expect(panel(page)).toBeVisible();
+    await page.locator('#queryLibraryTabHistory').click();
+    await expect(preview(page)).toBeHidden();
+    await page.locator('#queryLibraryViewHistory .qhItem').first().click();
+    await expect(preview(page)).toBeVisible();
+    await expect(page.locator('#queryLibraryViewHistory')).toBeHidden();
+    await expect(preview(page).locator('.qlPreview__foot .button')).toHaveText(['Save to library\u2026', 'Run', 'Load in editor']);
+    await preview(page).locator('.qlPreview__back').click();
+    await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeFocused();
+    await page.locator('#queryLibraryTabSaved').click();
     await page.keyboard.press('Escape');
     await expect(panel(page)).toBeHidden();
     const background = await panel(page).evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -1044,7 +1255,7 @@ test('themes: panel, tree and preview follow dark and light', async ({ page }, t
     await page.emulateMedia({ colorScheme: scheme });
     await openLibrary(page);
     await expandFolder(page, 'Operations');
-    await node(page, 'Active parts').locator(':scope > .qlRow').hover();
+    await node(page, 'Active parts').locator(':scope > .qlRow').click();
     await expect(page.locator('#queryLibraryPreview .qlSql')).toBeVisible();
     colors[scheme] = await page.evaluate(() => ({
       nav: getComputedStyle(document.getElementById('queryLibraryMenu')).backgroundColor,
@@ -1094,7 +1305,7 @@ test('live server library: create, save, move, reload and delete against a real 
   await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '2');
 
   // The run lands in the server History.
-  await node(page, `${stamp} query`).locator(':scope > .qlRow').click();
+  await loadSaved(page, `${stamp} query`);
   await page.locator('#runButton').click();
   await waitForTerminal(page);
   await showPanel(page, 'history');

@@ -12,7 +12,7 @@
   // to the opener (or a fallback) on close, and floating children (toasts)
   // follow the top dialog.
   //
-  //   shell({ id, title, size, ... })         -> the elements of a new shell
+  //   shell({ id, title, size, tabs, ... })   -> the elements of a new shell
   //   bind(dialog, { onClose, ... })           -> { open, close, isOpen }
   //   open({ title, body, actions, onSubmit }) -> Promise<value | null>
   //   confirm({ title, message, ... })         -> Promise<boolean>
@@ -24,6 +24,9 @@
   //       <div class="uiDialog__head"> heading (title, subtitle), actions, close
   //       <div class="uiDialog__tabs"> (optional) .uiDialog__tab buttons
   //       <div class="uiDialog__body">
+  // A head that holds the tabs in place of the title (the query library):
+  //       <div class="uiDialog__head uiDialog__head--tabs"> .uiDialog__tabs, actions, close
+  // and the dialog is named by aria-label (the label of shell()).
 
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
@@ -50,9 +53,31 @@
       && !node.closest("[hidden], [inert]") && node.getClientRects().length > 0;
   }
 
-  // tabs: { label, items: [{ id, label, controls, value }] } adds a tab bar
-  // under the head, in the profiling dialog's tab style (the caller selects).
-  function shell({ id = "", title = "", titleId = "", subtitleId = "", closeLabel = "Close", size = "lg", className = "", form = false, tabs = null } = {}) {
+  // A tab bar in the profiling dialog's tab style (the caller selects):
+  // { label, items: [{ id, label, controls, value }] }.
+  function tabBar(tabs) {
+    const bar = el("div", "uiDialog__tabs");
+    bar.setAttribute("role", "tablist");
+    if (tabs.label) bar.setAttribute("aria-label", tabs.label);
+    const buttons = tabs.items.map((item) => {
+      const tab = el("button", "uiDialog__tab", item.label);
+      tab.type = "button";
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", "false");
+      tab.tabIndex = -1;
+      if (item.id) tab.id = item.id;
+      if (item.controls) tab.setAttribute("aria-controls", item.controls);
+      if (item.value != null) tab.dataset.tab = String(item.value);
+      bar.appendChild(tab);
+      return tab;
+    });
+    return { bar, buttons };
+  }
+
+  // tabs adds a tab bar under the head. With tabs.inHead the bar takes the
+  // place of the title in the head, and label names the dialog (aria-label):
+  // heading, title and subtitle are then null.
+  function shell({ id = "", title = "", label = "", titleId = "", subtitleId = "", closeLabel = "Close", size = "lg", className = "", form = false, tabs = null } = {}) {
     const n = ++uid;
     const dialog = el("dialog", `uiDialog uiDialog--${size}${className ? ` ${className}` : ""}`);
     if (id) dialog.id = id;
@@ -62,48 +87,37 @@
       frame.method = "dialog";
       frame.noValidate = true;
     }
-    const head = el("div", "uiDialog__head");
-    const heading = el("div", "uiDialog__heading");
-    const titleEl = el("h2", "uiDialog__title", title);
-    titleEl.id = titleId || `uiDialogTitle${n}`;
-    const subtitle = el("div", "uiDialog__subtitle");
-    subtitle.id = subtitleId || `uiDialogSubtitle${n}`;
-    subtitle.hidden = true;
-    heading.append(titleEl, subtitle);
+    const bar = tabs && Array.isArray(tabs.items) ? tabBar(tabs) : null;
+    const tabsInHead = !!bar && tabs.inHead === true;
+    const head = el("div", tabsInHead ? "uiDialog__head uiDialog__head--tabs" : "uiDialog__head");
+    let heading = null;
+    let titleEl = null;
+    let subtitle = null;
+    if (!tabsInHead) {
+      heading = el("div", "uiDialog__heading");
+      titleEl = el("h2", "uiDialog__title", title);
+      titleEl.id = titleId || `uiDialogTitle${n}`;
+      subtitle = el("div", "uiDialog__subtitle");
+      subtitle.id = subtitleId || `uiDialogSubtitle${n}`;
+      subtitle.hidden = true;
+      heading.append(titleEl, subtitle);
+    }
     const actions = el("div", "uiDialog__actions");
     const close = el("button", "closeCross uiDialog__close", "\u00d7");
     close.type = "button";
     close.setAttribute("aria-label", closeLabel);
     close.title = `${closeLabel} (Esc)`;
     actions.appendChild(close);
-    head.append(heading, actions);
+    head.append(tabsInHead ? bar.bar : heading, actions);
     const body = el("div", "uiDialog__body");
     frame.append(head);
-    let tabBar = null;
-    const tabButtons = [];
-    if (tabs && Array.isArray(tabs.items)) {
-      tabBar = el("div", "uiDialog__tabs");
-      tabBar.setAttribute("role", "tablist");
-      if (tabs.label) tabBar.setAttribute("aria-label", tabs.label);
-      for (const item of tabs.items) {
-        const tab = el("button", "uiDialog__tab", item.label);
-        tab.type = "button";
-        tab.setAttribute("role", "tab");
-        tab.setAttribute("aria-selected", "false");
-        tab.tabIndex = -1;
-        if (item.id) tab.id = item.id;
-        if (item.controls) tab.setAttribute("aria-controls", item.controls);
-        if (item.value != null) tab.dataset.tab = String(item.value);
-        tabBar.appendChild(tab);
-        tabButtons.push(tab);
-      }
-      frame.appendChild(tabBar);
-    }
+    if (bar && !tabsInHead) frame.appendChild(bar.bar);
     frame.appendChild(body);
     dialog.appendChild(frame);
-    dialog.setAttribute("aria-labelledby", titleEl.id);
+    if (titleEl) dialog.setAttribute("aria-labelledby", titleEl.id);
+    else dialog.setAttribute("aria-label", label || tabs.label || "");
     document.body.appendChild(dialog);
-    return { dialog, frame, head, heading, title: titleEl, subtitle, actions, close, tabs: tabBar, tabButtons, body };
+    return { dialog, frame, head, heading, title: titleEl, subtitle, actions, close, tabs: bar ? bar.bar : null, tabButtons: bar ? bar.buttons : [], body };
   }
 
   // Open / close behaviour of a shell. onClose runs once per close, however

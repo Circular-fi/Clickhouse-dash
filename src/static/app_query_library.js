@@ -36,8 +36,8 @@
   const MAX_SQL_CHARS = 256 * 1024;
   const MAX_TAGS = 16;
   const HISTORY_PAGE = 100;
-  const PREVIEW_DELAY_MS = 350;
-  const PREVIEW_SQL_CHARS = 4000;
+  const PROMPT_SQL_CHARS = 4000;
+  const PANE_SQL_CHARS = 20000;
   const SEARCH_DEBOUNCE_MS = 160;
   const SERVER_RELOAD_AFTER_MS = 30000;
   const ELLIPSIS = "\u2026";
@@ -587,7 +587,8 @@
     library: { revision: 0, folders: [], queries: [] },
     loadedAt: 0,
     expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string") : []),
-    selected: "",
+    // The selected item of each tab (its data-key), shown in the preview.
+    selection: { saved: "", history: "" },
     search: "",
     opened: null,
     busy: false,
@@ -684,8 +685,8 @@
       if (result.loadError !== undefined) ctl.loadError = result.loadError || "";
       if (ctl.mode === "server" && result.writable !== undefined) ctl.writable = result.writable === true;
       ctl.loadedAt = Date.now();
-      if (typeof select === "function") ctl.selected = select(result.id) || ctl.selected;
-      else if (select) ctl.selected = select;
+      if (typeof select === "function") ctl.selection.saved = select(result.id) || ctl.selection.saved;
+      else if (select) ctl.selection.saved = select;
       renderLibrary({ keepFocus: true });
       if (success) toast(success);
       return result;
@@ -725,6 +726,8 @@
     }
   }
 
+  // "Load in editor": the editor takes the SQL (a saved query is then the
+  // opened one, marked in the tree) and the dialog closes.
   function openInEditor(item, { savedQuery = null } = {}) {
     if (!item) return;
     useHostOf(item);
@@ -733,11 +736,13 @@
     ns.ui?.syncQueryUrl?.(item.sql);
     closePanel();
     dom.queryTextArea?.focus({ preventScroll: true });
+    if (ctl.rendered.library) renderTree();
   }
 
-  // Adds the query after the editor's statements: the next run shows it in a
-  // panel of its own (multiquery, switched on when it was off).
-  function addAsStatement(item) {
+  // "Append to editor": the query goes after the editor's statements, so the
+  // next run shows it in a panel of its own (multiquery, switched on when it
+  // was off).
+  function appendToEditor(item) {
     if (!item) return;
     const current = editorSql().replace(/\s+$/, "");
     if (!current.trim()) {
@@ -748,16 +753,17 @@
     setEditorSql(`${/;\s*$/.test(current) ? current : `${current};`}\n\n${sql}`);
     if (!state.runOptMultiQuery) {
       ns.ui?.setRunOption?.("multiQuery", true);
-      toast("Added as a new statement; multiquery is now on.");
+      toast("Appended to the editor; multiquery is now on.");
     } else {
-      toast("Added as a new statement.");
+      toast("Appended to the editor.");
     }
     closePanel();
     dom.queryTextArea?.focus({ preventScroll: true });
   }
 
-  function runItem(item) {
-    openInEditor(item);
+  // "Run": load, then run.
+  function runItem(item, options) {
+    openInEditor(item, options);
     ns.run?.handleRun?.();
   }
 
@@ -868,10 +874,11 @@
     return select;
   }
 
-  function sqlPreview(sql) {
+  // Highlighted SQL, clipped (a prompt shows the start, the pane more).
+  function sqlPreview(sql, max = PROMPT_SQL_CHARS) {
     const pre = el("pre", "qlSql");
     const text = String(sql || "");
-    const clipped = text.length > PREVIEW_SQL_CHARS ? `${text.slice(0, PREVIEW_SQL_CHARS)}\n${ELLIPSIS}` : text;
+    const clipped = text.length > max ? `${text.slice(0, max)}\n${ELLIPSIS}` : text;
     if (ns.highlight && typeof ns.highlight.renderInto === "function") ns.highlight.renderInto(pre, clipped);
     else pre.textContent = clipped;
     return pre;
@@ -899,7 +906,7 @@
     const selectedFolder = (() => {
       if (folderId !== undefined) return folderId;
       if (opened) return opened.folder_id;
-      const sel = parseKey(ctl.selected);
+      const sel = parseKey(ctl.selection.saved);
       if (sel?.kind === "folder" && folderById(ctl.library, sel.id)) return sel.id;
       if (sel?.kind === "query") return queryById(ctl.library, sel.id)?.folder_id || null;
       return null;
@@ -1206,13 +1213,17 @@
           ctl.search = input.value;
           renderTree();
         }
-        focusItem(treeItems()[0]);
+        select("saved", treeItems()[0]);
       } else if (ev.key === "Enter") {
+        // The first query found, in the preview.
         ev.preventDefault();
         ctl.search = input.value;
         renderTree();
         const first = treeItems().find((li) => li.dataset.kind === "query");
-        if (first) activate(first, ev);
+        if (first) {
+          select("saved", first);
+          enterPreview();
+        }
       } else if (ev.key === "Escape" && input.value) {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1222,7 +1233,7 @@
       }
     });
     newFolder.addEventListener("click", () => {
-      const sel = parseKey(ctl.selected);
+      const sel = parseKey(ctl.selection.saved);
       const parentId = sel?.kind === "folder" ? sel.id : sel?.kind === "query" ? queryById(ctl.library, sel.id)?.folder_id : null;
       folderDialog({ parentId: parentId || null });
     });
@@ -1232,8 +1243,6 @@
     tree.addEventListener("keydown", onTreeKeydown);
     tree.addEventListener("contextmenu", onTreeContextMenu);
     tree.addEventListener("focusin", onTreeFocus);
-    tree.addEventListener("mouseover", onTreeHover);
-    tree.addEventListener("mouseleave", () => hidePreview());
     tree.addEventListener("dragstart", onDragStart);
     tree.addEventListener("dragover", onDragOver);
     tree.addEventListener("dragleave", onDragLeave);
@@ -1309,16 +1318,6 @@
     const count = format.countLabel(lib.queries.length, "query", "queries");
     foot.textContent = `${count}${MIDDOT}${where}`;
     foot.title = ctl.mode === "server" ? "Shared by everyone using this ChDash server" : "Only this browser sees these queries";
-    renderSummary();
-  }
-
-  // The dialog subtitle: where the library lives, and whether it is editable.
-  function renderSummary() {
-    const summary = dom.queryLibrarySummary;
-    if (!summary) return;
-    const where = ctl.mode === "server" ? "Shared on this server" : "Stored in this browser";
-    summary.textContent = ctl.fatal ? "" : `${where}${ctl.writable ? "" : `${MIDDOT}read-only`}`;
-    summary.hidden = !summary.textContent;
   }
 
   function searchMatches() {
@@ -1372,7 +1371,7 @@
     li.dataset.id = entity.id;
     li.dataset.key = keyOf(kind, entity.id);
     li.tabIndex = -1;
-    li.setAttribute("aria-selected", String(ctl.selected === li.dataset.key));
+    li.setAttribute("aria-selected", "false");
     if (ctl.writable && !ctl.fatal) li.draggable = true;
     const row = el("div", "qlRow");
     row.style.setProperty("--qlDepth", String(level - 1));
@@ -1428,7 +1427,6 @@
     const tree = libraryEls.tree;
     if (!tree) return;
     const hadFocus = keepFocus || tree.contains(document.activeElement);
-    hidePreview();
     tree.innerHTML = "";
     const lib = ctl.library;
     const matches = searchMatches();
@@ -1443,16 +1441,8 @@
         tree.appendChild(emptyRow(editable ? `No saved queries yet. Write a query and press ${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S to save it here.` : "This library is empty."));
       }
     }
-    const items = treeItems();
-    if (!items.some((li) => li.dataset.key === ctl.selected)) {
-      if (items.length && ctl.selected) ctl.selected = items[0].dataset.key;
-    }
-    // Roving tabindex: one item of the tree is in the Tab order.
-    const current = items.find((li) => li.dataset.key === ctl.selected) || items[0];
-    if (current) current.tabIndex = 0;
-    for (const li of items) li.setAttribute("aria-selected", String(li === current && !!ctl.selected));
+    const current = restoreSelection("saved");
     if (hadFocus && current) current.focus({ preventScroll: false });
-    refreshPreview();
   }
 
   function emptyRow(text) {
@@ -1481,21 +1471,8 @@
     return (after || before)?.dataset.key || "";
   }
 
-  function focusItem(li, { preview = true } = {}) {
-    if (!li) return;
-    for (const item of treeItems()) {
-      item.tabIndex = item === li ? 0 : -1;
-      item.setAttribute("aria-selected", String(item === li));
-    }
-    ctl.selected = li.dataset.key;
-    li.focus({ preventScroll: false });
-    li.scrollIntoView({ block: "nearest" });
-    if (preview && li.dataset.kind === "query") schedulePreview(li, 500);
-  }
-
   function focusSelected() {
-    const li = treeItems().find((x) => x.dataset.key === ctl.selected);
-    if (li) li.focus({ preventScroll: true });
+    selectedItem("saved")?.focus({ preventScroll: true });
   }
 
   function toggleFolder(li, open) {
@@ -1504,7 +1481,7 @@
     if (next) ctl.expanded.add(id);
     else ctl.expanded.delete(id);
     saveUiPrefs();
-    ctl.selected = li.dataset.key;
+    ctl.selection.saved = li.dataset.key;
     renderTree({ keepFocus: true });
   }
 
@@ -1513,54 +1490,37 @@
     return li.dataset.kind === "folder" ? folderById(ctl.library, li.dataset.id) : queryById(ctl.library, li.dataset.id);
   }
 
-  function activate(li, ev) {
-    const entity = entityOf(li);
-    if (!entity) return;
-    if (li.dataset.kind === "folder") {
-      toggleFolder(li);
-      return;
-    }
-    ctl.selected = li.dataset.key;
-    hidePreview();
-    if (ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey)) addAsStatement(entity);
-    else openInEditor(entity, { savedQuery: entity });
-    // The opened marker follows the editor.
-    if (libraryEls.tree) renderTree();
-  }
-
+  // A click selects: a query shows in the preview (the next step on a
+  // phone), a folder also opens or closes.
   function onTreeClick(ev) {
     const li = itemOf(ev.target);
     if (!li) return;
     if (ev.target.closest(".qlRow__more")) {
       ev.stopPropagation();
-      focusItem(li, { preview: false });
+      select("saved", li);
       openItemMenu(li, ev.target.closest(".qlRow__more"));
       return;
     }
-    if (ev.target.closest(".qlRow__twisty") && li.dataset.kind === "folder") {
+    if (li.dataset.kind === "folder") {
       toggleFolder(li);
       return;
     }
-    activate(li, ev);
+    select("saved", li);
+    if (isPhone()) enterPreview();
   }
 
   function onTreeContextMenu(ev) {
     const li = itemOf(ev.target);
     if (!li) return;
     ev.preventDefault();
-    focusItem(li, { preview: false });
+    select("saved", li);
     openItemMenu(li, null, { x: ev.clientX, y: ev.clientY });
   }
 
+  // The focus and the selection move together (Tab back into the tree).
   function onTreeFocus(ev) {
     const li = itemOf(ev.target);
-    if (li && li.dataset.key !== ctl.selected) {
-      ctl.selected = li.dataset.key;
-      for (const item of treeItems()) {
-        item.tabIndex = item === li ? 0 : -1;
-        item.setAttribute("aria-selected", String(item === li));
-      }
-    }
+    if (li && li.dataset.key !== ctl.selection.saved) select("saved", li, { focus: false });
   }
 
   function onTreeKeydown(ev) {
@@ -1575,27 +1535,27 @@
     switch (ev.key) {
       case "ArrowDown":
         ev.preventDefault();
-        focusItem(items[Math.min(items.length - 1, index + 1)]);
+        select("saved", items[Math.min(items.length - 1, index + 1)]);
         return;
       case "ArrowUp":
         ev.preventDefault();
         if (index === 0) libraryEls.input?.focus();
-        else focusItem(items[index - 1]);
+        else select("saved", items[index - 1]);
         return;
       case "Home":
         ev.preventDefault();
-        focusItem(items[0]);
+        select("saved", items[0]);
         return;
       case "End":
         ev.preventDefault();
-        focusItem(items[items.length - 1]);
+        select("saved", items[items.length - 1]);
         return;
       case "ArrowRight":
         ev.preventDefault();
         if (isFolder && !open) toggleFolder(li, true);
         else if (isFolder && open) {
           const child = li.querySelector(":scope > ul > li[role=treeitem]");
-          if (child) focusItem(child);
+          if (child) select("saved", child);
         }
         return;
       case "ArrowLeft": {
@@ -1605,17 +1565,18 @@
           return;
         }
         const parent = li.parentElement?.closest("li[role=treeitem]");
-        if (parent) focusItem(parent);
+        if (parent) select("saved", parent);
         return;
       }
       case "Enter":
         ev.preventDefault();
-        activate(li, ev);
+        if (isFolder) toggleFolder(li);
+        else if (mod) loadSelection();
+        else enterPreview();
         return;
       case " ":
         ev.preventDefault();
         if (isFolder) toggleFolder(li);
-        else schedulePreview(li, 0);
         return;
       case "F2":
         if (!editable) return;
@@ -1631,9 +1592,6 @@
       case "ContextMenu":
         ev.preventDefault();
         openItemMenu(li, li.querySelector(".qlRow__more"));
-        return;
-      case "Escape":
-        hidePreview();
         return;
       default:
         break;
@@ -1660,7 +1618,7 @@
       const hit = ordered.find((x) => fold(entityOf(x)?.name || "").startsWith(letter));
       if (hit) {
         ev.preventDefault();
-        focusItem(hit);
+        select("saved", hit);
       }
     }
   }
@@ -1692,7 +1650,6 @@
 
   function showMenu(entries, anchor, point, returnFocus) {
     closeMenu({ restoreFocus: false });
-    hidePreview();
     const menu = el("div", "qlMenu");
     menu.setAttribute("role", "menu");
     menu.tabIndex = -1;
@@ -1761,9 +1718,9 @@
     const item = { kind: li.dataset.kind, id: li.dataset.id };
     const entries = [];
     if (item.kind === "query") {
-      entries.push({ label: "Open in editor", hint: "Enter", action: "open", run: () => openInEditor(entity, { savedQuery: entity }) });
-      entries.push({ label: "Add as a new statement", hint: `${mod}+Click`, action: "append", run: () => addAsStatement(entity) });
-      entries.push({ label: "Run", action: "run", run: () => runItem(entity) });
+      entries.push({ label: "Load in editor", hint: `${mod}+Enter`, action: "open", run: () => openInEditor(entity, { savedQuery: entity }) });
+      entries.push({ label: "Append to editor", action: "append", run: () => appendToEditor(entity) });
+      entries.push({ label: "Run", action: "run", run: () => runItem(entity, { savedQuery: entity }) });
       entries.push({ label: "Copy SQL", action: "copy", run: () => copySql(entity) });
       if (editable) {
         entries.push("-");
@@ -1824,7 +1781,6 @@
       return;
     }
     dragItem = { kind: li.dataset.kind, id: li.dataset.id };
-    hidePreview();
     try {
       ev.dataTransfer.effectAllowed = "copyMove";
       ev.dataTransfer.setData("application/x-chdash-library", JSON.stringify(dragItem));
@@ -1874,22 +1830,98 @@
     for (const node of libraryEls.tree?.querySelectorAll(".is-dragging") || []) node.classList.remove("is-dragging");
   }
 
+  // -------------------------------------------------------------- selection
+
+  // One selection model for both tabs. Each tab lists items that carry a
+  // data-key (Saved: "f:<id>" / "q:<id>" tree items, History: "h:<id>"
+  // options) and ctl.selection holds the selected key of each tab. The
+  // selected item is aria-selected and in the Tab order (roving tabindex),
+  // and the preview pane shows it. A click or the arrows select; Enter (and a
+  // click on a phone) moves on to the preview, whose "Load in editor"
+  // (Ctrl/Cmd+Enter) loads it.
+  const views = {
+    saved: { items: () => treeItems(), preview: (key) => savedPreview(key) },
+    history: { items: () => historyItems(), preview: (key) => historyPreview(key) },
+  };
+
+  const isPhone = () => !!ns.ui?.isPhoneLayout?.();
+
+  function selectedItem(tab) {
+    const key = ctl.selection[tab];
+    return key ? views[tab].items().find((x) => x.dataset.key === key) || null : null;
+  }
+
+  // Marks the selection. The Tab stop is the selected item, else the first.
+  function markSelection(tab) {
+    const items = views[tab].items();
+    const current = selectedItem(tab);
+    const stop = current || items[0] || null;
+    for (const x of items) {
+      x.tabIndex = x === stop ? 0 : -1;
+      x.setAttribute("aria-selected", String(x === current));
+    }
+    return stop;
+  }
+
+  function select(tab, item, { focus = true } = {}) {
+    if (!item) return;
+    ctl.selection[tab] = item.dataset.key;
+    markSelection(tab);
+    if (focus) item.focus({ preventScroll: true });
+    item.scrollIntoView({ block: "nearest" });
+    if (ctl.shown === tab) renderPreview();
+  }
+
+  // After a render: the same key again (a renamed query, a reloaded History),
+  // else the first item when the selected one is gone. Returns the Tab stop.
+  function restoreSelection(tab) {
+    if (ctl.selection[tab] && !selectedItem(tab)) ctl.selection[tab] = views[tab].items()[0]?.dataset.key || "";
+    const stop = markSelection(tab);
+    if (ctl.shown === tab) renderPreview();
+    return stop;
+  }
+
+  function selectionPreview() {
+    const tab = ctl.shown;
+    return tab ? views[tab].preview(ctl.selection[tab]) : null;
+  }
+
+  // The primary action of the selection: "Load in editor".
+  function loadSelection() {
+    selectionPreview()?.actions?.find((a) => a.primary)?.run();
+  }
+
+  // The next step after a selection: its preview, focused on "Load in
+  // editor". On a phone the pane replaces the list (.is-previewing).
+  function enterPreview() {
+    const model = selectionPreview();
+    if (!model || !model.actions) return;
+    if (isPhone()) setPreviewStep(true);
+    const pane = previewPane();
+    (pane?.querySelector(".qlPreview__foot .button--primary") || pane)?.focus({ preventScroll: true });
+  }
+
+  // Back to the list, on the selected item.
+  function leavePreview() {
+    setPreviewStep(false);
+    if (ctl.shown) (selectedItem(ctl.shown) || markSelection(ctl.shown))?.focus({ preventScroll: true });
+  }
+
+  function setPreviewStep(on) {
+    dom.queryLibraryViewSaved?.parentElement?.classList.toggle("is-previewing", on);
+  }
+
   // ---------------------------------------------------------- preview pane
 
   // The right pane of the dialog (#queryLibraryPreview, beside the views):
-  // the query under the pointer or the keyboard focus, with its folder,
-  // description, tags and highlighted SQL, until another one replaces it.
-  let previewTimer = 0;
-  let previewFor = null;
-  let previewKey = "";
-  const PREVIEW_EMPTY = "Point at a query, or select it, to preview it here.";
-
-  // Cancels a pending preview (the one shown stays).
-  function hidePreview() {
-    if (previewTimer) clearTimeout(previewTimer);
-    previewTimer = 0;
-    previewFor = null;
-  }
+  // one component for both tabs. A tab describes its selected item as
+  //   { title, status, description, facts: [[label, text | node]], error,
+  //     sql, actions: [{ label, action, run, primary }] }
+  // and the pane renders it: its head (with the Back button of the phone
+  // step), the facts, the highlighted SQL, then the actions in its foot,
+  // the primary one ("Load in editor") last, at the bottom right.
+  const PREVIEW_EMPTY = { saved: "Select a query to preview it here.", history: "Select a run to preview it here." };
+  let paneModel = null;
 
   // The pane, added beside the views the first time the dialog shows them.
   function previewPane() {
@@ -1898,91 +1930,155 @@
     if (!pane && views) {
       pane = el("aside", "qlPreview");
       pane.id = "queryLibraryPreview";
+      pane.tabIndex = -1;
       pane.setAttribute("aria-label", "Preview");
-      pane.appendChild(el("div", "qlPreview__empty", PREVIEW_EMPTY));
+      pane.addEventListener("click", onPreviewClick);
+      pane.addEventListener("keydown", onPreviewKeydown);
       views.appendChild(pane);
     }
     return pane;
   }
 
-  // Back to the placeholder.
-  function clearPreview() {
-    hidePreview();
-    previewKey = "";
-    document.getElementById("queryLibraryPreview")?.replaceChildren(el("div", "qlPreview__empty", PREVIEW_EMPTY));
-  }
-
-  function onTreeHover(ev) {
-    if (dragItem || menuEl) return;
-    const li = itemOf(ev.target);
-    if (!li || li.dataset.kind !== "query") {
-      if (li) hidePreview();
+  function onPreviewClick(ev) {
+    const button = ev.target instanceof Element ? ev.target.closest("button[data-action]") : null;
+    if (!button) return;
+    if (button.dataset.action === "back") {
+      leavePreview();
       return;
     }
-    if (previewFor === li) return;
-    schedulePreview(li, PREVIEW_DELAY_MS);
+    paneModel?.actions?.find((a) => a.action === button.dataset.action)?.run();
   }
 
-  function queryPreview(query) {
+  function onPreviewKeydown(ev) {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+      ev.preventDefault();
+      loadSelection();
+    } else if (ev.key === "Escape" && dom.queryLibraryViewSaved?.parentElement?.classList.contains("is-previewing")) {
+      // The phone step: Escape goes back to the list, not out of the dialog.
+      ev.preventDefault();
+      ev.stopPropagation();
+      leavePreview();
+    }
+  }
+
+  function timeNode(ms) {
+    const node = el("time", "", format.time(ms));
+    node.dateTime = format.iso(ms);
+    node.title = format.timeTitle(ms);
+    return node;
+  }
+
+  function tagList(tags) {
+    const list = el("span", "qlPreview__tags");
+    for (const tag of tags) list.appendChild(el("span", "qlTag", tag));
+    return list;
+  }
+
+  function savedPreview(key) {
+    const sel = parseKey(key);
+    const lib = ctl.library;
+    if (sel?.kind === "folder") {
+      const folder = folderById(lib, sel.id);
+      if (!folder) return null;
+      const counts = subtreeCounts(lib, folder.id);
+      const contents = [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT);
+      return {
+        title: folder.name,
+        description: folder.description,
+        facts: [["Folder", folderPath(lib, folder.parent_id).join(" / ") || "Top level"], ["Contents", contents || "Empty"]],
+      };
+    }
+    const query = sel?.kind === "query" ? queryById(lib, sel.id) : null;
+    if (!query) return null;
+    const facts = [["Folder", folderPath(lib, query.folder_id).join(" / ") || "Top level"]];
+    if (query.tags.length) facts.push(["Tags", tagList(query.tags)]);
+    if (query.host_id) facts.push(["Host", String(query.host_id)]);
+    if (query.updated_at_ms) facts.push(["Updated", timeNode(query.updated_at_ms)]);
     return {
-      key: `q:${query.id}`,
       title: query.name,
-      path: folderPath(ctl.library, query.folder_id).join(" / "),
       description: query.description,
-      tags: query.tags,
+      facts,
       sql: query.sql,
-      meta: [query.host_id ? `host ${query.host_id}` : "", query.updated_at_ms ? `updated ${format.time(query.updated_at_ms)}` : ""].filter(Boolean).join(MIDDOT),
+      actions: [
+        { label: "Run", action: "run", run: () => runItem(query, { savedQuery: query }) },
+        { label: "Load in editor", action: "load", primary: true, run: () => openInEditor(query, { savedQuery: query }) },
+      ],
     };
   }
 
-  function historyPreview(entry) {
-    const [, statusText] = statusInfo(entry.status);
-    const meta = [statusText, format.time(Number(entry.ran_at_ms) || 0), entry.host_id ? `host ${entry.host_id}` : ""].filter(Boolean).join(MIDDOT);
-    return { key: `h:${entry.id}`, title: oneLine(entry.sql, 80), sql: entry.sql, meta, error: entry.status === "error" ? entry.error : "" };
+  function historyPreview(key) {
+    const entry = ctl.historyState.entries.find((e) => `h:${e.id}` === key);
+    if (!entry) return null;
+    const [status, statusText] = statusInfo(entry.status);
+    const facts = [["Time", timeNode(Number(entry.ran_at_ms) || 0)]];
+    if (entry.elapsed_ms != null && Number.isFinite(Number(entry.elapsed_ms))) facts.push(["Elapsed", format.duration.fromMs(Number(entry.elapsed_ms))]);
+    if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
+    if (entry.host_id) facts.push(["Host", String(entry.host_id)]);
+    const actions = [];
+    if (ctl.writable && !ctl.fatal) actions.push({ label: "Save to library\u2026", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
+    actions.push({ label: "Run", action: "run", run: () => runItem(entry) });
+    actions.push({ label: "Load in editor", action: "load", primary: true, run: () => openInEditor(entry) });
+    return { title: statusText, status, facts, error: entry.status === "error" ? entry.error : "", sql: entry.sql, actions };
   }
 
-  function schedulePreview(li, delay) {
-    if (previewTimer) clearTimeout(previewTimer);
-    previewFor = li;
-    previewTimer = setTimeout(() => {
-      previewTimer = 0;
-      if (previewFor !== li || !document.contains(li)) return;
-      const query = entityOf(li);
-      if (query) showPreview(queryPreview(query));
-    }, delay);
-  }
-
-  // After a render: the same query or entry again (renamed, edited), or the
-  // placeholder when it is gone.
-  function refreshPreview() {
-    if (!previewKey) return;
-    const id = previewKey.slice(2);
-    const query = previewKey.startsWith("q:") ? queryById(ctl.library, id) : null;
-    const entry = previewKey.startsWith("h:") ? ctl.historyState.entries.find((e) => String(e.id) === id) : null;
-    if (query) showPreview(queryPreview(query));
-    else if (entry) showPreview(historyPreview(entry));
-    else clearPreview();
-  }
-
-  function showPreview({ key = "", title, path = "", description = "", tags = [], sql = "", meta = "", error = "" }) {
-    if (ns.ui?.isPhoneLayout?.()) return;
+  // Renders the selection of the tab shown. The focus stays on the same
+  // action (or the pane) when the pane had it.
+  function renderPreview() {
     const pane = previewPane();
     if (!pane) return;
-    previewKey = key;
+    const active = pane.contains(document.activeElement) ? document.activeElement : null;
+    const refocus = active ? active.dataset.action || "" : null;
+    const model = selectionPreview();
+    paneModel = model;
     pane.replaceChildren();
-    const head = el("div", "qlPreview__head");
-    head.appendChild(el("div", "qlPreview__title", title));
-    if (path) head.appendChild(el("div", "qlPreview__path", path));
-    pane.appendChild(head);
-    if (description) pane.appendChild(el("div", "qlPreview__description", description));
-    if (error) pane.appendChild(el("div", "qlPreview__error", oneLine(error, 600)));
-    if (tags && tags.length) {
-      const list = el("div", "qlPreview__tags");
-      for (const tag of tags) list.appendChild(el("span", "qlTag", tag));
-      pane.appendChild(list);
+    if (!model) {
+      pane.appendChild(el("div", "qlPreview__empty", PREVIEW_EMPTY[ctl.shown] || PREVIEW_EMPTY.saved));
+      setPreviewStep(false);
+      if (refocus !== null) leavePreview();
+      return;
     }
-    pane.appendChild(sqlPreview(sql));
-    if (meta) pane.appendChild(el("div", "qlPreview__meta", meta));
+    const content = el("div", "qlPreview__content");
+    const head = el("div", "qlPreview__head");
+    const back = el("button", "qlIconButton qlPreview__back");
+    back.type = "button";
+    back.dataset.action = "back";
+    back.setAttribute("aria-label", "Back to the list");
+    back.title = "Back to the list";
+    back.appendChild(icon("back"));
+    const title = el("h3", "qlPreview__title", model.title);
+    if (model.status) {
+      const dot = el("span", `qhItem__status qhItem__status--${model.status}`);
+      dot.setAttribute("aria-hidden", "true");
+      title.prepend(dot);
+    }
+    head.append(back, title);
+    content.appendChild(head);
+    if (model.description) content.appendChild(el("p", "qlPreview__description", model.description));
+    if (model.facts && model.facts.length) {
+      const facts = el("dl", "qlPreview__facts");
+      for (const [label, value] of model.facts) {
+        const dd = el("dd");
+        dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)));
+        facts.append(el("dt", "", label), dd);
+      }
+      content.appendChild(facts);
+    }
+    if (model.error) content.appendChild(el("div", "qlPreview__error", oneLine(model.error, 600)));
+    if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS));
+    pane.appendChild(content);
+    if (model.actions && model.actions.length) {
+      const foot = el("div", "qlPreview__foot");
+      const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
+      for (const action of model.actions) {
+        const button = el("button", action.primary ? "button button--primary" : "button", action.label);
+        button.type = "button";
+        button.dataset.action = action.action;
+        if (action.primary) button.title = `${action.label} (${mod}+Enter)`;
+        foot.appendChild(button);
+      }
+      pane.appendChild(foot);
+    }
+    if (refocus !== null) (pane.querySelector(`[data-action="${refocus}"]`) || pane).focus({ preventScroll: true });
   }
 
   // ------------------------------------------------------------ history view
@@ -2029,7 +2125,7 @@
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "ArrowDown") {
         ev.preventDefault();
-        focusHistory(historyItems()[0]);
+        select("history", historyItems()[0]);
       } else if (ev.key === "Escape" && input.value) {
         ev.preventDefault();
         ev.stopPropagation();
@@ -2046,16 +2142,13 @@
       const item = historyItemOf(ev.target);
       if (!item) return;
       ev.preventDefault();
-      focusHistory(item);
+      select("history", item);
       openHistoryMenu(item, null, { x: ev.clientX, y: ev.clientY });
     });
-    list.addEventListener("mouseover", (ev) => {
-      if (menuEl) return;
+    list.addEventListener("focusin", (ev) => {
       const item = historyItemOf(ev.target);
-      if (!item || previewFor === item) return;
-      scheduleHistoryPreview(item, PREVIEW_DELAY_MS);
+      if (item && item.dataset.key !== ctl.selection.history) select("history", item, { focus: false });
     });
-    list.addEventListener("mouseleave", () => hidePreview());
   }
 
   function historyEntryOf(item) {
@@ -2087,11 +2180,9 @@
     const hs = ctl.historyState;
     const list = historyEls.list;
     const hadFocus = keepFocus || list.contains(document.activeElement);
-    const focusedId = document.activeElement?.closest?.(".qhItem")?.dataset.id || "";
     const canClear = !!ctl.history?.canClear?.();
     historyEls.clear.hidden = !canClear;
     historyEls.clear.disabled = !hs.entries.length;
-    hidePreview();
     list.innerHTML = "";
     if (hs.error) {
       const box = el("div", "qlNotice qlNotice--error", hs.error);
@@ -2099,7 +2190,6 @@
       list.appendChild(box);
     }
     let lastDay = "";
-    const canSave = ctl.writable && !ctl.fatal;
     for (const entry of hs.entries) {
       const ts = Number(entry.ran_at_ms) || 0;
       const day = dayKey(ts);
@@ -2115,6 +2205,7 @@
       item.setAttribute("aria-selected", "false");
       item.tabIndex = -1;
       item.dataset.id = String(entry.id);
+      item.dataset.key = `h:${entry.id}`;
       const dot = el("span", `qhItem__status qhItem__status--${cls}`);
       dot.title = statusText;
       dot.setAttribute("aria-label", statusText);
@@ -2129,15 +2220,8 @@
       if (Number.isFinite(entry.rows) && entry.rows != null) meta.appendChild(el("span", "qhItem__rows", format.countLabel(entry.rows, "row")));
       if (entry.host_id) meta.appendChild(el("span", "qhItem__host", String(entry.host_id)));
       main.appendChild(meta);
+      // Run, Save and Load are in the preview; the rest in the item menu.
       const actions = el("div", "qhItem__actions");
-      const rerun = iconButton("play", "Run again", "rerun");
-      rerun.tabIndex = -1;
-      actions.appendChild(rerun);
-      if (canSave) {
-        const save = iconButton("save", "Save to library", "save");
-        save.tabIndex = -1;
-        actions.appendChild(save);
-      }
       const more = iconButton("more", "More actions", "menu");
       more.tabIndex = -1;
       more.setAttribute("aria-haspopup", "menu");
@@ -2151,11 +2235,8 @@
     if (hs.loading && !hs.entries.length) list.appendChild(el("div", "qlEmpty", `Loading history${ELLIPSIS}`));
     historyEls.more.hidden = !hs.hasMore;
     historyEls.foot.textContent = `${format.count(hs.entries.length)}${hs.hasMore ? "+" : ""} ${hs.entries.length === 1 ? "entry" : "entries"}${MIDDOT}${ctl.history?.kind === "server" ? "Stored on the server" : "Stored in this browser"}`;
-    const items = historyItems();
-    const current = items.find((x) => x.dataset.id === focusedId) || items[0];
-    if (current) current.tabIndex = 0;
+    const current = restoreSelection("history");
     if (hadFocus && current) current.focus({ preventScroll: true });
-    refreshPreview();
   }
 
   async function loadHistory({ more = false } = {}) {
@@ -2214,6 +2295,12 @@
   }
 
   async function removeHistoryEntry(entry) {
+    // The selection moves to the next run (or the previous one).
+    if (ctl.selection.history === `h:${entry.id}`) {
+      const items = historyItems();
+      const index = items.findIndex((x) => x.dataset.key === ctl.selection.history);
+      ctl.selection.history = (items[index + 1] || items[index - 1])?.dataset.key || "";
+    }
     try {
       await ctl.history.remove(String(entry.id));
     } catch (err) {
@@ -2222,29 +2309,15 @@
     loadHistory();
   }
 
-  function focusHistory(item) {
-    if (!item) return;
-    for (const x of historyItems()) {
-      x.tabIndex = x === item ? 0 : -1;
-      x.setAttribute("aria-selected", String(x === item));
-    }
-    item.focus({ preventScroll: false });
-    item.scrollIntoView({ block: "nearest" });
-  }
-
+  // A click selects the run and shows it in the preview (the next step on a
+  // phone); its menu button opens the item menu.
   function onHistoryClick(ev) {
     const item = historyItemOf(ev.target);
-    const entry = historyEntryOf(item);
-    if (!entry) return;
-    const action = ev.target.closest("[data-action]")?.dataset.action || "";
-    hidePreview();
-    if (action === "rerun") runItem(entry);
-    else if (action === "save") saveDialog({ sql: entry.sql, fromHistory: entry });
-    else if (action === "menu") {
-      focusHistory(item);
-      openHistoryMenu(item, ev.target.closest("[data-action]"));
-    } else if (ev.ctrlKey || ev.metaKey || ev.shiftKey) addAsStatement(entry);
-    else openInEditor(entry);
+    if (!historyEntryOf(item)) return;
+    select("history", item);
+    const menuButton = ev.target.closest("[data-action=menu]");
+    if (menuButton) openHistoryMenu(item, menuButton);
+    else if (isPhone()) enterPreview();
   }
 
   function onHistoryKeydown(ev) {
@@ -2257,30 +2330,25 @@
     switch (ev.key) {
       case "ArrowDown":
         ev.preventDefault();
-        focusHistory(items[Math.min(items.length - 1, index + 1)]);
-        scheduleHistoryPreview(items[Math.min(items.length - 1, index + 1)], 500);
+        select("history", items[Math.min(items.length - 1, index + 1)]);
         return;
       case "ArrowUp":
         ev.preventDefault();
         if (index === 0) historyEls.input?.focus();
-        else {
-          focusHistory(items[index - 1]);
-          scheduleHistoryPreview(items[index - 1], 500);
-        }
+        else select("history", items[index - 1]);
         return;
       case "Home":
         ev.preventDefault();
-        focusHistory(items[0]);
+        select("history", items[0]);
         return;
       case "End":
         ev.preventDefault();
-        focusHistory(items[items.length - 1]);
+        select("history", items[items.length - 1]);
         return;
       case "Enter":
         ev.preventDefault();
-        if (mod) runItem(entry);
-        else if (ev.shiftKey) addAsStatement(entry);
-        else openInEditor(entry);
+        if (mod) loadSelection();
+        else enterPreview();
         return;
       case "Delete":
         if (!ctl.history?.canClear?.()) return;
@@ -2290,9 +2358,6 @@
       case "ContextMenu":
         ev.preventDefault();
         openHistoryMenu(item, item.querySelector("[data-action=menu]"));
-        return;
-      case "Escape":
-        hidePreview();
         return;
       default:
         break;
@@ -2306,26 +2371,14 @@
     }
   }
 
-  function scheduleHistoryPreview(item, delay) {
-    if (!item) return;
-    if (previewTimer) clearTimeout(previewTimer);
-    previewFor = item;
-    previewTimer = setTimeout(() => {
-      previewTimer = 0;
-      const entry = historyEntryOf(item);
-      if (previewFor !== item || !entry || !document.contains(item)) return;
-      showPreview(historyPreview(entry));
-    }, delay);
-  }
-
   function openHistoryMenu(item, anchor, point) {
     const entry = historyEntryOf(item);
     if (!entry) return;
     const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
     const entries = [
-      { label: "Open in editor", hint: "Enter", action: "open", run: () => openInEditor(entry) },
-      { label: "Run again", hint: `${mod}+Enter`, action: "rerun", run: () => runItem(entry) },
-      { label: "Add as a new statement", hint: "Shift+Enter", action: "append", run: () => addAsStatement(entry) },
+      { label: "Load in editor", hint: `${mod}+Enter`, action: "open", run: () => openInEditor(entry) },
+      { label: "Append to editor", action: "append", run: () => appendToEditor(entry) },
+      { label: "Run", action: "run", run: () => runItem(entry) },
       { label: "Copy SQL", action: "copy", run: () => copySql(entry) },
     ];
     if (ctl.writable && !ctl.fatal) entries.push({ label: "Save to library\u2026", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
@@ -2340,12 +2393,11 @@
 
   async function show(tab) {
     const next = tab === "history" ? "history" : "saved";
-    // Each tab previews its own items.
-    if (ctl.shown !== next) clearPreview();
-    previewPane();
+    // Each tab previews its own selection; a phone starts on the list.
+    if (ctl.shown !== next) setPreviewStep(false);
     ctl.shown = next;
+    renderPreview();
     await start();
-    renderSummary();
     if (next === "saved") {
       if (ctl.mode === "server" && ctl.rendered.library && Date.now() - ctl.loadedAt > SERVER_RELOAD_AFTER_MS) await reloadLibrary();
       if (!ctl.rendered.library) renderLibrary();
@@ -2355,6 +2407,7 @@
     } else if (!ctl.rendered.history) {
       renderHistory();
     }
+    if (ctl.shown === next) renderPreview();
   }
 
   async function focus(tab) {
@@ -2406,7 +2459,7 @@
 
   // The dialog closed: nothing of it stays on screen.
   function hidden() {
-    clearPreview();
+    setPreviewStep(false);
     closeMenu({ restoreFocus: false });
     ctl.shown = "";
   }

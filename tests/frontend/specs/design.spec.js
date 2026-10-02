@@ -312,7 +312,8 @@ test('captures the query library panel: saved queries, preview and history', asy
   await page.locator('#queryLibraryViewSaved [role=treeitem][data-kind=folder]').first().locator('.qlRow__twisty').click();
   await expect(page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts]')).toBeVisible();
   await captureState(page, testInfo, 'query-library');
-  await page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts] > .qlRow').hover();
+  // A click selects the query: the pane shows it (it does not load it).
+  await page.locator('#queryLibraryViewSaved [role=treeitem][data-id=q_parts] > .qlRow').click();
   await expect(page.locator('#queryLibraryPreview .qlPreview__title')).toHaveText('Active parts');
   await captureState(page, testInfo, 'query-library-preview');
   await page.locator('#queryLibraryTabHistory').click();

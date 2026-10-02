@@ -700,7 +700,7 @@
     applyRunOptionsUi();
   }
 
-  // Sets one Run settings option (the Library "Add as a new statement" turns
+  // Sets one Run settings option (the Library "Append to editor" turns
   // multiquery on); a no-op when it already has that value.
   function setRunOption(key, enabled) {
     const current = {
@@ -810,21 +810,20 @@
     });
   }
 
-  // The dialog (title, Saved / History tabs in the profiling tab style and
-  // the two views) is built the first time it opens: an idle page carries
-  // none of it.
+  // The dialog (the Saved / History tabs in its head, where a title would be,
+  // in the profiling tab style, and the two views) is built the first time it
+  // opens: an idle page carries none of it.
   function buildQueryLibraryDialog() {
     if (queryLibraryDialog || !ns.dialog || !dom.queryLibraryButton) return queryLibraryDialog;
     const parts = ns.dialog.shell({
       id: "queryLibraryMenu",
-      title: "Query library",
-      titleId: "queryLibraryTitle",
-      subtitleId: "queryLibrarySummary",
+      label: "Query library",
       closeLabel: "Close the query library",
       size: "lg",
       className: "queryLibraryDialog",
       tabs: {
-        label: "Query library",
+        label: "Saved queries or History",
+        inHead: true,
         items: [
           { id: "queryLibraryTabSaved", label: "Saved", controls: "queryLibraryViewSaved", value: "saved" },
           { id: "queryLibraryTabHistory", label: "History", controls: "queryLibraryViewHistory", value: "history" },
@@ -840,7 +839,6 @@
     for (const id of ["queryLibraryMenu", "queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
       dom[id] = document.getElementById(id);
     }
-    dom.queryLibrarySummary = parts.subtitle;
     dom.queryLibraryButton.setAttribute("aria-controls", "queryLibraryMenu");
     queryLibraryDialog = ns.dialog.bind(parts.dialog, {
       closeButton: parts.close,

@@ -6615,6 +6615,10 @@ body {
   .queryLibraryDialog__view {
     border-right: 0;
   }
+  .queryLibraryDialog__body.is-previewing > .queryLibraryDialog__view,
+  .queryLibraryDialog__body:not(.is-previewing) > .qlPreview {
+    display: none;
+  }
   .panel--query .editorWrap {
     min-height: 12rem;
   }
