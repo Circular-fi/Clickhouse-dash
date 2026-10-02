@@ -265,7 +265,12 @@ def test_menus_go_through_the_component():
     chart = read("app_query_chart.js")
     assert 'ns.menu?.select(xSelect, { className: "queryChart__picker" });' in chart and "ns.menu?.multi(seriesButton, seriesMenu," in chart
     assert "ns.menu?.bind(autocompleteControlButton, autocompleteControlMenu," in read("app_autocomplete.js")
-    assert "const handle = ns.menu?.context(menu, {" in read("app_query_library.js")
+    # The query library has no item menus: its list only selects, every
+    # action is a button of the preview pane.
+    library = read("app_query_library.js")
+    for gone in ("ns.menu?.context(", "contextmenu", "qlRow__more", "qlMenu", "openItemMenu", "openHistoryMenu"):
+        assert gone not in library, gone
+    assert "qlMenu" not in read("style.css") and "qlRow__more" not in read("style.css")
 
 
 def test_hidden_native_selects_are_data_sources_only():

@@ -32,14 +32,16 @@
       await navigator.clipboard.writeText(value);
       return;
     }
-    // http:// origins have no async clipboard: a selected, off-screen textarea.
+    // http:// origins have no async clipboard: a selected, off-screen textarea,
+    // in the top modal dialog when one is open (the page under it is inert, so
+    // a textarea there could not take the selection), e.g. the query library.
     const area = document.createElement("textarea");
     area.value = value;
     area.setAttribute("readonly", "");
     area.style.position = "fixed";
     area.style.top = "-1000px";
     area.style.left = "-1000px";
-    document.body.appendChild(area);
+    (ns.dialog?.host?.() || document.body).appendChild(area);
     area.select();
     const ok = document.execCommand("copy");
     area.remove();

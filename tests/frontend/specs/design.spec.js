@@ -295,10 +295,10 @@ test('captures the query library panel: saved queries, preview and history', asy
     const now = Date.now();
     localStorage.setItem('chdash.queryLibrary.v2', JSON.stringify({
       version: 2, revision: 1,
-      folders: [{ id: 'f_ops', parent_id: null, name: 'Operations', description: 'Server health' }],
+      folders: [{ id: 'f_ops', host_id: 'local', parent_id: null, name: 'Operations', description: 'Server health' }],
       queries: [
-        { id: 'q_parts', folder_id: 'f_ops', name: 'Active parts', description: 'Parts per table', sql: 'SELECT table, count() FROM system.parts WHERE active GROUP BY table', host_id: null, tags: ['storage'], created_at_ms: now, updated_at_ms: now },
-        { id: 'q_answer', folder_id: null, name: 'The answer', description: '', sql: 'SELECT 42 AS answer', host_id: null, tags: [], created_at_ms: now, updated_at_ms: now },
+        { id: 'q_parts', folder_id: 'f_ops', name: 'Active parts', description: 'Parts per table', sql: 'SELECT table, count() FROM system.parts WHERE active GROUP BY table', host_id: 'local', tags: ['storage'], created_at_ms: now, updated_at_ms: now },
+        { id: 'q_answer', folder_id: null, name: 'The answer', description: '', sql: 'SELECT 42 AS answer', host_id: 'local', tags: [], created_at_ms: now, updated_at_ms: now },
       ],
     }));
   });

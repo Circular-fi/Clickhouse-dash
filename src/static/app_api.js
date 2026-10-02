@@ -61,15 +61,17 @@
   }
 
   // The one request path of every api.* call: the request headers, the
-  // online flag, a JSON answer and one error shape (Error with .code and
-  // .payload). options: { method, body (JSON-encoded), signal }.
-  async function request(path, { method = "GET", body, signal } = {}) {
+  // online flag, a JSON answer and one error shape (Error with .code,
+  // .payload, and for an HTTP error .status and .body, the answer as sent).
+  // options: { method, body (JSON-encoded), headers (added, e.g. If-Match),
+  // signal }.
+  async function request(path, { method = "GET", body, headers, signal } = {}) {
     if (signal?.aborted) throw abortError();
     let response;
     try {
       response = await fetch(resolveUrl(path), {
         method,
-        headers: requestHeaders(body === undefined ? {} : { "Content-Type": "application/json" }),
+        headers: requestHeaders({ ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(headers || {}) }),
         body: body === undefined ? undefined : JSON.stringify(body),
         cache: "no-store",
         signal,
@@ -87,7 +89,12 @@
       if (signal?.aborted || e?.name === "AbortError") throw abortError();
       throw e;
     }
-    if (!response.ok) throw apiError(util.buildApiErrorFromResponse(response.status, payload), `Request failed with status ${response.status}`);
+    if (!response.ok) {
+      const err = apiError(util.buildApiErrorFromResponse(response.status, payload), `Request failed with status ${response.status}`);
+      err.status = response.status;
+      err.body = payload;
+      throw err;
+    }
     return payload;
   }
 

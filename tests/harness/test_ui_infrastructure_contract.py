@@ -109,14 +109,20 @@ def test_feature_flags_are_read_through_ns_features():
 
 def test_requests_go_through_api_and_superseded_ones_are_aborted():
     api = read("src/static/app_api.js")
-    assert "async function request(path, { method = \"GET\", body, signal } = {}) {" in api
+    assert "async function request(path, { method = \"GET\", body, headers, signal } = {}) {" in api
     assert api.count("fetch(") == 1
+    # An HTTP error carries its status and the answer as sent (the library's
+    # 409 conflict and validation fields).
+    assert "err.status = response.status;" in api and "err.body = payload;" in api
     for name, text in sources().items():
         if name in ("app_api.js",):
             continue
-        # The query library keeps its own request (If-Match revisions, LibraryError).
-        if name != "app_query_library.js":
-            assert not re.search(r"(?<![.\w])fetch\(", text), name
+        assert not re.search(r"(?<![.\w])fetch\(", text), name
+    # The query library sends its If-Match revision through api.request, and
+    # its list reloads are util.latest requests.
+    library = sources()["app_query_library.js"]
+    assert "ns.api.request(`${API_BASE}${path}`, { method, body, headers, signal })" in library
+    assert "util.latest(LIBRARY_REQUEST)" in library and "util.latest(HISTORY_REQUEST)" in library
     util = read("src/static/app_util.js")
     assert "function latest(key) {" in util and "latestByKey.get(key)?.controller.abort();" in util
     # The views' stale-answer guards are util.latest, not hand-rolled sequences.

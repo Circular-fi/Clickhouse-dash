@@ -7,7 +7,6 @@
   const THEME_STORAGE_KEY = "chdash.theme";
   const HOST_STORAGE_KEY = "chdash.selectedHost";
   const HISTORY_STORAGE_KEY = "chdash.queryHistory.v1";
-  const SAVED_QUERIES_STORAGE_KEY = "chdash.savedQueries.v1";
   const RUN_OPTIONS_STORAGE_KEY = "chdash.runOptions.v1";
   const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
   // Last page availability reported by /api/version, read by each page's head
@@ -30,7 +29,6 @@
     theme: THEME_STORAGE_KEY,
     selectedHost: HOST_STORAGE_KEY,
     queryHistory: HISTORY_STORAGE_KEY,
-    savedQueries: SAVED_QUERIES_STORAGE_KEY,
     runOptions: RUN_OPTIONS_STORAGE_KEY,
     editorSql: EDITOR_STORAGE_KEY,
     pageNav: PAGE_NAV_STORAGE_KEY,
@@ -194,16 +192,19 @@
     }
   };
 
+  // A History entry belongs to the host it ran on: an entry without one is
+  // dropped (docs/query-library.md, "Entries without a host").
   const normalizeHistoryEntry = (entry) => {
     if (!entry || typeof entry !== "object") return null;
     if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
+    if (entry.host_id == null || entry.host_id === "") return null;
     const sqlRaw = entry.sql_raw.slice(0, HISTORY_MAX_SQL_BYTES);
     const formattedSource = typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw;
     const out = {
       ts_ms: entry.ts_ms,
       sql_raw: sqlRaw,
       sql_formatted: formattedSource.slice(0, HISTORY_MAX_SQL_BYTES),
-      host_id: entry.host_id == null ? null : String(entry.host_id),
+      host_id: String(entry.host_id),
     };
     // Outcome of the run, once it ended (older entries have none).
     if (HISTORY_STATUSES.includes(entry.status)) out.status = entry.status;
@@ -229,27 +230,12 @@
     return out;
   };
 
-  const normalizeSavedQueryEntry = (entry) => {
-    if (!entry || typeof entry !== "object") return null;
-    if (typeof entry.name !== "string" || typeof entry.sql_raw !== "string") return null;
-    return {
-      name: entry.name,
-      sql_raw: entry.sql_raw,
-      sql_formatted: typeof entry.sql_formatted === "string" ? entry.sql_formatted : entry.sql_raw,
-      host_id: entry.host_id == null ? null : String(entry.host_id),
-      created_at_ms: typeof entry.created_at_ms === "number" ? entry.created_at_ms : typeof entry.ts_ms === "number" ? entry.ts_ms : Date.now(),
-    };
-  };
-
-  const normalizeSavedQueryName = (name) => String(name || "").trim().toLocaleLowerCase();
-
   const storage = {
     KEYS,
     pref,
     THEME_STORAGE_KEY,
     HOST_STORAGE_KEY,
     HISTORY_STORAGE_KEY,
-    SAVED_QUERIES_STORAGE_KEY,
     RUN_OPTIONS_STORAGE_KEY,
     EDITOR_STORAGE_KEY,
     PAGE_NAV_STORAGE_KEY,
@@ -350,33 +336,6 @@
       Object.assign(target, normalizeHistoryEntry({ ...target, ...outcome }));
       storage.saveHistory(items);
       return true;
-    },
-
-    loadSavedQueries() {
-      const arr = safeReadJson(SAVED_QUERIES_STORAGE_KEY, []);
-      if (!Array.isArray(arr)) return [];
-      return arr.map(normalizeSavedQueryEntry).filter(Boolean);
-    },
-
-    saveSavedQueries(items) {
-      const normalized = Array.isArray(items) ? items.map(normalizeSavedQueryEntry).filter(Boolean) : [];
-      safeWriteJson(SAVED_QUERIES_STORAGE_KEY, normalized);
-    },
-
-    addSavedQuery(entry) {
-      const normalizedEntry = normalizeSavedQueryEntry(entry);
-      if (!normalizedEntry) return false;
-      const normalizedName = normalizeSavedQueryName(normalizedEntry.name);
-      const items = storage.loadSavedQueries();
-      if (items.some((x) => normalizeSavedQueryName(x.name) === normalizedName)) return false;
-      items.unshift(normalizedEntry);
-      storage.saveSavedQueries(items);
-      return true;
-    },
-
-    deleteSavedQuery(name) {
-      const items = storage.loadSavedQueries().filter((x) => x.name !== name);
-      storage.saveSavedQueries(items);
     },
 
     loadEditorSql() {

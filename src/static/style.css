@@ -16795,8 +16795,7 @@ body {
 
 .qlIconButton:focus-visible,
 .qlNode:focus-visible > .qlRow,
-.qhItem:focus-visible,
-.qlMenu__item:focus-visible {
+.qhItem:focus-visible {
   outline: 2px solid var(--accentBorder);
   outline-offset: -2px;
 }
@@ -16821,7 +16820,6 @@ body {
 .qlIcon--folderPlus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M2.75 5.5A1.75 1.75 0 0 1 4.5 3.75h3.2l1.8 2h6a1.75 1.75 0 0 1 1.75 1.75v7a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M10 8.6v4.8M7.6 11h4.8' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .qlIcon--query { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 2.75h6l3.75 3.75v9a1.75 1.75 0 0 1-1.75 1.75h-8a1.75 1.75 0 0 1-1.75-1.75v-11A1.75 1.75 0 0 1 5.5 2.75z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M7 10.25h6M7 13.25h4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .qlIcon--plus { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M10 4.25v11.5M4.25 10h11.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E"); }
-.qlIcon--more { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='4.5' cy='10' r='1.55'/%3E%3Ccircle cx='10' cy='10' r='1.55'/%3E%3Ccircle cx='15.5' cy='10' r='1.55'/%3E%3C/svg%3E"); }
 .qlIcon--back { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M12.25 4.5 6.75 10l5.5 5.5' fill='none' stroke='%23000' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .qlIcon--lock { --qlIcon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='4' y='8.75' width='12' height='8.25' rx='1.75' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M6.75 8.75v-2.2a3.25 3.25 0 0 1 6.5 0v2.2' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 
@@ -17041,33 +17039,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.qlRow__more {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.45rem;
-  height: 1.45rem;
-  padding: 0;
-  border: 0;
-  border-radius: 0.4rem;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  opacity: 0;
-}
-
-.qlRow:hover > .qlRow__more,
-.qlNode:focus > .qlRow > .qlRow__more,
-.qlNode[aria-selected="true"] > .qlRow > .qlRow__more {
-  opacity: 1;
-}
-
-.qlRow__more:hover {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
-  color: var(--text);
-}
-
 .qlTree__empty {
   padding: 0.3rem 0.5rem 0.3rem calc(1.6rem + var(--qlDepth, 0) * 0.95rem);
   color: var(--muted);
@@ -17199,96 +17170,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.qhItem__host {
-  overflow: hidden;
-  max-width: 8rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The actions overlay the row end on hover / focus: the SQL keeps the width. */
-.qhItem__actions {
-  position: absolute;
-  top: 0.25rem;
-  right: 0.3rem;
-  display: flex;
-  gap: 0.05rem;
-  padding-left: 0.9rem;
-  border-radius: 0.45rem;
-  background: linear-gradient(90deg, transparent, var(--panelBg) 0.8rem);
-  opacity: 0;
-}
-
-.qhItem:hover > .qhItem__actions,
-.qhItem:focus > .qhItem__actions,
-.qhItem[aria-selected="true"] > .qhItem__actions {
-  opacity: 1;
-}
-
-.qhItem__actions .qlIconButton {
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.qhItem__actions .qlIcon {
-  width: 13px;
-  height: 13px;
-  -webkit-mask-size: 13px 13px;
-  mask-size: 13px 13px;
-}
-
-/* Item menu (in the top dialog) and the docked preview. */
-.qlMenu {
-  position: fixed;
-  z-index: 1200;
-  min-width: 13.5rem;
-  padding: 0.3rem;
-  border: 1px solid var(--borderStrong);
-  border-radius: 0.7rem;
-  background: var(--panelBg);
-  box-shadow: var(--shadow2);
-  outline: none;
-}
-
-.qlMenu__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  width: 100%;
-  padding: 0.42rem 0.55rem;
-  border: 0;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.75rem;
-  text-align: left;
-  cursor: pointer;
-}
-
-.qlMenu__item:hover,
-.qlMenu__item:focus {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-}
-
-.qlMenu__item--danger {
-  color: var(--danger);
-}
-
-.qlMenu__hint {
-  color: var(--muted);
-  font-size: 0.66rem;
-}
-
-.qlMenu__sep {
-  height: 1px;
-  margin: 0.25rem 0.3rem;
-  background: var(--border);
-}
-
-/* The preview pane: the selected item (head, facts, SQL) over its actions,
-   "Load in editor" at the bottom right. */
+/* The preview pane: the selected item (head, its tools, facts, SQL) over
+   its actions, "Load in editor" at the bottom right. Every item action is
+   here: the list on the left has no menus. */
 .qlPreview {
   grid-column: 2;
   grid-row: 1;
@@ -17342,6 +17226,28 @@ body {
 
 .qlPreview__title > .qhItem__status {
   margin-top: 0;
+}
+
+/* The item's own changes (Edit, Move, Delete, New subfolder, Save to
+   library, Remove), a row of small buttons under the title. */
+.qlPreview__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* A destructive tool (Delete, Remove) reads in the danger colour, without the
+   filled look of the confirm's own Delete. */
+.qlPreview__tools .button--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+
+.qlPreview__tools .button--danger:not(:disabled):hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
 }
 
 .qlPreview__description {
@@ -17666,6 +17572,10 @@ html:not(.is-ready) .queryEmptyState {
     min-height: 2.4rem;
   }
 
+  .qlPreview__tools .button {
+    min-height: 2.2rem;
+  }
+
   .panel--query .editorWrap {
     min-height: 12rem;
   }
@@ -17726,11 +17636,6 @@ html:not(.is-ready) .queryEmptyState {
   .qlRow,
   .qhItem {
     min-height: 2.4rem;
-  }
-
-  .qlRow__more,
-  .qhItem__actions {
-    opacity: 1;
   }
 }
 

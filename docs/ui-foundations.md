@@ -355,7 +355,7 @@ Each option keeps its value in a data attribute the caller names
 Every popup list is an `ns.menu` menu: the header host, page and theme
 menus, the Run and Copy split menus, the run settings, the Observability
 pickers, the time range panel, the chart and editor menus, the
-click-to-filter, library and row context menus. Each family keeps its look
+click-to-filter and row context menus. Each family keeps its look
 (`themeSelect`, `tracePicker`, `runMenu`...). The module owns:
 
 - **Open and close**: `aria-expanded` on the button and the root's
@@ -419,8 +419,11 @@ and `test_page_manifest_contract.py` fail on a local copy.
   table (`server.hpp`); `fallback` applies only before `/api/version`
   answers.
 - **Requests** (`app_api.js`): every call goes through `request()` and takes
-  a last `{ signal }`. `util.latest(key)` aborts the previous request for
-  `key`: check `isCurrent()` before using an answer or showing an error.
+  a last `{ signal }`; `request(path, { method, body, headers, signal })`
+  adds request headers (the query library's `If-Match`), and an HTTP error
+  carries `.status` and `.body` (the answer as sent). `util.latest(key)`
+  aborts the previous request for `key`: check `isCurrent()` before using an
+  answer or showing an error.
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`):
   never throws; the fallback's type keeps the stored format of the key.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): the one delay
