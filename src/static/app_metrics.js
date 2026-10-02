@@ -8,7 +8,7 @@
   // picks (range, panels, aggregation, group-by, filters) lives in the URL.
   const ns = window.ChDash;
   if (!ns) return;
-  const { dom, state, api, ui, util } = ns;
+  const { dom, state, api, ui, util, h } = ns;
 
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
   const PLOT_HEIGHT = 280;
@@ -752,15 +752,15 @@
       setOp("=");
       keyInput.focus({ preventScroll: true });
       const keys = await ensureKeys(panel);
-      form.querySelector(".metricsFilterForm__keys").innerHTML = keys.map((k) => `<option value="${esc(k)}"></option>`).join("");
+      h.replace(form.querySelector(".metricsFilterForm__keys"), keys.map((k) => h("option", { value: k })));
     });
     const refreshValues = async () => {
       const key = keyInput.value.trim();
       const list = form.querySelector(".metricsFilterForm__values");
-      if (!key || !(panel.keys || []).includes(key)) { list.innerHTML = ""; return; }
+      if (!key || !(panel.keys || []).includes(key)) { list.replaceChildren(); return; }
       const values = await ensureValues(panel, key);
       if (keyInput.value.trim() !== key) return;
-      list.innerHTML = values.map((v) => `<option value="${esc(v.value)}">${esc(`${fmt.count(Number(v.points || 0))} points`)}</option>`).join("");
+      h.replace(list, values.map((v) => h("option", { value: v.value ?? "" }, `${fmt.count(Number(v.points || 0))} points`)));
     };
     keyInput.addEventListener("change", refreshValues);
     keyInput.addEventListener("input", () => { if ((panel.keys || []).includes(keyInput.value.trim())) refreshValues(); });
@@ -826,8 +826,9 @@
     const aggButton = aggPicker.querySelector(".tracePicker__button");
     aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
     aggButton.disabled = !aggs.length;
-    aggPicker.querySelector(".tracePicker__menu").innerHTML = aggs.map((agg) =>
-      `<button type="button" class="themeSelect__option tracePicker__option" role="option" data-agg="${esc(agg)}" aria-selected="${agg === panel.agg}">${esc(aggLabel(agg))}</button>`).join("");
+    h.replace(aggPicker.querySelector(".tracePicker__menu"), aggs.map((agg) => h("button", {
+      type: "button", class: "themeSelect__option tracePicker__option", role: "option", "data-agg": agg, "aria-selected": agg === panel.agg,
+    }, aggLabel(agg))));
     renderGroupButton(panel);
     const perSeries = !!data?.per_series;
     el.querySelector(".metricsPicker--group .tracePicker__button").disabled = perSeries;
@@ -864,11 +865,12 @@
     if (!note) return;
     const data = panel.data;
     const parts = [];
-    if (data?.note) parts.push(esc(data.note));
-    if (data?.truncated) parts.push(`Top ${esc(data.top_k)} of ${esc(data.group_count)} groups; the other ${esc(data.other_series_count)} are folded into \u201cOther\u201d.`);
+    const text = (value) => (value == null ? "" : String(value));
+    if (data?.note) parts.push(text(data.note));
+    if (data?.truncated) parts.push(`Top ${text(data.top_k)} of ${text(data.group_count)} groups; the other ${text(data.other_series_count)} are folded into \u201cOther\u201d.`);
     if (data?.truncated_rows) parts.push("Too many groups: the result was cut; narrow the filters or the group-by.");
-    if (panel.exemplars && panel.exemplarError) parts.push(`Exemplars: ${esc(panel.exemplarError)}`);
-    note.innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
+    if (panel.exemplars && panel.exemplarError) parts.push(`Exemplars: ${text(panel.exemplarError)}`);
+    h.replace(note, parts.map((part) => h("span", null, part)));
     note.hidden = !parts.length;
   }
 
@@ -883,13 +885,13 @@
     const menu = panel.el?.querySelector(".metricsPicker--group .tracePicker__menu");
     if (!menu) return;
     const keys = [...new Set([...(panel.keys || []), ...panel.groupBy])];
-    if (loading && !panel.keys) { menu.innerHTML = `<div class="metricsPicker__hint">Loading attributes\u2026</div>`; return; }
-    if (!keys.length) { menu.innerHTML = `<div class="metricsPicker__hint">No point attributes.</div>`; return; }
-    menu.innerHTML = keys.map((key) => {
+    if (loading && !panel.keys) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "Loading attributes\u2026")); return; }
+    if (!keys.length) { h.replace(menu, h("div", { class: "metricsPicker__hint" }, "No point attributes.")); return; }
+    h.replace(menu, keys.map((key) => {
       const checked = panel.groupBy.includes(key);
       const disabled = !checked && panel.groupBy.length >= 5;
-      return `<label class="metricsPicker__check"><input type="checkbox" data-group-key="${esc(key)}"${checked ? " checked" : ""}${disabled ? " disabled" : ""} /><span>${esc(key)}</span></label>`;
-    }).join("");
+      return h("label", { class: "metricsPicker__check" }, h("input", { type: "checkbox", "data-group-key": key, checked, disabled }), h("span", null, key));
+    }));
   }
 
   function renderFilters(panel) {

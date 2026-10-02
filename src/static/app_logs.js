@@ -9,7 +9,7 @@
   // state lives in the URL.
   const ns = window.ChDash;
   if (!ns) return;
-  const { state, api, util, ui } = ns;
+  const { state, api, util, ui, h } = ns;
   // Formats and colours (docs/ui-foundations.md): a service keeps the colour
   // it has on Traces and Metrics (palette.service), severities are --sev-*.
   const fmt = ns.format;
@@ -664,7 +664,7 @@
     const head = $("logsTableHead");
     if (!head) return;
     head.style.gridTemplateColumns = columnTemplate();
-    head.innerHTML = model.cols.map((col) => `<span class="logsTable__th${col === "time" ? " num" : ""}" role="columnheader">${esc(columnLabel(col))}</span>`).join("");
+    h.replace(head, model.cols.map((col) => h("span", { class: ["logsTable__th", col === "time" && "num"], role: "columnheader" }, columnLabel(col))));
   }
 
   // No logs: where the data is (a jump to it) and no filters, the ways out.
@@ -692,21 +692,21 @@
       messageBox.hidden = false;
       messageBox.innerHTML = ns.uiState.loadingHtml({ label: "Searching logs\u2026" });
       spacer.style.height = "0px";
-      $("logsTableRows").innerHTML = "";
+      $("logsTableRows").replaceChildren();
       return;
     }
     if (message === "error") {
       messageBox.hidden = false;
       messageBox.innerHTML = failedHtml("Search failed", error, "search");
       spacer.style.height = "0px";
-      $("logsTableRows").innerHTML = "";
+      $("logsTableRows").replaceChildren();
       return;
     }
     if (!model.rows.length) {
       messageBox.hidden = false;
       messageBox.innerHTML = model.lastSearch ? emptyHtml() : ns.uiState.emptyHtml({ body: "Search to load logs." });
       spacer.style.height = "0px";
-      $("logsTableRows").innerHTML = "";
+      $("logsTableRows").replaceChildren();
       return;
     }
     messageBox.hidden = true;
@@ -800,14 +800,15 @@
     const menu = $("logsColumnsMenu");
     if (!menu) return;
     const attrCols = model.cols.filter((c) => c.startsWith("attr:"));
-    const option = (col, label) => `
-      <label class="logsMultiPicker__option" role="option" aria-selected="${model.cols.includes(col)}">
-        <input type="checkbox" value="${esc(col)}" ${model.cols.includes(col) ? "checked" : ""} />
-        <span class="logsMultiPicker__name">${esc(label)}</span>
-      </label>`;
-    menu.innerHTML = OPTIONAL_COLUMNS.map((col) => option(col, COLUMN_DEFS[col].label)).join("") +
-      attrCols.map((col) => option(col, col.slice(5))).join("") +
-      `<form class="logsColumnsAdd" data-columns-add><input type="text" placeholder="Attribute column, e.g. http.route" aria-label="Add attribute column" spellcheck="false" /><button type="submit" class="logsMiniButton">Add</button></form>`;
+    const option = (col, label) => h("label", { class: "logsMultiPicker__option", role: "option", "aria-selected": model.cols.includes(col) },
+      h("input", { type: "checkbox", value: col, checked: model.cols.includes(col) }),
+      h("span", { class: "logsMultiPicker__name" }, label));
+    h.replace(menu,
+      OPTIONAL_COLUMNS.map((col) => option(col, COLUMN_DEFS[col].label)),
+      attrCols.map((col) => option(col, col.slice(5))),
+      h("form", { class: "logsColumnsAdd", "data-columns-add": true },
+        h("input", { type: "text", placeholder: "Attribute column, e.g. http.route", "aria-label": "Add attribute column", spellcheck: "false" }),
+        h("button", { type: "submit", class: "logsMiniButton" }, "Add")));
   }
 
   function setColumns(cols) {
@@ -897,9 +898,9 @@
   }
 
   // Bucket starts -> bars centred on [start, start + bucket_ms).
-  function histogramData(h) {
-    const rows = Array.isArray(h.buckets) ? h.buckets : [];
-    const bucketMs = Number(h.bucket_ms) || 60000;
+  function histogramData(hist) {
+    const rows = Array.isArray(hist.buckets) ? hist.buckets : [];
+    const bucketMs = Number(hist.bucket_ms) || 60000;
     const xs = new Float64Array(rows.length);
     const columns = {};
     for (const sev of SEV_STACK) columns[sev] = new Float64Array(rows.length);
@@ -910,7 +911,7 @@
     return {
       xs,
       bucketMs,
-      xDomain: Array.isArray(h.range) ? [Number(h.range[0]), Number(h.range[1])] : null,
+      xDomain: Array.isArray(hist.range) ? [Number(hist.range[0]), Number(hist.range[1])] : null,
       series: SEV_STACK.map((sev) => ({ id: sev, label: SEV_LABELS[sev], color: SEV_COLORS[sev], values: columns[sev], nulls: null, group: 0 })),
     };
   }
@@ -932,9 +933,9 @@
     const total = $("logsTotal");
     const meta = $("logsHistogramMeta");
     if (!box) return;
-    const h = model.histogram;
-    ns.uiState.busy(box, model.histogramLoading && !!h);
-    if (model.histogramLoading && !h) {
+    const hist = model.histogram;
+    ns.uiState.busy(box, model.histogramLoading && !!hist);
+    if (model.histogramLoading && !hist) {
       histogramMessage(box, "Loading volume\u2026");
       if (total) total.textContent = fmt.EMPTY;
       return;
@@ -944,14 +945,14 @@
       if (total) total.textContent = fmt.EMPTY;
       return;
     }
-    if (!h) return;
-    const count = Number(h.totals?.total || 0);
+    if (!hist) return;
+    const count = Number(hist.totals?.total || 0);
     if (total) total.textContent = `${fmt.count(count)} log${count === 1 ? "" : "s"}`;
-    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(h.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
+    if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(hist.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
     // While a refetch runs, the previous bars stay (dimmed) until it answers.
     if (model.histogramLoading || !ns.chartCore) return;
     for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .uiState")) note.hidden = true;
-    const data = histogramData(h);
+    const data = histogramData(hist);
     if (!histogramChart) {
       histogramChart = ns.chartCore.create(box, {
         ...data,
@@ -1336,7 +1337,7 @@
     if (model.side.contextLoading && !model.side.context) { box.innerHTML = ns.uiState.loadingHtml({ label: "Loading surrounding logs\u2026", compact: true }); return; }
     if (model.side.contextError) { box.innerHTML = failedHtml("", model.side.contextError, "context", { compact: true }); return; }
     const ctx = model.side.context;
-    if (!ctx) { box.innerHTML = ""; return; }
+    if (!ctx) { box.replaceChildren(); return; }
     const rows = ctx.rows || [];
     const anchor = model.side.anchorId;
     box.innerHTML = `${ctx.more_after ? '<div class="logsContext__more">Newer logs continue past the window</div>' : ""}
