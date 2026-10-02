@@ -1401,11 +1401,11 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 .hostDot--good {
-  background: rgba(34, 197, 94, 0.95);
+  background: var(--success);
   animation: hostDotHealthyPulse 1.8s ease-in-out infinite;
 }
 .hostDot--bad {
-  background: rgba(239, 68, 68, 0.95);
+  background: var(--danger);
 }
 @keyframes hostDotHealthyPulse {
   0%, 100% {
@@ -1460,10 +1460,10 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   line-height: 1.35;
 }
 .jsonPretty .jKey { color: var(--accentBorder); }
-.jsonPretty .jStr { color: color-mix(in srgb, var(--text) 78%, #22c55e); }
-.jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
-.jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
-.jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
+.jsonPretty .jStr { color: var(--json-string); }
+.jsonPretty .jNum { color: var(--json-number); }
+.jsonPretty .jBool { color: var(--json-bool); }
+.jsonPretty .jNull { color: var(--json-null); font-style: italic; }
 .nullToken { color: var(--json-null); font-style: italic; }
 .tableWrap {
   max-height: none;
@@ -8517,7 +8517,7 @@ body {
   color: var(--text);
 }
 .qlNotice--error {
-  border-color: rgba(239, 68, 68, 0.42);
+  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
   background: var(--error-bg);
 }
 .qlNotice--import {
@@ -8534,9 +8534,9 @@ body {
   align-items: center;
   gap: 0.35rem;
   padding: 0.22rem 0.55rem;
-  border: 1px solid color-mix(in srgb, #f59e0b 50%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  background: var(--warning-bg);
   color: var(--text);
   font-size: 0.68rem;
   font-weight: 800;
@@ -8626,7 +8626,7 @@ body {
   color: var(--muted);
 }
 .qlNode--folder > .qlRow > .qlIcon {
-  color: color-mix(in srgb, #f59e0b 70%, var(--muted));
+  color: color-mix(in srgb, var(--qchart-4) 70%, var(--muted));
 }
 .qlRow__text {
   flex: 1 1 auto;
@@ -8641,7 +8641,7 @@ body {
   white-space: nowrap;
 }
 .qlRow__name mark {
-  background: color-mix(in srgb, #facc15 38%, transparent);
+  background: color-mix(in srgb, var(--warning) 38%, transparent);
   color: inherit;
   border-radius: 2px;
 }
@@ -8698,7 +8698,7 @@ body {
   text-align: center;
 }
 .qlEmpty--error {
-  color: #f87171;
+  color: var(--danger);
 }
 .ql__foot {
   flex: 0 0 auto;
@@ -8727,8 +8727,8 @@ body {
   line-height: 1.35;
 }
 .qlToast--error {
-  border-color: rgba(239, 68, 68, 0.55);
-  background: color-mix(in srgb, #ef4444 12%, var(--panelBg));
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
 }
 .qh__clear {
   height: 1.95rem;
@@ -8773,9 +8773,9 @@ body {
   border-radius: 999px;
   background: var(--muted);
 }
-.qhItem__status--ok { background: #22c55e; }
-.qhItem__status--error { background: #ef4444; }
-.qhItem__status--cancelled { background: #f59e0b; }
+.qhItem__status--ok { background: var(--success); }
+.qhItem__status--error { background: var(--danger); }
+.qhItem__status--cancelled { background: var(--warning); }
 .qhItem__status--unknown { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--muted) 70%, transparent); }
 .qhItem__main {
   flex: 1 1 auto;
@@ -8790,7 +8790,7 @@ body {
   font-size: 0.72rem;
 }
 .qhItem--error .qhItem__sql {
-  color: color-mix(in srgb, #f87171 40%, var(--text));
+  color: color-mix(in srgb, var(--danger) 40%, var(--text));
 }
 .qhItem__meta {
   display: flex;
@@ -8865,7 +8865,7 @@ body {
   background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
 }
 .qlMenu__item--danger {
-  color: #f87171;
+  color: var(--danger);
 }
 .qlMenu__hint {
   color: var(--muted);
@@ -8913,7 +8913,7 @@ body {
   white-space: pre-wrap;
 }
 .qlPreview__error {
-  color: #f87171;
+  color: var(--danger);
   font-size: 0.7rem;
   line-height: 1.35;
 }
@@ -8982,7 +8982,7 @@ body {
   box-shadow: var(--ring);
 }
 .qlInput[aria-invalid="true"] {
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 .qlInput--area {
   resize: vertical;
@@ -9017,7 +9017,7 @@ body {
   z-index: 8;
   height: 2px;
   border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, #7dd3fc) 60%, transparent);
+  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, var(--accent-text)) 60%, transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
   animation: queryRunBar 1.1s linear infinite;

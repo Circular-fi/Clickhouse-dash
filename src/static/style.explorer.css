@@ -614,7 +614,7 @@ body {
   color: var(--sqlNull);
 }
 .tok-err {
-  text-decoration: underline wavy #e11d48;
+  text-decoration: underline wavy var(--danger);
   text-decoration-thickness: 0.08rem;
   text-underline-offset: 0.2rem;
 }
@@ -1589,11 +1589,11 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 .hostDot--good {
-  background: rgba(34, 197, 94, 0.95);
+  background: var(--success);
   animation: hostDotHealthyPulse 1.8s ease-in-out infinite;
 }
 .hostDot--bad {
-  background: rgba(239, 68, 68, 0.95);
+  background: var(--danger);
 }
 @keyframes hostDotHealthyPulse {
   0%, 100% {
@@ -1648,10 +1648,10 @@ body.is-trace-detail .obsNav:has(> .obsNav__views[hidden]),
   line-height: 1.35;
 }
 .jsonPretty .jKey { color: var(--accentBorder); }
-.jsonPretty .jStr { color: color-mix(in srgb, var(--text) 78%, #22c55e); }
-.jsonPretty .jNum { color: color-mix(in srgb, var(--text) 78%, #f59e0b); }
-.jsonPretty .jBool { color: color-mix(in srgb, var(--text) 78%, #a78bfa); }
-.jsonPretty .jNull { color: color-mix(in srgb, var(--muted) 70%, var(--text)); font-style: italic; }
+.jsonPretty .jStr { color: var(--json-string); }
+.jsonPretty .jNum { color: var(--json-number); }
+.jsonPretty .jBool { color: var(--json-bool); }
+.jsonPretty .jNull { color: var(--json-null); font-style: italic; }
 .nullToken { color: var(--json-null); font-style: italic; }
 .resultTable tbody tr:hover td.resultTable__gaugeCell {
   background-image: linear-gradient(to right, color-mix(in srgb, var(--accentBorder) 16%, transparent), color-mix(in srgb, var(--accentBorder) 16%, transparent));
@@ -1944,21 +1944,21 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 }
 .explorerMiniHealth--healthy,
 .explorerHealthBadge--healthy {
-  color: #34d399;
-  border-color: color-mix(in srgb, #34d399 32%, transparent);
-  background: color-mix(in srgb, #34d399 8%, transparent);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, transparent);
+  background: var(--success-bg);
 }
 .explorerMiniHealth--warning,
 .explorerHealthBadge--warning {
-  color: #fbbf24;
-  border-color: color-mix(in srgb, #fbbf24 32%, transparent);
-  background: color-mix(in srgb, #fbbf24 8%, transparent);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  background: var(--warning-bg);
 }
 .explorerMiniHealth--error,
 .explorerHealthBadge--error {
-  color: #f87171;
-  border-color: color-mix(in srgb, #f87171 35%, transparent);
-  background: color-mix(in srgb, #f87171 9%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-bg);
 }
 .explorerEmptyState[hidden] {
   display: none !important;
@@ -2001,9 +2001,9 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
 .explorerWarning {
   padding: 8px 10px;
   border-radius: 9px;
-  border: 1px solid color-mix(in srgb, #fbbf24 24%, transparent);
-  background: color-mix(in srgb, #fbbf24 7%, transparent);
-  color: color-mix(in srgb, #fbbf24 80%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
+  background: var(--warning-bg);
+  color: var(--warning);
   font-size: 0.72rem;
 }
 .explorerSummaryCards {
@@ -2771,7 +2771,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .explorerTreemap__node.is-other {
   cursor: default;
-  background-color: #f3b944;
+  background-color: var(--qchart-other);
   background-image: repeating-linear-gradient(
     135deg,
     rgba(255, 255, 255, .24) 0,
@@ -2779,8 +2779,7 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
     rgba(255, 255, 255, .04) 7px,
     rgba(255, 255, 255, .04) 14px
   );
-  border-color: #b45309;
-  box-shadow: inset 0 0 0 1px rgba(120, 53, 15, .18);
+  border-color: color-mix(in srgb, var(--qchart-other) 70%, var(--text));
 }
 .explorerTreemap__node[role="img"]:not(.is-other) {
   cursor: default;
@@ -2794,10 +2793,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .explorerTreemap__node.is-table.is-hovered {
   background: var(--treemap-color);
-}
-.explorerTreemap__node.is-other.is-hovered,
-.explorerTreemap__node.is-other:focus-visible {
-  --focusRingColor: #92400e;
 }
 .explorerTreemap__label {
   position: absolute;
@@ -2847,10 +2842,6 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 .explorerTreemap__node.is-database.is-branch > .explorerTreemap__label .explorerTreemap__size {
   font-size: .6rem;
   line-height: 1;
-}
-.explorerTreemap__node.is-other > .explorerTreemap__label {
-  color: #5f370e;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, .55);
 }
 .explorerTreemap__name {
   display: -webkit-box;
@@ -3045,11 +3036,11 @@ html[data-theme-mode="light"] #themeSelectText.themeIcon {
 }
 .explorerStorageView__notice.is-error,
 .explorerOpsView__error {
-  border: 1px solid color-mix(in srgb, #dc2626 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
   border-radius: 6px;
   padding: 6px 10px;
   color: var(--text);
-  background: color-mix(in srgb, #dc2626 9%, transparent);
+  background: var(--danger-bg);
   font-size: 12px;
 }
 .explorerStorageView__notice[hidden],
@@ -3274,10 +3265,8 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 .explorerStorageStrip__segment.is-other,
 .explorerStorageStrip__swatch.is-other {
-  background-color: #f3b944;
+  background-color: var(--qchart-other);
   background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, .24) 0, rgba(255, 255, 255, .24) 6px, rgba(255, 255, 255, .04) 6px, rgba(255, 255, 255, .04) 12px);
-  color: #5f370e;
-  text-shadow: none;
 }
 .explorerStorageStrip__label {
   overflow: hidden;
@@ -3837,13 +3826,13 @@ html.chdash-page-select-hidden .pageSelect {
   flex: 0 0 auto;
 }
 .explorerStorageStackedBar__segment--wide,
-.explorerStorageCompositionLegend__swatch--wide { background: #2563eb; }
+.explorerStorageCompositionLegend__swatch--wide { background: var(--qchart-1); }
 .explorerStorageStackedBar__segment--compact,
-.explorerStorageCompositionLegend__swatch--compact { background: #8b5cf6; }
+.explorerStorageCompositionLegend__swatch--compact { background: var(--qchart-7); }
 .explorerStorageStackedBar__segment--projection,
-.explorerStorageCompositionLegend__swatch--projection { background: #06b6d4; }
+.explorerStorageCompositionLegend__swatch--projection { background: var(--qchart-3); }
 .explorerStorageStackedBar__segment--index,
-.explorerStorageCompositionLegend__swatch--index { background: #f59e0b; }
+.explorerStorageCompositionLegend__swatch--index { background: var(--qchart-4); }
 .explorerStorageCompositionLegend {
   display: flex;
   flex-wrap: wrap;
@@ -5052,12 +5041,12 @@ html[data-theme="light"] {
   color: var(--text);
 }
 .explorerBadge--partition {
-  border-color: color-mix(in srgb, #8b5cf6 50%, var(--border));
-  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+  border-color: color-mix(in srgb, var(--qchart-7) 50%, var(--border));
+  background: color-mix(in srgb, var(--qchart-7) 12%, transparent);
 }
 .explorerBadge--sample {
-  border-color: color-mix(in srgb, #14b8a6 50%, var(--border));
-  background: color-mix(in srgb, #14b8a6 12%, transparent);
+  border-color: color-mix(in srgb, var(--qchart-3) 50%, var(--border));
+  background: color-mix(in srgb, var(--qchart-3) 12%, transparent);
 }
 .explorerBadge--active,
 .explorerBadge--pending {
@@ -5212,11 +5201,11 @@ html[data-theme="light"] {
   text-align: center;
 }
 .explorerObjIcon--table { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
-.explorerObjIcon--mv { color: color-mix(in srgb, #8b5cf6 78%, var(--text)); }
-.explorerObjIcon--view { color: color-mix(in srgb, #0ea5e9 75%, var(--text)); }
-.explorerObjIcon--dictionary { color: color-mix(in srgb, #d97706 78%, var(--text)); }
-.explorerObjIcon--buffer { color: color-mix(in srgb, #14b8a6 75%, var(--text)); }
-.explorerObjIcon--distributed { color: color-mix(in srgb, #22c55e 70%, var(--text)); }
+.explorerObjIcon--mv { color: var(--kind-mv); }
+.explorerObjIcon--view { color: var(--kind-view); }
+.explorerObjIcon--dictionary { color: var(--kind-dict); }
+.explorerObjIcon--buffer { color: var(--kind-buffer); }
+.explorerObjIcon--distributed { color: var(--kind-distributed); }
 @container explorerCard (max-width: 560px) {
   .explorerCard .explorerLineage { grid-template-columns: minmax(0, 1fr); }
 }
@@ -6069,34 +6058,26 @@ html[data-theme="light"] {
   font-size: 12px;
   line-height: 1;
 }
-.explorerTreeObject__icon--view,
-.explorerTreeObject__icon--mv {
-  color: color-mix(in srgb, #8b5cf6 70%, var(--muted));
-}
-.explorerTreeObject__icon--dict {
-  color: color-mix(in srgb, #0d9488 70%, var(--muted));
-}
-.explorerTreeObject__icon--buffer,
-.explorerTreeObject__icon--memory {
-  color: color-mix(in srgb, #d97706 70%, var(--muted));
-}
 .explorerTreeObject__icon--table,
-.explorerTreeObject__icon--distributed {
-  color: color-mix(in srgb, var(--accentBorder) 60%, var(--muted));
-}
+.explorerTreeObject__icon--memory { color: var(--kind-table); }
+.explorerTreeObject__icon--view { color: var(--kind-view); }
+.explorerTreeObject__icon--mv { color: var(--kind-mv); }
+.explorerTreeObject__icon--dict { color: var(--kind-dict); }
+.explorerTreeObject__icon--buffer { color: var(--kind-buffer); }
+.explorerTreeObject__icon--distributed { color: var(--kind-distributed); }
 .explorerTreeObject__health {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: var(--warning);
 }
 .explorerTreeObject__health--error {
-  background: #ef4444;
+  background: var(--danger);
 }
 .explorerTreeMark {
   padding: 0 1px;
   border-radius: 2px;
-  background: color-mix(in srgb, #facc15 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 40%, transparent);
   color: inherit;
 }
 .explorerWorkspace .explorerTreeObject.is-storage-blocked,
@@ -6558,7 +6539,7 @@ body {
   text-align: center;
 }
 .qlEmpty--error {
-  color: #f87171;
+  color: var(--danger);
 }
 .ql__foot {
   flex: 0 0 auto;
@@ -6582,7 +6563,7 @@ body {
   z-index: 8;
   height: 2px;
   border-radius: 2px;
-  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, #7dd3fc) 60%, transparent);
+  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, var(--accent-text)) 60%, transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
   animation: queryRunBar 1.1s linear infinite;
