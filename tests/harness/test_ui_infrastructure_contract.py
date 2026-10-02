@@ -180,3 +180,14 @@ def test_frame_coalescing_uses_util_raf_once():
     for name in ("app_logs.js", "app_traces.js", "app_trace_views.js", "app_trace_spans.js", "app_chart_core.js", "app_pipeline_viewer.js"):
         assert not re.search(r"if \(!\w+\) \w+ = requestAnimationFrame\(\(\) => \{ \w+ = 0;", code[name]), name
         assert not re.search(r"= requestAnimationFrame\(\(\) => \{\s*\w+(Frame|Raf) = 0;", code[name]), name
+
+
+def test_plain_debounces_use_util_debounce():
+    """A plain trailing delay is util.debounce (.cancel/.flush), not a
+    hand-written clearTimeout/setTimeout pair."""
+    code = sources()
+    for name, needle in (("app_query_library.js", "util.debounce(() => loadHistory(), 150)"),
+                         ("app_ui.js", "util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200)")):
+        assert needle in code[name], (name, needle)
+    for name, timer in (("app_query_library.js", "historyTimer"), ("app_ui.js", "draftSaveTimer")):
+        assert timer not in code[name], (name, timer)

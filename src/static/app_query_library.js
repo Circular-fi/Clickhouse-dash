@@ -2325,14 +2325,10 @@
     else libraryEls.input?.focus();
   }
 
-  let historyTimer = 0;
+  // A burst of run-history changes reloads the list once.
+  const reloadHistorySoon = util.debounce(() => loadHistory(), 150);
   function historyChanged() {
-    if (!ctl.historyState.loaded) return;
-    if (historyTimer) clearTimeout(historyTimer);
-    historyTimer = setTimeout(() => {
-      historyTimer = 0;
-      loadHistory();
-    }, 150);
+    if (ctl.historyState.loaded) reloadHistorySoon();
   }
 
   // Another tab changed the browser library.

@@ -828,14 +828,8 @@
       }
     }
 
-    let draftSaveTimer = 0;
-    dom.queryTextArea.addEventListener("input", () => {
-      if (draftSaveTimer) clearTimeout(draftSaveTimer);
-      draftSaveTimer = setTimeout(() => {
-        draftSaveTimer = 0;
-        saveEditorDraft(dom.queryTextArea.value);
-      }, 200);
-    });
+    const saveDraftSoon = util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200);
+    dom.queryTextArea.addEventListener("input", () => saveDraftSoon());
 
     const replaceSelectionText = (ta, nextText) => {
       const start = ta.selectionStart;
