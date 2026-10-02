@@ -1551,6 +1551,325 @@ test('Explorer Parts: part ages follow the duration rule and the table fits besi
   expect(fit.scroll).toBeLessThanOrEqual(fit.client + 1);
 });
 
+// --- Trace links in the row menu ---------------------------------------------
+// A row holding an OpenTelemetry trace id (32 hex digits, not all zeros, in a
+// String / FixedString cell or array element, read raw) offers "Open trace"
+// (a new tab on /observability/traces/<id>, ?span= when a span column pairs
+// with it by name) and "Copy trace link"; several distinct ids make both
+// submenus. Only when the traces feature is enabled.
+
+const TRACE_A = '0af7651916cd43dd8448eb211c80319c';
+const TRACE_B = '4bf92f3577b34da6a3ce929d0e0e4736';
+const TRACE_C = '00f067aa0ba902b700f067aa0ba902b7';
+const SPAN_A = 'b7ad6b7169203331';
+const SPAN_B = '00f067aa0ba902b7';
+
+const traceRowMenu = (page) => page.locator('.rowDetailsMenu:not(.rowDetailsMenu--sub)');
+const traceSubMenu = (page) => page.locator('.rowDetailsMenu--sub');
+const menuLabels = (menu) => menu.getByRole('menuitem').evaluateAll((items) => items.map((i) => i.textContent));
+const menuHrefs = (menu) => menu.locator('a[role=menuitem]').evaluateAll((items) => items.map((a) => a.getAttribute('href')));
+const tracePath = (id, span = '') => `/observability/traces/${id}${span ? `?span=${span}` : ''}`;
+const ROW_COPIES = ['Copy cell', 'Copy row', 'Copy column'];
+
+async function openTraceRowMenu(page, row, cell = 1) {
+  await row.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await row.locator('td').nth(cell).click({ button: 'right' });
+  await expect(traceRowMenu(page)).toBeVisible();
+  return traceRowMenu(page);
+}
+
+async function closeTraceRowMenu(page) {
+  await page.keyboard.press('Escape');
+  if (await traceRowMenu(page).count()) await page.keyboard.press('Escape');
+  await expect(traceRowMenu(page)).toHaveCount(0);
+}
+
+// Outside a secure context the app copies through a hidden textarea:
+// capture what that copy selects (or read the clipboard when available).
+async function captureCopies(page) {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(() => {
+    window.__chdashTestCopiedText = '';
+    document.addEventListener('copy', () => {
+      const active = document.activeElement;
+      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
+    }, true);
+  });
+  return () => page.evaluate(async () => {
+    if (window.isSecureContext && navigator.clipboard) {
+      try { return await navigator.clipboard.readText(); } catch (_) {}
+    }
+    return window.__chdashTestCopiedText || '';
+  });
+}
+
+async function setTracesFeature(page, enabled) {
+  await page.route('**/api/version', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.features = { ...(body.features || {}), traces: { ...((body.features || {}).traces || {}), enabled } };
+    await route.fulfill({ response, json: body });
+  });
+}
+
+test('row menu: Open trace for a raw trace id cell (any case, trimmed, String or FixedString), never for zeros, wrong lengths, ids inside text or numbers', async ({ page }) => {
+  await setTracesFeature(page, true);
+  await openApp(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  await runSuccessfulQuery(page, `SELECT number AS n,
+  '${TRACE_A.toUpperCase()}' AS TraceId,
+  '${SPAN_A}' AS SpanId,
+  '00000000000000000000000000000000' AS zero_trace,
+  '${TRACE_A.slice(0, 31)}' AS short_trace,
+  '${TRACE_A}d' AS long_trace,
+  'see ${TRACE_A}' AS note,
+  'zz${TRACE_A.slice(2)}' AS not_hex,
+  toUInt128('12345678901234567890123456789012') AS numeric_id
+FROM numbers(3)`);
+  await expect(rows).toHaveCount(3);
+  // The cells stay raw (as ClickHouse sent them): upper case.
+  await expect(rows.nth(1).locator('td').nth(2)).toHaveText(TRACE_A.toUpperCase());
+  let menu = await openTraceRowMenu(page, rows.nth(1), 4);
+  // One trace id: flat entries, after Details.
+  expect(await menuLabels(menu)).toEqual(['Details', 'Open trace', 'Copy trace link', ...ROW_COPIES]);
+  // A link to the lower-cased id, on its span (TraceId pairs with SpanId),
+  // in a new tab.
+  const open = menu.getByRole('menuitem', { name: 'Open trace', exact: true });
+  await expect(open).toHaveAttribute('href', tracePath(TRACE_A, SPAN_A));
+  await expect(open).toHaveAttribute('target', '_blank');
+  // Hovering it lights the trace id cell.
+  await open.hover();
+  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('td.is-copyTarget')].map((td) => td.cellIndex))).toEqual([2]);
+  await closeTraceRowMenu(page);
+
+  // FixedString(32), and a value padded with spaces.
+  await runSuccessfulQuery(page, `SELECT number AS n, toFixedString('${TRACE_B}', 32) AS fixed_trace FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_B)]);
+  await closeTraceRowMenu(page);
+  await runSuccessfulQuery(page, `SELECT number AS n, concat('  ', '${TRACE_C}', '\\t') AS padded FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_C)]);
+  await closeTraceRowMenu(page);
+
+  // Nothing that is not a whole trace id.
+  await runSuccessfulQuery(page, `SELECT number AS n, '00000000000000000000000000000000' AS TraceId, 'x ${TRACE_A}' AS trace_note, '${TRACE_A.slice(0, 16)}' AS half FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(1));
+  expect(await menuLabels(menu)).toEqual(['Details', ...ROW_COPIES]);
+  await closeTraceRowMenu(page);
+});
+
+test('row menu: one entry for a trace id found in several columns; the span pairs with its trace column by name, and an ambiguous span is left out', async ({ page }) => {
+  await setTracesFeature(page, true);
+  await openApp(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+
+  // The same id twice (case aside): one entry naming the first column, the
+  // other one in its tooltip.
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${TRACE_A.toUpperCase()}' AS trace_id_copy, '${SPAN_A}' AS SpanId FROM numbers(2)`);
+  let menu = await openTraceRowMenu(page, rows.nth(0));
+  await expect(traceSubMenu(page)).toHaveCount(0);
+  expect(await menuLabels(menu)).toEqual(['Details', 'Open trace (TraceId)', 'Copy trace link (TraceId)', ...ROW_COPIES]);
+  const open = menu.getByRole('menuitem', { name: 'Open trace (TraceId)' });
+  await expect(open).toHaveAttribute('title', 'Also in trace_id_copy');
+  await expect(open).toHaveAttribute('href', tracePath(TRACE_A, SPAN_A));
+  await closeTraceRowMenu(page);
+
+  // Two span columns of the trace (SpanId and span_id) that disagree: the
+  // trace opens without ?span=.
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId, '${SPAN_B}' AS span_id FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A)]);
+  await closeTraceRowMenu(page);
+
+  // A trace column whose name pairs with no span column: no ?span= either.
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS trace, '${SPAN_A}' AS SpanId FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A)]);
+  await closeTraceRowMenu(page);
+
+  // trace_id pairs with span_id; an all-zero span is no span.
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS trace_id, if(number = 0, '0000000000000000', '${SPAN_A}') AS span_id FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A)]);
+  await closeTraceRowMenu(page);
+  menu = await openTraceRowMenu(page, rows.nth(1));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A, SPAN_A)]);
+  await closeTraceRowMenu(page);
+
+  // A prefix pairs too: parent_trace_id with parent_span_id, not SpanId.
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_B}' AS parent_trace_id, '${SPAN_B}' AS parent_span_id, '${SPAN_A}' AS SpanId FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_B, SPAN_B)]);
+  await closeTraceRowMenu(page);
+});
+
+test('row menu: several distinct trace ids make Open trace and Copy trace link submenus, keyboard driven; a link opens a new tab and keeps the results', async ({ page }) => {
+  await setTracesFeature(page, true);
+  await openApp(page);
+  const readClipboard = await captureCopies(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId, toFixedString('${TRACE_B}', 32) AS parent_trace_id, ' ${TRACE_C} ' AS LinkedTraceId FROM numbers(3)`);
+  await expect(rows).toHaveCount(3);
+  const menu = await openTraceRowMenu(page, rows.nth(1));
+  expect(await menuLabels(menu)).toEqual(['Details', 'Open trace', 'Copy trace link', ...ROW_COPIES]);
+  const openTrigger = menu.getByRole('menuitem', { name: 'Open trace', exact: true });
+  const copyTrigger = menu.getByRole('menuitem', { name: 'Copy trace link', exact: true });
+  await expect(openTrigger).toHaveAttribute('aria-haspopup', 'menu');
+  await expect(openTrigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(menu.locator('a[role=menuitem]')).toHaveCount(0);
+
+  // Keyboard: ArrowRight opens the submenu on its first item; arrows, Home
+  // and End move in it; ArrowLeft and Escape close it, back on its item.
+  await expect(menu.getByRole('menuitem', { name: 'Details' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(openTrigger).toBeFocused();
+  await expect(traceSubMenu(page)).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  const sub = traceSubMenu(page);
+  await expect(sub).toBeVisible();
+  await expect(sub).toHaveAttribute('role', 'menu');
+  await expect(openTrigger).toHaveAttribute('aria-expanded', 'true');
+  expect(await menuLabels(sub)).toEqual([`TraceId · ${TRACE_A.slice(0, 8)}…`, `parent_trace_id · ${TRACE_B.slice(0, 8)}…`, `LinkedTraceId · ${TRACE_C.slice(0, 8)}…`]);
+  expect(await menuHrefs(sub)).toEqual([tracePath(TRACE_A, SPAN_A), tracePath(TRACE_B), tracePath(TRACE_C)]);
+  const subItems = sub.getByRole('menuitem');
+  await expect(subItems.nth(0)).toBeFocused();
+  await expect(subItems.nth(0)).toHaveAttribute('title', TRACE_A);
+  // Beside the menu, to its right.
+  const [mainBox, subBox] = [await menu.boundingBox(), await sub.boundingBox()];
+  expect(subBox.x).toBeGreaterThanOrEqual(mainBox.x + mainBox.width - 8);
+  await page.keyboard.press('ArrowDown');
+  await expect(subItems.nth(1)).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(subItems.nth(2)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(subItems.nth(0)).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(sub).toHaveCount(0);
+  await expect(openTrigger).toBeFocused();
+  await expect(openTrigger).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('ArrowRight');
+  await expect(subItems.nth(0)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(sub).toHaveCount(0);
+  await expect(menu).toBeVisible();
+  await expect(openTrigger).toBeFocused();
+  // Enter opens it too; moving on in the menu closes it.
+  await page.keyboard.press('ArrowDown');
+  await expect(copyTrigger).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(sub).toBeVisible();
+  await expect(sub.locator('a')).toHaveCount(0);
+  expect(await menuLabels(sub)).toHaveLength(3);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Copy cell' })).toBeFocused();
+  await expect(sub).toHaveCount(0);
+  await closeTraceRowMenu(page);
+
+  // Enter on a trace opens it in a new tab, on its span; the results stay.
+  await openTraceRowMenu(page, rows.nth(1));
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await expect(subItems.nth(0)).toBeFocused();
+  const [tab] = await Promise.all([page.context().waitForEvent('page'), page.keyboard.press('Enter')]);
+  await tab.waitForLoadState('domcontentloaded');
+  expect(new URL(tab.url()).pathname + new URL(tab.url()).search).toBe(tracePath(TRACE_A, SPAN_A));
+  await tab.close();
+  await expect(traceRowMenu(page)).toHaveCount(0);
+  await expect(traceSubMenu(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/\/query/);
+  await expect(rows).toHaveCount(3);
+
+  // A pointer: hovering the item opens its submenu, a click on a trace opens
+  // the new tab.
+  await openTraceRowMenu(page, rows.nth(2));
+  await openTrigger.hover();
+  await expect(sub).toBeVisible();
+  const [second] = await Promise.all([page.context().waitForEvent('page'), subItems.nth(1).click()]);
+  await second.waitForLoadState('domcontentloaded');
+  expect(new URL(second.url()).pathname).toBe(tracePath(TRACE_B));
+  await second.close();
+  await expect(rows).toHaveCount(3);
+
+  // Copy trace link: the absolute URL of the chosen trace.
+  await openTraceRowMenu(page, rows.nth(0));
+  await copyTrigger.click();
+  await expect(sub).toBeVisible();
+  await subItems.nth(2).click();
+  await expect(traceRowMenu(page)).toHaveCount(0);
+  await expect.poll(readClipboard).toBe(new URL(tracePath(TRACE_C), page.url()).href);
+});
+
+test('row menu: trace ids in array cells count element by element, pair with the span array, and the submenu stops at ten', async ({ page }) => {
+  await setTracesFeature(page, true);
+  await openApp(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId,
+  ['${TRACE_B}', '${TRACE_A}', 'not-a-trace', '${TRACE_C}'] AS \`Links.TraceId\`,
+  ['1111111111111111', '${SPAN_A}', '', '3333333333333333'] AS \`Links.SpanId\`
+FROM numbers(2)`);
+  let menu = await openTraceRowMenu(page, rows.nth(0));
+  await menu.getByRole('menuitem', { name: 'Open trace', exact: true }).click();
+  const sub = traceSubMenu(page);
+  await expect(sub).toBeVisible();
+  // Links.TraceId[2] is TraceId again: one entry, the element in its tooltip.
+  expect(await menuLabels(sub)).toEqual([`TraceId · ${TRACE_A.slice(0, 8)}…`, `Links.TraceId[1] · ${TRACE_B.slice(0, 8)}…`, `Links.TraceId[4] · ${TRACE_C.slice(0, 8)}…`]);
+  await expect(sub.getByRole('menuitem').first()).toHaveAttribute('title', `${TRACE_A}\nAlso in Links.TraceId[2]`);
+  expect(await menuHrefs(sub)).toEqual([tracePath(TRACE_A, SPAN_A), tracePath(TRACE_B, '1111111111111111'), tracePath(TRACE_C, '3333333333333333')]);
+  await closeTraceRowMenu(page);
+
+  // Twelve ids: ten links, then "+2 more", disabled and skipped by the keys.
+  await runSuccessfulQuery(page, `SELECT number AS n, arrayMap(i -> concat(repeat('a', 30), leftPad(toString(i), 2, '0')), range(1, 13)) AS trace_ids FROM numbers(2)`);
+  menu = await openTraceRowMenu(page, rows.nth(0));
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await expect(sub).toBeVisible();
+  const labels = await menuLabels(sub);
+  expect(labels).toHaveLength(11);
+  expect(labels[0]).toBe('trace_ids[1] · aaaaaaaa…');
+  expect(labels[10]).toBe('+2 more');
+  await expect(sub.locator('a[role=menuitem]')).toHaveCount(10);
+  expect((await menuHrefs(sub))[9]).toBe(tracePath(`${'a'.repeat(30)}10`));
+  const more = sub.getByRole('menuitem', { name: '+2 more' });
+  await expect(more).toBeDisabled();
+  await expect(more).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('End');
+  await expect(sub.locator('a[role=menuitem]').nth(9)).toBeFocused();
+  await closeTraceRowMenu(page);
+});
+
+test('row menu: no trace entries when the traces feature is off; multiquery panels offer them too', async ({ page }) => {
+  const sql = `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId FROM numbers(3)`;
+  await setTracesFeature(page, false);
+  await openApp(page);
+  const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
+  await runSuccessfulQuery(page, sql);
+  const menu = await openTraceRowMenu(page, rows.nth(0));
+  expect(await menuLabels(menu)).toEqual(['Details', ...ROW_COPIES]);
+  await closeTraceRowMenu(page);
+
+  await page.unroute('**/api/version');
+  await setTracesFeature(page, true);
+  await page.reload();
+  await expect(page.locator('#runButton')).toBeEnabled();
+  await page.locator('#runSettingsButton').click();
+  await page.locator('#runOptMultiQuery').click();
+  await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('#runSettingsButton').click();
+  await runQuery(page, `SELECT 1 AS a FROM numbers(2); ${sql};`);
+  await waitForTerminal(page);
+  const second = page.locator('.resultsStack__block').nth(1);
+  if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
+  const panelRows = second.locator(`tbody ${dataRowsSelector}`);
+  await expect(panelRows).toHaveCount(3);
+  const panelMenu = await openTraceRowMenu(page, panelRows.nth(2));
+  expect(await menuLabels(panelMenu)).toEqual(['Details', 'Open trace', 'Copy trace link', ...ROW_COPIES]);
+  expect(await menuHrefs(panelMenu)).toEqual([tracePath(TRACE_A, SPAN_A)]);
+  await closeTraceRowMenu(page);
+});
+
 test('inline row details open from the Explorer data preview', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);

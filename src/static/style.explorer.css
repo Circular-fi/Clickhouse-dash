@@ -4375,6 +4375,34 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
   font-size: .76rem;
   line-height: 1.25;
 }
+.rowDetailsMenu a.runMenu__opt {
+  box-sizing: border-box;
+  color: var(--text);
+  text-decoration: none;
+}
+.rowDetailsMenu .runMenu__opt--submenu[aria-expanded="true"] {
+  background: var(--hoverTint);
+}
+.runMenu__optArrow {
+  flex: 0 0 auto;
+  width: 0.36rem;
+  height: 0.36rem;
+  margin-left: auto;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: rotate(45deg);
+}
+.rowDetailsMenu .runMenu__optText {
+  white-space: nowrap;
+}
+.rowDetailsMenu .runMenu__opt--note {
+  color: var(--muted);
+  cursor: default;
+}
+.rowDetailsMenu .runMenu__opt--note:hover {
+  background: transparent;
+}
 .resultTable tbody td.resultTable__rowIndex:not(.resultTable__stickyLeft) {
   position: relative;
 }

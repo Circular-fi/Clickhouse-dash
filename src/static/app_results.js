@@ -3685,6 +3685,115 @@
   }
 
 
+  // --- Trace links: a row that holds OpenTelemetry trace ids ----------------
+  // A value is a trace id when, read raw (never the displayed text) and
+  // trimmed, it is exactly 32 hex digits (W3C trace-context: 16 bytes) and
+  // not all zeros; an id inside a longer string does not count. The values
+  // looked at are String / FixedString cells and the elements of their
+  // arrays (Links.TraceId, groupArray(TraceId)). The same id found again is
+  // one link (its first place names it); distinct ids are one link each, in
+  // column order. A span id (16 hex digits, not all zeros) goes with the
+  // trace column it belongs to by name: TraceId with SpanId (span_id,
+  // spanId), Links.TraceId[i] with Links.SpanId[i], <prefix>trace_id with
+  // <prefix>span_id; two different candidates leave the span out. Only
+  // offered when the traces feature is on.
+  const TRACE_ID_RE = /^[0-9a-f]{32}$/;
+  const SPAN_ID_RE = /^[0-9a-f]{16}$/;
+  const TEXT_TYPE_RE = /^(?:(?:LowCardinality|Nullable)\()*(?:String|FixedString\(\d+\))\)*$/;
+  const TRACE_MENU_MAX = 10;
+  const AMBIGUOUS = Symbol("ambiguous");
+
+  function hexId(value, pattern) {
+    if (typeof value !== "string") return "";
+    const id = value.replace(/^[\s\0]+|[\s\0]+$/g, "").toLowerCase();
+    return pattern.test(id) && /[1-9a-f]/.test(id) ? id : "";
+  }
+
+  // "TraceId", "trace_id" and "traceId" read "traceid"; "Links.TraceId"
+  // reads "links.traceid".
+  const idColumnKey = (name) => String(name ?? "").replace(/_/g, "").toLowerCase();
+
+  // "text" (String, FixedString), "array" (an Array of them) or "" for a
+  // column; a column of unknown type is judged by its value.
+  function idColumnShape(type, value) {
+    const t = String(type || "").replace(/\s+/g, "");
+    if (!t) return Array.isArray(value) ? "array" : "text";
+    if (TEXT_TYPE_RE.test(t)) return "text";
+    const inner = /^Array\((.+)\)$/.exec(t);
+    return inner && TEXT_TYPE_RE.test(inner[1]) ? "array" : "";
+  }
+
+  function arrayElements(value) {
+    const parsed = parseJsonStringIfLikely(value);
+    return Array.isArray(parsed) ? parsed : [];
+  }
+
+  // Every trace id of the row, in column order: { label, columnIndex,
+  // element (1-based array index, 0 for a plain cell), key, traceId }.
+  function traceCandidates(ctx, row) {
+    const out = [];
+    for (let i = 0; i < ctx.columns.length; i++) {
+      const column = String(ctx.columns[i] ?? "");
+      const key = idColumnKey(column);
+      if (key.endsWith("spanid")) continue;
+      const shape = idColumnShape(ctx.types[i], row[i]);
+      if (shape === "text") {
+        const traceId = hexId(row[i], TRACE_ID_RE);
+        if (traceId) out.push({ label: column, columnIndex: i, element: 0, key, traceId });
+      } else if (shape === "array") {
+        arrayElements(row[i]).forEach((value, j) => {
+          const traceId = hexId(value, TRACE_ID_RE);
+          if (traceId) out.push({ label: `${column}[${j + 1}]`, columnIndex: i, element: j + 1, key, traceId });
+        });
+      }
+    }
+    return out;
+  }
+
+  // The span of one trace id place: "", a span id, or AMBIGUOUS.
+  function spanOf(ctx, row, place) {
+    if (!place.key.endsWith("traceid")) return "";
+    const spanKey = `${place.key.slice(0, -"traceid".length)}spanid`;
+    const spans = new Set();
+    for (let j = 0; j < ctx.columns.length; j++) {
+      if (idColumnKey(ctx.columns[j]) !== spanKey) continue;
+      const shape = idColumnShape(ctx.types[j], row[j]);
+      const value = place.element ? (shape === "array" ? arrayElements(row[j])[place.element - 1] : undefined) : (shape === "text" ? row[j] : undefined);
+      const spanId = hexId(value, SPAN_ID_RE);
+      if (spanId) spans.add(spanId);
+    }
+    if (spans.size > 1) return AMBIGUOUS;
+    return spans.size ? [...spans][0] : "";
+  }
+
+  // [{ traceId, spanId, label, columnIndex, others: [labels], href }], one
+  // per distinct trace id.
+  function rowTraceLinks(ctx, row) {
+    if (state.features?.traces?.enabled !== true || !ctx || !Array.isArray(row)) return [];
+    const byId = new Map();
+    for (const place of traceCandidates(ctx, row)) {
+      let link = byId.get(place.traceId);
+      if (!link) {
+        link = { traceId: place.traceId, label: place.label, columnIndex: place.columnIndex, others: [], spans: new Set(), ambiguous: false };
+        byId.set(place.traceId, link);
+      } else {
+        link.others.push(place.label);
+      }
+      const span = spanOf(ctx, row, place);
+      if (span === AMBIGUOUS) link.ambiguous = true;
+      else if (span) link.spans.add(span);
+    }
+    return [...byId.values()].map(({ spans, ambiguous, ...link }) => {
+      const spanId = !ambiguous && spans.size === 1 ? [...spans][0] : "";
+      const path = `observability/traces/${encodeURIComponent(link.traceId)}${spanId ? `?span=${encodeURIComponent(spanId)}` : ""}`;
+      return { ...link, spanId, href: ns.api ? ns.api.resolveUrl(path) : `/${path}` };
+    });
+  }
+
+  // The row menu (and its submenus, the same component): items are
+  // role=menuitem buttons, or links for "Open trace" (a new tab). Arrows,
+  // Home and End move in the menu that has the focus; ArrowRight (Enter,
+  // a click or hovering) opens a submenu, ArrowLeft and Escape close it.
   function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, tr = null) {
     closeRowDetailsMenu();
     const el = document.createElement("div");
@@ -3693,42 +3802,143 @@
     el.setAttribute("aria-label", "Row actions");
     el.tabIndex = -1;
 
-    const items = [];
+    const main = { node: el, items: [] };
+    let sub = null; // the open submenu: { node, items, trigger }
+    const submenus = new Map(); // trigger -> fill(list)
     let lit = [];
     const clearHighlight = () => {
       for (const cell of lit) cell.classList.remove("is-copyTarget");
       lit = [];
     };
-    const highlight = (scope) => {
+    const highlight = (scope, column) => {
       clearHighlight();
-      lit = rowMenuTargetCells(table, tr, columnIndex, scope);
+      lit = rowMenuTargetCells(table, tr, column, scope);
       for (const cell of lit) cell.classList.add("is-copyTarget");
     };
-    const addItem = (text, onPick, scope = "") => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "runMenu__opt";
-      btn.setAttribute("role", "menuitem");
+    const itemNode = (tag, text, { scope = "", column = columnIndex, title = "" } = {}) => {
+      const node = document.createElement(tag);
+      node.className = "runMenu__opt";
+      node.setAttribute("role", "menuitem");
+      if (tag === "button") node.type = "button";
+      if (title) node.title = title;
       const label = document.createElement("span");
       label.className = "runMenu__optText";
       label.textContent = text;
-      btn.appendChild(label);
-      btn.addEventListener("click", () => {
-        closeRowDetailsMenu();
-        onPick();
+      node.appendChild(label);
+      node.addEventListener("pointerenter", () => highlight(scope, column));
+      node.addEventListener("pointerleave", clearHighlight);
+      node.addEventListener("focus", () => highlight(scope, column));
+      node.addEventListener("blur", clearHighlight);
+      return node;
+    };
+    // href: a link opened in a new tab (the results stay), else onPick runs.
+    // column: the cell the item is about (default: the right-clicked one).
+    const addItem = (text, onPick, scope = "", { href = "", column = columnIndex, title = "", list = main } = {}) => {
+      const node = itemNode(href ? "a" : "button", text, { scope, column, title });
+      if (href) {
+        node.href = href;
+        node.target = "_blank";
+        node.rel = "noopener";
+      }
+      node.addEventListener("click", () => {
+        // The link navigates once the click is over: the menu closes after.
+        if (href) setTimeout(() => closeRowDetailsMenu(), 0);
+        else {
+          closeRowDetailsMenu();
+          onPick();
+        }
       });
-      btn.addEventListener("pointerenter", () => highlight(scope));
-      btn.addEventListener("pointerleave", clearHighlight);
-      btn.addEventListener("focus", () => highlight(scope));
-      btn.addEventListener("blur", clearHighlight);
-      el.appendChild(btn);
-      items.push(btn);
+      // Another item of the menu, pointed at or focused, closes the submenu.
+      if (list === main) {
+        node.addEventListener("pointerenter", () => closeSubmenu());
+        node.addEventListener("focus", () => closeSubmenu());
+      }
+      list.node.appendChild(node);
+      list.items.push(node);
+    };
+    const addNote = (text, list) => {
+      const node = itemNode("button", text);
+      node.disabled = true;
+      node.setAttribute("aria-disabled", "true");
+      node.classList.add("runMenu__opt--note");
+      list.node.appendChild(node);
+    };
+
+    const closeSubmenu = ({ refocus = false } = {}) => {
+      if (!sub) return;
+      const { node, trigger } = sub;
+      sub = null;
+      node.remove();
+      trigger.setAttribute("aria-expanded", "false");
+      if (refocus) trigger.focus({ preventScroll: true });
+    };
+    const openSubmenu = (trigger, fill, { focus = true } = {}) => {
+      if (!sub || sub.trigger !== trigger) {
+        closeSubmenu();
+        const node = document.createElement("div");
+        node.className = "runMenu rowDetailsMenu rowDetailsMenu--sub is-open";
+        node.setAttribute("role", "menu");
+        node.setAttribute("aria-label", trigger.textContent);
+        node.tabIndex = -1;
+        sub = { node, items: [], trigger };
+        fill(sub);
+        document.body.appendChild(node);
+        // Beside its item, on the side with room.
+        const rect = trigger.getBoundingClientRect();
+        const vw = window.innerWidth || 0;
+        const vh = window.innerHeight || 0;
+        const w = node.offsetWidth;
+        const h = node.offsetHeight;
+        const left = rect.right + w + 4 <= vw ? rect.right + 2 : Math.max(4, rect.left - w - 2);
+        const top = Math.max(4, Math.min(rect.top - 4, vh - h - 4));
+        node.style.left = `${Math.round(left)}px`;
+        node.style.top = `${Math.round(top)}px`;
+        trigger.setAttribute("aria-expanded", "true");
+      }
+      if (focus) sub.items[0]?.focus({ preventScroll: true });
+    };
+    const addSubmenu = (text, fill) => {
+      const trigger = itemNode("button", text);
+      trigger.classList.add("runMenu__opt--submenu");
+      trigger.setAttribute("aria-haspopup", "menu");
+      trigger.setAttribute("aria-expanded", "false");
+      const arrow = document.createElement("span");
+      arrow.className = "runMenu__optArrow";
+      arrow.setAttribute("aria-hidden", "true");
+      trigger.appendChild(arrow);
+      trigger.addEventListener("click", () => openSubmenu(trigger, fill));
+      trigger.addEventListener("pointerenter", () => openSubmenu(trigger, fill, { focus: false }));
+      trigger.addEventListener("focus", () => { if (sub && sub.trigger !== trigger) closeSubmenu(); });
+      submenus.set(trigger, fill);
+      el.appendChild(trigger);
+      main.items.push(trigger);
     };
 
     const returnFocus = document.activeElement;
     const copy = (text) => { void util.copyTextToClipboard(text).catch(() => undefined); };
+    const absolute = (href) => new URL(href, window.location.href).href;
     addItem("Details", () => openRowDetails(binding, table, returnFocus));
     const ctx = rowDetailsContext(table);
+    // The row's traces, in Observability: flat entries for one trace id, a
+    // submenu of the distinct ids (column order, capped) for several.
+    const traces = rowTraceLinks(ctx, binding.row);
+    if (traces.length === 1) {
+      const [link] = traces;
+      const named = link.others.length ? ` (${link.label})` : "";
+      const title = link.others.length ? `Also in ${link.others.join(", ")}` : "";
+      addItem(`Open trace${named}`, null, "cell", { href: link.href, column: link.columnIndex, title });
+      addItem(`Copy trace link${named}`, () => copy(absolute(link.href)), "cell", { column: link.columnIndex, title });
+    } else if (traces.length > 1) {
+      const fillTraces = (pick) => (list) => {
+        for (const link of traces.slice(0, TRACE_MENU_MAX)) {
+          const title = `${link.traceId}${link.others.length ? `\nAlso in ${link.others.join(", ")}` : ""}`;
+          addItem(`${link.label} \u00b7 ${link.traceId.slice(0, 8)}\u2026`, () => pick(link), "cell", { ...(pick ? {} : { href: link.href }), column: link.columnIndex, title, list });
+        }
+        if (traces.length > TRACE_MENU_MAX) addNote(`+${traces.length - TRACE_MENU_MAX} more`, list);
+      };
+      addSubmenu("Open trace", fillTraces(null));
+      addSubmenu("Copy trace link", fillTraces((link) => copy(absolute(link.href))));
+    }
     // The value of the cell under the pointer, spelled as the result copy
     // spells single values (strings raw, JSON pretty-printed, NULL empty).
     const onColumn = ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length;
@@ -3754,19 +3964,30 @@
     el.style.top = `${Math.round(top)}px`;
     el.classList.add("is-open");
 
-    const disposers = [];
+    const disposers = [() => closeSubmenu()];
     // The right-clicked row shows its accent bar while its menu is open.
     if (tr) tr.classList.add("is-rowMenuTarget");
     rowDetailsMenu = { el, disposers, returnFocus, tr, clearHighlight };
     const close = () => closeRowDetailsMenu();
+    const inMenus = (node) => node instanceof Node && (el.contains(node) || !!(sub && sub.node.contains(node)));
     listenUntilClosed(disposers, document, "pointerdown", (ev) => {
-      if (!(ev.target instanceof Node) || !el.contains(ev.target)) close();
+      if (!inMenus(ev.target)) close();
     }, true);
     listenUntilClosed(disposers, document, "keydown", (ev) => {
-      if (ev.key === "Escape") {
+      const inSub = !!sub && sub.node.contains(document.activeElement);
+      if (ev.key === "Escape" || (ev.key === "ArrowLeft" && inSub)) {
         ev.preventDefault();
         ev.stopPropagation();
-        closeRowDetailsMenu({ restoreFocus: true });
+        if (inSub) closeSubmenu({ refocus: true });
+        else if (ev.key === "Escape") closeRowDetailsMenu({ restoreFocus: true });
+        return;
+      }
+      if (ev.key === "ArrowRight" && !inSub) {
+        const trigger = document.activeElement;
+        if (submenus.has(trigger)) {
+          ev.preventDefault();
+          openSubmenu(trigger, submenus.get(trigger));
+        }
         return;
       }
       if (ev.key === "Tab") {
@@ -3776,6 +3997,8 @@
       const moves = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
       if (!(ev.key in moves)) return;
       ev.preventDefault();
+      // Arrows move in the menu that has the focus.
+      const items = inSub ? sub.items : main.items;
       const current = items.indexOf(document.activeElement);
       const move = moves[ev.key];
       let next = 0;
@@ -3787,7 +4010,7 @@
     listenUntilClosed(disposers, document, "scroll", close, { capture: true, passive: true });
     listenUntilClosed(disposers, window, "resize", close, { passive: true });
     listenUntilClosed(disposers, window, "blur", close);
-    try { items[0].focus({ preventScroll: true }); } catch { null; }
+    try { main.items[0].focus({ preventScroll: true }); } catch { null; }
   }
 
   // `silent`: the table is being cleared/rebuilt, skip scroll compensation and
