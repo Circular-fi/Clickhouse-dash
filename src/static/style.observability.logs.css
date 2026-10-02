@@ -3230,6 +3230,8 @@ html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .traceFacets.logsFacets { position: relative; top: auto; max-height: none; align-self: stretch; }
 .traceFacet__scope--column { color: var(--accentText); background: color-mix(in srgb, var(--accentBorder) 16%, transparent); }
 .traceFacet__scope--log { color: var(--info); background: color-mix(in srgb, var(--info) 14%, transparent); }
+.logsPattern { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+.logsPattern .logsSevBadge { display: inline-block; margin-right: 7px; vertical-align: 1px; }
 @media (max-width: 760px) {
   .logsSearchBody { flex-direction: column; }
   .traceFacets.logsFacets { flex: 0 0 auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
