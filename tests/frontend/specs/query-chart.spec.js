@@ -416,7 +416,8 @@ test('time series result switches between table and chart, types and series pick
   await page.keyboard.press('Escape');
   await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 w');
   expect(Object.keys(await seriesStats(chart))).toEqual(['w']);
-  await expect(chart.locator('.chartCore__legendItem')).toHaveCount(1);
+  // One series: no legend (the engine shows one from two series up).
+  await expect(chart.locator('.chartCore__legendItem')).toHaveCount(0);
 
   // Back to the table: the rows are still rendered.
   await mainToggle(page).locator('[data-view="table"]').click();
@@ -448,7 +449,7 @@ test('split-by column draws one series per value and folds the rest into Other',
   expect(labels.slice(0, 8).sort()).toEqual(['10', '11', '4', '5', '6', '7', '8', '9']);
   await expect(chart.locator('.queryChart__note')).toContainText('4 groups folded into Other');
   await pickChart(chart, '.queryChart__group', '-1');
-  await expect(chart.locator('.chartCore__legendItem')).toHaveCount(1);
+  await expect(chart.locator('.chartCore__legendItem')).toHaveCount(0);
   await expect(chart.locator('.queryChart__note')).toContainText('summed');
 });
 

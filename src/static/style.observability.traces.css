@@ -8486,9 +8486,11 @@ button.chip__op:hover {
 .statTile--inline .statTile__value {
   font-size: 12.5px;
 }
-.chartCard {
+:where(.chartCard) {
   display: flex;
   flex-direction: column;
+}
+.chartCard {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;

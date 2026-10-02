@@ -94,7 +94,8 @@ test('logs: service, level and severity class filters', async ({ page, request }
   // A severity class from the histogram legend.
   await page.goto(logsUrl(win));
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
-  await page.locator('#logsLegend [data-sev="warn"]').click();
+  // The histogram's totals legend (the chart engine's): a click filters.
+  await page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]').click();
   await expect.poll(() => param(page, 'sev')).toEqual(['warn']);
   await expect(page.locator('#logsChips')).toContainText('Level: Warn');
   await expect(rows(page).first()).toBeVisible();

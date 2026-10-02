@@ -11462,6 +11462,13 @@ html[data-obs-view="traces"] .tracesResults--wide {
   font-size: var(--dt-font);
 }
 
+/* Lines as tall as the one-row view's (a 32 px table row). */
+.rowDetails__list > .kvList__row > .kvList__key,
+.rowDetails__list > .kvList__row > .kvList__value {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
 .rowDetails__list > .kvList__row:first-child > .kvList__value {
   padding-right: 9rem;
 }
@@ -19018,9 +19025,14 @@ button.chip__op:hover {
    One chart card: a header (title, meta, actions), the body (the chart
    engine), an optional footer legend. One sparkline: .sparkline, an SVG line
    (and area) in --sparkline-color. */
-.chartCard {
+/* Zero-specificity display: a page that hides its card (the Query chart
+   outside the Chart view) keeps hiding it. */
+:where(.chartCard) {
   display: flex;
   flex-direction: column;
+}
+
+.chartCard {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;

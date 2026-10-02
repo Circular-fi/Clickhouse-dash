@@ -4802,6 +4802,11 @@ html.chdash-page-select-hidden .pageSelect {
   background: transparent;
   font-size: var(--dt-font);
 }
+.rowDetails__list > .kvList__row > .kvList__key,
+.rowDetails__list > .kvList__row > .kvList__value {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
 .rowDetails__list > .kvList__row:first-child > .kvList__value {
   padding-right: 9rem;
 }
@@ -7802,9 +7807,11 @@ button.chip__op:hover {
 .statTile--inline .statTile__value {
   font-size: 12.5px;
 }
-.chartCard {
+:where(.chartCard) {
   display: flex;
   flex-direction: column;
+}
+.chartCard {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
