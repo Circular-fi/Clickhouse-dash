@@ -1235,20 +1235,9 @@
   function renderNotice() {
     const notice = libraryEls.notice;
     notice.innerHTML = "";
-    if (ctl.fatal) {
-      const box = el("div", "qlNotice qlNotice--error");
-      box.setAttribute("role", "alert");
-      box.appendChild(el("span", "", ctl.fatal));
-      const retry = el("button", "button button--small", "Retry");
-      retry.type = "button";
-      retry.addEventListener("click", () => reloadLibrary());
-      box.appendChild(retry);
-      notice.appendChild(box);
-    }
+    if (ctl.fatal) notice.appendChild(ns.uiState.banner(el("div", ""), { message: ctl.fatal, retry: () => void reloadLibrary(), inset: true }));
     if (ctl.loadError) {
-      const box = el("div", "qlNotice qlNotice--error");
-      box.textContent = `The library file could not be read (${ctl.loadError}); it is shown read-only.`;
-      notice.appendChild(box);
+      notice.appendChild(ns.uiState.banner(el("div", ""), { message: `The library file could not be read (${ctl.loadError}); it is shown read-only.`, inset: true }));
     }
     if (ctl.mode === "server" && !ctl.writable && !ctl.fatal) {
       const badge = el("div", "qlBadge qlBadge--readonly", "Read-only library");
@@ -2108,11 +2097,7 @@
     historyEls.clear.hidden = !canClear;
     historyEls.clear.disabled = !hs.entries.length;
     list.innerHTML = "";
-    if (hs.error) {
-      const box = el("div", "qlNotice qlNotice--error", hs.error);
-      box.setAttribute("role", "alert");
-      list.appendChild(box);
-    }
+    if (hs.error) list.appendChild(ns.uiState.banner(el("div", ""), { message: hs.error, retry: () => void loadHistory(), inset: true }));
     let lastDay = "";
     for (const entry of hs.entries) {
       const ts = Number(entry.ran_at_ms) || 0;
@@ -2156,7 +2141,7 @@
     if (!hs.entries.length && !hs.loading && !hs.error) {
       list.appendChild(el("div", "qlTree__empty qlTree__empty--root", hs.q ? `Nothing in the history matches \u201c${hs.q}\u201d.` : "No history yet: every query you run is listed here."));
     }
-    if (hs.loading && !hs.entries.length) list.appendChild(el("div", "qlEmpty", `Loading history${ELLIPSIS}`));
+    if (hs.loading && !hs.entries.length) list.appendChild(ns.uiState.block("loading", { label: `Loading the history${ELLIPSIS}`, compact: true }));
     historyEls.more.hidden = !hs.hasMore;
     historyEls.foot.textContent = `${format.count(hs.entries.length)}${hs.hasMore ? "+" : ""} ${hs.entries.length === 1 ? "entry" : "entries"}${MIDDOT}${ctl.history?.kind === "server" ? "Stored on the server" : "Stored in this browser"}`;
     const current = restoreSelection("history");

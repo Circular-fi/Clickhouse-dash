@@ -640,7 +640,7 @@
     const { database, table } = view.scope;
     const includeSystem = effectiveIncludeSystem();
     view.openTable.hidden = !table;
-    view.refresh.disabled = !!data.promise;
+    ns.uiState.busy(view.refresh, !!data.promise);
     view.root.dataset.level = table ? "table" : database ? "database" : "server";
 
     if (!data.storage) {

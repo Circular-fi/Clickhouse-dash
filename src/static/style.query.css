@@ -2891,12 +2891,6 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 #queryWorkspace[hidden] {
   display: none !important;
 }
-.explorerListEmpty,
-.explorerUnavailable {
-  padding: 18px;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
 .explorerSectionTitle {
   margin: 14px 0 8px;
   font-size: 0.78rem;
@@ -6415,10 +6409,6 @@ body {
   line-height: 1.35;
   color: var(--text);
 }
-.qlNotice--error {
-  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
-  background: var(--error-bg);
-}
 .qlNotice--import {
   border-color: color-mix(in srgb, var(--accentBorder) 45%, transparent);
   background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
@@ -6589,15 +6579,6 @@ body {
   font-style: normal;
   line-height: 1.45;
   text-align: center;
-}
-.qlEmpty {
-  padding: 1.2rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-align: center;
-}
-.qlEmpty--error {
-  color: var(--danger);
 }
 .ql__foot {
   flex: 0 0 auto;

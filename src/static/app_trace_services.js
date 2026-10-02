@@ -512,7 +512,7 @@
     let body;
     if (detail.error) body = failedHtml(detail.error, "detail");
     else if (!payload) body = ns.uiState.loadingHtml({ label: "Loading the service\u2026" });
-    else if (!row) body = emptyHtml("No entry spans of this service match in this range.");
+    else if (!row) body = emptyHtml("No requests to this service match in this range.");
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">

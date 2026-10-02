@@ -769,11 +769,7 @@
     const box = $("logsTableRows");
     const message = $("logsTableMessage");
     if (!viewport || !box) return;
-    let frame = 0;
-    viewport.addEventListener("scroll", () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; renderWindow(); });
-    }, { passive: true });
+    viewport.addEventListener("scroll", util.rafOnce(() => renderWindow()), { passive: true });
     new ResizeObserver(() => renderWindow(true)).observe(viewport);
     box.addEventListener("click", (event) => {
       if (event.target.closest("[data-load-more]")) { void loadMore(); return; }

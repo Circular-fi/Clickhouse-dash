@@ -457,13 +457,9 @@
     if (last >= state.rows.length - Math.floor(OVERSCAN / 2)) void loadPage();
   }
 
-  let scrollFrame = 0;
+  const scrollFrame = ns.util.rafOnce(() => updateWindow());
   function onScroll() {
-    if (!active() || scrollFrame) return;
-    scrollFrame = requestAnimationFrame(() => {
-      scrollFrame = 0;
-      updateWindow();
-    });
+    if (active()) scrollFrame();
   }
 
   // --------------------------------------------------------- selection

@@ -1324,13 +1324,21 @@
     }
   }
 
+  // The loading, empty or failed state of a tree or list (ns.uiState, compact).
+  // `clear`: the search field whose search found nothing (a "Clear the search" way out).
+  function listState(kind, text, retry, clear) {
+    const action = clear?.handle && clear.input?.value ? { label: "Clear the search", onClick: () => { clear.handle.clear(); clear.input.focus(); } } : null;
+    return ns.uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });
+  }
+  const searches = { tree: null, functions: null };
+
   function renderFunctionList() {
     if (!dom.explorerFunctionList) return;
     const items = visibleFunctions();
     clear(dom.explorerFunctionList);
     setSideMeta("explorerFunctionMeta", items.length ? format.countLabel(items.length, "function") : "");
     if (!items.length) {
-      dom.explorerFunctionList.appendChild(node("div", "explorerListEmpty", model.loadingFunctions ? "Loading\u2026" : "No functions found"));
+      dom.explorerFunctionList.appendChild(listState(model.loadingFunctions ? "loading" : "empty", model.loadingFunctions ? "Loading functions\u2026" : "No functions found", null, { handle: searches.functions, input: dom.explorerFunctionSearchInput }));
       renderFunctionDetail();
       return;
     }
@@ -1397,7 +1405,7 @@
     }
     model.loadingFunctions = true;
     setError(null);
-    if (dom.explorerFunctionRefreshButton) dom.explorerFunctionRefreshButton.disabled = true;
+    ns.uiState.busy(dom.explorerFunctionRefreshButton, true);
     renderFunctionList();
     try {
       const payload = await api.getExplorerFunctions(hostId, !!force);
@@ -1421,7 +1429,7 @@
       renderFunctionList();
     } finally {
       model.loadingFunctions = false;
-      if (dom.explorerFunctionRefreshButton) dom.explorerFunctionRefreshButton.disabled = false;
+      ns.uiState.busy(dom.explorerFunctionRefreshButton, false);
     }
   }
 
@@ -1574,10 +1582,11 @@
 
     if (!model.databaseTablesLoaded.has(name)) {
       const error = model.databaseLoadErrors.get(name);
-      if (error) showDetailState("error", { title: "The database could not be loaded", body: error.message || name });
+      if (error) showDetailState("error", { title: "The database could not be loaded", body: error.message || name, retry: () => void loadDatabaseTables(name, true) });
       else showDetailState("loading", { label: `Loading the tables of ${name}\u2026` });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
-      if (!model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);
+      // A failed load waits for Retry (no automatic retry loop against a failing server).
+      if (!error && !model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);
       return;
     }
 
@@ -1900,7 +1909,7 @@
       .sort((a, b) => a.localeCompare(b));
 
     if (!databases.length) {
-      dom.explorerTableList.appendChild(node("div", "explorerListEmpty", model.loadingCatalog ? "Loading\u2026" : "No accessible databases"));
+      dom.explorerTableList.appendChild(listState(model.loadingCatalog ? "loading" : "empty", model.loadingCatalog ? "Loading databases\u2026" : "No accessible databases"));
       setSideMeta("explorerTreeMeta", "");
       return;
     }
@@ -1977,12 +1986,12 @@
       if (expanded) {
         const children = node("div", "explorerTreeChildren");
         if (loading && !loaded) {
-          children.appendChild(node("div", "explorerListEmpty", "Loading tables\u2026"));
+          children.appendChild(listState("loading", "Loading tables\u2026"));
         } else if (model.databaseLoadErrors.has(database) && !loaded) {
-          children.appendChild(node("div", "explorerListEmpty", "Unable to load tables"));
+          children.appendChild(listState("error", "Unable to load tables", () => void loadDatabaseTables(database, true)));
         } else if (loaded && !items.length) {
           const filteredOut = (groupedTables.get(database) || []).length > 0;
-          children.appendChild(node("div", "explorerListEmpty", query ? "No matching objects" : (filteredOut ? "No objects match the type filters" : "No accessible tables or views")));
+          children.appendChild(listState("empty", query ? "No matching objects" : (filteredOut ? "No objects match the type filters" : "No accessible tables or views")));
         } else {
           const badges = new Map(items.map((table) => [table, treeBadge(table)]));
           const maxBytes = Math.max(0, ...[...badges.values()].map((badge) => Number(badge?.value) || 0));
@@ -2031,11 +2040,11 @@
           }
         }
         section.appendChild(children);
-        if (!loaded && !loading) queueMicrotask(() => void loadDatabaseTables(database));
+        if (!loaded && !loading && !model.databaseLoadErrors.has(database)) queueMicrotask(() => void loadDatabaseTables(database));
       }
       dom.explorerTableList.appendChild(section);
     }
-    if (!shown) dom.explorerTableList.appendChild(node("div", "explorerListEmpty", "No matching databases or objects"));
+    if (!shown) dom.explorerTableList.appendChild(listState("empty", "No matching databases or objects", null, { handle: searches.tree, input: dom.explorerSearchInput }));
     setSideMeta("explorerTreeMeta", format.countLabel(shown, "database"));
   }
 
@@ -2055,7 +2064,7 @@
     if (!hostId) return;
     model.loadingCatalog = true;
     setError(null);
-    if (dom.explorerRefreshButton) dom.explorerRefreshButton.disabled = true;
+    ns.uiState.busy(dom.explorerRefreshButton, true);
     renderTableList();
     try {
       const payload = await api.getExplorerCatalog(hostId, "", !!force);
@@ -2107,7 +2116,7 @@
       renderTableList();
     } finally {
       model.loadingCatalog = false;
-      if (dom.explorerRefreshButton) dom.explorerRefreshButton.disabled = false;
+      ns.uiState.busy(dom.explorerRefreshButton, false);
     }
   }
 
@@ -2462,8 +2471,8 @@
     // query once typing pauses (the one search delay) instead of once per
     // intermediate prefix.
     const graphSearch = util.debounce(() => graph?.searchFocus());
-    ns.search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
-    ns.search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
+    searches.tree = ns.search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
+    searches.functions = ns.search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
     dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
     // Function kind chips, like the tree's type chips: one kind at a time,
     // pressing the pressed chip again lists every function.

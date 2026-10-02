@@ -775,11 +775,8 @@
       }
       drawTimelines();
     }
-    let animationFrame = 0;
-    body.addEventListener("scroll", () => {
-      if (!virtual || animationFrame) return;
-      animationFrame = requestAnimationFrame(() => { animationFrame = 0; if (root.isConnected) mountRows(); });
-    }, { passive: true });
+    const scrollFrame = ns.util.rafOnce(() => { if (root.isConnected) mountRows(); });
+    body.addEventListener("scroll", () => { if (virtual) scrollFrame(); }, { passive: true });
     // Resizing changes the visible row count. Disconnect as soon as this view
     // is replaced; the observer must never retain an old profiling payload.
     const resize = typeof ResizeObserver === "function" && virtual ? new ResizeObserver(() => {
@@ -789,7 +786,7 @@
     if (resize) resize.observe(body);
     cleanupByContainer.set(container, () => {
       if (resize) resize.disconnect();
-      if (animationFrame) cancelAnimationFrame(animationFrame);
+      scrollFrame.cancel();
     });
 
     function drawTimelines() {

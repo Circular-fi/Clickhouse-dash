@@ -8295,15 +8295,6 @@ body {
   gap: 0.4rem;
   padding: 0 0.6rem 0.45rem;
 }
-.qlEmpty {
-  padding: 1.2rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-align: center;
-}
-.qlEmpty--error {
-  color: var(--danger);
-}
 .ql__foot {
   flex: 0 0 auto;
   padding: 0.45rem 0.75rem;

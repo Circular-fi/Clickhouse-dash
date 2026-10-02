@@ -38,7 +38,7 @@ def test_one_state_component_and_no_local_state_markup():
     state = read("src/static/app_ui_state.js")
     assert "ns.uiState = Object.freeze({ empty, error, loading, block, emptyHtml, errorHtml, loadingHtml, banner, busy, spinnerHtml, announce });" in state
     # Errors are alerts, loading is a busy status; a banner with Retry handles its own click.
-    assert '''const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : "";''' in state
+    assert '''const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : options.role === "status" ? ' role="status"' : "";''' in state
     assert 'container.setAttribute("role", level === "info" ? "status" : "alert");' in state
     assert 'el.setAttribute("aria-busy", "true");' in state
     css = read("src/static/style.css")
@@ -58,6 +58,24 @@ def test_one_state_component_and_no_local_state_markup():
     for gone in (".tracesEmpty", ".tracesError", ".errorBanner", ".logsEmpty", ".metricsEmpty", ".traceSvcEmpty", ".traceMap__message",
                  ".explorerEmptyState", ".traceButtonSpinner", "traceSpin", "metricsSpin", "traceDeltaSpin", "traceSpanSpin"):
         assert gone not in css, gone
+    # The Explorer tree and lists, Server operations and the query library use it too.
+    explorer = read("src/static/app_explorer.js")
+    assert 'return ns.uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });' in explorer
+    assert 'label: "Clear the search"' in explorer
+    # A failed database load waits for Retry: no reload on every render.
+    assert "if (!loaded && !loading && !model.databaseLoadErrors.has(database)) queueMicrotask(() => void loadDatabaseTables(database));" in explorer
+    assert "if (!error && !model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);" in explorer
+    assert 'listState("error", "Unable to load tables", () => void loadDatabaseTables(database, true))' in explorer
+    ops = read("src/static/app_explorer_ops.js")
+    assert "ns.uiState.busy(view.body, view.loading);" in ops and 'body.setAttribute("aria-live"' not in ops
+    library = read("src/static/app_query_library.js")
+    assert "retry: () => void reloadLibrary()" in library and "retry: () => void loadHistory()" in library
+    assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_ui.js")
+    for gone in ("explorerListEmpty", "explorerOpsView__error", "qlEmpty", "qlNotice--error", "explorerUnavailable"):
+        assert gone not in code and gone not in css, gone
+    # A refresh button is busy (spinner, aria-busy) while it reloads.
+    assert "ns.uiState.busy(dom.explorerRefreshButton, true);" in explorer
+    assert ".explorerRefreshButton.is-loading .refreshGlyph { display: none; }" in css
     # No jargon in the empty states.
     for jargon in ("runner ACL", "ACL boundary", "Map column", "ResourceAttributes[", "db.query.text / db.statement"):
         assert jargon not in code, jargon
@@ -148,3 +166,17 @@ def test_one_html_escaper():
             continue
         assert not re.search(r"""replace\(/&/g, ["']&amp;["']\)""", text), name
         assert not re.search(r"""\[&<>"']/g""", text), name
+
+
+def test_frame_coalescing_uses_util_raf_once():
+    """One animation-frame coalescer (util.rafOnce): no hand-written
+    `if (!frame) frame = requestAnimationFrame(...)` in the migrated modules."""
+    code = sources()
+    for name, needle in (("app_logs.js", "util.rafOnce(() => renderWindow())"), ("app_traces.js", "util.rafOnce(() => renderWaterfall())"),
+                         ("app_traces.js", "util.rafOnce(() => updateVirtualWindow())"), ("app_trace_views.js", "ns.util.rafOnce(() => markFocusedSpan())"),
+                         ("app_trace_spans.js", "ns.util.rafOnce(() => updateWindow())"), ("app_chart_core.js", "ns.util.rafOnce(() => drawOverlay())"),
+                         ("app_chart_core.js", "ns.util.rafOnce((p) => updateBox(p))"), ("app_pipeline_viewer.js", "ns.util.rafOnce(() => { if (root.isConnected) mountRows(); })")):
+        assert needle in code[name], (name, needle)
+    for name in ("app_logs.js", "app_traces.js", "app_trace_views.js", "app_trace_spans.js", "app_chart_core.js", "app_pipeline_viewer.js"):
+        assert not re.search(r"if \(!\w+\) \w+ = requestAnimationFrame\(\(\) => \{ \w+ = 0;", code[name]), name
+        assert not re.search(r"= requestAnimationFrame\(\(\) => \{\s*\w+(Frame|Raf) = 0;", code[name]), name

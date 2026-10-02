@@ -1568,11 +1568,9 @@
       openEventPopover(marker);
     }, true);
     if (waterfall && typeof MutationObserver === "function") {
-      let queued = false;
+      const mark = ns.util.rafOnce(() => markFocusedSpan());
       new MutationObserver(() => {
-        if (queued || !ctx.model.focusedSpanId) return;
-        queued = true;
-        requestAnimationFrame(() => { queued = false; markFocusedSpan(); });
+        if (ctx.model.focusedSpanId) mark();
       }).observe(waterfall, { childList: true, subtree: true });
     }
     const detail = byId("traceDetail");

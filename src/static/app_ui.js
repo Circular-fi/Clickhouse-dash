@@ -592,7 +592,7 @@
     return loadQueryLibrary().then(fn).catch((err) => {
       console.error(err);
       for (const view of [dom.queryLibraryViewSaved, dom.queryLibraryViewHistory]) {
-        if (view && !view.dataset.rendered) view.innerHTML = '<div class="qlEmpty qlEmpty--error">The query library could not be loaded.</div>';
+        if (view && !view.dataset.rendered) ns.uiState.error(view, { body: "The query library could not be loaded.", compact: true, retry: () => withQueryLibrary(fn) });
       }
     });
   }
@@ -639,8 +639,8 @@
     // The two views; app_query_library.js adds the preview pane beside them.
     parts.body.classList.add("queryLibraryDialog__body");
     parts.body.innerHTML = `
-      <div id="queryLibraryViewSaved" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved"><div class="qlEmpty">Loading the library\u2026</div></div>
-      <div id="queryLibraryViewHistory" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden><div class="qlEmpty">Loading the history\u2026</div></div>`;
+      <div id="queryLibraryViewSaved" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved">${ns.uiState.loadingHtml({ label: "Loading the library\u2026", compact: true })}</div>
+      <div id="queryLibraryViewHistory" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabHistory" hidden>${ns.uiState.loadingHtml({ label: "Loading the history\u2026", compact: true })}</div>`;
     for (const id of ["queryLibraryMenu", "queryLibraryClose", "queryLibraryTabSaved", "queryLibraryTabHistory", "queryLibraryViewSaved", "queryLibraryViewHistory"]) {
       dom[id] = document.getElementById(id);
     }

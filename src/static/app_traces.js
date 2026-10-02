@@ -967,19 +967,18 @@
   }
 
   let resultsResizeObserver = null;
-  let resultsResizeFrame = 0;
+  const resultsResizeFrame = util.rafOnce(() => {
+    hideServicePopover();
+    layoutServicePills(dom.tracesResults);
+  });
   function watchResultsWidth() {
     if (resultsResizeObserver || typeof ResizeObserver !== "function" || !dom.tracesResults) return;
     let lastWidth = -1;
     resultsResizeObserver = new ResizeObserver((entries) => {
       const width = Math.round(entries[entries.length - 1]?.contentRect?.width || 0);
-      if (width === lastWidth || resultsResizeFrame) return;
+      if (width === lastWidth || resultsResizeFrame.pending()) return;
       lastWidth = width;
-      resultsResizeFrame = requestAnimationFrame(() => {
-        resultsResizeFrame = 0;
-        hideServicePopover();
-        layoutServicePills(dom.tracesResults);
-      });
+      resultsResizeFrame();
     });
     resultsResizeObserver.observe(dom.tracesResults);
   }
@@ -1417,14 +1416,14 @@
   }
 
   // Zoom / pan of the waterfall (overview selection, timeline drag, keys).
-  let waterfallFrame = 0;
+  // One deferred waterfall render per frame (overview drags).
+  const waterfallFrame = util.rafOnce(() => renderWaterfall());
   function setTraceViewRange(range, { deferred = false } = {}) {
     const [lo, hi] = viewRangeOf(range);
     model.traceViewRange = [lo, Math.min(1, hi)];
     syncOverviewSelection();
     if (!deferred) { renderWaterfall(); return; }
-    if (waterfallFrame) return;
-    waterfallFrame = requestAnimationFrame(() => { waterfallFrame = 0; renderWaterfall(); });
+    waterfallFrame();
   }
 
   function renderTraceOverview(spans, bounds) {
@@ -1754,7 +1753,7 @@
   const inspectorHeights = new Map();
   const logsRowHeights = new Map();
   let virtualWaterfall = null;
-  let virtualFrame = 0;
+  const virtualFrame = util.rafOnce(() => updateVirtualWindow());
   let inspectorObserver = null;
 
   function virtualItemHeight(node) {
@@ -1847,8 +1846,7 @@
   }
 
   function scheduleVirtualWindow() {
-    if (!virtualWaterfall || virtualFrame) return;
-    virtualFrame = requestAnimationFrame(() => { virtualFrame = 0; updateVirtualWindow(); });
+    if (virtualWaterfall) virtualFrame();
   }
 
   function criticalPathHtml(cache, node, collapsed, ctx) {
@@ -3157,7 +3155,7 @@
       ],
     };
     // A missing or malformed ID is a state of the data (status); a failed load is an error (alert).
-    return missing || invalid ? ns.uiState.emptyHtml(options) : ns.uiState.errorHtml(options);
+    return missing || invalid ? ns.uiState.emptyHtml({ ...options, role: "status" }) : ns.uiState.errorHtml(options);
   }
 
   function onUnavailableClick(event) {

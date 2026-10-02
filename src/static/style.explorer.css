@@ -1992,12 +1992,6 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput,
   overflow: auto;
   padding: 6px;
 }
-.explorerListEmpty,
-.explorerUnavailable {
-  padding: 18px;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
 .explorerMiniHealth,
 .explorerHealthBadge {
   border-radius: var(--radiusPill);
@@ -3945,6 +3939,7 @@ html.chdash-page-select-hidden .pageSelect {
   opacity: 0.78;
   transition: opacity 120ms ease;
 }
+.explorerRefreshButton.is-loading .refreshGlyph { display: none; }
 .explorerTableSettings__button:hover .editorAutocompleteControl__gear,
 .explorerTableSettings.themeSelect--open .editorAutocompleteControl__gear,
 .explorerRefreshButton:hover:not(:disabled) .refreshGlyph,
@@ -6814,15 +6809,6 @@ body {
   display: grid;
   gap: 0.4rem;
   padding: 0 0.6rem 0.45rem;
-}
-.qlEmpty {
-  padding: 1.2rem 0.75rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-  text-align: center;
-}
-.qlEmpty--error {
-  color: var(--danger);
 }
 .ql__foot {
   flex: 0 0 auto;

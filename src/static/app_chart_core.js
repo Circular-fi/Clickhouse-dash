@@ -468,7 +468,7 @@
     let sizeW = 0;
     let dpr = window.devicePixelRatio || 1;
     let drawRaf = 0;
-    let overRaf = 0;
+    const overlayFrame = ns.util.rafOnce(() => drawOverlay());
     let released = false;
     let pendingDraw = false;
     let destroyed = false;
@@ -1155,7 +1155,7 @@
     }
 
     function scheduleOverlay() {
-      if (!overRaf) overRaf = requestAnimationFrame(() => { overRaf = 0; drawOverlay(); });
+      overlayFrame();
     }
 
     // The cursor is DOM, like uPlot's: dashed lines, series points and the
@@ -1399,7 +1399,13 @@
     }
 
     let pendingMove = null;
-    let moveRaf = 0;
+    const moveFrame = ns.util.rafOnce(() => {
+      if (!pendingMove) return;
+      moveCursor(pendingMove);
+      // Already in a frame: the crosshair and readouts move with the
+      // tooltip now, not one frame behind it.
+      if (overlayFrame.pending()) { overlayFrame.cancel(); drawOverlay(); }
+    });
     // The selection follows every move (cheap); the cursor redraws once per frame.
     const trackDrag = (p) => {
       if (!drag || !layout) return;
@@ -1409,16 +1415,7 @@
     overCanvas.addEventListener("pointermove", (ev) => {
       pendingMove = localPoint(ev);
       trackDrag(pendingMove);
-      if (!moveRaf) {
-        moveRaf = requestAnimationFrame(() => {
-          moveRaf = 0;
-          if (!pendingMove) return;
-          moveCursor(pendingMove);
-          // Already in a frame: the crosshair and readouts move with the
-          // tooltip now, not one frame behind it.
-          if (overRaf) { cancelAnimationFrame(overRaf); overRaf = 0; drawOverlay(); }
-        });
-      }
+      moveFrame();
     });
     overCanvas.addEventListener("pointerleave", () => {
       if (drag) return;
@@ -1925,8 +1922,8 @@
       if (dprQuery) dprQuery.removeEventListener("change", onDpr);
       document.removeEventListener("keydown", onKey, true);
       if (drawRaf) cancelAnimationFrame(drawRaf);
-      if (overRaf) cancelAnimationFrame(overRaf);
-      if (moveRaf) cancelAnimationFrame(moveRaf);
+      overlayFrame.cancel();
+      moveFrame.cancel();
       destroyExtras();
       release();
       root.remove();
@@ -1990,7 +1987,7 @@
     const pickPoints = new Map(); // series id -> { index, px, py, r } arrays of the last draw
     let pickHit = null;
     let boxDrag = null;
-    let boxRaf = 0;
+    const boxFrame = ns.util.rafOnce((p) => updateBox(p));
     let press = null;
     if (opts.keyboard === false) overCanvas.removeAttribute("tabindex");
     if (opts.brush === "xy") overCanvas.style.touchAction = "none";
@@ -2335,7 +2332,7 @@
     overCanvas.addEventListener("pointermove", (ev) => {
       if (!boxDrag) return;
       const p = localPoint(ev);
-      if (!boxRaf) boxRaf = requestAnimationFrame(() => { boxRaf = 0; updateBox(p); });
+      boxFrame(p);
     });
     overCanvas.addEventListener("pointerup", (ev) => {
       if (!boxDrag) return;
@@ -2406,7 +2403,7 @@
 
     function destroyExtras() {
       document.removeEventListener("keydown", onBoxKey, true);
-      if (boxRaf) cancelAnimationFrame(boxRaf);
+      boxFrame.cancel();
       cancelBox();
     }
 

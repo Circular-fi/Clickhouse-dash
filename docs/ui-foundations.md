@@ -266,8 +266,8 @@ once in the "Page shell" block of `style.css`:
 
 ## Layers, popovers and panels
 
-Three modules load right after `app_dom.js` on every page (the `app.js`
-file list and `COMMON_MODULES` of `app_observability.js`):
+Three modules load right after `app_dom.js` on every page (the `common`
+list of `src/static/modules.json`):
 
 - `ns.layers` (`app_ui_layers.js`): the one stack of what is open over the
   page. `ns.layers.push({ el, onDismiss, modal, docked, trapFocus, opener })`
@@ -297,8 +297,8 @@ file list and `COMMON_MODULES` of `app_observability.js`):
 ## Components: tabs, segmented controls and menus
 
 Every navigation or choice control is one of three components. Each loads
-on every page (the file list of `app.js` and `COMMON_MODULES` of
-`app_observability.js`, after `app_dom.js` and before `app_ui.js`) and keeps
+on every page (the `common` list of `src/static/modules.json`, after
+`app_dom.js` and before `app_ui.js`) and keeps
 its CSS in one `Components: <name>` block of `style.css`.
 `tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a
 family comes back.
@@ -390,3 +390,41 @@ The entry points:
 Every label sits inside the control, for example `Status · ALL`,
 `Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The graph
 depth stepper reads `- Depth 1 +`. There is no outside label.
+
+## Page infrastructure
+
+One way to do each of these; `tests/harness/test_ui_infrastructure_contract.py`
+and `test_page_manifest_contract.py` fail on a local copy.
+
+- **Modules**: `src/static/modules.json` lists every page's modules
+  (`common` first: shared helpers and `app_ui_*` components, then the page's
+  `modules`, its `lazy` groups and the Observability `views`).
+  `app_loader.js` (`ns.loader`: `load`, `loadGroup`, `url`) loads them; no
+  module names a script or inserts one. After editing it or the header
+  partial `src/shell/header.html`, run `python3 tools/build_page_css.py`: it
+  writes the shells' `shell:header` and `shell:scripts` regions, then the
+  page stylesheets.
+- **States** (`ns.uiState`, `app_ui_state.js`): `empty`, `error` and
+  `loading` blocks (and `emptyHtml` / `errorHtml` / `loadingHtml`, `block`)
+  with a title, a sentence and actions (a way out: Zoom out, Clear filters,
+  jump to data; Retry on an error); `banner` (the error strip, role alert,
+  Retry; `verbatim` for a server message); `busy(el, on)` (`is-loading`,
+  `aria-busy`, a button's spinner); `announce(text)` (the one polite live
+  region). No pane is `aria-live`; hover readouts are `role="tooltip"`.
+  Lists and trees (the Explorer tree, the query library) use `compact`
+  blocks; a search that finds nothing offers "Clear the search"; a refresh
+  button is `busy` while it reloads.
+- **Feature flags** (`ns.features`, `app_state.js`): `get(path, fallback)`,
+  `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the server's defaults
+  table (`server.hpp`); `fallback` applies only before `/api/version`
+  answers.
+- **Requests** (`app_api.js`): every call goes through `request()` and takes
+  a last `{ signal }`. `util.latest(key)` aborts the previous request for
+  `key`: check `isCurrent()` before using an answer or showing an error.
+- **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`):
+  never throws; the fallback's type keeps the stored format of the key.
+- **Search fields** (`ns.search.bind`, `ns.search.within`): the one delay
+  `util.SEARCH_DEBOUNCE_MS` (200 ms), Enter and Escape apply at once, one
+  look `.uiSearch` (`--compact` in dense bars).
+- **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`),
+  `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.

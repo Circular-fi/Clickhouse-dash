@@ -408,7 +408,8 @@
 
   function renderStatus() {
     if (!view) return;
-    view.refresh.disabled = !!view.loading;
+    ns.uiState.busy(view.refresh, view.loading);
+    ns.uiState.busy(view.body, view.loading);
     const bits = [];
     if (view.loading && !view.activity) bits.push("Loading\u2026");
     else if (view.activity?.generated_at_ms) {
@@ -425,13 +426,13 @@
     const body = view.body;
     body.replaceChildren();
     if (view.activityError) {
-      body.appendChild(node("div", "explorerOpsView__error", String(view.activityError.message || "Server operations are unavailable.")));
+      body.appendChild(ns.uiState.banner(node("div", ""), { message: String(view.activityError.message || "Server operations are unavailable."), retry: () => void load(true), inset: true }));
     }
     const activity = view.activity;
     if (!activity) {
       const keeper = renderKeeper();
       if (keeper) body.appendChild(keeper);
-      if (!view.activityError) body.appendChild(node("div", "explorerOpsSection__empty", view.loading ? "Loading server operations\u2026" : ""));
+      if (!view.activityError && view.loading) body.appendChild(ns.uiState.block("loading", { label: "Loading server operations\u2026", compact: true }));
       return;
     }
     const unavailable = new Set(activity.unavailable_sections || []);
@@ -482,8 +483,8 @@
     refresh.innerHTML = '<svg class="refreshGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.25A5.25 5.25 0 1 0 13.1 10.5"/><path d="M13 2.75v3.1h-3.1"/></svg>';
     actions.append(option, refresh);
     header.append(heading, actions);
+    // Not a live region: the auto-refresh would read the tables again every time.
     const body = node("div", "explorerOpsView__body");
-    body.setAttribute("aria-live", "polite");
     root.append(header, body);
     container.replaceChildren(root);
     view = {
