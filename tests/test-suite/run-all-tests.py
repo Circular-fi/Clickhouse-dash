@@ -207,8 +207,9 @@ def main() -> int:
     # The default is the full official suite: PW_ALL_PROJECTS=1 keeps every test of
     # the listed specs on every viewport the phase selects, whatever the defaults of
     # playwright.config.js. Quick mode (--quick or CHDASH_TESTS_QUICK=1) runs every
-    # test at least once: the design phase on desktop-1440 only and each
-    # performance case once (tests/README.md, "Running tests quickly").
+    # test at least once: the design phase runs on desktop-1440 only. The
+    # performance phase takes seconds and stays as is: fewer runs or no warm-up
+    # would measure a cold server, not the budgets (tests/README.md, "Running tests quickly").
     quick = '--quick' in sys.argv[1:] or os.environ.get('CHDASH_TESTS_QUICK') == '1'
     shutil.rmtree(RUN_ROOT, ignore_errors=True)
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
@@ -266,9 +267,6 @@ def main() -> int:
     performance_dir = RUN_ROOT / 'performance'
     perf_env = base_env.copy()
     perf_env['PERF_ARTIFACTS_DIR'] = str(performance_dir)
-    if quick:
-        perf_env['PERF_RUNS'] = '1'
-        perf_env['PERF_WARMUP'] = '0'
     statuses['performance'] = run_phase(
         'performance',
         [sys.executable, str(ROOT / 'performance' / 'run.py')],
