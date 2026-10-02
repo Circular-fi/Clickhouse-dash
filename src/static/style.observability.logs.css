@@ -3107,7 +3107,7 @@ html[data-theme="light"] {
   flex: 0 0 auto;
   margin: 8px 12px 0;
 }
-.logsHistogram__chart { position: relative; z-index: 2; height: 120px; }
+.logsHistogram__chart { position: relative; z-index: 2; min-height: 120px; }
 .logsHistogram__chart .chartCore__plot { overflow: visible; }
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; }
 .logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity 120ms ease; }
@@ -4735,7 +4735,7 @@ button.chip__op:hover {
 .logsChips.chips {
   padding: 6px 12px 0;
 }
-.logsChip {
+.chip.logsChip {
   max-width: 420px;
 }
 .chips__clear {
