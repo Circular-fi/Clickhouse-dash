@@ -505,10 +505,11 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(explorerResults).toContainText('WX-');
   await expect(explorerResults).toContainText(/Paris|Reykjavik|Lisbon/);
   await expect(explorerResults).toContainText('synthetic-weather');
-  // Row count + limit, column type sub-header, short timestamps.
+  // Row count + limit, column type sub-header, raw timestamps.
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)');
   await expect(explorerResults.locator('thead th[data-type="DateTime64(3)"]')).toHaveText('observed_at');
-  await expect(explorerResults.locator('tbody tr').first().locator('td').nth(1)).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/);
+  // Preview cells are result data: the DateTime64 stays as the API sent it (decision 45).
+  await expect(explorerResults.locator('tbody tr').first().locator('td').nth(1)).toHaveText(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/);
   await page.locator('.explorerSegmented__option', { hasText: /^50$/ }).click();
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('50 rows (LIMIT 50)', { timeout: 12_000 });
   await expect(explorerResults.locator('tbody tr')).toHaveCount(50);
