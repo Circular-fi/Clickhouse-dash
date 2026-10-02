@@ -157,6 +157,55 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => { try { if (!sessionStorage.getItem('__traceViewsInit')) { localStorage.removeItem('chdash.traceView'); sessionStorage.setItem('__traceViewsInit', '1'); } } catch (_) {} });
 });
 
+// The sticky waterfall head (z-index --z-panel) covers every layer of the
+// rows (bars, markers), and a row scrolled into view lands below it
+// (scroll-padding-top), so a row half under the head stays clickable.
+test.describe('waterfall head at 1280 px', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('a span row under the sticky waterfall head stays clickable', async ({ page }) => {
+    await openTrace(page);
+    await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });
+    // Three open inspectors make the waterfall taller than its pane.
+    for (const span of [ID.A, ID.B, ID.C]) {
+      await openSpan(page, span);
+      await expect(inspector(page, span)).toBeVisible();
+    }
+    const id = await page.evaluate(() => {
+      const scroller = document.getElementById('traceWaterfall');
+      const rows = [...scroller.querySelectorAll('.traceSpanRow[data-span-id]')];
+      // The first row past the visible part: it needs a scroll.
+      const bottom = scroller.getBoundingClientRect().bottom;
+      return rows.find((el) => el.getBoundingClientRect().top > bottom)?.getAttribute('data-span-id') || '';
+    });
+    expect(id).not.toBe('');
+    // Half under the head: the head is on top there, not the row.
+    const covered = await page.evaluate((spanId) => {
+      const scroller = document.getElementById('traceWaterfall');
+      const head = scroller.querySelector('.traceWaterfallHead');
+      const target = scroller.querySelector(`.traceSpanRow[data-span-id="${spanId}"]`);
+      scroller.scrollTop += target.getBoundingClientRect().top - head.getBoundingClientRect().bottom + target.offsetHeight / 2 - target.offsetHeight;
+      const h = head.getBoundingClientRect();
+      const points = [0.2, 0.5, 0.8].map((x) => document.elementFromPoint(h.left + h.width * x, h.bottom - 4));
+      return points.every((el) => head.contains(el));
+    }, id);
+    expect(covered).toBe(true);
+    // A click on it lands on the row: its inspector opens.
+    await openSpan(page, id);
+    await expect(inspector(page, id)).toBeVisible();
+    // Scrolled into view, a row sits below the head.
+    const landed = await page.evaluate((spanId) => {
+      const scroller = document.getElementById('traceWaterfall');
+      const head = scroller.querySelector('.traceWaterfallHead');
+      const target = scroller.querySelector(`.traceSpanRow[data-span-id="${spanId}"]`);
+      scroller.scrollTop = scroller.scrollHeight;
+      target.scrollIntoView({ block: 'start' });
+      return Math.round(target.getBoundingClientRect().top - head.getBoundingClientRect().bottom);
+    }, ID.A);
+    expect(landed).toBeGreaterThanOrEqual(0);
+  });
+});
+
 test('span inspector: attribute table layout, typed values, JSON trees and per-row copy', async ({ page }) => {
   await openTrace(page);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });

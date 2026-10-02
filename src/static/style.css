@@ -9335,7 +9335,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceWaterfallRuler { flex: 0 0 auto; height: 32px; display: grid; grid-template-columns: minmax(220px, 34%) minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--border); color: var(--muted); font-size: .64rem; font-weight: 700; }
 .traceWaterfallRuler span { padding: 0 9px; }
 .traceWaterfallRuler span + span { border-left: 1px solid var(--border); }
-.traceWaterfall { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; }
+/* scroll-padding-top: a row scrolled into view (keyboard focus, a click on a
+   row half under it) lands below the sticky head, not under it. */
+.traceWaterfall { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; scroll-padding-top: 36px; }
 .traceSpanRow {
   appearance: none;
   width: 100%;
@@ -9682,7 +9684,9 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceWaterfallHead {
   position: sticky;
   top: 0;
-  z-index: 4;
+  /* Above every layer of the rows it covers (bars, critical path, clipped
+     edges, event and log markers stack up to 5). */
+  z-index: var(--z-panel);
   height: 34px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
@@ -11066,7 +11070,7 @@ html.chdash-has-initial-editor-height .editorWrap.explorerDdlWrap,
 .traceWaterfallHead { position: sticky; }
 .traceWaterfallResizer {
   position: absolute;
-  z-index: 8;
+  z-index: var(--z-panel);
   top: 0;
   bottom: 0;
   left: var(--trace-label-width);
@@ -13522,6 +13526,9 @@ html[data-theme="light"] {
 .traceKv__v--null { color: var(--json-null); font-style: italic; }
 .traceKv__listSep { color: var(--muted); }
 .traceKv__actions {
+  /* Positioned so it stays above a JSON tree's lines that run under it. */
+  position: relative;
+  z-index: var(--z-raised);
   float: right;
   display: inline-flex;
   gap: 3px;

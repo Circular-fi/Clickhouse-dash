@@ -1961,7 +1961,7 @@ html.chdash-page-select-hidden .pageSelect {
 .traceDetailHeader__title { flex: 1 1 auto; }
 .traceDetailHeader__stats { flex: 0 0 auto; display: flex !important; grid-auto-flow: column; gap: 6px !important; }
 .traceDetailHeader__stats span { padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; }
-.traceWaterfall { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; }
+.traceWaterfall { min-height: 0; flex: 1 1 auto; overflow: auto; scrollbar-gutter: stable; scroll-padding-top: 36px; }
 .traceSpanRow {
   appearance: none;
   width: 100%;
@@ -2132,7 +2132,9 @@ html.chdash-page-select-hidden .pageSelect {
 .traceWaterfallHead {
   position: sticky;
   top: 0;
-  z-index: 4;
+  /* Above every layer of the rows it covers (bars, critical path, clipped
+     edges, event and log markers stack up to 5). */
+  z-index: var(--z-panel);
   height: 34px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
@@ -3280,7 +3282,7 @@ html.chdash-page-select-hidden .pageSelect {
 .traceWaterfallHead { position: sticky; }
 .traceWaterfallResizer {
   position: absolute;
-  z-index: 8;
+  z-index: var(--z-panel);
   top: 0;
   bottom: 0;
   left: var(--trace-label-width);
@@ -5359,6 +5361,9 @@ html[data-theme="light"] {
 .traceKv__v--null { color: var(--json-null); font-style: italic; }
 .traceKv__listSep { color: var(--muted); }
 .traceKv__actions {
+  /* Positioned so it stays above a JSON tree's lines that run under it. */
+  position: relative;
+  z-index: var(--z-raised);
   float: right;
   display: inline-flex;
   gap: 3px;
