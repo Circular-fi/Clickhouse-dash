@@ -412,7 +412,7 @@ test('observability: with one view the row keeps only what it has to show', asyn
   });
   await page.goto('/observability/traces');
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
-  await expect.poll(() => page.evaluate(() => window.ChDash?.observability?.featuresKnown === true)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.ChDash?.features?.known?.() === true)).toBe(true);
   // Traces alone: no view tabs, no separator, its own tabs on the row.
   await expect(page.locator('#obsTabs')).toBeHidden();
   await expect(page.locator('#obsNav .obsNav__sep')).toBeHidden();
@@ -421,7 +421,7 @@ test('observability: with one view the row keeps only what it has to show', asyn
   only = 'logs';
   await page.goto('/observability/logs');
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'logs');
-  await expect.poll(() => page.evaluate(() => window.ChDash?.observability?.featuresKnown === true)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.ChDash?.features?.known?.() === true)).toBe(true);
   await expect(page.locator('#obsNav')).toBeHidden();
   await expect(page.locator('#logsForm')).toBeVisible();
 });

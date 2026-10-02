@@ -3222,7 +3222,18 @@
     else ns.traceSpans?.onShown?.();
   }
 
-  async function reloadForHost() {
+  // The host and the feature flags often arrive together (the first load):
+  // both ask for a reload, which runs once per host.
+  let hostReload = null;
+  function reloadForHost() {
+    const host = currentHost();
+    if (hostReload && hostReload.host === host) return hostReload.promise;
+    const promise = reloadForHostNow().finally(() => { if (hostReload?.promise === promise) hostReload = null; });
+    hostReload = { host, promise };
+    return promise;
+  }
+
+  async function reloadForHostNow() {
     model.meta = null;
     model.traces = [];
     model.searched = false;

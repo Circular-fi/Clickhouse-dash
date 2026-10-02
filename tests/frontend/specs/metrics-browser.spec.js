@@ -90,12 +90,11 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await page.locator('#metricsSearch').fill('queue.dep');
   const items = catalog.locator('.metricsCatalog__metric');
   await expect(items.first()).toBeVisible();
-  const names = await items.evaluateAll((els) => [...new Set(els.map((el) => el.dataset.metric))]);
-  expect(names).toEqual(['queue.depth']);
+  // The search applies after the one typing delay (ns.search, 200 ms).
+  await expect.poll(() => items.evaluateAll((els) => [...new Set(els.map((el) => el.dataset.metric))])).toEqual(['queue.depth']);
   await expect(catalog.locator('mark').first()).toHaveText('queue.dep');
   await page.locator('#metricsSearch').fill('api_serv');
-  const services = await catalog.locator('[data-service-toggle]').evaluateAll((els) => els.map((el) => el.dataset.serviceToggle));
-  expect(services).toEqual(['api_service']);
+  await expect.poll(() => catalog.locator('[data-service-toggle]').evaluateAll((els) => els.map((el) => el.dataset.serviceToggle))).toEqual(['api_service']);
   await page.locator('#metricsSearch').fill('no-such-metric-xyz');
   await expect(catalog).toContainText('No metric matches');
 });
