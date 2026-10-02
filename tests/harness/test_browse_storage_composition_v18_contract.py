@@ -14,7 +14,7 @@ def test_storage_composition_reconciles_to_bytes_on_disk() -> None:
     assert "wideBytes = baseBytes * (rawWide / rawBase);" in ui
     assert "compactBytes = baseBytes - wideBytes;" in ui
     assert "Math.max(0, 100 - consumed)" in ui
-    assert 'bar.appendChild(node("span", "explorerStorageStackedBar__unknown", "unknown"));' in ui
+    assert 'bar.appendChild(h("span", { class: "explorerStorageStackedBar__unknown" }, "unknown"));' in ui
 
 
 def test_storage_composition_uses_parent_part_on_disk_split() -> None:

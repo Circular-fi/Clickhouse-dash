@@ -38,7 +38,7 @@ def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equi
     assert 'api.formatSqls(state.selectedHostId, [String(sql || "")])' in data
     assert 'await openFormattedSqlInQuery(buildPreviewSelectSql(detail));' in data
     assert 'finalizeAggregation() used so Explorer can display the value of a single row' in data
-    assert 'node("div", "explorerFinalizeInfo__tooltip", text)' in data
+    assert 'h("div", { class: "explorerFinalizeInfo__tooltip" }, text)' in data
 
 
 def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:

@@ -64,7 +64,7 @@ def test_lineage_tab_has_one_title_per_direction() -> None:
     ui = read("src/static/app_explorer_detail.js")
     lineage = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
     assert 'sectionTitle("Lineage")' not in ui
-    assert 'node("h4", "explorerLineage__title", relation === "upstream" ? "Upstream" : "Downstream")' in lineage
+    assert 'h("h4", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream")' in lineage
 
 
 def test_storage_composition_legend_omits_zero_or_nonexistent_categories() -> None:

@@ -18,6 +18,7 @@
   const ns = window.ChDash;
   if (!ns || !ns.traceTabs || !ns.graphKit) return;
   const kit = ns.graphKit;
+  const { h } = ns;
 
   // HyperDX's error-rate buckets (ERROR_RATE_ELEVATED / ERROR_RATE_HIGH).
   const ERROR_ELEVATED = 0.01;
@@ -614,7 +615,7 @@
     const target = map.selected;
     if (!target || !map.layout || !map.data) { closePanel(); return; }
     const onClose = () => { closePanel(); canvas()?.focus?.({ preventScroll: true }); };
-    const body = kit.el("div", "graphKitPanel__body");
+    const body = h("div", { class: "graphKitPanel__body" });
     if (target.kind === "node") {
       const item = map.layout.items.get(target.id);
       const node = item?.node?.node;

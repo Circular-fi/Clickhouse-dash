@@ -25,7 +25,7 @@ def test_dialog_is_a_native_modal_with_backdrop_escape_and_focus_return():
     dialog = read("src/static/app_ui_dialog.js")
     assert "ns.dialog = { shell, bind, open, confirm, host };" in dialog
     assert "dialog.showModal();" in dialog
-    assert 'el("dialog", `uiDialog uiDialog--${size}' in dialog
+    assert 'h("dialog", { class: `uiDialog uiDialog--${size}' in dialog
     # Escape (cancel), backdrop click, focus in on open and back on close.
     assert 'dialog.addEventListener("cancel", (ev) => {' in dialog
     assert "const backdrop = pressedBackdrop && ev.target === dialog;" in dialog
@@ -55,7 +55,7 @@ def test_library_prompts_use_the_shared_dialog():
     lib = read("src/static/app_query_library.js")
     assert "return ns.dialog.open({" in lib
     assert "return ns.dialog.confirm({ title, message, confirmLabel, danger, className: \"qlDialog\" });" in lib
-    assert "showModal" not in lib and 'el("dialog"' not in lib
+    assert "showModal" not in lib and 'h("dialog"' not in lib
     # Import asks first, like the deletes.
     body = lib[lib.index("async function importBrowserQueries() {"):lib.index("// ------------------------------------------------------------ library view")]
     assert body.index("await confirmDialog({") < body.index("ctl.adapter.importLibrary(payload)")

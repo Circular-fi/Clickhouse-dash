@@ -43,14 +43,14 @@ def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> Non
     assert 'item.percent == null ? DASH : percentText(item.percent)' in ui
     assert 'ns.results?.createStaticResultTable?.({' in ui
     # The composition bar keeps an explicit unknown state.
-    assert '"explorerStorageStackedBar__unknown", "unknown"' in ui
+    assert '{ class: "explorerStorageStackedBar__unknown" }, "unknown"' in ui
 
 
 def test_lineage_has_one_normalized_two_direction_layout() -> None:
     ui = read("src/static/app_explorer_detail.js")
     css = read("src/static/style.css")
     deps = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
-    assert 'const matrix = node("div", "explorerDependencyMatrix explorerLineage");' in deps
+    assert 'const matrix = h("div", { class: "explorerDependencyMatrix explorerLineage" });' in deps
     assert 'for (const relation of ["upstream", "downstream"])' in deps
     assert 'if (!items.length) list.appendChild(emptyNote(' in deps
     assert ".explorerDependencyMatrix" in css

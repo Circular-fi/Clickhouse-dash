@@ -20,7 +20,7 @@ def test_storage_tab_starts_with_the_composition_card_without_key_value_lists() 
 def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> None:
     ui = read("src/static/app_explorer_detail.js")
     assert "if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return null;" in ui
-    assert 'bar.appendChild(node("span", "explorerStorageStackedBar__unknown", "unknown"));' in ui
+    assert 'bar.appendChild(h("span", { class: "explorerStorageStackedBar__unknown" }, "unknown"));' in ui
     # The Share tile exists only when both byte totals are known and non-zero.
     assert "footprint > 0 && dbBytes != null && dbBytes > 0" in ui
     for label in ["Wide", "Compact", "Projections", "Indexes"]:
@@ -66,7 +66,7 @@ def test_storage_and_operations_are_separate_tabs_of_collapsible_sections() -> N
     # Sections with data first, then one muted line naming the empty ones.
     render = ui[ui.index("function renderSections") : ui.index("function objectType")]
     assert "const shown = sections.filter((item) => item && item.hasData);" in render
-    assert 'node("div", "explorerIdleLine")' in render
+    assert 'h("div", { class: "explorerIdleLine" }' in render
 
 
 def test_structure_zero_is_known_only_after_successful_metadata_queries() -> None:

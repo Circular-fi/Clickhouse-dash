@@ -9,7 +9,7 @@
   const ns = window.ChDash;
   if (!ns || !ns.graphKit) return;
 
-  const { dom, state, api } = ns;
+  const { dom, state, api, h } = ns;
   // Counts, sizes and shares from ns.format (docs/ui-foundations.md).
   const format = ns.format;
   const kit = ns.graphKit;
@@ -2732,12 +2732,6 @@
     root: null, isolatedLabel: null, isolatedInput: null, panel: null, panelBody: null, panelShell: null,
   };
 
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = String(text);
-    return node;
-  }
 
   function buildGraphChrome() {
     const pane = dom.explorerGraphPane;
@@ -2745,21 +2739,21 @@
     chrome.root = pane;
     const controls = pane.querySelector(".explorerGraphViewportControls");
 
-    const isolated = el("label", "graphKitGroup explorerGraphIsolatedToggle");
-    chrome.isolatedInput = el("input");
+    const isolated = h("label", { class: "graphKitGroup explorerGraphIsolatedToggle" });
+    chrome.isolatedInput = h("input");
     chrome.isolatedInput.type = "checkbox";
     chrome.isolatedInput.id = "explorerGraphShowIsolated";
     chrome.isolatedInput.addEventListener("change", () => setShowIsolated(chrome.isolatedInput.checked));
-    isolated.append(chrome.isolatedInput, el("span", null, "Show objects without dependencies"));
+    isolated.append(chrome.isolatedInput, h("span", null, "Show objects without dependencies"));
     chrome.isolatedLabel = isolated;
     if (controls) controls.append(isolated);
     else pane.append(isolated);
 
-    const panel = el("aside", "graphKitPanel explorerGraphPanel");
+    const panel = h("aside", { class: "graphKitPanel explorerGraphPanel" });
     panel.id = "explorerGraphPanel";
     panel.hidden = true;
     panel.setAttribute("aria-label", "Graph object details");
-    chrome.panelBody = el("div", "graphKitPanel__body");
+    chrome.panelBody = h("div", { class: "graphKitPanel__body" });
     panel.append(chrome.panelBody);
     chrome.panel = panel;
     pane.append(panel);
@@ -2805,16 +2799,16 @@
   }
 
   function panelSection(title) {
-    const section = el("section", "graphKitPanel__section");
-    if (title) section.append(el("h3", "graphKitPanel__sectionTitle", title));
+    const section = h("section", { class: "graphKitPanel__section" });
+    if (title) section.append(h("h3", { class: "graphKitPanel__sectionTitle" }, title));
     return section;
   }
 
   function panelFacts(pairs) {
-    const list = el("dl", "graphKitPanel__facts");
+    const list = h("dl", { class: "graphKitPanel__facts" });
     for (const [label, value] of pairs) {
       if (value == null || value === "") continue;
-      list.append(el("dt", null, label), el("dd", null, value));
+      list.append(h("dt", null, label), h("dd", null, value));
     }
     return list;
   }
@@ -2822,7 +2816,7 @@
   function objectButton(id, fallback) {
     const node = (model.graph?.nodes || []).find((candidate) => candidate.id === id);
     const label = node ? `${node.database}.${node.name}` : (parseLogicalTableId(id) ? `${parseLogicalTableId(id).database}.${parseLogicalTableId(id).table}` : fallback || id);
-    const button = el("button", "graphKitPanel__link", label);
+    const button = h("button", { class: "graphKitPanel__link" }, label);
     button.type = "button";
     button.title = label;
     button.addEventListener("click", () => selectGraphNode(id));
@@ -2832,9 +2826,9 @@
   // The shared read-only SQL block (ui.sqlBlock): copy, the first 16 lines
   // and "Show all".
   function sqlBlock(sql, truncated) {
-    const wrap = el("div", "explorerGraphPanel__sqlWrap");
+    const wrap = h("div", { class: "explorerGraphPanel__sqlWrap" });
     wrap.append(ns.ui.sqlBlock({ sql, copy: true, maxLines: 16, wrap: true, label: "SELECT", className: "explorerGraphPanel__sql" }));
-    if (truncated) wrap.append(el("p", "graphKitPanel__note", "Truncated at 32 KB: the full text is in the object's DDL."));
+    if (truncated) wrap.append(h("p", { class: "graphKitPanel__note" }, "Truncated at 32 KB: the full text is in the object's DDL."));
     return wrap;
   }
 
@@ -2868,7 +2862,7 @@
   // node panels and by edge panels for the object that defines the edge.
   function renderDefinitionInto(container, node, { compact = false } = {}) {
     const serial = model.panelSerial;
-    const status = el("p", "graphKitPanel__note", "Loading definition\u2026");
+    const status = h("p", { class: "graphKitPanel__note" }, "Loading definition\u2026");
     container.append(status);
     loadDefinition(node).then((definition) => {
       if (serial !== model.panelSerial) return;
@@ -2896,10 +2890,10 @@
       }
       if (facts.length) container.append(panelFacts(facts));
       if (definition.select_sql) {
-        if (!compact) container.append(el("h4", "graphKitPanel__subTitle", "SELECT"));
+        if (!compact) container.append(h("h4", { class: "graphKitPanel__subTitle" }, "SELECT"));
         container.append(sqlBlock(definition.select_sql, definition.select_sql_truncated));
       }
-      if (!facts.length && !definition.select_sql) container.append(el("p", "graphKitPanel__note", "No definition beyond the table structure."));
+      if (!facts.length && !definition.select_sql) container.append(h("p", { class: "graphKitPanel__note" }, "No definition beyond the table structure."));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;
       status.textContent = error instanceof Error ? error.message : String(error);
@@ -2908,18 +2902,18 @@
 
   function renderColumnsInto(container, node) {
     const serial = model.panelSerial;
-    const status = el("p", "graphKitPanel__note", "Loading columns\u2026");
+    const status = h("p", { class: "graphKitPanel__note" }, "Loading columns\u2026");
     container.append(status);
     loadColumns(node).then((columns) => {
       if (serial !== model.panelSerial) return;
       status.remove();
-      if (!columns.length) { container.append(el("p", "graphKitPanel__note", "No columns.")); return; }
+      if (!columns.length) { container.append(h("p", { class: "graphKitPanel__note" }, "No columns.")); return; }
       // The shared key / value list (ui.kvList): name, type (mono), copy.
       const limit = 40;
       container.append(ns.ui.kvList(columns.slice(0, limit).map((column) => ({
         key: column.name, value: column.type, json: false, text: true, mono: true, actions: ["copy"],
       })), { className: "explorerGraphPanel__columns", label: "Columns" }));
-      if (columns.length > limit) container.append(el("p", "graphKitPanel__note", `${format.count(columns.length - limit)} more columns in the table card.`));
+      if (columns.length > limit) container.append(h("p", { class: "graphKitPanel__note" }, `${format.count(columns.length - limit)} more columns in the table card.`));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;
       status.textContent = error instanceof Error ? error.message : String(error);
@@ -2935,8 +2929,8 @@
   function renderNodePanel(body, node) {
     body.append(kit.panelHeader({ eyebrow: nodeKindLabel(node), title: node.name, subtitle: node.database, onClose: closePanel }));
 
-    const actions = el("div", "graphKitPanel__actions");
-    const open = el("button", "button button--small explorerGraphPanel__openCard", "Open card");
+    const actions = h("div", { class: "graphKitPanel__actions" });
+    const open = h("button", { class: "button button--small explorerGraphPanel__openCard" }, "Open card");
     open.type = "button";
     open.id = "explorerGraphPanelOpenCard";
     open.addEventListener("click", () => {
@@ -2963,14 +2957,14 @@
     for (const [label, direction] of [["Reads from", "up"], ["Used by", "down"]]) {
       const ids = neighborIds(node.id, direction);
       const hidden = Number(direction === "up" ? node.hidden_upstream : node.hidden_downstream) || 0;
-      const row = el("div", "explorerGraphPanel__lineageRow");
-      row.append(el("span", "explorerGraphPanel__lineageLabel", label));
-      const values = el("div", "explorerGraphPanel__lineageValues");
+      const row = h("div", { class: "explorerGraphPanel__lineageRow" });
+      row.append(h("span", { class: "explorerGraphPanel__lineageLabel" }, label));
+      const values = h("div", { class: "explorerGraphPanel__lineageValues" });
       for (const id of ids.slice(0, 12)) values.append(objectButton(id));
-      if (ids.length > 12) values.append(el("span", "graphKitPanel__note", `+${ids.length - 12} more`));
-      if (!ids.length && !hidden) values.append(el("span", "graphKitPanel__note", format.EMPTY));
+      if (ids.length > 12) values.append(h("span", { class: "graphKitPanel__note" }, `+${ids.length - 12} more`));
+      if (!ids.length && !hidden) values.append(h("span", { class: "graphKitPanel__note" }, format.EMPTY));
       if (hidden) {
-        const more = el("button", "graphKitPanel__link explorerGraphPanel__expand", `Show ${format.count(hidden)} more`);
+        const more = h("button", { class: "graphKitPanel__link explorerGraphPanel__expand" }, `Show ${format.count(hidden)} more`);
         more.type = "button";
         more.addEventListener("click", () => toggleExpansion(`${direction}\u0000${node.id}`));
         values.append(more);
@@ -3004,23 +2998,23 @@
     body.append(kit.panelHeader({ eyebrow: "Dependency", title: edgeLongLabel(edge), onClose: closePanel }));
 
     const route = panelSection(null);
-    const fromTo = el("div", "explorerGraphPanel__route");
+    const fromTo = h("div", { class: "explorerGraphPanel__route" });
     const groupLabel = (id) => {
       const node = visibleNodes().find((candidate) => candidate.id === id);
-      return node?.kind === "database_group" ? el("span", "explorerGraphPanel__routeGroup", `${node.database} (database)`) : objectButton(id);
+      return node?.kind === "database_group" ? h("span", { class: "explorerGraphPanel__routeGroup" }, `${node.database} (database)`) : objectButton(id);
     };
-    fromTo.append(groupLabel(edge.from), el("span", "graphKitPanel__arrow", "\u2192"), groupLabel(edge.to));
+    fromTo.append(groupLabel(edge.from), h("span", { class: "graphKitPanel__arrow" }, "\u2192"), groupLabel(edge.to));
     route.append(fromTo);
-    if (edge.collapsed) route.append(el("p", "graphKitPanel__note", `Through ${edge.collapsed_path.length} hidden object${edge.collapsed_path.length === 1 ? "" : "s"} (non-storing objects are hidden).`));
+    if (edge.collapsed) route.append(h("p", { class: "graphKitPanel__note" }, `Through ${edge.collapsed_path.length} hidden object${edge.collapsed_path.length === 1 ? "" : "s"} (non-storing objects are hidden).`));
     body.append(route);
 
     if (edge.aggregated) {
       const members = panelSection("Dependencies");
-      const list = el("ul", "explorerGraphPanel__members");
+      const list = h("ul", { class: "explorerGraphPanel__members" });
       for (const member of edge.members.slice(0, 40)) {
-        const item = el("li");
-        item.append(objectButton(member.from), el("span", "graphKitPanel__arrow", "\u2192"), objectButton(member.to),
-          el("span", "explorerGraphPanel__memberKind", edgeShortLabel(member)));
+        const item = h("li");
+        item.append(objectButton(member.from), h("span", { class: "graphKitPanel__arrow" }, "\u2192"), objectButton(member.to),
+          h("span", { class: "explorerGraphPanel__memberKind" }, edgeShortLabel(member)));
         list.append(item);
       }
       members.append(list);
@@ -3037,7 +3031,7 @@
       body.append(section);
     }
     if (edge.kind === "view" && !edge.collapsed) {
-      body.append(el("p", "graphKitPanel__note graphKitPanel__note--block", "A View is evaluated at query time: no data is copied along this edge."));
+      body.append(h("p", { class: "graphKitPanel__note graphKitPanel__note--block" }, "A View is evaluated at query time: no data is copied along this edge."));
     }
   }
 

@@ -3,6 +3,7 @@
 
   const ns = window.ChDash;
   if (!ns) return;
+  const { h } = ns;
   const cleanupByContainer = new WeakMap();
   function dispose(container) {
     cleanupByContainer.get(container)?.();
@@ -562,14 +563,8 @@
     container.replaceChildren();
     container.classList.remove("traceViewerHost");
     container.classList.add("pipelineViewerHost");
-    const element = (tag, className, text) => {
-      const node = document.createElement(tag);
-      if (className) node.className = `pipelineViewer__${className}`;
-      if (text != null) node.textContent = text;
-      return node;
-    };
     const button = (label, title, action) => {
-      const node = element("button", "control", label);
+      const node = h("button", { class: "pipelineViewer__control" }, label);
       node.type = "button";
       node.title = title;
       node.setAttribute("aria-label", title);
@@ -599,18 +594,18 @@
     let view = selectWindow(model, 0, model.window);
     let selected = null;
     const overviewTables = Array.isArray(options.overview?.tables) ? options.overview.tables.map(String).filter(Boolean) : [];
-    const root = element("div");
+    const root = h("div");
     root.className = "pipelineViewer";
-    const header = element("div", "summary");
+    const header = h("div", { class: "pipelineViewer__summary" });
     header.append(
-      element("div", "summaryText", `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
-      element("div", "summaryNote", "Time position and accumulated work are separate measurements"));
+      h("div", { class: "pipelineViewer__summaryText" }, `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
+      h("div", { class: "pipelineViewer__summaryNote" }, "Time position and accumulated work are separate measurements"));
     root.appendChild(header);
 
-    const legend = element("div", "legend");
-    legend.append(element("span", "explanation", "Stages process blocks concurrently. Read each row on the same time axis."));
-    const scale = element("span", "densityLegend", "Height + shade: work density ");
-    scale.append(element("span", "densityRamp"), document.createTextNode(" low \u2192 high"));
+    const legend = h("div", { class: "pipelineViewer__legend" });
+    legend.append(h("span", { class: "pipelineViewer__explanation" }, "Stages process blocks concurrently. Read each row on the same time axis."));
+    const scale = h("span", { class: "pipelineViewer__densityLegend" }, "Height + shade: work density ");
+    scale.append(h("span", { class: "pipelineViewer__densityRamp" }), document.createTextNode(" low \u2192 high"));
     scale.title = "Same color scale for every stage. Summed processor work divided by the observed window duration; not CPU utilization. Activity inside each summary window is coalesced.";
     legend.append(scale);
     root.appendChild(legend);
@@ -631,12 +626,12 @@
     if (!model.start && !options.traceError && !options.summaryError) warnings.push("No OpenTelemetry timing is available; processor counters are shown below.");
     if (options.truncated && model.detailCount) warnings.push("Rows using detailed spans have partial timing coverage.");
     if (warnings.length) {
-      const notice = element("div", "notice", warnings.join(" "));
+      const notice = h("div", { class: "pipelineViewer__notice" }, warnings.join(" "));
       notice.setAttribute("role", "status");
       root.appendChild(notice);
     }
 
-    const controls = element("div", "controls");
+    const controls = h("div", { class: "pipelineViewer__controls" });
     const setView = (start, finish) => {
       view = selectWindow(model, start, finish);
       drawTimelines();
@@ -652,9 +647,9 @@
     const zoomIn = button("+", "Zoom in", () => zoom(0.5));
     const forward = button("\u2192", "Move to later activity", () => shift(1));
     const end = button("End · 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
-    const rangeLabel = element("output", "range");
+    const rangeLabel = h("output", { class: "pipelineViewer__range" });
     rangeLabel.setAttribute("aria-live", "polite");
-    const sort = element("select", "sort");
+    const sort = h("select", { class: "pipelineViewer__sort" });
     sort.setAttribute("aria-label", "Stage order");
     for (const [value, label] of [["pipeline", "Pipeline order"], ["work", "Most work first"]]) {
       const option = document.createElement("option");
@@ -665,16 +660,16 @@
     controls.append(reset, back, zoomOut, zoomIn, forward, end, rangeLabel, sort);
     root.appendChild(controls);
 
-    const table = element("div", "table");
-    const body = element("div", "scroll");
-    const head = element("div", "head");
+    const table = h("div", { class: "pipelineViewer__table" });
+    const body = h("div", { class: "pipelineViewer__scroll" });
+    const head = h("div", { class: "pipelineViewer__head" });
     head.classList.add("dataList__head");
-    const timelineHead = element("div", "timelineHead");
-    const workHead = element("div", "workHead", "Work \u03a3 · share");
+    const timelineHead = h("div", { class: "pipelineViewer__timelineHead" });
+    const workHead = h("div", { class: "pipelineViewer__workHead" }, "Work \u03a3 · share");
     workHead.title = "Accumulated active processor time and share of total recorded work. This is not elapsed query time.";
-    const metricsHead = element("div", "metricsHead");
-    for (const label of ["In wait max", "Out wait max", "Input", "Output"]) metricsHead.appendChild(element("span", "", label));
-    head.append(element("div", "", "Pipeline stage"), timelineHead, workHead, metricsHead);
+    const metricsHead = h("div", { class: "pipelineViewer__metricsHead" });
+    for (const label of ["In wait max", "Out wait max", "Input", "Output"]) metricsHead.appendChild(h("span", null, label));
+    head.append(h("div", null, "Pipeline stage"), timelineHead, workHead, metricsHead);
     body.appendChild(head);
     let rowViews = [];
     const indexedGroups = model.groups.map((group, order) => ({ group, order }));
@@ -683,8 +678,8 @@
     const rowHeight = 40;
     let mountedStart = -1;
     let mountedFinish = -1;
-    const beforeRows = element("div", "spacer");
-    const afterRows = element("div", "spacer");
+    const beforeRows = h("div", { class: "pipelineViewer__spacer" });
+    const afterRows = h("div", { class: "pipelineViewer__spacer" });
     beforeRows.setAttribute("aria-hidden", "true");
     afterRows.setAttribute("aria-hidden", "true");
     body.append(beforeRows, afterRows);
@@ -704,12 +699,12 @@
       }
     };
     function createRow(group, index) {
-      const row = element("div", "row");
+      const row = h("div", { class: "pipelineViewer__row" });
       if (!group.segments.length) row.classList.add("pipelineViewer__row--untimed");
-      const stage = element("div", "stage");
-      const stageText = element("div", "stageText");
-      const title = element("strong", "stageTitle", stageTitle(group));
-      const sub = element("span", "stageSub", stageProcessorLabel(group));
+      const stage = h("div", { class: "pipelineViewer__stage" });
+      const stageText = h("div", { class: "pipelineViewer__stageText" });
+      const title = h("strong", { class: "pipelineViewer__stageTitle" }, stageTitle(group));
+      const sub = h("span", { class: "pipelineViewer__stageSub" }, stageProcessorLabel(group));
       if (model.attemptCount > 1) sub.textContent = `Attempt ${group.attempt + 1} · ${sub.textContent}`;
       if (overviewTables.length === 1 && /read|source|mergetree/i.test(`${group.planStepName} ${sub.textContent}`)) sub.textContent += ` · ${overviewTables[0]}`;
       stageText.title = `${title.textContent}\n${sub.textContent}\n${group.description || ""}\nHost: ${group.hostname || "unknown"}\nQuery: ${group.queryId || "unknown"}`;
@@ -717,18 +712,18 @@
       const focus = button("\u2315", `Focus activity for stage ${index + 1}: ${stageTitle(group)}`, () => focusGroup(group));
       focus.classList.add("pipelineViewer__focus");
       focus.disabled = !group.segments.length;
-      stage.append(element("span", "ordinal", String(index + 1).padStart(2, "0")), stageText, focus);
-      const timeline = element("div", "timeline");
-      const work = element("div", "work");
+      stage.append(h("span", { class: "pipelineViewer__ordinal" }, String(index + 1).padStart(2, "0")), stageText, focus);
+      const timeline = h("div", { class: "pipelineViewer__timeline" });
+      const work = h("div", { class: "pipelineViewer__work" });
       work.title = `${durationUs(group.elapsedSum)} accumulated active work; ${format.percent(group.workShare)} of all recorded stage work. Waits are separate counters. Parallel work can exceed query duration.`;
-      const workValues = element("div", "workValues");
-      workValues.append(element("strong", "", durationUs(group.elapsedSum)), element("span", "", format.percent(group.workShare)));
-      const workTrack = element("div", "workTrack");
-      const workBar = element("span", "workBar");
+      const workValues = h("div", { class: "pipelineViewer__workValues" });
+      workValues.append(h("strong", null, durationUs(group.elapsedSum)), h("span", null, format.percent(group.workShare)));
+      const workTrack = h("div", { class: "pipelineViewer__workTrack" });
+      const workBar = h("span", { class: "pipelineViewer__workBar" });
       workBar.style.width = `${group.workShare * 100}%`;
       workTrack.appendChild(workBar);
       work.append(workValues, workTrack);
-      const metrics = element("div", "metrics");
+      const metrics = h("div", { class: "pipelineViewer__metrics" });
       metrics.append(
         metric("In wait", durationUs(group.inputWaitMax), "Maximum input wait on one processor; its position in time is not recorded."),
         metric("Out wait", durationUs(group.outputWaitMax), "Maximum output/backpressure wait on one processor; its position in time is not recorded."),
@@ -744,7 +739,7 @@
       mountRows(true);
     });
 
-    const hint = element("div", "hint");
+    const hint = h("div", { class: "pipelineViewer__hint" });
     const defaultHint = () => number(options.summaryBucketUs) > 0
       ? `Summary resolution: ${durationUs(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use \u2315 to focus a stage.`
       : model.envelopeCount
@@ -850,7 +845,7 @@
           timeline.onpointerleave = null;
         }
         for (const segment of envelopes) {
-          const range = element("span", "envelope");
+          const range = h("span", { class: "pipelineViewer__envelope" });
           const left = scaleX(segment.start) / 10;
           const width = (scaleX(segment.finish) - scaleX(segment.start)) / 10;
           range.style.left = `min(${left}%, calc(100% - 2px))`;
@@ -865,11 +860,11 @@
             first = Math.min(first, segment.start);
             last = Math.max(last, segment.finish);
           }
-          const label = element("span", "timeRange", `${group.timingEstimated ? "\u2248 " : ""}${envelopes.length && !cells.length ? "First / last only · " : ""}${timeLabel(Math.max(0, first - model.start), view.width)} \u2192 ${timeLabel(last - model.start, view.width)}`);
+          const label = h("span", { class: "pipelineViewer__timeRange" }, `${group.timingEstimated ? "\u2248 " : ""}${envelopes.length && !cells.length ? "First / last only · " : ""}${timeLabel(Math.max(0, first - model.start), view.width)} \u2192 ${timeLabel(last - model.start, view.width)}`);
           label.title = "First and last observed activity in this view; this range is not continuous work.";
           timeline.appendChild(label);
         } else {
-          const untimed = element("span", "untimed");
+          const untimed = h("span", { class: "pipelineViewer__untimed" });
           untimed.textContent = group.segments.length ? "Outside this time range" : "Timing unavailable";
           untimed.title = group.segments.length ? "Use Full query to see this stage's recorded activity."
             : "Processor counters exist, but no OTel span can be assigned confidently. This is not evidence of zero work.";

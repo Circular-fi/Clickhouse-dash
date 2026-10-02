@@ -38,7 +38,7 @@ def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data()
     assert 'name: `${safeColumns[columnIndex]}.${leaf.path.join(".")}`' in results
     assert "flattenTupleRow(sourceRow, resultTupleFlattenPlan)" in results
     assert "function createDataSettingsControl()" in explorer
-    assert 'node("span", "runMenu__optText", "Flatten tuple")' in explorer
+    assert 'h("span", { class: "runMenu__optText" }, "Flatten tuple")' in explorer
     assert "storage?.saveRunOptions?." in explorer
     assert "ns.results?.flattenTupleTableData?." in explorer
 

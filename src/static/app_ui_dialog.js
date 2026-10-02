@@ -33,17 +33,12 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
   if (ns.dialog) return;
+  const { h } = ns;
 
   // Open dialogs, bottom first (the top layer order).
   const stack = [];
   let uid = 0;
 
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-  }
 
   function host() {
     return stack[stack.length - 1] || document.body;
@@ -58,7 +53,7 @@
   // A tier 2 tab row (.contentTabs, built by ns.tabs.render; the caller
   // binds and selects): { label, items: [{ id, label, controls, value }] }.
   function tabBar(tabs) {
-    const bar = el("div", "contentTabs uiDialog__tabs");
+    const bar = h("div", { class: "contentTabs uiDialog__tabs" });
     bar.setAttribute("role", "tablist");
     if (tabs.label) bar.setAttribute("aria-label", tabs.label);
     ns.tabs?.render(bar, tabs.items.map((item) => ({ value: item.value != null ? String(item.value) : "", label: item.label, id: item.id, controls: item.controls })));
@@ -70,37 +65,37 @@
   // heading, title and subtitle are then null.
   function shell({ id = "", title = "", label = "", titleId = "", subtitleId = "", closeLabel = "Close", size = "lg", className = "", form = false, tabs = null } = {}) {
     const n = ++uid;
-    const dialog = el("dialog", `uiDialog uiDialog--${size}${className ? ` ${className}` : ""}`);
+    const dialog = h("dialog", { class: `uiDialog uiDialog--${size}${className ? ` ${className}` : ""}` });
     if (id) dialog.id = id;
     dialog.tabIndex = -1;
-    const frame = el(form ? "form" : "div", "uiDialog__frame");
+    const frame = h(form ? "form" : "div", { class: "uiDialog__frame" });
     if (form) {
       frame.method = "dialog";
       frame.noValidate = true;
     }
     const bar = tabs && Array.isArray(tabs.items) ? tabBar(tabs) : null;
     const tabsInHead = !!bar && tabs.inHead === true;
-    const head = el("div", tabsInHead ? "uiDialog__head uiDialog__head--tabs" : "uiDialog__head");
+    const head = h("div", { class: tabsInHead ? "uiDialog__head uiDialog__head--tabs" : "uiDialog__head" });
     let heading = null;
     let titleEl = null;
     let subtitle = null;
     if (!tabsInHead) {
-      heading = el("div", "uiDialog__heading");
-      titleEl = el("h2", "uiDialog__title", title);
+      heading = h("div", { class: "uiDialog__heading" });
+      titleEl = h("h2", { class: "uiDialog__title" }, title);
       titleEl.id = titleId || `uiDialogTitle${n}`;
-      subtitle = el("div", "uiDialog__subtitle");
+      subtitle = h("div", { class: "uiDialog__subtitle" });
       subtitle.id = subtitleId || `uiDialogSubtitle${n}`;
       subtitle.hidden = true;
       heading.append(titleEl, subtitle);
     }
-    const actions = el("div", "uiDialog__actions");
-    const close = el("button", "closeCross uiDialog__close", "\u00d7");
+    const actions = h("div", { class: "uiDialog__actions" });
+    const close = h("button", { class: "closeCross uiDialog__close" }, "\u00d7");
     close.type = "button";
     close.setAttribute("aria-label", closeLabel);
     close.title = `${closeLabel} (Esc)`;
     actions.appendChild(close);
     head.append(tabsInHead ? bar.bar : heading, actions);
-    const body = el("div", "uiDialog__body");
+    const body = h("div", { class: "uiDialog__body" });
     frame.append(head);
     if (bar && !tabsInHead) frame.appendChild(bar.bar);
     frame.appendChild(body);
@@ -215,14 +210,14 @@
       const parts = shell({ title, size, className, closeLabel, form: true });
       const { dialog, frame } = parts;
       if (body) parts.body.appendChild(body);
-      const error = el("div", "uiDialog__error");
+      const error = h("div", { class: "uiDialog__error" });
       error.setAttribute("role", "alert");
       error.hidden = true;
-      const foot = el("div", "uiDialog__foot");
+      const foot = h("div", { class: "uiDialog__foot" });
       const list = actions || [{ label: "Cancel", value: null }, { label: "OK", value: "submit", kind: "primary", submit: true }];
       const buttons = list.map((action) => {
         const kind = action.kind === "danger" ? " button--danger" : action.kind === "primary" ? " button--primary" : "";
-        const button = el("button", `button${kind}${action.submit ? " uiDialog__submit" : ""}`, action.label);
+        const button = h("button", { class: `button${kind}${action.submit ? " uiDialog__submit" : ""}` }, action.label);
         button.type = action.submit ? "submit" : "button";
         foot.appendChild(button);
         return { action, button };
@@ -288,7 +283,7 @@
 
   // Yes / no. The focus starts on Cancel when the action destroys something.
   async function confirm({ title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false, className = "" } = {}) {
-    const body = el("p", "uiDialog__message", message);
+    const body = h("p", { class: "uiDialog__message" }, message);
     const answer = await open({
       title,
       body,

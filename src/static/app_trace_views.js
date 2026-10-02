@@ -7,6 +7,7 @@
   // its model and helpers at init.
   const ns = window.ChDash;
   if (!ns) return;
+  const { h } = ns;
 
   const VIEWS = ["timeline", "graph", "statistics", "spans", "flamegraph"];
   const viewPref = () => ns.storage.pref(ns.storage.KEYS.traceView, "", { allowed: VIEWS });
@@ -1260,7 +1261,7 @@
     const node = graphUi.layout?.items.get(graphUi.selected)?.node;
     if (!panel || !node) { closeGraphPanel(); return; }
     const traceStart = derived().cache.bounds.start;
-    const body = kit.el("div", "graphKitPanel__body");
+    const body = h("div", { class: "graphKitPanel__body" });
     body.append(kit.panelHeader({
       eyebrow: "Call path",
       title: node.service,

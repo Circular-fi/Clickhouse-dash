@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, state, api, util, ui, storage } = ns;
+  const { dom, state, api, util, ui, storage, h } = ns;
   const graph = ns.explorerGraph;
   const treemap = ns.explorerTreemap;
 
@@ -174,13 +174,6 @@
   // navigation function).
   function syncExplorerUrl(history = "push") {
     address.write(history, null, { href: currentExplorerUrl() });
-  }
-
-  function node(tag, className, text) {
-    const el = document.createElement(tag);
-    if (className) el.className = className;
-    if (text != null) el.textContent = String(text);
-    return el;
   }
 
   function clear(el) {
@@ -1051,7 +1044,7 @@
       if (match[1] != null) {
         const href = safeDocHref(match[2]);
         if (href) {
-          const a = node("a", "functionDoc__link", match[1]);
+          const a = h("a", { class: "functionDoc__link" }, match[1]);
           a.href = href;
           a.target = "_blank";
           a.rel = "noopener noreferrer";
@@ -1060,9 +1053,9 @@
           parent.appendChild(document.createTextNode(match[1]));
         }
       } else if (match[3] != null) {
-        parent.appendChild(node("code", "functionDoc__inlineCode", match[3]));
+        parent.appendChild(h("code", { class: "functionDoc__inlineCode" }, match[3]));
       } else if (match[4] != null) {
-        parent.appendChild(node("strong", "", match[4]));
+        parent.appendChild(h("strong", null, match[4]));
       }
       cursor = match.index + match[0].length;
     }
@@ -1077,7 +1070,7 @@
     let code = null;
     const flushParagraph = () => {
       if (!paragraph.length) return;
-      const p = node("p", "functionDoc__paragraph");
+      const p = h("p", { class: "functionDoc__paragraph" });
       appendMarkdownInline(p, paragraph.join(" ").trim());
       container.appendChild(p);
       paragraph = [];
@@ -1099,8 +1092,8 @@
       const fence = line.match(/^\s*```\s*([\w+-]*)/);
       if (fence) {
         flushParagraph(); closeList();
-        const wrap = node("pre", "functionDoc__code");
-        const codeEl = node("code", fence[1] ? `language-${fence[1]}` : "");
+        const wrap = h("pre", { class: "functionDoc__code" });
+        const codeEl = h("code", { class: fence[1] ? `language-${fence[1]}` : "" });
         wrap.appendChild(codeEl);
         code = { wrap, code: codeEl, lines: [] };
         continue;
@@ -1108,16 +1101,15 @@
       const heading = line.match(/^\s*(#{1,4})\s+(.+)$/);
       if (heading) {
         flushParagraph(); closeList();
-        const h = document.createElement(heading[1].length <= 2 ? "h3" : "h4");
-        h.className = "functionDoc__heading";
-        appendMarkdownInline(h, heading[2]);
-        container.appendChild(h);
+        const title = h(heading[1].length <= 2 ? "h3" : "h4", { class: "functionDoc__heading" });
+        appendMarkdownInline(title, heading[2]);
+        container.appendChild(title);
         continue;
       }
       const bullet = line.match(/^\s*[-*]\s+(.+)$/);
       if (bullet) {
         flushParagraph();
-        if (!list) { list = node("ul", "functionDoc__list"); container.appendChild(list); }
+        if (!list) { list = h("ul", { class: "functionDoc__list" }); container.appendChild(list); }
         const li = document.createElement("li"); appendMarkdownInline(li, bullet[1]); list.appendChild(li);
         continue;
       }
@@ -1157,16 +1149,16 @@
 
   function appendFunctionDocSection(root, title, content, { code = false } = {}) {
     if (!String(content || "").trim()) return;
-    const section = node("section", "functionDoc__section");
-    section.appendChild(node("h3", "functionDoc__sectionTitle", title));
+    const section = h("section", { class: "functionDoc__section" });
+    section.appendChild(h("h3", { class: "functionDoc__sectionTitle" }, title));
     if (code) {
-      const pre = node("pre", "functionDoc__code");
-      const codeEl = node("code", "language-sql");
+      const pre = h("pre", { class: "functionDoc__code" });
+      const codeEl = h("code", { class: "language-sql" });
       renderHighlightedCode(codeEl, String(content || ""));
       pre.appendChild(codeEl);
       section.appendChild(pre);
     } else {
-      const body = node("div", "functionDoc__markdown");
+      const body = h("div", { class: "functionDoc__markdown" });
       renderSafeMarkdown(body, content);
       section.appendChild(body);
     }
@@ -1211,10 +1203,10 @@
       const category = functionCategory(item);
       counts.set(category, (counts.get(category) || 0) + 1);
     }
-    const header = node("div", "explorerFunctionOverview__header");
+    const header = h("div", { class: "explorerFunctionOverview__header" });
     header.append(
-      node("strong", "explorerFunctionOverview__title", `${format.countLabel(functions.length, "function")} in ${format.countLabel(counts.size, "category", "categories")}`),
-      node("span", "explorerFunctionOverview__sub", model.functionsCatalog?.documentation_available === false
+      h("strong", { class: "explorerFunctionOverview__title" }, `${format.countLabel(functions.length, "function")} in ${format.countLabel(counts.size, "category", "categories")}`),
+      h("span", { class: "explorerFunctionOverview__sub" }, model.functionsCatalog?.documentation_available === false
         ? "This server does not expose system.documentation: names and categories only."
         : "Pick a function on the left, search by name, or start from a category."),
     );
@@ -1223,12 +1215,12 @@
       .filter(Boolean);
     const sections = [header];
     if (popular.length) {
-      const block = node("section", "explorerFunctionOverview__section");
-      block.appendChild(node("h3", "explorerFunctionOverview__heading", "Popular"));
-      const list = node("div", "explorerFunctionOverview__chips");
+      const block = h("section", { class: "explorerFunctionOverview__section" });
+      block.appendChild(h("h3", { class: "explorerFunctionOverview__heading" }, "Popular"));
+      const list = h("div", { class: "explorerFunctionOverview__chips" });
       list.id = "explorerFunctionPopular";
       for (const item of popular) {
-        const button = node("button", "explorerFunctionOverview__chip", item.name);
+        const button = h("button", { class: "explorerFunctionOverview__chip" }, item.name);
         button.type = "button";
         button.title = `${item.name} · ${functionCategory(item)}`;
         button.addEventListener("click", () => selectFunction(item, functionCategory(item)));
@@ -1237,15 +1229,15 @@
       block.appendChild(list);
       sections.push(block);
     }
-    const block = node("section", "explorerFunctionOverview__section");
-    block.appendChild(node("h3", "explorerFunctionOverview__heading", "Categories"));
-    const grid = node("div", "explorerFunctionOverview__categories");
+    const block = h("section", { class: "explorerFunctionOverview__section" });
+    block.appendChild(h("h3", { class: "explorerFunctionOverview__heading" }, "Categories"));
+    const grid = h("div", { class: "explorerFunctionOverview__categories" });
     grid.id = "explorerFunctionCategories";
     for (const [category, count] of [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
-      const button = node("button", "explorerFunctionOverview__category");
+      const button = h("button", { class: "explorerFunctionOverview__category" });
       button.type = "button";
       button.dataset.category = category;
-      button.append(node("span", "explorerFunctionOverview__categoryName", category), node("span", "explorerFunctionOverview__categoryCount", format.count(count)));
+      button.append(h("span", { class: "explorerFunctionOverview__categoryName" }, category), h("span", { class: "explorerFunctionOverview__categoryCount" }, format.count(count)));
       button.addEventListener("click", () => {
         model.expandedFunctionCategories.add(category);
         renderFunctionList();
@@ -1292,8 +1284,8 @@
     const aliases = Array.isArray(item.alias_documents) ? item.alias_documents : [];
     for (const aliased of aliases) {
       if (!aliased || !aliased.name) continue;
-      const aliasSection = node("section", "functionDoc__section functionDoc__alias");
-      aliasSection.appendChild(node("h3", "functionDoc__sectionTitle", `Alias documentation · ${aliased.name}`));
+      const aliasSection = h("section", { class: "functionDoc__section functionDoc__alias" });
+      aliasSection.appendChild(h("h3", { class: "functionDoc__sectionTitle" }, `Alias documentation · ${aliased.name}`));
       const aliasSections = splitFunctionDocumentation(aliased.description || "");
       const aliasDescription = aliasSections.description || (aliased.description || "");
       if (aliasDescription) appendFunctionDocSection(aliasSection, "Description", aliasDescription);
@@ -1336,18 +1328,18 @@
       groups.get(category).push(item);
     }
     for (const [category, groupItems] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const section = node("section", "explorerTreeGroup explorerFunctionGroup");
+      const section = h("section", { class: "explorerTreeGroup explorerFunctionGroup" });
       section.dataset.category = category;
       const selectedInGroup = groupItems.some((item) => functionKey(item) === model.selectedFunctionKey);
       const expanded = searching || selectedInGroup || model.expandedFunctionCategories.has(category);
-      const row = node("div", "explorerTreeDatabaseRow");
-      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "\u2304" : "\u203a");
+      const row = h("div", { class: "explorerTreeDatabaseRow" });
+      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, expanded ? "\u2304" : "\u203a");
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${category}`);
       toggle.setAttribute("aria-expanded", String(expanded));
-      const header = node("button", "explorerTreeDatabase");
+      const header = h("button", { class: "explorerTreeDatabase" });
       header.type = "button";
-      header.append(node("span", "explorerTreeDatabase__name", category), node("span", "explorerTreeDatabase__count explorerFunctionGroup__count", format.count(groupItems.length)));
+      header.append(h("span", { class: "explorerTreeDatabase__name" }, category), h("span", { class: "explorerTreeDatabase__count explorerFunctionGroup__count" }, format.count(groupItems.length)));
       const toggleGroup = () => {
         if (model.expandedFunctionCategories.has(category)) model.expandedFunctionCategories.delete(category);
         else model.expandedFunctionCategories.add(category);
@@ -1358,15 +1350,15 @@
       row.append(toggle, header);
       section.appendChild(row);
       if (expanded) {
-        const children = node("div", "explorerTreeChildren");
+        const children = h("div", { class: "explorerTreeChildren" });
         for (const item of groupItems.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))) {
           const key = functionKey(item);
-          const button = node("button", "explorerTreeObject explorerFunctionObject");
+          const button = h("button", { class: "explorerTreeObject explorerFunctionObject" });
           button.type = "button";
           button.classList.toggle("is-selected", key === model.selectedFunctionKey);
           // One line per function: the group already names the category,
           // so only a kind badge that adds information is kept.
-          button.appendChild(node("span", "explorerTreeObject__name explorerFunctionObject__name", item.name || "\u2014"));
+          button.appendChild(h("span", { class: "explorerTreeObject__name explorerFunctionObject__name" }, item.name || "\u2014"));
           const badge = functionKindBadge(item, category);
           if (badge) button.appendChild(ns.badge.el(badge, { shape: "pill", className: "explorerFunctionObject__badge" }));
           button.title = item.name || "";
@@ -1652,9 +1644,9 @@
   const DATABASE_OBJECT_BAR_COLUMNS = new Set([2, 3, 4, 6]);
 
   function renderDatabaseObjects(container, database, tables) {
-    const section = node("section", "explorerSection explorerDatabaseObjects");
-    const head = node("div", "explorerSectionHead");
-    head.append(node("h3", "explorerSectionTitle", "Objects"), node("span", "explorerSectionCount", format.count(tables.length)));
+    const section = h("section", { class: "explorerSection explorerDatabaseObjects" });
+    const head = h("div", { class: "explorerSectionHead" });
+    head.append(h("h3", { class: "explorerSectionTitle" }, "Objects"), h("span", { class: "explorerSectionCount" }, format.count(tables.length)));
     section.appendChild(head);
     container.appendChild(section);
     if (!tables.length) {
@@ -1700,7 +1692,7 @@
         td.classList.add(`explorerDatabaseObjectsTable__col--${ctx.columnIndex}`);
         if (DATABASE_OBJECT_NUMERIC(ctx.columnIndex)) td.dataset.value = value == null ? "" : String(value);
         if (ctx.columnIndex === 0) {
-          const button = node("button", "explorerDatabaseObjectsTable__open explorerDatabaseObjectsTable__clip", String(value || ""));
+          const button = h("button", { class: "explorerDatabaseObjectsTable__open explorerDatabaseObjectsTable__clip" }, String(value || ""));
           button.type = "button";
           button.title = `Open ${database}.${value}`;
           const table = item || { database, name: String(value || "") };
@@ -1715,7 +1707,7 @@
           return true;
         }
         if (ctx.columnIndex === 1) {
-          td.appendChild(node("span", "explorerDatabaseObjectsTable__clip", String(value)));
+          td.appendChild(h("span", { class: "explorerDatabaseObjectsTable__clip" }, String(value)));
           td.title = String(value);
           return true;
         }
@@ -1834,7 +1826,7 @@
 
   // Text with every case-insensitive occurrence of `query` wrapped in <mark>.
   function highlightedText(className, text, query) {
-    const el = node("span", className);
+    const el = h("span", { class: className });
     const value = String(text || "");
     const q = String(query || "").toLowerCase();
     if (!q) { el.textContent = value; return el; }
@@ -1842,7 +1834,7 @@
     let at = 0;
     for (let index = lower.indexOf(q); index >= 0; index = lower.indexOf(q, at)) {
       if (index > at) el.appendChild(document.createTextNode(value.slice(at, index)));
-      el.appendChild(node("mark", "explorerTreeMark", value.slice(index, index + q.length)));
+      el.appendChild(h("mark", { class: "explorerTreeMark" }, value.slice(index, index + q.length)));
       at = index + q.length;
     }
     if (at < value.length) el.appendChild(document.createTextNode(value.slice(at)));
@@ -1918,9 +1910,9 @@
       if (query && loaded && !items.length && !databaseMatches) continue;
       shown += 1;
       const expanded = model.expandedDatabases.has(database) || (!!query && loaded && items.length > 0);
-      const section = node("section", "explorerTreeGroup");
-      const header = node("div", `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}`);
-      const toggle = node("button", "explorerTreeDatabaseToggle", expanded ? "\u2304" : "\u203a");
+      const section = h("section", { class: "explorerTreeGroup" });
+      const header = h("div", { class: `explorerTreeDatabaseRow${model.selectedDatabase === database ? " is-selected" : ""}` });
+      const toggle = h("button", { class: "explorerTreeDatabaseToggle" }, expanded ? "\u2304" : "\u203a");
       toggle.type = "button";
       toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${database}`);
       toggle.setAttribute("aria-expanded", String(expanded));
@@ -1943,7 +1935,7 @@
         }
         renderTableList();
       });
-      const headerMain = node("button", "explorerTreeDatabase");
+      const headerMain = h("button", { class: "explorerTreeDatabase" });
       headerMain.type = "button";
       const databaseSummary = summaries.get(database) || null;
       let countText = "";
@@ -1954,13 +1946,13 @@
         countText = format.countLabel(count, "object");
       }
       const bytes = databaseBytes(database);
-      const size = node("span", "explorerTreeDatabase__size explorerBar", bytes == null ? "" : format.bytes(bytes));
+      const size = h("span", { class: "explorerTreeDatabase__size explorerBar" }, bytes == null ? "" : format.bytes(bytes));
       size.style.setProperty("--bar-pct", `${barPercent(bytes, maxDatabaseBytes)}%`);
       if (bytes == null) size.hidden = true;
       headerMain.title = [database, countText, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" · ");
       headerMain.append(
         highlightedText("explorerTreeDatabase__name", database, query),
-        node("span", "explorerTreeDatabase__count", countText),
+        h("span", { class: "explorerTreeDatabase__count" }, countText),
         size,
       );
       headerMain.addEventListener("click", () => { selectDatabase(database); setTreeDrawerOpen(false); });
@@ -1968,7 +1960,7 @@
       section.appendChild(header);
 
       if (expanded) {
-        const children = node("div", "explorerTreeChildren");
+        const children = h("div", { class: "explorerTreeChildren" });
         if (loading && !loaded) {
           children.appendChild(listState("loading", "Loading tables\u2026"));
         } else if (model.databaseLoadErrors.has(database) && !loaded) {
@@ -1982,16 +1974,16 @@
           for (const table of items.sort((a, b) => a.name.localeCompare(b.name))) {
             const key = `${table.database}\0${table.name}`;
             const kind = treeKind(table);
-            const button = node("button", `explorerTreeObject explorerTreeObject--${kind}`);
+            const button = h("button", { class: `explorerTreeObject explorerTreeObject--${kind}` });
             button.type = "button";
             button.classList.toggle("is-selected", key === model.selectedKey);
             button.dataset.database = table.database;
             button.dataset.table = table.name;
             button.dataset.kind = kind;
-            const icon = node("span", `explorerTreeObject__icon explorerTreeObject__icon--${kind}`, TREE_KINDS[kind].glyph);
+            const icon = h("span", { class: `explorerTreeObject__icon explorerTreeObject__icon--${kind}` }, TREE_KINDS[kind].glyph);
             icon.setAttribute("aria-hidden", "true");
             const name = highlightedText("explorerTreeObject__name", table.name, query);
-            const srKind = node("span", "srOnly", `${TREE_KINDS[kind].label}, `);
+            const srKind = h("span", { class: "srOnly" }, `${TREE_KINDS[kind].label}, `);
             button.append(icon, srKind, name);
             // Replicated tables carry the replica health dot (item 19); other
             // tables only show a dot when they are not healthy.
@@ -2000,13 +1992,13 @@
             if (replicaDot) {
               button.appendChild(replicaDot);
             } else if (health === "warning" || health === "error") {
-              const dot = node("span", `explorerTreeObject__health explorerTreeObject__health--${health}`);
+              const dot = h("span", { class: `explorerTreeObject__health explorerTreeObject__health--${health}` });
               dot.setAttribute("aria-label", healthLabel(table));
               button.appendChild(dot);
             }
             const badge = badges.get(table);
             if (badge) {
-              const size = node("span", "explorerTreeObject__size explorerBar", badge.text);
+              const size = h("span", { class: "explorerTreeObject__size explorerBar" }, badge.text);
               size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);
               button.appendChild(size);
             }
@@ -2107,7 +2099,7 @@
   // Table detail (header, tabs and tab bodies) lives in app_explorer_detail.js.
   // The shell hands it the model and the helpers it shares with the tree.
   const detailView = ns.explorerDetail?.create?.({
-    model, node, clear, appRoute, setError, quoteIdent, humanEngine,
+    model, clear, appRoute, setError, quoteIdent, humanEngine,
     healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
     isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
     setMode, setWorkspace, syncExplorerUrl,
@@ -2116,7 +2108,7 @@
   function renderDetailHeader() { detailView?.renderDetailHeader(); }
   function renderTabs() { detailView?.renderTabs(); }
   function renderTabContent() { detailView?.renderTabContent(); }
-  function sectionTitle(text) { return node("h3", "explorerSectionTitle", text); }
+  function sectionTitle(text) { return h("h3", { class: "explorerSectionTitle" }, text); }
 
   async function selectTable(database, table, force = false, { history = "push", graphOrigin = false } = {}) {
     if (model.mode === "graph" && graph?.isStorageMode?.() && graph?.canUseStorageForTable?.(database, table) === false) return;

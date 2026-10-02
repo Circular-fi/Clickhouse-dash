@@ -20,10 +20,10 @@
   const DASH = format.EMPTY;
 
   function create(ctx) {
-    const { dom, state, api, util, ui, storage } = ns;
+    const { dom, state, api, util, ui, storage, h } = ns;
     const graph = ns.explorerGraph;
     const {
-      model, node, clear, appRoute, setError, quoteIdent, humanEngine,
+      model, clear, appRoute, setError, quoteIdent, humanEngine,
       healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
       isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
       setMode, setWorkspace, syncExplorerUrl,
@@ -51,7 +51,7 @@
 
     // The one empty / unavailable style of the card: a muted line, no box.
     function emptyNote(text) {
-      return node("div", "explorerEmptyNote", text);
+      return h("div", { class: "explorerEmptyNote" }, text);
     }
 
     function unavailableMessage(label) {
@@ -165,14 +165,14 @@
 
     // Collapsible section with a count; returns its body.
     function section(container, { id, title, count = null, open = true, note = "" }) {
-      const details = node("details", "explorerSection");
+      const details = h("details", { class: "explorerSection" });
       details.dataset.section = id;
       details.open = open;
-      const summary = node("summary", "explorerSection__summary");
-      summary.appendChild(node("span", "explorerSection__title", title));
-      if (count != null) summary.appendChild(node("span", "explorerSection__count", format.count(count)));
-      if (note) summary.appendChild(node("span", "explorerSection__note", note));
-      const body = node("div", "explorerSection__body");
+      const summary = h("summary", { class: "explorerSection__summary" });
+      summary.appendChild(h("span", { class: "explorerSection__title" }, title));
+      if (count != null) summary.appendChild(h("span", { class: "explorerSection__count" }, format.count(count)));
+      if (note) summary.appendChild(h("span", { class: "explorerSection__note" }, note));
+      const body = h("div", { class: "explorerSection__body" });
       details.append(summary, body);
       container.appendChild(details);
       return body;
@@ -188,7 +188,7 @@
         item.render(body);
       }
       if (idle.length) {
-        const line = node("div", "explorerIdleLine");
+        const line = h("div", { class: "explorerIdleLine" });
         line.dataset.sections = idle.map((item) => item.id).join(" ");
         line.textContent = idle.map((item) => item.emptyText).join(" \u00b7 ");
         container.appendChild(line);
@@ -216,7 +216,7 @@
 
     function objectIcon(engine) {
       const type = objectType(engine);
-      const icon = node("span", `explorerObjIcon explorerObjIcon--${type}`, OBJECT_GLYPHS[type] || OBJECT_GLYPHS.unknown);
+      const icon = h("span", { class: `explorerObjIcon explorerObjIcon--${type}` }, OBJECT_GLYPHS[type] || OBJECT_GLYPHS.unknown);
       icon.setAttribute("aria-hidden", "true");
       return icon;
     }
@@ -234,16 +234,16 @@
     };
 
     function dependencyChip(dep, contextDatabase, { cluster = "" } = {}) {
-      const button = node("button", "explorerLineageChip");
+      const button = h("button", { class: "explorerLineageChip" });
       button.type = "button";
       const qualified = `${dep.database || DASH}.${dep.table || DASH}`;
       const [kindLabel, kindTitle] = DEPENDENCY_KINDS[dep.kind] || DEPENDENCY_KINDS.dependency;
       button.dataset.kind = dep.kind || "dependency";
       button.title = [qualified, dep.engine ? humanEngine(dep.engine) : "", kindTitle].filter(Boolean).join(" \u00b7 ");
       button.appendChild(objectIcon(dep.engine));
-      button.appendChild(node("span", "explorerLineageChip__name", shortName(dep.database, dep.table, contextDatabase)));
-      if (dep.kind === "distributed_route" && cluster) button.appendChild(node("span", "explorerLineageChip__meta", `on ${cluster}`));
-      else if (kindLabel) button.appendChild(node("span", "explorerLineageChip__meta", kindLabel));
+      button.appendChild(h("span", { class: "explorerLineageChip__name" }, shortName(dep.database, dep.table, contextDatabase)));
+      if (dep.kind === "distributed_route" && cluster) button.appendChild(h("span", { class: "explorerLineageChip__meta" }, `on ${cluster}`));
+      else if (kindLabel) button.appendChild(h("span", { class: "explorerLineageChip__meta" }, kindLabel));
       button.addEventListener("click", () => void selectTable(dep.database, dep.table));
       return button;
     }
@@ -309,14 +309,14 @@
     const HEALTH_TONES = { healthy: "ok", warning: "warn", error: "error" };
     function metaChip(text, { kind = "", title = "", dot = "", color = "" } = {}) {
       const tone = dot ? HEALTH_TONES[dot] || "neutral" : color ? "category" : "neutral";
-      const chip = node("span", `${ns.badge.classes({ tone, size: "md", shape: "pill" })} explorerMetaChip${kind ? ` explorerMetaChip--${kind}` : ""}`);
+      const chip = h("span", { class: `${ns.badge.classes({ tone, size: "md", shape: "pill" })} explorerMetaChip${kind ? ` explorerMetaChip--${kind}` : ""}` });
       if (color) chip.style.setProperty("--badge-color", color);
       if (dot) {
-        const mark = node("i", `explorerHealthDot explorerHealthDot--${dot}`);
+        const mark = h("i", { class: `explorerHealthDot explorerHealthDot--${dot}` });
         mark.setAttribute("aria-hidden", "true");
         chip.appendChild(mark);
       }
-      chip.appendChild(node("span", "", text));
+      chip.appendChild(h("span", null, text));
       if (title) chip.title = title;
       return chip;
     }
@@ -367,8 +367,8 @@
         return;
       }
       const status = replicationStatus(r);
-      const banner = node("div", `explorerReplicaBanner explorerReplicaBanner--${status}`);
-      const dot = node("i", `explorerHealthDot explorerHealthDot--${status}`);
+      const banner = h("div", { class: `explorerReplicaBanner explorerReplicaBanner--${status}` });
+      const dot = h("i", { class: `explorerHealthDot explorerHealthDot--${status}` });
       dot.setAttribute("aria-hidden", "true");
       const facts = [
         `${format.count(r.active_replicas)}/${format.count(r.total_replicas)} replicas active`,
@@ -377,10 +377,10 @@
       ];
       if (r.readonly) facts.push("read-only");
       if (r.session_expired) facts.push("Keeper session expired");
-      banner.append(dot, node("strong", "explorerReplicaBanner__title", "Replicated"), node("span", "explorerReplicaBanner__facts", facts.join(" \u00b7 ")));
-      if (r.replica_name) banner.appendChild(node("span", "explorerReplicaBanner__replica", `this replica: ${r.replica_name}`));
+      banner.append(dot, h("strong", { class: "explorerReplicaBanner__title" }, "Replicated"), h("span", { class: "explorerReplicaBanner__facts" }, facts.join(" \u00b7 ")));
+      if (r.replica_name) banner.appendChild(h("span", { class: "explorerReplicaBanner__replica" }, `this replica: ${r.replica_name}`));
       if (availableTabs(detail).includes("Operations")) {
-        const open = node("button", "explorerReplicaBanner__open", "Details");
+        const open = h("button", { class: "explorerReplicaBanner__open" }, "Details");
         open.type = "button";
         open.addEventListener("click", () => openTab("Operations"));
         banner.appendChild(open);
@@ -398,7 +398,7 @@
       if (dom.explorerDetail) dom.explorerDetail.hidden = false;
       if (dom.explorerDetailName) dom.explorerDetailName.textContent = `${s.database || ""}.${s.name || ""}`;
       if (dom.explorerDetailMeta) {
-        const chips = node("span", "explorerMetaChips");
+        const chips = h("span", { class: "explorerMetaChips" });
         chips.append(...headerChips(detail));
         dom.explorerDetailMeta.replaceChildren(chips);
       }
@@ -409,7 +409,7 @@
       if (dom.explorerWarnings) {
         const warnings = Array.isArray(s.warnings) ? s.warnings : [];
         dom.explorerWarnings.hidden = !warnings.length;
-        dom.explorerWarnings.replaceChildren(...warnings.map((warning) => node("div", "explorerWarning", warning)));
+        dom.explorerWarnings.replaceChildren(...warnings.map((warning) => h("div", { class: "explorerWarning" }, warning)));
       }
       renderReplicationBanner(detail);
     }
@@ -463,17 +463,17 @@
 
     function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false } = {}) {
       // A stat tile (ui.statTile classes): label, value, context lines.
-      const tile = node("div", `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}`);
+      const tile = h("div", { class: `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}` });
       if (id) tile.dataset.tile = id;
-      tile.appendChild(node("div", "statTile__label explorerAboutTile__label", label));
-      const valueEl = node("div", `statTile__value explorerAboutTile__value${mono ? " is-code" : ""}`);
+      tile.appendChild(h("div", { class: "statTile__label explorerAboutTile__label" }, label));
+      const valueEl = h("div", { class: `statTile__value explorerAboutTile__value${mono ? " is-code" : ""}` });
       if (value instanceof Node) valueEl.appendChild(value);
       else valueEl.textContent = String(value);
       if (title || (!(value instanceof Node) && String(value).length > 28)) valueEl.title = title || String(value);
       tile.appendChild(valueEl);
       const contexts = (Array.isArray(context) ? context : [context]).filter((item) => item != null && item !== "");
       for (const item of contexts) {
-        const el = item instanceof Node ? item : node("div", "statTile__sub explorerAboutTile__context", item);
+        const el = item instanceof Node ? item : h("div", { class: "statTile__sub explorerAboutTile__context" }, item);
         if (!(item instanceof Node) && String(item).length > 36) el.title = String(item);
         tile.appendChild(el);
       }
@@ -501,7 +501,7 @@
         ? visibleDependencies(detail).filter((dep) => dep.relation === "downstream" && dep.kind === routeKind && objectType(dep.engine) !== "mv")
         : [];
       if (targets.length) {
-        const list = node("div", "explorerAboutTile__chips");
+        const list = h("div", { class: "explorerAboutTile__chips" });
         list.append(...targets.map((dep) => dependencyChip(dep, database)));
         tiles.push(aboutTile(routeKind === "buffer" ? "Flushes to" : "Writes to", list, null, { id: "target" }));
       }
@@ -541,9 +541,9 @@
       const ttl = extractTableTtl(detail);
       if (ttl) {
         const rules = splitTopLevel(ttl);
-        const list = node("ol", "explorerAboutTile__rules");
+        const list = h("ol", { class: "explorerAboutTile__rules" });
         for (const rule of rules) {
-          const item = node("li", "", prettyTtlRule(rule));
+          const item = h("li", null, prettyTtlRule(rule));
           item.title = rule;
           list.appendChild(item);
         }
@@ -556,12 +556,12 @@
       }
 
       if (r.available) {
-        const list = node("div", "explorerAboutTile__replicas");
+        const list = h("div", { class: "explorerAboutTile__replicas" });
         for (const replica of r.replicas || []) {
-          const chip = node("span", "explorerReplicaChip");
-          const dot = node("i", `explorerHealthDot explorerHealthDot--${replica.active ? "healthy" : "error"}`);
+          const chip = h("span", { class: "explorerReplicaChip" });
+          const dot = h("i", { class: `explorerHealthDot explorerHealthDot--${replica.active ? "healthy" : "error"}` });
           dot.setAttribute("aria-hidden", "true");
-          chip.append(dot, node("span", "", replica.name === r.replica_name ? `${replica.name} (this)` : replica.name));
+          chip.append(dot, h("span", null, replica.name === r.replica_name ? `${replica.name} (this)` : replica.name));
           chip.title = replica.active ? "Active" : "Inactive";
           list.appendChild(chip);
         }
@@ -608,7 +608,7 @@
       if (deps.length) {
         const up = deps.filter((dep) => String(dep.relation) === "upstream").length;
         const down = deps.length - up;
-        const link = node("button", "explorerAboutTile__link", "Open lineage");
+        const link = h("button", { class: "explorerAboutTile__link" }, "Open lineage");
         link.type = "button";
         link.addEventListener("click", () => openTab("Lineage"));
         tiles.push(aboutTile("Lineage", `${format.count(up)} upstream \u00b7 ${format.count(down)} downstream`, link, { id: "lineage" }));
@@ -619,10 +619,10 @@
     function renderAbout(detail) {
       const tiles = aboutTiles(detail);
       if (!tiles.length) return null;
-      const aside = node("aside", "explorerAbout");
+      const aside = h("aside", { class: "explorerAbout" });
       aside.setAttribute("aria-label", "About this object");
-      aside.appendChild(node("h3", "explorerAbout__title", "About"));
-      const grid = node("div", "explorerAbout__tiles");
+      aside.appendChild(h("h3", { class: "explorerAbout__title" }, "About"));
+      const grid = h("div", { class: "explorerAbout__tiles" });
       grid.append(...tiles);
       aside.appendChild(grid);
       // Narrow panes show the About tiles above the tab body: the first ones
@@ -630,7 +630,7 @@
       if (tiles.length > 4) {
         const collapsed = model.aboutExpanded !== true;
         aside.classList.toggle("is-collapsed", collapsed);
-        const toggle = node("button", "explorerAbout__toggle", collapsed ? `Show all ${tiles.length}` : "Show less");
+        const toggle = h("button", { class: "explorerAbout__toggle" }, collapsed ? `Show all ${tiles.length}` : "Show less");
         toggle.type = "button";
         toggle.setAttribute("aria-expanded", String(!collapsed));
         toggle.addEventListener("click", () => {
@@ -784,7 +784,7 @@
             td.classList.add("explorerColumns__name");
             if (item.tuple_root) {
               const open = tupleExpanded.has(item.tuple_root);
-              const toggle = node("button", "explorerTreeDatabaseToggle explorerStorageTupleToggle", open ? "\u2304" : "\u203a");
+              const toggle = h("button", { class: "explorerTreeDatabaseToggle explorerStorageTupleToggle" }, open ? "\u2304" : "\u203a");
               toggle.type = "button";
               toggle.setAttribute("aria-expanded", String(open));
               toggle.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${item.tuple_root}`);
@@ -800,13 +800,13 @@
                   if (row.dataset.tupleParent === item.tuple_root) row.hidden = !opening;
                 }
               });
-              td.append(toggle, node("span", "explorerStorageTupleName", item.name));
+              td.append(toggle, h("span", { class: "explorerStorageTupleName" }, item.name));
             } else {
-              td.appendChild(node("span", item.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName", item.name));
+              td.appendChild(h("span", { class: item.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName" }, item.name));
             }
             td.title = item.comment ? `${item.name}\n${item.comment}` : item.name;
             // The comment reads under the name and wraps (two lines at most).
-            if (item.comment) td.appendChild(node("span", "explorerColumns__comment", item.comment));
+            if (item.comment) td.appendChild(h("span", { class: "explorerColumns__comment" }, item.comment));
           },
         },
         {
@@ -815,11 +815,11 @@
           value: (item) => item.type,
           render: (td, item) => {
             td.classList.add("explorerColumns__type");
-            td.appendChild(node("span", "explorerColumns__typeName", item.type || DASH));
+            td.appendChild(h("span", { class: "explorerColumns__typeName" }, item.type || DASH));
             td.title = item.type || "";
             if (item.default_kind) {
-              const line = node("span", "explorerColumns__default");
-              line.append(ns.badge.el(item.default_kind, { tone: "key", className: "explorerBadge explorerBadge--default" }), node("span", "explorerColumns__expr", item.default_expression));
+              const line = h("span", { class: "explorerColumns__default" });
+              line.append(ns.badge.el(item.default_kind, { tone: "key", className: "explorerBadge explorerBadge--default" }), h("span", { class: "explorerColumns__expr" }, item.default_expression));
               td.appendChild(line);
               td.title = `${item.type}\n${item.default_kind} ${item.default_expression}`;
             }
@@ -996,8 +996,8 @@
 
     function buildStorageComposition(detail, { embedded = false } = {}) {
       const composition = storageComposition(detail);
-      const wrap = node("div", `explorerStorageComposition explorerStorageComposition--stacked${embedded ? " is-embedded" : ""}`);
-      const bar = node("div", `explorerStorageStackedBar${composition.known ? "" : " is-unknown"}`);
+      const wrap = h("div", { class: `explorerStorageComposition explorerStorageComposition--stacked${embedded ? " is-embedded" : ""}` });
+      const bar = h("div", { class: `explorerStorageStackedBar${composition.known ? "" : " is-unknown"}` });
 
       if (composition.known) {
         let consumed = 0;
@@ -1006,28 +1006,27 @@
           const width = index === visible.length - 1
             ? Math.max(0, 100 - consumed)
             : Math.max(0, Math.min(item.percent, 100 - consumed));
-          const segment = node("div", `explorerStorageStackedBar__segment explorerStorageStackedBar__segment--${item.variant}`);
+          const segment = h("div", { class: `explorerStorageStackedBar__segment explorerStorageStackedBar__segment--${item.variant}` });
           segment.style.width = `${width}%`;
           segment.title = `${item.label}: ${percentText(item.percent)} \u00b7 ${format.bytes(item.bytes)}`;
           bar.appendChild(segment);
           consumed += width;
         });
       } else {
-        bar.appendChild(node("span", "explorerStorageStackedBar__unknown", "unknown"));
+        bar.appendChild(h("span", { class: "explorerStorageStackedBar__unknown" }, "unknown"));
       }
       wrap.appendChild(bar);
 
-      const legend = node("div", "explorerStorageCompositionLegend");
+      const legend = h("div", { class: "explorerStorageCompositionLegend" });
       const legendItems = composition.known
         ? composition.items.filter((item) => Number(item.bytes) > 0)
         : [];
       for (const item of legendItems) {
-        const entry = node("div", "explorerStorageCompositionLegend__item");
+        const entry = h("div", { class: "explorerStorageCompositionLegend__item" });
         entry.append(
-          node("i", `explorerStorageCompositionLegend__swatch explorerStorageCompositionLegend__swatch--${item.variant}`),
-          node("span", "explorerStorageCompositionLegend__label", item.label),
-          node("span", "explorerStorageCompositionLegend__percent",
-            item.percent == null || item.bytes == null
+          h("i", { class: `explorerStorageCompositionLegend__swatch explorerStorageCompositionLegend__swatch--${item.variant}` }),
+          h("span", { class: "explorerStorageCompositionLegend__label" }, item.label),
+          h("span", { class: "explorerStorageCompositionLegend__percent" }, item.percent == null || item.bytes == null
               ? "unknown"
               : `${percentText(item.percent)} \u00b7 ${format.bytes(item.bytes)}`),
         );
@@ -1040,11 +1039,11 @@
 
     function renderStorageCompositionCard(container, detail) {
       const tableBytes = summaryFootprintBytes(detail.summary || {});
-      const card = node("div", "explorerStorageCompositionCard");
-      const head = node("div", "explorerStorageCompositionCard__head");
+      const card = h("div", { class: "explorerStorageCompositionCard" });
+      const head = h("div", { class: "explorerStorageCompositionCard__head" });
       head.append(
-        node("span", "explorerStorageCompositionCard__label", "Table storage"),
-        node("span", "explorerStorageCompositionCard__bytes", tableBytes == null ? "unknown" : format.bytes(tableBytes)),
+        h("span", { class: "explorerStorageCompositionCard__label" }, "Table storage"),
+        h("span", { class: "explorerStorageCompositionCard__bytes" }, tableBytes == null ? "unknown" : format.bytes(tableBytes)),
       );
       card.append(head, buildStorageComposition(detail, { embedded: true }));
       container.appendChild(card);
@@ -1226,24 +1225,24 @@
         ["Client", s.client_ingress || {}, "Finished INSERT queries (system.query_log)"],
         ["Persisted", s.physical_ingress || {}, "New parts written (system.part_log); Buffer forwarding and MV output are not folded in"],
       ];
-      const table = node("table", "explorerIngestionTable dataTable dataTable--compact");
-      const head = node("tr");
-      head.appendChild(node("th", "", ""));
-      for (const [label] of windows) head.appendChild(node("th", "num", label));
-      const thead = node("thead");
+      const table = h("table", { class: "explorerIngestionTable dataTable dataTable--compact" });
+      const head = h("tr");
+      head.appendChild(h("th", null, ""));
+      for (const [label] of windows) head.appendChild(h("th", { class: "num" }, label));
+      const thead = h("thead");
       thead.appendChild(head);
-      const tbody = node("tbody");
+      const tbody = h("tbody");
       for (const [label, rate, title] of sources) {
-        const tr = node("tr");
-        const th = node("th", "", label);
+        const tr = h("tr");
+        const th = h("th", null, label);
         th.scope = "row";
         th.title = title;
         tr.appendChild(th);
         for (const [, suffix] of windows) {
-          const td = node("td", "num");
+          const td = h("td", { class: "num" });
           td.append(
-            node("div", "explorerIngestionTable__rows", format.rate(rate[`rows_per_second_${suffix}`], "rows")),
-            node("div", "explorerIngestionTable__bytes", format.bytesRate(rate[`bytes_per_second_${suffix}`])),
+            h("div", { class: "explorerIngestionTable__rows" }, format.rate(rate[`rows_per_second_${suffix}`], "rows")),
+            h("div", { class: "explorerIngestionTable__bytes" }, format.bytesRate(rate[`bytes_per_second_${suffix}`])),
           );
           tr.appendChild(td);
         }
@@ -1260,15 +1259,15 @@
         client.last_event_time ? `last client write ${ui.serverTime(client.last_event_time).text}` : "",
         physical.last_event_time ? `last persisted write ${ui.serverTime(physical.last_event_time).text}` : "",
       ].filter(Boolean);
-      if (facts.length) body.appendChild(node("div", "explorerSection__facts", facts.join(" \u00b7 ")));
+      if (facts.length) body.appendChild(h("div", { class: "explorerSection__facts" }, facts.join(" \u00b7 ")));
     }
 
     function keyValueGrid(items) {
-      const grid = node("dl", "explorerKeyValues");
+      const grid = h("dl", { class: "explorerKeyValues" });
       for (const [label, value, { code = false, title = "" } = {}] of items) {
         if (value == null || value === "") continue;
-        const dt = node("dt", "", label);
-        const dd = node("dd", code ? "is-code" : "", value);
+        const dt = h("dt", null, label);
+        const dd = h("dd", { class: code ? "is-code" : "" }, value);
         if (title || String(value).length > 32) dd.title = title || String(value);
         grid.append(dt, dd);
       }
@@ -1290,12 +1289,12 @@
         ["Keeper path", r.zookeeper_path || DASH, { code: true }],
       ]));
       if ((r.replicas || []).length) {
-        const list = node("div", "explorerAboutTile__replicas explorerReplicaList");
+        const list = h("div", { class: "explorerAboutTile__replicas explorerReplicaList" });
         for (const replica of r.replicas) {
-          const chip = node("span", "explorerReplicaChip");
-          const dot = node("i", `explorerHealthDot explorerHealthDot--${replica.active ? "healthy" : "error"}`);
+          const chip = h("span", { class: "explorerReplicaChip" });
+          const dot = h("i", { class: `explorerHealthDot explorerHealthDot--${replica.active ? "healthy" : "error"}` });
           dot.setAttribute("aria-hidden", "true");
-          chip.append(dot, node("span", "", `${replica.name}${replica.name === r.replica_name ? " (this)" : ""} \u00b7 ${replica.active ? "active" : "inactive"}`));
+          chip.append(dot, h("span", null, `${replica.name}${replica.name === r.replica_name ? " (this)" : ""} \u00b7 ${replica.active ? "active" : "inactive"}`));
           list.appendChild(chip);
         }
         body.appendChild(list);
@@ -1451,9 +1450,9 @@
     function renderLineageTab(container, detail) {
       const deps = visibleDependencies(detail);
       const s = detail.summary || {};
-      const toolbar = node("div", "explorerLineageToolbar");
-      toolbar.appendChild(node("span", "explorerLineageToolbar__note", "Only objects readable by the runner are listed."));
-      const open = node("button", "button button--small", "Open lineage graph");
+      const toolbar = h("div", { class: "explorerLineageToolbar" });
+      toolbar.appendChild(h("span", { class: "explorerLineageToolbar__note" }, "Only objects readable by the runner are listed."));
+      const open = h("button", { class: "button button--small" }, "Open lineage graph");
       open.type = "button";
       open.addEventListener("click", () => {
         setMode("graph");
@@ -1468,18 +1467,18 @@
       }
       // Both directions always render so the layout keeps its shape when one
       // side is empty.
-      const matrix = node("div", "explorerDependencyMatrix explorerLineage");
+      const matrix = h("div", { class: "explorerDependencyMatrix explorerLineage" });
       for (const relation of ["upstream", "downstream"]) {
         const items = deps
           .filter((dep) => String(dep.relation || "").toLowerCase() === relation)
           .slice()
           .sort((a, b) => `${a.database}.${a.table}`.localeCompare(`${b.database}.${b.table}`, undefined, { numeric: true, sensitivity: "base" }));
-        const group = node("section", "explorerDependencyGroup explorerLineage__group");
+        const group = h("section", { class: "explorerDependencyGroup explorerLineage__group" });
         group.dataset.relation = relation;
-        const title = node("h4", "explorerLineage__title", relation === "upstream" ? "Upstream" : "Downstream");
-        title.appendChild(node("span", "explorerSection__count", format.count(items.length)));
+        const title = h("h4", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream");
+        title.appendChild(h("span", { class: "explorerSection__count" }, format.count(items.length)));
         group.appendChild(title);
-        const list = node("div", "explorerLineage__list");
+        const list = h("div", { class: "explorerLineage__list" });
         if (!items.length) list.appendChild(emptyNote(relation === "upstream" ? "Nothing feeds this object." : "Nothing reads from this object."));
         for (const dep of items) list.appendChild(dependencyChip(dep, s.database, { cluster: detail.distributed?.cluster || "" }));
         group.appendChild(list);
@@ -1577,7 +1576,7 @@
     function appendFinalizePreviewInfo(th) {
       const text = "finalizeAggregation() used so Explorer can display the value of a single row";
       th.classList.add("has-finalize-info");
-      const info = node("span", "explorerFinalizeInfo");
+      const info = h("span", { class: "explorerFinalizeInfo" });
       info.tabIndex = 0;
       info.setAttribute("aria-label", text);
       info.addEventListener("click", (event) => event.stopPropagation());
@@ -1588,7 +1587,7 @@
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", "M356.004 61.156C274.634-20.314 142.627-20.395 61.156 60.974c-81.47 81.371-81.552 213.379-.181 294.85 81.369 81.47 213.378 81.551 294.849.181 81.469-81.369 81.551-213.379.18-294.849zM237.6 340.786c0 3.217-2.607 5.822-5.822 5.822h-46.576c-3.215 0-5.822-2.605-5.822-5.822V167.885c0-3.217 2.607-5.822 5.822-5.822h46.576c3.215 0 5.822 2.604 5.822 5.822v172.901zM208.49 137.901c-18.618 0-33.766-15.146-33.766-33.765 0-18.617 15.147-33.766 33.766-33.766 18.619 0 33.766 15.148 33.766 33.766 0 18.619-15.149 33.765-33.766 33.765z");
       icon.appendChild(path);
-      info.append(icon, node("div", "explorerFinalizeInfo__tooltip", text));
+      info.append(icon, h("div", { class: "explorerFinalizeInfo__tooltip" }, text));
       th.appendChild(info);
     }
 
@@ -1605,25 +1604,25 @@
     }
 
     function createDataSettingsControl() {
-      const root = node("div", "themeSelect explorerDataSettings");
-      const button = node("button", "themeSelect__button editorAutocompleteControl__button explorerDataSettings__button");
+      const root = h("div", { class: "themeSelect explorerDataSettings" });
+      const button = h("button", { class: "themeSelect__button editorAutocompleteControl__button explorerDataSettings__button" });
       button.type = "button";
       button.setAttribute("aria-haspopup", "menu");
       button.setAttribute("aria-expanded", "false");
       button.setAttribute("aria-label", "Data display settings");
       button.title = "Data display settings";
-      button.appendChild(node("span", "editorAutocompleteControl__gear"));
+      button.appendChild(h("span", { class: "editorAutocompleteControl__gear" }));
 
-      const menu = node("div", "themeSelect__menu explorerDataSettings__menu");
+      const menu = h("div", { class: "themeSelect__menu explorerDataSettings__menu" });
       menu.setAttribute("role", "menu");
       menu.tabIndex = -1;
       menu.hidden = true;
-      const option = node("button", "runMenu__opt");
+      const option = h("button", { class: "runMenu__opt" });
       option.type = "button";
       option.setAttribute("role", "menuitemcheckbox");
-      const check = node("span", "runMenu__optCheck");
+      const check = h("span", { class: "runMenu__optCheck" });
       check.setAttribute("aria-hidden", "true");
-      option.append(check, node("span", "runMenu__optText", "Flatten tuple"));
+      option.append(check, h("span", { class: "runMenu__optText" }, "Flatten tuple"));
       const sync = () => option.setAttribute("aria-checked", String(state.runOptFlattenTuple !== false));
       sync();
       menu.appendChild(option);
@@ -1654,21 +1653,21 @@
     }
 
     function renderPreviewToolbar(container, detail) {
-      const toolbar = node("div", "explorerDataToolbar explorerPreviewToolbar");
-      const info = node("div", "explorerPreviewToolbar__info");
+      const toolbar = h("div", { class: "explorerDataToolbar explorerPreviewToolbar" });
+      const info = h("div", { class: "explorerPreviewToolbar__info" });
       const limit = previewLimit();
       const rows = Array.isArray(model.preview?.rows) ? model.preview.rows.length : null;
       const total = optionalNumber(detail.summary?.rows);
-      const count = node("span", "explorerPreviewToolbar__count", rows == null ? `LIMIT ${limit}` : `${format.countLabel(rows, "row")} (LIMIT ${limit})`);
+      const count = h("span", { class: "explorerPreviewToolbar__count" }, rows == null ? `LIMIT ${limit}` : `${format.countLabel(rows, "row")} (LIMIT ${limit})`);
       info.appendChild(count);
-      if (total != null && rows != null) info.appendChild(node("span", "explorerPreviewToolbar__total", `of ${format.count(total)} in the table`));
+      if (total != null && rows != null) info.appendChild(h("span", { class: "explorerPreviewToolbar__total" }, `of ${format.count(total)} in the table`));
       // The row limit: the shared segmented control (app_ui_segmented.js).
-      const limits = node("div", "explorerPreviewLimits");
+      const limits = h("div", { class: "explorerPreviewLimits" });
       ns.segmented?.render(limits, PREVIEW_LIMITS.map((value) => ({ value, label: String(value), title: `Preview the first ${value} rows` })), { attr: "limit", value: limit, size: "compact", label: "Preview row limit" });
       ns.segmented?.bind(limits, { attr: "limit", onChange: (value) => { if (Number(value) !== previewLimit()) setPreviewLimit(Number(value)); return false; } });
       info.appendChild(limits);
 
-      const open = node("button", "button button--small", "Open in Query");
+      const open = h("button", { class: "button button--small" }, "Open in Query");
       open.type = "button";
       open.addEventListener("click", async () => {
         if (open.disabled) return;
@@ -1680,7 +1679,7 @@
           open.disabled = false;
         }
       });
-      const actions = node("div", "explorerDataToolbar__actions");
+      const actions = h("div", { class: "explorerDataToolbar__actions" });
       actions.append(open, createDataSettingsControl());
       toolbar.append(info, actions);
       container.appendChild(toolbar);
@@ -1787,8 +1786,8 @@
       clear(container);
       const detail = model.detail;
       if (!detail) return;
-      const card = node("div", "explorerCard");
-      const main = node("div", "explorerCard__main");
+      const card = h("div", { class: "explorerCard" });
+      const main = h("div", { class: "explorerCard__main" });
       main.dataset.tab = String(model.tab || "").toLowerCase();
       card.appendChild(main);
       const about = renderAbout(detail);
@@ -1812,7 +1811,7 @@
     function replicaHealthDot(table) {
       if (!table?.replicated) return null;
       const state = healthState(table);
-      const dot = node("i", `explorerHealthDot explorerHealthDot--${state} explorerTreeHealthDot`);
+      const dot = h("i", { class: `explorerHealthDot explorerHealthDot--${state} explorerTreeHealthDot` });
       dot.title = state === "healthy" ? "Replicated: local replica healthy" : `Replicated: ${healthLabel(table).toLowerCase()} (local replica)`;
       return dot;
     }

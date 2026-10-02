@@ -32,7 +32,7 @@
   const ns = window.ChDash;
   if (!ns || ns.queryLibrary) return;
 
-  const { dom, state, storage, util } = ns;
+  const { dom, state, storage, util, h } = ns;
 
   const LOCAL_KEY = storage.KEYS.queryLibrary;
   const HISTORY_KEY = storage.KEYS.queryHistory;
@@ -61,21 +61,15 @@
   const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const byName = (a, b) => String(a.name).localeCompare(String(b.name), "en", { numeric: true, sensitivity: "base" });
 
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = String(text);
-    return node;
-  }
 
   function icon(name) {
-    const node = el("span", `qlIcon qlIcon--${name}`);
+    const node = h("span", { class: `qlIcon qlIcon--${name}` });
     node.setAttribute("aria-hidden", "true");
     return node;
   }
 
   function iconButton(name, label, action) {
-    const button = el("button", "qlIconButton");
+    const button = h("button", { class: "qlIconButton" });
     button.type = "button";
     button.dataset.action = action;
     button.setAttribute("aria-label", label);
@@ -859,7 +853,7 @@
   function toast(message, kind = "info") {
     let node = document.querySelector(".qlToast");
     if (!node) {
-      node = el("div", "qlToast");
+      node = h("div", { class: "qlToast" });
       node.dataset.dialogFloat = "";
     }
     const layer = ns.dialog?.host?.() || document.body;
@@ -893,15 +887,15 @@
   }
 
   function field(label, control, hint) {
-    const wrap = el("label", "qlField");
-    wrap.appendChild(el("span", "qlField__label", label));
+    const wrap = h("label", { class: "qlField" });
+    wrap.appendChild(h("span", { class: "qlField__label" }, label));
     wrap.appendChild(control);
-    if (hint) wrap.appendChild(el("span", "qlField__hint", hint));
+    if (hint) wrap.appendChild(h("span", { class: "qlField__hint" }, hint));
     return wrap;
   }
 
   function textInput(name, value, { placeholder = "", maxLength = MAX_NAME_CHARS, autofocus = false } = {}) {
-    const input = el("input", "qlInput");
+    const input = h("input", { class: "qlInput" });
     input.type = "text";
     input.name = name;
     input.dataset.field = name;
@@ -915,7 +909,7 @@
   }
 
   function textArea(name, value, placeholder) {
-    const area = el("textarea", "qlInput qlInput--area");
+    const area = h("textarea", { class: "qlInput qlInput--area" });
     area.name = name;
     area.dataset.field = name;
     area.value = value || "";
@@ -928,16 +922,16 @@
   // Folder <select> (Save, Move, New folder): "/" for the top level, then
   // every folder of the host as its path ("/Operations/Merges").
   function folderSelect(name, selected, { exclude = null } = {}) {
-    const select = el("select", "qlInput qlSelect");
+    const select = h("select", { class: "qlInput qlSelect" });
     select.name = name;
     select.dataset.field = name;
-    const top = el("option", "", "/");
+    const top = h("option", null, "/");
     top.value = "";
     select.appendChild(top);
     const walk = (parentId) => {
       for (const folder of childFolders(ctl.library, parentId)) {
         if (exclude && (folder.id === exclude || isInside(ctl.library, folder.id, exclude))) continue;
-        const option = el("option", "", folderPathText(ctl.library, folder.id));
+        const option = h("option", null, folderPathText(ctl.library, folder.id));
         option.value = folder.id;
         if (exclude && folderDepth(ctl.library, folder.id) + subtreeHeight(ctl.library, exclude) > MAX_DEPTH) option.disabled = true;
         select.appendChild(option);
@@ -988,14 +982,14 @@
       if (sel?.kind === "query") return queryById(ctl.library, sel.id)?.folder_id || null;
       return null;
     })();
-    const body = el("div", "qlForm");
+    const body = h("div", { class: "qlForm" });
     const name = textInput("name", opened ? opened.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
     const description = textArea("description", opened ? opened.description : "", "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", selectedFolder);
     const tags = textInput("tags", opened ? opened.tags.join(", ") : "", { placeholder: "comma, separated (optional)", maxLength: 600 });
     body.append(field("Name", name), field("Description", description), field("Folder", folder), field("Tags", tags));
-    const preview = el("div", "qlField");
-    preview.appendChild(el("span", "qlField__label", fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
+    const preview = h("div", { class: "qlField" });
+    preview.appendChild(h("span", { class: "qlField__label" }, fromHistory ? "SQL (from History)" : "SQL (from the editor)"));
     preview.appendChild(sqlPreview(text));
     body.appendChild(preview);
     // The query belongs to the current host (the adapters stamp it).
@@ -1031,21 +1025,21 @@
   }
 
   async function editQueryDialog(query) {
-    const body = el("div", "qlForm");
+    const body = h("div", { class: "qlForm" });
     const name = textInput("name", query.name, { autofocus: true });
     const description = textArea("description", query.description, "What it answers, when to use it (optional)");
     const folder = folderSelect("folder_id", query.folder_id);
     const tags = textInput("tags", query.tags.join(", "), { placeholder: "comma, separated (optional)", maxLength: 600 });
-    const replace = el("input");
+    const replace = h("input");
     replace.type = "checkbox";
     replace.name = "replace_sql";
     const editor = editorSql().trim();
     replace.disabled = !editor || editor === query.sql.trim();
-    const replaceLabel = el("label", "qlCheck");
-    replaceLabel.append(replace, el("span", "", replace.disabled && editor ? "The editor holds this SQL" : "Replace the SQL with the editor content"));
+    const replaceLabel = h("label", { class: "qlCheck" });
+    replaceLabel.append(replace, h("span", null, replace.disabled && editor ? "The editor holds this SQL" : "Replace the SQL with the editor content"));
     body.append(field("Name", name), field("Description", description), field("Folder", folder), field("Tags", tags), replaceLabel);
-    const preview = el("div", "qlField");
-    preview.appendChild(el("span", "qlField__label", "SQL"));
+    const preview = h("div", { class: "qlField" });
+    preview.appendChild(h("span", { class: "qlField__label" }, "SQL"));
     preview.appendChild(sqlPreview(query.sql));
     body.appendChild(preview);
     await openDialog({
@@ -1066,7 +1060,7 @@
   }
 
   async function folderDialog({ folder = null, parentId = null } = {}) {
-    const body = el("div", "qlForm");
+    const body = h("div", { class: "qlForm" });
     const name = textInput("name", folder ? folder.name : "", { placeholder: "e.g. Monitoring", autofocus: true });
     const description = textArea("description", folder ? folder.description : "", "Optional");
     body.append(field("Name", name), field("Description", description));
@@ -1105,7 +1099,7 @@
     const select = folderSelect("target", current, { exclude: isFolder ? entity.id : null });
     select.size = Math.min(10, Math.max(4, select.options.length));
     select.classList.add("qlSelect--list");
-    const body = el("div", "qlForm");
+    const body = h("div", { class: "qlForm" });
     body.appendChild(field(`Move \u201c${entity.name}\u201d to`, select));
     await openDialog({
       title: "Move to\u2026",
@@ -1245,11 +1239,11 @@
   function buildLibraryShell(root) {
     root.innerHTML = "";
     root.dataset.rendered = "1";
-    const wrap = el("div", "ql");
-    const head = el("div", "ql__head");
-    const search = el("div", "qlSearch");
+    const wrap = h("div", { class: "ql" });
+    const head = h("div", { class: "ql__head" });
+    const search = h("div", { class: "qlSearch" });
     search.appendChild(icon("search"));
-    const input = el("input", "qlSearch__input");
+    const input = h("input", { class: "qlSearch__input" });
     input.type = "search";
     input.placeholder = "Search the library";
     input.title = "Searches names, descriptions, tags and SQL";
@@ -1257,16 +1251,16 @@
     input.autocomplete = "off";
     input.spellcheck = false;
     search.appendChild(input);
-    const actions = el("div", "ql__actions");
+    const actions = h("div", { class: "ql__actions" });
     const newFolder = iconButton("folderPlus", "New folder", "new-folder");
     const save = iconButton("plus", "Save the editor query", "save");
     actions.append(newFolder, save);
     head.append(search, actions);
-    const notice = el("div", "ql__notice");
-    const tree = el("ul", "qlTree");
+    const notice = h("div", { class: "ql__notice" });
+    const tree = h("ul", { class: "qlTree" });
     tree.setAttribute("role", "tree");
     tree.setAttribute("aria-label", "Saved queries");
-    const foot = el("div", "ql__foot");
+    const foot = h("div", { class: "ql__foot" });
     wrap.append(head, notice, tree, foot);
     root.appendChild(wrap);
     Object.assign(libraryEls, { root, wrap, input, actions, newFolder, save, notice, tree, foot });
@@ -1327,10 +1321,10 @@
   function renderNotice() {
     const notice = libraryEls.notice;
     notice.innerHTML = "";
-    if (!ctl.host) notice.appendChild(ns.uiState.banner(el("div", ""), { message: "Select a ClickHouse host: saved queries and History belong to a host.", inset: true }));
-    if (ctl.fatal) notice.appendChild(ns.uiState.banner(el("div", ""), { message: ctl.fatal, retry: () => void reloadLibrary(), inset: true }));
+    if (!ctl.host) notice.appendChild(ns.uiState.banner(h("div"), { message: "Select a ClickHouse host: saved queries and History belong to a host.", inset: true }));
+    if (ctl.fatal) notice.appendChild(ns.uiState.banner(h("div"), { message: ctl.fatal, retry: () => void reloadLibrary(), inset: true }));
     if (ctl.loadError) {
-      notice.appendChild(ns.uiState.banner(el("div", ""), { message: `The library file could not be read (${ctl.loadError}); it is shown read-only.`, inset: true }));
+      notice.appendChild(ns.uiState.banner(h("div"), { message: `The library file could not be read (${ctl.loadError}); it is shown read-only.`, inset: true }));
     }
     if (ctl.mode === "server" && !ctl.writable && !ctl.fatal) {
       const badge = ns.badge.el("Read-only library", { tone: "warn", size: "md", shape: "pill", className: "qlBadge qlBadge--readonly" });
@@ -1339,14 +1333,14 @@
       notice.appendChild(badge);
     }
     if (ctl.importOffer > 0 && editable()) {
-      const box = el("div", "qlNotice qlNotice--import");
+      const box = h("div", { class: "qlNotice qlNotice--import" });
       const n = ctl.importOffer;
-      box.appendChild(el("span", "", `${format.count(n)} ${n === 1 ? "query of this host is" : "queries of this host are"} saved in this browser only.`));
-      const actions = el("div", "qlNotice__actions");
-      const importButton = el("button", "button button--small button--primary", "Import my browser queries");
+      box.appendChild(h("span", null, `${format.count(n)} ${n === 1 ? "query of this host is" : "queries of this host are"} saved in this browser only.`));
+      const actions = h("div", { class: "qlNotice__actions" });
+      const importButton = h("button", { class: "button button--small button--primary" }, "Import my browser queries");
       importButton.type = "button";
       importButton.addEventListener("click", importBrowserQueries);
-      const later = el("button", "button button--small", "Not now");
+      const later = h("button", { class: "button button--small" }, "Not now");
       later.type = "button";
       later.addEventListener("click", () => {
         rememberImportOffer("dismissed");
@@ -1386,7 +1380,7 @@
   }
 
   function nameWithMarks(name, terms) {
-    const span = el("span", "qlRow__name");
+    const span = h("span", { class: "qlRow__name" });
     if (!terms || !terms.length) {
       span.textContent = name;
       return span;
@@ -1405,7 +1399,7 @@
     for (const [s, e] of ranges) {
       if (s < pos) continue;
       if (s > pos) span.appendChild(document.createTextNode(name.slice(pos, s)));
-      span.appendChild(el("mark", "", name.slice(s, e)));
+      span.appendChild(h("mark", null, name.slice(s, e)));
       pos = e;
     }
     if (pos < name.length) span.appendChild(document.createTextNode(name.slice(pos)));
@@ -1413,7 +1407,7 @@
   }
 
   function treeRow(kind, entity, level, { terms = null, path = "" } = {}) {
-    const li = el("li", `qlNode qlNode--${kind}`);
+    const li = h("li", { class: `qlNode qlNode--${kind}` });
     li.setAttribute("role", "treeitem");
     li.setAttribute("aria-level", String(level));
     li.dataset.kind = kind;
@@ -1422,19 +1416,19 @@
     li.tabIndex = -1;
     li.setAttribute("aria-selected", "false");
     if (editable()) li.draggable = true;
-    const row = el("div", "qlRow");
+    const row = h("div", { class: "qlRow" });
     row.style.setProperty("--qlDepth", String(level - 1));
-    const twisty = el("span", "qlRow__twisty");
+    const twisty = h("span", { class: "qlRow__twisty" });
     twisty.setAttribute("aria-hidden", "true");
     row.appendChild(twisty);
     row.appendChild(icon(kind === "folder" ? (ctl.expanded.has(entity.id) ? "folderOpen" : "folder") : "query"));
-    const text = el("span", "qlRow__text");
+    const text = h("span", { class: "qlRow__text" });
     text.appendChild(nameWithMarks(entity.name, terms));
-    if (path) text.appendChild(el("span", "qlRow__path", path));
+    if (path) text.appendChild(h("span", { class: "qlRow__path" }, path));
     row.appendChild(text);
     if (kind === "folder") {
       const counts = childQueries(ctl.library, entity.id).length + childFolders(ctl.library, entity.id).length;
-      if (counts) row.appendChild(el("span", "qlRow__count", format.count(counts)));
+      if (counts) row.appendChild(h("span", { class: "qlRow__count" }, format.count(counts)));
     } else if (ctl.opened?.id === entity.id) {
       row.classList.add("is-opened");
       li.setAttribute("aria-current", "true");
@@ -1449,11 +1443,11 @@
       const open = ctl.expanded.has(folder.id);
       li.setAttribute("aria-expanded", String(open));
       if (open) {
-        const group = el("ul", "qlTree__group");
+        const group = h("ul", { class: "qlTree__group" });
         group.setAttribute("role", "group");
         appendFolderChildren(group, folder.id, level + 1);
         if (!group.childElementCount) {
-          const empty = el("li", "qlTree__empty", "Empty folder");
+          const empty = h("li", { class: "qlTree__empty" }, "Empty folder");
           empty.setAttribute("role", "none");
           empty.style.setProperty("--qlDepth", String(level));
           group.appendChild(empty);
@@ -1489,7 +1483,7 @@
   }
 
   function emptyRow(text) {
-    const li = el("li", "qlTree__empty qlTree__empty--root", text);
+    const li = h("li", { class: "qlTree__empty qlTree__empty--root" }, text);
     li.setAttribute("role", "none");
     return li;
   }
@@ -1846,7 +1840,7 @@
     let pane = document.getElementById("queryLibraryPreview");
     const views = dom.queryLibraryViewSaved?.parentElement;
     if (!pane && views) {
-      pane = el("aside", "qlPreview");
+      pane = h("aside", { class: "qlPreview" });
       pane.id = "queryLibraryPreview";
       pane.tabIndex = -1;
       pane.setAttribute("aria-label", "Preview");
@@ -1880,14 +1874,14 @@
   }
 
   function timeNode(ms) {
-    const node = el("time", "", format.time(ms));
+    const node = h("time", null, format.time(ms));
     node.dateTime = format.iso(ms);
     node.title = format.timeTitle(ms);
     return node;
   }
 
   function tagList(tags) {
-    const list = el("span", "qlPreview__tags");
+    const list = h("span", { class: "qlPreview__tags" });
     for (const tag of tags) list.appendChild(ns.badge.el(tag, { tone: "accent", shape: "pill", className: "qlTag" }));
     return list;
   }
@@ -1975,59 +1969,59 @@
     paneModel = model;
     pane.replaceChildren();
     if (!model) {
-      pane.appendChild(el("div", "qlPreview__empty", PREVIEW_EMPTY[ctl.shown] || PREVIEW_EMPTY.saved));
+      pane.appendChild(h("div", { class: "qlPreview__empty" }, PREVIEW_EMPTY[ctl.shown] || PREVIEW_EMPTY.saved));
       setPreviewStep(false);
       if (refocus !== null) leavePreview();
       return;
     }
-    const content = el("div", "qlPreview__content");
-    const head = el("div", "qlPreview__head");
-    const back = el("button", "qlIconButton qlPreview__back");
+    const content = h("div", { class: "qlPreview__content" });
+    const head = h("div", { class: "qlPreview__head" });
+    const back = h("button", { class: "qlIconButton qlPreview__back" });
     back.type = "button";
     back.dataset.action = "back";
     back.setAttribute("aria-label", "Back to the list");
     back.title = "Back to the list";
     back.appendChild(icon("back"));
-    const title = el("h3", "qlPreview__title", model.title);
+    const title = h("h3", { class: "qlPreview__title" }, model.title);
     if (model.status) {
-      const dot = el("span", `qhItem__status qhItem__status--${model.status}`);
+      const dot = h("span", { class: `qhItem__status qhItem__status--${model.status}` });
       dot.setAttribute("aria-hidden", "true");
       title.prepend(dot);
     }
     head.append(back, title);
     content.appendChild(head);
     if (model.tools && model.tools.length) {
-      const tools = el("div", "qlPreview__tools");
+      const tools = h("div", { class: "qlPreview__tools" });
       tools.setAttribute("role", "group");
       tools.setAttribute("aria-label", "Change this item");
       for (const tool of model.tools) {
-        const button = el("button", tool.danger ? "button button--small button--danger" : "button button--small", tool.label);
+        const button = h("button", { class: tool.danger ? "button button--small button--danger" : "button button--small" }, tool.label);
         button.type = "button";
         button.dataset.action = tool.action;
         tools.appendChild(button);
       }
       content.appendChild(tools);
     }
-    if (model.description) content.appendChild(el("p", "qlPreview__description", model.description));
+    if (model.description) content.appendChild(h("p", { class: "qlPreview__description" }, model.description));
     if (model.facts && model.facts.length) {
-      const facts = el("dl", "qlPreview__facts");
+      const facts = h("dl", { class: "qlPreview__facts" });
       for (const [label, value] of model.facts) {
-        const dd = el("dd");
+        const dd = h("dd");
         dd.appendChild(value instanceof Node ? value : document.createTextNode(String(value)));
-        facts.append(el("dt", "", label), dd);
+        facts.append(h("dt", null, label), dd);
       }
       content.appendChild(facts);
     }
-    if (model.error) content.appendChild(el("div", "qlPreview__error", oneLine(model.error, 600)));
+    if (model.error) content.appendChild(h("div", { class: "qlPreview__error" }, oneLine(model.error, 600)));
     if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS));
     pane.appendChild(content);
     if (model.actions && model.actions.length) {
-      const foot = el("div", "qlPreview__foot");
+      const foot = h("div", { class: "qlPreview__foot" });
       foot.setAttribute("role", "group");
       foot.setAttribute("aria-label", "Use this query");
       const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
       for (const action of model.actions) {
-        const button = el("button", action.primary ? "button button--primary" : "button", action.label);
+        const button = h("button", { class: action.primary ? "button button--primary" : "button" }, action.label);
         button.type = "button";
         button.dataset.action = action.action;
         if (action.primary) button.title = `${action.label} (${mod}+Enter)`;
@@ -2045,28 +2039,28 @@
   function buildHistoryShell(root) {
     root.innerHTML = "";
     root.dataset.rendered = "1";
-    const wrap = el("div", "ql qh");
-    const head = el("div", "ql__head");
-    const search = el("div", "qlSearch");
+    const wrap = h("div", { class: "ql qh" });
+    const head = h("div", { class: "ql__head" });
+    const search = h("div", { class: "qlSearch" });
     search.appendChild(icon("search"));
-    const input = el("input", "qlSearch__input");
+    const input = h("input", { class: "qlSearch__input" });
     input.type = "search";
     input.placeholder = "Search the history";
     input.setAttribute("aria-label", "Search the history");
     input.autocomplete = "off";
     input.spellcheck = false;
     search.appendChild(input);
-    const clear = el("button", "button button--small qh__clear", "Clear");
+    const clear = h("button", { class: "button button--small qh__clear" }, "Clear");
     clear.type = "button";
     clear.title = "Clear the history";
     head.append(search, clear);
-    const list = el("div", "qhList");
+    const list = h("div", { class: "qhList" });
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-label", "Query history");
-    const more = el("button", "button button--small qh__more", "Load older entries");
+    const more = h("button", { class: "button button--small qh__more" }, "Load older entries");
     more.type = "button";
     more.hidden = true;
-    const foot = el("div", "ql__foot");
+    const foot = h("div", { class: "ql__foot" });
     wrap.append(head, list, more, foot);
     root.appendChild(wrap);
     Object.assign(historyEls, { root, input, clear, list, more, foot });
@@ -2124,43 +2118,43 @@
     historyEls.clear.hidden = !canClear;
     historyEls.clear.disabled = !hs.entries.length;
     list.innerHTML = "";
-    if (hs.error) list.appendChild(ns.uiState.banner(el("div", ""), { message: hs.error, retry: () => void loadHistory(), inset: true }));
+    if (hs.error) list.appendChild(ns.uiState.banner(h("div"), { message: hs.error, retry: () => void loadHistory(), inset: true }));
     let lastDay = "";
     for (const entry of hs.entries) {
       const ts = Number(entry.ran_at_ms) || 0;
       const day = dayKey(ts);
       if (day !== lastDay) {
         lastDay = day;
-        const label = el("div", "qhDay", dayLabel(ts));
+        const label = h("div", { class: "qhDay" }, dayLabel(ts));
         label.setAttribute("role", "presentation");
         list.appendChild(label);
       }
       const [cls, statusText] = statusInfo(entry.status);
-      const item = el("div", `qhItem qhItem--${cls}`);
+      const item = h("div", { class: `qhItem qhItem--${cls}` });
       item.setAttribute("role", "option");
       item.setAttribute("aria-selected", "false");
       item.tabIndex = -1;
       item.dataset.id = String(entry.id);
       item.dataset.key = `h:${entry.id}`;
-      const dot = el("span", `qhItem__status qhItem__status--${cls}`);
+      const dot = h("span", { class: `qhItem__status qhItem__status--${cls}` });
       dot.title = statusText;
       dot.setAttribute("aria-label", statusText);
       dot.setAttribute("role", "img");
-      const main = el("div", "qhItem__main");
-      main.appendChild(el("div", "qhItem__sql", oneLine(entry.sql, 220)));
-      const meta = el("div", "qhItem__meta");
-      const time = el("span", "qhItem__time", format.time(ts, { date: "never" }));
+      const main = h("div", { class: "qhItem__main" });
+      main.appendChild(h("div", { class: "qhItem__sql" }, oneLine(entry.sql, 220)));
+      const meta = h("div", { class: "qhItem__meta" });
+      const time = h("span", { class: "qhItem__time" }, format.time(ts, { date: "never" }));
       time.title = format.timeTitle(ts);
       meta.appendChild(time);
-      if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms != null) meta.appendChild(el("span", "qhItem__elapsed", format.duration.fromMs(entry.elapsed_ms)));
-      if (Number.isFinite(entry.rows) && entry.rows != null) meta.appendChild(el("span", "qhItem__rows", format.countLabel(entry.rows, "row")));
+      if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms != null) meta.appendChild(h("span", { class: "qhItem__elapsed" }, format.duration.fromMs(entry.elapsed_ms)));
+      if (Number.isFinite(entry.rows) && entry.rows != null) meta.appendChild(h("span", { class: "qhItem__rows" }, format.countLabel(entry.rows, "row")));
       main.appendChild(meta);
       // Every action of the run is in the preview.
       item.append(dot, main);
       list.appendChild(item);
     }
     if (!hs.entries.length && !hs.loading && !hs.error) {
-      list.appendChild(el("div", "qlTree__empty qlTree__empty--root", hs.q
+      list.appendChild(h("div", { class: "qlTree__empty qlTree__empty--root" }, hs.q
         ? `Nothing in the history matches \u201c${hs.q}\u201d.`
         : ctl.host ? `No history for ${ctl.host} yet: every query you run on it is listed here.` : "Select a ClickHouse host to see its History."));
     }

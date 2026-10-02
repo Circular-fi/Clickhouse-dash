@@ -32,6 +32,7 @@
   // The Explorer's "System" chip (app_explorer.js writes it).
   const INCLUDE_SYSTEM_KEY = ns.storage.KEYS.explorerIncludeSystem;
   const DASH = ns.format.EMPTY;
+  const { h } = ns;
 
   const data = {
     hostId: "",
@@ -52,13 +53,6 @@
   function percentText(value) {
     const n = Number(value);
     return value == null || !Number.isFinite(n) ? DASH : format.percent(n / 100);
-  }
-
-  function node(tag, className, text) {
-    const el = document.createElement(tag);
-    if (className) el.className = className;
-    if (text != null) el.textContent = String(text);
-    return el;
   }
 
   function humanEngine(engine) {
@@ -323,10 +317,10 @@
     if (!container) return;
     const families = ns.explorerTreemap?.engineLegend?.([tree]) || [];
     container.replaceChildren(...families.map((family) => {
-      const item = node("span", "explorerTreemapLegend__item");
-      const swatch = node("span", "explorerTreemapLegend__swatch");
+      const item = h("span", { class: "explorerTreemapLegend__item" });
+      const swatch = h("span", { class: "explorerTreemapLegend__swatch" });
       swatch.style.background = family.color;
-      item.append(swatch, node("span", "", family.label));
+      item.append(swatch, h("span", null, family.label));
       return item;
     }));
     container.hidden = !families.length;
@@ -388,21 +382,21 @@
 
   function mountView(container) {
     view?.treemap?.destroy();
-    const root = node("section", "explorerStorageView");
+    const root = h("section", { class: "explorerStorageView" });
     root.setAttribute("aria-label", "Storage");
 
     // No breadcrumb: the tree selection is the location. The meta line sums
     // the scope up.
-    const header = node("header", "explorerStorageView__header");
-    const heading = node("div", "explorerStorageView__heading");
-    const meta = node("div", "explorerStorageView__meta");
+    const header = h("header", { class: "explorerStorageView__header" });
+    const heading = h("div", { class: "explorerStorageView__heading" });
+    const meta = h("div", { class: "explorerStorageView__meta" });
     heading.append(meta);
-    const actions = node("div", "explorerStorageView__actions");
-    const openTable = node("button", "button button--small explorerStorageView__open", "Open card");
+    const actions = h("div", { class: "explorerStorageView__actions" });
+    const openTable = h("button", { class: "button button--small explorerStorageView__open" }, "Open card");
     openTable.title = "Open the table card";
     openTable.type = "button";
     openTable.hidden = true;
-    const refresh = node("button", "button button--small explorerRefreshButton explorerStorageView__refresh");
+    const refresh = h("button", { class: "button button--small explorerRefreshButton explorerStorageView__refresh" });
     refresh.type = "button";
     refresh.title = "Refresh storage";
     refresh.setAttribute("aria-label", "Refresh storage");
@@ -410,17 +404,17 @@
     actions.append(openTable, refresh);
     header.append(heading, actions);
 
-    const notice = node("div", "explorerStorageView__notice");
+    const notice = h("div", { class: "explorerStorageView__notice" });
     notice.hidden = true;
-    const map = node("section", "explorerStorageView__map");
+    const map = h("section", { class: "explorerStorageView__map" });
     map.hidden = true;
-    const mapHost = node("div", "explorerTreemapPanel explorerTreemapPanel--storage");
-    const mapFooter = node("div", "explorerTreemapFooter");
-    const legend = node("div", "explorerTreemapLegend");
+    const mapHost = h("div", { class: "explorerTreemapPanel explorerTreemapPanel--storage" });
+    const mapFooter = h("div", { class: "explorerTreemapFooter" });
+    const legend = h("div", { class: "explorerTreemapLegend" });
     mapFooter.appendChild(legend);
     map.append(mapHost, mapFooter);
-    const list = node("div", "explorerStorageView__list");
-    const footnote = node("div", "explorerStorageView__footnote");
+    const list = h("div", { class: "explorerStorageView__list" });
+    const footnote = h("div", { class: "explorerStorageView__footnote" });
     root.append(header, notice, list, map, footnote);
     container.replaceChildren(root);
 
@@ -488,13 +482,13 @@
 
   function renderList(level, info) {
     const columns = COLUMNS[level];
-    const table = node("table", `explorerStorageList explorerStorageList--${level} dataTable dataTable--compact`);
+    const table = h("table", { class: `explorerStorageList explorerStorageList--${level} dataTable dataTable--compact` });
     table.id = "explorerStorageList";
-    const thead = node("thead");
-    const headRow = node("tr");
+    const thead = h("thead");
+    const headRow = h("tr");
     const sort = view.sort[level];
     for (const column of columns) {
-      const th = node("th", `explorerStorageList__th explorerStorageList__th--${column.key}${column.type === "text" ? "" : " num"}`, column.label);
+      const th = h("th", { class: `explorerStorageList__th explorerStorageList__th--${column.key}${column.type === "text" ? "" : " num"}` }, column.label);
       th.scope = "col";
       ns.table.sortHeader(th, {
         key: column.key,
@@ -512,28 +506,28 @@
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
-    const tbody = node("tbody");
+    const tbody = h("tbody");
     const rows = sortedRows(level, info.rows, info.total);
     const maxBytes = Math.max(0, ...info.rows.map((row) => Number(row.bytes || 0)));
     const maxRows = Math.max(0, ...info.rows.map((row) => Number(row.rows || 0)));
     for (const row of rows) {
-      const tr = node("tr", "explorerStorageList__row");
+      const tr = h("tr", { class: "explorerStorageList__row" });
       tr.dataset.name = row.key;
       if (row.zoom) tr.classList.add("is-zoomable");
       for (const column of columns) {
-        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}`);
+        const td = h("td", { class: `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}` });
         if (column.key === "name") {
           if (row.zoom) {
-            const button = node("button", "explorerStorageList__name", row.name);
+            const button = h("button", { class: "explorerStorageList__name" }, row.name);
             button.type = "button";
             button.title = level === "server" ? `Show the tables of ${row.name}` : `Show the partitions of ${row.name}`;
             button.addEventListener("click", () => setScope(row.zoom));
             td.appendChild(button);
           } else {
-            td.appendChild(node("span", "explorerStorageList__name explorerStorageList__name--static", row.name));
+            td.appendChild(h("span", { class: "explorerStorageList__name explorerStorageList__name--static" }, row.name));
           }
           if (row.open) {
-            const open = node("button", "explorerStorageList__open", "\u2197");
+            const open = h("button", { class: "explorerStorageList__open" }, "\u2197");
             open.type = "button";
             open.title = `Open ${row.open.database}.${row.open.table}`;
             open.setAttribute("aria-label", `Open ${row.open.database}.${row.open.table}`);
@@ -573,9 +567,9 @@
       tbody.appendChild(tr);
     }
     if (info.omitted) {
-      const tr = node("tr", "explorerStorageList__row explorerStorageList__row--omitted");
+      const tr = h("tr", { class: "explorerStorageList__row explorerStorageList__row--omitted" });
       for (const column of columns) {
-        const td = node("td", `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}`);
+        const td = h("td", { class: `explorerStorageList__cell explorerStorageList__cell--${column.key}${column.type === "num" ? " num" : ""}` });
         if (column.key === "name") td.textContent = `${format.countLabel(Number(info.omitted.count || 0), "smaller table")}`;
         else if (column.key === "bytes") td.textContent = format.bytes(info.omitted.bytes);
         else if (column.key === "share") shareBarCell(td, info.omitted.bytes, info.total, maxBytes);
@@ -706,7 +700,7 @@
     }
     view.list.replaceChildren(renderList(level, info));
     if (level === "table" && info.partitionLimitReached) {
-      view.list.appendChild(node("div", "explorerStorageView__hint", "Only the 1,000 most recently modified partitions are listed."));
+      view.list.appendChild(h("div", { class: "explorerStorageView__hint" }, "Only the 1,000 most recently modified partitions are listed."));
     }
   }
 
@@ -758,15 +752,15 @@
 
   function renderCompact(container, { root, residentBytes = 0, name = "", onOpen, onShowStorage } = {}) {
     const treemap = ns.explorerTreemap;
-    const section = node("section", "explorerDatabaseStorage");
-    const head = node("div", "explorerDatabaseStorage__head");
-    head.appendChild(node("h3", "explorerSectionTitle", "Storage"));
+    const section = h("section", { class: "explorerDatabaseStorage" });
+    const head = h("div", { class: "explorerDatabaseStorage__head" });
+    head.appendChild(h("h3", { class: "explorerSectionTitle" }, "Storage"));
     const total = Number(root?.bytes || 0);
-    head.appendChild(node("span", "explorerDatabaseStorage__meta", total > 0
+    head.appendChild(h("span", { class: "explorerDatabaseStorage__meta" }, total > 0
       ? `${format.bytes(total)} on disk${residentBytes > 0 ? ` · ${format.bytes(residentBytes)} RAM` : ""}`
       : ""));
     if (typeof onShowStorage === "function") {
-      const link = node("button", "explorerDatabaseStorage__link", "Storage view");
+      const link = h("button", { class: "explorerDatabaseStorage__link" }, "Storage view");
       link.type = "button";
       link.title = `Open ${name} in the Storage view`;
       link.addEventListener("click", () => onShowStorage());
@@ -785,11 +779,11 @@
     }
     const { threshold, tree } = treemap.buildTreemap(root);
     if (significantLeafCount(tree) >= TREEMAP_MIN_ITEMS) {
-      const host = node("div", "explorerTreemapPanel explorerTreemapPanel--database");
+      const host = h("div", { class: "explorerTreemapPanel explorerTreemapPanel--database" });
       host.id = "explorerDatabaseTreemap";
-      const footer = node("div", "explorerTreemapFooter");
-      const legend = node("div", "explorerTreemapLegend");
-      footer.append(legend, node("div", "explorerTreemapFootnote", footnoteText({ threshold, scopeLabel: "the database", resident: residentBytes, treemapShown: true })));
+      const footer = h("div", { class: "explorerTreemapFooter" });
+      const legend = h("div", { class: "explorerTreemapLegend" });
+      footer.append(legend, h("div", { class: "explorerTreemapFootnote" }, footnoteText({ threshold, scopeLabel: "the database", resident: residentBytes, treemapShown: true })));
       section.append(host, footer);
       renderLegend(legend, tree);
       const controller = treemap.mount(host, {
@@ -810,16 +804,16 @@
       ? tree.children
       : [tree.kind === "table" ? tree : { kind: "other", name: "Others", members: Number(tree.count || 0), bytes: total }];
     const items = top.filter((item) => Number(item.bytes || 0) > 0);
-    const strip = node("div", "explorerStorageStrip");
+    const strip = h("div", { class: "explorerStorageStrip" });
     strip.id = "explorerDatabaseStorageStrip";
     strip.setAttribute("role", "list");
     strip.setAttribute("aria-label", `${name} storage split`);
-    const legend = node("div", "explorerStorageStrip__legend");
+    const legend = h("div", { class: "explorerStorageStrip__legend" });
     for (const item of items) {
       const share = Number(item.bytes || 0) / total * 100;
       const other = item.kind === "other";
       const label = other ? `Others (${format.countLabel(Number(item.members || 0), "table")})` : item.name;
-      const segment = node(other || !onOpen ? "span" : "button", `explorerStorageStrip__segment${other ? " is-other" : ""}`);
+      const segment = h(other || !onOpen ? "span" : "button", { class: `explorerStorageStrip__segment${other ? " is-other" : ""}` });
       segment.setAttribute("role", "listitem");
       if (!other) {
         segment.dataset.table = item.table || item.name;
@@ -827,16 +821,16 @@
       }
       segment.style.flexGrow = String(Math.max(share, 0.6));
       segment.title = `${other ? `Others in ${name}` : `${name}.${item.name}`}\n${format.bytes(item.bytes)} · ${percentText(share)}`;
-      if (share >= 12) segment.appendChild(node("span", "explorerStorageStrip__label", `${label} · ${percentText(share)}`));
+      if (share >= 12) segment.appendChild(h("span", { class: "explorerStorageStrip__label" }, `${label} · ${percentText(share)}`));
       if (!other && onOpen) {
         segment.type = "button";
         segment.addEventListener("click", () => onOpen(name, item.table || item.name));
       }
       strip.appendChild(segment);
-      const entry = node("span", "explorerStorageStrip__entry");
-      const swatch = node("span", `explorerStorageStrip__swatch${other ? " is-other" : ""}`);
+      const entry = h("span", { class: "explorerStorageStrip__entry" });
+      const swatch = h("span", { class: `explorerStorageStrip__swatch${other ? " is-other" : ""}` });
       if (!other) swatch.style.background = treemap.engineFamily(item.engine).color;
-      entry.append(swatch, node("span", "explorerStorageStrip__name", label), node("span", "explorerStorageStrip__value", `${format.bytes(item.bytes)} · ${percentText(share)}`));
+      entry.append(swatch, h("span", { class: "explorerStorageStrip__name" }, label), h("span", { class: "explorerStorageStrip__value" }, `${format.bytes(item.bytes)} · ${percentText(share)}`));
       legend.appendChild(entry);
     }
     section.append(strip, legend);

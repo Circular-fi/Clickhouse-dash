@@ -15,6 +15,7 @@
   // ("Graph kit" block), never from literals.
   const ns = window.ChDash;
   if (!ns) return;
+  const { h } = ns;
 
   const FONT = "Arial, Helvetica, sans-serif";
   const ZOOM_STEP = 1.22;
@@ -2373,12 +2374,6 @@
 
   // ------------------------------------------------------------ DOM chrome
 
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = String(text);
-    return node;
-  }
 
   // Show / hide button of a pane's legend, at the start of its status line.
   // One preference for every graph, kept per viewer (storage is optional):
@@ -2398,7 +2393,7 @@
     const status = dock?.querySelector(".graphKitStatus");
     if (!legend || !status || status.querySelector(".graphKitLegendToggle")) return null;
     if (!legend.id) legend.id = `graphKitLegend${(legendSerial += 1)}`;
-    const button = el("button", "graphKitLegendToggle");
+    const button = h("button", { class: "graphKitLegendToggle" });
     button.type = "button";
     button.setAttribute("aria-controls", legend.id);
     button.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h2M6.5 4h7M2.5 8h2M6.5 8h7M2.5 12h2M6.5 12h4"/></svg>';
@@ -2481,16 +2476,16 @@
   }
 
   function panelSection(title) {
-    const section = el("section", "graphKitPanel__section");
-    if (title) section.append(el("h3", "graphKitPanel__sectionTitle", title));
+    const section = h("section", { class: "graphKitPanel__section" });
+    if (title) section.append(h("h3", { class: "graphKitPanel__sectionTitle" }, title));
     return section;
   }
 
   function panelFacts(pairs) {
-    const list = el("dl", "graphKitPanel__facts");
+    const list = h("dl", { class: "graphKitPanel__facts" });
     for (const [label, value] of pairs) {
       if (value == null || value === "") continue;
-      list.append(el("dt", null, label), el("dd", null, value));
+      list.append(h("dt", null, label), h("dd", null, value));
     }
     return list;
   }
@@ -2541,7 +2536,6 @@
     fitTransform,
     clampView,
     mount,
-    el,
     legendToggle,
     foldLegendToFit,
     panelHeader,

@@ -377,7 +377,7 @@ def test_explorer_tools_live_in_sidebar_and_table_tree_is_minimal() -> None:
     assert 'id="explorerFunctionCategorySelect"' in html
     assert 'id="explorerFunctionRefreshButton"' in html
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
-    assert 'node("span", "explorerTreeDatabase__count", countText)' in tree
+    assert 'h("span", { class: "explorerTreeDatabase__count" }, countText)' in tree
     assert 'format.bytes(bytes)' in tree
     assert 'treeObjectTitle(table)' in tree and 'treeBadge(table)' in tree
     helpers = ui[ui.index("function treeBadge"):ui.index("function renderTableList")]

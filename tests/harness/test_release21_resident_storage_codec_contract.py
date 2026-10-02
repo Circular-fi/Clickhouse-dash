@@ -57,7 +57,7 @@ def test_lineage_chips_wrap_with_type_icon_and_short_in_database_names() -> None
     chip = ui[ui.index("function dependencyChip"):ui.index("// ---- tabs")]
     assert 'const qualified = `${dep.database || DASH}.${dep.table || DASH}`;' in chip
     assert "button.appendChild(objectIcon(dep.engine));" in chip
-    assert '"explorerLineageChip__name", shortName(dep.database, dep.table, contextDatabase)' in chip
+    assert '{ class: "explorerLineageChip__name" }, shortName(dep.database, dep.table, contextDatabase)' in chip
     assert 'dep.kind === "distributed_route" && cluster' in chip
     assert ".explorerLineage__list {" in css
     assert "flex-wrap: wrap;" in css

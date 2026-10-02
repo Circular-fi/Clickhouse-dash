@@ -58,16 +58,11 @@
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
   if (ns.sidePanel && ns.detailPanel) return;
+  const { h } = ns;
 
   let uid = 0;
   const atMostMd = () => !!ns.shell?.isAtMost?.("md");
 
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-  }
 
   // The remembered fold ("1" / "0"): storage.pref (app_state.js, loaded by
   // the time a page mounts a panel).
@@ -168,17 +163,17 @@
       drawerToggle = drawer.toggle || null;
       if (!drawerToggle && drawer.host) {
         // A bar at the start of the main column, shown at --bp-md and below.
-        const bar = el("div", "uiSide__drawerBar");
-        drawerToggle = el("button", "button button--small uiSide__drawerToggle");
+        const bar = h("div", { class: "uiSide__drawerBar" });
+        drawerToggle = h("button", { class: "button button--small uiSide__drawerToggle" });
         drawerToggle.type = "button";
         if (panel.id) drawerToggle.id = `${panel.id}DrawerToggle`;
         drawerToggle.innerHTML = drawer.icon || '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 8h11M2.5 12.5h11"/></svg>';
-        drawerToggle.append(el("span", "uiSide__drawerToggleText", label));
+        drawerToggle.append(h("span", { class: "uiSide__drawerToggleText" }, label));
         bar.append(drawerToggle);
         drawer.host.prepend(bar);
       }
       if (!backdrop) {
-        backdrop = el("div", "uiSide__backdrop");
+        backdrop = h("div", { class: "uiSide__backdrop" });
         backdrop.hidden = true;
         panel.after(backdrop);
       }
@@ -204,7 +199,7 @@
   }
 
   function closeButton(label, onClose) {
-    const button = el("button", "closeCross uiDetail__close", "×");
+    const button = h("button", { class: "closeCross uiDetail__close" }, "×");
     button.type = "button";
     button.setAttribute("aria-label", label);
     button.title = `${label} (Esc)`;
@@ -216,23 +211,23 @@
   // aliases (graphKitPanel__*) its content styles and tests name.
   function head({ eyebrow = "", title = "", subtitle = "", dot = "", titleId = "", closeLabel = "Close", onClose = null, actions = null, graphKit = false } = {}) {
     const alias = (name) => (graphKit ? ` graphKitPanel__${name}` : "");
-    const header = el("header", `uiDetail__head${alias("head")}`);
-    const titles = el("div", `uiDetail__titles${alias("titles")}`);
-    if (eyebrow) titles.append(el("span", `uiDetail__eyebrow${alias("eyebrow")}`, eyebrow));
-    const heading = el("h2", `uiDetail__title${alias("title")}`);
+    const header = h("header", { class: `uiDetail__head${alias("head")}` });
+    const titles = h("div", { class: `uiDetail__titles${alias("titles")}` });
+    if (eyebrow) titles.append(h("span", { class: `uiDetail__eyebrow${alias("eyebrow")}` }, eyebrow));
+    const heading = h("h2", { class: `uiDetail__title${alias("title")}` });
     if (titleId) heading.id = titleId;
     if (dot) {
-      const swatch = el("span", `uiDetail__dot${alias("dot")}`);
+      const swatch = h("span", { class: `uiDetail__dot${alias("dot")}` });
       swatch.style.background = dot;
       heading.append(swatch);
     }
     if (title instanceof Node) heading.append(title);
     else heading.append(document.createTextNode(String(title ?? "")));
     titles.append(heading);
-    if (subtitle) titles.append(el("span", `uiDetail__subtitle${alias("subtitle")}`, subtitle));
+    if (subtitle) titles.append(h("span", { class: `uiDetail__subtitle${alias("subtitle")}` }, subtitle));
     header.append(titles);
     if (actions) {
-      const box = el("div", "uiDetail__actions");
+      const box = h("div", { class: "uiDetail__actions" });
       if (actions instanceof Node) box.append(actions);
       else box.innerHTML = String(actions);
       header.append(box);
@@ -249,22 +244,22 @@
     let panel = options.el || null;
     if (!panel) {
       const id = options.id || `uiDetail${++uid}`;
-      panel = el("aside", `uiDetail uiDetail--${layout}${options.className ? ` ${options.className}` : ""}`);
+      panel = h("aside", { class: `uiDetail uiDetail--${layout}${options.className ? ` ${options.className}` : ""}` });
       panel.id = id;
       panel.hidden = true;
       const titleId = `${id}Title`;
-      const header = el("header", "uiDetail__head");
-      const titles = el("div", "uiDetail__titles");
-      const eyebrow = el("span", "uiDetail__eyebrow");
+      const header = h("header", { class: "uiDetail__head" });
+      const titles = h("div", { class: "uiDetail__titles" });
+      const eyebrow = h("span", { class: "uiDetail__eyebrow" });
       eyebrow.hidden = true;
-      const title = el("h2", "uiDetail__title");
+      const title = h("h2", { class: "uiDetail__title" });
       title.id = titleId;
-      const subtitle = el("span", "uiDetail__subtitle");
+      const subtitle = h("span", { class: "uiDetail__subtitle" });
       subtitle.hidden = true;
       titles.append(eyebrow, title, subtitle);
-      const actions = el("div", "uiDetail__actions");
+      const actions = h("div", { class: "uiDetail__actions" });
       header.append(titles, actions, closeButton(closeLabel, null));
-      const body = el("div", "uiDetail__body");
+      const body = h("div", { class: "uiDetail__body" });
       panel.append(header, body);
       panel.setAttribute("aria-labelledby", titleId);
       (options.host || document.body).appendChild(panel);

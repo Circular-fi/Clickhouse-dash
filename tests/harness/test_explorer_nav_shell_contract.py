@@ -90,7 +90,7 @@ def test_tree_rows_chips_and_drawer() -> None:
     ui = read("src/static/app_explorer.js")
     css = read("src/static/style.css")
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
-    assert 'node("span", "explorerTreeObject__size explorerBar", badge.text)' in tree
+    assert 'h("span", { class: "explorerTreeObject__size explorerBar" }, badge.text)' in tree
     assert 'size.style.setProperty("--bar-pct", `${barPercent(badge.value, maxBytes)}%`);' in tree
     assert 'highlightedText("explorerTreeObject__name", table.name, query)' in tree
     assert 'if (query && loaded && !items.length && !databaseMatches) continue;' in tree

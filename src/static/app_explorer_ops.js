@@ -21,15 +21,9 @@
   // "1.82 ms"; counts "120,064"; server times in the browser's zone.
   const format = ns.format;
   const DASH = format.EMPTY;
+  const { h } = ns;
 
   let view = null;
-
-  function node(tag, className, text) {
-    const el = document.createElement(tag);
-    if (className) el.className = className;
-    if (text != null) el.textContent = String(text);
-    return el;
-  }
 
   function hostId() {
     return String(ns.state?.selectedHostId || "");
@@ -121,17 +115,17 @@
   }
 
   function objectCell(item) {
-    const td = node("td", "explorerOpsTable__object");
-    const button = node("button", "explorerOpsTable__link", item.table);
+    const td = h("td", { class: "explorerOpsTable__object" });
+    const button = h("button", { class: "explorerOpsTable__link" }, item.table);
     button.type = "button";
     button.title = `Open ${item.database}.${item.table}`;
     button.addEventListener("click", () => openTable(item.database, item.table));
-    td.append(button, node("span", "explorerOpsTable__database", item.database));
+    td.append(button, h("span", { class: "explorerOpsTable__database" }, item.database));
     return td;
   }
 
   function textCell(text, className = "", title = "") {
-    const td = node("td", className, text == null || text === "" ? DASH : text);
+    const td = h("td", { class: className }, text == null || text === "" ? DASH : text);
     if (title) td.title = title;
     return td;
   }
@@ -143,55 +137,55 @@
   const STATUS_TONES = { ok: "ok", warning: "warn", pending: "neutral", error: "error" };
 
   function statusCell(level, text, title = "") {
-    const td = node("td", "explorerOpsTable__status");
+    const td = h("td", { class: "explorerOpsTable__status" });
     td.appendChild(ns.badge.el(text, { tone: STATUS_TONES[level] || "neutral", title, attrs: { "data-level": level } }));
     return td;
   }
 
   function messageCell(text) {
     const value = String(text || "").trim();
-    const td = node("td", "explorerOpsTable__message");
+    const td = h("td", { class: "explorerOpsTable__message" });
     if (!value) { td.textContent = DASH; return td; }
     const first = value.split("\n")[0];
-    td.appendChild(node("span", "explorerOpsTable__messageText", first.length > 220 ? `${first.slice(0, 220)}\u2026` : first));
+    td.appendChild(h("span", { class: "explorerOpsTable__messageText" }, first.length > 220 ? `${first.slice(0, 220)}\u2026` : first));
     td.title = value.length > 2000 ? `${value.slice(0, 2000)}\u2026` : value;
     return td;
   }
 
   function progressCell(progress) {
     const pct = Math.max(0, Math.min(100, Number(progress || 0) * 100));
-    const td = node("td", "num explorerOpsTable__progress", format.percent(pct / 100));
+    const td = h("td", { class: "num explorerOpsTable__progress" }, format.percent(pct / 100));
     ns.table.cellBar(td, pct);
     return td;
   }
 
   function opsTable(id, headers, rows) {
-    const table = node("table", "explorerOpsTable dataTable dataTable--compact");
+    const table = h("table", { class: "explorerOpsTable dataTable dataTable--compact" });
     table.id = id;
-    const thead = node("thead");
-    const tr = node("tr");
+    const thead = h("thead");
+    const tr = h("tr");
     for (const header of headers) {
-      const th = node("th", header.num ? "num" : "", header.label);
+      const th = h("th", { class: header.num ? "num" : "" }, header.label);
       th.scope = "col";
       if (header.title) th.title = header.title;
       tr.appendChild(th);
     }
     thead.appendChild(tr);
-    const tbody = node("tbody");
+    const tbody = h("tbody");
     rows.forEach((row) => tbody.appendChild(row));
     table.append(thead, tbody);
-    const wrap = node("div", "explorerOpsTableWrap");
+    const wrap = h("div", { class: "explorerOpsTableWrap" });
     wrap.appendChild(table);
     return wrap;
   }
 
   function section(key, title, count, { warn = 0, note = "" } = {}) {
-    const el = node("section", "explorerOpsSection");
+    const el = h("section", { class: "explorerOpsSection" });
     el.dataset.section = key;
-    const head = node("div", "explorerOpsSection__head");
-    head.appendChild(node("h3", "explorerOpsSection__title", title));
-    head.appendChild(node("span", `explorerOpsSection__count${warn > 0 ? " is-warning" : ""}`, count));
-    if (note) head.appendChild(node("span", "explorerOpsSection__note", note));
+    const head = h("div", { class: "explorerOpsSection__head" });
+    head.appendChild(h("h3", { class: "explorerOpsSection__title" }, title));
+    head.appendChild(h("span", { class: `explorerOpsSection__count${warn > 0 ? " is-warning" : ""}` }, count));
+    if (note) head.appendChild(h("span", { class: "explorerOpsSection__note" }, note));
     el.appendChild(head);
     return el;
   }
@@ -217,18 +211,18 @@
     if (!keeper) {
       if (!view.keeperError) return null;
       const el = section("keeper", "Keeper", "unavailable", { warn: 1 });
-      el.appendChild(node("div", "explorerOpsSection__empty", String(view.keeperError.message || "Keeper status is unavailable.")));
+      el.appendChild(h("div", { class: "explorerOpsSection__empty" }, String(view.keeperError.message || "Keeper status is unavailable.")));
       return el;
     }
     if (!keeper.configured) {
       const el = section("keeper", "Keeper", "not configured");
-      el.appendChild(node("div", "explorerOpsSection__empty", "This server has no Keeper / ZooKeeper connection (no replicated tables or distributed DDL)."));
+      el.appendChild(h("div", { class: "explorerOpsSection__empty" }, "This server has no Keeper / ZooKeeper connection (no replicated tables or distributed DDL)."));
       return el;
     }
     const connections = keeper.connections || [];
     const expired = connections.some((item) => item.is_expired) || Number(keeper.metrics?.ZooKeeperSessionExpired || 0) > 0;
     const el = section("keeper", "Keeper", expired ? "session expired" : `${connections.length || Number(keeper.metrics?.ZooKeeperSession || 0)} connected`, { warn: expired ? 1 : 0 });
-    const tiles = node("div", "statTiles statTiles--boxed explorerOpsTiles");
+    const tiles = h("div", { class: "statTiles statTiles--boxed explorerOpsTiles" });
     const tile = (label, value, sub = "", level = "") => {
       tiles.appendChild(ns.ui.statTile({ label, value, sub, tone: level, className: "explorerOpsTile" }));
     };
@@ -244,7 +238,7 @@
     el.appendChild(tiles);
     if (connections.length) {
       const rows = connections.map((item) => {
-        const tr = node("tr");
+        const tr = h("tr");
         tr.append(
           textCell(item.name || "default"),
           textCell(`${item.host}:${item.port}`, "mono"),
@@ -267,7 +261,7 @@
   function renderMerges(items) {
     const el = section("merges", "Merges", `${format.count(items.length)} running`, { note: truncatedNote("merges") });
     const rows = items.map((item) => {
-      const tr = node("tr");
+      const tr = h("tr");
       tr.append(
         objectCell(item),
         textCell(item.is_mutation ? "Mutation" : (item.merge_type || "Merge")),
@@ -292,9 +286,9 @@
     const failing = items.filter((item) => String(item.latest_fail_reason || "").trim()).length;
     const el = section("mutations", "Mutations", failing ? `${format.count(items.length)} pending · ${format.count(failing)} failing` : `${format.count(items.length)} pending`, { warn: failing, note: truncatedNote("mutations") });
     const rows = items.map((item) => {
-      const tr = node("tr");
+      const tr = h("tr");
       const failed = String(item.latest_fail_reason || "").trim();
-      const command = node("td", "explorerOpsTable__command");
+      const command = h("td", { class: "explorerOpsTable__command" });
       command.appendChild(ns.ui.sqlBlock({ sql: item.command, inline: true, label: "Mutation command" }));
       command.title = item.command;
       tr.append(
@@ -320,7 +314,7 @@
     const postponed = items.reduce((sum, item) => sum + Number(item.postponed || 0), 0);
     const el = section("replication_queue", "Replication queue", `${format.count(entries)} entries in ${format.count(items.length)} tables`, { warn: postponed, note: truncatedNote("replication_queue") });
     const rows = items.map((item) => {
-      const tr = node("tr");
+      const tr = h("tr");
       tr.append(
         objectCell(item),
         numCell(format.count(item.entries)),
@@ -347,7 +341,7 @@
     const rows = items.map((item) => {
       const level = replicaLevel(item);
       const status = item.is_session_expired ? "Session expired" : item.is_readonly ? "Read-only" : level === "warning" ? "Lagging" : "Healthy";
-      const tr = node("tr");
+      const tr = h("tr");
       tr.append(
         objectCell(item),
         textCell(item.replica_name, "mono", item.is_leader ? "Leader" : ""),
@@ -372,7 +366,7 @@
     const errors = items.filter((item) => Number(item.error_count || 0) > 0 || item.is_blocked || Number(item.broken_data_files || 0) > 0).length;
     const el = section("distribution_queue", "Distributed send queues", `${format.count(files)} files pending`, { warn: errors, note: truncatedNote("distribution_queue") });
     const rows = items.map((item) => {
-      const tr = node("tr");
+      const tr = h("tr");
       const level = item.is_blocked || Number(item.broken_data_files || 0) > 0 ? "error" : Number(item.error_count || 0) > 0 ? "warning" : "ok";
       tr.append(
         objectCell(item),
@@ -416,7 +410,7 @@
     const body = view.body;
     body.replaceChildren();
     if (view.activityError) {
-      body.appendChild(ns.uiState.banner(node("div", ""), { message: String(view.activityError.message || "Server operations are unavailable."), retry: () => void load(true), inset: true }));
+      body.appendChild(ns.uiState.banner(h("div"), { message: String(view.activityError.message || "Server operations are unavailable."), retry: () => void load(true), inset: true }));
     }
     const activity = view.activity;
     if (!activity) {
@@ -445,27 +439,27 @@
     const empty = sections.filter((item) => !item.items.length && !unavailable.has(item.key)).map((item) => `No ${item.label}`);
     const missing = sections.filter((item) => unavailable.has(item.key)).map((item) => item.key.replace(/_/g, " "));
     if (empty.length || missing.length) {
-      const line = node("div", "explorerOpsView__quiet");
+      const line = h("div", { class: "explorerOpsView__quiet" });
       line.id = "explorerOpsQuiet";
-      if (empty.length) line.appendChild(node("span", "", `${empty.join(" · ")}.`));
-      if (missing.length) line.appendChild(node("span", "explorerOpsView__missing", `Not readable on this server: ${missing.join(", ")}.`));
+      if (empty.length) line.appendChild(h("span", null, `${empty.join(" · ")}.`));
+      if (missing.length) line.appendChild(h("span", { class: "explorerOpsView__missing" }, `Not readable on this server: ${missing.join(", ")}.`));
       body.appendChild(line);
     }
   }
 
   function mount(container) {
     clearTimeout(view?.timer);
-    const root = node("section", "explorerOpsView");
-    const header = node("header", "explorerOpsView__header");
-    const heading = node("div", "explorerOpsView__heading");
-    heading.append(node("h2", "explorerOpsView__title", "Server operations"), node("div", "explorerOpsView__meta"));
-    const actions = node("div", "explorerOpsView__actions");
-    const option = node("label", "explorerOpsView__option");
-    const autoRefreshInput = node("input");
+    const root = h("section", { class: "explorerOpsView" });
+    const header = h("header", { class: "explorerOpsView__header" });
+    const heading = h("div", { class: "explorerOpsView__heading" });
+    heading.append(h("h2", { class: "explorerOpsView__title" }, "Server operations"), h("div", { class: "explorerOpsView__meta" }));
+    const actions = h("div", { class: "explorerOpsView__actions" });
+    const option = h("label", { class: "explorerOpsView__option" });
+    const autoRefreshInput = h("input");
     autoRefreshInput.type = "checkbox";
     autoRefreshInput.id = "explorerOpsAutoRefresh";
-    option.append(autoRefreshInput, node("span", "", `Auto-refresh (${AUTO_REFRESH_MS / 1000} s)`));
-    const refresh = node("button", "button button--small explorerRefreshButton");
+    option.append(autoRefreshInput, h("span", null, `Auto-refresh (${AUTO_REFRESH_MS / 1000} s)`));
+    const refresh = h("button", { class: "button button--small explorerRefreshButton" });
     refresh.type = "button";
     refresh.id = "explorerOpsRefreshButton";
     refresh.title = "Refresh server operations";
@@ -474,7 +468,7 @@
     actions.append(option, refresh);
     header.append(heading, actions);
     // Not a live region: the auto-refresh would read the tables again every time.
-    const body = node("div", "explorerOpsView__body");
+    const body = h("div", { class: "explorerOpsView__body" });
     root.append(header, body);
     container.replaceChildren(root);
     view = {
