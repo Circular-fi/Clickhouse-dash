@@ -136,9 +136,15 @@ async function captureCopies(page) {
 }
 const lastCopy = (page) => page.evaluate(() => window.__copies[window.__copies.length - 1] || '');
 
+// The trace views are a tab row (Timeline | Graph | Statistics | Spans |
+// Flamegraph); below 820 px the "View" dropdown stands in for it.
+const viewTabs = (page) => page.locator('#traceViewTabs');
+const viewTab = (page, label) => viewTabs(page).getByRole('tab', { name: label, exact: true });
+const viewPicker = (page) => page.locator('#traceViewBar .traceViewBar__picker');
+
 async function pickView(page, label) {
-  await page.locator('#traceViewBar .traceViewBar__picker .tracePicker__button').click();
-  await page.locator('#traceViewBar .traceViewBar__picker .tracePicker__menu').getByRole('option', { name: label, exact: true }).click();
+  await viewTab(page, label).click();
+  await expect(viewTab(page, label)).toHaveAttribute('aria-selected', 'true');
 }
 
 async function pickTool(page, selectId, label) {
@@ -381,7 +387,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
 
 test('trace statistics: self time, grouping, sub-groups, sorting and heat colouring', async ({ page }) => {
   await openTrace(page);
-  await pickView(page, 'Trace Statistics');
+  await pickView(page, 'Statistics');
   await expect(page).toHaveURL(/\?view=statistics$/);
   await expect(page.locator('.traceTimelineFrame')).toBeHidden();
   await expect(page.locator('#traceOverview')).toBeHidden();
@@ -441,7 +447,7 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
 
 test('trace spans table: sort, filter, and a row click focuses the span in the timeline (back returns)', async ({ page }) => {
   await openTrace(page);
-  await pickView(page, 'Trace Spans Table');
+  await pickView(page, 'Spans');
   await expect(page).toHaveURL(/\?view=spans$/);
   const table = page.locator('#traceAltView .traceSpansTable__table');
   await expect(table.locator('tbody tr')).toHaveCount(9);
@@ -469,10 +475,10 @@ test('trace spans table: sort, filter, and a row click focuses the span in the t
   await pickTool(page, 'traceSpansService', 'All services');
 
   // Collapse the root in the timeline first: the focus expands the ancestors.
-  await pickView(page, 'Trace Timeline');
+  await pickView(page, 'Timeline');
   await row(page, ID.A).locator('[data-toggle-span]').click();
   await expect(row(page, ID.F)).toHaveCount(0);
-  await pickView(page, 'Trace Spans Table');
+  await pickView(page, 'Spans');
   await table.locator(`tr[data-table-span="${ID.F}"]`).click();
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?span=${ID.F}$`));
@@ -926,12 +932,12 @@ test('trace view persists in the URL and in localStorage; timeline by default', 
   await expect(page.locator('#traceViewSelect')).toHaveValue('timeline');
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(page.locator('#traceAltView')).toBeHidden();
-  await pickView(page, 'Trace Graph');
+  await pickView(page, 'Graph');
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?view=graph$`));
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('graph');
   await page.reload();
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
-  await expect(page.locator('#traceViewBar .traceViewBar__picker .tracePicker__button')).toHaveText('Trace Graph');
+  await expect(viewTabs(page).locator('[aria-selected="true"]')).toHaveText('Graph');
   // Without ?view=, the stored view opens (and shows in the URL).
   await page.goto(`/observability/traces/${TRACE_ID}`);
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
@@ -943,12 +949,9 @@ test('trace view persists in the URL and in localStorage; timeline by default', 
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(inspector(page, ID.C)).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('statistics');
-  // The menu lists the other views only.
-  await page.locator('#traceViewBar .traceViewBar__picker .tracePicker__button').click();
-  await expect(page.locator('#traceViewBar .traceViewBar__picker .tracePicker__menu [role="option"]:visible')).toHaveText(['Trace Graph', 'Trace Statistics', 'Trace Spans Table', 'Trace Flamegraph']);
-  await page.locator('#traceViewBar .traceViewBar__picker .tracePicker__button').click();
-  await pickView(page, 'Trace Flamegraph');
-  await pickView(page, 'Trace Timeline');
+  await expect(viewTabs(page).getByRole('tab')).toHaveText(['Timeline', 'Graph', 'Statistics', 'Spans', 'Flamegraph']);
+  await pickView(page, 'Flamegraph');
+  await pickView(page, 'Timeline');
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('timeline');
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}$`));
   await page.goto(`/observability/traces/${TRACE_ID}`);
@@ -982,4 +985,73 @@ test('trace views: no horizontal page overflow and readable in both themes', asy
     }
   }
   await page.evaluate(() => localStorage.removeItem('chdash.theme'));
+});
+
+
+test('trace views: a tab row with arrow / Home / End keys that follows ?view= and Back / Forward, a dropdown below 820 px', async ({ page }) => {
+  await openTrace(page);
+  await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });
+  const tabs = viewTabs(page);
+  await expect(tabs).toBeVisible();
+  await expect(tabs).toHaveAttribute('role', 'tablist');
+  await expect(viewPicker(page)).toBeHidden();
+  // The Logs Results / Patterns tab look: one in-content tab component.
+  const look = (el) => { const cs = getComputedStyle(el); return [cs.fontSize, cs.fontWeight, cs.height, cs.borderBottomWidth, cs.borderBottomStyle]; };
+  expect(await viewTab(page, 'Timeline').evaluate(look)).toEqual(['11.5px', '700', '28px', '2px', 'solid']);
+  // Roving tabindex: Tab reaches the selected tab only.
+  await expect(tabs.locator('[tabindex="0"]')).toHaveText('Timeline');
+  await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-controls', 'traceTimelineFrame');
+  await expect(viewTab(page, 'Graph')).toHaveAttribute('aria-controls', 'traceAltView');
+  await viewTab(page, 'Timeline').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(viewTab(page, 'Graph')).toBeFocused();
+  await expect(viewTab(page, 'Graph')).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(/\?view=graph$/);
+  await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
+  await page.keyboard.press('End');
+  await expect(viewTab(page, 'Flamegraph')).toBeFocused();
+  await expect(page).toHaveURL(/\?view=flamegraph$/);
+  await page.keyboard.press('ArrowRight');
+  await expect(viewTab(page, 'Timeline')).toBeFocused();
+  await expect(page.locator('.traceTimelineFrame')).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page).toHaveURL(/\?view=flamegraph$/);
+  await page.keyboard.press('Home');
+  await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.locator('[aria-selected="true"]')).toHaveCount(1);
+  // The view is the URL's ?view= (replaced, as before the tabs); Back and
+  // Forward over a deep-linked span bring the view and its tab back.
+  await pickView(page, 'Spans');
+  await expect(page).toHaveURL(/\?view=spans$/);
+  await page.locator(`#traceAltView tr[data-table-span="${ID.C}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`\\?span=${ID.C}$`));
+  await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
+  await page.goBack();
+  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(viewTab(page, 'Spans')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
+  await page.goForward();
+  await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
+  await expect(inspector(page, ID.C)).toBeVisible();
+  await page.goto(`/observability/traces/${TRACE_ID}?view=statistics`);
+  await expect(page.locator('#traceAltView .traceStats')).toBeVisible();
+  await expect(viewTab(page, 'Statistics')).toHaveAttribute('aria-selected', 'true');
+  await expect(tabs.locator('[tabindex="0"]')).toHaveText('Statistics');
+
+  // Below 820 px: the dropdown, listing the other views; the tabs follow it.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect(tabs).toBeHidden();
+  await expect(viewPicker(page)).toBeVisible();
+  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('Statistics');
+  await viewPicker(page).locator('.tracePicker__button').click();
+  await expect(viewPicker(page).locator('.tracePicker__menu [role="option"]:visible')).toHaveText(['Timeline', 'Graph', 'Spans', 'Flamegraph']);
+  await viewPicker(page).locator('.tracePicker__menu').getByRole('option', { name: 'Spans', exact: true }).click();
+  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
+  await expect(page.locator('#traceViewSelect')).toHaveValue('spans');
+  await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('Spans');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(viewPicker(page)).toBeHidden();
+  await expect(viewTab(page, 'Spans')).toHaveAttribute('aria-selected', 'true');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 });

@@ -294,6 +294,8 @@ private:
   void handle_logs_context(const httplib::Request& req, httplib::Response& res);
   void handle_logs_patterns(const httplib::Request& req, httplib::Response& res);
   void handle_logs_services(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_facets(const httplib::Request& req, httplib::Response& res);
+  void handle_logs_facet_values(const httplib::Request& req, httplib::Response& res);
   void handle_metrics_meta(const httplib::Request& req, httplib::Response& res);
 
   // OTel metrics browser (api_metrics.cpp).

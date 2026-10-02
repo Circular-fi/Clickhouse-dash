@@ -2,6 +2,7 @@
 #include "time_util.hpp"
 
 #include "api_error.hpp"
+#include "facet_limits.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
@@ -547,60 +548,9 @@ bool trace_filters_sql(clickhouse::Client& client, const HostSpec& host, const T
   return true;
 }
 
-// A SELECT whose work is capped by its SETTINGS (read limit / time budget):
-// the progress packets tell whether it read every row it would have read
-// (read_rows == total_rows_to_read) or stopped early (LIMIT, a read_overflow
-// or timeout_overflow break), i.e. whether its answer is only an estimate.
-// Both progress fields are per-packet deltas.
-struct BoundedRead {
-  uint64_t read_rows = 0;
-  uint64_t total_rows = 0;
-  uint64_t elapsed_ms = 0;
-  bool partial() const { return read_rows < total_rows; }
-};
-
-BoundedRead bounded_select(clickhouse::Client& client, const std::string& sql,
-                           const std::function<void(const clickhouse::Block&)>& on_block) {
-  BoundedRead out;
-  const auto started = std::chrono::steady_clock::now();
-  clickhouse::Query query(sql);
-  query.OnData(on_block);
-  query.OnProgress([&](const clickhouse::Progress& progress) {
-    out.read_rows += progress.rows;
-    out.total_rows += progress.total_rows;
-  });
-  client.Execute(query);
-  out.elapsed_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - started).count());
-  return out;
-}
-
-// Attribute discovery caps (after HyperDX's metadata queries): an inner LIMIT
-// of sampled spans, a hard cap on the rows read from storage (a selective
-// filter would otherwise scan the whole window looking for enough spans), a
-// GROUP BY size cap for high-cardinality values and a time budget. The read
-// cap breaks like an exhausted source, so the aggregation still answers from
-// what was read; the time budget is a last resort (a timeout break may drop
-// the partial aggregate) and is reported as an estimate as well.
-constexpr uint64_t kFacetSampleRows = 3000000;
-constexpr uint64_t kFacetReadRowsCap = 50000000;
-constexpr uint64_t kFacetGroupByCap = 100000;
-constexpr int kFacetTimeBudgetSeconds = 5;
+// Facet caps, BoundedRead and bounded_select: facet_limits.hpp (shared with
+// api_logs.cpp).
 constexpr uint64_t kTaggedPrefillReadRowsCap = 100000000;
-
-std::string facet_settings_sql(uint64_t read_rows_cap, bool group_by_cap) {
-  std::string out = " SETTINGS max_execution_time = " + std::to_string(kFacetTimeBudgetSeconds) +
-      ", timeout_overflow_mode = 'break', max_rows_to_read = " + std::to_string(read_rows_cap) +
-      ", read_overflow_mode = 'break'";
-  if (group_by_cap) {
-    out += ", max_rows_to_group_by = " + std::to_string(kFacetGroupByCap) + ", group_by_overflow_mode = 'any'";
-  }
-  return out;
-}
-
-bool timed_out(const BoundedRead& read) {
-  return read.elapsed_ms + 250 >= static_cast<uint64_t>(kFacetTimeBudgetSeconds) * 1000;
-}
 
 struct TraceFacetKeys {
   struct Key { std::string scope, key; uint64_t count = 0; };
@@ -1395,9 +1345,6 @@ struct FacetScope {
   AttributeColumns columns;
 };
 
-constexpr uint64_t kFacetTtlMs = 60 * 1000;
-constexpr size_t kFacetMaxKeys = 500;
-constexpr int kFacetMaxValues = 500;
 
 bool facet_scope(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPool>& pool, const httplib::Request& req,
                  httplib::Response& res, FacetScope* scope, std::shared_ptr<clickhouse::Client>* client) {

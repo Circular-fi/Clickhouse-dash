@@ -245,6 +245,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
     http_.Get("/api/logs/patterns", [&](const auto& req, auto& res) { handle_logs_patterns(req, res); });
     http_.Get("/api/logs/services", [&](const auto& req, auto& res) { handle_logs_services(req, res); });
+    http_.Get("/api/logs/facets", [&](const auto& req, auto& res) { handle_logs_facets(req, res); });
+    http_.Get("/api/logs/facet_values", [&](const auto& req, auto& res) { handle_logs_facet_values(req, res); });
   }
   if (cfg_.metrics.enabled) {
     http_.Get("/api/metrics/catalog", [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); });

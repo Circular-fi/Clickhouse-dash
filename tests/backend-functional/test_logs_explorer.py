@@ -1,4 +1,4 @@
-"""Logs explorer routes: /api/logs/{search,histogram,context,patterns,services}.
+"""Logs explorer routes: /api/logs/{search,histogram,context,patterns,services,facets,facet_values}.
 
 Every check compares the API with ground truth read straight from ClickHouse
 (otel.otel_logs, filled by the otel_fixture service): row order and keyset
@@ -415,3 +415,199 @@ def test_substring_body_search_uses_narrow_windows():
     wide = requests.get(f"{SUBSTRING_BASE_URL}/api/logs/histogram", timeout=30,
                         params=dict(start_ms=end_ms - 7 * 3600 * 1000, end_ms=end_ms, q="x"))
     assert wide.status_code == 400 and wide.json()["error_code"] == "logs_substring_range"
+
+
+# ---------------------------------------------------------------------------
+# Fields panel: /api/logs/facets and /api/logs/facet_values (the Traces
+# attribute facets' caps: 3M sampled records, 50M rows read, minute-aligned
+# windows cached for 60 s).
+
+ALT_BASE_URLS = [u.strip().rstrip("/") for u in os.environ.get("CHDASH_ALT_API_BASE_URLS", "").split(",") if u.strip()]
+MAPS = {"log": "LogAttributes", "resource": "ResourceAttributes", "scope": "ScopeAttributes"}
+FACET_COLUMNS = ["ServiceName", "SeverityText", "ScopeName", "ScopeVersion"]
+
+
+def aligned_sql(payload: dict) -> str:
+    """The minute-aligned window a facet answer scanned, [start, end]."""
+    lo, hi = payload["scanned_range"]
+    assert lo % 60000 == 0 and hi % 60000 == 0
+    return (f"Timestamp >= fromUnixTimestamp64Milli(toInt64({lo})) "
+            f"AND Timestamp <= fromUnixTimestamp64Milli(toInt64({hi}))")
+
+
+def facet_keys_truth(where: str) -> dict:
+    truth = {}
+    for scope, column in MAPS.items():
+        for row in ch_rows(f"SELECT arrayJoin(mapKeys({column})) AS k, count() AS c FROM {TABLE} WHERE {where} GROUP BY k"):
+            truth[(scope, row["k"])] = int(row["c"])
+    counts = ch_rows("SELECT " + ", ".join(f"countIf({c} != '') AS n_{c}" for c in FACET_COLUMNS) + f" FROM {TABLE} WHERE {where}")[0]
+    for column in FACET_COLUMNS:
+        if int(counts[f"n_{column}"]):
+            truth[("column", column)] = int(counts[f"n_{column}"])
+    return truth
+
+
+@pytest.fixture(scope="module")
+def facet_window(meta) -> tuple[int, int]:
+    """Ten minutes ending 5 minutes before the newest record, off the minute
+    grid: fewer records than the 3M sample, so the answers are exact."""
+    end_ms = int(meta["time_bounds"]["max_ms"]) - 5 * 60 * 1000 + 17_123
+    return end_ms - 10 * 60 * 1000, end_ms
+
+
+def test_facet_keys_match_ground_truth_over_the_minute_aligned_window(facet_window):
+    start_ms, end_ms = facet_window
+    payload = ok("/api/logs/facets", start_ms=start_ms, end_ms=end_ms)
+    assert payload["supported"] is True and payload["range"] == [start_ms, end_ms]
+    lo, hi = payload["scanned_range"]
+    assert lo == start_ms // 60000 * 60000 and hi == -(-end_ms // 60000) * 60000
+    assert payload["sample_limit"] == 3_000_000 and payload["read_rows_limit"] == 50_000_000
+    assert set(payload["scopes"]) >= {"log", "resource", "column"}
+    where = aligned_sql(payload)
+    sampled = int(ch_value(f"SELECT count() FROM {TABLE} WHERE {where}"))
+    assert 0 < sampled < payload["sample_limit"], sampled
+    assert payload["estimated"] is False and payload["sampled_records"] == sampled
+    keys = {(scope, key): count for scope, key, count in payload["keys"]}
+    assert keys == facet_keys_truth(where)
+    # Most frequent first; ties: the record columns first.
+    counts = [count for _, _, count in payload["keys"]]
+    assert counts == sorted(counts, reverse=True)
+    assert payload["keys"][0][0] == "column"
+    assert ("column", "TraceId") not in keys and ("column", "SpanId") not in keys
+    # Served from the 60 s cache the second time.
+    again = ok("/api/logs/facets", start_ms=start_ms, end_ms=end_ms)
+    assert again["cached"] is True and again["keys"] == payload["keys"]
+
+
+def test_facet_keys_follow_the_search_filters(facet_window):
+    start_ms, end_ms = facet_window
+    service = ch_value(f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(start_ms, end_ms)} "
+                       f"AND mapContains(LogAttributes, 'http.route') GROUP BY ServiceName ORDER BY count() DESC LIMIT 1")
+    params = dict(start_ms=start_ms, end_ms=end_ms, service=service, severity_min=9, q="GET",
+                  attr=["ResourceAttributes.telemetry.synthetic!=nope"])
+    payload = ok("/api/logs/facets", **params)
+    where = (f"{aligned_sql(payload)} AND ServiceName = '{service}' AND SeverityNumber >= 9 AND hasToken(Body, 'GET') "
+             f"AND NOT ResourceAttributes['telemetry.synthetic'] = 'nope'")
+    keys = {(scope, key): count for scope, key, count in payload["keys"]}
+    assert keys == facet_keys_truth(where)
+    assert keys[("column", "ServiceName")] == payload["sampled_records"] > 0
+    assert payload["text_search"]["active"] is True
+
+
+def test_facet_values_match_ground_truth_and_ignore_their_own_filters(facet_window):
+    start_ms, end_ms = facet_window
+    services = [r["ServiceName"] for r in ch_rows(
+        f"SELECT ServiceName FROM {TABLE} WHERE {time_sql(start_ms, end_ms)} GROUP BY ServiceName ORDER BY count() DESC LIMIT 2")]
+    # ServiceName: the service filter is its own (the other services stay
+    # listed), the severity filter applies.
+    payload = ok("/api/logs/facet_values", start_ms=start_ms, end_ms=end_ms, scope="column", key="ServiceName",
+                 limit=500, service=services[0], attr=[f"ServiceName!={services[1]}"], severity_min=13)
+    where = f"{aligned_sql(payload)} AND SeverityNumber >= 13"
+    truth = {r["v"]: int(r["c"]) for r in ch_rows(f"SELECT ServiceName AS v, count() AS c FROM {TABLE} WHERE {where} GROUP BY v")}
+    assert payload["estimated"] is False
+    assert {v: c for v, c in payload["values"]} == truth
+    assert services[1] in truth and len(truth) > 2
+    assert payload["distinct_values"] == len(truth) and payload["has_more"] is False
+    assert payload["records_with_key"] == sum(truth.values())
+    counts = [c for _, c in payload["values"]]
+    assert counts == sorted(counts, reverse=True)
+
+    # A resource attribute under a filter on it (bare and map-qualified keys
+    # both count as its own) and on another field.
+    host = ch_value(f"SELECT ResourceAttributes['host.name'] FROM {TABLE} WHERE {time_sql(start_ms, end_ms)} LIMIT 1")
+    payload = ok("/api/logs/facet_values", start_ms=start_ms, end_ms=end_ms, scope="resource", key="host.name", limit=5,
+                 attr=[f"ResourceAttributes.host.name={host}", f"host.name!={host}x", "SeverityText=WARN"])
+    where = f"{aligned_sql(payload)} AND mapContains(ResourceAttributes, 'host.name') AND SeverityText = 'WARN'"
+    truth = ch_rows(f"SELECT ResourceAttributes['host.name'] AS v, count() AS c FROM {TABLE} WHERE {where} "
+                    f"GROUP BY v ORDER BY c DESC, v LIMIT 5")
+    assert payload["values"] == [[r["v"], int(r["c"])] for r in truth]
+    assert payload["has_more"] is True and payload["limit"] == 5
+    assert payload["distinct_values"] == int(ch_value(f"SELECT uniqExact(ResourceAttributes['host.name']) FROM {TABLE} WHERE {where}"))
+
+    # A log attribute: only the records carrying the key.
+    payload = ok("/api/logs/facet_values", start_ms=start_ms, end_ms=end_ms, scope="log", key="http.route", limit=50)
+    where = f"{aligned_sql(payload)} AND mapContains(LogAttributes, 'http.route')"
+    truth = {r["v"]: int(r["c"]) for r in ch_rows(f"SELECT LogAttributes['http.route'] AS v, count() AS c FROM {TABLE} WHERE {where} GROUP BY v")}
+    assert {v: c for v, c in payload["values"]} == truth and truth
+
+
+def test_several_values_of_one_key_match_any_of_them(window):
+    start_ms, end_ms = window
+    lo = end_ms - 5 * 60 * 1000
+    params = dict(start_ms=lo, end_ms=end_ms, limit=150, attr=["SeverityText=WARN", "SeverityText=ERROR", "LogAttributes.log.origin!=nope"])
+    payload = ok("/api/logs/search", **params)
+    expected = [row["id"] for row in ch_rows(ids_sql(
+        f"{time_sql(lo, end_ms)} AND SeverityText IN ('WARN', 'ERROR') AND NOT LogAttributes['log.origin'] = 'nope'", 150))]
+    assert expected and [row["id"] for row in payload["rows"]] == expected
+    assert {row["severity_text"] for row in payload["rows"]} == {"WARN", "ERROR"}
+    histogram = ok("/api/logs/histogram", **{k: v for k, v in params.items() if k != "limit"})
+    assert histogram["totals"]["total"] == int(ch_value(
+        f"SELECT count() FROM {TABLE} WHERE {time_sql(lo, end_ms)} AND SeverityText IN ('WARN', 'ERROR')"))
+
+
+def test_facet_requests_are_validated_and_bounded(meta, facet_window):
+    start_ms, end_ms = facet_window
+    base = dict(start_ms=start_ms, end_ms=end_ms)
+    bad = [
+        ("/api/logs/facet_values", {**base, "scope": "any", "key": "host.name"}, "invalid_logs_facet"),
+        ("/api/logs/facet_values", {**base, "scope": "log"}, "invalid_logs_facet"),
+        ("/api/logs/facet_values", {**base, "scope": "log", "key": "k" * 513}, "invalid_logs_facet"),
+        # Columns are named from a fixed list (never an identifier from the request).
+        ("/api/logs/facet_values", {**base, "scope": "column", "key": "TraceId"}, "invalid_logs_facet"),
+        ("/api/logs/facet_values", {**base, "scope": "column", "key": "Body`, 1) --"}, "invalid_logs_facet"),
+        ("/api/logs/facets", {"start_ms": end_ms - 400 * 24 * 3600 * 1000, "end_ms": end_ms}, "invalid_logs_range"),
+        ("/api/logs/facets", {"start_ms": start_ms}, "invalid_logs_range"),
+        ("/api/logs/facets", {**base, "attr": "novalue"}, "invalid_logs_filter"),
+        ("/api/logs/facet_values", {**base, "scope": "log", "key": "x", "severity": "loud"}, "invalid_logs_filter"),
+        ("/api/logs/facets", {**base, "attr": [f"k{i}=v" for i in range(17)]}, "invalid_logs_filter"),
+    ]
+    for path, params, code in bad:
+        response = api(path, **params)
+        assert response.status_code == 400, (path, params, response.text)
+        assert response.json().get("error_code") == code, (path, params, response.text)
+    unknown = api("/api/logs/facets", **base, host_id="no-such-host")
+    assert unknown.status_code == 404 and unknown.json().get("error_code") == "unknown_host", unknown.text
+    # The value limit is clamped to 1..500; keys and values are quoted.
+    assert ok("/api/logs/facet_values", **base, scope="column", key="SeverityText", limit=9999)["limit"] == 500
+    one = ok("/api/logs/facet_values", **base, scope="column", key="SeverityText", limit=0)
+    assert one["limit"] == 1 and len(one["values"]) == 1 and one["has_more"] is True
+    quoted = ok("/api/logs/facet_values", **base, scope="log", key="it's\\a `key`", limit=3)
+    assert quoted["values"] == [] and quoted["distinct_values"] == 0
+    # A week (the logs.max_lookback_minutes default) stays within the caps and the time budget.
+    week_end = int(meta["time_bounds"]["max_ms"]) - (int(time.time()) % 600) * 60_000
+    started = time.perf_counter()
+    week = ok("/api/logs/facets", start_ms=week_end - 7 * 24 * 3600 * 1000 + 60_000, end_ms=week_end)
+    elapsed = time.perf_counter() - started
+    assert week["sampled_records"] <= week["sample_limit"]
+    assert week["estimated"] is (int(ch_value(f"SELECT count() FROM {TABLE} WHERE {aligned_sql(week)}")) > week["sampled_records"])
+    assert elapsed < 10.0, elapsed
+
+
+def test_facets_follow_the_allowlist_and_are_gated_on_every_instance():
+    """Every instance of CHDASH_ALT_API_BASE_URLS: logs disabled answers 404;
+    a service allowlist keeps other services out of the field values."""
+    if not ALT_BASE_URLS:
+        pytest.skip("CHDASH_ALT_API_BASE_URLS not set")
+    import fnmatch
+    for base in ALT_BASE_URLS:
+        features = requests.get(f"{base}/api/version", timeout=30).json()["features"]
+        if not features.get("logs", {}).get("enabled"):
+            for path in ("/api/logs/facets", "/api/logs/facet_values"):
+                response = requests.get(f"{base}{path}", params={"scope": "column", "key": "ServiceName"}, timeout=30)
+                assert response.status_code == 404, (base, path, response.text)
+            continue
+        m = requests.get(f"{base}/api/logs/meta", timeout=30).json()
+        if not m.get("table_exists") or not m.get("time_bounds") or not m.get("service_filter_applied"):
+            continue
+        patterns = m["service_allowlist"]
+        end_ms = int(m["time_bounds"]["max_ms"])
+        params = dict(start_ms=end_ms - 10 * 60 * 1000, end_ms=end_ms)
+        values = requests.get(f"{base}/api/logs/facet_values", params={**params, "scope": "column", "key": "ServiceName", "limit": 500},
+                              timeout=60).json()["values"]
+        assert values and all(any(fnmatch.fnmatchcase(v, p) for p in patterns) for v, _ in values), (patterns, values)
+        keys = requests.get(f"{base}/api/logs/facets", params=params, timeout=60).json()
+        allowed = " OR ".join(f"ServiceName LIKE '{p.replace('*', '%')}'" for p in patterns)
+        lo, hi = keys["scanned_range"]
+        truth = int(ch_value(f"SELECT count() FROM {TABLE} WHERE Timestamp >= fromUnixTimestamp64Milli(toInt64({lo})) "
+                             f"AND Timestamp <= fromUnixTimestamp64Milli(toInt64({hi})) AND ({allowed})"))
+        assert keys["sampled_records"] == min(truth, keys["sample_limit"]), (base, keys["sampled_records"], truth)

@@ -66,14 +66,6 @@
               document.documentElement.classList.add("chdash-trace-analytics");
             }
           } catch (_) {}
-          // The attribute facets sidebar keeps its open / hidden state (hidden
-          // by default on narrow windows) from the first paint.
-          try {
-            var facets = localStorage.getItem("chdash.traceFacetsCollapsed.v1");
-            if (facets === "1" || (facets !== "0" && window.innerWidth < 1100)) {
-              document.documentElement.classList.add("chdash-trace-facets-collapsed");
-            }
-          } catch (_) {}
           // The selected tab (?tab=, app_trace_tabs.js) shows its panel from
           // the first paint.
           try {
@@ -81,6 +73,18 @@
             if (tab && /^[a-z]+$/.test(tab) && tab !== "search") document.documentElement.classList.add("chdash-trace-tab-" + tab);
           } catch (_) {}
         }
+        // The facets sidebars (Traces Attributes, Logs Fields) keep their
+        // open / hidden state (hidden by default on narrow windows) from the
+        // first paint, each its own.
+        try {
+          var facetRails = [["chdash.traceFacetsCollapsed.v1", "chdash-trace-facets-collapsed"], ["chdash.logsFacetsCollapsed.v1", "chdash-logs-facets-collapsed"]];
+          for (var f = 0; f < facetRails.length; f += 1) {
+            var facets = localStorage.getItem(facetRails[f][0]);
+            if (facets === "1" || (facets !== "0" && window.innerWidth < 1100)) {
+              document.documentElement.classList.add(facetRails[f][1]);
+            }
+          }
+        } catch (_) {}
         window.__chdashEarlyState = { themeMode: mode, obsView: view };
       } catch (_) {}
     })();
@@ -323,10 +327,18 @@
         </header>
         <section id="traceLogsPanel" class="traceLogsPanel" aria-label="Trace logs" hidden></section>
         <div id="traceViewBar" class="traceViewBar" role="toolbar" aria-label="Trace view">
-          <label class="traceViewBar__picker"><span class="traceViewBar__label">View</span><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view"><option value="timeline">Trace Timeline</option><option value="graph">Trace Graph</option><option value="statistics">Trace Statistics</option><option value="spans">Trace Spans Table</option><option value="flamegraph">Trace Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Trace Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
+          <!-- The trace views: in-content tabs (app_ui_tabs.js); below 820 px the dropdown instead. -->
+          <div id="traceViewTabs" class="contentTabs traceViewTabs" role="tablist" aria-label="Trace view">
+            <button id="traceViewTab-timeline" class="contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="traceTimelineFrame" data-tab="timeline">Timeline</button>
+            <button id="traceViewTab-graph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="graph" tabindex="-1">Graph</button>
+            <button id="traceViewTab-statistics" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="statistics" tabindex="-1">Statistics</button>
+            <button id="traceViewTab-spans" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="spans" tabindex="-1">Spans</button>
+            <button id="traceViewTab-flamegraph" class="contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="traceAltView" data-tab="flamegraph" tabindex="-1">Flamegraph</button>
+          </div>
+          <label class="traceViewBar__picker"><span class="traceViewBar__label">View</span><div class="themeSelect tracePicker"><select id="traceViewSelect" class="tracePicker__native" tabindex="-1" aria-hidden="true" aria-label="Trace view"><option value="timeline">Timeline</option><option value="graph">Graph</option><option value="statistics">Statistics</option><option value="spans">Spans</option><option value="flamegraph">Flamegraph</option></select><button class="button themeSelect__button tracePicker__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-disabled="false">Timeline</button><div class="themeSelect__menu tracePicker__menu" role="listbox" tabindex="-1" hidden></div></div></label>
           <div id="traceViewTools" class="traceViewBar__tools"></div>
         </div>
-        <div class="traceTimelineFrame">
+        <div id="traceTimelineFrame" class="traceTimelineFrame">
           <div id="traceWaterfall" class="traceWaterfall traceWaterfall--jaeger"><div class="tracesEmpty">No trace selected.</div></div>
           <section id="traceInspector" class="traceInspector traceInspector--jaeger" hidden></section>
         </div>
@@ -383,6 +395,19 @@
       <div id="logsChips" class="logsChips" aria-label="Active filters" hidden></div>
       <div id="logsError" class="tracesError logsError" role="alert" hidden></div>
 
+      <div class="logsSearchBody">
+      <!-- The Fields sidebar: the Traces Attributes facets (app_facet_panel.js). -->
+      <aside id="logsFacets" class="traceFacets logsFacets" aria-label="Field filters">
+        <div class="traceFacets__head">
+          <button id="logsFacetsToggle" class="traceFacets__toggle" type="button" aria-expanded="true" aria-controls="logsFacetsBody" title="Hide fields"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3h11l-4.3 5.2v4.3l-2.4 1V8.2z"/></svg><span>Fields</span></button>
+          <span id="logsFacetsMeta" class="traceFacets__meta"></span>
+        </div>
+        <div id="logsFacetsBody" class="traceFacets__body">
+          <input id="logsFacetsSearch" class="traceFacets__search" type="search" placeholder="Filter keys" aria-label="Filter field keys" autocomplete="off" spellcheck="false" />
+          <div id="logsFacetsList" class="traceFacets__list"><div class="traceFacets__empty">Search to discover fields.</div></div>
+        </div>
+      </aside>
+      <div class="logsSearchMain">
       <section id="logsHistogramCard" class="logsHistogram" aria-label="Log volume">
         <header class="logsHistogram__header">
           <strong id="logsTotal" class="logsHistogram__total">–</strong>
@@ -398,9 +423,9 @@
       </section>
 
       <div class="logsToolbar" role="toolbar" aria-label="Results">
-        <div class="logsTabs" role="tablist" aria-label="Logs view">
-          <button id="logsTabResults" class="logsTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsResultsPane" data-tab="results">Results</button>
-          <button id="logsTabPatterns" class="logsTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsPatternsPane" data-tab="patterns">Patterns</button>
+        <div class="logsTabs contentTabs" role="tablist" aria-label="Logs view">
+          <button id="logsTabResults" class="logsTabs__tab contentTabs__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="logsResultsPane" data-tab="results">Results</button>
+          <button id="logsTabPatterns" class="logsTabs__tab contentTabs__tab" type="button" role="tab" aria-selected="false" aria-controls="logsPatternsPane" data-tab="patterns" tabindex="-1">Patterns</button>
         </div>
         <span id="logsStatus" class="logsStatus" aria-live="polite"></span>
         <div class="logsToolbar__actions">
@@ -458,6 +483,8 @@
             <div id="logsContextRows" class="logsContext__rows"></div>
           </div>
         </aside>
+      </div>
+      </div>
       </div>
     </section>
   </main>

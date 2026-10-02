@@ -8,6 +8,9 @@
 //   GET /api/logs/context    records around one record (any / same service /
 //                            same host / same trace), bounded windows.
 //   GET /api/logs/patterns   Drain templates mined from a bounded sample.
+//   GET /api/logs/facets     the Fields panel: field keys (attribute map keys
+//                            and record columns) of the matching records.
+//   GET /api/logs/facet_values  top values of one field.
 //
 // Every query filters on the primary-key columns first (ServiceName through
 // the allowlist and the service filter, TimestampTime / Timestamp through the
@@ -19,6 +22,7 @@
 #include "api_error.hpp"
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
+#include "facet_limits.hpp"
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
 #include "time_util.hpp"
@@ -176,6 +180,11 @@ struct LogsSchema {
   bool log_attributes = false;
   bool resource_attributes = false;
   bool scope_attributes = false;
+  // Map(String, String) attribute columns (the facets read their key
+  // subcolumns; a JSON column filters but is not faceted).
+  bool log_attributes_map = false;
+  bool resource_attributes_map = false;
+  bool scope_attributes_map = false;
   bool body_lower_index = false;
   bool body_token_index = false;
 };
@@ -215,6 +224,10 @@ LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const L
   schema.log_attributes = columns.count("LogAttributes") && attribute_column(columns["LogAttributes"]);
   schema.resource_attributes = columns.count("ResourceAttributes") && attribute_column(columns["ResourceAttributes"]);
   schema.scope_attributes = columns.count("ScopeAttributes") && attribute_column(columns["ScopeAttributes"]);
+  const auto map_column = [&](const char* name) { return columns.count(name) && columns[name].rfind("Map(", 0) == 0; };
+  schema.log_attributes_map = map_column("LogAttributes");
+  schema.resource_attributes_map = map_column("ResourceAttributes");
+  schema.scope_attributes_map = map_column("ScopeAttributes");
   if (schema.exists) {
     client.Select(
         "SELECT toString(type), toString(expr) FROM system.data_skipping_indices WHERE database = " +
@@ -466,13 +479,16 @@ bool build_filters(const AppConfig& cfg, const LogsSchema& schema, const httplib
   // attr=key=value / attr=key!=value. A bare key matches LogAttributes or
   // ResourceAttributes; LogAttributes.<key> / ResourceAttributes.<key> pick
   // one map; ServiceName, SeverityText, TraceId, SpanId, ScopeName and
-  // ScopeVersion compare the column.
+  // ScopeVersion compare the column. Several key=value filters of one key
+  // match any of their values (the Fields panel's checked values, as the
+  // Traces attribute facets); key!=value filters each exclude their value.
   const auto attrs = repeated(req, "attr");
   if (attrs.size() > kMaxAttrFilters) {
     *code = "invalid_logs_filter";
     *message = "Too many attribute filters.";
     return false;
   }
+  std::map<std::string, std::vector<std::string>> included;  // key -> predicates (ORed)
   for (const auto& raw : attrs) {
     const size_t eq = raw.find('=');
     if (eq == std::string::npos || eq == 0) {
@@ -530,7 +546,17 @@ bool build_filters(const AppConfig& cfg, const LogsSchema& schema, const httplib
       }
       predicate = parts.size() == 1 ? parts.front() : "(" + parts[0] + " OR " + parts[1] + ")";
     }
-    where += negate ? " AND NOT " + predicate : " AND " + predicate;
+    if (negate) where += " AND NOT " + predicate;
+    else included[key].push_back(predicate);
+  }
+  for (const auto& [key, predicates] : included) {
+    if (predicates.size() == 1) {
+      where += " AND " + predicates.front();
+      continue;
+    }
+    where += " AND (";
+    for (size_t i = 0; i < predicates.size(); ++i) where += (i ? " OR " : "") + predicates[i];
+    where += ")";
   }
 
   const std::string q = param(req, "q");
@@ -1511,6 +1537,327 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   }
   w.EndArray();
   w.Key("timing_ms"); w.StartObject(); w.Key("total"); w.Int64(elapsed_ms(started)); w.EndObject();
+  w.EndObject();
+  send_json(res, sb);
+}
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Fields facets (/api/logs/facets and /api/logs/facet_values): the Logs Fields
+// panel, the Traces attribute facets' component, sampled and capped like them
+// (facet_limits.hpp). Scopes: "log", "resource" and "scope" (the LogAttributes
+// / ResourceAttributes / ScopeAttributes maps, Map columns only) and "column"
+// (the record columns below: the ones a key=value filter compares, minus the
+// unique TraceId / SpanId).
+
+const char* const kFacetColumns[] = {"ServiceName", "SeverityText", "ScopeName", "ScopeVersion"};
+
+bool facet_column_known(const std::string& name) {
+  return std::any_of(std::begin(kFacetColumns), std::end(kFacetColumns), [&](const char* c) { return name == c; });
+}
+
+bool facet_column_present(const LogsSchema& schema, const std::string& name) {
+  if (name == "ScopeName") return schema.scope_name;
+  if (name == "ScopeVersion") return schema.scope_version;
+  return name == "ServiceName" || name == "SeverityText";
+}
+
+const char* facet_map_column(const std::string& scope) {
+  if (scope == "log") return "LogAttributes";
+  if (scope == "resource") return "ResourceAttributes";
+  if (scope == "scope") return "ScopeAttributes";
+  return nullptr;
+}
+
+bool facet_map_present(const LogsSchema& schema, const std::string& scope) {
+  if (scope == "log") return schema.log_attributes_map;
+  if (scope == "resource") return schema.resource_attributes_map;
+  if (scope == "scope") return schema.scope_attributes_map;
+  return false;
+}
+
+bool top_level_column(const std::string& key) {
+  return std::any_of(std::begin(kTopLevelColumns), std::end(kTopLevelColumns), [&](const char* c) { return key == c; });
+}
+
+struct LogFacetKeys {
+  struct Key { std::string scope, key; uint64_t count = 0; };
+  std::vector<Key> keys;
+  uint64_t sampled = 0;
+  bool estimated = false;
+  bool timed_out = false;
+  uint64_t query_ms = 0;
+};
+
+struct LogFacetValues {
+  std::vector<std::pair<std::string, uint64_t>> values;
+  uint64_t with_key = 0;
+  uint64_t distinct_values = 0;
+  bool estimated = false;
+  bool timed_out = false;
+  uint64_t query_ms = 0;
+};
+
+StaleCache<std::string, LogFacetKeys> g_log_facet_keys_cache;
+StaleCache<std::string, LogFacetValues> g_log_facet_values_cache;
+
+// The key of an attr filter ("k=v" / "k!=v"), or "" when malformed.
+std::string attr_filter_key(const std::string& raw) {
+  const size_t eq = raw.find('=');
+  if (eq == std::string::npos || eq == 0) return {};
+  return raw.substr(0, raw[eq - 1] == '!' ? eq - 1 : eq);
+}
+
+// The request without the filters on the field (scope, key) itself, so the
+// field's values ignore its own filters: its other values stay listed (and
+// can be added). A bare key filters both LogAttributes and
+// ResourceAttributes, so it counts as either map's own filter.
+httplib::Request without_own_filters(const httplib::Request& req, const std::string& scope, const std::string& key) {
+  httplib::Request out;
+  const char* map = facet_map_column(scope);
+  for (const auto& [name, value] : req.params) {
+    if (scope == "column" && key == "ServiceName" && name == "service") continue;
+    if (name == "attr") {
+      const std::string k = attr_filter_key(value);
+      const bool own = scope == "column"
+          ? k == key
+          : k == std::string(map) + "." + key || (k == key && scope != "scope" && !top_level_column(k));
+      if (own) continue;
+    }
+    out.params.emplace(name, value);
+  }
+  return out;
+}
+
+// The minute-aligned window a facet request scans (requests made within the
+// same minute share one cached scan), [start, end] inclusive.
+struct FacetWindow {
+  int64_t start_ms = 0, end_ms = 0;
+};
+
+FacetWindow facet_window(const LogsQuery& q) {
+  constexpr int64_t kAlignMs = 60 * 1000;
+  return FacetWindow{(q.start_ms / kAlignMs) * kAlignMs, ((q.end_ms + kAlignMs - 1) / kAlignMs) * kAlignMs};
+}
+
+std::string facet_where(const LogsRequest& r, const FacetWindow& win) {
+  return " WHERE " + time_predicate(r.schema, win.start_ms * 1000000, win.end_ms * 1000000) + r.query.where;
+}
+
+void write_facet_common(JsonWriter& w, const LogsRequest& r, const FacetWindow& win, bool estimated, bool timed_out_flag,
+                        uint64_t query_ms, bool cached) {
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); w.String(r.host_id.c_str());
+  w.Key("range"); w.StartArray(); w.Int64(r.query.start_ms); w.Int64(r.query.end_ms); w.EndArray();
+  w.Key("scanned_range"); w.StartArray(); w.Int64(win.start_ms); w.Int64(win.end_ms); w.EndArray();
+  w.Key("estimated"); w.Bool(estimated);
+  w.Key("timed_out"); w.Bool(timed_out_flag);
+  w.Key("sample_limit"); w.Uint64(kFacetSampleRows);
+  w.Key("read_rows_limit"); w.Uint64(kFacetReadRowsCap);
+  w.Key("cached"); w.Bool(cached);
+  write_text_search(w, r.query);
+  w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(query_ms); w.EndObject();
+}
+
+std::string join_sql(const std::vector<std::string>& parts) {
+  std::string out;
+  for (size_t i = 0; i < parts.size(); ++i) out += (i ? ", " : "") + parts[i];
+  return out;
+}
+
+int facet_scope_rank(const std::string& scope) {
+  if (scope == "column") return 0;
+  if (scope == "log") return 1;
+  if (scope == "resource") return 2;
+  return 3;
+}
+
+} // namespace
+
+// Field keys of the records matching the filters (attribute map keys and the
+// record columns), by the number of sampled records carrying them. One capped
+// pass reads only the maps' key subcolumns and the columns.
+void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& res) {
+  LogsRequest r;
+  if (!open_request(cfg_, client_pool_, req, res, &r)) return;
+  if (substring_range_rejected(r, res)) return;
+  const FacetWindow win = facet_window(r.query);
+  std::vector<std::string> scopes;
+  for (const char* scope : {"log", "resource", "scope"}) {
+    if (facet_map_present(r.schema, scope)) scopes.emplace_back(scope);
+  }
+  std::vector<std::string> columns;
+  for (const char* column : kFacetColumns) {
+    if (facet_column_present(r.schema, column)) columns.emplace_back(column);
+  }
+  std::string shape;
+  for (const auto& scope : scopes) shape += scope + ",";
+  for (const auto& column : columns) shape += column + ",";
+  const std::string cache_key = r.host_id + '\0' + r.table + '\0' + std::to_string(win.start_ms) + '\0' +
+      std::to_string(win.end_ms) + '\0' + shape + '\0' + r.query.where;
+  bool fetched = false;
+  auto cached = g_log_facet_keys_cache.get_or_refresh(
+      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      [&](LogFacetKeys& value, std::string& code, std::string& message) {
+        fetched = true;
+        std::vector<std::string> inner, aggregates, tuples, column_tuples;
+        for (size_t i = 0; i < scopes.size(); ++i) {
+          const std::string k = "k" + std::to_string(i), m = "m" + std::to_string(i);
+          inner.push_back(std::string(facet_map_column(scopes[i])) + ".keys AS " + k);
+          aggregates.push_back("sumMap(" + k + ", arrayResize([toUInt64(1)], length(" + k + "), toUInt64(1))) AS " + m);
+          tuples.push_back("arrayMap((k, c) -> tuple('" + scopes[i] + "', toString(k), c), " + m + ".1, " + m + ".2)");
+        }
+        for (size_t i = 0; i < columns.size(); ++i) {
+          const std::string c = "c" + std::to_string(i), n = "n" + std::to_string(i);
+          inner.push_back(quote_ident(columns[i]) + " AS " + c);
+          aggregates.push_back("countIf(" + c + " != '') AS " + n);
+          column_tuples.push_back("tuple('column', " + quote(columns[i]) + ", " + n + ")");
+        }
+        tuples.push_back("[" + join_sql(column_tuples) + "]");
+        const std::string sql =
+            "SELECT toString(sampled), toString(t.1), toString(t.2), toString(t.3) FROM ("
+            "SELECT count() AS sampled, " + join_sql(aggregates) + " FROM ("
+            "SELECT " + join_sql(inner) + " FROM " + r.table + facet_where(r, win) +
+            " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join_sql(tuples) + ") AS t" +
+            facet_settings_sql(kFacetReadRowsCap, false);
+        try {
+          const BoundedRead read = bounded_select(*r.client, sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              parse_u64(ch_block_text_at(block, 0, row), &value.sampled);
+              LogFacetKeys::Key key{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), 0};
+              parse_u64(ch_block_text_at(block, 3, row), &key.count);
+              // A column empty on every sampled record is not a field.
+              if (key.scope.empty() || key.count == 0) continue;
+              value.keys.push_back(std::move(key));
+            }
+          });
+          value.timed_out = timed_out(read);
+          value.estimated = read.partial() || value.timed_out;
+          value.query_ms = read.elapsed_ms;
+        } catch (const std::exception& e) {
+          if (client_pool_) client_pool_->invalidate(r.client);
+          code = "logs_facets_failed";
+          message = e.what();
+          return false;
+        }
+        // Most frequent first; ties: the record columns, then the maps, by key.
+        std::sort(value.keys.begin(), value.keys.end(), [](const LogFacetKeys::Key& a, const LogFacetKeys::Key& b) {
+          if (a.count != b.count) return a.count > b.count;
+          if (a.scope != b.scope) return facet_scope_rank(a.scope) < facet_scope_rank(b.scope);
+          return a.key < b.key;
+        });
+        return true;
+      });
+  if (!cached.has_value || !cached.value) {
+    return json_error(res, 503, cached.error_code.empty() ? "logs_facets_failed" : cached.error_code,
+                      cached.error_message.empty() ? "Log field discovery failed." : cached.error_message);
+  }
+  const auto& value = *cached.value;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  JsonWriter w(sb);
+  w.StartObject();
+  w.Key("supported"); w.Bool(true);
+  w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) w.String(scope.c_str()); w.String("column"); w.EndArray();
+  w.Key("columns"); w.StartArray(); for (const auto& column : columns) w.String(column.c_str()); w.EndArray();
+  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !fetched);
+  w.Key("sampled_records"); w.Uint64(value.sampled);
+  w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
+  w.Key("keys"); w.StartArray();
+  for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
+    const auto& key = value.keys[i];
+    w.StartArray(); w.String(key.scope.c_str()); w.String(key.key.c_str()); w.Uint64(key.count); w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  send_json(res, sb);
+}
+
+// Top values of one field with their sampled record counts. The field's own
+// filters are left out, so its other values stay visible (and can be added:
+// several values of one key match any of them).
+void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Response& res) {
+  const std::string scope = param(req, "scope");
+  const std::string key = param(req, "key");
+  if (scope != "log" && scope != "resource" && scope != "scope" && scope != "column") {
+    return json_error(res, 400, "invalid_logs_facet", "scope must be log, resource, scope or column.");
+  }
+  if (key.empty() || key.size() > kFacetMaxKeyBytes) return json_error(res, 400, "invalid_logs_facet", "key must be 1 to 512 bytes.");
+  if (scope == "column" && !facet_column_known(key)) {
+    return json_error(res, 400, "invalid_logs_facet", "column must be ServiceName, SeverityText, ScopeName or ScopeVersion.");
+  }
+  const int limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
+  LogsRequest r;
+  if (!open_request(cfg_, client_pool_, without_own_filters(req, scope, key), res, &r)) return;
+  if (substring_range_rejected(r, res)) return;
+  if (scope == "column" ? !facet_column_present(r.schema, key) : !facet_map_present(r.schema, scope)) {
+    return json_error(res, 400, "logs_facet_unsupported",
+                      scope == "column" ? "Column " + key + " is not in the logs table."
+                                        : std::string(facet_map_column(scope)) + " is not stored as a Map column.");
+  }
+  const FacetWindow win = facet_window(r.query);
+  const std::string cache_key = r.host_id + '\0' + r.table + '\0' + std::to_string(win.start_ms) + '\0' +
+      std::to_string(win.end_ms) + '\0' + scope + '\0' + key + '\0' + std::to_string(limit) + '\0' + r.query.where;
+  bool fetched = false;
+  auto cached = g_log_facet_values_cache.get_or_refresh(
+      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      [&](LogFacetValues& value, std::string& code, std::string& message) {
+        fetched = true;
+        std::string expr, presence;
+        if (scope == "column") {
+          expr = "toString(" + quote_ident(key) + ")";
+        } else {
+          const std::string map = facet_map_column(scope);
+          expr = map + "[" + quote(key) + "]";
+          presence = " AND mapContains(" + map + ", " + quote(key) + ")";
+        }
+        const std::string sql =
+            "SELECT toString(v), toString(c), toString(sum(c) OVER ()), toString(count() OVER ()) FROM ("
+            "SELECT v, count() AS c FROM ("
+            "SELECT " + expr + " AS v FROM " + r.table + facet_where(r, win) + presence +
+            " LIMIT " + std::to_string(kFacetSampleRows) + ") GROUP BY v) "
+            "ORDER BY c DESC, v LIMIT " + std::to_string(limit) + facet_settings_sql(kFacetReadRowsCap, true);
+        try {
+          const BoundedRead read = bounded_select(*r.client, sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              uint64_t count = 0;
+              parse_u64(ch_block_text_at(block, 1, row), &count);
+              value.values.emplace_back(ch_block_text_at(block, 0, row), count);
+              parse_u64(ch_block_text_at(block, 2, row), &value.with_key);
+              parse_u64(ch_block_text_at(block, 3, row), &value.distinct_values);
+            }
+          });
+          value.timed_out = timed_out(read);
+          value.estimated = read.partial() || value.timed_out || value.distinct_values >= kFacetGroupByCap;
+          value.query_ms = read.elapsed_ms;
+        } catch (const std::exception& e) {
+          if (client_pool_) client_pool_->invalidate(r.client);
+          code = "logs_facet_values_failed";
+          message = e.what();
+          return false;
+        }
+        return true;
+      });
+  if (!cached.has_value || !cached.value) {
+    return json_error(res, 503, cached.error_code.empty() ? "logs_facet_values_failed" : cached.error_code,
+                      cached.error_message.empty() ? "Log field values failed." : cached.error_message);
+  }
+  const auto& value = *cached.value;
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  JsonWriter w(sb);
+  w.StartObject();
+  w.Key("scope"); w.String(scope.c_str());
+  w.Key("key"); w.String(key.c_str());
+  w.Key("limit"); w.Int(limit);
+  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !fetched);
+  w.Key("records_with_key"); w.Uint64(value.with_key);
+  w.Key("distinct_values"); w.Uint64(value.distinct_values);
+  w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
+  w.Key("values"); w.StartArray();
+  for (const auto& [text, count] : value.values) {
+    w.StartArray(); w.String(text.c_str(), static_cast<rapidjson::SizeType>(text.size())); w.Uint64(count); w.EndArray();
+  }
+  w.EndArray();
   w.EndObject();
   send_json(res, sb);
 }

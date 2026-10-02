@@ -45,7 +45,7 @@ def test_logs_and_metrics_draw_on_the_engine_without_the_legacy_axis_helpers():
     metrics = read("src/static/app_metrics.js")
     controller = read("src/static/app_observability.js")
     # The Logs and Metrics views load the engine, not the Query chart module.
-    assert '    logs: ["app_chart_core.js", "app_logs.js"],' in controller
+    assert '    logs: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_logs.js"],' in controller
     assert '    metrics: ["app_chart_core.js", "app_metrics.js"],' in controller
     # The SVG axis helpers metrics used to borrow are gone with their last reader.
     exports = chart[chart.index("ns.queryChart = {"):]

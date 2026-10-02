@@ -183,9 +183,14 @@
 
   // ---------------------------------------------------------------- views
 
+  // The view tabs (#traceViewTabs, app_ui_tabs.js); below 820 px the
+  // #traceViewSelect dropdown stands in for them (CSS).
+  let viewTabs = null;
+
   function setView(name, { url = "replace", persist = true } = {}) {
     const next = VIEWS.includes(name) ? name : "timeline";
     view.current = next;
+    viewTabs?.select(next);
     const select = byId("traceViewSelect");
     if (select && select.value !== next) {
       select.value = next;
@@ -1591,6 +1596,7 @@
       ctx.enhanceTraceSelect(select);
       select.addEventListener("change", () => setView(select.value, { url: "replace" }));
     }
+    viewTabs = ns.tabs?.bind(byId("traceViewTabs"), { onSelect: (name) => { if (name !== view.current) setView(name, { url: "replace" }); } }) || null;
     initAltViewEvents();
     const waterfall = byId("traceWaterfall");
     // Event markers on the span bars open their group's popover instead of

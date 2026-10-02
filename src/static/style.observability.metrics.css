@@ -2602,10 +2602,11 @@ html[data-theme="light"] {
   overflow: hidden;
 }
 .traceFacets[hidden] { display: none; }
-html.chdash-trace-facets-collapsed .traceFacets { flex-basis: 32px; width: 32px; }
+html.chdash-trace-facets-collapsed #traceFacets,
+html.chdash-logs-facets-collapsed #logsFacets { flex-basis: 32px; width: 32px; }
 @media (max-width: 760px) {
   .traceFacets { position: static; flex-basis: auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
-  html.chdash-trace-facets-collapsed .traceFacets { width: auto; }
+  html.chdash-trace-facets-collapsed #traceFacets { width: auto; }
 }
 [data-sev="fatal"] { --sev-color: var(--sev-fatal); }
 [data-sev="error"] { --sev-color: var(--sev-error); }
@@ -2617,6 +2618,11 @@ html.chdash-trace-facets-collapsed .traceFacets { flex-basis: 32px; width: 32px;
 html[data-obs-view="logs"] .appHeader { border-bottom: 0 !important; }
 .logsWorkspace { display: flex; flex-direction: column; }
 @keyframes logsNewRow { from { background: color-mix(in srgb, #22c55e 28%, transparent); } }
+.traceFacets.logsFacets { position: relative; top: auto; max-height: none; align-self: stretch; }
+@media (max-width: 760px) {
+  .traceFacets.logsFacets { flex: 0 0 auto; width: auto; max-height: 50vh; margin: 8px 12px 0; }
+  html.chdash-logs-facets-collapsed #logsFacets { width: auto; }
+}
 .metricsWorkspace {
   flex: 1 1 auto;
   min-height: 0;

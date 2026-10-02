@@ -2,7 +2,7 @@
   "use strict";
   // Logs explorer (the Logs view of /observability), modelled on HyperDX's
   // search page: a search bar (time range, services, level, Body text,
-  // attribute filters), the volume
+  // attribute filters), a Fields sidebar (the Traces attribute facets), the volume
   // histogram stacked by severity (drag to zoom), a virtualised newest-first
   // table paged by keyset cursors, a side panel with click-to-filter actions
   // and the surrounding context, a Patterns tab and a live tail. All search
@@ -462,6 +462,123 @@
     return true;
   }
 
+  // --- Fields panel ------------------------------------------------------------------
+  // The Traces Attributes sidebar (app_facet_panel.js) over /api/logs/facets
+  // and facet_values: the attribute map keys and the record columns of the
+  // matching records. Its filters are the search's: a checked value is a
+  // key=value filter (the service picker for ServiceName), an excluded one
+  // key!=value; several checked values of one key match any of them.
+
+  const FIELD_MAPS = { log: "LogAttributes", resource: "ResourceAttributes", scope: "ScopeAttributes" };
+  const FIELD_COLUMNS = ["ServiceName", "SeverityText", "TraceId", "SpanId", "ScopeName", "ScopeVersion"];
+  let fields = null;
+
+  // The key a field's filters are written with: LogAttributes.<key> (one map)
+  // or the column name.
+  const fieldFilterKey = (scope, key) => (scope === "column" ? key : `${FIELD_MAPS[scope]}.${key}`);
+
+  // Whether a filter on `filterKey` filters the field (scope, key): a bare
+  // key filters both LogAttributes and ResourceAttributes.
+  function filtersField(filterKey, scope, key) {
+    if (scope === "column") return filterKey === key;
+    return filterKey === `${FIELD_MAPS[scope]}.${key}` || (filterKey === key && scope !== "scope" && !FIELD_COLUMNS.includes(filterKey));
+  }
+
+  function fieldFiltered(scope, key) {
+    const out = { include: scope === "column" && key === "ServiceName" ? [...model.services] : [], exclude: [] };
+    for (const attr of model.attrs) {
+      const { key: filterKey, value, negate } = parseAttr(attr);
+      if (filtersField(filterKey, scope, key)) (negate ? out.exclude : out.include).push(value);
+    }
+    return out;
+  }
+
+  // The attr filters on the field (scope, key) for `value`, = or !=.
+  const isFieldAttr = (attr, scope, key, value, negate) => {
+    const parsed = parseAttr(attr);
+    return parsed.negate === negate && parsed.value === value && filtersField(parsed.key, scope, key);
+  };
+
+  function setServices(services) {
+    model.services = [...new Set(services)].sort();
+    renderServiceButton();
+  }
+
+  function onFieldInclude(scope, key, value, checked) {
+    const service = scope === "column" && key === "ServiceName";
+    model.attrs = model.attrs.filter((attr) => !isFieldAttr(attr, scope, key, value, false) && !(checked && isFieldAttr(attr, scope, key, value, true)));
+    if (service) setServices(checked ? [...model.services, value] : model.services.filter((name) => name !== value));
+    else if (checked) model.attrs = [...model.attrs, `${fieldFilterKey(scope, key)}=${value}`];
+    void search({ push: true });
+  }
+
+  function onFieldExclude(scope, key, value) {
+    const excluded = model.attrs.some((attr) => isFieldAttr(attr, scope, key, value, true));
+    model.attrs = model.attrs.filter((attr) => !isFieldAttr(attr, scope, key, value, true) && !isFieldAttr(attr, scope, key, value, false));
+    if (!excluded) {
+      if (scope === "column" && key === "ServiceName") setServices(model.services.filter((name) => name !== value));
+      model.attrs = [...model.attrs, `${fieldFilterKey(scope, key)}!=${value}`];
+    }
+    void search({ push: true });
+  }
+
+  // The panel's filters: the search's parameters over its range.
+  function fieldFilters(range) {
+    return { range, params: filterParams(range).toString() };
+  }
+
+  function fieldFilterKeyOf(filters) {
+    const params = new URLSearchParams(filters.params);
+    params.delete("start_ms");
+    params.delete("end_ms");
+    // Minute-aligned like the server's cache: a re-search within the minute does not refetch.
+    return `${Math.floor(filters.range.start_ms / 60000)}|${Math.ceil(filters.range.end_ms / 60000)}|${params.toString()}`;
+  }
+
+  function initFields() {
+    if (!ns.facetPanel || !$("logsFacets")) return;
+    fields = ns.facetPanel.create({
+      ids: { panel: "logsFacets", toggle: "logsFacetsToggle", meta: "logsFacetsMeta", search: "logsFacetsSearch", list: "logsFacetsList" },
+      collapsedClass: "chdash-logs-facets-collapsed",
+      collapsedStoreKey: "chdash.logsFacetsCollapsed.v1",
+      pinStoreKey: "chdash.logsFacetPins.v1",
+      label: "fields",
+      noun: ["log", "logs"],
+      scopes: {
+        column: { badge: "C", title: "Record column" },
+        log: { badge: "L", title: "Log attribute (LogAttributes)" },
+        resource: { badge: "R", title: "Resource attribute (ResourceAttributes)" },
+        scope: { badge: "S", title: "Scope attribute (ScopeAttributes)" },
+      },
+      filterKey: fieldFilterKeyOf,
+      fetchKeys: async (filters) => {
+        const payload = await api.getLogs("facets", new URLSearchParams(filters.params));
+        return {
+          supported: payload?.supported !== false,
+          keys: (Array.isArray(payload?.keys) ? payload.keys : []).map((row) => ({ scope: String(row?.[0] || ""), key: String(row?.[1] || ""), count: Number(row?.[2] || 0) })),
+          estimated: payload?.estimated === true,
+          timedOut: payload?.timed_out === true,
+          sampled: Number(payload?.sampled_records || 0),
+        };
+      },
+      fetchValues: async (filters, scope, key, limit) => {
+        const params = new URLSearchParams(filters.params);
+        params.set("scope", scope);
+        params.set("key", key);
+        params.set("limit", String(limit));
+        const payload = await api.getLogs("facet_values", params);
+        return {
+          values: (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) })),
+          estimated: payload?.estimated === true,
+          hasMore: payload?.has_more === true,
+        };
+      },
+      filtered: fieldFiltered,
+      onInclude: onFieldInclude,
+      onExclude: onFieldExclude,
+    });
+  }
+
   // --- Errors and status -----------------------------------------------------------
 
   // A failed step's Retry (onRetryClick): "search", "more", "histogram",
@@ -530,6 +647,7 @@
     setStatus("Searching\u2026");
     void loadHistogram(range);
     void loadServiceChoices(range);
+    void fields?.load(fieldFilters(range));
     if (model.tab === "patterns") void loadPatterns();
     const started = performance.now();
     try {
@@ -1087,13 +1205,12 @@
     });
   }
 
+  // The Results / Patterns in-content tabs (app_ui_tabs.js).
+  let viewTabs = null;
+
   function setTab(tab, { push = false } = {}) {
     model.tab = tab === "patterns" ? "patterns" : "results";
-    for (const button of document.querySelectorAll(".logsTabs [data-tab]")) {
-      const on = button.dataset.tab === model.tab;
-      button.classList.toggle("is-active", on);
-      button.setAttribute("aria-selected", String(on));
-    }
+    viewTabs?.select(model.tab);
     $("logsResultsPane").hidden = model.tab !== "results";
     $("logsPatternsPane").hidden = model.tab !== "patterns";
     const cols = $("logsColumnsPicker");
@@ -1547,6 +1664,7 @@
     initTimePicker();
     initServicePicker();
     initColumnsPicker();
+    initFields();
     const level = $("logsLevel");
     if (level) {
       const enhanced = enhanceSelect(level, (value) => { model.level = value; void search({ push: true }); });
@@ -1556,6 +1674,7 @@
     initHistogram();
     initPatterns();
     initSidePanel();
+    viewTabs = ns.tabs?.bind(document.querySelector(".logsTabs"), { onSelect: (tab) => { if (tab !== model.tab) setTab(tab, { push: true }); } }) || null;
     $("logsWorkspace")?.addEventListener("click", onRetryClick);
     syncControls();
     setTab(model.tab, { push: false });
@@ -1601,9 +1720,6 @@
       if (kind === "attr") model.attrs = model.attrs.filter((a) => a !== value);
       void search({ push: true });
     });
-    for (const button of document.querySelectorAll(".logsTabs [data-tab]")) {
-      button.addEventListener("click", () => setTab(button.dataset.tab, { push: true }));
-    }
     $("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
     window.addEventListener("chdash:host-changed", () => {
       if (ownsUrl()) void reloadForHost();

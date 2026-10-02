@@ -23,8 +23,6 @@
     "mode", "kind", "span_min_duration_ms", "span_max_duration_ms"];
   const PIN_STORE_KEY = "chdash.traceFacetPins.v1";
   const COLLAPSED_STORE_KEY = "chdash.traceFacetsCollapsed.v1";
-  const KEYS_PAGE = 20;
-  const VALUE_LIMITS = [10, 50, 200, 500];
 
   let ctx = null;
   const byId = (id) => document.getElementById(id);
@@ -37,24 +35,6 @@
     // Trace duration range in ms ({ min, max }, 0 = open side) or null: set
     // by the heatmap's "Search traces in this box", shown as a chip.
     duration: null,
-  };
-
-  const facets = {
-    seq: 0,
-    filterKey: "",
-    filters: null,
-    keys: [],
-    supported: true,
-    estimated: false,
-    timedOut: false,
-    sampled: 0,
-    loading: false,
-    error: "",
-    shown: KEYS_PAGE,
-    query: "",
-    // "scope\x1fkey" -> { limit, values, loading, error, estimated, hasMore, seq }
-    expanded: new Map(),
-    pins: readPins(),
   };
 
   // ------------------------------------------------------------------ chips
@@ -550,40 +530,10 @@
 
   // ---------------------------------------------------------------- facets
 
-  function readPins() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(PIN_STORE_KEY) || "[]");
-      return Array.isArray(saved) ? saved.filter((item) => Array.isArray(item) && item.length === 2).map(([scope, key]) => `${scope}\x1f${key}`) : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  function savePins() {
-    try { localStorage.setItem(PIN_STORE_KEY, JSON.stringify(facets.pins.map((id) => id.split("\x1f")))); } catch (_) { /* optional */ }
-  }
-
-  const facetId = (scope, key) => `${scope}\x1f${key}`;
-
-  function collapsed() {
-    return document.documentElement.classList.contains("chdash-trace-facets-collapsed");
-  }
-
-  function setCollapsed(value) {
-    document.documentElement.classList.toggle("chdash-trace-facets-collapsed", value);
-    try { localStorage.setItem(COLLAPSED_STORE_KEY, value ? "1" : "0"); } catch (_) { /* optional */ }
-    syncToggle();
-    if (!value && facets.filters && facets.filterKey !== facetFilterKey(facets.filters)) void loadFacets(facets.filters);
-    else if (!value) renderFacets();
-  }
-
-  function syncToggle() {
-    const button = byId("traceFacetsToggle");
-    if (!button) return;
-    const open = !collapsed();
-    button.setAttribute("aria-expanded", open ? "true" : "false");
-    button.title = open ? "Hide attributes" : "Show attributes";
-  }
+  // The Attributes sidebar: the facets panel shared with the Logs Fields
+  // panel (app_facet_panel.js) over /api/traces/facets and facet_values, the
+  // chips as its filters.
+  let facets = null;
 
   function facetFilterParams(filters) {
     const out = { ...(filters || {}) };
@@ -598,203 +548,64 @@
     return JSON.stringify({ ...params, start_ms: Math.floor(Number(params.start_ms) / 60000), end_ms: Math.ceil(Number(params.end_ms) / 60000) });
   }
 
-  function facetsEnabled() {
-    return ctx?.model?.meta?.tag_search_supported !== false;
-  }
-
-  // After every search: the keys for the new filters, then the values of the
-  // expanded keys. Skipped while the sidebar is hidden.
-  async function loadFacets(filters) {
-    facets.filters = filters;
-    const panel = byId("traceFacets");
-    if (panel) panel.hidden = !facetsEnabled();
-    if (!facetsEnabled() || collapsed()) return;
-    const key = facetFilterKey(filters);
-    facets.filterKey = key;
-    const seq = ++facets.seq;
-    facets.loading = true;
-    facets.error = "";
-    renderFacets();
-    try {
-      const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters));
-      if (seq !== facets.seq) return;
-      facets.supported = payload?.supported !== false;
-      facets.keys = (Array.isArray(payload?.keys) ? payload.keys : []).map((row) => ({ scope: String(row?.[0] || ""), key: String(row?.[1] || ""), count: Number(row?.[2] || 0) }));
-      facets.estimated = payload?.estimated === true;
-      facets.timedOut = payload?.timed_out === true;
-      facets.sampled = Number(payload?.sampled_spans || 0);
-    } catch (error) {
-      if (seq !== facets.seq) return;
-      facets.keys = [];
-      facets.error = error instanceof Error ? error.message : String(error);
-    } finally {
-      if (seq === facets.seq) {
-        facets.loading = false;
-        renderFacets();
-      }
-    }
-    if (seq !== facets.seq) return;
-    for (const id of facets.expanded.keys()) {
-      const [scope, facetKey] = id.split("\x1f");
-      void loadValues(scope, facetKey);
-    }
-  }
-
-  async function loadValues(scope, key) {
-    const id = facetId(scope, key);
-    const entry = facets.expanded.get(id);
-    if (!entry || !facets.filters) return;
-    const seq = (entry.seq || 0) + 1;
-    entry.seq = seq;
-    entry.loading = true;
-    entry.error = "";
-    renderFacets();
-    try {
-      const payload = await ctx.api.getTraceFacetValues(ctx.currentHost(), { ...facetFilterParams(facets.filters), scope, key, limit: String(entry.limit) });
-      if (facets.expanded.get(id) !== entry || entry.seq !== seq) return;
-      entry.values = (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) }));
-      entry.estimated = payload?.estimated === true;
-      entry.hasMore = payload?.has_more === true;
-      entry.distinct = Number(payload?.distinct_values || 0);
-    } catch (error) {
-      if (facets.expanded.get(id) !== entry || entry.seq !== seq) return;
-      entry.values = [];
-      entry.error = error instanceof Error ? error.message : String(error);
-    } finally {
-      if (facets.expanded.get(id) === entry && entry.seq === seq) {
-        entry.loading = false;
-        renderFacets();
-      }
-    }
-  }
-
   function chipMatches(chip, scope, key, value, op) {
     return chip.kind === "tag" && chip.op === op && chip.key === key && (chip.scope === scope || chip.scope === "any") && chip.value === value;
   }
 
-  function facetValuesHtml(scope, key, entry, estimated) {
-    if (entry.loading && !entry.values) return '<div class="traceFacet__status">Loading values\u2026</div>';
-    if (entry.error) return `<div class="traceFacet__status is-error" role="alert">${esc(entry.error)} <button type="button" class="traceMiniButton" data-facet-retry>Retry</button></div>`;
-    const values = [...(entry.values || [])];
-    // Values filtered on stay listed (checked) even outside the top values.
-    for (const chip of search.chips) {
-      if (chip.kind !== "tag" || (chip.op !== "=" && chip.op !== "!=") || chip.key !== key || (chip.scope !== scope && chip.scope !== "any")) continue;
-      if (!values.some((item) => item.value === chip.value)) values.push({ value: chip.value, count: null });
-    }
-    if (!values.length) return '<div class="traceFacet__status">No values in the sampled spans.</div>';
-    const rows = values.map((item) => {
-      const included = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "="));
-      const excluded = search.chips.some((chip) => chipMatches(chip, scope, key, item.value, "!="));
-      const shown = item.value === "" ? '""' : item.value;
-      const count = item.count == null ? fmt.EMPTY : `${estimated || entry.estimated ? "\u2248" : ""}${fmt.compact(item.count)}`;
-      return `<div class="traceFacetValue${excluded ? " is-excluded" : ""}" data-facet-value="${esc(item.value)}"><label class="traceFacetValue__label" title="${esc(item.value)}"><input type="checkbox" data-facet-include${included ? " checked" : ""}><span class="traceFacetValue__text">${esc(shown)}</span></label><span class="traceFacetValue__count" title="${item.count == null ? "Not in the sampled top values" : `${fmt.count(item.count)} span${item.count === 1 ? "" : "s"}${estimated || entry.estimated ? " (estimated from a sample)" : ""}`}">${esc(count)}</span><button type="button" class="traceFacetValue__exclude" data-facet-exclude aria-pressed="${excluded ? "true" : "false"}" title="${excluded ? "Stop excluding this value" : "Exclude this value"}" aria-label="${excluded ? "Stop excluding" : "Exclude"} ${esc(shown)}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/><path d="M4.4 11.6 11.6 4.4"/></svg></button></div>`;
-    }).join("");
-    const next = VALUE_LIMITS.find((limit) => limit > entry.limit);
-    const more = entry.hasMore && next ? `<button type="button" class="traceFacet__more" data-facet-more-values>Load more values</button>` : "";
-    return `<div class="traceFacet__valueList">${rows}</div>${entry.loading ? '<div class="traceFacet__status">Loading values\u2026</div>' : more}`;
-  }
-
-  function facetHtml(item, pinned) {
-    const id = facetId(item.scope, item.key);
-    const entry = facets.expanded.get(id);
-    const open = !!entry;
-    const active = search.chips.some((chip) => chip.kind === "tag" && chip.key === item.key && (chip.scope === item.scope || chip.scope === "any"));
-    const count = item.count == null ? "" : `${facets.estimated ? "\u2248" : ""}${fmt.compact(item.count)}`;
-    const title = item.count == null ? item.key : `${item.key}: ${fmt.count(item.count)} span${item.count === 1 ? "" : "s"}${facets.estimated ? " in the sample" : ""}`;
-    return `<section class="traceFacet${open ? " is-open" : ""}${active ? " is-active" : ""}" data-facet-scope="${esc(item.scope)}" data-facet-key="${esc(item.key)}">
-      <div class="traceFacet__head"><button type="button" class="traceFacet__expand" data-facet-expand aria-expanded="${open ? "true" : "false"}" title="${esc(title)}"><svg class="traceFacet__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg><span class="traceFacet__scope traceFacet__scope--${esc(item.scope)}" title="${item.scope === "resource" ? "Resource attribute" : "Span attribute"}">${item.scope === "resource" ? "R" : "S"}</span><span class="traceFacet__key">${esc(item.key)}</span><span class="traceFacet__count">${esc(count)}</span></button><button type="button" class="traceFacet__pin" data-facet-pin aria-pressed="${pinned ? "true" : "false"}" title="${pinned ? "Unpin" : "Pin to the top"}" aria-label="${pinned ? "Unpin" : "Pin"} ${esc(item.key)}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2.5h4l-.6 4 2.6 2.2v1H4v-1l2.6-2.2zM8 9.7V14"/></svg></button></div>
-      ${open ? `<div class="traceFacet__values">${facetValuesHtml(item.scope, item.key, entry, facets.estimated)}</div>` : ""}
-    </section>`;
-  }
-
-  function renderFacets() {
-    const list = byId("traceFacetsList");
-    const meta = byId("traceFacetsMeta");
-    syncToggle();
-    if (!list) return;
-    if (meta) {
-      meta.textContent = facets.loading ? "Loading\u2026" : facets.keys.length ? `${facets.estimated ? "\u2248" : ""}${fmt.compact(facets.sampled)} spans` : "";
-      meta.title = facets.estimated
-        ? `Estimated: counted over a sample of ${fmt.count(facets.sampled)} matching spans${facets.timedOut ? " (the time budget stopped the scan)" : ""}.`
-        : facets.keys.length ? `Counted over all ${fmt.count(facets.sampled)} matching spans of the range.` : "";
-      meta.classList.toggle("is-estimated", facets.estimated);
-    }
-    if (!facets.supported) { list.innerHTML = '<div class="traceFacets__empty">Attributes are not stored as Map columns.</div>'; return; }
-    if (facets.error) { list.innerHTML = `<div class="traceFacets__empty is-error" role="alert">${esc(facets.error)} <button type="button" class="traceMiniButton" data-facets-retry>Retry</button></div>`; return; }
-    if (!facets.filters) { list.innerHTML = '<div class="traceFacets__empty">Search to discover attributes.</div>'; return; }
-    const query = facets.query.trim().toLowerCase();
-    const matches = (item) => !query || item.key.toLowerCase().includes(query);
-    const byId_ = new Map(facets.keys.map((item) => [facetId(item.scope, item.key), item]));
-    const pinned = facets.pins.map((id) => byId_.get(id) || { scope: id.split("\x1f")[0], key: id.split("\x1f").slice(1).join("\x1f"), count: null }).filter(matches);
-    const rest = facets.keys.filter((item) => !facets.pins.includes(facetId(item.scope, item.key)) && matches(item));
-    const shown = rest.slice(0, facets.shown);
-    if (!pinned.length && !rest.length) {
-      list.innerHTML = `<div class="traceFacets__empty">${facets.loading ? "Loading attributes\u2026" : query ? "No attribute key matches." : "No attributes in the matching spans."}</div>`;
-      return;
-    }
-    const more = rest.length > shown.length
-      ? `<button type="button" class="traceFacets__more" data-facet-more-keys>Load more (${rest.length - shown.length})</button>`
-      : "";
-    list.innerHTML = `${pinned.length ? `<div class="traceFacets__group traceFacets__group--pinned">${pinned.map((item) => facetHtml(item, true)).join("")}</div>` : ""}<div class="traceFacets__group">${shown.map((item) => facetHtml(item, false)).join("")}</div>${more}`;
-  }
-
-  function facetOf(element) {
-    const section = element.closest("[data-facet-key]");
-    return section ? { scope: section.getAttribute("data-facet-scope") || "span", key: section.getAttribute("data-facet-key") || "" } : null;
-  }
-
-  function onFacetsClick(event) {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-    if (target.closest("[data-facet-more-keys]")) { facets.shown += KEYS_PAGE; renderFacets(); return; }
-    if (target.closest("[data-facets-retry]")) { if (facets.filters) void loadFacets(facets.filters); return; }
-    const facet = facetOf(target);
-    if (!facet) return;
-    const id = facetId(facet.scope, facet.key);
-    if (target.closest("[data-facet-expand]")) {
-      if (facets.expanded.has(id)) facets.expanded.delete(id);
-      else {
-        facets.expanded.set(id, { limit: VALUE_LIMITS[0], values: null, loading: false, error: "", estimated: false, hasMore: false, seq: 0 });
-        void loadValues(facet.scope, facet.key);
-      }
-      renderFacets();
-      byId("traceFacetsList")?.querySelector(`[data-facet-key="${CSS.escape(facet.key)}"][data-facet-scope="${facet.scope}"] [data-facet-expand]`)?.focus({ preventScroll: true });
-      return;
-    }
-    if (target.closest("[data-facet-pin]")) {
-      facets.pins = facets.pins.includes(id) ? facets.pins.filter((pin) => pin !== id) : [...facets.pins, id];
-      savePins();
-      renderFacets();
-      return;
-    }
-    if (target.closest("[data-facet-retry]")) { void loadValues(facet.scope, facet.key); return; }
-    if (target.closest("[data-facet-more-values]")) {
-      const entry = facets.expanded.get(id);
-      if (!entry) return;
-      entry.limit = VALUE_LIMITS.find((limit) => limit > entry.limit) || entry.limit;
-      void loadValues(facet.scope, facet.key);
-      return;
-    }
-    const exclude = target.closest("[data-facet-exclude]");
-    if (exclude) {
-      const value = exclude.closest("[data-facet-value]")?.getAttribute("data-facet-value") ?? "";
-      const chip = { kind: "tag", op: "!=", scope: facet.scope, key: facet.key, value };
-      const existing = search.chips.find((other) => chipMatches(other, facet.scope, facet.key, value, "!="));
-      if (existing) removeChip(existing); else addChip(chip);
-      void ctx.runSearch({ url: "push" });
-    }
-  }
-
-  function onFacetsChange(event) {
-    const box = event.target instanceof HTMLInputElement && event.target.matches("[data-facet-include]") ? event.target : null;
-    if (!box) return;
-    const facet = facetOf(box);
-    if (!facet) return;
-    const value = box.closest("[data-facet-value]")?.getAttribute("data-facet-value") ?? "";
-    const existing = search.chips.find((other) => chipMatches(other, facet.scope, facet.key, value, "="));
-    if (box.checked && !existing) addChip({ kind: "tag", op: "=", scope: facet.scope, key: facet.key, value });
-    if (!box.checked && existing) removeChip(existing);
-    void ctx.runSearch({ url: "push" });
+  function createFacets() {
+    return ns.facetPanel.create({
+      ids: { panel: "traceFacets", toggle: "traceFacetsToggle", meta: "traceFacetsMeta", search: "traceFacetsSearch", list: "traceFacetsList" },
+      collapsedClass: "chdash-trace-facets-collapsed",
+      collapsedStoreKey: COLLAPSED_STORE_KEY,
+      pinStoreKey: PIN_STORE_KEY,
+      label: "attributes",
+      noun: ["span", "spans"],
+      scopes: { span: { badge: "S", title: "Span attribute" }, resource: { badge: "R", title: "Resource attribute" } },
+      enabled: () => ctx?.model?.meta?.tag_search_supported !== false,
+      filterKey: facetFilterKey,
+      fetchKeys: async (filters) => {
+        const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters));
+        return {
+          supported: payload?.supported !== false,
+          unsupportedText: "Attributes are not stored as Map columns.",
+          keys: (Array.isArray(payload?.keys) ? payload.keys : []).map((row) => ({ scope: String(row?.[0] || ""), key: String(row?.[1] || ""), count: Number(row?.[2] || 0) })),
+          estimated: payload?.estimated === true,
+          timedOut: payload?.timed_out === true,
+          sampled: Number(payload?.sampled_spans || 0),
+        };
+      },
+      fetchValues: async (filters, scope, key, limit) => {
+        const payload = await ctx.api.getTraceFacetValues(ctx.currentHost(), { ...facetFilterParams(filters), scope, key, limit: String(limit) });
+        return {
+          values: (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) })),
+          estimated: payload?.estimated === true,
+          hasMore: payload?.has_more === true,
+        };
+      },
+      // The chips on the key: = values checked, != values excluded; an
+      // exists / missing chip marks the key active.
+      filtered: (scope, key) => {
+        const out = { include: [], exclude: [], active: false };
+        for (const chip of search.chips) {
+          if (chip.kind !== "tag" || chip.key !== key || (chip.scope !== scope && chip.scope !== "any")) continue;
+          out.active = true;
+          if (chip.op === "=") out.include.push(chip.value);
+          else if (chip.op === "!=") out.exclude.push(chip.value);
+        }
+        return out;
+      },
+      onInclude: (scope, key, value, checked) => {
+        const existing = search.chips.find((other) => chipMatches(other, scope, key, value, "="));
+        if (checked && !existing) addChip({ kind: "tag", op: "=", scope, key, value });
+        if (!checked && existing) removeChip(existing);
+        void ctx.runSearch({ url: "push" });
+      },
+      onExclude: (scope, key, value) => {
+        const existing = search.chips.find((other) => chipMatches(other, scope, key, value, "!="));
+        if (existing) removeChip(existing); else addChip({ kind: "tag", op: "!=", scope, key, value });
+        void ctx.runSearch({ url: "push" });
+      },
+    });
   }
 
   // ---------------------------------------------------------------- wiring
@@ -812,15 +623,11 @@
     document.addEventListener("keydown", onDocumentKeydown, true);
     window.addEventListener("scroll", closeMenu, { passive: true, capture: true });
     window.addEventListener("resize", closeMenu, { passive: true });
-    byId("traceFacetsToggle")?.addEventListener("click", () => setCollapsed(!collapsed()));
-    byId("traceFacetsList")?.addEventListener("click", onFacetsClick);
-    byId("traceFacetsList")?.addEventListener("change", onFacetsChange);
-    byId("traceFacetsSearch")?.addEventListener("input", (event) => { facets.query = String(event.target.value || ""); facets.shown = KEYS_PAGE; renderFacets(); });
+    facets = createFacets();
     // A user's own service / operation choice replaces an applied one.
     for (const select of [ctx.dom.tracesService, ctx.dom.tracesOperation]) {
       select?.addEventListener("change", () => wantSelect(select, ""));
     }
-    syncToggle();
   }
 
   // Tag params of the chips for the service / operation prefill; true when
@@ -853,14 +660,7 @@
   }
 
   function resetFacets() {
-    ++facets.seq;
-    facets.filters = null;
-    facets.filterKey = "";
-    facets.keys = [];
-    facets.error = "";
-    facets.loading = false;
-    facets.expanded.clear();
-    renderFacets();
+    facets?.reset();
   }
 
   ns.traceSearch = {
@@ -873,7 +673,7 @@
     writeUrl,
     applyLocation,
     hasSearchParams: () => hasSearchParams(new URLSearchParams(window.location.search)),
-    onSearched: (filters) => { void loadFacets(filters); },
+    onSearched: (filters) => { void facets?.load(filters); },
     resetFacets,
     applySearch,
     prefillTagParams,
@@ -886,6 +686,6 @@
     exclude: (field, value) => applyFilter(field, value, "exclude"),
     setDuration,
     // Discovered attribute keys (the span table's column picker suggests them).
-    facetKeys: () => facets.keys.map(({ scope, key }) => ({ scope, key })),
+    facetKeys: () => facets?.keys() || [],
   };
 })();

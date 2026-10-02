@@ -85,7 +85,7 @@ def test_logs_view_follows_the_page_conventions():
     assert not (ROOT / "src/static/app_logs_bootstrap.js").exists()
     # Loaded the first time the Logs tab is shown.
     controller = read("src/static/app_observability.js")
-    assert '    logs: ["app_chart_core.js", "app_logs.js"],' in controller
+    assert '    logs: ["app_chart_core.js", "app_ui_tabs.js", "app_facet_panel.js", "app_logs.js"],' in controller
 
 
 def test_logs_page_script_reuses_shared_pieces():

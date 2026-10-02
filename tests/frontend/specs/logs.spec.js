@@ -427,3 +427,189 @@ test('logs: no page overflow and keyboard row navigation', async ({ page, reques
   const ids = await page.evaluate(() => window.ChDash.logs.model.rows.map((r) => r.id));
   expect(new Set(ids).size).toBe(ids.length);
 });
+
+// --- Fields panel: the Traces Attributes facets (app_facet_panel.js) over
+// /api/logs/facets and /api/logs/facet_values.
+
+const fieldsPanel = (page) => page.locator('#logsFacets');
+const field = (page, key) => fieldsPanel(page).locator(`.traceFacet[data-facet-key="${key}"]`);
+const fieldValue = (page, key, value) => field(page, key).locator(`.traceFacetValue[data-facet-value="${value}"]`);
+
+async function freshFields(page) {
+  await page.addInitScript(() => {
+    try {
+      if (!sessionStorage.getItem('__logsFieldsInit')) {
+        localStorage.removeItem('chdash.logsFacetPins.v1');
+        localStorage.removeItem('chdash.logsFacetsCollapsed.v1');
+        sessionStorage.setItem('__logsFieldsInit', '1');
+      }
+    } catch (_) {}
+  });
+}
+
+test('logs: the Fields panel lists fields and top values; include, exclude, pin and fold; the filters and the URL follow', async ({ page, request }) => {
+  await freshFields(page);
+  const facetRequests = [];
+  page.on('request', (req) => { if (/\/api\/logs\/facet/.test(req.url())) facetRequests.push(new URL(req.url())); });
+  const win = await logsWindow(request, 10);
+  await openLogs(page, logsUrl(win));
+  const panel = fieldsPanel(page);
+  await expect(panel).toBeVisible();
+  // Left of the histogram and the results, the Traces Attributes width and look.
+  const box = await panel.boundingBox();
+  const histogramBox = await page.locator('#logsHistogramCard').boundingBox();
+  const tableBox = await page.locator('#logsTable').boundingBox();
+  expect(Math.round(box.width)).toBe(248);
+  expect(box.x + box.width).toBeLessThanOrEqual(histogramBox.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(tableBox.x);
+  expect(Math.abs(box.y - histogramBox.y)).toBeLessThanOrEqual(1);
+  await expect(page.locator('#logsFacetsToggle')).toContainText('Fields');
+  await expect(page.locator('#logsFacetsMeta')).toHaveText(/^≈?[\d.]+[KMB]? logs$/);
+  // Record columns first (C badge), then the attribute maps (L / R badges).
+  const first = panel.locator('.traceFacet').first();
+  await expect(first.locator('.traceFacet__scope')).toHaveText('C');
+  await expect(field(page, 'SeverityText').locator('.traceFacet__scope')).toHaveText('C');
+  await expect(field(page, 'code.function').locator('.traceFacet__scope')).toHaveText('L');
+  await expect(field(page, 'host.name').locator('.traceFacet__scope')).toHaveText('R');
+  await expect(panel.locator('.traceFacet[data-facet-key="TraceId"]')).toHaveCount(0);
+  // The request carries the search's own filters and range.
+  const keysRequest = facetRequests.find((url) => url.pathname.endsWith('/api/logs/facets'));
+  expect(Number(keysRequest.searchParams.get('end_ms')) - Number(keysRequest.searchParams.get('start_ms'))).toBeGreaterThan(9 * 60000);
+
+  // Key search.
+  await page.locator('#logsFacetsSearch').fill('host');
+  await expect(panel.locator('.traceFacet')).toHaveCount(1);
+  await page.locator('#logsFacetsSearch').fill('');
+
+  // Top values of SeverityText; include WARN, then ERROR as well (one key's
+  // values match any of them).
+  await field(page, 'SeverityText').locator('[data-facet-expand]').click();
+  await expect(fieldValue(page, 'SeverityText', 'WARN')).toBeVisible();
+  await expect(fieldValue(page, 'SeverityText', 'WARN').locator('.traceFacetValue__count')).toHaveText(/^[\d.]+[KMB]?$/);
+  await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').check();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN']);
+  await expect(page.locator('#logsChips')).toContainText('SeverityText = WARN');
+  await expect(rows(page).first()).toBeVisible();
+  for (const badge of await page.locator('#logsTableRows .logsSevBadge').allInnerTexts()) expect(badge).toBe('WARN');
+  await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).toBeChecked();
+  await expect(field(page, 'SeverityText')).toHaveClass(/is-active/);
+  // Its own filter is left out of its values: the other levels stay listed.
+  await expect(fieldValue(page, 'SeverityText', 'ERROR')).toBeVisible();
+  await fieldValue(page, 'SeverityText', 'ERROR').locator('[data-facet-include]').check();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN', 'SeverityText=ERROR']);
+  await expect.poll(async () => new Set(await page.locator('#logsTableRows .logsSevBadge').allInnerTexts())).toEqual(new Set(['WARN', 'ERROR']));
+  const valuesRequest = facetRequests.filter((url) => url.pathname.endsWith('/facet_values')).pop();
+  expect(valuesRequest.searchParams.get('scope')).toBe('column');
+  expect(valuesRequest.searchParams.get('key')).toBe('SeverityText');
+
+  // ServiceName is the service picker's filter.
+  await field(page, 'ServiceName').locator('[data-facet-expand]').click();
+  const service = await field(page, 'ServiceName').locator('.traceFacetValue').first().getAttribute('data-facet-value');
+  await fieldValue(page, 'ServiceName', service).locator('[data-facet-include]').check();
+  await expect.poll(() => param(page, 'service')).toEqual([service]);
+  await expect(page.locator('#logsServiceButton')).toHaveText(`Service · ${service}`);
+  await expect(fieldValue(page, 'ServiceName', service).locator('[data-facet-include]')).toBeChecked();
+  expect(await field(page, 'ServiceName').locator('.traceFacetValue').count()).toBeGreaterThan(1);
+  for (const name of await page.locator('#logsTableRows .logsCell--service').allInnerTexts()) expect(name.trim()).toBe(service);
+
+  // Exclude a resource value: a negated map-qualified filter.
+  await field(page, 'host.name').locator('[data-facet-expand]').click();
+  const host = await field(page, 'host.name').locator('.traceFacetValue').first().getAttribute('data-facet-value');
+  await fieldValue(page, 'host.name', host).locator('[data-facet-exclude]').click();
+  await expect.poll(() => param(page, 'attr')).toContain(`ResourceAttributes.host.name!=${host}`);
+  await expect(page.locator('#logsChips .logsChip.is-negated')).toContainText(`host.name ≠ ${host}`);
+  await expect(fieldValue(page, 'host.name', host)).toHaveClass(/is-excluded/);
+  await expect(fieldValue(page, 'host.name', host).locator('[data-facet-exclude]')).toHaveAttribute('aria-pressed', 'true');
+
+  // Unchecking WARN drops its filter; a removed chip unchecks its value.
+  await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').uncheck();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR', `ResourceAttributes.host.name!=${host}`]);
+  await page.locator('#logsChips .logsChip.is-negated .logsChip__remove').click();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR']);
+  await expect(fieldValue(page, 'host.name', host)).not.toHaveClass(/is-excluded/);
+
+  // A filter typed in the Filter input shows in the panel too.
+  await page.locator('#logsFilterInput').fill('SeverityText=WARN');
+  await page.locator('#logsFilterInput').press('Enter');
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR', 'SeverityText=WARN']);
+  await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).toBeChecked();
+
+  // Pin a key: it moves to the pinned group and stays pinned after a reload,
+  // where the URL brings the filters (and the checked values) back.
+  await field(page, 'code.lineno').locator('[data-facet-pin]').click();
+  await expect(panel.locator('.traceFacets__group--pinned .traceFacet__key')).toHaveText(['code.lineno']);
+  await page.reload();
+  await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+  await expect(panel.locator('.traceFacets__group--pinned .traceFacet__key')).toHaveText(['code.lineno']);
+  await expect(field(page, 'SeverityText')).toHaveClass(/is-active/);
+  await field(page, 'SeverityText').locator('[data-facet-expand]').click();
+  await expect(fieldValue(page, 'SeverityText', 'ERROR').locator('[data-facet-include]')).toBeChecked();
+  // Back undoes the last filter.
+  await page.goBack();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR']);
+  await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).not.toBeChecked();
+
+  // Folding: a 32 px rail, remembered across reloads; unfolding reloads the keys.
+  await page.locator('#logsFacetsToggle').click();
+  await expect(page.locator('#logsFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#logsFacetsList')).toBeHidden();
+  expect(Math.round((await panel.boundingBox()).width)).toBe(32);
+  await page.reload();
+  await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#logsFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
+  const before = facetRequests.length;
+  await page.locator('#logsFacetsToggle').click();
+  await expect(panel.locator('.traceFacet').first()).toBeVisible();
+  expect(facetRequests.length).toBeGreaterThan(before);
+  // The Traces Attributes panel keeps its own fold state.
+  expect(await page.evaluate(() => document.documentElement.classList.contains('chdash-trace-facets-collapsed'))).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('logs: the Results / Patterns tabs are the in-content tab component (arrow, Home and End keys)', async ({ page, request }) => {
+  const win = await logsWindow(request, 10);
+  await openLogs(page, logsUrl(win));
+  const results = page.locator('#logsTabResults');
+  const patterns = page.locator('#logsTabPatterns');
+  await expect(results).toHaveAttribute('tabindex', '0');
+  await expect(patterns).toHaveAttribute('tabindex', '-1');
+  await results.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(patterns).toBeFocused();
+  await expect(patterns).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => param(page, 'tab')).toEqual(['patterns']);
+  await expect(page.locator('#logsPatternsPane')).toBeVisible();
+  await page.keyboard.press('Home');
+  await expect(results).toBeFocused();
+  await expect(results).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#logsResultsPane')).toBeVisible();
+  await page.keyboard.press('End');
+  await expect(patterns).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await expect(results).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => param(page, 'tab')).toEqual([]);
+  // Back steps through the tab changes.
+  await page.goBack();
+  await expect(patterns).toHaveAttribute('aria-selected', 'true');
+});
+
+test('logs: on a phone the Fields panel starts folded and stacks above the histogram', async ({ page, request }) => {
+  await freshFields(page);
+  const win = await logsWindow(request);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openLogs(page, logsUrl(win));
+  const panel = fieldsPanel(page);
+  await expect(page.locator('#logsFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#logsFacetsList')).toBeHidden();
+  await page.locator('#logsFacetsToggle').click();
+  await expect(panel.locator('.traceFacet').first()).toBeVisible({ timeout: 30_000 });
+  const box = await panel.boundingBox();
+  const histogramBox = await page.locator('#logsHistogramCard').boundingBox();
+  expect(box.width).toBeGreaterThan(300);
+  expect(box.y + box.height).toBeLessThanOrEqual(histogramBox.y + 1);
+  expect(box.height).toBeLessThanOrEqual(844 / 2 + 1);
+  await field(page, 'SeverityText').locator('[data-facet-expand]').click();
+  await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').check();
+  await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN']);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
