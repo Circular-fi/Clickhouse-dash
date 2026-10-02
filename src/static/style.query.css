@@ -5940,32 +5940,9 @@ body {
 }
 .uiDialog__tabs {
   flex: 0 0 auto;
-  display: flex;
   align-items: end;
-  gap: 2px;
   padding: 4px 8px 0;
   border-bottom: 1px solid var(--border);
-}
-.uiDialog__tab {
-  appearance: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  min-height: 30px;
-  padding: 0 10px;
-  font: 700 12px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-.uiDialog__tab:hover,
-.uiDialog__tab:focus-visible {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-.uiDialog__tab[aria-selected="true"] {
-  color: var(--text);
-  border-bottom-color: var(--accentBorder);
 }
 .uiDialog__head--tabs {
   align-items: stretch;
@@ -5980,8 +5957,9 @@ body {
   padding: 0;
   border-bottom: 0;
 }
-.uiDialog__head--tabs .uiDialog__tab {
+.uiDialog__head--tabs .contentTabs__tab {
   align-self: stretch;
+  height: auto;
 }
 .uiDialog__head--tabs > .uiDialog__actions {
   align-self: center;

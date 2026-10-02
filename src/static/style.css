@@ -15872,37 +15872,12 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 }
 
 /* ==========================================================================
-   Trace page tabs (app_trace_tabs.js) and the service map tab
-   (app_trace_map.js, after HyperDX's DBServiceMapPage).
+   The service map tab (app_trace_map.js, after HyperDX's
+   DBServiceMapPage); the trace page tabs are a .viewTabs row in #obsNav.
    ========================================================================== */
-.traceTabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  min-height: 30px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
-}
-.traceTabs__tab {
-  height: 29px;
-  margin-bottom: -1px;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  font: 600 12px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-}
-.traceTabs__tab:hover { color: var(--text); }
-.traceTabs__tab:focus-visible { box-shadow: var(--ring); border-radius: 4px 4px 0 0; }
-.traceTabs__tab.is-active { color: var(--text); border-bottom-color: var(--accentBorder); }
-
 /* Another tab than Search: its panel fills the view under the search bar. */
 .traceSearchView.is-alt-tab { display: flex; flex-direction: column; overflow: hidden; }
 .traceSearchView.is-alt-tab > .traceSearchBar,
-.traceSearchView.is-alt-tab > .traceTabs,
 .traceSearchView.is-alt-tab > .traceFilterChips { flex: 0 0 auto; }
 html.chdash-trace-tab-map .traceSearchBody { display: none; }
 html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
@@ -18472,38 +18447,12 @@ body {
   font-size: 1.05rem;
 }
 
+/* The dialog's tab row: a tier 2 row (.contentTabs, Components: tabs). */
 .uiDialog__tabs {
   flex: 0 0 auto;
-  display: flex;
   align-items: end;
-  gap: 2px;
   padding: 4px 8px 0;
   border-bottom: 1px solid var(--border);
-}
-
-.uiDialog__tab {
-  appearance: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  min-height: 30px;
-  padding: 0 10px;
-  font: 700 12px/1 Arial, Helvetica, sans-serif;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-
-.uiDialog__tab:hover,
-.uiDialog__tab:focus-visible {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-
-/* --accentBorder: solid in both themes (--accent is a light tint in light). */
-.uiDialog__tab[aria-selected="true"] {
-  color: var(--text);
-  border-bottom-color: var(--accentBorder);
 }
 
 /* A head that holds the tabs in place of the title (the query library):
@@ -18524,8 +18473,9 @@ body {
   border-bottom: 0;
 }
 
-.uiDialog__head--tabs .uiDialog__tab {
+.uiDialog__head--tabs .contentTabs__tab {
   align-self: stretch;
+  height: auto;
 }
 
 .uiDialog__head--tabs > .uiDialog__actions {

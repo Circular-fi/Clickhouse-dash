@@ -738,7 +738,7 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
     const cs = getComputedStyle(dialog);
     const round = (v) => Math.round(v * 10) / 10;
     const head = dialog.querySelector(':scope > .uiDialog__frame > .uiDialog__head');
-    const tab = dialog.querySelector(':scope > .uiDialog__frame .uiDialog__tabs .uiDialog__tab[aria-selected="true"]');
+    const tab = dialog.querySelector(':scope > .uiDialog__frame .uiDialog__tabs .contentTabs__tab[aria-selected="true"]');
     const tcs = getComputedStyle(tab);
     const close = head.querySelector('.uiDialog__close');
     return {

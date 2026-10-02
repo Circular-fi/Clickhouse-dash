@@ -35,7 +35,7 @@
   // tools/build_page_css.py.
   const PAGE_SKIPPED_MODULES = {
     query: ["app_graph_kit.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_explorer_storage.js", "app_explorer_ops.js", "app_explorer_detail.js"],
-    explorer: ["app_autocomplete.js", "app_query_chart.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js", "app_query_library.js", "app_explorer_ops.js", "app_ui_tabs.js", "app_ui_dialog.js"],
+    explorer: ["app_autocomplete.js", "app_query_chart.js", "app_trace_viewer.js", "app_pipeline_viewer.js", "app_analysis_data.js", "app_analysis.js", "app_download.js", "app_export.js", "app_run.js", "app_query_library.js", "app_explorer_ops.js", "app_ui_dialog.js"],
   };
   const skipped = new Set(PAGE_SKIPPED_MODULES[document.body?.dataset.page] || []);
 
@@ -107,7 +107,6 @@
       "app_autocomplete.js",
       "app_query_chart.js",
       "app_results.js",
-      "app_ui_tabs.js",
       "app_ui_dialog.js",
       "app_ui.js",
       "app_trace_viewer.js",

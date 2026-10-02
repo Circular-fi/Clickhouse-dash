@@ -41,7 +41,7 @@ def test_profiling_and_library_share_the_large_shell():
     analysis = read("src/static/app_analysis.js")
     ui = read("src/static/app_ui.js")
     assert '<dialog id="analysisModal" class="uiDialog uiDialog--lg analysisModal"' in html
-    assert 'class="uiDialog__tabs analysisTabs" role="tablist"' in html
+    assert 'class="contentTabs uiDialog__tabs analysisTabs" role="tablist"' in html
     assert "analysisModalBackdrop" not in html and "analysisModalBackdrop" not in analysis
     assert "dialog = ns.dialog?.bind(dom.analysisModal, {" in analysis
     # The library dialog: the same shell and size, built on first open.

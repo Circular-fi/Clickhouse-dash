@@ -84,14 +84,14 @@ def test_every_tab_row_is_one_of_the_two_tiers():
     for name, html in shells().items():
         for list_tag in re.findall(r"<div[^>]*role=\"tablist\"[^>]*>", html):
             classes = re.search(r'class="([^"]*)"', list_tag).group(1).split()
-            assert "viewTabs" in classes or "contentTabs" in classes or "uiDialog__tabs" in classes, (name, list_tag)
+            assert "viewTabs" in classes or "contentTabs" in classes, (name, list_tag)
         for tab in re.findall(r"<button[^>]*role=\"tab\"[^>]*>", html):
             classes = re.search(r'class="([^"]*)"', tab).group(1).split()
-            assert "viewTab" in classes or "contentTabs__tab" in classes or "uiDialog__tab" in classes, (name, tab)
+            assert "viewTab" in classes or "contentTabs__tab" in classes, (name, tab)
 
 
 def test_no_module_builds_tabs_or_handles_tab_keys_itself():
-    allowed = {"app_ui_tabs.js", "app_ui_dialog.js"}
+    allowed = {"app_ui_tabs.js"}
     for name, source in scripts().items():
         if name in allowed:
             continue

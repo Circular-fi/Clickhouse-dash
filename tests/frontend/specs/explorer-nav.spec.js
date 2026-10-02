@@ -39,7 +39,7 @@ for (const theme of ['dark', 'light']) {
 
     test('top tabs are Catalog / Functions; Browse, Graph and Storage are modes of one Catalog', async ({ page }) => {
       await page.goto('/explorer');
-      await expect(page.locator('#viewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
+      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
       // The mode switch heads the content, not the top tab row.
       const modes = page.locator('#explorerModeTabs .viewTab:visible');
@@ -191,7 +191,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerOpsTab')).toBeHidden();
       await expect(page.locator('#explorerOpsPane')).toBeHidden();
-      await expect(page.locator('#viewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
+      await expect(page.locator('#explorerViewTabs .viewTab:visible')).toHaveText(['Catalog', 'Functions']);
       // The module is not even loaded.
       expect(await page.evaluate(() => !!window.ChDash?.explorer && !window.ChDash.explorerOps)).toBe(true);
     });
@@ -394,7 +394,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerListPane')).toBeHidden();
 
       // The tabs and the mode bar fit the phone width; no breadcrumb.
-      for (const id of ['#viewTabs', '#explorerModeBar', '#explorerModeTabs']) {
+      for (const id of ['#explorerViewTabs', '#explorerModeBar', '#explorerModeTabs']) {
         const box = await page.locator(id).boundingBox();
         expect(box.x + box.width, id).toBeLessThanOrEqual(390);
       }

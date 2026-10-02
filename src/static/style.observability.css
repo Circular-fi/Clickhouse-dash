@@ -7654,18 +7654,8 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   }
   .obsFilterBar .obsFilterBar__text { flex: 1 1 100%; min-width: 0; }
 }
-.traceTabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  min-height: 30px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
-}
 .traceSearchView.is-alt-tab { display: flex; flex-direction: column; overflow: hidden; }
 .traceSearchView.is-alt-tab > .traceSearchBar,
-.traceSearchView.is-alt-tab > .traceTabs,
 .traceSearchView.is-alt-tab > .traceFilterChips { flex: 0 0 auto; }
 html.chdash-trace-tab-map .traceSearchBody { display: none; }
 html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }

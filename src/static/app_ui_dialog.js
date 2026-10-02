@@ -24,7 +24,7 @@
   //   <dialog class="uiDialog uiDialog--lg|--sm">
   //     <div|form class="uiDialog__frame">
   //       <div class="uiDialog__head"> heading (title, subtitle), actions, close
-  //       <div class="uiDialog__tabs"> (optional) .uiDialog__tab buttons
+  //       <div class="contentTabs uiDialog__tabs"> (optional) .contentTabs__tab buttons
   //       <div class="uiDialog__body">
   // A head that holds the tabs in place of the title (the query library):
   //       <div class="uiDialog__head uiDialog__head--tabs"> .uiDialog__tabs, actions, close
@@ -55,25 +55,14 @@
       && !node.closest("[hidden], [inert]") && node.getClientRects().length > 0;
   }
 
-  // A tab bar in the profiling dialog's tab style (the caller selects):
-  // { label, items: [{ id, label, controls, value }] }.
+  // A tier 2 tab row (.contentTabs, built by ns.tabs.render; the caller
+  // binds and selects): { label, items: [{ id, label, controls, value }] }.
   function tabBar(tabs) {
-    const bar = el("div", "uiDialog__tabs");
+    const bar = el("div", "contentTabs uiDialog__tabs");
     bar.setAttribute("role", "tablist");
     if (tabs.label) bar.setAttribute("aria-label", tabs.label);
-    const buttons = tabs.items.map((item) => {
-      const tab = el("button", "uiDialog__tab", item.label);
-      tab.type = "button";
-      tab.setAttribute("role", "tab");
-      tab.setAttribute("aria-selected", "false");
-      tab.tabIndex = -1;
-      if (item.id) tab.id = item.id;
-      if (item.controls) tab.setAttribute("aria-controls", item.controls);
-      if (item.value != null) tab.dataset.tab = String(item.value);
-      bar.appendChild(tab);
-      return tab;
-    });
-    return { bar, buttons };
+    ns.tabs?.render(bar, tabs.items.map((item) => ({ value: item.value != null ? String(item.value) : "", label: item.label, id: item.id, controls: item.controls })));
+    return { bar, buttons: [...bar.children] };
   }
 
   // tabs adds a tab bar under the head. With tabs.inHead the bar takes the
