@@ -21,7 +21,14 @@
     "app_state.js",
     "app_util.js",
     "app_ui_state.js",
-    "app_ui_search.js"
+    "app_ui_search.js",
+    "app_ui_table.js",
+    "app_ui_badge.js",
+    "app_ui_copy.js",
+    "app_ui_sql.js",
+    "app_ui_kv.js",
+    "app_ui_stat.js",
+    "app_ui_chart.js"
   ],
   "pages": {
     "query": {

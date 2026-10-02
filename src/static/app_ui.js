@@ -1277,10 +1277,12 @@
     ctrl.clearError();
   }
 
-  ns.ui = {
+  // The component modules (app_ui_copy.js, app_ui_sql.js, ...) load first
+  // and add their builders to ns.ui.
+  ns.ui = Object.assign(ns.ui || {}, {
     init, setSelectedHostId, setApiOnline, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
     applyProductFeatures, applyRunOptionsUi, setRunOption, setEditorError, clearEditorError,
     loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
     serverTimeZone, serverTime,
-  };
+  });
 })();
