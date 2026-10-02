@@ -292,19 +292,25 @@ every page one way to build and find elements.
 - **Lookups**: `dom.byId(id)`, `dom.$(selector, root)` (the first match) and
   `dom.$$(selector, root)` (every match, an array). `root` defaults to the
   document only when it is left out; an explicit `null` root finds nothing,
-  so a component never searches the whole page by mistake. The `dom.*`
-  registry keeps the page shell's ids.
+  so a component never searches the whole page by mistake. Modules take them
+  with `const { byId, $, $$ } = ns.dom;` and never call `getElementById` or
+  `querySelector*` themselves; the loader and the Observability bootstrap,
+  which run before `app_dom.js`, are the exceptions. The `dom.*` registry
+  keeps the page shell's ids.
 
 **String renderers.** Lists drawn thousands of times (the trace waterfall,
-the span list, the Logs grid, Query results) and the panels built from the
+the span list, the Logs grid, the treemap) and the panels built from the
 data components' `*Html` functions stay HTML strings: every value goes
 through `util.escapeHtml` (a module's `esc` alias) or a component that
-escapes. Each module that still writes `innerHTML` or calls
+escapes, and a variable or function holding such markup is named `*Html`.
+Each module that still writes `innerHTML` / `outerHTML` or calls
 `insertAdjacentHTML` is on the allow-list of
 `tests/harness/test_dom_builder_contract.py`, with its reason and its
-count; a template literal written straight into `innerHTML` interpolates
-only escaped values, component markup or numbers. Everything else uses
-`h()`.
+count; a template literal written straight into one of them interpolates
+only escaped values, `*Html` markup, numbers, constants and literals.
+Everything else, from a count label to a menu, uses `h()`; clearing a
+container is `replaceChildren()` (or `h.replace(el)`), never
+`innerHTML = ""`.
 
 ## Layers, popovers and panels
 
