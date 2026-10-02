@@ -182,3 +182,12 @@ def test_charts_share_the_card_legend_readout_and_sparkline():
     # One sparkline: SVG polylines are drawn by app_ui_chart.js only.
     assert not offenders(r"<polyline", {"app_ui_chart.js"})
     assert "<canvas" not in read("query.html")
+
+
+def test_no_merge_conflict_marker_in_static_sources():
+    # A stray marker line invalidates the CSS rule after it (the data table
+    # tokens once went missing that way).
+    marker = re.compile(r"^(<{7}|={7}|>{7})( |$)", re.M)
+    for path in sorted(STATIC.glob("*")):
+        if path.suffix in {".css", ".js", ".html", ".json"}:
+            assert not marker.search(path.read_text(encoding="utf-8")), path.name

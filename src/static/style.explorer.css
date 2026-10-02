@@ -6371,8 +6371,6 @@ button:not(.is-loading) > .uiSpin { display: none; }
 .uiSearch:focus { border-color: var(--accentBorder); }
 .uiSearch--compact { height: 24px; font-size: 11px; }
 .uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }
-=======
-
 :root {
   --row-compact: 26px;
   --row-regular: 32px;

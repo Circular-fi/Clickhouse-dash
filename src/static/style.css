@@ -17876,7 +17876,6 @@ button:not(.is-loading) > .uiSpin { display: none; }
 /* In a side panel head (ns.sidePanel): as tall as every side panel's field. */
 .uiSearch.uiSide__search { height: 30px; font-size: 11.5px; }
 /* ==== /Components: search ================================================= */
-=======
 /* ==== Components: data table (app_ui_table.js) ==============================
    One table for every page: <table class="dataTable">. The header is 11.5 px /
    700 in --muted on --theadBg, sentence case, sticky inside the scroll
