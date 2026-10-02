@@ -459,7 +459,18 @@ is part of the query.
   `) AS alias`.
 - `GROUP BY` and `ORDER BY` items follow the same rule as projections.
 - A window function keeps its `OVER (...)` layout (see the window fixtures);
-  a call containing a multi-line `OVER` specification is never joined.
+  a call containing a multi-line `OVER` specification is never joined. A
+  window that extends a named one keeps that name as its first line
+  (`OVER (\n    base_window\n    ROWS BETWEEN ...\n)`). A `WINDOW name AS (...)`
+  definition that does not fit its line lays its specification out the same
+  way, one clause per line.
+- A scalar subquery beside a comparison or arithmetic operator is a block whose
+  `(` stays on the operator's line: `WHERE m > (` then the query, `)` one level
+  in, like an `IN` subquery; `a / (` … `) AS ratio` in a projection.
+- A boolean projection (`a AND b AS flag`) too long for its line wraps before
+  `AND` / `OR`, the continuation lines one level deeper.
+- `ORDER BY x WITH FILL FROM a TO b STEP s` too long for its line breaks
+  before `FROM`, `TO`, `STEP` and `STALENESS`, one level deeper.
 
 ```sql
 SELECT count()
@@ -677,6 +688,22 @@ ALTER TABLE anon.metrics_store
 )
 ```
 
+A one-command `ALTER TABLE ... UPDATE` puts `IN PARTITION p` on its own line
+after the assignments, before `WHERE`. A multi-command ALTER keeps formatQuery's
+`(command),` layout.
+
+### Set operators
+
+`INTERSECT` and `EXCEPT` (with or without `DISTINCT` / `ALL`) stand on their own
+line between their operands, like `UNION ALL`; an operand formatQuery
+parenthesizes to show precedence is a block.
+
+### CREATE FUNCTION
+
+The lambda of `CREATE FUNCTION name AS (x, y) -> body` follows the lambda rules
+(no parentheses around a plain body). When its first line does not fit after
+`AS`, the lambda moves to the next line, one level deeper.
+
 ### Index definitions
 
 `INDEX name expr TYPE type GRANULARITY n` rows of one table are aligned in
@@ -688,6 +715,9 @@ overflow, the rows are stacked instead, one clause per continuation line:
         TYPE text(tokenizer = array)
         GRANULARITY 100000000
 ```
+
+The single `ADD INDEX [IF NOT EXISTS] ...` command of an `ALTER TABLE` stacks the
+same way when it does not fit.
 
 ### TTL lists
 
@@ -709,9 +739,23 @@ TTL
         AND metric_value = 0
 ```
 
+A `GROUP BY ... SET ...` rule is one rule although its keys and assignments are
+comma lists; when it does not fit, `GROUP BY` and `SET` start their own lines,
+one assignment per line.
+
+```sql
+TTL
+    event_hour + toIntervalMonth(1)
+    GROUP BY entity_key, toStartOfDay(event_hour)
+    SET
+        metric_sum = sum(metric_sum),
+        metric_max = max(metric_max)
+```
+
 ### Access-control and refreshable view DDL
 
-`CREATE ROW POLICY`, `CREATE SETTINGS PROFILE` and materialized view heads stay
+`CREATE ROW POLICY`, `CREATE SETTINGS PROFILE` and view heads (`REFRESH`,
+`DEPENDS ON`, `TO`, `DEFINER = user`, `SQL SECURITY`) stay
 on one line while they fit the line width. A longer statement puts every clause on
 its own line at column 0: `USING` is formatted like `WHERE`, `SETTINGS` lists one
 setting per line with aligned `=`, and a view head ends with `AS` on its own line
