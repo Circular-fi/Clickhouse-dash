@@ -108,4 +108,4 @@ def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
     # ?view= and the other aliases are rewritten to the one Catalog scheme.
     block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n      // Aliases'):ui.index('model.routeIntent = route;')]
     assert "const canonical = appRoute(catalogPath({" in block
-    assert 'window.history.replaceState({ workspace: "explorer" }, "", canonical);' in block
+    assert 'router.replace(null, { href: canonical, view: "explorer" });' in block

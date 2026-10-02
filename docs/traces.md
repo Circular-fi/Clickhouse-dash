@@ -10,11 +10,11 @@ Traces, logs (`docs/logs.md`) and metrics (`docs/metrics.md`) are the three view
 | --- | --- |
 | `/observability` | the first enabled view (Traces, Logs, Metrics), its query parameters kept |
 | `/observability/traces?…` | trace search; `tab=services` / `tab=map` for the other Traces tabs |
-| `/observability/traces/<trace-id>?span=…&view=…` | one trace, with the search context it was opened from |
+| `/observability/traces/<trace-id>?span=…&tab=…` | one trace (`tab=` its view; the former `view=` is an alias), with the search context it was opened from (its filters, not the search page's tab) |
 | `/observability/logs?…` | the Logs explorer |
 | `/observability/metrics?…` | the metrics browser |
 
-Each view keeps its own URL parameters (listed in its section); switching views is a history entry, so Back / Forward return to the previous view as it was, and a deep link opens the view and sub-tab it names. A view's filters stay with it for the session: switching away and back restores them (its last URL) and keeps its results.
+Each view keeps its own URL parameters (listed in its section; every route and parameter is in `docs/ui-foundations.md`, "Routes"); switching views is a history entry, so Back / Forward return to the previous view as it was, and a deep link opens the view and sub-tab it names. A view's filters stay with it for the session: switching away and back restores them (its last URL) and keeps its results.
 
 The **time range** and the **selected service** follow the user across views: when a view is left, its range and service (the Traces service picker, the Logs service when exactly one is picked, the service of the active Metrics panel) become the shared context, and the next view adopts whatever changed since it last showed them (Metrics opens that service's group of its catalog). A link from one view to another (*Open trace* in a log record, a metrics exemplar) switches view in place and carries the shared context.
 
@@ -325,7 +325,7 @@ Measured on the local fixture (about 2.0 B spans over 7 days), server time, medi
 
 ## Trace detail rendering
 
-The views of a trace are a tab row above the waterfall, *Timeline | Graph | Statistics | Spans | Flamegraph*: the in-content tab component (`app_ui_tabs.js`, the Logs *Results | Patterns* tabs' look; arrow keys, Home and End move between them). The view is the URL's `?view=` (omitted for the timeline) and the last one is remembered; below 820 px a *View* dropdown replaces the tabs.
+The views of a trace are a tab row above the waterfall, *Timeline | Graph | Statistics | Spans | Flamegraph*: the in-content tab component (`app_ui_tabs.js`, the Logs *Results | Patterns* tabs' look; arrow keys, Home and End move between them). The view is the URL's `?tab=` (omitted for the timeline; the former `?view=` is an alias, rewritten on load) and the last one is remembered; below 820 px a *View* dropdown replaces the tabs.
 
 The detail page derives the span tree, trace bounds, per-service counts, start-ordered overview bars and parsed event markers once per loaded trace. Opening or closing a span inspector and folding or unfolding a branch patch only the affected rows; service filters and range changes re-render the waterfall from the cached data. Waterfall controls use delegated listeners on the persistent container. The query-analysis trace viewer mounts rows lazily: only rows visible under the initial fold are built, and a branch mounts its children the first time it is expanded.
 

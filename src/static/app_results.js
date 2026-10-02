@@ -3958,7 +3958,8 @@
       ev.preventDefault();
       closeRowDetails({ restoreFocus: true });
     });
-    listenUntilClosed(disposers, window, "popstate", () => closeRowDetails());
+    // Back / Forward close it (ns.router: the one popstate listener).
+    disposers.push(ns.router.on("", () => closeRowDetails()));
     if (typeof ResizeObserver === "function") {
       const observer = new ResizeObserver(() => {
         if (rowDetailsView !== view) return;

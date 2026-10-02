@@ -62,7 +62,7 @@ for (const scheme of ['dark', 'light']) {
       });
       expect(look).toEqual({ bottom: '2px', left: '0px', radius: '0px' });
       await arrowThrough(page, card);
-      await expect(page).toHaveURL(/\/columns$/);
+      await expect(page).toHaveURL(/\/weather_observations$/);
       // The mode row: Right moves to Graph and shows it.
       await page.locator('#explorerModeBrowse').focus();
       await page.keyboard.press('ArrowRight');

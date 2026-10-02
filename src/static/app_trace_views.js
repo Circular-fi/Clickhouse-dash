@@ -2,7 +2,7 @@
   "use strict";
   // Trace page views after Jaeger's TracePage view switcher: Trace Timeline
   // (the waterfall, app_traces.js), Trace Graph, Trace Statistics, Trace
-  // Spans Table and Trace Flamegraph; plus the ?span= / ?view= location and
+  // Spans Table and Trace Flamegraph; plus the ?span= / ?tab= location and
   // the span-bar event marker popover. app_traces.js calls install(ctx) with
   // its model and helpers at init.
   const ns = window.ChDash;
@@ -50,15 +50,14 @@
     viewPref().set(value);
   }
 
+  // The trace's own parameters (?tab=, ?span=) on its URL, through the
+  // Traces owner of ns.router (nothing while another view shows).
   function updateParams(mutate, { push = false } = {}) {
-    if (ns.observability && !ns.observability.isActive("traces")) return;
-    const url = new URL(window.location.href);
-    mutate(url.searchParams);
-    const next = `${url.pathname}${url.search}${url.hash}`;
-    if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
-    // A pushed view keeps the count of steps back to the search (app_traces.js).
-    if (push) window.history.pushState(ns.traces?.detailEntryState ? ns.traces.detailEntryState(window.history.state) : window.history.state, "", next);
-    else window.history.replaceState(window.history.state, "", next);
+    const address = ns.router.owner("traces");
+    const href = ns.router.href();
+    // A pushed entry keeps the count of steps back to the search (app_traces.js).
+    if (push) address.push(mutate, { href, state: ns.traces?.detailEntryState?.(ns.router.state()) || null });
+    else address.replace(mutate, { href });
   }
 
   // ---------------------------------------------------------------- self time
@@ -203,9 +202,10 @@
     if (persist) storeView(next);
     if (url) {
       updateParams((params) => {
-        if (next === "timeline") params.delete("view");
+        params.delete("view");
+        if (next === "timeline") params.delete("tab");
         else {
-          params.set("view", next);
+          params.set("tab", next);
           params.delete("span");
         }
       }, { push: url === "push" });
@@ -217,10 +217,19 @@
     if (view.current !== "timeline") setView("timeline", { url: null });
   }
 
+  // The trace's tab: ?tab= (the former ?view= is an alias, rewritten by
+  // applyLocation).
+  function tabParam(params) {
+    const tab = params.get("tab");
+    if (VIEWS.includes(tab)) return tab;
+    const alias = params.get("view");
+    return VIEWS.includes(alias) ? alias : "";
+  }
+
   function viewFromLocation() {
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get("view");
-    if (VIEWS.includes(fromUrl)) return fromUrl;
+    const params = ns.router.current().params;
+    const fromUrl = tabParam(params);
+    if (fromUrl) return fromUrl;
     if (params.get("span")) return "timeline";
     return readStoredView() || "timeline";
   }
@@ -229,9 +238,15 @@
   // deep-linked span of the URL.
   function applyLocation() {
     if (!ctx) return;
-    const params = new URLSearchParams(window.location.search);
+    const params = ns.router.current().params;
+    // ?view=<tab> (the former name) and a tab= that is not a trace tab (the
+    // search page's, carried by former trace URLs) take the canonical form.
+    if (params.has("view") || (params.has("tab") && !VIEWS.includes(params.get("tab")))) {
+      const tab = tabParam(params);
+      ns.router.owner("traces").replace({ view: null, tab: tab === "timeline" ? null : tab }, { href: ns.router.href() });
+    }
     const target = viewFromLocation();
-    const explicit = VIEWS.includes(params.get("view"));
+    const explicit = !!tabParam(params);
     setView(target, { url: explicit || target === "timeline" ? null : "replace", persist: explicit || !params.get("span") });
     const spanId = params.get("span");
     if (spanId && target === "timeline") {
@@ -268,8 +283,8 @@
       ctx.model.focusedSpanId = "";
       markFocusedSpan();
     }
-    const current = new URLSearchParams(window.location.search).get("span");
-    if (opening) updateParams((params) => { params.set("span", spanId); params.delete("view"); });
+    const current = ns.router.current().params.get("span");
+    if (opening) updateParams((params) => { params.set("span", spanId); params.delete("tab"); });
     else if (current === spanId) updateParams((params) => params.delete("span"));
   }
 

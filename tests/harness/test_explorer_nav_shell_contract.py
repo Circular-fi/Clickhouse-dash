@@ -67,7 +67,7 @@ def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
     assert '(params.get("view") === "graph" ? "graph" : "browse")' in ui
     assert 'return { ...catalog, mode: "storage", database, table: database ? params.get("table") || "" : "" };' in ui
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"],' in ui
-    assert 'window.history.replaceState({ workspace: "explorer" }, "", canonical);' in ui
+    assert 'router.replace(null, { href: canonical, view: "explorer" });' in ui
 
 
 def test_one_number_format_is_shared_with_every_explorer_module() -> None:

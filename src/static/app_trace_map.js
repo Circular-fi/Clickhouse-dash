@@ -521,17 +521,19 @@
   // call, selects the call; on the background, closes the panel.
   // The selected service in the URL (node=, a view parameter of the tab):
   // pushed when the panel opens on a service, replaced when the selection
-  // moves, and Back closes the panel (closePanel goes Back when the entry is
-  // the panel's own).
-  const NODE_ENTRY = "detail:node";
+  // moves, and Back closes the panel (ns.router.panel("node"): closePanel
+  // goes Back when the entry is the panel's own).
+  const nodeParam = ns.router.owner("traces").panel("node");
   let pendingNode = "";
   const selectedNode = () => (map.selected?.kind === "node" ? map.selected.id : "");
 
+  // An edge in the open panel has no parameter: a service selected from it
+  // moves the panel (replace) rather than opening it.
   function writeNodeUrl(previous) {
     const next = selectedNode();
     if (next === previous) return;
-    if (next && !previous && !map.panelWasOpen) ns.traceSearch?.writeUrl?.("push", { detail: NODE_ENTRY });
-    else ns.traceSearch?.writeUrl?.("replace");
+    if (next && !previous && !map.panelWasOpen) nodeParam.open(next);
+    else nodeParam.move(next);
   }
 
   // url: false when the URL already names the selection (Back / Forward).
@@ -564,8 +566,8 @@
     map.selected = null;
     panelShell()?.hide();
     if (previous && url === "clear" && shown()) {
-      if (window.history.state?.detail === NODE_ENTRY && new URLSearchParams(window.location.search).get("node") === previous) window.history.back();
-      else ns.traceSearch?.writeUrl?.("replace");
+      if (nodeParam.get() === previous) nodeParam.close();
+      else ns.router.owner("traces").replace();
     }
     byId("traceMapPane")?.classList.remove("graphKitPane--panel");
     ctl?.scheduleDraw();
@@ -716,7 +718,7 @@
       const dropped = pendingNode && !map.selected;
       pendingNode = "";
       if (map.selected) renderPanel(); else closePanel({ url: "none" });
-      if (dropped || (previous?.kind === "node" && !map.selected)) ns.traceSearch?.writeUrl?.("replace");
+      if (dropped || (previous?.kind === "node" && !map.selected)) ns.router.owner("traces").replace();
       fit();
     } catch (error) {
       if (!req.isCurrent()) return;

@@ -228,7 +228,7 @@ test('node click opens the side panel with summary, definition and columns, and 
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
   await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_daily_summary_mv');
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_daily_summary_mv$/);
 });
 
 test('edge click explains the Materialized View SELECT, the dictionary source and the Distributed route', async ({ page }) => {

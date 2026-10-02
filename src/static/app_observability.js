@@ -106,29 +106,21 @@
 
   // -------------------------------------------------------------- routes
 
-  function appBasePath() {
-    const raw = String(window.__CHDASH_BASE_PATH__ || "/");
-    return raw === "/" ? "" : raw.replace(/\/+$/, "");
-  }
+  // The address bar is ns.router's (app_router.js): this controller writes
+  // the view switches, each view module its own parameters.
+  // It loads with the common modules, after this script.
+  const router = () => window.ChDash.router;
 
-  // "traces" for /observability/traces/abc, "" for /observability or another page.
+  // "traces" for /observability/traces/abc, "" for /observability or another
+  // page. Read before the modules load (start): the page is only served
+  // under <base>/observability, so the first "/observability/" segment is it.
   function viewFromPath(pathname) {
-    let path = String(pathname || "/");
-    const prefix = appBasePath();
-    if (prefix && path.startsWith(prefix)) path = path.slice(prefix.length);
-    const match = /^\/observability\/(traces|logs|metrics)(?:\/|$)/.exec(path);
+    const match = /\/observability\/(traces|logs|metrics)(?:\/|$)/.exec(String(pathname || "/"));
     return match ? match[1] : "";
   }
 
-  function isObservabilityPath(pathname) {
-    let path = String(pathname || "/");
-    const prefix = appBasePath();
-    if (prefix && path.startsWith(prefix)) path = path.slice(prefix.length);
-    return /^\/observability(?:\/|$)/.test(path);
-  }
-
-  const viewRoute = (view) => `${appBasePath()}/observability/${view}`;
-  const currentUrl = () => `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const viewRoute = (view) => router().url(`/observability/${view}`);
+  const currentUrl = () => router().href();
 
   // ---------------------------------------------------------- controller
 
@@ -247,6 +239,9 @@
 
   // history: "push" (a tab click or a link: its own entry), "replace" (page
   // load, a view turned off) or "none" (Back / Forward: the URL is the entry).
+  // The shown view's lifecycle scope opens before its module runs: the view
+  // owns its address (ns.router.owner) from init() on, and a hidden view
+  // never writes it.
   async function show(view, { history = "push", url = "" } = {}) {
     if (!VIEWS.includes(view)) return;
     if (view === ctl.active && !url) return;
@@ -269,21 +264,23 @@
       window.ChDash.lifecycle?.leave(leaving);
     }
     if (history !== "none") {
-      const next = targetUrl(view, url);
-      if (history === "push" && next !== currentUrl()) window.history.pushState({ obsView: view }, "", next);
-      else window.history.replaceState({ ...(window.history.state || {}), obsView: view }, "", next);
+      // Another view's entry state (a panel's entry, the trace steps back to
+      // its search) does not carry over a replaced switch.
+      const fresh = leaving ? { detail: undefined, detailOf: undefined, searchBack: undefined } : null;
+      router().write(history, null, { href: targetUrl(view, url), view, state: fresh });
     } else {
       markSeen(view);
     }
     applyActive(view);
     const module = viewModule(view);
+    const scope = window.ChDash.lifecycle?.enter(view) || null;
     if (!ctl.started.has(view)) {
       ctl.started.add(view);
       module?.init?.();
     } else {
       module?.onLocation?.();
     }
-    module?.onShow?.(window.ChDash.lifecycle?.enter(view) || null);
+    module?.onShow?.(scope);
   }
 
   // An observability URL of another view, followed in place.
@@ -305,8 +302,9 @@
     return enabledViews()[0] || VIEWS[0];
   }
 
+  // Back / Forward (ns.router.on("/observability")): the entry's view shows,
+  // or the shown one follows its URL (onLocation).
   function onPopState() {
-    if (!isObservabilityPath(window.location.pathname)) return;
     const named = viewFromPath(window.location.pathname);
     const view = named && enabledViews().includes(named) ? named : defaultView();
     if (view !== named) {
@@ -345,7 +343,7 @@
     // the selected tab keeps the focus once its view is shown.
     ns.tabs?.bind(document.getElementById("obsTabs"), { attr: "obsTab", onSelect: (view) => show(view) });
     document.addEventListener("click", onDocumentClick);
-    window.addEventListener("popstate", onPopState);
+    router().on("/observability", onPopState);
     window.ChDash.features.on(onFeatures);
   }
 

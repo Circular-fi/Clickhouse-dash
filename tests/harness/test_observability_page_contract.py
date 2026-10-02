@@ -79,18 +79,24 @@ def test_views_load_lazily_once_with_their_stylesheet():
 
 def test_one_history_listener_drives_the_views():
     js = read("src/static/app_observability.js")
-    assert 'window.addEventListener("popstate", onPopState);' in js
-    assert 'window.history.pushState({ obsView: view }, "", next);' in js
+    # Back / Forward reach the controller through ns.router (the one popstate
+    # listener); it writes the view switches.
+    assert 'router().on("/observability", onPopState);' in js
+    assert "router().write(history, null, { href: targetUrl(view, url), view, state: fresh });" in js
+    # The view's lifecycle scope opens before its module runs: it owns its URL from init() on.
+    show = js[js.index("async function show("):js.index("// An observability URL of another view")]
+    assert show.index("window.ChDash.lifecycle?.enter(view)") < show.index("module?.init?.();")
     for name, module in (("traces", "app_traces.js"), ("logs", "app_logs.js"), ("metrics", "app_metrics.js")):
         source = read(f"src/static/{module}")
-        assert '"popstate"' not in source, module
-        assert f'const ownsUrl = () => !ns.observability || ns.observability.isActive("{name}");' in source, module
+        assert '"popstate"' not in source and "ownsUrl" not in source, module
+        assert f'ns.router.owner("{name}"' in source, module
         exported = source[source.index(f"ns.{name} = {{"):]
         for hook in ("init", "onLocation", "onShow", "onHide", "getContext", "applyContext"):
             assert re.search(rf"\b{hook}\b", exported[:exported.index("}")]), (module, hook)
-    # Hidden views never write the location.
-    assert 'if (ns.observability && !ns.observability.isActive("traces")) return;' in read("src/static/app_trace_search.js")
-    assert 'if (ns.observability && !ns.observability.isActive("traces")) return;' in read("src/static/app_trace_views.js")
+    # Hidden views never write the location: every Traces module writes
+    # through the Traces owner, which is active only while its scope shows.
+    assert 'ns.router.owner("traces", { path: "/observability/traces"' in read("src/static/app_trace_search.js")
+    assert 'const address = ns.router.owner("traces");' in read("src/static/app_trace_views.js")
 
 
 def test_time_range_and_service_are_shared_and_other_filters_stay_per_view():

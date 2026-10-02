@@ -435,9 +435,8 @@
     applyPageNavigation({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     storage?.savePageNav?.({ explorer: explorerEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled });
     if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
-      const next = api.resolveUrl("query");
-      window.history.replaceState({ workspace: "query" }, "", next);
-      if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { historyMode: "none" });
+      ns.router.replace("", { path: "/query", view: "query" });
+      if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { history: "none" });
     }
     // A turned-off view falls back to another (app_observability.js); with no
     // view left the page itself is gone.
@@ -699,20 +698,14 @@
   // so the address bar is a link to the query. Read once at startup.
   const QUERY_URL_MAX_SQL = 4000;
 
+  // The Query page's owner of the address (ns.router): it only writes these
+  // two parameters, and always replaces.
   function syncQueryUrl(sqlText) {
-    if (document.body?.dataset.page !== "query" || !window.history?.replaceState) return;
-    const params = new URLSearchParams(window.location.search || "");
-    params.delete("sql");
-    params.delete("saved");
+    if (document.body?.dataset.page !== "query") return;
     const text = String(sqlText ?? dom.queryTextArea?.value ?? "").trim();
     const savedId = ns.queryLibrary?.openedId?.(text) || "";
-    if (savedId) params.set("saved", savedId);
-    else if (text && text.length <= QUERY_URL_MAX_SQL) params.set("sql", text);
-    const qs = params.toString();
-    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash || ""}`;
-    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash || ""}`) {
-      window.history.replaceState(window.history.state, "", next);
-    }
+    const sql = !savedId && text.length <= QUERY_URL_MAX_SQL ? text : "";
+    ns.router.owner("query", { view: null }).replace({ saved: savedId, sql });
   }
 
   // A link fills an empty editor; a reload keeps the tab's own draft.

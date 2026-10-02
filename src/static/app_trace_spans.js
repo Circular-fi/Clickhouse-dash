@@ -96,6 +96,9 @@
 
   function active() { return state.mode === "spans"; }
 
+  // span= of the side panel on the search page (ns.router.panel).
+  const spanParam = ns.router.owner("traces").panel("span");
+
   // Spans mode and its own filters as search URL parameters.
   function urlParams(params) {
     if (!active()) return;
@@ -282,7 +285,7 @@
       const index = state.rows.findIndex((row) => String(row.span_id) === span);
       state.pendingSpan = "";
       if (index >= 0) select(index, { open: true, url: "none" });
-      else ns.traceSearch?.writeUrl?.("replace");
+      else ns.router.owner("traces").replace();
     }
   }
 
@@ -544,7 +547,9 @@
     const moving = state.panelOpen;
     openPanel(next);
     const mode = url || (moving ? "replace" : "push");
-    if (mode !== "none") ns.traceSearch?.writeUrl?.(mode, mode === "push" ? { detail: PANEL_ENTRY } : null);
+    const span = String(state.rows[next]?.span_id || "");
+    if (mode === "push") spanParam.open(span);
+    else if (mode === "replace") spanParam.move(span);
   }
 
   function onTableClick(event) {
@@ -598,10 +603,9 @@
 
   // The side panel: a docked ns.detailPanel beside the results, sticky under
   // the search bar (a bottom sheet on narrow windows). Escape (ns.layers) and
-  // its close button give the focus back to the table. Its span= is pushed
-  // when it opens (PANEL_ENTRY marks that history entry), replaced when it
-  // moves, and Back closes it.
-  const PANEL_ENTRY = "detail:span";
+  // its close button give the focus back to the table. Its span= is
+  // ns.router.panel("span"): pushed when it opens, replaced when it moves,
+  // and Back closes it.
   let detail = null;
 
   function panelApi() {
@@ -670,8 +674,7 @@
     if (detail?.isOpen()) detail.close("closed", { restoreFocus: false });
     if (focus && wasOpen) byId("traceSpanTable")?.focus({ preventScroll: true });
     if (!wasOpen || url !== "clear" || !active()) return;
-    if (window.history.state?.detail === PANEL_ENTRY && new URLSearchParams(window.location.search).has("span")) window.history.back();
-    else ns.traceSearch?.writeUrl?.("replace");
+    spanParam.close();
   }
 
   function copyButton(value, label) {

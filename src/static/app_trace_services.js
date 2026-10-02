@@ -332,7 +332,8 @@
   // detail, a docked ns.detailPanel sticky under the search bar (a bottom
   // sheet on narrow windows). Built once; renders fill them.
   let detailPanel = null;
-  const PANEL_ENTRY = "detail:svc";
+  // svc= of the open detail (ns.router.panel).
+  const svcParam = ns.router.owner("traces").panel("svc");
 
   function skeleton() {
     let shell = root.querySelector(":scope > .traceSvc");
@@ -556,7 +557,10 @@
   function openDetail(name, { push = true } = {}) {
     const opening = !view.detailName;
     view.detailName = name || "";
-    if (push && view.detailName) ns.traceSearch?.writeUrl?.(opening ? "push" : "replace", opening ? { detail: PANEL_ENTRY } : null);
+    if (push && view.detailName) {
+      if (opening) svcParam.open(view.detailName);
+      else svcParam.move(view.detailName);
+    }
     const table = root?.querySelector(".traceSvcTable");
     table?.querySelectorAll("[data-svc-row]").forEach((tr) => {
       const on = tr.getAttribute("data-svc-row") === view.detailName;
@@ -572,11 +576,11 @@
   function closeDetail({ fromPanel = false } = {}) {
     const name = view.detailName;
     if (!name) return;
-    const back = window.history.state?.detail === PANEL_ENTRY;
     view.detailName = "";
     openDetail("", { push: false });
-    if (back) window.history.back();
-    else ns.traceSearch?.writeUrl?.("replace");
+    let back = false;
+    if (svcParam.get()) back = svcParam.close();
+    else ns.router.owner("traces").replace();
     if (fromPanel || !back) root?.querySelector(`[data-svc-row="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
   }
 
@@ -592,7 +596,7 @@
     if (sort) {
       const key = sort.getAttribute("data-svc-sort");
       view.sort = view.sort.key === key ? { key, dir: view.sort.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "name" ? "asc" : "desc" };
-      ns.traceSearch?.writeUrl?.("replace");
+      ns.router.owner("traces").replace();
       render();
       root.querySelector(`[data-svc-sort="${key}"] .dataTable__sort`)?.focus({ preventScroll: true });
       return;

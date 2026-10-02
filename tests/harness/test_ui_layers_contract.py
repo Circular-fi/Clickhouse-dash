@@ -115,5 +115,5 @@ def test_views_bind_their_global_listeners_while_shown():
 def test_observability_views_get_a_lifecycle_scope():
     obs = read("src/static/app_observability.js")
     assert "window.ChDash.lifecycle?.leave(leaving);" in obs
-    assert "module?.onShow?.(window.ChDash.lifecycle?.enter(view) || null);" in obs
+    assert "const scope = window.ChDash.lifecycle?.enter(view) || null;" in obs and "module?.onShow?.(scope);" in obs
     assert obs.index("viewModule(leaving)?.onHide?.();") < obs.index("window.ChDash.lifecycle?.leave(leaving);")

@@ -109,7 +109,7 @@ def test_metrics_page_keeps_its_state_in_the_url_and_links_exemplars_to_spans():
                   'params.set("exemplars", "0")']:
         assert param in js, param
     assert "bucket_origin_ms: localMidnight(range.start_ms)" in js
-    assert 'const url = `${route("observability/metrics")}?${urlQuery()}`;' in js
-    assert '`${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
+    assert 'const address = ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });' in js
+    assert '`${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`' in js
     for route in ["api/metrics/catalog?", "api/metrics/series?", "api/metrics/exemplars?", "api/metrics/attributes?"]:
         assert route in js, route

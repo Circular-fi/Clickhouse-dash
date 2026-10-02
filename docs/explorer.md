@@ -46,16 +46,18 @@ One URL scheme covers the Catalog, and Back / forward walk modes and scopes:
 
 | Address | Opens |
 | --- | --- |
-| `/explorer[/<db>[/<table>/<tab>]]` | Browse (the default mode) |
+| `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for Columns |
 | `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph |
 | `/explorer[/<db>[/<table>]]?mode=storage` | Storage |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
 
 Former addresses stay aliases and are rewritten to that form: `?view=browse` and
 `?view=graph` (the former Browse / Graph views), `/explorer/_system[?database=
-<db>[&table=<t>]]` (the former Storage view), the former card tab slugs
-(`/overview`, `/schema`, `/data`), `/explorer/functions` and
-`/explorer/databases`.
+<db>[&table=<t>]]` (the former Storage view), the card tab as a path segment
+(`/explorer/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
+`schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme of
+every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
+address through `ns.router` while its workspace shows.
 
 Storage calls `ns.explorerStorage.show(container, { scope, includeSystem,
 fetchTable, onScopeChange, onOpenTable })`: the scope is the tree selection,
@@ -396,9 +398,10 @@ with its model and shared helpers):
   gets a banner right under the header (`Replicated · 2/2 replicas active ·
   queue 0 · delay 0 s`, coloured by state) with a link to its Operations tab.
 - **Tabs**, in this order and only when they have content:
-  `Columns · Preview · Storage · Operations · Lineage · DDL`. Old routes keep
-  working: `/overview` and `/schema` open Columns, `/data` opens Preview, and
-  the address bar is rewritten to the new slug.
+  `Columns · Preview · Storage · Operations · Lineage · DDL`, the URL's `?tab=`
+  (`?tab=lineage`; none for Columns). Old routes keep working: a `/<tab>` path
+  segment opens its tab, `/overview` and `/schema` open Columns, `/data` opens
+  Preview, and the address bar is rewritten to the new form.
 - **About** panel beside the tab body (above it, collapsed to its first tiles,
   when the pane is narrower than 960 px): value + context tiles for engine,
   MV target / Buffer destination, size and rows, compression ratio, parts and

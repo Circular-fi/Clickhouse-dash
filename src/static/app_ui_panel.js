@@ -50,11 +50,10 @@
   // ns.detailPanel.head({ eyebrow, title, subtitle, dot, closeLabel, onClose, actions })
   //   -> a head element in the shell's markup (the graph-kit panels).
   //
-  // ns.detailPanel.urlParam(name) -> { get(search?), open(value), move(value), clear() }
-  //   The one URL parameter of a panel that shows one entity: open pushes a
-  //   history entry, a move inside the panel (next / previous) replaces it,
-  //   and closing goes Back when the entry is the panel's own (otherwise it
-  //   replaces), so Back closes an open panel.
+  // The one URL parameter of a panel that shows one entity (span=, log=,
+  //   node=, svc=) is ns.router.panel(name) (app_router.js): open pushes a
+  //   history entry, a move inside the panel replaces it, and closing goes
+  //   Back when the entry is the panel's own, so Back closes an open panel.
 
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
@@ -336,50 +335,6 @@
     return api;
   }
 
-  // ------------------------------------------------------------- URL state
-
-  function urlParam(name) {
-    const marker = `detail:${name}`;
-    const current = () => new URL(window.location.href);
-    const withValue = (value) => {
-      const url = current();
-      if (value == null || value === "") url.searchParams.delete(name);
-      else url.searchParams.set(name, String(value));
-      return `${url.pathname}${url.search}${url.hash}`;
-    };
-    return {
-      name,
-      get(search = window.location.search) {
-        return new URLSearchParams(search).get(name) || "";
-      },
-      // A new entity in the panel: its own history entry.
-      open(value) {
-        if (this.get() === String(value)) return;
-        const state = { ...(window.history.state || {}), detail: marker };
-        if (this.get()) window.history.replaceState(state, "", withValue(value));
-        else window.history.pushState(state, "", withValue(value));
-      },
-      // Next / previous inside the open panel.
-      move(value) {
-        if (this.get() === String(value)) return;
-        window.history.replaceState({ ...(window.history.state || {}) }, "", withValue(value));
-      },
-      // The panel closed: its own entry goes (Back); a panel restored from
-      // a link or a reload has none and only drops the parameter.
-      clear() {
-        if (!this.get()) return false;
-        if (window.history.state?.detail === marker) {
-          window.history.back();
-          return true;
-        }
-        const state = { ...(window.history.state || {}) };
-        delete state.detail;
-        window.history.replaceState(state, "", withValue(""));
-        return false;
-      },
-    };
-  }
-
   ns.sidePanel = Object.freeze({ mount: mountSide });
-  ns.detailPanel = Object.freeze({ create, head, urlParam, closeButton });
+  ns.detailPanel = Object.freeze({ create, head, closeButton });
 })();

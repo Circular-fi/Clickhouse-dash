@@ -84,7 +84,7 @@ for (const theme of ['dark', 'light']) {
       await page.goto('/explorer');
       await expandExplorerDatabase(page, 'chdash_ui');
       await page.locator('.explorerTreeObject[data-table="weather_observations"]').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
 
       // Graph focuses the selected table.
@@ -118,7 +118,7 @@ for (const theme of ['dark', 'light']) {
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
       await expect(list.locator('thead th').first()).toHaveText(/^Partition/, { timeout: 15_000 });
       await page.locator('#explorerModeBrowse').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns$/);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types', { timeout: 15_000 });
       // A tree pick in Graph keeps Graph and refocuses it.
       await page.locator('#explorerModeGraph').click();
@@ -131,7 +131,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?mode=graph&graph=lineage&depth=1$/);
       await expect(selectedObject(page)).toHaveAttribute('data-table', 'wide_types');
       await page.goBack();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns$/);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
       await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
       await page.goBack();
@@ -156,7 +156,7 @@ for (const theme of ['dark', 'light']) {
       // Open card leaves Storage for the table card in Browse.
       await list.locator('tbody tr[data-name="chdash_ui"] .explorerStorageList__name').click();
       await list.locator('tbody tr[data-name="weather_observations"] .explorerStorageList__open').click();
-      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+      await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
       await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
     });
@@ -210,9 +210,9 @@ for (const theme of ['dark', 'light']) {
 
     test('former URLs are aliases of the Catalog scheme', async ({ page }) => {
       const cases = [
-        ['/explorer/chdash_ui/weather_observations/columns?view=browse', /\/explorer\/chdash_ui\/weather_observations\/columns$/, 'browse'],
+        ['/explorer/chdash_ui/weather_observations/columns?view=browse', /\/explorer\/chdash_ui\/weather_observations$/, 'browse'],
         ['/explorer/chdash_ui?view=browse', /\/explorer\/chdash_ui$/, 'browse'],
-        ['/explorer/chdash_ui/weather_observations/schema', /\/explorer\/chdash_ui\/weather_observations\/columns$/, 'browse'],
+        ['/explorer/chdash_ui/weather_observations/schema', /\/explorer\/chdash_ui\/weather_observations$/, 'browse'],
         ['/explorer/chdash_ui/weather_observations/overview?view=graph&graph=lineage&depth=2', /\/explorer\/chdash_ui\/weather_observations\?mode=graph&graph=lineage&depth=2$/, 'graph'],
         ['/explorer?view=graph', /\/explorer\?mode=graph&graph=lineage&depth=1$/, 'graph'],
         ['/explorer/_system', /\/explorer\?mode=storage$/, 'storage'],

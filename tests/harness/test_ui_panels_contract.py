@@ -66,7 +66,7 @@ def test_panel_module_loads_after_popover_on_every_page():
 def test_panel_api_and_tokens():
     panel = read("src/static/app_ui_panel.js")
     assert "ns.sidePanel = Object.freeze({ mount: mountSide });" in panel
-    assert "ns.detailPanel = Object.freeze({ create, head, urlParam, closeButton });" in panel
+    assert "ns.detailPanel = Object.freeze({ create, head, closeButton });" in panel
     assert 'const button = el("button", "closeCross uiDetail__close", "×");' in panel
     # Escape and focus return through ns.layers.
     assert panel.count("ns.layers.push({") == 2
@@ -152,18 +152,23 @@ def test_no_local_fixed_drawer():
 
 
 def test_entity_panels_write_one_url_parameter():
-    panel = read("src/static/app_ui_panel.js")
-    assert "window.history.pushState(state, \"\", withValue(value));" in panel
-    assert "window.history.back();" in panel
+    # One helper for every panel parameter: ns.router.panel (app_router.js).
+    router = read("src/static/app_router.js")
+    assert "function panel(name, { owner: own = null } = {}) {" in router
+    assert 'return push({ [param]: next }, { ...view(), state: { detail: marker, detailOf: of } });' in router
+    assert "back();" in router[router.index("      close() {"):]
+    assert "urlParam" not in read("src/static/app_ui_panel.js")
     logs = read("src/static/app_logs.js")
-    assert 'const logParam = ns.detailPanel.urlParam("log");' in logs
+    assert 'const logParam = address.panel("log");' in logs
     spans = read("src/static/app_trace_spans.js")
     assert 'if (span) params.set("span", span);' in spans
-    assert 'const PANEL_ENTRY = "detail:span";' in spans
+    assert 'const spanParam = ns.router.owner("traces").panel("span");' in spans
     search = read("src/static/app_trace_search.js")
     # span= is the panel's, never part of the search key or a trace URL's context.
     assert search.count('params.delete("span");') == 2
     trace_map = read("src/static/app_trace_map.js")
-    assert 'params: ["node"],' in trace_map and 'const NODE_ENTRY = "detail:node";' in trace_map
+    assert 'params: ["node"],' in trace_map and 'const nodeParam = ns.router.owner("traces").panel("node");' in trace_map
     services = read("src/static/app_trace_services.js")
-    assert 'const PANEL_ENTRY = "detail:svc";' in services
+    assert 'const svcParam = ns.router.owner("traces").panel("svc");' in services
+    for source in (logs, spans, trace_map, services):
+        assert "history.state" not in source and '"detail:' not in source

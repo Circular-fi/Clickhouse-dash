@@ -54,7 +54,8 @@ def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
     assert 'if (mode !== "browse") params.set("mode", mode);' in ui
     assert 'params.set("graph", route.mode === "physical" ? "storage" : "lineage")' in ui
     assert 'params.set("depth", String(route.depth ?? 1))' in ui
-    assert 'if (mode === "browse") path += `/${String(tab || DEFAULT_TAB).toLowerCase()}`;' in ui
+    # The card tab is ?tab= (Columns, the default, has none).
+    assert 'if (mode === "browse" && database && table && tab && tab !== DEFAULT_TAB) params.set("tab", String(tab).toLowerCase());' in ui
     assert 'const TABS = ["Columns", "Preview", "Storage", "Operations", "Lineage", "DDL"];' in ui
     assert "function getRouteState()" in graph
     assert "function applyRouteState(route = {})" in graph

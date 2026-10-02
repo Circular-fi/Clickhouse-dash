@@ -17,10 +17,10 @@
 
   const $ = (id) => document.getElementById(id);
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
-  const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
-  // The Logs view of the Observability page (app_observability.js) writes the
-  // location only while it is the shown view.
-  const ownsUrl = () => !ns.observability || ns.observability.isActive("logs");
+  // The Logs view's address (ns.router): /observability/logs and its search
+  // parameters, written only while the view shows (the "logs" lifecycle
+  // scope of app_observability.js).
+  const address = ns.router.owner("logs", { path: "/observability/logs", params: () => urlParams() });
 
   const SEV_CLASSES = ["error", "warn", "info", "debug"];
   const SEV_LABELS = { error: "Error", warn: "Warn", info: "Info", debug: "Debug" };
@@ -137,7 +137,7 @@
     model.denoise = params.get("denoise") === "1";
   }
 
-  // withRecord: the open record's log= too (writeUrl keeps it).
+  // withRecord: the open record's log= too (every address write keeps it).
   function urlParams({ withRecord = true } = {}) {
     const params = new URLSearchParams();
     params.set("from", model.timeRange.from);
@@ -156,14 +156,6 @@
     return params;
   }
 
-  function writeUrl(push) {
-    if (!ownsUrl()) return;
-    const next = `${route("observability/logs")}?${urlParams().toString()}`;
-    const current = `${window.location.pathname}${window.location.search}`;
-    if (next === current) return;
-    if (push) window.history.pushState({ workspace: "logs" }, "", next);
-    else window.history.replaceState({ workspace: "logs" }, "", next);
-  }
 
   // --- Request parameters ------------------------------------------------------
 
@@ -529,7 +521,7 @@
       return;
     }
     showError("");
-    writeUrl(push);
+    address.write(push ? "push" : "replace");
     renderChips();
     syncLegend();
     // A new search supersedes the previous one, its next page and its live poll.
@@ -821,7 +813,7 @@
   function setColumns(cols) {
     const ordered = [...OPTIONAL_COLUMNS.filter((c) => cols.includes(c)), ...cols.filter((c) => c.startsWith("attr:"))];
     model.cols = [...new Set([...ordered, "body"])];
-    writeUrl(false);
+    address.replace();
     renderTable();
   }
 
@@ -1098,7 +1090,7 @@
     });
     $("logsDenoise")?.addEventListener("change", (event) => {
       model.denoise = !!event.target.checked;
-      writeUrl(false);
+      address.replace();
       renderPatterns();
     });
   }
@@ -1117,7 +1109,7 @@
     if (cols) cols.hidden = model.tab !== "results";
     const denoise = $("logsDenoiseToggle");
     if (denoise) denoise.hidden = model.tab !== "patterns";
-    writeUrl(push);
+    address.write(push ? "push" : "replace");
     if (model.tab === "patterns") void loadPatterns();
     else renderTable();
   }
@@ -1130,7 +1122,7 @@
   // the focus back to the record table, whose arrow keys move through the
   // records.
   let sidePanel = null;
-  const logParam = ns.detailPanel.urlParam("log");
+  const logParam = address.panel("log");
   // A log= of a reload or a link: opened when its record is listed.
   let pendingLogId = "";
 
@@ -1160,8 +1152,8 @@
     renderWindow(true);
     if (model.side.tab === "context") void loadContext();
     const mode = url || (moving ? "replace" : "push");
-    if (ownsUrl() && mode === "push") logParam.open(row.id);
-    else if (ownsUrl() && mode === "replace") logParam.move(row.id);
+    if (mode === "push") logParam.open(row.id);
+    else if (mode === "replace") logParam.move(row.id);
   }
 
   // url: "clear" (drop log=, Back when the entry is the panel's own) or
@@ -1173,7 +1165,7 @@
     if (sidePanel?.isOpen()) sidePanel.close("closed", { restoreFocus: true });
     document.querySelector(".logsBody")?.classList.remove("has-side");
     renderWindow(true);
-    if (wasOpen && url === "clear" && ownsUrl()) logParam.clear();
+    if (wasOpen && url === "clear") logParam.close();
   }
 
   // Back / Forward: the panel follows log=.
@@ -1194,7 +1186,7 @@
     const row = model.rows.find((item) => item.id === pendingLogId);
     pendingLogId = "";
     if (row) openSidePanel(row, { url: "none" });
-    else if (logParam.get()) logParam.clear();
+    else if (logParam.get()) logParam.close();
   }
 
   // Record fields: the shared key / value list (ui.kvListHtml) with the
@@ -1226,7 +1218,7 @@
     if (openTrace) {
       const traced = !!row.trace_id && ns.features.get("traces.enabled");
       openTrace.hidden = !traced;
-      if (traced) openTrace.href = route(`observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
+      if (traced) openTrace.href = ns.router.url(`/observability/traces/${encodeURIComponent(row.trace_id)}${row.span_id ? `?span=${encodeURIComponent(row.span_id)}` : ""}`);
     }
     sideTabs?.select(model.side.tab);
     $("logsSideDetails").hidden = model.side.tab !== "details";
@@ -1448,7 +1440,7 @@
 
   async function pollLive() {
     if (!model.live) return;
-    if (document.hidden || model.searching || !ownsUrl()) { scheduleLive(); return; }
+    if (document.hidden || model.searching || !address.active()) { scheduleLive(); return; }
     let range;
     try { range = resolvedRange(); } catch (_) { scheduleLive(); return; }
     const newest = model.rows[0];
@@ -1656,11 +1648,11 @@
     });
     $("logsLiveButton")?.addEventListener("click", () => { if (model.live) stopLive(); else void startLive(); });
     window.addEventListener("chdash:host-changed", () => {
-      if (ownsUrl()) void reloadForHost();
+      if (address.active()) void reloadForHost();
       else reloadWhenShown = true;
     });
     ns.features.on((features) => {
-      if (features?.logs?.enabled === false || !ownsUrl()) return;
+      if (features?.logs?.enabled === false || !address.active()) return;
       if (!booted && currentHost()) { booted = true; void reloadForHost(); }
     });
     if (currentHost()) { booted = true; void reloadForHost(); }

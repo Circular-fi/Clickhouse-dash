@@ -289,15 +289,19 @@
     return params;
   }
 
-  // The search context carried by trace detail URLs.
-  // The search a trace URL carries: not the span of the Spans side panel
-  // (span= names the trace's own span there).
+  // The search context carried by trace detail URLs: not the span of the
+  // Spans side panel (span= names the trace's own span there), nor the search
+  // page's tab and its view parameters (tab= names the trace's own tab).
   function contextQuery() {
     if (!ctx) return "";
     const params = currentParams();
     params.delete("span");
+    params.delete("tab");
+    for (const name of ns.traceTabs?.viewParams?.() || []) params.delete(name);
     return params.toString();
   }
+
+  const onTracePath = () => /\/observability\/traces\/[^/]+\/?$/.test(window.location.pathname);
 
   function searchKey() {
     const params = currentParams();
@@ -310,25 +314,12 @@
     return params.toString();
   }
 
-  function searchUrl() {
-    const query = currentParams().toString();
-    return `${ctx.route("observability/traces")}${query ? `?${query}` : ""}`;
-  }
-
-  // mode: "push" (a new search), "replace" (same entry, e.g. the page-load
-  // search or a view toggle) or "none" (restored from history).
-  // state: more history state for a pushed entry ({ detail }: the entry a
-  // detail panel opened, which its close takes Back).
-  function writeUrl(mode = "push", state = null) {
-    if (mode === "none" || !ctx) return;
-    // Another Observability view owns the location (app_observability.js).
-    if (ns.observability && !ns.observability.isActive("traces")) return;
-    const next = searchUrl();
-    const current = `${window.location.pathname}${window.location.search}`;
-    if (next === current) return;
-    if (mode === "push") window.history.pushState({ ...(state || {}), workspace: "traces" }, "", next);
-    else window.history.replaceState({ ...(window.history.state || {}), workspace: "traces" }, "", next);
-  }
+  // The search page's address (ns.router): /observability/traces and
+  // currentParams(), written only while the Traces view shows. Every Traces
+  // module writes it through the same owner: ns.router.owner("traces")
+  // .write(mode), mode "push" (a new search), "replace" (same entry, e.g.
+  // the page-load search or a view toggle) or "none" (restored from history).
+  ns.router.owner("traces", { path: "/observability/traces", params: () => (ctx ? currentParams() : null) });
 
   function hasSearchParams(params) {
     return SEARCH_PARAMS.some((name) => params.has(name)) || !!ns.traceTabs?.hasParams?.(params);
@@ -376,7 +367,10 @@
 
   function applyLocation({ initial = false } = {}) {
     if (!ctx) return;
-    applyParams(new URLSearchParams(window.location.search), { initial });
+    const params = ns.router.current().params;
+    // A trace URL's tab= is the trace's tab (app_trace_views.js).
+    if (onTracePath()) params.delete("tab");
+    applyParams(params, { initial });
   }
 
   // --------------------------------------------------- click-to-filter menu
@@ -692,7 +686,6 @@
     commitPendingTag,
     contextQuery,
     searchKey,
-    writeUrl,
     applyLocation,
     hasSearchParams: () => hasSearchParams(new URLSearchParams(window.location.search)),
     onSearched: (filters) => { void facets?.load(filters); },

@@ -291,8 +291,9 @@ list of `src/static/modules.json`):
   phones) and the right entity panel (`.uiDetail`, `--detail-w`, docked or
   floating, one head and the `.closeCross` close button, a bottom sheet at
   `--bp-md`). A detail panel showing one entity writes one URL parameter
-  (`span=`, `log=`, `node=`, `svc=`): pushed when it opens, replaced when
-  it moves, and Back closes it.
+  (`span=`, `log=`, `node=`, `svc=`) through `ns.router.panel(name)` (see
+  "Routes"): pushed when it opens, replaced when it moves, and Back closes
+  it.
 
 ## Components: tabs, segmented controls and menus
 
@@ -432,6 +433,83 @@ and `test_page_manifest_contract.py` fail on a local copy.
   side panel's `.uiSide__search`).
 - **Timing helpers**: `util.debounce(fn, ms)` (`.cancel`, `.flush`),
   `util.rafOnce(fn)`. **Escaping**: `util.escapeHtml` only.
+
+## Routes
+
+`ns.router` (`src/static/app_router.js`, in the `common` list right after
+`app_dom.js`) owns the address bar and the session history. No other script
+calls `history.pushState`, `replaceState`, `back` or `go`, or listens to
+`popstate`: `tests/harness/test_ui_router_contract.py` fails on a copy.
+
+- **Reading**: `router.current()` gives `{ path, params, hash, state }` (`path`
+  without the base path, `params` a copy); `router.url(path)` adds the base
+  path, `router.path(pathname)` removes it, `router.href()` is the current
+  address.
+- **Writing**: `router.push(update, opts)` and `router.replace(update, opts)`.
+  An object update merges into the params and drops a parameter set to
+  `null`, `""` or `[]`; a `URLSearchParams` or a string is the whole query; a
+  function mutates a copy. `opts.path` / `opts.href` change the address,
+  `opts.state` adds the owner's entry state. A push of the current address
+  replaces it; a write that changes nothing is a no-op. The one option name of
+  page navigation functions is `history: "push" | "replace" | "none"`.
+- **History state**: one shape, `{ chdash: 1, view, ...owner state }`
+  (`view`: `query`, `explorer`, `traces`, `logs` or `metrics`; owner state: a
+  panel's `detail` / `detailOf`, a trace's `searchBack`).
+- **Owners**: `router.owner(name, { view, path, params })` is the handle a
+  view writes with. It writes only while its `ns.lifecycle` scope shows (the
+  Observability views; `view: null` always, a function decides otherwise), so
+  a hidden view never writes the URL. `path` and `params()` are the owner's
+  address and its whole state, the base of every write. The Observability
+  page opens a view's scope before its module's `init()`.
+- **Panels**: `router.panel(name)` (or `owner.panel(name)`) is a detail
+  panel's parameter: `open(value)` pushes an entry (replaces when another
+  value is open), `move(value)` replaces (next / previous), `close()` goes
+  Back when the entry is the panel's own (pushed by `open` over the same
+  address) and replaces without the parameter otherwise.
+- **Back / Forward**: `router.on(prefix | RegExp | fn, handler)` runs the
+  handlers that match the new entry, in order, from the page's one popstate
+  listener (`router.debug().popstateListeners` is 1). Handlers: the
+  Observability controller (`/observability`), the Explorer (`/explorer`) and
+  the Query result's row details (every path).
+
+**Vocabulary.** The path names where you are: the page, the view and the
+entity (`/explorer/<db>/<object>`, `/explorer/_functions/<name>`,
+`/observability/traces/<traceId>`); reserved Explorer segments start with
+`_`. `?tab=` names the sub-view of what the path shows (one per address, the
+default tab has none). `?mode=` is another presentation of the same scope
+(Explorer Graph / Storage, the Traces Spans results). A detail panel has one
+parameter. Values are the labels the UI shows, lower case (`graph=lineage`,
+`tab=flamegraph`). A former name is a read-only alias: the page reads it and
+rewrites the address with replace on load.
+
+| Route | Parameters |
+| --- | --- |
+| `/query` (and `/`) | `?saved=<id>` the library query in the editor, else `?sql=<text>` of the last run (up to 4,000 characters); replaced, never pushed |
+| `/explorer` | the Catalog root; `?mode=graph\|storage` as below |
+| `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
+| `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
+| `/explorer[/<db>[/<object>]]?mode=storage` | the Storage mode of the scope |
+| `/explorer/_functions[/<name>]` | Functions, the selected function |
+| `/explorer/_operations` | Server operations (hidden: falls back to the Catalog) |
+| `/observability` | the first enabled view, its parameters kept |
+| `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
+| `/observability/traces/<traceId>` | `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
+| `/observability/logs` | `from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `cols`, `denoise=1`, `?tab=patterns`, `log=` (panel) |
+| `/observability/metrics` | `from`, `to`, the first panel's `service`, `metric`, `kind`, `agg`, `group_by`, `filter`, `filter_not`, `exemplars=0`, one `panel=` per other panel (its own parameters, encoded) and `active` |
+
+Pushed: a new search or selection, a view or tab switch, an opened panel, a
+trace or span opened. Replaced: the page-load write, a panel moving, a sort,
+column or display toggle, an alias rewrite. Back from a trace returns to the
+search it came from (`returnToSearch`, `state.searchBack` steps).
+
+| Alias (read, rewritten on load) | Canonical |
+| --- | --- |
+| `/explorer/<db>/<object>/<tab>`, the slugs `overview` / `schema` (Columns) and `data` (Preview) | `/explorer/<db>/<object>?tab=<tab>` |
+| `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
+| `/explorer/_system[?database=<db>[&table=<t>]]` | `/explorer[/<db>[/<t>]]?mode=storage` |
+| `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
+| `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
+| `/observability/traces?results=spans` | `?mode=spans` |
 
 ## Data display components
 

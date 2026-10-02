@@ -20,8 +20,9 @@ def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> Non
     block = explorer[explorer.index('function setWorkspace('):explorer.index('function visibleTables()', explorer.index('function setWorkspace('))]
     assert 'appRoute("/explorer")' in block
     assert 'appRoute("/query")' in block
-    assert 'window.history.pushState' in block
-    assert 'historyMode !== "none"' in block
+    # The address goes through ns.router (push, replace or none).
+    assert 'router.write(history, null, { href: route, view: explorer ? "explorer" : "query" })' in block
+    assert 'history !== "none"' in block
 
 
 def test_materialized_view_target_is_added_as_downstream_and_select_sources_remain_upstream() -> None:

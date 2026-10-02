@@ -34,10 +34,9 @@
 
   // util.escapeHtml is the one escaper; null prints as "".
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
-  const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
-  // The Metrics view of the Observability page (app_observability.js) writes
-  // the location only while it is the shown view.
-  const ownsUrl = () => !ns.observability || ns.observability.isActive("metrics");
+  // The Metrics view's address (ns.router): /observability/metrics and its
+  // panels, written only while the view shows (the "metrics" lifecycle scope).
+  const address = ns.router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });
   // Formats and colours (docs/ui-foundations.md): a series grouped by
   // service keeps the service's colour of Traces and Logs.
   const fmt = ns.format;
@@ -232,13 +231,6 @@
     return params.toString();
   }
 
-  function writeUrl({ push = false } = {}) {
-    if (!ownsUrl()) return;
-    const url = `${route("observability/metrics")}?${urlQuery()}`;
-    if (url === `${window.location.pathname}${window.location.search}`) return;
-    if (push) window.history.pushState({ metrics: true }, "", url);
-    else window.history.replaceState({ metrics: true }, "", url);
-  }
 
   // --- Requests -------------------------------------------------------------
 
@@ -477,7 +469,7 @@
       panel.hidden.clear();
       panel.filterDraft = null;
     }
-    writeUrl({ push: !same });
+    address.write(same ? "replace" : "push");
     renderCatalog();
     renderPanels();
     if (!same) loadPanel(panel);
@@ -492,7 +484,7 @@
     if (index < 0 || index === model.active) return;
     model.active = index;
     for (const p of model.panels) p.el?.classList.toggle("is-active", p === panel);
-    writeUrl();
+    address.replace();
     renderCatalog();
   }
 
@@ -500,7 +492,7 @@
     const panel = newPanel();
     model.panels.push(panel);
     model.active = model.panels.length - 1;
-    writeUrl({ push: true });
+    address.push();
     renderPanels();
     renderCatalog();
     panel.el?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
@@ -515,7 +507,7 @@
     panel.el = null;
     if (model.active >= model.panels.length) model.active = model.panels.length - 1;
     else if (model.active > index) model.active -= 1;
-    writeUrl({ push: true });
+    address.push();
     renderPanels();
     renderCatalog();
   }
@@ -535,7 +527,7 @@
       panel.data = data;
       if (data?.agg && data.agg !== panel.agg) {
         panel.agg = data.agg;
-        writeUrl();
+        address.replace();
       }
     } catch (e) {
       if (!req.isCurrent()) return;
@@ -692,7 +684,7 @@
       if (option.dataset.agg === panel.agg) return;
       panel.agg = option.dataset.agg;
       panel.hidden.clear();
-      writeUrl();
+      address.replace();
       loadPanel(panel);
     });
 
@@ -713,7 +705,7 @@
       if (box.checked) next.push(key);
       panel.groupBy = next.slice(0, 5);
       panel.hidden.clear();
-      writeUrl();
+      address.replace();
       renderGroupButton(panel);
       loadPanel(panel);
     });
@@ -724,7 +716,7 @@
       const remove = event.target.closest("[data-remove-filter]");
       if (!remove) return;
       panel.filters.splice(Number(remove.dataset.removeFilter), 1);
-      writeUrl();
+      address.replace();
       renderFilters(panel);
       loadPanel(panel);
     });
@@ -781,7 +773,7 @@
       const value = valueInput.value;
       if (!panel.filters.some((f) => f.key === key && f.op === op && f.value === value)) panel.filters.push({ key, op, value });
       closeForm();
-      writeUrl();
+      address.replace();
       renderFilters(panel);
       loadPanel(panel);
     });
@@ -789,7 +781,7 @@
 
     el.querySelector(".metricsExemplarToggle").addEventListener("change", (event) => {
       panel.exemplars = !!event.target.checked;
-      writeUrl();
+      address.replace();
       if (panel.exemplars && EXEMPLAR_KINDS.has(panel.kind) && panel.data) loadExemplars(panel);
       else { panel.exemplarData = null; renderPanelNote(panel); drawChart(panel); }
     });
@@ -976,7 +968,7 @@
       const t = Number(ex.t);
       if (!Number.isFinite(t) || t < x0 || t > x1 || !ex.trace_id) continue;
       const value = Number(ex.value);
-      const href = `${route(`observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
+      const href = `${ns.router.url(`/observability/traces/${encodeURIComponent(ex.trace_id)}`)}${ex.span_id ? `?span=${encodeURIComponent(ex.span_id)}` : ""}`;
       markers.push({
         x: t,
         y: onAxis && Number.isFinite(value) ? value : null,
@@ -1100,7 +1092,7 @@
   function applyRange(raw) {
     model.range = { from: String(raw.from), to: String(raw.to) };
     timePicker?.refresh?.();
-    writeUrl({ push: true });
+    address.push();
     reloadAll();
   }
 
@@ -1199,7 +1191,7 @@
 
     readUrl();
     initTimeRangePicker();
-    writeUrl();
+    address.replace();
     renderPanels();
 
     // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
@@ -1223,12 +1215,12 @@
     dom.metricsAddPanelButton?.addEventListener("click", addPanel);
     window.addEventListener("chdash:host-changed", () => {
       started = true;
-      if (!ownsUrl()) { reloadWhenShown = true; return; }
+      if (!address.active()) { reloadWhenShown = true; return; }
       model.catalog = null;
       loadMeta().then(reloadAll);
     });
     ns.features.on((features) => {
-      if (features?.metrics?.enabled === false || !ownsUrl()) return;
+      if (features?.metrics?.enabled === false || !address.active()) return;
       start();
     });
     start();

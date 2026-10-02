@@ -78,7 +78,7 @@
     hm.mode = next;
     syncToggle();
     hideTooltip();
-    if (url && !/\/observability\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) ns.traceSearch?.writeUrl?.("replace");
+    if (url && !/\/observability\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) ns.router.owner("traces").replace();
     if (active()) {
       if (hm.filters && hm.dataKey !== filtersKey(hm.filters)) void load();
       else render();

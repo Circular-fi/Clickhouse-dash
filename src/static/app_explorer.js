@@ -81,30 +81,24 @@
     return encodeURIComponent(String(value || ""));
   }
 
-  function appBasePath() {
-    const base = String(window.__CHDASH_BASE_PATH__ || "/");
-    return base === "/" ? "" : base.replace(/\/+$/, "");
-  }
-
-  function appRoute(path) {
-    const raw = String(path || "/");
-    return `${appBasePath()}${raw.startsWith("/") ? raw : `/${raw}`}` || "/";
-  }
+  // The address bar is ns.router's (app_router.js); the Explorer writes it
+  // while its workspace shows.
+  const router = ns.router;
+  const appRoute = (path) => router.url(path);
+  const address = router.owner("explorer", { view: () => model.active });
 
   // One URL scheme for the Catalog:
-  //   /explorer[/<db>[/<table>[/<tab>]]][?mode=graph|storage]
-  // Browse (no mode) keeps the card tab in the path; Graph adds
-  // &graph=lineage|storage&depth=N. Aliases, rewritten to that form by
-  // applyRouteFromLocation:
+  //   /explorer[/<db>[/<table>]][?tab=<card tab>|?mode=graph|storage]
+  // Browse (no mode) names the card tab in ?tab= (Columns, the default, has
+  // none); Graph adds &graph=lineage|storage&depth=N. Aliases, rewritten to
+  // that form by applyRouteFromLocation:
   //   ?view=browse|graph (former Browse / Graph views),
   //   /explorer/_system[?database=&table=] (former Storage view),
-  //   former card tab slugs (/overview, /schema, /data).
+  //   /explorer/<db>/<table>/<tab> (the card tab as a path segment) and the
+  //   former card tab slugs (overview, schema, data).
   function parseExplorerRoute(pathname = window.location.pathname) {
-    let path = String(pathname || "/");
-    const base = appBasePath();
-    if (base && path.startsWith(base)) path = path.slice(base.length) || "/";
-    path = path.replace(/\/+$/, "") || "/";
-    const params = new URLSearchParams(window.location.search || "");
+    const path = router.path(pathname).replace(/\/+$/, "") || "/";
+    const params = router.current().params;
     const modeParam = String(params.get("mode") || "");
     const mode = MODES.includes(modeParam) ? modeParam : (params.get("view") === "graph" ? "graph" : "browse");
     const graphType = params.get("graph") === "storage" ? "physical" : "logical";
@@ -127,7 +121,7 @@
     }
     const database = parts[0] || "";
     const table = parts[1] || "";
-    const tab = TAB_BY_SLUG.get(String(parts[2] || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;
+    const tab = TAB_BY_SLUG.get(String(params.get("tab") || parts[2] || DEFAULT_TAB).toLowerCase()) || DEFAULT_TAB;
     const route = { ...catalog, database, table, tab };
     // Former reserved routes, now plain database routes that keep an alias:
     // /explorer/functions[/<name>] opened Functions, /explorer/databases the
@@ -145,11 +139,9 @@
   function catalogPath({ database = "", table = "", tab = DEFAULT_TAB, mode = "browse", graphRoute = null } = {}) {
     let path = "/explorer";
     if (database) path += `/${encodeRouteSegment(database)}`;
-    if (database && table) {
-      path += `/${encodeRouteSegment(table)}`;
-      if (mode === "browse") path += `/${String(tab || DEFAULT_TAB).toLowerCase()}`;
-    }
+    if (database && table) path += `/${encodeRouteSegment(table)}`;
     const params = new URLSearchParams();
+    if (mode === "browse" && database && table && tab && tab !== DEFAULT_TAB) params.set("tab", String(tab).toLowerCase());
     if (mode !== "browse") params.set("mode", mode);
     if (mode === "graph") {
       const route = graphRoute || { mode: "logical", depth: 1 };
@@ -178,13 +170,10 @@
     return appRoute(currentExplorerPath());
   }
 
-  function syncExplorerUrl(mode = "push") {
-    if (!model.active || mode === "none") return;
-    const url = currentExplorerUrl();
-    const current = `${window.location.pathname}${window.location.search || ""}`;
-    if (current === url) return;
-    const method = mode === "replace" ? "replaceState" : "pushState";
-    window.history[method]({ workspace: "explorer" }, "", url);
+  // history: "push" | "replace" | "none" (the option of every Explorer
+  // navigation function).
+  function syncExplorerUrl(history = "push") {
+    address.write(history, null, { href: currentExplorerUrl() });
   }
 
   function node(tag, className, text) {
@@ -473,7 +462,7 @@
 
   // ns.explorer.setView(): a top view, or a Catalog mode by name ("browse",
   // "graph", "storage": the former Graph and Storage views).
-  function setView(view, { historyMode = "push" } = {}) {
+  function setView(view, { history = "push" } = {}) {
     if (MODES.includes(view)) {
       if (model.section !== "tables") {
         model.mode = view;
@@ -488,7 +477,7 @@
     } else {
       setSection("tables");
     }
-    syncExplorerUrl(historyMode);
+    syncExplorerUrl(history);
   }
 
   function clearSelection() {
@@ -508,12 +497,12 @@
 
   // Nothing selected: the Catalog root (all databases in Graph, the server in
   // Storage).
-  function openCatalogRoot({ historyMode = "push" } = {}) {
+  function openCatalogRoot({ history = "push" } = {}) {
     clearSelection();
     syncVisibilityOptionLocks({ propagate: true });
     renderTableList();
     showMode();
-    syncExplorerUrl(historyMode);
+    syncExplorerUrl(history);
   }
 
   // The tree becomes a drawer at --bp-md (ns.shell, app_dom.js).
@@ -673,7 +662,7 @@
     // Graph and Storage never fetch the card: Browse loads it when shown. The
     // caller owns the history entry (a mode switch pushes the Browse URL).
     if (model.selectedKey) {
-      if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table, false, { historyMode: "none" });
+      if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table, false, { history: "none" });
     } else if (model.selectedDatabase) {
       renderDatabaseDetail(model.selectedDatabase);
     } else if (!scope.database) {
@@ -692,21 +681,21 @@
     } else {
       setMode("browse", { show: false });
     }
-    void selectTable(database, table, false, { historyMode: "push" });
+    void selectTable(database, table, false, { history: "push" });
   }
 
-  function setWorkspace(name, { historyMode = "push" } = {}) {
+  function setWorkspace(name, { history = "push" } = {}) {
     if (name === "explorer" && explorerFeatures().enabled === false) name = "query";
     const explorer = name === "explorer";
     // Query and Explorer are separate HTML documents. Crossing that boundary
     // must load the other document rather than leaving the current DOM mounted
     // and emulating a page transition with pushState.
     if (explorer && !dom.explorerWorkspace) {
-      if (historyMode !== "none") window.location.assign(appRoute("/explorer"));
+      if (history !== "none") window.location.assign(appRoute("/explorer"));
       return;
     }
     if (!explorer && !dom.queryWorkspace) {
-      if (historyMode !== "none") window.location.assign(appRoute("/query"));
+      if (history !== "none") window.location.assign(appRoute("/query"));
       return;
     }
     model.active = explorer;
@@ -719,10 +708,7 @@
     ui?.setPageSelectorValue?.(explorer ? "explorer" : "query");
 
     const route = explorer ? (parseExplorerRoute().workspace === "explorer" ? window.location.pathname : appRoute("/explorer")) : appRoute("/query");
-    if (window.location.pathname !== route) {
-      if (historyMode === "replace") window.history.replaceState({ workspace: explorer ? "explorer" : "query" }, "", route);
-      else if (historyMode !== "none") window.history.pushState({ workspace: explorer ? "explorer" : "query" }, "", route);
-    }
+    if (window.location.pathname !== route) router.write(history, null, { href: route, view: explorer ? "explorer" : "query" });
 
     if (explorer) {
       if (model.section === "functions") refreshFunctions(false);
@@ -1764,7 +1750,7 @@
     section.appendChild(objectTable);
   }
 
-  function selectDatabase(database, { historyMode = "push", expand = true } = {}) {
+  function selectDatabase(database, { history = "push", expand = true } = {}) {
     const name = String(database || "");
     if (!name || !catalogHasDatabase(name)) {
       setError(new Error(`Explorer database is not visible: ${name || "unknown"}`));
@@ -1785,7 +1771,7 @@
     else if (model.mode === "storage") renderSystemView();
     else renderDatabaseDetail(name);
     if (!model.databaseTablesLoaded.has(name)) void loadDatabaseTables(name);
-    syncExplorerUrl(historyMode);
+    syncExplorerUrl(history);
   }
 
   function healthLabel(table) {
@@ -2093,9 +2079,9 @@
             throw new Error(`Explorer route object is not visible: ${route.database}.${route.table}`);
           }
           model.tab = route.tab || DEFAULT_TAB;
-          await selectTable(route.database, route.table, false, { historyMode: "none" });
+          await selectTable(route.database, route.table, false, { history: "none" });
         } else if (route.database) {
-          selectDatabase(route.database, { historyMode: "none" });
+          selectDatabase(route.database, { history: "none" });
         }
         if (model.routeIntent === route) model.routeIntent = null;
       }
@@ -2132,7 +2118,7 @@
   function renderTabContent() { detailView?.renderTabContent(); }
   function sectionTitle(text) { return node("h3", "explorerSectionTitle", text); }
 
-  async function selectTable(database, table, force = false, { historyMode = "push", graphOrigin = false } = {}) {
+  async function selectTable(database, table, force = false, { history = "push", graphOrigin = false } = {}) {
     if (model.mode === "graph" && graph?.isStorageMode?.() && graph?.canUseStorageForTable?.(database, table) === false) return;
     // The top-level catalog intentionally contains only database names. Load
     // exactly the branch the user is navigating to before resolving selection.
@@ -2163,7 +2149,7 @@
       model.detailLoading = false;
       renderTableList();
       if (model.mode === "storage") renderSystemView();
-      syncExplorerUrl(historyMode);
+      syncExplorerUrl(history);
       return;
     }
     model.preview = null;
@@ -2194,7 +2180,7 @@
       renderDetailHeader();
       renderTabs();
       renderTabContent();
-      syncExplorerUrl(historyMode);
+      syncExplorerUrl(history);
     } else {
       showDetailState("loading", { label: `Loading ${database}.${table}\u2026` });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
@@ -2214,7 +2200,7 @@
       renderDetailHeader();
       renderTabs();
       renderTabContent();
-      syncExplorerUrl(historyMode);
+      syncExplorerUrl(history);
       ns.uiState.announce(`${database}.${table} loaded.`);
 
       // SQL formatting is cosmetic and must never delay the first usable table
@@ -2276,10 +2262,10 @@
     if (exists) return { ...route, legacyAlias: null };
     if (alias.section === "functions") {
       const name = alias.functionName ? `/${encodeRouteSegment(alias.functionName)}` : "";
-      window.history.replaceState({ workspace: "explorer" }, "", appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`));
+      router.replace(null, { href: appRoute(`/explorer/${FUNCTIONS_ROUTE_SEGMENT}${name}`), view: "explorer" });
       return { workspace: "explorer", section: "functions", functionName: alias.functionName || "" };
     }
-    window.history.replaceState({ workspace: "explorer" }, "", `${appRoute("/explorer")}${window.location.search || ""}`);
+    router.replace(null, { path: "/explorer", view: "explorer" });
     return { ...route, database: "", table: "", legacyAlias: null };
   }
 
@@ -2299,17 +2285,17 @@
         graphRoute: { mode: route.graphType, depth: route.graphDepth },
       }));
       if (`${window.location.pathname}${window.location.search || ""}` !== canonical) {
-        window.history.replaceState({ workspace: "explorer" }, "", canonical);
+        router.replace(null, { href: canonical, view: "explorer" });
       }
     }
     model.routeIntent = route;
     if (route.workspace !== "explorer") {
-      setWorkspace("query", { historyMode: "none" });
-      if (window.location.pathname === appRoute("/")) window.history.replaceState({ workspace: "query" }, "", appRoute("/query"));
+      setWorkspace("query", { history: "none" });
+      if (window.location.pathname === appRoute("/")) router.replace(null, { path: "/query", view: "query" });
       return;
     }
 
-    setWorkspace("explorer", { historyMode: "none" });
+    setWorkspace("explorer", { history: "none" });
     if (route.section === "functions") {
       setSection("functions");
       if (model.functionsCatalog) {
@@ -2364,12 +2350,12 @@
         model.routeIntent = null;
         showMode();
       } else {
-        await selectTable(route.database, route.table, false, { historyMode: "none" });
+        await selectTable(route.database, route.table, false, { history: "none" });
         model.routeIntent = null;
         if (model.mode === "graph") graph?.activate(false);
       }
     } else if (route.database && model.catalog) {
-      selectDatabase(route.database, { historyMode: "none" });
+      selectDatabase(route.database, { history: "none" });
       model.routeIntent = null;
       if (model.mode === "graph") graph?.activate(false);
     } else if (!route.database) {
@@ -2438,7 +2424,8 @@
     graph?.init({ openTable: openTableFromGraph, openCard: openTableCardFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
     dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
     dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
-    window.addEventListener("popstate", () => { void applyRouteFromLocation(); });
+    // Back / Forward within the Explorer (ns.router: the one popstate listener).
+    router.on("/explorer", () => { void applyRouteFromLocation(); });
     // The view and mode tab rows: the shared tab behaviour (app_ui_tabs.js).
     ns.tabs?.bind(shellEl("explorerViewTabs"), {
       attr: "view",

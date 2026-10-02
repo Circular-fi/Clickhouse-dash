@@ -492,7 +492,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await page.getByText('weather_observations', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations');
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
 
   // Header: chips (engine, health, rows, size, parts) instead of a dotted
   // sentence; no ingress rate.
@@ -538,7 +538,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
 
   const lineageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true });
   await lineageTab.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/lineage$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=lineage$/);
   const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
   await expect(lineage).toBeVisible();
   // Same-database objects use their short name; the tooltip keeps the full one.
@@ -550,13 +550,13 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
 
   const ddlTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true });
   await ddlTab.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/ddl$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=ddl$/);
   await expect(page.locator('#explorerDetailContent .explorerDdlWrap')).toBeVisible();
   await expect(page.locator('#explorerDetailContent .explorerDdl')).toContainText('temperature_c');
 
   const previewTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true });
   await previewTab.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/preview$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=preview$/);
   const explorerResults = page.locator('#explorerDetailContent .tableWrap .resultTable');
   await expect(explorerResults).toBeVisible({ timeout: 12_000 });
   await expect(explorerResults).toContainText('WX-');
@@ -576,7 +576,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   const storageTab = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true });
   await storageTab.click();
   await expect(storageTab).toHaveAttribute('aria-selected', 'true');
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/storage$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=storage$/);
   const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
   await expect(composition).toBeVisible();
   await expect(composition).toContainText('Table storage');
@@ -604,19 +604,19 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // An old /data deep link opens Preview; an old /schema one opens Columns.
   await page.goto('/explorer/chdash_ui/weather_observations/data');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/preview$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=preview$/);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Preview', exact: true })).toHaveAttribute('aria-selected', 'true');
 
   await page.goto('/explorer/chdash_ui/weather_observations/schema');
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
   await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toBeVisible();
 
   const reloadedDdl = page.locator('#explorerDetailTabs').getByRole('tab', { name: 'DDL', exact: true });
   await reloadedDdl.click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/ddl$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\?tab=ddl$/);
   await page.goBack();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
   await expect(page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Columns', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerDetailContent .explorerColumnsTable')).toContainText('temperature_c');
   await page.locator('#explorerFunctionsTab').click();
@@ -699,7 +699,7 @@ test('replicated and Distributed tables show replication first and their local t
   // The tree marks replicated tables with a health dot.
   await expect(page.locator('.explorerTreeObject[data-table="replicated_events"] .explorerTreeHealthDot')).toBeVisible();
   await banner.getByRole('button', { name: 'Details' }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_repl\/replicated_events\/operations$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_repl\/replicated_events\?tab=operations$/);
   const replication = page.locator('#explorerDetailContent .explorerSection[data-section="replication"]');
   await expect(replication).toBeVisible();
   await expect(replication).toContainText('Keeper path');
@@ -870,7 +870,7 @@ test('database detail lists every object under the storage band, sorts each colu
   }
 
   await objects.locator('.explorerDatabaseObjectsTable__open', { hasText: /^weather_observations$/ }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/weather_observations$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations');
   await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
 });
@@ -992,7 +992,7 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
 
   // Storage: flat part-format / projection / index composition of the table footprint.
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/storage$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\?tab=storage$/);
   const composition = page.locator('#explorerDetailContent .explorerStorageCompositionCard');
   await expect(composition).toBeVisible();
   await expect(composition.locator('.explorerStorageStackedBar__segment').first()).toBeVisible();
@@ -1012,7 +1012,7 @@ test('wide_types browse shows flat storage accounting, contextual DDL keywords a
 
   // Columns: per-column table with collapsible Tuple children.
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Columns', exact: true }).click();
-  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types\/columns$/);
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui\/wide_types$/);
   const columnStorage = page.locator('#explorerDetailContent .explorerStorageResultTable--columns');
   await expect(columnStorage).toBeVisible();
   const tupleChild = columnStorage.locator('tbody tr').filter({ hasText: 'tuple_value.code' }).first();

@@ -1,7 +1,7 @@
 {
   "//": [
     "The script modules of every page shell, in load order: the one list app_loader.js, app.js, app_observability.js and tools/build_page_css.py read.",
-    "common: loaded first on every page (shared helpers and UI components: add a new app_ui_<name>.js here, after app_dom.js).",
+    "common: loaded first on every page (shared helpers and UI components: add a new app_ui_<name>.js here, after app_dom.js; app_router.js, ns.router, owns the address bar).",
     "pages.<page>.bootstrap: the page controller the shell starts; modules: loaded at start, after common;",
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
@@ -12,6 +12,7 @@
     "app_format.js",
     "app_palette.js",
     "app_dom.js",
+    "app_router.js",
     "app_ui_layers.js",
     "app_ui_popover.js",
     "app_ui_panel.js",

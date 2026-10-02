@@ -48,12 +48,13 @@
   };
 
   const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
-  const route = (path) => api.resolveUrl(String(path || "").replace(/^\/+/, ""));
+  const route = (path) => ns.router.url(String(path || ""));
   // The Traces view of the Observability page (app_observability.js): its
-  // URLs are /observability/traces[/<traceId>], and it writes the location
-  // only while it is the shown view.
-  const SEARCH_ROUTE = "observability/traces";
-  const ownsUrl = () => !ns.observability || ns.observability.isActive("traces");
+  // URLs are /observability/traces[/<traceId>], written through the Traces
+  // owner of ns.router (the search page's address is app_trace_search.js's;
+  // a trace's own writes pass its href), only while the view shows.
+  const SEARCH_ROUTE = "/observability/traces";
+  const address = ns.router.owner("traces");
 
 
   // Duration axis steps: 1-2-5 below a second, then clock-friendly steps
@@ -228,7 +229,7 @@
     if (dom.traceDetail) dom.traceDetail.hidden = !detail;
     document.body.classList.toggle("is-trace-detail", !!detail);
     // An open trace names the tab after itself (renderTraceHeader).
-    if (!detail && ownsUrl()) document.title = TRACES_PAGE_TITLE;
+    if (!detail && address.active()) document.title = TRACES_PAGE_TITLE;
   }
 
 
@@ -908,7 +909,7 @@
     if (persist) writeStored(RESULTS_VIEW_KEY, next);
     if (next === "table") model.tableSort = { ...listSort() };
     renderResults();
-    if (persist && !traceIdFromPath()) ns.traceSearch?.writeUrl?.("replace");
+    if (persist && !traceIdFromPath()) address.replace();
   }
 
   function sortTableBy(key) {
@@ -1568,13 +1569,13 @@
       if (dom.traceServiceFilters) dom.traceServiceFilters.innerHTML = "";
       if (dom.traceOverview) dom.traceOverview.innerHTML = "";
       ns.traceInsights?.renderHighlights(null);
-      if (ownsUrl()) document.title = TRACES_PAGE_TITLE;
+      if (address.active()) document.title = TRACES_PAGE_TITLE;
       return;
     }
     const cache = activeTraceCache();
     const bounds = cache.bounds;
     const root = spans.find((s) => !parentSpanId(s)) || spans.slice().sort((a, b) => Number(a.start_ns || 0) - Number(b.start_ns || 0))[0];
-    if (ownsUrl()) document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
+    if (address.active()) document.title = `${String(trace.trace_id || "").slice(0, 7)}: ${root?.service_name || "trace"} ${root?.span_name || ""}`.trim();
     if (dom.traceDetailTitle) {
       const filterable = (field, value, text) => (value
         ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
@@ -2070,7 +2071,7 @@
   // Jaeger's keyboard-mappings.ts: [ ] expand / collapse all, o / p one
   // level, a d or arrows pan, up / down zoom, shift for large steps.
   function onTraceKeydown(event) {
-    if (!model.activeTrace || dom.traceDetail?.hidden || !ownsUrl()) return;
+    if (!model.activeTrace || dom.traceDetail?.hidden || !address.active()) return;
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="menu"], [role="listbox"], [role="tab"], [data-trace-waterfall-resizer]')) return;
@@ -2715,10 +2716,10 @@
     ns.traceViews?.showTimeline?.();
     renderWaterfall();
     ns.traceViews?.markFocusedSpan?.();
-    if ((push || replace) && ownsUrl()) {
-      const url = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
-      if (push) window.history.pushState(detailEntryState({ traceId: model.activeTrace?.trace_id, spanId: id }), "", url);
-      else window.history.replaceState(window.history.state, "", url);
+    if (push || replace) {
+      const href = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
+      if (push) address.push(null, { href, state: detailEntryState({ traceId: model.activeTrace?.trace_id, spanId: id }) });
+      else address.replace(null, { href });
     }
     if (scroll) {
       const row = [...(dom.traceWaterfall?.querySelectorAll(".traceSpanRow[data-span-id]") || [])].find((el) => el.getAttribute("data-span-id") === id);
@@ -2974,8 +2975,7 @@
       showError(error instanceof Error ? error.message : String(error));
       return;
     }
-    if (searchState) searchState.writeUrl(url);
-    else if (ownsUrl() && traceIdFromPath()) window.history.pushState({ workspace: "traces" }, "", route(SEARCH_ROUTE));
+    address.write(url);
     // Another tab (app_trace_tabs.js, e.g. the service map) runs its own
     // search; the result list searches again when its tab comes back.
     const tabSearch = ns.traceTabs?.activeSearch?.();
@@ -3049,7 +3049,7 @@
     // The entry is pushed once the answer is in (the search stays the current
     // entry while it loads), whether the trace was found or not.
     const pushEntry = () => {
-      if (push && ownsUrl()) window.history.pushState(detailEntryState({ traceId: id }), "", spanTraceUrl(id, pendingSpanId));
+      if (push) address.push(null, { href: spanTraceUrl(id, pendingSpanId), state: detailEntryState({ traceId: id }) });
     };
     try {
       const trace = await api.getTrace(currentHost(), id, { signal: req.signal });
@@ -3127,10 +3127,10 @@
   // linked trace opened from it one more again. A direct link or a new tab
   // has no such entry (no searchBack).
   function detailEntryState(state) {
-    const steps = traceIdFromPath() ? Number(window.history.state?.searchBack) || 0 : 1;
+    const steps = traceIdFromPath() ? Number(ns.router.state().searchBack) || 0 : 1;
     const next = { ...(state || {}) };
     delete next.searchBack;
-    if (steps > 0 && ownsUrl()) next.searchBack = traceIdFromPath() ? steps + 1 : 1;
+    if (steps > 0 && address.active()) next.searchBack = traceIdFromPath() ? steps + 1 : 1;
     return next;
   }
 
@@ -3138,9 +3138,9 @@
   // search entry the trace came from, so Back / Forward stay one list of
   // pages, else a new entry for the trace's search context.
   function returnToSearch() {
-    const steps = Number(window.history.state?.searchBack) || 0;
-    if (steps > 0 && ownsUrl() && traceIdFromPath()) {
-      window.history.go(-steps);
+    const steps = Number(ns.router.state().searchBack) || 0;
+    if (steps > 0 && address.active() && traceIdFromPath()) {
+      ns.router.back(steps);
       return;
     }
     backToSearch({ push: true });
@@ -3157,10 +3157,7 @@
     model.disabledServices.clear();
     model.collapsed.clear();
     ns.traceSearch?.closeMenu?.();
-    if (push && ownsUrl()) {
-      if (ns.traceSearch) ns.traceSearch.writeUrl("push");
-      else window.history.pushState({ workspace: "traces" }, "", route(SEARCH_ROUTE));
-    }
+    if (push) address.push();
     ns.traceInsights?.onTraceChanged(null);
     setView(false);
     // The trace's search context may differ from the listed results (a
@@ -3319,7 +3316,7 @@
     trackSearchBarHeight();
     dom.tracesSort?.addEventListener("change", () => {
       renderResults();
-      if (!traceIdFromPath()) ns.traceSearch?.writeUrl?.("replace");
+      if (!traceIdFromPath()) address.replace();
     });
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
@@ -3347,11 +3344,11 @@
     new MutationObserver(redrawOverview).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", redrawOverview);
     window.addEventListener("chdash:host-changed", () => {
-      if (ownsUrl()) reloadForHost();
+      if (address.active()) reloadForHost();
       else reloadWhenShown = true;
     });
     ns.features.on((features) => {
-      if (features?.traces?.enabled === false || !ownsUrl()) return;
+      if (features?.traces?.enabled === false || !address.active()) return;
       if (!model.meta && currentHost()) reloadForHost();
     });
     const id = traceIdFromPath();

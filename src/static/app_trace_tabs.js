@@ -85,7 +85,7 @@
   // activate: false only switches the panels (a caller that searches next).
   function select(id, { url = "push", activate: run = true } = {}) {
     if (!show(id)) return;
-    if (url !== "none") ns.traceSearch?.writeUrl?.(url);
+    ns.router.owner("traces").write(url);
     if (run) activate(current);
   }
 
@@ -109,7 +109,7 @@
     meta = value || null;
     if (current !== SEARCH_TAB && !available(find(current))) {
       show(SEARCH_TAB);
-      ns.traceSearch?.writeUrl?.("replace");
+      ns.router.owner("traces").replace();
     }
     render();
   }

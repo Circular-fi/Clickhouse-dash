@@ -117,8 +117,7 @@
       view.options.onOpenTable(database, table);
       return;
     }
-    const base = String(window.__CHDASH_BASE_PATH__ || "/").replace(/\/+$/, "");
-    window.location.assign(`${base}/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}/columns`);
+    window.location.assign(ns.router.url(`/explorer/${encodeURIComponent(database)}/${encodeURIComponent(table)}`));
   }
 
   function objectCell(item) {

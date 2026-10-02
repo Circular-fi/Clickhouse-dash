@@ -439,7 +439,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
 test('trace statistics: self time, grouping, sub-groups, sorting and heat colouring', async ({ page }) => {
   await openTrace(page);
   await pickView(page, 'Statistics');
-  await expect(page).toHaveURL(/\?view=statistics$/);
+  await expect(page).toHaveURL(/\?tab=statistics$/);
   await expect(page.locator('.traceTimelineFrame')).toBeHidden();
   await expect(page.locator('#traceOverview')).toBeHidden();
   const table = page.locator('#traceAltView .traceStats__table');
@@ -499,7 +499,7 @@ test('trace statistics: self time, grouping, sub-groups, sorting and heat colour
 test('trace spans table: sort, filter, and a row click focuses the span in the timeline (back returns)', async ({ page }) => {
   await openTrace(page);
   await pickView(page, 'Spans');
-  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page).toHaveURL(/\?tab=spans$/);
   const table = page.locator('#traceAltView .traceSpansTable__table');
   await expect(table.locator('tbody tr')).toHaveCount(9);
   await expect(page.locator('#traceSpansCount')).toHaveText('9 of 9 spans');
@@ -537,14 +537,14 @@ test('trace spans table: sort, filter, and a row click focuses the span in the t
   await expect(inspector(page, ID.F)).toBeVisible();
   await expect(page.locator('#traceViewSelect')).toHaveValue('timeline');
   await page.goBack();
-  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page).toHaveURL(/\?tab=spans$/);
   await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
   await page.goForward();
   await expect(inspector(page, ID.F)).toBeVisible();
 });
 
 test('trace flamegraph: widths follow durations, a click zooms into a frame, reset zooms out', async ({ page }) => {
-  await openTrace(page, '?view=flamegraph');
+  await openTrace(page, '?tab=flamegraph');
   const canvas = page.locator('#traceAltView .traceFlame__canvas');
   await expect(canvas).toBeVisible();
   const frames = canvas.locator('.traceFlame__frame');
@@ -585,7 +585,7 @@ test('trace flamegraph: widths follow durations, a click zooms into a frame, res
 const inspectGraph = (page) => page.evaluate(() => window.ChDash.traceGraph.inspect());
 
 async function openGraph(page, count = 8) {
-  await openTrace(page, '?view=graph');
+  await openTrace(page, '?tab=graph');
   await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceGraph?.inspect?.().nodes.length || 0)), { timeout: 20_000 }).toBe(count);
   await settle(page);
 }
@@ -830,7 +830,7 @@ test('trace graph: hover outlines the card; a click recentres on it and opens it
   await expect(inspector(page, ID.D)).toBeVisible();
   await page.goBack();
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
-  await expect(page).toHaveURL(/\?view=graph$/);
+  await expect(page).toHaveURL(/\?tab=graph$/);
   // A call path of two spans lists both: the second one jumps to C2.
   await expect.poll(async () => (await inspectGraph(page)).nodes.length).toBe(8);
   await cameraIdle(page, 'ChDash.traceGraph');
@@ -974,7 +974,7 @@ test('performance budget: the graph of a 10,000-span trace builds, routes and dr
   // The 10,000-span fixture trace has 8,612 call paths: over the limit.
   const fixture = largeTrace(10_000, 'bead0000000000000000000000010000', 8);
   await routeTrace(page, fixture);
-  await page.goto(`/observability/traces/${fixture.trace_id}?view=graph`);
+  await page.goto(`/observability/traces/${fixture.trace_id}?tab=graph`);
   await expect(page.locator('#traceAltView')).toContainText('distinct call paths: too many to draw (limit 1500)', { timeout: 30_000 });
 });
 
@@ -984,17 +984,17 @@ test('trace view persists in the URL and in localStorage; timeline by default', 
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await expect(page.locator('#traceAltView')).toBeHidden();
   await pickView(page, 'Graph');
-  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?view=graph$`));
+  await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?tab=graph$`));
   expect(await page.evaluate(() => localStorage.getItem('chdash.traceView'))).toBe('graph');
   await page.reload();
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
   await expect(viewTabs(page).locator('[aria-selected="true"]')).toHaveText('Graph');
-  // Without ?view=, the stored view opens (and shows in the URL).
+  // Without ?tab=, the stored view opens (and shows in the URL).
   await page.goto(`/observability/traces/${TRACE_ID}`);
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
-  await expect(page).toHaveURL(/\?view=graph$/);
-  // ?view= wins over the stored one; a deep link opens the timeline.
-  await page.goto(`/observability/traces/${TRACE_ID}?view=statistics`);
+  await expect(page).toHaveURL(/\?tab=graph$/);
+  // ?tab= wins over the stored one; a deep link opens the timeline.
+  await page.goto(`/observability/traces/${TRACE_ID}?tab=statistics`);
   await expect(page.locator('#traceAltView .traceStats')).toBeVisible();
   await page.goto(`/observability/traces/${TRACE_ID}?span=${ID.C}`);
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
@@ -1015,7 +1015,7 @@ test('trace views: no horizontal page overflow and readable in both themes', asy
     await mockTraces(page);
     await page.goto('/observability/traces');
     await page.evaluate((m) => localStorage.setItem('chdash.theme', m), theme);
-    for (const [name, query] of [['timeline', '?view=timeline'], ['statistics', '?view=statistics'], ['spans', '?view=spans'], ['flamegraph', '?view=flamegraph'], ['graph', '?view=graph']]) {
+    for (const [name, query] of [['timeline', '?tab=timeline'], ['statistics', '?tab=statistics'], ['spans', '?tab=spans'], ['flamegraph', '?tab=flamegraph'], ['graph', '?tab=graph']]) {
       await page.goto(`/observability/traces/${TRACE_ID}${query}`);
       await expect(page.locator('#traceDetail')).toBeVisible();
       if (name === 'timeline') {
@@ -1039,7 +1039,7 @@ test('trace views: no horizontal page overflow and readable in both themes', asy
 });
 
 
-test('trace views: a tab row with arrow / Home / End keys that follows ?view= and Back / Forward, a dropdown below 820 px', async ({ page }) => {
+test('trace views: a tab row with arrow / Home / End keys that follows ?tab= and Back / Forward, a dropdown below 820 px', async ({ page }) => {
   await openTrace(page);
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(MOCK_SPANS.length, { timeout: 30_000 });
   const tabs = viewTabs(page);
@@ -1057,34 +1057,34 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?view= an
   await page.keyboard.press('ArrowRight');
   await expect(viewTab(page, 'Graph')).toBeFocused();
   await expect(viewTab(page, 'Graph')).toHaveAttribute('aria-selected', 'true');
-  await expect(page).toHaveURL(/\?view=graph$/);
+  await expect(page).toHaveURL(/\?tab=graph$/);
   await expect(page.locator('#traceAltView .traceGraph')).toBeVisible();
   await page.keyboard.press('End');
   await expect(viewTab(page, 'Flamegraph')).toBeFocused();
-  await expect(page).toHaveURL(/\?view=flamegraph$/);
+  await expect(page).toHaveURL(/\?tab=flamegraph$/);
   await page.keyboard.press('ArrowRight');
   await expect(viewTab(page, 'Timeline')).toBeFocused();
   await expect(page.locator('.traceTimelineFrame')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
-  await expect(page).toHaveURL(/\?view=flamegraph$/);
+  await expect(page).toHaveURL(/\?tab=flamegraph$/);
   await page.keyboard.press('Home');
   await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
   await expect(tabs.locator('[aria-selected="true"]')).toHaveCount(1);
-  // The view is the URL's ?view= (replaced, as before the tabs); Back and
+  // The view is the URL's ?tab= (replaced, as before the tabs); Back and
   // Forward over a deep-linked span bring the view and its tab back.
   await pickView(page, 'Spans');
-  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page).toHaveURL(/\?tab=spans$/);
   await page.locator(`#traceAltView tr[data-table-span="${ID.C}"]`).click();
   await expect(page).toHaveURL(new RegExp(`\\?span=${ID.C}$`));
   await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
   await page.goBack();
-  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page).toHaveURL(/\?tab=spans$/);
   await expect(viewTab(page, 'Spans')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
   await page.goForward();
   await expect(viewTab(page, 'Timeline')).toHaveAttribute('aria-selected', 'true');
   await expect(inspector(page, ID.C)).toBeVisible();
-  await page.goto(`/observability/traces/${TRACE_ID}?view=statistics`);
+  await page.goto(`/observability/traces/${TRACE_ID}?tab=statistics`);
   await expect(page.locator('#traceAltView .traceStats')).toBeVisible();
   await expect(viewTab(page, 'Statistics')).toHaveAttribute('aria-selected', 'true');
   await expect(tabs.locator('[tabindex="0"]')).toHaveText('Statistics');
@@ -1097,7 +1097,7 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?view= an
   await viewPicker(page).locator('.tracePicker__button').click();
   await expect(viewPicker(page).locator('.tracePicker__menu [role="option"]:visible')).toHaveText(['Timeline', 'Graph', 'Spans', 'Flamegraph']);
   await viewPicker(page).locator('.tracePicker__menu').getByRole('option', { name: 'Spans', exact: true }).click();
-  await expect(page).toHaveURL(/\?view=spans$/);
+  await expect(page).toHaveURL(/\?tab=spans$/);
   await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();
   await expect(page.locator('#traceViewSelect')).toHaveValue('spans');
   await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('View \u00b7 Spans');
