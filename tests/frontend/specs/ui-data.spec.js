@@ -202,9 +202,16 @@ test.describe('copy', () => {
     await main.click();
     await expect(main).toHaveText('Copied');
     await expect(main).toHaveText('Copy JSON', { timeout: 3000 });
-    // The menu: the first item focused, Escape back to its toggle.
+    // The menu is an ns.menu split: a click opens it with the list focused,
+    // Down on the toggle with its first item focused; Escape gives the focus
+    // back to the toggle.
     await page.locator('#copyMenuButton').click();
     await expect(page.locator('#copyMenu')).toBeVisible();
+    await expect(page.locator('#copyMenu')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#copyMenu')).toBeHidden();
+    await expect(page.locator('#copyMenuButton')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
     await expect(page.locator('#copyCsvButton')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.locator('#copyMenu')).toBeHidden();
