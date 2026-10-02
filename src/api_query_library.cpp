@@ -135,14 +135,18 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   std::string if_match_storage;
   const std::string* if_match = optional_header(req, "If-Match", if_match_storage);
   const std::string id = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
+  // The library, its folders and its history are per host: the reads and the
+  // history clear name it (?host_id=), the other writes in their body.
+  std::string host_storage;
+  const std::string* host_id = optional_param(req, "host_id", host_storage);
 
   switch (route) {
     case QueryLibraryRoute::Get:
-      send(res, store.get_library());
+      send(res, store.get_library(host_id));
       return;
     case QueryLibraryRoute::HistoryList: {
       std::string limit, before_ms, before_id, q;
-      send(res, store.list_history(optional_param(req, "limit", limit), optional_param(req, "before_ms", before_ms),
+      send(res, store.list_history(host_id, optional_param(req, "limit", limit), optional_param(req, "before_ms", before_ms),
                                    optional_param(req, "before_id", before_id), optional_param(req, "q", q)));
       return;
     }
@@ -150,7 +154,7 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
       send(res, store.append_history(req.body, if_match));
       return;
     case QueryLibraryRoute::HistoryClear:
-      send(res, store.clear_history(if_match));
+      send(res, store.clear_history(host_id, if_match));
       return;
     case QueryLibraryRoute::HistoryDelete:
       send(res, store.delete_history_entry(id, if_match));

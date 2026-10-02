@@ -189,14 +189,12 @@ std::string read_sql(const rapidjson::Value* v, const std::string& field, size_t
   return s;
 }
 
-std::optional<std::string> read_host_id(const rapidjson::Value* v, const std::string& field) {
+// A body field holding a host id: absent / null -> nullopt (the store then
+// answers "required"); anything but a string is a type error.
+std::optional<std::string> read_host_field(const rapidjson::Value* v, const std::string& field) {
   if (!v || v->IsNull()) return std::nullopt;
-  if (!v->IsString()) throw validation(field, "type", field + " must be a string or null");
-  std::string s = json_text(*v);
-  if (s.empty()) return std::nullopt;
-  if (s.size() > kQueryLibraryMaxHostIdBytes) throw validation(field, "too_long", field + " is too long");
-  if (has_control(s, false)) throw validation(field, "invalid", field + " cannot contain control characters");
-  return s;
+  if (!v->IsString()) throw validation(field, "type", field + " must be a string");
+  return json_text(*v);
 }
 
 std::vector<std::string> read_tags(const rapidjson::Value* v, const std::string& field) {
@@ -266,6 +264,7 @@ void write_number(W& w, double d) {
 template <typename W>
 void write_folder_fields(W& w, const QueryLibraryFolder& f) {
   w.Key("id"); write_str(w, f.id);
+  w.Key("host_id"); write_str(w, f.host_id);
   w.Key("parent_id"); write_opt(w, f.parent_id);
   w.Key("name"); write_str(w, f.name);
   w.Key("description"); write_str(w, f.description);
@@ -280,7 +279,7 @@ void write_query_fields(W& w, const QueryLibraryQuery& q) {
   w.Key("name"); write_str(w, q.name);
   w.Key("description"); write_str(w, q.description);
   w.Key("sql"); write_str(w, q.sql);
-  w.Key("host_id"); write_opt(w, q.host_id);
+  w.Key("host_id"); write_str(w, q.host_id);
   w.Key("tags");
   w.StartArray();
   for (const auto& t : q.tags) write_str(w, t);
@@ -293,7 +292,7 @@ template <typename W>
 void write_history_fields(W& w, const QueryLibraryHistoryEntry& h) {
   w.Key("id"); write_str(w, h.id);
   w.Key("sql"); write_str(w, h.sql);
-  w.Key("host_id"); write_opt(w, h.host_id);
+  w.Key("host_id"); write_str(w, h.host_id);
   w.Key("ran_at_ms"); w.Int64(h.ran_at_ms);
   w.Key("elapsed_ms"); write_number(w, h.elapsed_ms);
   w.Key("rows");
@@ -401,30 +400,40 @@ std::vector<std::pair<std::string, int>> folder_subtree(const QueryLibraryState&
   return out;
 }
 
-bool folder_name_taken(const QueryLibraryState& s, const std::optional<std::string>& parent,
+// Sibling names are unique per host: the top level of each host is its own.
+bool folder_name_taken(const QueryLibraryState& s, const std::string& host, const std::optional<std::string>& parent,
                        const std::string& name, const std::string* except_id) {
   const std::string folded = fold_ascii(name);
   for (const auto& f : s.folders) {
     if (except_id && f.id == *except_id) continue;
-    if (f.parent_id == parent && fold_ascii(f.name) == folded) return true;
+    if (f.host_id == host && f.parent_id == parent && fold_ascii(f.name) == folded) return true;
   }
   return false;
 }
 
-bool query_name_taken(const QueryLibraryState& s, const std::optional<std::string>& folder,
+bool query_name_taken(const QueryLibraryState& s, const std::string& host, const std::optional<std::string>& folder,
                       const std::string& name, const std::string* except_id) {
   const std::string folded = fold_ascii(name);
   for (const auto& q : s.queries) {
     if (except_id && q.id == *except_id) continue;
-    if (q.folder_id == folder && fold_ascii(q.name) == folded) return true;
+    if (q.host_id == host && q.folder_id == folder && fold_ascii(q.name) == folded) return true;
   }
   return false;
 }
 
+ApiError host_mismatch(const std::string& field, const std::string& message) {
+  return validation(field, "host_mismatch", message);
+}
+
+// A folder reference of an item of `host`: null (the top level) or a folder
+// of the same host (400 host_mismatch for a folder of another host).
 std::optional<std::string> existing_folder_ref(const QueryLibraryState& s, const rapidjson::Value* v,
-                                               const std::string& field) {
+                                               const std::string& field, const std::string& host) {
   auto ref = read_ref(v, field);
-  if (ref && !find_folder(s, *ref)) throw validation(field, "not_found", field + " does not name an existing folder");
+  if (!ref) return ref;
+  const auto* folder = find_folder(s, *ref);
+  if (!folder) throw validation(field, "not_found", field + " does not name an existing folder");
+  if (folder->host_id != host) throw host_mismatch(field, field + " names a folder of another host");
   return ref;
 }
 
@@ -435,13 +444,14 @@ void ensure_depth(const QueryLibraryState& s, const std::optional<std::string>& 
   }
 }
 
-std::string unique_query_name(const QueryLibraryState& s, const std::optional<std::string>& folder, const std::string& name) {
-  if (!query_name_taken(s, folder, name, nullptr)) return name;
+std::string unique_query_name(const QueryLibraryState& s, const std::string& host, const std::optional<std::string>& folder,
+                              const std::string& name) {
+  if (!query_name_taken(s, host, folder, name, nullptr)) return name;
   for (int n = 2; n < 100000; ++n) {
     const std::string suffix = " (" + std::to_string(n) + ")";
     std::string base = truncate_utf8(name, kQueryLibraryMaxNameBytes - suffix.size());
     std::string candidate = base + suffix;
-    if (!query_name_taken(s, folder, candidate, nullptr)) return candidate;
+    if (!query_name_taken(s, host, folder, candidate, nullptr)) return candidate;
   }
   throw validation("name", "duplicate", "no free name for an imported query");
 }
@@ -497,7 +507,7 @@ void log_line(const std::string& message) {
 
 // --- file format ------------------------------------------------------------
 
-QueryLibraryState parse_query_library_file(std::string_view text) {
+QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMigration* migration) {
   rapidjson::Document doc;
   doc.Parse<rapidjson::kParseValidateEncodingFlag>(text.data(), text.size());
   if (doc.HasParseError()) {
@@ -507,13 +517,24 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
   if (!doc.IsObject()) file_error("the top-level value must be an object");
   const auto* version = member(doc, "version");
   if (!version || !version->IsInt64()) file_error("version is required");
-  if (version->GetInt64() != 1) file_error("unsupported version " + std::to_string(version->GetInt64()) + " (expected 1)");
+  if (version->GetInt64() != 1 && version->GetInt64() != kQueryLibraryFileVersion) {
+    file_error("unsupported version " + std::to_string(version->GetInt64()) + " (expected 1 or 2)");
+  }
+  QueryLibraryMigration local;
+  QueryLibraryMigration& mig = migration ? *migration : local;
+  mig = QueryLibraryMigration{};
+  mig.from_version = static_cast<int>(version->GetInt64());
 
   QueryLibraryState state;
   state.revision = file_int(doc, "revision", "file", 0);
   if (state.revision < 0) file_error("revision cannot be negative");
   state.updated_at_ms = file_int(doc, "updated_at_ms", "file", 0);
 
+  // Every entry belongs to one host. Entries without a host_id (every folder
+  // of a version-1 file) are dropped; a folder or query left in a dropped
+  // folder moves to the top level of its host. The structure is checked on
+  // the whole file first, so a broken file is a load error either way.
+  std::vector<QueryLibraryFolder> all_folders;
   std::unordered_set<std::string> folder_ids;
   if (const auto* folders = file_array(doc, "folders")) {
     if (folders->Size() > kQueryLibraryMaxFolders) file_error("too many folders");
@@ -523,28 +544,47 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
       if (!item.IsObject()) file_error(ctx + " must be an object");
       QueryLibraryFolder f;
       f.id = file_id(item, ctx);
+      f.host_id = file_opt_string(item, "host_id", ctx).value_or("");
       f.parent_id = file_opt_string(item, "parent_id", ctx);
       f.name = file_string(item, "name", ctx, true);
       f.description = file_string(item, "description", ctx, false);
       f.created_at_ms = file_int(item, "created_at_ms", ctx, 0);
       f.updated_at_ms = file_int(item, "updated_at_ms", ctx, f.created_at_ms);
       if (!folder_ids.insert(f.id).second) file_error(ctx + ".id is a duplicate");
-      state.folders.push_back(std::move(f));
+      all_folders.push_back(std::move(f));
     }
   }
-  std::unordered_map<std::string, std::optional<std::string>> parents;
-  for (const auto& f : state.folders) {
+  std::unordered_map<std::string, const QueryLibraryFolder*> folder_by_id;
+  for (const auto& f : all_folders) folder_by_id[f.id] = &f;
+  for (const auto& f : all_folders) {
     if (f.parent_id && folder_ids.count(*f.parent_id) == 0) file_error("folder " + f.id + " has an unknown parent_id");
-    parents[f.id] = f.parent_id;
   }
-  for (const auto& f : state.folders) {
+  for (const auto& f : all_folders) {
     size_t steps = 0;
     std::optional<std::string> cur = f.parent_id;
     while (cur) {
-      if (*cur == f.id || ++steps > state.folders.size()) file_error("folder " + f.id + " is part of a parent_id cycle");
-      cur = parents[*cur];
+      if (*cur == f.id || ++steps > all_folders.size()) file_error("folder " + f.id + " is part of a parent_id cycle");
+      cur = folder_by_id[*cur]->parent_id;
     }
   }
+  std::unordered_set<std::string> dropped;
+  for (const auto& f : all_folders) {
+    if (f.host_id.empty()) dropped.insert(f.id);
+  }
+  for (const auto& f : all_folders) {
+    if (f.host_id.empty()) continue;
+    QueryLibraryFolder kept = f;
+    if (kept.parent_id) {
+      if (dropped.count(*kept.parent_id)) {
+        kept.parent_id.reset();
+        ++mig.rerooted;
+      } else if (folder_by_id[*kept.parent_id]->host_id != kept.host_id) {
+        file_error("folder " + kept.id + " and its parent belong to different hosts");
+      }
+    }
+    state.folders.push_back(std::move(kept));
+  }
+  mig.dropped_folders = dropped.size();
 
   std::unordered_set<std::string> query_ids;
   if (const auto* queries = file_array(doc, "queries")) {
@@ -560,7 +600,7 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
       q.name = file_string(item, "name", ctx, true);
       q.description = file_string(item, "description", ctx, false);
       q.sql = file_string(item, "sql", ctx, true);
-      q.host_id = file_opt_string(item, "host_id", ctx);
+      q.host_id = file_opt_string(item, "host_id", ctx).value_or("");
       if (const auto* tags = member(item, "tags"); tags && !tags->IsNull()) {
         if (!tags->IsArray()) file_error(ctx + ".tags must be an array");
         for (const auto& t : tags->GetArray()) {
@@ -571,6 +611,18 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
       q.created_at_ms = file_int(item, "created_at_ms", ctx, 0);
       q.updated_at_ms = file_int(item, "updated_at_ms", ctx, q.created_at_ms);
       if (!query_ids.insert(q.id).second) file_error(ctx + ".id is a duplicate");
+      if (q.host_id.empty()) {
+        ++mig.dropped_queries;
+        continue;
+      }
+      if (q.folder_id) {
+        if (dropped.count(*q.folder_id)) {
+          q.folder_id.reset();
+          ++mig.rerooted;
+        } else if (folder_by_id[*q.folder_id]->host_id != q.host_id) {
+          file_error(ctx + " and its folder belong to different hosts");
+        }
+      }
       state.queries.push_back(std::move(q));
     }
   }
@@ -584,7 +636,7 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
       QueryLibraryHistoryEntry h;
       h.id = file_id(item, ctx);
       h.sql = file_string(item, "sql", ctx, true);
-      h.host_id = file_opt_string(item, "host_id", ctx);
+      h.host_id = file_opt_string(item, "host_id", ctx).value_or("");
       h.ran_at_ms = file_int(item, "ran_at_ms", ctx, 0);
       if (const auto* e = member(item, "elapsed_ms"); e && !e->IsNull()) {
         if (!e->IsNumber()) file_error(ctx + ".elapsed_ms must be a number");
@@ -596,6 +648,10 @@ QueryLibraryState parse_query_library_file(std::string_view text) {
       if (!valid_history_status(h.status)) file_error(ctx + ".status must be ok, error or cancelled");
       h.error = file_string(item, "error", ctx, false);
       if (!history_ids.insert(h.id).second) file_error(ctx + ".id is a duplicate");
+      if (h.host_id.empty()) {
+        ++mig.dropped_history;
+        continue;
+      }
       h.seq = state.next_seq++;
       state.history.push_back(std::move(h));
     }
@@ -608,7 +664,7 @@ std::string serialize_query_library_file(const QueryLibraryState& state) {
   rapidjson::PrettyWriter<rapidjson::StringBuffer> w(sb);
   w.SetIndent(' ', 2);
   w.StartObject();
-  w.Key("version"); w.Int(1);
+  w.Key("version"); w.Int(kQueryLibraryFileVersion);
   w.Key("revision"); w.Int64(state.revision);
   w.Key("updated_at_ms"); w.Int64(state.updated_at_ms);
   w.Key("folders");
@@ -776,8 +832,9 @@ void QueryLibraryStore::refresh_locked() {
     fail("cannot read the file");
     return;
   }
+  QueryLibraryMigration migration;
   try {
-    QueryLibraryState parsed = parse_query_library_file(text);
+    QueryLibraryState parsed = parse_query_library_file(text, &migration);
     while (parsed.history.size() > options_.history_max_entries) parsed.history.pop_front();
     if (had) parsed.revision = std::max(parsed.revision, previous_revision + 1);
     if (!load_error_.empty()) log_line("reloaded " + options_.file + "; the load error is cleared");
@@ -785,6 +842,26 @@ void QueryLibraryStore::refresh_locked() {
     load_error_.clear();
   } catch (const std::exception& e) {
     fail(e.what());
+    return;
+  }
+  if (!migration.changed()) return;
+  // A version-1 file, or entries without a host: they are dropped in memory;
+  // a writable library also rewrites the file (atomically, as version 2). A
+  // read-only library never touches the file.
+  const std::string counts = "from version " + std::to_string(migration.from_version) + ", dropped " +
+                             std::to_string(migration.dropped_folders) + " folders, " +
+                             std::to_string(migration.dropped_queries) + " queries and " +
+                             std::to_string(migration.dropped_history) + " history entries without a host_id, moved " +
+                             std::to_string(migration.rerooted) + " items to the top level of their host";
+  if (!options_.writable) {
+    log_line("migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
+    return;
+  }
+  try {
+    commit_locked(state_);
+    log_line("migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
+  } catch (const ApiError& e) {
+    log_line("migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
   }
 }
 
@@ -835,6 +912,16 @@ void QueryLibraryStore::check_if_match_locked(const std::string* if_match) const
   e.message = "the library changed; reload it and retry";
   e.revision = state_.revision;
   throw e;
+}
+
+// The host of a request: required, and one of the configured hosts.
+std::string QueryLibraryStore::require_host_locked(const std::string* raw, const std::string& field) const {
+  if (!raw || raw->empty()) throw validation(field, "required", field + " is required");
+  if (raw->size() > kQueryLibraryMaxHostIdBytes || has_control(*raw, false) ||
+      std::find(options_.host_ids.begin(), options_.host_ids.end(), *raw) == options_.host_ids.end()) {
+    throw validation(field, "unknown_host", field + " does not name a configured host");
+  }
+  return *raw;
 }
 
 std::string QueryLibraryStore::new_id_locked(char prefix, const QueryLibraryState& state) {
@@ -922,11 +1009,13 @@ QueryLibraryStore::Response query_response(int status, const QueryLibraryQuery& 
 
 } // namespace
 
-QueryLibraryStore::Response QueryLibraryStore::get_library() {
+QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* host_raw) {
   return guarded([&]() -> Response {
+    const std::string host = require_host_locked(host_raw, "host_id");
     rapidjson::StringBuffer sb;
     JsonWriter w(sb);
     w.StartObject();
+    w.Key("host_id"); write_string(w, host);
     w.Key("revision"); w.Int64(state_.revision);
     w.Key("updated_at_ms"); w.Int64(state_.updated_at_ms);
     w.Key("writable"); w.Bool(options_.writable && load_error_.empty());
@@ -945,21 +1034,29 @@ QueryLibraryStore::Response QueryLibraryStore::get_library() {
     w.EndObject();
     w.Key("folders");
     w.StartArray();
-    for (const auto& f : state_.folders) { w.StartObject(); write_folder_fields(w, f); w.EndObject(); }
+    for (const auto& f : state_.folders) {
+      if (f.host_id != host) continue;
+      w.StartObject(); write_folder_fields(w, f); w.EndObject();
+    }
     w.EndArray();
     w.Key("queries");
     w.StartArray();
-    for (const auto& q : state_.queries) { w.StartObject(); write_query_fields(w, q); w.EndObject(); }
+    for (const auto& q : state_.queries) {
+      if (q.host_id != host) continue;
+      w.StartObject(); write_query_fields(w, q); w.EndObject();
+    }
     w.EndArray();
     w.EndObject();
     return {200, sb.GetString()};
   });
 }
 
-QueryLibraryStore::Response QueryLibraryStore::list_history(const std::string* limit_raw, const std::string* before_ms_raw,
-                                                            const std::string* before_id, const std::string* q_raw) {
+QueryLibraryStore::Response QueryLibraryStore::list_history(const std::string* host_raw, const std::string* limit_raw,
+                                                            const std::string* before_ms_raw, const std::string* before_id,
+                                                            const std::string* q_raw) {
   return guarded([&]() -> Response {
     if (!options_.history_on_server) throw not_found("query history is stored in the browser");
+    const std::string host = require_host_locked(host_raw, "host_id");
     const size_t limit = static_cast<size_t>(
         parse_query_int(limit_raw, "limit", 1, kQueryLibraryMaxHistoryPage).value_or(kQueryLibraryDefaultHistoryPage));
     const auto before_ms = parse_query_int(before_ms_raw, "before_ms", 0, INT64_MAX / 2);
@@ -971,7 +1068,9 @@ QueryLibraryStore::Response QueryLibraryStore::list_history(const std::string* l
 
     std::vector<const QueryLibraryHistoryEntry*> rows;
     rows.reserve(state_.history.size());
-    for (const auto& h : state_.history) rows.push_back(&h);
+    for (const auto& h : state_.history) {
+      if (h.host_id == host) rows.push_back(&h);
+    }
     std::sort(rows.begin(), rows.end(), [](const auto* a, const auto* b) {
       if (a->ran_at_ms != b->ran_at_ms) return a->ran_at_ms > b->ran_at_ms;
       return a->seq > b->seq;
@@ -1022,7 +1121,8 @@ QueryLibraryStore::Response QueryLibraryStore::append_history(std::string_view b
     const auto doc = parse_body(body);
     QueryLibraryHistoryEntry h;
     h.sql = read_sql(member(doc, "sql"), "sql", options_.max_query_bytes);
-    h.host_id = read_host_id(member(doc, "host_id"), "host_id");
+    const auto host = read_host_field(member(doc, "host_id"), "host_id");
+    h.host_id = require_host_locked(host ? &*host : nullptr, "host_id");
     h.ran_at_ms = read_opt_int(member(doc, "ran_at_ms"), "ran_at_ms").value_or(now_ms());
     if (const auto* e = member(doc, "elapsed_ms"); e && !e->IsNull()) {
       if (!e->IsNumber() || !std::isfinite(e->GetDouble()) || e->GetDouble() < 0) {
@@ -1071,17 +1171,19 @@ QueryLibraryStore::Response QueryLibraryStore::append_history(std::string_view b
   });
 }
 
-QueryLibraryStore::Response QueryLibraryStore::clear_history(const std::string* if_match) {
+QueryLibraryStore::Response QueryLibraryStore::clear_history(const std::string* host_raw, const std::string* if_match) {
   return guarded([&]() -> Response {
     if (!options_.history_on_server) throw not_found("query history is stored in the browser");
     require_editable_locked();
     check_if_match_locked(if_match);
-    const size_t deleted = state_.history.size();
-    if (deleted > 0) {
-      QueryLibraryState candidate = state_;
-      candidate.history.clear();
-      commit_locked(std::move(candidate));
-    }
+    const std::string host = require_host_locked(host_raw, "host_id");
+    QueryLibraryState candidate = state_;
+    const size_t before = candidate.history.size();
+    candidate.history.erase(std::remove_if(candidate.history.begin(), candidate.history.end(),
+                                           [&](const auto& h) { return h.host_id == host; }),
+                            candidate.history.end());
+    const size_t deleted = before - candidate.history.size();
+    if (deleted > 0) commit_locked(std::move(candidate));
     rapidjson::StringBuffer sb;
     JsonWriter w(sb);
     w.StartObject();
@@ -1121,12 +1223,14 @@ QueryLibraryStore::Response QueryLibraryStore::create_folder(std::string_view bo
     const auto doc = parse_body(body);
     QueryLibraryState candidate = state_;
     QueryLibraryFolder f;
-    f.parent_id = existing_folder_ref(candidate, member(doc, "parent_id"), "parent_id");
+    const auto host = read_host_field(member(doc, "host_id"), "host_id");
+    f.host_id = require_host_locked(host ? &*host : nullptr, "host_id");
+    f.parent_id = existing_folder_ref(candidate, member(doc, "parent_id"), "parent_id", f.host_id);
     f.name = read_name(member(doc, "name"), "name");
     f.description = read_description(member(doc, "description"), "description");
     if (candidate.folders.size() >= kQueryLibraryMaxFolders) throw too_large("folders", "too many folders");
     ensure_depth(candidate, f.parent_id, 1, "parent_id");
-    if (folder_name_taken(candidate, f.parent_id, f.name, nullptr)) {
+    if (folder_name_taken(candidate, f.host_id, f.parent_id, f.name, nullptr)) {
       throw validation("name", "duplicate", "a folder with this name already exists here");
     }
     f.id = new_id_locked('f', candidate);
@@ -1148,6 +1252,10 @@ QueryLibraryStore::Response QueryLibraryStore::update_folder(const std::string& 
     if (!f) throw not_found("folder not found");
     QueryLibraryFolder next = *f;
     bool changed = false;
+    // A folder stays on its host.
+    if (const auto host = read_host_field(member(doc, "host_id"), "host_id"); host && *host != next.host_id) {
+      throw host_mismatch("host_id", "a folder cannot move to another host");
+    }
     if (const auto* v = member(doc, "name")) {
       std::string name = read_name(v, "name");
       changed |= name != next.name;
@@ -1159,7 +1267,7 @@ QueryLibraryStore::Response QueryLibraryStore::update_folder(const std::string& 
       next.description = std::move(description);
     }
     if (const auto* v = member(doc, "parent_id")) {
-      auto parent = existing_folder_ref(candidate, v, "parent_id");
+      auto parent = existing_folder_ref(candidate, v, "parent_id", next.host_id);
       if (parent != next.parent_id) {
         if (parent) {
           if (*parent == id) throw validation("parent_id", "cycle", "a folder cannot be moved into itself");
@@ -1180,7 +1288,7 @@ QueryLibraryStore::Response QueryLibraryStore::update_folder(const std::string& 
       }
     }
     if (!changed) return folder_response(200, *f, state_.revision);
-    if (folder_name_taken(candidate, next.parent_id, next.name, &id)) {
+    if (folder_name_taken(candidate, next.host_id, next.parent_id, next.name, &id)) {
       throw validation("name", "duplicate", "a folder with this name already exists here");
     }
     next.updated_at_ms = now_ms();
@@ -1247,14 +1355,15 @@ QueryLibraryStore::Response QueryLibraryStore::create_query(std::string_view bod
     const auto doc = parse_body(body);
     QueryLibraryState candidate = state_;
     QueryLibraryQuery q;
-    q.folder_id = existing_folder_ref(candidate, member(doc, "folder_id"), "folder_id");
+    const auto host = read_host_field(member(doc, "host_id"), "host_id");
+    q.host_id = require_host_locked(host ? &*host : nullptr, "host_id");
+    q.folder_id = existing_folder_ref(candidate, member(doc, "folder_id"), "folder_id", q.host_id);
     q.name = read_name(member(doc, "name"), "name");
     q.description = read_description(member(doc, "description"), "description");
     q.sql = read_sql(member(doc, "sql"), "sql", options_.max_query_bytes);
-    q.host_id = read_host_id(member(doc, "host_id"), "host_id");
     q.tags = read_tags(member(doc, "tags"), "tags");
     if (candidate.queries.size() >= kQueryLibraryMaxQueries) throw too_large("queries", "too many saved queries");
-    if (query_name_taken(candidate, q.folder_id, q.name, nullptr)) {
+    if (query_name_taken(candidate, q.host_id, q.folder_id, q.name, nullptr)) {
       throw validation("name", "duplicate", "a query with this name already exists in this folder");
     }
     q.id = new_id_locked('q', candidate);
@@ -1275,16 +1384,19 @@ QueryLibraryStore::Response QueryLibraryStore::update_query(const std::string& i
     QueryLibraryQuery* q = find_query(candidate, id);
     if (!q) throw not_found("query not found");
     QueryLibraryQuery next = *q;
+    // A query stays on its host: a folder of another host is refused.
+    if (const auto host = read_host_field(member(doc, "host_id"), "host_id"); host && *host != next.host_id) {
+      throw host_mismatch("host_id", "a saved query cannot move to another host");
+    }
     if (const auto* v = member(doc, "name")) next.name = read_name(v, "name");
     if (const auto* v = member(doc, "description")) next.description = read_description(v, "description");
     if (const auto* v = member(doc, "sql")) next.sql = read_sql(v, "sql", options_.max_query_bytes);
-    if (const auto* v = member(doc, "folder_id")) next.folder_id = existing_folder_ref(candidate, v, "folder_id");
-    if (const auto* v = member(doc, "host_id")) next.host_id = read_host_id(v, "host_id");
+    if (const auto* v = member(doc, "folder_id")) next.folder_id = existing_folder_ref(candidate, v, "folder_id", next.host_id);
     if (const auto* v = member(doc, "tags")) next.tags = read_tags(v, "tags");
     const bool changed = next.name != q->name || next.description != q->description || next.sql != q->sql ||
-                         next.folder_id != q->folder_id || next.host_id != q->host_id || next.tags != q->tags;
+                         next.folder_id != q->folder_id || next.tags != q->tags;
     if (!changed) return query_response(200, *q, state_.revision);
-    if (query_name_taken(candidate, next.folder_id, next.name, &id)) {
+    if (query_name_taken(candidate, next.host_id, next.folder_id, next.name, &id)) {
       throw validation("name", "duplicate", "a query with this name already exists in this folder");
     }
     next.updated_at_ms = now_ms();
@@ -1316,15 +1428,19 @@ QueryLibraryStore::Response QueryLibraryStore::delete_query(const std::string& i
   });
 }
 
-// Import (typically the browser's localStorage library, once). Folders are
-// merged by name under the same parent; queries are de-duplicated by
-// name + SQL against the whole library and within the payload; a remaining
-// name clash in the target folder gets a " (n)" suffix.
+// Import (typically the browser's localStorage library of one host, once)
+// into the library of the request's host_id: every imported folder and query
+// belongs to that host, whatever the payload says. Folders are merged by name
+// under the same parent; queries are de-duplicated by name + SQL against the
+// host's library and within the payload; a remaining name clash in the target
+// folder gets a " (n)" suffix.
 QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view body, const std::string* if_match) {
   return guarded([&]() -> Response {
     require_editable_locked();
     check_if_match_locked(if_match);
     const auto doc = parse_body(body);
+    const auto host_field = read_host_field(member(doc, "host_id"), "host_id");
+    const std::string host = require_host_locked(host_field ? &*host_field : nullptr, "host_id");
     const auto* folders = member(doc, "folders");
     const auto* queries = member(doc, "queries");
     if (folders && !folders->IsNull() && !folders->IsArray()) throw validation("folders", "type", "folders must be an array");
@@ -1399,12 +1515,12 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       if (item.parent) {
         const auto mapped = folder_map.find(*item.parent);
         if (mapped != folder_map.end()) parent = mapped->second;
-        else if (find_folder(candidate, *item.parent)) parent = *item.parent;
+        else if (const auto* known = find_folder(candidate, *item.parent); known && known->host_id == host) parent = *item.parent;
       }
       const std::string folded = fold_ascii(item.name);
       const QueryLibraryFolder* existing = nullptr;
       for (const auto& f : candidate.folders) {
-        if (f.parent_id == parent && fold_ascii(f.name) == folded) { existing = &f; break; }
+        if (f.host_id == host && f.parent_id == parent && fold_ascii(f.name) == folded) { existing = &f; break; }
       }
       if (existing) {
         folder_map[item.import_id] = existing->id;
@@ -1415,6 +1531,7 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       ensure_depth(candidate, parent, 1, item.field + ".parent_id");
       QueryLibraryFolder f;
       f.id = new_id_locked('f', candidate);
+      f.host_id = host;
       f.parent_id = parent;
       f.name = item.name;
       f.description = item.description;
@@ -1425,7 +1542,9 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
     }
 
     std::unordered_set<std::string> keys;
-    for (const auto& q : candidate.queries) keys.insert(import_key(q.name, q.sql));
+    for (const auto& q : candidate.queries) {
+      if (q.host_id == host) keys.insert(import_key(q.name, q.sql));
+    }
     size_t imported_queries = 0;
     size_t skipped_queries = 0;
     for (rapidjson::SizeType i = 0; i < query_count; ++i) {
@@ -1436,13 +1555,13 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
       q.name = read_name(member(item, "name"), field + ".name");
       q.description = read_description(member(item, "description"), field + ".description");
       q.sql = read_sql(member(item, "sql"), field + ".sql", options_.max_query_bytes);
-      q.host_id = read_host_id(member(item, "host_id"), field + ".host_id");
+      q.host_id = host;
       q.tags = read_tags(member(item, "tags"), field + ".tags");
       if (const auto* v = member(item, "folder_id"); v && v->IsString() && v->GetStringLength() > 0) {
         const std::string ref = json_text(*v);
         const auto mapped = folder_map.find(ref);
         if (mapped != folder_map.end()) q.folder_id = mapped->second;
-        else if (find_folder(candidate, ref)) q.folder_id = ref;
+        else if (const auto* known = find_folder(candidate, ref); known && known->host_id == host) q.folder_id = ref;
       }
       const std::string key = import_key(q.name, q.sql);
       if (!keys.insert(key).second) {
@@ -1450,7 +1569,7 @@ QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view b
         continue;
       }
       if (candidate.queries.size() >= kQueryLibraryMaxQueries) throw too_large("queries", "too many saved queries");
-      q.name = unique_query_name(candidate, q.folder_id, q.name);
+      q.name = unique_query_name(candidate, host, q.folder_id, q.name);
       q.id = new_id_locked('q', candidate);
       const auto created = read_opt_int(member(item, "created_at_ms"), field + ".created_at_ms");
       const auto updated = read_opt_int(member(item, "updated_at_ms"), field + ".updated_at_ms");

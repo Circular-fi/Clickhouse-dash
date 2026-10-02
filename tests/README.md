@@ -218,13 +218,14 @@ The backend phase hits the running ChDash service rather than only inspecting so
 
 ### Query library
 
-`backend-functional/test_query_library.py` covers the server-side query library (`docs/query-library.md`). Against `chdash_source` (feature disabled) it only checks that every route answers 404; the other tests need dedicated instances and skip otherwise:
+`backend-functional/test_query_library.py` covers the server-side query library (`docs/query-library.md`). Both instance configs declare two hosts (`local` and `other`, the same ClickHouse), for the per-host tests. Against `chdash_source` (feature disabled) it only checks that every route answers 404; the other tests need dedicated instances and skip otherwise:
 
 | Variable | Instance |
 | --- | --- |
 | `QUERY_LIBRARY_BASE_URL` | `config/query-library.writable.hcl`, with an empty writable directory mounted at `/data` |
 | `QUERY_LIBRARY_RO_BASE_URL` | `config/query-library.readonly.hcl`, with a writable `/data` (optionally holding a copy of `config/query-library.seed.json` as `query_library.json`) |
-| `QUERY_LIBRARY_DATA_DIR` | the writable instance's `/data` as seen by pytest (file mode, external edit, malformed file) |
+| `QUERY_LIBRARY_DATA_DIR` | the writable instance's `/data` as seen by pytest (file mode, external edit, malformed file, version 1 migration) |
+| `QUERY_LIBRARY_RO_DATA_DIR` | the read-only instance's `/data` as seen by pytest (version 1 migration in memory, file untouched) |
 | `QUERY_LIBRARY_RESTART_CMD` | a command restarting the writable instance (persistence across a restart) |
 | `QUERY_LIBRARY_DISABLED_BASE_URL` | optional; defaults to `API_BASE_URL` |
 
@@ -241,7 +242,7 @@ docker run -d --name chdash-qlib-ro --network chdash-tests_default --user "$(id 
   -v /tmp/qlib/ro:/data chdash-qlib:local
 cd tests && QUERY_LIBRARY_DISABLED_BASE_URL=http://127.0.0.1:18080 \
   QUERY_LIBRARY_BASE_URL=http://127.0.0.1:18471 QUERY_LIBRARY_RO_BASE_URL=http://127.0.0.1:18472 \
-  QUERY_LIBRARY_DATA_DIR=/tmp/qlib/rw QUERY_LIBRARY_RESTART_CMD="docker restart -t 2 chdash-qlib" \
+  QUERY_LIBRARY_DATA_DIR=/tmp/qlib/rw QUERY_LIBRARY_RO_DATA_DIR=/tmp/qlib/ro QUERY_LIBRARY_RESTART_CMD="docker restart -t 2 chdash-qlib" \
   python3 -m pytest -q backend-functional/test_query_library.py
 ```
 

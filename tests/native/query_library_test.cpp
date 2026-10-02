@@ -31,6 +31,12 @@ namespace {
 int g_failures = 0;
 int g_checks = 0;
 
+// The configured hosts of options_for(); every request names one of them.
+const std::string kLocal = "local";
+const std::string kOther = "other";
+const std::string* const LOCAL = &kLocal;
+const std::string* const OTHER = &kOther;
+
 #define CHECK(cond)                                                                        \
   do {                                                                                     \
     ++g_checks;                                                                            \
@@ -116,16 +122,23 @@ QueryLibraryOptions options_for(const std::string& file) {
   o.history_max_entries = 5;
   o.max_file_bytes = 64 * 1024;
   o.max_query_bytes = 2048;
+  o.host_ids = {kLocal, kOther};
   return o;
 }
 
-std::string folder_body(const std::string& name, const std::string& parent = "") {
-  return std::string("{\"name\":\"") + name + "\",\"parent_id\":" + (parent.empty() ? "null" : "\"" + parent + "\"") + "}";
+std::string folder_body(const std::string& name, const std::string& parent = "", const std::string& host = kLocal) {
+  return std::string("{\"host_id\":\"") + host + "\",\"name\":\"" + name + "\",\"parent_id\":" +
+         (parent.empty() ? "null" : "\"" + parent + "\"") + "}";
 }
 
-std::string query_body(const std::string& name, const std::string& sql, const std::string& folder = "") {
-  return std::string("{\"name\":\"") + name + "\",\"sql\":\"" + sql + "\",\"folder_id\":" +
-         (folder.empty() ? "null" : "\"" + folder + "\"") + "}";
+std::string query_body(const std::string& name, const std::string& sql, const std::string& folder = "",
+                       const std::string& host = kLocal) {
+  return std::string("{\"host_id\":\"") + host + "\",\"name\":\"" + name + "\",\"sql\":\"" + sql +
+         "\",\"folder_id\":" + (folder.empty() ? "null" : "\"" + folder + "\"") + "}";
+}
+
+std::string history_body(const std::string& sql, const std::string& host = kLocal) {
+  return std::string("{\"host_id\":\"") + host + "\",\"sql\":\"" + sql + "\"}";
 }
 
 void test_atomic_write(const std::string& dir) {
@@ -151,7 +164,7 @@ void test_atomic_write(const std::string& dir) {
 void test_crud_tree_and_conflicts(const std::string& dir) {
   const std::string path = dir + "/library.json";
   QueryLibraryStore store(options_for(path));
-  auto lib = json(store.get_library());
+  auto lib = json(store.get_library(LOCAL));
   CHECK(num(lib, "revision") == 0);
   CHECK(lib["writable"].GetBool());
   CHECK(lib["load_error"].IsNull());
@@ -228,7 +241,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK_STATUS(store.update_query("q_missing", "{\"name\":\"x\"}", nullptr), 404);
 
   // If-Match.
-  const int64_t revision = num(json(store.get_library()), "revision");
+  const int64_t revision = num(json(store.get_library(LOCAL)), "revision");
   const std::string stale = std::to_string(revision - 1);
   r = store.update_query(query, "{\"name\":\"Renamed\"}", &stale);
   CHECK_STATUS(r, 409);
@@ -255,13 +268,13 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK(num(json(r), "deleted_folders") == 2);
   CHECK(num(json(r), "deleted_queries") == 1);
   CHECK_STATUS(store.delete_folder(other, true, nullptr), 404);
-  lib = json(store.get_library());
+  lib = json(store.get_library(LOCAL));
   CHECK(lib["folders"].Size() == 0);
   CHECK(lib["queries"].Size() == 1);
 
   // Persistence: a new store on the same file sees the same library.
   QueryLibraryStore again(options_for(path));
-  auto lib2 = json(again.get_library());
+  auto lib2 = json(again.get_library(LOCAL));
   CHECK(num(lib2, "revision") == num(lib, "revision"));
   CHECK(lib2["queries"].Size() == 1);
 }
@@ -269,35 +282,35 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
 void test_history(const std::string& dir) {
   const std::string path = dir + "/history.json";
   QueryLibraryStore store(options_for(path));
-  const int64_t revision = num(json(store.get_library()), "revision");
+  const int64_t revision = num(json(store.get_library(LOCAL)), "revision");
   for (int i = 1; i <= 8; ++i) {
     const std::string body = "{\"sql\":\"SELECT " + std::to_string(i) + "\",\"host_id\":\"local\",\"ran_at_ms\":" +
                              std::to_string(1000 * i) + ",\"elapsed_ms\":1.5,\"rows\":1,\"status\":\"ok\"}";
     CHECK_STATUS(store.append_history(body, nullptr), 201);
   }
-  CHECK(num(json(store.get_library()), "revision") == revision);  // history does not bump the library revision
+  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);  // history does not bump the library revision
   const std::string limit = "2";
-  auto page = json(store.list_history(&limit, nullptr, nullptr, nullptr));
+  auto page = json(store.list_history(LOCAL, &limit, nullptr, nullptr, nullptr));
   CHECK(page["entries"].Size() == 2);
   CHECK(page["has_more"].GetBool());
   CHECK(str(page["entries"][0], "sql") == "SELECT 8");
   const std::string before = std::to_string(page["entries"][1]["ran_at_ms"].GetInt64());
   const std::string ten = "10";
-  page = json(store.list_history(&ten, &before, nullptr, nullptr));
+  page = json(store.list_history(LOCAL, &ten, &before, nullptr, nullptr));
   CHECK(page["entries"].Size() == 3);  // cap 5: 8,7 | 6,5,4
   CHECK(!page["has_more"].GetBool());
   CHECK(str(page["entries"][2], "sql") == "SELECT 4");
   const std::string needle = "select 6";
-  page = json(store.list_history(nullptr, nullptr, nullptr, &needle));
+  page = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, &needle));
   CHECK(page["entries"].Size() == 1);
   const std::string bad = "0";
-  CHECK_STATUS(store.list_history(&bad, nullptr, nullptr, nullptr), 400);
-  CHECK_STATUS(store.append_history("{\"sql\":\"SELECT 1\",\"status\":\"weird\"}", nullptr), 400);
-  CHECK_STATUS(store.append_history("{\"sql\":\"" + std::string(3000, 'y') + "\"}", nullptr), 413);
-  const std::string id = str(json(store.list_history(nullptr, nullptr, nullptr, nullptr))["entries"][0], "id");
+  CHECK_STATUS(store.list_history(LOCAL, &bad, nullptr, nullptr, nullptr), 400);
+  CHECK_STATUS(store.append_history("{\"host_id\":\"local\",\"sql\":\"SELECT 1\",\"status\":\"weird\"}", nullptr), 400);
+  CHECK_STATUS(store.append_history(history_body(std::string(3000, 'y')), nullptr), 413);
+  const std::string id = str(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"][0], "id");
   CHECK_STATUS(store.delete_history_entry(id, nullptr), 200);
   CHECK_STATUS(store.delete_history_entry(id, nullptr), 404);
-  auto cleared = json(store.clear_history(nullptr));
+  auto cleared = json(store.clear_history(LOCAL, nullptr));
   CHECK(num(cleared, "deleted") == 4);
 }
 
@@ -311,10 +324,10 @@ void test_read_only(const std::string& dir) {
   CHECK_STATUS(r, 403);
   CHECK(str(json(r), "error") == "read_only");
   CHECK_STATUS(store.create_query(query_body("x", "SELECT 1"), nullptr), 403);
-  CHECK_STATUS(store.import_library("{\"queries\":[]}", nullptr), 403);
-  CHECK_STATUS(store.clear_history(nullptr), 403);
+  CHECK_STATUS(store.import_library("{\"host_id\":\"local\",\"queries\":[]}", nullptr), 403);
+  CHECK_STATUS(store.clear_history(LOCAL, nullptr), 403);
   // History append is not library editing.
-  CHECK_STATUS(store.append_history("{\"sql\":\"SELECT 1\"}", nullptr), 201);
+  CHECK_STATUS(store.append_history(history_body("SELECT 1"), nullptr), 201);
 }
 
 void test_malformed_and_reload(const std::string& dir) {
@@ -326,20 +339,20 @@ void test_malformed_and_reload(const std::string& dir) {
   auto* old = std::cerr.rdbuf(captured.rdbuf());
   {
     QueryLibraryStore store(options_for(path));
-    auto lib = json(store.get_library());
+    auto lib = json(store.get_library(LOCAL));
     CHECK(!lib["load_error"].IsNull());
     CHECK(!lib["writable"].GetBool());
     CHECK(!store.writable());
     auto r = store.create_folder(folder_body("x"), nullptr);
     CHECK_STATUS(r, 403);
     CHECK(json(r).HasMember("load_error"));
-    CHECK_STATUS(store.append_history("{\"sql\":\"SELECT secret_marker_123\"}", nullptr), 403);
+    CHECK_STATUS(store.append_history(history_body("SELECT secret_marker_123"), nullptr), 403);
     CHECK(read_file(path) == broken);  // never overwritten
 
     // Fixing the file on disk clears the error without a restart.
-    write_plain(path, "{\"version\":1,\"revision\":7,\"folders\":[{\"id\":\"f_a\",\"parent_id\":null,\"name\":\"A\"}],"
-                      "\"queries\":[{\"id\":\"q_a\",\"folder_id\":\"f_a\",\"name\":\"Q\",\"sql\":\"SELECT secret_marker_123\"}]}");
-    lib = json(store.get_library());
+    write_plain(path, "{\"version\":2,\"revision\":7,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"parent_id\":null,\"name\":\"A\"}],"
+                      "\"queries\":[{\"id\":\"q_a\",\"host_id\":\"local\",\"folder_id\":\"f_a\",\"name\":\"Q\",\"sql\":\"SELECT secret_marker_123\"}]}");
+    lib = json(store.get_library(LOCAL));
     CHECK(lib["load_error"].IsNull());
     CHECK(lib["writable"].GetBool());
     CHECK(num(lib, "revision") >= 7);
@@ -347,17 +360,22 @@ void test_malformed_and_reload(const std::string& dir) {
 
     // An external edit with the same revision still moves the revision forward.
     const int64_t before = num(lib, "revision");
-    write_plain(path, "{\"version\":1,\"revision\":7,\"folders\":[],\"queries\":[]}");
-    lib = json(store.get_library());
+    write_plain(path, "{\"version\":2,\"revision\":7,\"folders\":[],\"queries\":[]}");
+    lib = json(store.get_library(LOCAL));
     CHECK(num(lib, "revision") > before);
     CHECK(lib["queries"].Size() == 0);
 
     // Structural problems are load errors too.
-    write_plain(path, "{\"version\":1,\"folders\":[{\"id\":\"f_a\",\"parent_id\":\"f_b\",\"name\":\"A\"},"
-                      "{\"id\":\"f_b\",\"parent_id\":\"f_a\",\"name\":\"B\"}]}");
-    CHECK(!json(store.get_library())["load_error"].IsNull());
-    write_plain(path, "{\"version\":2}");
-    CHECK(!json(store.get_library())["load_error"].IsNull());
+    write_plain(path, "{\"version\":2,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"parent_id\":\"f_b\",\"name\":\"A\"},"
+                      "{\"id\":\"f_b\",\"host_id\":\"local\",\"parent_id\":\"f_a\",\"name\":\"B\"}]}");
+    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    // A folder of one host inside a folder of another is inconsistent.
+    write_plain(path, "{\"version\":2,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"name\":\"A\"},"
+                      "{\"id\":\"f_b\",\"host_id\":\"other\",\"parent_id\":\"f_a\",\"name\":\"B\"}]}");
+    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    write_plain(path, "{\"version\":3}");
+    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(read_file(path) == "{\"version\":3}");  // never rewritten
   }
   std::cerr.rdbuf(old);
   CHECK(captured.str().find("[query_library]") != std::string::npos);
@@ -369,7 +387,7 @@ void test_import(const std::string& dir) {
   QueryLibraryStore store(options_for(path));
   CHECK_STATUS(store.create_query(query_body("Existing", "SELECT 1"), nullptr), 201);
   const std::string payload =
-      "{\"folders\":[{\"id\":\"local-1\",\"parent_id\":null,\"name\":\"Imported\"},"
+      "{\"host_id\":\"local\",\"folders\":[{\"id\":\"local-1\",\"parent_id\":null,\"name\":\"Imported\"},"
       "{\"id\":\"local-2\",\"parent_id\":\"local-1\",\"name\":\"Child\"}],"
       "\"queries\":[{\"name\":\"Existing\",\"sql\":\"SELECT 1\"},"
       "{\"name\":\"Existing\",\"sql\":\"SELECT 2\"},"
@@ -380,7 +398,7 @@ void test_import(const std::string& dir) {
   CHECK(num(r, "imported_queries") == 2);
   CHECK(num(r, "skipped_queries") == 2);
   CHECK(r["folder_ids"].HasMember("local-2"));
-  auto lib = json(store.get_library());
+  auto lib = json(store.get_library(LOCAL));
   CHECK(lib["folders"].Size() == 2);
   CHECK(lib["queries"].Size() == 3);
   bool renamed = false;
@@ -393,10 +411,10 @@ void test_import(const std::string& dir) {
   CHECK(num(r, "imported_queries") == 0);  // "Existing (2)" still matches "Existing" + SELECT 2
   CHECK(num(r, "skipped_queries") == 4);
   r = json(store.import_library(
-      "{\"folders\":[{\"id\":\"a\",\"parent_id\":\"b\",\"name\":\"A\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"B\"}]}",
+      "{\"host_id\":\"local\",\"folders\":[{\"id\":\"a\",\"parent_id\":\"b\",\"name\":\"A\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"B\"}]}",
       nullptr));
   CHECK(str(r, "reason") == "cycle");
-  CHECK(num(json(store.get_library()), "revision") == revision);  // nothing new: no write
+  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);  // nothing new: no write
 }
 
 void test_file_limit(const std::string& dir) {
@@ -407,7 +425,7 @@ void test_file_limit(const std::string& dir) {
   o.history_max_entries = 100;
   QueryLibraryStore store(o);
   const std::string sql(1500, 'h');
-  for (int i = 0; i < 8; ++i) CHECK_STATUS(store.append_history("{\"sql\":\"" + sql + "\"}", nullptr), 201);
+  for (int i = 0; i < 8; ++i) CHECK_STATUS(store.append_history(history_body(sql), nullptr), 201);
   // Library edits evict the oldest history entries first.
   int created = 0;
   QueryLibraryStore::Response r;
@@ -419,10 +437,231 @@ void test_file_limit(const std::string& dir) {
   CHECK_STATUS(r, 413);
   CHECK(str(json(r), "error") == "too_large");
   CHECK(created >= 8);
-  CHECK(json(store.list_history(nullptr, nullptr, nullptr, nullptr))["entries"].Size() < 8);
+  CHECK(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"].Size() < 8);
   struct stat st {};
   CHECK(::stat(path.c_str(), &st) == 0);
   CHECK(static_cast<size_t>(st.st_size) <= o.max_file_bytes);
+}
+
+// Folders, queries and history belong to one host: reads filter by it, the
+// host is required and must be configured, a move across hosts is refused.
+void test_per_host(const std::string& dir) {
+  const std::string path = dir + "/hosts.json";
+  QueryLibraryStore store(options_for(path));
+  const std::string unknown = "elsewhere";
+  const std::string empty;
+  auto r = store.get_library(nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "field") == "host_id");
+  CHECK(str(json(r), "reason") == "required");
+  CHECK(str(json(store.get_library(&empty)), "reason") == "required");
+  r = store.get_library(&unknown);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "unknown_host");
+  CHECK_STATUS(store.list_history(nullptr, nullptr, nullptr, nullptr, nullptr), 400);
+  CHECK_STATUS(store.list_history(&unknown, nullptr, nullptr, nullptr, nullptr), 400);
+  CHECK_STATUS(store.clear_history(nullptr, nullptr), 400);
+  // Writes name their host.
+  r = store.create_folder("{\"name\":\"No host\"}", nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "field") == "host_id");
+  CHECK_STATUS(store.create_folder(folder_body("Unknown", "", unknown), nullptr), 400);
+  CHECK_STATUS(store.create_query("{\"name\":\"q\",\"sql\":\"SELECT 1\"}", nullptr), 400);
+  CHECK_STATUS(store.create_query("{\"name\":\"q\",\"sql\":\"SELECT 1\",\"host_id\":7}", nullptr), 400);
+  CHECK_STATUS(store.append_history("{\"sql\":\"SELECT 1\"}", nullptr), 400);
+  CHECK_STATUS(store.append_history(history_body("SELECT 1", unknown), nullptr), 400);
+  CHECK_STATUS(store.import_library("{\"queries\":[]}", nullptr), 400);
+
+  r = store.create_folder(folder_body("Ops"), nullptr);
+  CHECK_STATUS(r, 201);
+  CHECK(str(json(r), "host_id") == "local");
+  const std::string local_ops = str(json(r), "id");
+  // The same name at the top level of another host is another folder.
+  r = store.create_folder(folder_body("Ops", "", kOther), nullptr);
+  CHECK_STATUS(r, 201);
+  const std::string other_ops = str(json(r), "id");
+  r = store.create_query(query_body("Parts", "SELECT 1", local_ops), nullptr);
+  CHECK_STATUS(r, 201);
+  CHECK(str(json(r), "host_id") == "local");
+  const std::string local_query = str(json(r), "id");
+  CHECK_STATUS(store.create_query(query_body("Parts", "SELECT 2", other_ops, kOther), nullptr), 201);
+  CHECK_STATUS(store.create_query(query_body("Top", "SELECT 3", "", kOther), nullptr), 201);
+
+  auto lib = json(store.get_library(LOCAL));
+  CHECK(str(lib, "host_id") == "local");
+  CHECK(lib["folders"].Size() == 1);
+  CHECK(lib["queries"].Size() == 1);
+  CHECK(str(lib["folders"][0], "host_id") == "local");
+  auto other = json(store.get_library(OTHER));
+  CHECK(other["folders"].Size() == 1);
+  CHECK(other["queries"].Size() == 2);
+  CHECK(num(lib, "revision") == num(other, "revision"));  // one library revision
+
+  // Across hosts: 400 host_mismatch, nothing changes.
+  const int64_t revision = num(lib, "revision");
+  r = store.create_query(query_body("Cross", "SELECT 4", other_ops), nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "host_mismatch");
+  CHECK(str(json(r), "field") == "folder_id");
+  r = store.update_query(local_query, "{\"folder_id\":\"" + other_ops + "\"}", nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "host_mismatch");
+  r = store.update_query(local_query, "{\"host_id\":\"other\"}", nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "host_mismatch");
+  CHECK_STATUS(store.update_query(local_query, "{\"host_id\":\"local\",\"name\":\"Parts\"}", nullptr), 200);
+  r = store.create_folder(folder_body("Child", other_ops), nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "host_mismatch");
+  r = store.update_folder(local_ops, "{\"parent_id\":\"" + other_ops + "\"}", nullptr);
+  CHECK_STATUS(r, 400);
+  CHECK(str(json(r), "reason") == "host_mismatch");
+  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);
+  // Moves inside a host work.
+  CHECK_STATUS(store.update_query(local_query, "{\"folder_id\":null}", nullptr), 200);
+
+  // History: appends are stamped with their host, lists and clears are per host.
+  CHECK_STATUS(store.append_history(history_body("SELECT 'local 1'"), nullptr), 201);
+  CHECK_STATUS(store.append_history(history_body("SELECT 'local 2'"), nullptr), 201);
+  CHECK_STATUS(store.append_history(history_body("SELECT 'other 1'", kOther), nullptr), 201);
+  auto page = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr));
+  CHECK(page["entries"].Size() == 2);
+  CHECK(str(page["entries"][0], "host_id") == "local");
+  page = json(store.list_history(OTHER, nullptr, nullptr, nullptr, nullptr));
+  CHECK(page["entries"].Size() == 1);
+  CHECK(str(page["entries"][0], "sql") == "SELECT 'other 1'");
+  auto cleared = json(store.clear_history(OTHER, nullptr));
+  CHECK(num(cleared, "deleted") == 1);
+  CHECK(json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr))["entries"].Size() == 2);
+  CHECK(json(store.list_history(OTHER, nullptr, nullptr, nullptr, nullptr))["entries"].Size() == 0);
+
+  // Import keeps the request's host, whatever the payload says.
+  r = store.import_library(
+      "{\"host_id\":\"other\",\"folders\":[{\"id\":\"b1\",\"name\":\"Imported\"}],"
+      "\"queries\":[{\"name\":\"Imp\",\"sql\":\"SELECT 9\",\"host_id\":\"local\",\"folder_id\":\"b1\"},"
+      "{\"name\":\"Into local\",\"sql\":\"SELECT 10\",\"folder_id\":\"" + local_ops + "\"}]}",
+      nullptr);
+  CHECK_STATUS(r, 200);
+  CHECK(num(json(r), "imported_queries") == 2);
+  other = json(store.get_library(OTHER));
+  CHECK(other["queries"].Size() == 4);
+  for (const auto& q : other["queries"].GetArray()) {
+    CHECK(str(q, "host_id") == "other");
+    if (str(q, "name") == "Into local") CHECK(q["folder_id"].IsNull());  // a folder of another host means the top level
+  }
+  CHECK(json(store.get_library(LOCAL))["queries"].Size() == 1);
+
+  // On disk: version 2, a host on every entry.
+  rapidjson::Document file;
+  file.Parse(read_file(path).c_str());
+  CHECK(file["version"].GetInt() == 2);
+  for (const auto* key : {"folders", "queries", "history"}) {
+    for (const auto& item : file[key].GetArray()) CHECK(!str(item, "host_id").empty());
+  }
+}
+
+// A version-1 file (folders without a host) and entries without a host:
+// dropped on load. A writable library rewrites the file as version 2; a
+// read-only one serves the cleaned library and never touches the file.
+const char* kVersion1 =
+    "{\"version\":1,\"revision\":4,\"folders\":["
+    "{\"id\":\"f_ops\",\"parent_id\":null,\"name\":\"Operations\"},"
+    "{\"id\":\"f_sub\",\"parent_id\":\"f_ops\",\"name\":\"Merges\"}],"
+    "\"queries\":["
+    "{\"id\":\"q_hostless\",\"folder_id\":null,\"name\":\"No host\",\"sql\":\"SELECT 1\",\"host_id\":null},"
+    "{\"id\":\"q_in_folder\",\"folder_id\":\"f_sub\",\"name\":\"Parts\",\"sql\":\"SELECT 2\",\"host_id\":\"local\"},"
+    "{\"id\":\"q_top\",\"folder_id\":null,\"name\":\"Top\",\"sql\":\"SELECT 3\",\"host_id\":\"other\"}],"
+    "\"history\":["
+    "{\"id\":\"h_1\",\"sql\":\"SELECT 4\",\"host_id\":null,\"ran_at_ms\":1000},"
+    "{\"id\":\"h_2\",\"sql\":\"SELECT 5\",\"host_id\":\"local\",\"ran_at_ms\":2000},"
+    "{\"id\":\"h_3\",\"sql\":\"SELECT 6\",\"ran_at_ms\":3000}]}";
+
+void check_migrated(QueryLibraryStore& store) {
+  auto lib = json(store.get_library(LOCAL));
+  CHECK(lib["load_error"].IsNull());
+  CHECK(lib["folders"].Size() == 0);
+  CHECK(lib["queries"].Size() == 1);
+  CHECK(str(lib["queries"][0], "id") == "q_in_folder");
+  CHECK(lib["queries"][0]["folder_id"].IsNull());  // its folder had no host: the top level
+  CHECK(num(lib, "revision") == 4);
+  auto other = json(store.get_library(OTHER));
+  CHECK(other["queries"].Size() == 1);
+  auto history = json(store.list_history(LOCAL, nullptr, nullptr, nullptr, nullptr));
+  CHECK(history["entries"].Size() == 1);
+  CHECK(str(history["entries"][0], "id") == "h_2");
+}
+
+void test_migration(const std::string& dir) {
+  std::ostringstream captured;
+  auto* old = std::cerr.rdbuf(captured.rdbuf());
+  {
+    // Writable: dropped, then rewritten atomically as version 2.
+    const std::string path = dir + "/v1-writable.json";
+    write_plain(path, kVersion1);
+    struct stat before {};
+    CHECK(::stat(path.c_str(), &before) == 0);
+    QueryLibraryStore store(options_for(path));
+    CHECK(store.writable());
+    check_migrated(store);
+    struct stat after {};
+    CHECK(::stat(path.c_str(), &after) == 0);
+    CHECK(after.st_ino != before.st_ino);  // replaced by rename
+    CHECK((after.st_mode & 0777) == 0600);
+    rapidjson::Document file;
+    file.Parse(read_file(path).c_str());
+    CHECK(!file.HasParseError());
+    CHECK(file["version"].GetInt() == 2);
+    CHECK(file["folders"].Size() == 0);
+    CHECK(file["queries"].Size() == 2);
+    CHECK(file["history"].Size() == 1);
+    CHECK(num(file, "revision") == 4);
+    // Loading the rewritten file changes nothing more.
+    const std::string rewritten = read_file(path);
+    QueryLibraryStore again(options_for(path));
+    check_migrated(again);
+    CHECK(read_file(path) == rewritten);
+    // Still editable after the migration.
+    CHECK_STATUS(again.create_folder(folder_body("Operations"), nullptr), 201);
+
+    // Read-only: the same library in memory, the file untouched.
+    const std::string ro_path = dir + "/v1-readonly.json";
+    write_plain(ro_path, kVersion1);
+    auto o = options_for(ro_path);
+    o.writable = false;
+    QueryLibraryStore ro(o);
+    check_migrated(ro);
+    CHECK(read_file(ro_path) == kVersion1);
+    CHECK_STATUS(ro.create_folder(folder_body("x"), nullptr), 403);
+    CHECK(read_file(ro_path) == kVersion1);
+
+    // A version-2 file holding entries without a host: dropped and rewritten too.
+    const std::string v2_path = dir + "/v2-hostless.json";
+    write_plain(v2_path, "{\"version\":2,\"revision\":1,\"folders\":[{\"id\":\"f_x\",\"name\":\"X\"}],"
+                         "\"queries\":[{\"id\":\"q_x\",\"name\":\"X\",\"sql\":\"SELECT 1\",\"host_id\":\"local\"}]}");
+    QueryLibraryStore v2(options_for(v2_path));
+    CHECK(json(v2.get_library(LOCAL))["folders"].Size() == 0);
+    CHECK(json(v2.get_library(LOCAL))["queries"].Size() == 1);
+    rapidjson::Document v2file;
+    v2file.Parse(read_file(v2_path).c_str());
+    CHECK(v2file["folders"].Size() == 0);
+
+    // An external edit dropping in a version-1 file is migrated on reload.
+    write_plain(v2_path, kVersion1);
+    check_migrated(v2);
+    v2file.Parse(read_file(v2_path).c_str());
+    CHECK(v2file["version"].GetInt() == 2);
+
+    // A malformed file is never rewritten, whatever its version.
+    const std::string bad_path = dir + "/v1-broken.json";
+    const std::string broken = std::string(kVersion1).substr(0, 120);
+    write_plain(bad_path, broken);
+    QueryLibraryStore bad(options_for(bad_path));
+    CHECK(!json(bad.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(read_file(bad_path) == broken);
+  }
+  std::cerr.rdbuf(old);
+  CHECK(captured.str().find("migrated") != std::string::npos);
+  CHECK(captured.str().find("SELECT") == std::string::npos);  // SQL is never logged
 }
 
 } // namespace
@@ -436,6 +675,8 @@ int main() {
   test_malformed_and_reload(dir);
   test_import(dir);
   test_file_limit(dir);
+  test_per_host(dir);
+  test_migration(dir);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

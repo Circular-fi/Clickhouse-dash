@@ -22,6 +22,9 @@ namespace chdash {
 
 struct QueryLibraryOptions {
   std::string file;
+  // The configured ClickHouse host ids: every request names one of them
+  // (host_id), and the library, its folders and its history are per host.
+  std::vector<std::string> host_ids;
   bool writable = false;
   bool history_on_server = true;
   size_t history_max_entries = 500;
@@ -42,9 +45,13 @@ inline constexpr size_t kQueryLibraryMaxIdBytes = 128;
 inline constexpr size_t kQueryLibraryMaxHistoryErrorBytes = 4096;
 inline constexpr size_t kQueryLibraryMaxHistoryPage = 1000;
 inline constexpr size_t kQueryLibraryDefaultHistoryPage = 100;
+// Version of the persisted file. Version 1 (no host on folders) is migrated
+// on load: see parse_query_library_file.
+inline constexpr int kQueryLibraryFileVersion = 2;
 
 struct QueryLibraryFolder {
   std::string id;
+  std::string host_id;
   std::optional<std::string> parent_id;
   std::string name;
   std::string description;
@@ -58,7 +65,7 @@ struct QueryLibraryQuery {
   std::string name;
   std::string description;
   std::string sql;
-  std::optional<std::string> host_id;
+  std::string host_id;
   std::vector<std::string> tags;
   int64_t created_at_ms = 0;
   int64_t updated_at_ms = 0;
@@ -67,7 +74,7 @@ struct QueryLibraryQuery {
 struct QueryLibraryHistoryEntry {
   std::string id;
   std::string sql;
-  std::optional<std::string> host_id;
+  std::string host_id;
   int64_t ran_at_ms = 0;
   double elapsed_ms = 0;
   std::optional<int64_t> rows;
@@ -88,11 +95,26 @@ struct QueryLibraryState {
   uint64_t next_seq = 0;
 };
 
-// Parse and validate the persisted JSON document. Throws std::runtime_error
-// with a message that never contains file content.
-QueryLibraryState parse_query_library_file(std::string_view text);
+// What loading a file changed: a version-1 file, or entries without a host
+// (folders, queries, history), which are dropped. A query or folder whose
+// folder was dropped moves to the top level of its host.
+struct QueryLibraryMigration {
+  int from_version = kQueryLibraryFileVersion;
+  size_t dropped_folders = 0;
+  size_t dropped_queries = 0;
+  size_t dropped_history = 0;
+  size_t rerooted = 0;
+  bool changed() const {
+    return from_version != kQueryLibraryFileVersion || dropped_folders || dropped_queries || dropped_history || rerooted;
+  }
+};
 
-// Serialize the persisted JSON document (version 1).
+// Parse and validate the persisted JSON document (version 1 or 2), applying
+// the migration above. Throws std::runtime_error with a message that never
+// contains file content.
+QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMigration* migration = nullptr);
+
+// Serialize the persisted JSON document (version 2).
 std::string serialize_query_library_file(const QueryLibraryState& state);
 
 // Atomic replacement: write a temporary file in the target's directory with
@@ -118,11 +140,13 @@ public:
   const QueryLibraryOptions& options() const { return options_; }
 
   // `if_match` is the raw If-Match header value, or nullptr when absent.
-  Response get_library();
-  Response list_history(const std::string* limit, const std::string* before_ms,
+  // `host_id` is the request's host_id parameter, or nullptr when absent
+  // (400: it is required and must name a configured host).
+  Response get_library(const std::string* host_id);
+  Response list_history(const std::string* host_id, const std::string* limit, const std::string* before_ms,
                         const std::string* before_id, const std::string* q);
   Response append_history(std::string_view body, const std::string* if_match);
-  Response clear_history(const std::string* if_match);
+  Response clear_history(const std::string* host_id, const std::string* if_match);
   Response delete_history_entry(const std::string& id, const std::string* if_match);
   Response create_folder(std::string_view body, const std::string* if_match);
   Response update_folder(const std::string& id, std::string_view body, const std::string* if_match);
@@ -152,6 +176,7 @@ private:
   void require_editable_locked() const;
   void require_history_writable_locked() const;
   void check_if_match_locked(const std::string* if_match) const;
+  std::string require_host_locked(const std::string* raw, const std::string& field) const;
   void commit_locked(QueryLibraryState candidate);
   std::string new_id_locked(char prefix, const QueryLibraryState& state);
 

@@ -133,6 +133,7 @@ Server::Server(AppConfig cfg, bool start_background)
   if (cfg_.query_library.enabled) {
     QueryLibraryOptions library;
     library.file = cfg_.query_library.file;
+    for (const auto& host : cfg_.hosts) library.host_ids.push_back(host.id);
     library.writable = cfg_.query_library.writable;
     library.history_on_server = cfg_.query_library.history_on_server();
     library.history_max_entries = cfg_.query_library.history_max_entries;

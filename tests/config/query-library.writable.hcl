@@ -32,4 +32,10 @@ clickhouse {
     runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
     system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
   }
+  # A second host on the same server: the library is per host.
+  host {
+    name       = "other"
+    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
+    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+  }
 }

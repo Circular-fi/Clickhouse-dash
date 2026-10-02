@@ -1,10 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "revision": 3,
   "updated_at_ms": 1790000000000,
   "folders": [
     {
       "id": "f_seed_ops",
+      "host_id": "local",
       "parent_id": null,
       "name": "Operations",
       "description": "Shared operational queries",
@@ -13,6 +14,7 @@
     },
     {
       "id": "f_seed_merges",
+      "host_id": "local",
       "parent_id": "f_seed_ops",
       "name": "Merges",
       "description": "",
@@ -27,8 +29,11 @@
       "name": "Active parts per table",
       "description": "Largest tables by active part count",
       "sql": "SELECT database, table, count() AS parts\nFROM system.parts\nWHERE active\nGROUP BY database, table\nORDER BY parts DESC\nLIMIT 20",
-      "host_id": null,
-      "tags": ["parts", "merges"],
+      "host_id": "local",
+      "tags": [
+        "parts",
+        "merges"
+      ],
       "created_at_ms": 1790000000000,
       "updated_at_ms": 1790000000000
     }

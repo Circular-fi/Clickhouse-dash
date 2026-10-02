@@ -2,6 +2,8 @@
 
 The Query page keeps saved queries (in folders, with descriptions and tags) and the history of the queries it ran. By default both live in the browser (localStorage). The optional `query_library` block moves them to one JSON file on the ChDash server, so every user of the panel shares the same library.
 
+**Saved queries and history are per host.** Every folder, saved query and history entry belongs to one ClickHouse host (`host_id`, the `name` of a `clickhouse.host` block). The library shows the folders, queries and history of the host selected in the header only, and follows a host switch at once; a run is recorded in the history of the host it ran on. In server mode every read names its host (`?host_id=`), every write is stamped with it, and nothing moves from one host to another.
+
 ```hcl
 query_library {
   enabled  = true
@@ -43,11 +45,20 @@ Ctrl/Cmd+S saves the editor to the library (or updates the saved query the edito
 
 | Mode | Library | History |
 | --- | --- | --- |
-| `enabled = false` | this browser, `localStorage["chdash.queryLibrary.v2"]` (created once from the flat `chdash.savedQueries.v1` list, which is left as it was); always editable | `localStorage["chdash.queryHistory.v1"]` |
-| `enabled = true` | the server file through `/api/query-library` | per `history.store` |
+| `enabled = false` | this browser, `localStorage["chdash.queryLibrary.v2"]` (each folder and query carries its `host_id`); always editable | `localStorage["chdash.queryHistory.v1"]` (each entry carries its `host_id`) |
+| `enabled = true` | the server file through `/api/query-library?host_id=` | per `history.store` |
 | `writable = false` | shown with a *Read-only library* badge; every create / edit / move / delete control is hidden | no Clear, no per-entry removal |
 
-In server mode every folder / query change sends `If-Match: <revision>`; on a 409 conflict the library reloads and retries once, then tells the user. When the server library is editable and the browser has queries of its own, the library offers once to *Import my browser queries* (`POST /api/query-library/import`, after a confirm).
+In server mode every folder / query change sends `If-Match: <revision>`; on a 409 conflict the library reloads and retries once, then tells the user. When the server library is editable and the browser has queries of its own for the current host, the library offers once to *Import my browser queries* (`POST /api/query-library/import` with that `host_id`, after a confirm).
+
+### Entries without a host
+
+Entries without a host do not exist any more: they are dropped.
+
+- **Server, writable file**: when the file is loaded (at startup, or after an external edit), folders, saved queries and history entries without a `host_id` are removed, and the file is rewritten atomically as version 2 (see [File format](#file-format)). A query or folder that was inside a removed folder moves to the top level of its own host. The log says what was dropped (counts only, never SQL).
+- **Server, read-only (`writable = false`)**: the same entries are ignored in memory; the file is never rewritten.
+- **Server, malformed file**: a load error as before (read-only, served empty or from the last good copy); the file is never rewritten.
+- **Browser**: on the first load, folders and queries without a host are removed from `chdash.queryLibrary.v2` and history entries without a host from `chdash.queryHistory.v1`. The old flat list `chdash.savedQueries.v1` is no longer read or imported (its entries have no folder and often no host).
 
 The page address follows the editor: `?saved=<id>` while it holds a library query unchanged, else `?sql=<text>` of the last run (up to 4,000 characters). Opened in a new tab, the link fills the editor.
 
@@ -72,14 +83,14 @@ Responses carry `Cache-Control: no-store`.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "revision": 42,
   "updated_at_ms": 1790000000000,
   "folders": [
-    {"id": "f_3c1d...", "parent_id": null, "name": "Operations", "description": "", "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
+    {"id": "f_3c1d...", "host_id": "local", "parent_id": null, "name": "Operations", "description": "", "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
   ],
   "queries": [
-    {"id": "q_9a0b...", "folder_id": "f_3c1d...", "name": "Active parts", "description": "", "sql": "SELECT ...", "host_id": null, "tags": ["parts"], "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
+    {"id": "q_9a0b...", "folder_id": "f_3c1d...", "name": "Active parts", "description": "", "sql": "SELECT ...", "host_id": "local", "tags": ["parts"], "created_at_ms": 1790000000000, "updated_at_ms": 1790000000000}
   ],
   "history": [
     {"id": "h_77e2...", "sql": "SELECT 1", "host_id": "local", "ran_at_ms": 1790000000000, "elapsed_ms": 12.5, "rows": 1, "status": "ok", "error": null}
@@ -87,9 +98,11 @@ Responses carry `Cache-Control: no-store`.
 }
 ```
 
-- `version` must be `1`. `revision` is the library revision (see below). `history` is stored oldest first.
+- `version` is `2`; a version `1` file is migrated on load (below), any other version is a load error. `revision` is the library revision (see below). `history` is stored oldest first.
+- `host_id` is required on every folder, query and history entry. A folder lives in a folder of its own host, and a query in a folder of its own host; anything else is a load error. Host ids that are no longer configured are kept (the host may come back) but cannot be read until it is.
+- **Migration from version 1.** Version 1 had no `host_id` on folders, and `host_id` was optional on queries and history entries. On load every entry without a `host_id` is dropped (so every version-1 folder), a query or folder whose folder was dropped moves to the top level of its host, and a writable library rewrites the file as version 2 at once (atomically; the revision is kept). A read-only library serves the migrated library from memory and leaves the file as it is. The same applies to a version-2 file holding entries without a host.
 - Ids are generated by the server (`f_`, `q_`, `h_` + 16 hex digits); a hand-written file may use any unique string of at most 128 bytes.
-- `parent_id` / `folder_id` are `null` for the root. Folders nest at most 8 levels deep. Names are 1..256 bytes, trimmed, without control characters, and unique among siblings, case-insensitively (ASCII): among the subfolders of one folder, and among the queries of one folder.
+- `parent_id` / `folder_id` are `null` for the top level of the host. Folders nest at most 8 levels deep. Names are 1..256 bytes, trimmed, without control characters, and unique among siblings, case-insensitively (ASCII): among the subfolders of one folder (or of the host's top level), and among the queries of one folder.
 - `description` is at most 16 KiB. `tags` holds at most 32 distinct (case-insensitive) tags of 1..64 bytes. `status` is `ok`, `error` or `cancelled`; `error` is at most 4 KiB (longer messages are truncated).
 - Unknown fields are ignored and not preserved by the next write.
 
@@ -99,31 +112,33 @@ To pre-seed a read-only library, write such a file by hand (for example from an 
 
 All bodies are JSON. `If-Match: <revision>` is accepted on every mutating request (`42`, `"42"`, `W/"42"` and `*` are understood); on a mismatch the request answers 409 `{"error": "conflict", "revision": <current>}` so the UI can reload. Mutation responses carry the new `revision`.
 
-The library revision changes with every folder or query change and with an external edit of the file. History appends and deletions do not change it, so running queries never invalidates an editor's `If-Match`.
+`host_id` is required where the table names it, and must name a configured host: missing, it answers 400 `reason: "required"`; unknown, 400 `reason: "unknown_host"` (both with `field: "host_id"`). Requests by id (`PATCH`, `DELETE .../<id>`) act on the entity's own host. A move into a folder of another host, or a `host_id` in a PATCH that is not the entity's, answers 400 `reason: "host_mismatch"` and changes nothing.
+
+The library revision is one for the whole file (every host): it changes with every folder or query change and with an external edit of the file. History appends and deletions do not change it, so running queries never invalidates an editor's `If-Match`.
 
 | Route | Writable only | Result |
 | --- | --- | --- |
-| `GET /api/query-library` | | `{revision, updated_at_ms, writable, history_store, load_error, limits, folders, queries}` (queries include `sql`; no history). `load_error` is `null` or the reason the file could not be loaded. `limits` holds `max_query_bytes`, `max_file_bytes`, `history_max_entries`, `max_folder_depth`, `max_name_bytes`, `max_description_bytes`. |
-| `GET /api/query-library/history?limit=&before_ms=&before_id=&q=` | | `{entries, has_more}`, newest first (`ran_at_ms` descending). `limit` 1..1000 (default 100); `before_ms` returns entries with `ran_at_ms < before_ms`; the optional `before_id` (with `before_ms` = that entry's `ran_at_ms`) also returns older entries of the same millisecond; `q` is a case-insensitive substring of the SQL. History store `server` only. |
-| `POST /api/query-library/history` `{sql, host_id, ran_at_ms, elapsed_ms, rows, status, error}` | no | 201 `{id, revision}`. Only `sql` is required; `ran_at_ms` defaults to now, `status` to `ok` (`canceled` is accepted as `cancelled`). History store `server` only. |
-| `DELETE /api/query-library/history` | yes | Clears the history: `{ok, deleted, revision}`. |
+| `GET /api/query-library?host_id=` | | `{host_id, revision, updated_at_ms, writable, history_store, load_error, limits, folders, queries}`: the folders and queries of that host (queries include `sql`; no history). `load_error` is `null` or the reason the file could not be loaded. `limits` holds `max_query_bytes`, `max_file_bytes`, `history_max_entries`, `max_folder_depth`, `max_name_bytes`, `max_description_bytes`. |
+| `GET /api/query-library/history?host_id=&limit=&before_ms=&before_id=&q=` | | `{entries, has_more}`: the runs of that host, newest first (`ran_at_ms` descending). `limit` 1..1000 (default 100); `before_ms` returns entries with `ran_at_ms < before_ms`; the optional `before_id` (with `before_ms` = that entry's `ran_at_ms`) also returns older entries of the same millisecond; `q` is a case-insensitive substring of the SQL. History store `server` only. |
+| `POST /api/query-library/history` `{sql, host_id, ran_at_ms, elapsed_ms, rows, status, error}` | no | 201 `{id, revision}`. `sql` and `host_id` (the host the query ran on) are required; `ran_at_ms` defaults to now, `status` to `ok` (`canceled` is accepted as `cancelled`). History store `server` only. |
+| `DELETE /api/query-library/history?host_id=` | yes | Clears the history of that host: `{ok, deleted, revision}`. |
 | `DELETE /api/query-library/history/<id>` | yes | `{ok, id, revision}`. |
-| `POST /api/query-library/folders` `{parent_id, name, description}` | yes | 201: the folder plus `revision`. |
-| `PATCH /api/query-library/folders/<id>` `{name?, description?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = root); moving a folder into itself or one of its subfolders answers 400 `reason: "cycle"`, and a move that would nest deeper than 8 levels 400 `reason: "depth"`. |
+| `POST /api/query-library/folders` `{host_id, parent_id, name, description}` | yes | 201: the folder plus `revision`. `parent_id` is a folder of the same host. |
+| `PATCH /api/query-library/folders/<id>` `{name?, description?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = the top level of its host); moving a folder into itself or one of its subfolders answers 400 `reason: "cycle"`, a move that would nest deeper than 8 levels 400 `reason: "depth"`, and into a folder of another host 400 `reason: "host_mismatch"`. |
 | `DELETE /api/query-library/folders/<id>?recursive=1` | yes | `{ok, id, deleted_folders, deleted_queries, revision}`. Without `recursive=1` a folder holding subfolders or queries answers 409 `{"error": "not_empty", "folders": <subfolders>, "queries": <direct queries>}`. |
-| `POST /api/query-library/queries` `{folder_id, name, description, sql, host_id?, tags?}` | yes | 201: the query plus `revision`. |
-| `PATCH /api/query-library/queries/<id>` `{name?, description?, sql?, folder_id?, host_id?, tags?}` | yes | The query plus `revision`; `folder_id` moves it. |
+| `POST /api/query-library/queries` `{host_id, folder_id, name, description, sql, tags?}` | yes | 201: the query plus `revision`. `folder_id` is a folder of the same host. |
+| `PATCH /api/query-library/queries/<id>` `{name?, description?, sql?, folder_id?, tags?}` | yes | The query plus `revision`; `folder_id` moves it, within its host (400 `reason: "host_mismatch"` otherwise). |
 | `DELETE /api/query-library/queries/<id>` | yes | `{ok, id, revision}`. |
-| `POST /api/query-library/import` `{folders, queries}` | yes | `{ok, imported_folders, merged_folders, imported_queries, skipped_queries, folder_ids, revision}`. |
+| `POST /api/query-library/import` `{host_id, folders, queries}` | yes | `{ok, imported_folders, merged_folders, imported_queries, skipped_queries, folder_ids, revision}`. |
 
 A PATCH that changes nothing does not write the file and keeps the revision.
 
 ### Import
 
-`POST /api/query-library/import` is meant to be called once, to move the browser's localStorage library into the server library. `folders` entries are `{id, parent_id, name, description}` where `id` / `parent_id` are the browser's ids; `queries` entries are `{folder_id, name, description, sql, host_id, tags, created_at_ms?, updated_at_ms?}` where `folder_id` refers to an imported folder id (or an existing server folder id; anything else means the root).
+`POST /api/query-library/import` is meant to be called once per host, to move the browser's localStorage library of the current host into the server library. Everything imported belongs to the request's `host_id` (the current host): a `host_id` on an imported query is ignored. `folders` entries are `{id, parent_id, name, description}` where `id` / `parent_id` are the browser's ids; `queries` entries are `{folder_id, name, description, sql, tags, created_at_ms?, updated_at_ms?}` where `folder_id` refers to an imported folder id (or an existing server folder id of the same host; anything else means the top level).
 
-- Folders are imported parents first. A folder whose name (case-insensitive) already exists under the same parent is merged into the existing one (`merged_folders`). A parent cycle in the payload answers 400 `reason: "cycle"`.
-- Queries are de-duplicated by name + SQL against the whole library and within the payload (`skipped_queries`); a ` (n)` suffix added by an earlier import does not count, so importing the same payload twice is a no-op. A query whose name is already used by a different query of the target folder is renamed `name (2)`, `name (3)`, ...
+- Folders are imported parents first. A folder whose name (case-insensitive) already exists under the same parent of the same host is merged into the existing one (`merged_folders`). A parent cycle in the payload answers 400 `reason: "cycle"`.
+- Queries are de-duplicated by name + SQL against the host's library and within the payload (`skipped_queries`); a ` (n)` suffix added by an earlier import does not count, so importing the same payload twice is a no-op. A query whose name is already used by a different query of the target folder is renamed `name (2)`, `name (3)`, ...
 - `folder_ids` maps each imported folder id to its server id.
 - The import is all-or-nothing: a validation error anywhere answers 400 (or 413) with the offending `field` (for example `queries[3].sql`) and nothing is written. When nothing is new, the file is not written and the revision does not change.
 
@@ -133,7 +148,7 @@ Errors are JSON objects carrying `error` (and the same value in `error_code`, li
 
 | Status | `error` | Extra fields |
 | --- | --- | --- |
-| 400 | `validation` | `field` (`name`, `parent_id`, `sql`, `tags[2]`, `queries[3].name`, `If-Match`, `limit`, `body`, ...) and `reason` (`required`, `type`, `too_long`, `invalid`, `duplicate`, `not_found`, `cycle`, `depth`, `invalid_json`, `range`) |
+| 400 | `validation` | `field` (`host_id`, `name`, `parent_id`, `folder_id`, `sql`, `tags[2]`, `queries[3].name`, `If-Match`, `limit`, `body`, ...) and `reason` (`required`, `type`, `too_long`, `invalid`, `duplicate`, `not_found`, `unknown_host`, `host_mismatch`, `cycle`, `depth`, `invalid_json`, `range`) |
 | 403 | `read_only` | `load_error` when the file failed to load |
 | 403 | `cross_site_request` | |
 | 404 | `not_found` | Unknown id; also every route when the feature is disabled (empty body) |
@@ -145,6 +160,6 @@ Errors are JSON objects carrying `error` (and the same value in `error_code`, li
 
 ## Tests
 
-- `tests/native/query_library_test.cpp`: store unit tests (atomic write, tree rules, If-Match, history, read-only, malformed file and reload, import, size cap). Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`; `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
+- `tests/native/query_library_test.cpp`: store unit tests (atomic write, tree rules, If-Match, history, read-only, malformed file and reload, import, size cap, per-host reads and writes, `host_mismatch`, the version 1 to 2 migration on a writable and a read-only file). Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`; `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances; see "Query library" in [`tests/README.md`](../tests/README.md).
 - `tests/frontend/specs/query-library.spec.js`: the Query page library dialog (the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, stacked confirms) in browser mode (migration, folders, save / edit / move, search, preview, keyboard, History), in server mode against a mocked API (If-Match and conflict retry, read-only, import, server History), on a phone and in both themes. Its last test runs against a real writable instance when `QUERY_LIBRARY_BASE_URL` names one (as the Playwright container reaches it).
