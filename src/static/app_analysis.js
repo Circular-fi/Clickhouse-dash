@@ -35,7 +35,8 @@
     traceSpans = null;
     pipelineModel = null;
   }
-  function emptyState(text) { const el = document.createElement("div"); el.className = "analysisEmpty"; el.textContent = text; return el; }
+  // The dialog's empty and failed states (ns.uiState).
+  function emptyState(text, kind = "empty") { return ns.uiState.block(kind, { body: text }); }
 
   function decodeTraceSpans(data) {
     const compact = data?.trace_compact;
@@ -276,14 +277,14 @@
     try {
       if (!views.pipeline && !views.tracing) {
         clear(dom.analysisContent);
-        dom.analysisContent?.appendChild(emptyState("No profiling views are available for this host/query."));
+        dom.analysisContent?.appendChild(emptyState("No profiling view is available for this query on this host."));
       } else if (activeTab === "tracing") renderTrace();
       else renderPipeline();
     } catch (err) {
       releaseData();
       notice(err instanceof Error ? err.message : String(err), "error");
       clear(dom.analysisContent);
-      dom.analysisContent?.appendChild(emptyState("Analysis could not be loaded."));
+      dom.analysisContent?.appendChild(emptyState("The profiling views could not be loaded.", "error"));
     }
   }
 
@@ -366,7 +367,7 @@
       notice(err instanceof Error ? err.message : String(err), "error");
       if (dom.analysisContent) {
         clear(dom.analysisContent);
-        dom.analysisContent.appendChild(emptyState("Analysis could not be loaded."));
+        dom.analysisContent.appendChild(emptyState("The profiling views could not be loaded.", "error"));
       }
     }
   }

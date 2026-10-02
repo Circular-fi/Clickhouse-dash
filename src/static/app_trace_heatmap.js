@@ -190,7 +190,7 @@
     }
     if (hm.error) {
       ctx.unmountChart(container);
-      container.innerHTML = `<div class="tracesEmpty traceChartError" role="alert"><span>${esc(hm.error)}</span> <button type="button" class="traceMiniButton" data-heatmap-retry>Retry</button></div>`;
+      container.innerHTML = ns.uiState.errorHtml({ body: hm.error, compact: true, retry: { attrs: { "data-heatmap-retry": "" } } });
       container.querySelector("[data-heatmap-retry]")?.addEventListener("click", () => { void load(); });
       renderPanel();
       return;
@@ -499,15 +499,16 @@
   }
 
   function panelBodyHtml() {
-    if (deltas.loading) return `<div class="traceDeltaPanel__state" role="status"><span class="traceDeltaSpinner" aria-hidden="true"></span>Comparing sampled traces of the box with the baseline\u2026</div>`;
-    if (deltas.error) return `<div class="traceDeltaPanel__state traceChartError" role="alert"><span>${esc(deltas.error)}</span><button type="button" class="traceMiniButton" data-delta-retry>Retry</button></div>`;
+    const ui = ns.uiState;
+    if (deltas.loading) return ui.loadingHtml({ label: "Comparing sampled traces of the box with the baseline\u2026", compact: true });
+    if (deltas.error) return ui.errorHtml({ body: deltas.error, compact: true, retry: { attrs: { "data-delta-retry": "" } } });
     const data = deltas.data;
     if (!data) return "";
-    if (!Number(data.selection?.sampled || 0)) return '<div class="traceDeltaPanel__state">No traces in this box: select cells that hold traces.</div>';
+    if (!Number(data.selection?.sampled || 0)) return ui.emptyHtml({ body: "No traces in this box: select cells that hold traces.", compact: true });
     const keys = Array.isArray(data.keys) ? data.keys : [];
     if (!keys.length) {
       const hidden = (data.hidden_keys || []).length;
-      return `<div class="traceDeltaPanel__state">No attribute sets these traces apart from the baseline${hidden ? ` (${hidden} identifier or high-cardinality key${hidden === 1 ? "" : "s"} skipped)` : ""}.</div>`;
+      return ui.emptyHtml({ body: `No attribute sets these traces apart from the baseline${hidden ? ` (${hidden} key${hidden === 1 ? "" : "s"} with a different value on almost every trace skipped)` : ""}.`, compact: true });
     }
     return `<div class="traceDeltaGrid">${keys.map(cardHtml).join("")}</div>`;
   }

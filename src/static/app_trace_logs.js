@@ -307,7 +307,7 @@
     let title = "";
     let cls = "";
     let extra = "";
-    if (v.status === "loading") { value = '<span class="traceButtonSpinner" aria-hidden="true"></span>'; title = "Loading the logs of this trace"; cls = " is-loading"; }
+    if (v.status === "loading") { value = ns.uiState.spinnerHtml(); title = "Loading the logs of this trace"; cls = " is-loading"; }
     else if (v.status === "error") { value = "!"; title = `Logs could not be loaded: ${v.message}`; cls = " is-error"; }
     else if (v.status === "unavailable") { value = fmt.EMPTY; title = v.message; cls = " is-unavailable"; }
     else {
@@ -351,8 +351,13 @@
       && (!needle || searchText(record).includes(needle)));
   }
 
-  function panelStateHtml(kind, html) {
-    return `<div class="traceLogsState is-${kind}" data-trace-logs-state="${kind}">${html}</div>`;
+  // The panel's state (ns.uiState): loading, error, unavailable, empty or filtered.
+  function panelStateHtml(kind, options) {
+    const ui = ns.uiState;
+    const attrs = { "data-trace-logs-state": kind };
+    if (kind === "loading") return ui.loadingHtml({ ...options, compact: true, attrs });
+    if (kind === "error") return ui.errorHtml({ ...options, compact: true, attrs });
+    return ui.emptyHtml({ ...options, compact: true, attrs });
   }
 
   function windowText(v) {
@@ -396,10 +401,10 @@
 
   function panelListHtml(v) {
     if (!v.records.length) {
-      return panelStateHtml("empty", `No logs for this trace in ${esc(`${v.payload?.database}.${v.payload?.table}`)} (${esc(windowText(v))}).`);
+      return panelStateHtml("empty", { body: `No logs for this trace in ${v.payload?.database}.${v.payload?.table} (${windowText(v)}).` });
     }
     const rows = filteredRecords(v);
-    if (!rows.length) return panelStateHtml("filtered", 'No loaded log matches the filters. <button type="button" class="traceLogsState__action" data-trace-logs-clear>Clear filters</button>');
+    if (!rows.length) return panelStateHtml("filtered", { body: "No loaded log matches the filters.", action: { label: "Clear filters", attrs: { "data-trace-logs-clear": "" } } });
     const shown = rows.slice(0, v.shown);
     const more = rows.length > shown.length
       ? `<button type="button" class="traceLogsPanel__more" data-trace-logs-more>Show ${fmt.count(Math.min(PANEL_PAGE, rows.length - shown.length))} more of ${fmt.count(rows.length - shown.length)}</button>`
@@ -427,12 +432,14 @@
     if (!visible) { panel.innerHTML = ""; delete panel.dataset.traceLogsState; return; }
     panel.dataset.traceLogsState = v.status;
     if (v.status === "loading") {
-      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", '<span class="traceButtonSpinner" aria-hidden="true"></span>Loading the logs of this trace\u2026')}`;
+      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml("loading", { label: "Loading the logs of this trace\u2026" })}`;
       return;
     }
     if (v.status === "error" || v.status === "unavailable") {
-      const retry = v.status === "error" ? ' <button type="button" class="traceLogsState__action" data-trace-logs-retry>Retry</button>' : "";
-      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml(v.status, `${v.status === "error" ? "Logs could not be loaded: " : ""}${esc(v.message)}${retry}`)}`;
+      const state = v.status === "error"
+        ? { body: `The logs could not be loaded: ${v.message}`, retry: { attrs: { "data-trace-logs-retry": "" } } }
+        : { body: v.message };
+      panel.innerHTML = `<div class="traceLogsPanel__bar"><strong class="traceLogsPanel__title">${LOG_ICON}Logs</strong><button type="button" class="closeCross closeCross--sm traceLogsPanel__close" data-trace-logs-toggle aria-label="Hide the logs panel" title="Hide the logs panel">×</button></div>${panelStateHtml(v.status, state)}`;
       return;
     }
     panel.innerHTML = `${panelToolbarHtml(v)}<div data-trace-logs-notice-slot>${panelNoticeHtml(v)}</div><div class="traceLogsPanel__list" data-trace-logs-list role="list" aria-label="Trace logs">${panelListHtml(v)}</div>`;

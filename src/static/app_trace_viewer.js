@@ -409,10 +409,7 @@
     container.replaceChildren();
     container.classList.add("traceViewerHost");
     if (!model.spans.length) {
-      const empty = document.createElement("div");
-      empty.className = "traceViewer__empty";
-      empty.textContent = options.emptyText || "No trace spans are available.";
-      container.appendChild(empty);
+      container.appendChild(ns.uiState.block("empty", { body: options.emptyText || "No trace spans are available." }));
       return controller;
     }
 

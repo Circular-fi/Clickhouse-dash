@@ -655,6 +655,28 @@
     facets?.reset();
   }
 
+  // Filters beyond the time range: status, service, operation, chips, duration.
+  function hasFilters() {
+    if (!ctx) return false;
+    const { dom } = ctx;
+    return !!(dom.tracesStatus?.value || dom.tracesService?.value || dom.tracesOperation?.value || search.chips.length || search.duration);
+  }
+
+  // "Clear filters" of an empty result: the range, limit and sort stay.
+  function clearFilters() {
+    if (!ctx) return;
+    const { dom } = ctx;
+    setSelect(dom.tracesStatus, "");
+    wantSelect(dom.tracesService, "");
+    wantSelect(dom.tracesOperation, "");
+    ctx.refreshServiceOperationOptions();
+    setSelect(dom.tracesService, "");
+    setSelect(dom.tracesOperation, "");
+    search.chips = [];
+    search.duration = null;
+    renderChips();
+  }
+
   ns.traceSearch = {
     install,
     chipParams,
@@ -667,6 +689,8 @@
     hasSearchParams: () => hasSearchParams(new URLSearchParams(window.location.search)),
     onSearched: (filters) => { void facets?.load(filters); },
     resetFacets,
+    hasFilters,
+    clearFilters,
     applySearch,
     prefillTagParams,
     prefillTagsChanged,

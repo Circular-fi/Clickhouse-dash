@@ -42,7 +42,9 @@
   // ------------------------------------------------------------ formatting
 
   // A failed request's Retry: "list", "detail" or "db" (onClick).
-  const RETRY = (what) => `<button type="button" class="button button--small" data-svc-retry="${what}">Retry</button>`;
+  // A failed step's state block, its Retry handled by the view's click listener.
+  const failedHtml = (text, what) => ns.uiState.errorHtml({ body: text, compact: true, retry: { attrs: { "data-svc-retry": what } } });
+  const emptyHtml = (text, options = {}) => ns.uiState.emptyHtml({ body: text, compact: true, ...options });
 
   // A request rate in the largest unit it reaches 1 in: 2.4/s, 29/min, 6/h.
   const RATE_UNITS = [{ per: 1, suffix: "/s", word: "second" }, { per: 60, suffix: "/min", word: "minute" }, { per: 3600, suffix: "/h", word: "hour" }];
@@ -302,9 +304,9 @@
     const timing = payload?.timing_ms?.total != null ? ` · ${fmt.duration.fromMs(Number(payload.timing_ms.total))}` : "";
     const meta = payload ? `${view.scope === "root" ? "root spans" : "entry spans"} · ${bucket} buckets${timing}` : "";
     let body;
-    if (view.error && !payload) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(view.error)} ${RETRY("list")}</div>`;
-    else if (!payload) body = `<div class="tracesEmpty">${view.loading ? "Loading services\u2026" : "Search to load services."}</div>`;
-    else if (!count) body = `<div class="tracesEmpty">No ${view.scope === "root" ? "root" : "entry"} spans match in this range.</div>`;
+    if (view.error && !payload) body = failedHtml(view.error, "list");
+    else if (!payload) body = view.loading ? ns.uiState.loadingHtml({ label: "Loading services\u2026" }) : emptyHtml("Search to load services.");
+    else if (!count) body = emptyHtml(`No ${view.scope === "root" ? "trace starts" : "service requests"} match the search in this range.`, { title: "No services in this time range" });
     else body = tableHtml(rows);
     releaseDetailCharts();
     // A re-render (Back / Forward, a new answer) keeps the focus on its row.
@@ -436,7 +438,7 @@
 
   function endpointsHtml(payload, service) {
     const rows = withRates((payload.endpoints || []).map(statsRow), payload);
-    if (!rows.length) return '<div class="traceSvcEmpty">No endpoints in this range.</div>';
+    if (!rows.length) return emptyHtml("No endpoints in this range.");
     const body = rows.map((row) => `<tr data-svc-endpoint="${esc(row.name)}">
       <th scope="row"><button type="button" class="traceSvcLink" data-svc-operation-search="${esc(row.name)}" title="Search traces of ${esc(service)} / ${esc(row.name)}">${esc(row.name)}</button></th>
       <td class="is-num">${esc(rateText(row.rate))}</td>
@@ -445,12 +447,12 @@
       <td class="is-num">${p99Cell(row, service, row.name)}</td>
       <td class="traceSvcShare" title="${esc(`${fmt.duration(row.total)} in total`)}"><span class="traceSvcShare__bar" style="--share:${Math.min(100, row.share).toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt.duration(row.total))}</span></td>
     </tr>`).join("");
-    return `<table class="traceSvcTable traceSvcTable--compact" aria-label="Most time-consuming endpoints"><thead><tr><th scope="col">Endpoint</th><th scope="col" class="is-num">Requests</th><th scope="col" class="is-num">Errors</th><th scope="col" class="is-num">P95</th><th scope="col" class="is-num">P99</th><th scope="col">Total time</th></tr></thead><tbody>${body}</tbody></table>${payload.endpoints_truncated ? '<div class="traceSvcEmpty">Only the 100 most time-consuming endpoints are listed.</div>' : ""}`;
+    return `<table class="traceSvcTable traceSvcTable--compact" aria-label="Most time-consuming endpoints"><thead><tr><th scope="col">Endpoint</th><th scope="col" class="is-num">Requests</th><th scope="col" class="is-num">Errors</th><th scope="col" class="is-num">P95</th><th scope="col" class="is-num">P99</th><th scope="col">Total time</th></tr></thead><tbody>${body}</tbody></table>${payload.endpoints_truncated ? '<div class="traceSvcNote">Only the 100 most time-consuming endpoints are listed.</div>' : ""}`;
   }
 
   function slowestHtml(payload) {
     const rows = Array.isArray(payload.slowest) ? payload.slowest : [];
-    if (!rows.length) return '<div class="traceSvcEmpty">No spans in this range.</div>';
+    if (!rows.length) return emptyHtml("No spans in this range.");
     return `<ol class="traceSvcSlowest">${rows.map((row) => {
       const [traceId, spanId, operation, startMs, durationNs, status] = row;
       const href = ctx.spanTraceUrl(String(traceId), String(spanId || ""));
@@ -463,25 +465,25 @@
     const rows = Array.isArray(payload.releases) ? payload.releases : [];
     const items = rows.length
       ? rows.map((r) => `<li data-release-version="${esc(r[0])}"><b>${esc(r[0])}</b><span title="${esc(fmt.timeTitle(Number(r[1])))}">${esc(fmt.time(Number(r[1])))}</span></li>`).join("")
-      : '<li class="traceSvcEmpty">No ResourceAttributes[\'service.version\'] on this service\'s spans in range.</li>';
+      : `<li class="traceSvcReleases__none">${emptyHtml("No release version (service.version) on this service's spans in this range.")}</li>`;
     return `<section class="traceSvcSection"><h4>Releases${payload.releases_estimated ? ' <span class="traceSvcBadge traceSvcBadge--estimated" title="The read cap stopped the scan: later versions may be missing.">\u2248</span>' : ""}</h4><ul class="traceSvcReleases">${items}</ul></section>`;
   }
 
   function dbHtml() {
     const db = view.db;
-    if (db.loading && !db.payload) return '<div class="traceSvcEmpty">Loading database statements\u2026</div>';
-    if (db.error) return `<div class="traceSvcEmpty traceChartError" role="alert">${esc(db.error)} ${RETRY("db")}</div>`;
+    if (db.loading && !db.payload) return ns.uiState.loadingHtml({ label: "Loading database statements\u2026", compact: true });
+    if (db.error) return failedHtml(db.error, "db");
     const payload = db.payload;
     if (!payload) return "";
-    if (payload.supported === false) return '<div class="traceSvcEmpty">Span attributes are not stored as a Map column (or are disabled): database statements are unavailable.</div>';
+    if (payload.supported === false) return emptyHtml("Database statements are unavailable: this trace table does not keep span attributes.");
     const rows = Array.isArray(payload.statements) ? payload.statements : [];
-    if (!rows.length) return '<div class="traceSvcEmpty">No database spans (db.query.text / db.statement) for this service in range.</div>';
+    if (!rows.length) return emptyHtml("No database calls from this service in this range.");
     const seconds = Math.max(1, (Number(payload.range?.[1]) - Number(payload.range?.[0])) / 1000);
     const total = rows.reduce((sum, r) => sum + Number(r[5] || 0), 0) || 1;
     return `<table class="traceSvcTable traceSvcTable--compact traceSvcDb" aria-label="Database statements"><thead><tr><th scope="col">Statement</th><th scope="col">System</th><th scope="col" class="is-num">Count</th><th scope="col" class="is-num">Throughput</th><th scope="col" class="is-num">P95</th><th scope="col">Total time</th></tr></thead><tbody>${rows.map((r) => {
       const share = (Number(r[5] || 0) / total) * 100;
       return `<tr data-db-statement="${esc(r[1])}"><th scope="row"><code class="traceSvcDb__stmt" title="${esc(r[1])}">${esc(r[1])}</code></th><td>${esc(r[2] || fmt.EMPTY)}</td><td class="is-num">${fmt.count(Number(r[3] || 0))}</td><td class="is-num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="is-num">${esc(fmt.duration(r[6]))}</td><td class="traceSvcShare"><span class="traceSvcShare__bar" style="--share:${share.toFixed(2)}%"></span><span class="traceSvcShare__text">${esc(fmt.duration(r[5]))}</span></td></tr>`;
-    }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcEmpty">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
+    }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcNote">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
   }
 
   // The selected service's totals row of a detail payload (rates included).
@@ -509,9 +511,9 @@
       ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), row.errors ? " has-errors" : "") + stat("P50", esc(fmt.duration(row.p50))) + stat("P95", esc(fmt.duration(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt.duration(row.total)))
       : "";
     let body;
-    if (detail.error) body = `<div class="tracesEmpty traceChartError" role="alert">${esc(detail.error)} ${RETRY("detail")}</div>`;
-    else if (!payload) body = '<div class="tracesEmpty">Loading service\u2026</div>';
-    else if (!row) body = '<div class="tracesEmpty">No entry spans of this service match in this range.</div>';
+    if (detail.error) body = failedHtml(detail.error, "detail");
+    else if (!payload) body = ns.uiState.loadingHtml({ label: "Loading the service\u2026" });
+    else if (!row) body = emptyHtml("This service handled no requests matching the search in this range.");
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">

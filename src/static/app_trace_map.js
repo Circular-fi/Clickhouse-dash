@@ -403,13 +403,18 @@
     byId("traceMapView")?.setAttribute("aria-busy", map.loading ? "true" : "false");
     let html = "";
     if (map.loading) {
-      html = `<div class="traceMap__message${hasGraph ? " traceMap__message--over" : ""}" role="status"><span class="traceButtonSpinner traceMap__spinner" aria-hidden="true"></span>Loading service map\u2026</div>`;
+      html = ns.uiState.loadingHtml({ label: "Loading service map\u2026", className: hasGraph ? "traceMap__over" : "" });
     } else if (map.error) {
-      html = `<div class="traceMap__message traceMap__message--error" role="alert"><strong>Service map failed</strong><span>${esc(map.error)}</span><button type="button" class="button button--small" data-map-retry>Retry</button></div>`;
+      html = ns.uiState.errorHtml({ title: "The service map could not be loaded", body: map.error, retry: { attrs: { "data-map-retry": "" } } });
     } else if (!map.data) {
-      html = '<div class="tracesEmpty">Search to load the service map.</div>';
+      html = ns.uiState.emptyHtml({ body: "Search to load the service map." });
     } else if (!map.data.nodes.length) {
-      html = '<div class="traceMap__message" role="status"><strong>No services in this time range</strong><span>No visible span matches the search. Widen the time range or remove filters.</span></div>';
+      const zoom = byId("tracesRangeZoomOut");
+      html = ns.uiState.emptyHtml({
+        title: "No services in this time range",
+        body: "No span matches the search. Widen the time range or remove filters.",
+        action: zoom && !zoom.disabled ? { label: "Zoom out", icon: "zoomOut", attrs: { "data-map-zoom-out": "" } } : null,
+      });
     } else if (!map.data.edges.length) {
       html = '<div class="traceMap__notice" role="status">No calls between services: an edge links a span to its parent span in another service.</div>';
     }
@@ -774,7 +779,9 @@
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
     byId("traceMapPanel")?.addEventListener("click", onActionClick);
     byId("traceMapState")?.addEventListener("click", (event) => {
-      if (event.target instanceof Element && event.target.closest("[data-map-retry]")) void ctx.runSearch({ url: "none" });
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest("[data-map-retry]")) void ctx.runSearch({ url: "none" });
+      else if (event.target.closest("[data-map-zoom-out]")) byId("tracesRangeZoomOut")?.click();
     });
     renderLegend();
     renderState();

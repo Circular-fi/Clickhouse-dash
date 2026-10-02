@@ -258,7 +258,7 @@
     if (!alt || view.current === "timeline") return;
     const spans = ctx.model.activeTrace?.spans || [];
     if (!spans.length) {
-      alt.innerHTML = '<div class="tracesEmpty">No spans.</div>';
+      alt.innerHTML = ns.uiState.emptyHtml({ body: "This trace has no spans." });
       return;
     }
     if (view.current === "statistics") renderStatistics(alt);
@@ -1313,11 +1313,14 @@
     const kit = graphKit();
     const graph = graphTree();
     if (!kit) {
-      alt.innerHTML = '<div class="tracesEmpty">The trace graph could not load.</div>';
+      alt.innerHTML = ns.uiState.errorHtml({ body: "The trace graph could not be drawn. Reload the page to try again." });
       return;
     }
     if (graph.nodes.length > GRAPH_NODE_LIMIT) {
-      alt.innerHTML = `<div class="tracesEmpty">This trace has ${graph.nodes.length} distinct call paths: too many to draw (limit ${GRAPH_NODE_LIMIT}).</div>`;
+      alt.innerHTML = ns.uiState.emptyHtml({
+        title: "Too many call paths to draw",
+        body: `This trace has ${graph.nodes.length} distinct call paths; the graph draws up to ${GRAPH_NODE_LIMIT}. The Timeline, Statistics and Spans views show every span.`,
+      });
       return;
     }
     const pane = graphPane();

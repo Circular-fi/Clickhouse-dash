@@ -198,17 +198,19 @@
     if (el) el.replaceChildren();
   }
 
+  // The error strip above the Explorer (ns.uiState.banner).
   function setError(error) {
-    if (!dom.explorerError) return;
-    if (!error) {
-      dom.explorerError.hidden = true;
-      dom.explorerError.textContent = "";
-      return;
-    }
-    const code = error && error.code ? String(error.code) : "explorer_error";
-    let message = error instanceof Error ? String(error.message || "Explorer request failed.") : String(error || "Explorer request failed.");
-    dom.explorerError.textContent = message;
-    dom.explorerError.hidden = false;
+    const message = !error ? "" : error instanceof Error ? String(error.message || "The Explorer request failed.") : String(error || "The Explorer request failed.");
+    ns.uiState.banner(dom.explorerError, { message });
+  }
+
+  // The detail pane's state when no object is shown: empty, loading or
+  // error (ns.uiState), in #explorerEmptyState.
+  function showDetailState(kind, options) {
+    const box = dom.explorerEmptyState;
+    if (!box) return;
+    box.hidden = false;
+    ns.uiState[kind](box, options);
   }
 
   // Numbers, sizes, percentages and instants come from ns.format
@@ -500,10 +502,7 @@
 
   function renderBrowseRoot() {
     destroyDatabaseTreemap();
-    if (dom.explorerEmptyState) {
-      dom.explorerEmptyState.hidden = false;
-      dom.explorerEmptyState.replaceChildren(node("strong", "", "Select a table"), node("span", "", "Pick a database or an object in the tree."));
-    }
+    showDetailState("empty", { title: "Select a table", body: "Pick a database or an object in the tree." });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;
   }
 
@@ -1220,12 +1219,11 @@
     const functions = model.functionsCatalog?.functions || [];
     empty.classList.toggle("explorerFunctionOverview", functions.length > 0);
     if (!functions.length) {
-      empty.replaceChildren(
-        node("strong", "", model.loadingFunctions ? "Loading functions\u2026" : "Select a function"),
-        node("span", "", "Documentation is loaded from the selected ClickHouse server when available."),
-      );
+      if (model.loadingFunctions) ns.uiState.loading(empty, { label: "Loading functions\u2026" });
+      else ns.uiState.empty(empty, { title: "Select a function", body: "Its documentation comes from the selected ClickHouse server, when it has some." });
       return;
     }
+    empty.removeAttribute("aria-busy");
     const counts = new Map();
     for (const item of functions) {
       const category = functionCategory(item);
@@ -1326,7 +1324,7 @@
       dom.explorerFunctionDescription.appendChild(aliasSection);
     }
     if (!dom.explorerFunctionDescription.childElementCount) {
-      dom.explorerFunctionDescription.appendChild(node("div", "explorerEmptySection", "Documentation unavailable on this server."));
+      dom.explorerFunctionDescription.appendChild(ns.uiState.block("empty", { body: "This server has no documentation for this function.", compact: true }));
     }
   }
 
@@ -1573,23 +1571,15 @@
       .filter((item) => item.database === name && sidebarObjectVisible(item))
       .sort((a, b) => a.name.localeCompare(b.name));
     if (!name || !catalogHasDatabase(name)) {
-      if (dom.explorerEmptyState) {
-        dom.explorerEmptyState.hidden = false;
-        dom.explorerEmptyState.replaceChildren(node("strong", "", "Database unavailable"), node("span", "", name || "Unknown database"));
-      }
+      showDetailState("empty", { title: "Database unavailable", body: name ? `${name} is not in the catalog of this host, or you cannot read it.` : "Pick a database in the tree." });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
       return;
     }
 
     if (!model.databaseTablesLoaded.has(name)) {
-      if (dom.explorerEmptyState) {
-        dom.explorerEmptyState.hidden = false;
-        const error = model.databaseLoadErrors.get(name);
-        dom.explorerEmptyState.replaceChildren(
-          node("strong", "", error ? "Unable to load database" : "Loading tables\u2026"),
-          node("span", "", error?.message || name),
-        );
-      }
+      const error = model.databaseLoadErrors.get(name);
+      if (error) showDetailState("error", { title: "The database could not be loaded", body: error.message || name });
+      else showDetailState("loading", { label: `Loading the tables of ${name}\u2026` });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
       if (!model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);
       return;
@@ -1614,7 +1604,7 @@
     // followed by an empty object table.
     if (!tables.length) {
       destroyDatabaseTreemap();
-      dom.explorerDetailContent.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
+      dom.explorerDetailContent.appendChild(ns.uiState.block("empty", { title: "No objects in this database", body: "It holds no table, view or dictionary you can read." }));
       return;
     }
     renderDatabaseStorage(dom.explorerDetailContent, name);
@@ -1677,7 +1667,7 @@
     section.appendChild(head);
     container.appendChild(section);
     if (!tables.length) {
-      section.appendChild(node("div", "explorerEmptySection", "No objects in this database."));
+      section.appendChild(ns.uiState.block("empty", { body: "No objects in this database.", compact: true }));
       return;
     }
     const onDiskTotal = databaseStorageTree(database).root.bytes;
@@ -2203,10 +2193,7 @@
       renderTabContent();
       syncExplorerUrl(historyMode);
     } else {
-      if (dom.explorerEmptyState) {
-        dom.explorerEmptyState.hidden = false;
-        dom.explorerEmptyState.replaceChildren(node("strong", "", "Loading table\u2026"), node("span", "", `${database}.${table}`));
-      }
+      showDetailState("loading", { label: `Loading ${database}.${table}\u2026` });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
     }
 
@@ -2241,10 +2228,7 @@
     } catch (e) {
       if (serial !== model.detailSerial || model.selectedKey !== key) return;
       setError(e);
-      if (dom.explorerEmptyState) {
-        dom.explorerEmptyState.hidden = false;
-        dom.explorerEmptyState.replaceChildren(node("strong", "", "Unable to load table"), node("span", "", "The object may no longer be readable."));
-      }
+      showDetailState("error", { title: "The table could not be loaded", body: "It may have been dropped, or you can no longer read it." });
     } finally {
       if (serial === model.detailSerial) model.detailLoading = false;
     }
@@ -2416,10 +2400,7 @@
     model.preview = null;
     model.tab = DEFAULT_TAB;
     destroyDatabaseTreemap();
-    if (dom.explorerEmptyState) {
-      dom.explorerEmptyState.hidden = false;
-      dom.explorerEmptyState.replaceChildren(node("strong", "", "Select a table"), node("span", "", "Metadata is scoped to the currently selected host and user."));
-    }
+    showDetailState("empty", { title: "Select a table", body: "Pick a database or an object in the tree." });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;
     renderTableList();
     renderFunctionList();

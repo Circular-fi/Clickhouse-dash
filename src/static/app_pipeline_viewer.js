@@ -591,9 +591,7 @@
       } else if (options.profilingStatus === "unknown_no_rows") {
         message = "No processor rows were found, and ClickHouse did not expose the effective log_processors_profiles setting for this query.";
       }
-      const empty = element("div", "", message);
-      empty.className = "analysisEmpty";
-      container.appendChild(empty);
+      container.appendChild(ns.uiState.block("empty", { body: message }));
       return null;
     }
 

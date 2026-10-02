@@ -361,7 +361,7 @@
       return `<div class="traceSpanTable__foot is-error" role="alert"><span>${esc(state.error)}</span><button type="button" class="button button--small" data-span-retry>Retry</button></div>`;
     }
     if (state.loading) {
-      return `<div class="traceSpanTable__foot" role="status"><span class="traceSpanTable__spinner" aria-hidden="true"></span><span>${state.rows.length ? "Loading more spans\u2026" : "Searching spans\u2026"}</span></div>`;
+      return `<div class="traceSpanTable__foot" role="status">${ns.uiState.spinnerHtml()}<span>${state.rows.length ? "Loading more spans\u2026" : "Searching spans\u2026"}</span></div>`;
     }
     if (state.hasMore) {
       const asked = state.emptyPages >= AUTO_EMPTY_PAGES;
@@ -373,16 +373,10 @@
     return `<div class="traceSpanTable__foot is-end" data-span-end>End of results · ${fmt.count(state.rows.length)} span${state.rows.length === 1 ? "" : "s"}.${esc(capped)}</div>`;
   }
 
+  // The result list's "nothing found" (app_traces.js noResultsHtml).
   function emptyHtml() {
     const range = state.base ? { start: Number(state.base.start_ms), end: Number(state.base.end_ms) } : null;
-    const when = range ? `between ${fmt.time(range.start)} and ${fmt.time(range.end)}` : "in this range";
-    const zoom = ctx.dom.tracesRangeZoomOut;
-    const canZoom = !!zoom && !zoom.disabled;
-    return `<div class="tracesEmpty tracesEmpty--search" data-empty-results data-span-empty>
-        <strong>No spans found</strong>
-        <span>No spans match these filters ${esc(when)}.</span>
-        ${canZoom ? '<button type="button" class="button button--small tracesEmpty__zoom" data-results-zoom-out><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg><span>Zoom out</span></button>' : ""}
-      </div>`;
+    return ctx.noResultsHtml("spans", range, { "data-span-empty": "" });
   }
 
   function renderCount() {
@@ -407,7 +401,7 @@
     if (!root) return;
     root.classList.add("tracesResults--spans");
     if (!state.searched) {
-      root.innerHTML = '<div class="tracesEmpty">Search to load spans.</div>';
+      root.innerHTML = ns.uiState.emptyHtml({ body: "Search to load spans." });
       return;
     }
     if (!state.rows.length && !state.loading && !state.hasMore && !state.error) {

@@ -204,7 +204,7 @@
   <!-- observability:traces -->
   <main id="tracesWorkspace" data-obs-panel="traces" class="obsView tracesWorkspace tracesWorkspace--jaeger" role="main">
     <section class="tracesShell tracesShell--jaeger">
-      <div id="tracesError" class="tracesError" hidden></div>
+      <div id="tracesError" class="uiBanner" role="alert" hidden></div>
 
       <section id="tracesSearchView" class="traceSearchView">
         <!-- The filter bar (.obsFilterBar), the same on Traces, Logs and
@@ -266,7 +266,7 @@
             </label>
 
             <div class="obsFilterBar__actions">
-              <button id="tracesSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
+              <button id="tracesSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit" type="submit"><span class="uiSpin" aria-hidden="true"></span><span>Search</span></button>
             </div>
           </div>
         </form>
@@ -289,11 +289,11 @@
         <section id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden>
           <article class="traceAnalyticsCard">
             <header><strong>Matching traces</strong><span id="traceServiceChartMeta">traces over time</span></header>
-            <div id="traceServiceChart" class="traceChart"><div class="tracesEmpty">Search to load matching trace activity.</div></div>
+            <div id="traceServiceChart" class="traceChart"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load matching trace activity.</p></div></div>
           </article>
           <article class="traceAnalyticsCard">
             <header><strong>Trace duration</strong><span id="traceDurationChartMeta">points + P50 / P90 / P95 / P99</span><span class="segmented segmented--compact traceDurationViews" role="group" aria-label="Duration chart"><button type="button" class="segmented__option" data-duration-view="percentiles" aria-pressed="true" title="Duration percentiles and listed traces">Percentiles</button><button type="button" class="segmented__option" data-duration-view="heatmap" aria-pressed="false" title="Trace counts by start time and duration; drag a box to compare its traces">Heatmap</button></span></header>
-            <div id="traceDurationChart" class="traceChart"><div class="tracesEmpty">Search to load duration distribution.</div></div>
+            <div id="traceDurationChart" class="traceChart"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load the duration distribution.</p></div></div>
           </article>
         </section>
         <section id="traceDeltaPanel" class="traceDeltaPanel" aria-label="Heatmap selection compared with its baseline" hidden></section>
@@ -316,7 +316,7 @@
               <button type="button" class="segmented__option" data-results-view="table" aria-pressed="false" title="Table view"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M2 6.25h12M2 9.75h12M6.5 6.25v7.25"/></svg><span>Table</span></button>
             </div>
           </div>
-          <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="tracesEmpty">Search to load traces.</div></div>
+          <div id="tracesResults" class="tracesResults tracesResults--wide"><div class="uiState uiState--empty"><p class="uiState__body">Search to load traces.</p></div></div>
         </section>
         </div>
         </div>
@@ -333,7 +333,7 @@
                 <button id="traceMapZoomIn" class="graphKitTool" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button>
               </div>
             </div>
-            <div id="traceMapState" class="traceMap__state"><div class="tracesEmpty">Search to load the service map.</div></div>
+            <div id="traceMapState" class="traceMap__state"><div class="uiState uiState--empty"><p class="uiState__body">Search to load the service map.</p></div></div>
             <div class="graphKitDock">
               <div id="traceMapLegend" class="graphKitLegend" aria-label="Legend"></div>
               <div class="graphKitStatus"><span id="traceMapMeta" class="graphKitStatus__text" role="status"></span><span id="traceMapSampled" class="graphKitStatus__badge" hidden></span></div>
@@ -380,7 +380,7 @@
           <div id="traceViewTools" class="traceViewBar__tools"></div>
         </div>
         <div id="traceTimelineFrame" class="traceTimelineFrame">
-          <div id="traceWaterfall" class="traceWaterfall traceWaterfall--jaeger"><div class="tracesEmpty">No trace selected.</div></div>
+          <div id="traceWaterfall" class="traceWaterfall traceWaterfall--jaeger"><div class="uiState uiState--empty"><p class="uiState__body">No trace selected.</p></div></div>
           <section id="traceInspector" class="traceInspector traceInspector--jaeger" hidden></section>
         </div>
         <section id="traceAltView" class="traceAltView" aria-label="Trace view" hidden></section>
@@ -428,13 +428,13 @@
 
           <div class="obsFilterBar__actions">
             <button id="logsLiveButton" class="button obsFilterBar__secondary obsFilterBar__toggle logsLiveButton" type="button" aria-pressed="false" title="Live tail: poll for new logs"><span class="obsFilterBar__toggleDot logsLiveDot" aria-hidden="true"></span><span>Live</span></button>
-            <button id="logsSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit logsSearchSubmit" type="submit"><span class="traceButtonSpinner" aria-hidden="true"></span><span>Search</span></button>
+            <button id="logsSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit logsSearchSubmit" type="submit"><span class="uiSpin" aria-hidden="true"></span><span>Search</span></button>
           </div>
         </div>
       </form>
 
       <div id="logsChips" class="logsChips" aria-label="Active filters" hidden></div>
-      <div id="logsError" class="tracesError logsError" role="alert" hidden></div>
+      <div id="logsError" class="uiBanner logsError" role="alert" hidden></div>
 
       <div class="logsSearchBody">
       <!-- The Fields sidebar: the Traces Attributes facets (app_facet_panel.js). -->
@@ -462,7 +462,7 @@
             <button type="button" class="logsLegend__item" data-sev="debug" aria-pressed="false"><i class="logsSevSwatch logsSev--debug"></i><span>Debug</span><b data-sev-count="debug"></b></button>
           </div>
         </header>
-        <div id="logsHistogram" class="logsHistogram__chart"><div class="tracesEmpty">Search to load the log volume.</div></div>
+        <div id="logsHistogram" class="logsHistogram__chart"><div class="uiState uiState--empty uiState--compact"><p class="uiState__body">Search to load the log volume.</p></div></div>
       </section>
 
       <div class="logsToolbar" role="toolbar" aria-label="Results">
@@ -488,11 +488,11 @@
               <div id="logsTableSpacer" class="logsTable__spacer"></div>
               <div id="logsTableRows" class="logsTable__rows" role="rowgroup"></div>
             </div>
-            <div id="logsTableMessage" class="logsTable__message"><div class="tracesEmpty">Search to load logs.</div></div>
+            <div id="logsTableMessage" class="logsTable__message"><div class="uiState uiState--empty"><p class="uiState__body">Search to load logs.</p></div></div>
           </div>
         </section>
         <section id="logsPatternsPane" class="logsPane logsPatterns" role="tabpanel" aria-labelledby="logsTabPatterns" hidden>
-          <div id="logsPatterns" class="logsPatterns__body"><div class="tracesEmpty">Open this tab to mine the patterns of the current search.</div></div>
+          <div id="logsPatterns" class="logsPatterns__body"><div class="uiState uiState--empty"><p class="uiState__body">Open this tab to mine the patterns of the current search.</p></div></div>
         </section>
         <!-- The record panel: a docked ns.detailPanel (app_ui_panel.js); its log= URL parameter names the record. -->
         <aside id="logsSidePanel" class="uiDetail uiDetail--docked logsSidePanel" role="dialog" aria-modal="false" aria-labelledby="logsSideTitle" tabindex="-1" hidden>
@@ -567,15 +567,15 @@
         <input id="metricsSearch" class="uiSide__search metricsSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
       </div>
       <div id="metricsCatalog" class="uiSide__body metricsCatalog" role="tree" aria-label="Services and metrics">
-        <div class="metricsEmpty metricsEmpty--loading">Loading the metrics catalog…</div>
+        <div class="uiState uiState--loading uiState--compact" role="status"><span class="uiSpin" aria-hidden="true"></span><p class="uiState__body">Loading the metrics catalog…</p></div>
       </div>
     </aside>
 
     <section class="metricsMain" aria-label="Metric charts">
-      <div id="metricsError" class="tracesError metricsError" role="alert" hidden></div>
+      <div id="metricsError" class="uiBanner metricsError" role="alert" hidden></div>
       <div id="metricsPanels" class="metricsPanels">
         <article class="metricsPanel is-active is-empty">
-          <div class="metricsEmpty metricsEmpty--panel">Pick a metric in the catalog to chart it.</div>
+          <div class="metricsPanel__empty"><div class="uiState uiState--empty"><p class="uiState__body">Pick a metric in the catalog to chart it.</p></div></div>
         </article>
       </div>
     </section>
@@ -585,7 +585,7 @@
   <!-- shell:scripts -->
   <!-- Generated by tools/build_page_css.py from src/static/modules.json: edit it there, then rerun the script. -->
   <!-- The page's modules (src/static/modules.json), read by app_loader.js. -->
-  <script type="application/json" id="chdashModules">{"name":"observability","bootstrap":"app_observability.js","common":["app_format.js","app_palette.js","app_dom.js","app_ui_layers.js","app_ui_popover.js","app_ui_panel.js","app_ui_tabs.js","app_ui_segmented.js","app_ui_menu.js","app_state.js","app_util.js"],"modules":["app_api.js","app_ui.js","app_timerange.js"],"lazy":{},"views":{"traces":["app_chart_core.js","app_facet_panel.js","app_traces.js","app_trace_views.js","app_trace_insights.js","app_trace_search.js","app_trace_spans.js","app_trace_logs.js","app_trace_tabs.js","app_trace_services.js","app_graph_kit.js","app_trace_map.js","app_trace_heatmap.js"],"logs":["app_chart_core.js","app_facet_panel.js","app_logs.js"],"metrics":["app_chart_core.js","app_metrics.js"]}}</script>
+  <script type="application/json" id="chdashModules">{"name":"observability","bootstrap":"app_observability.js","common":["app_format.js","app_palette.js","app_dom.js","app_ui_layers.js","app_ui_popover.js","app_ui_panel.js","app_ui_tabs.js","app_ui_segmented.js","app_ui_menu.js","app_state.js","app_util.js","app_ui_state.js"],"modules":["app_api.js","app_ui.js","app_timerange.js"],"lazy":{},"views":{"traces":["app_chart_core.js","app_facet_panel.js","app_traces.js","app_trace_views.js","app_trace_insights.js","app_trace_search.js","app_trace_spans.js","app_trace_logs.js","app_trace_tabs.js","app_trace_services.js","app_graph_kit.js","app_trace_map.js","app_trace_heatmap.js"],"logs":["app_chart_core.js","app_facet_panel.js","app_logs.js"],"metrics":["app_chart_core.js","app_metrics.js"]}}</script>
   <script>
     (function () {
       // Both download at once and run in this order (async = false).

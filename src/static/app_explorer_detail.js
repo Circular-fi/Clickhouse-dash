@@ -1717,9 +1717,9 @@
 
     function renderPreviewTab(container, detail) {
       renderPreviewToolbar(container, detail);
-      if (model.previewLoading) return container.appendChild(emptyNote("Loading preview\u2026"));
+      if (model.previewLoading) return container.appendChild(ns.uiState.block("loading", { label: "Loading the preview\u2026" }));
       if (!model.preview) {
-        container.appendChild(emptyNote("Loading preview\u2026"));
+        container.appendChild(ns.uiState.block("loading", { label: "Loading the preview\u2026" }));
         setTimeout(loadPreview, 0);
         return;
       }

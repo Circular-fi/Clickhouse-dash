@@ -621,14 +621,17 @@
     return { shown: true, threshold };
   }
 
+  // The notice above the map (ns.uiState.banner): an error with Retry, or a
+  // neutral note (a stale distribution).
   function setNotice(text, kind = "") {
-    view.notice.hidden = !text;
-    view.notice.className = `explorerStorageView__notice${kind ? ` is-${kind}` : ""}`;
-    view.notice.textContent = text || "";
+    const error = kind === "error";
+    ns.uiState.banner(view.notice, { message: text, level: error ? "error" : "info", inset: true, retry: error ? () => { void refreshView(true); } : null });
   }
 
-  function emptyList(text) {
-    view.list.replaceChildren(node("div", "explorerStorageView__empty", text));
+  function emptyList(text, loading = false) {
+    if (loading) ns.uiState.loading(view.list, { label: text, compact: true });
+    else if (text) ns.uiState.empty(view.list, { body: text, compact: true });
+    else view.list.replaceChildren();
   }
 
   function render() {
@@ -644,11 +647,11 @@
       view.map.hidden = true;
       view.footnote.textContent = "";
       if (data.error) {
-        setNotice(String(data.error?.message || "Storage distribution unavailable."), "error");
-        emptyList("Storage distribution unavailable.");
+        setNotice(String(data.error?.message || "The storage distribution could not be loaded."), "error");
+        emptyList("The storage distribution is unavailable.");
       } else {
         setNotice("");
-        emptyList(data.promise ? "Loading storage\u2026" : "");
+        emptyList(data.promise ? "Loading storage\u2026" : "", !!data.promise);
       }
       return;
     }
@@ -778,9 +781,12 @@
     section.appendChild(head);
     container.appendChild(section);
     if (!treemap || !(total > 0)) {
-      section.appendChild(node("div", "explorerEmptySection", residentBytes > 0
-        ? `No on-disk data. Resident memory: ${format.bytes(residentBytes)} (Memory / Buffer / Dictionary).`
-        : "No on-disk data in this database."));
+      section.appendChild(ns.uiState.block("empty", {
+        compact: true,
+        body: residentBytes > 0
+          ? `No on-disk data. Resident memory: ${format.bytes(residentBytes)} (Memory / Buffer / Dictionary).`
+          : "No on-disk data in this database.",
+      }));
       return { destroy() {} };
     }
     const { threshold, tree } = treemap.buildTreemap(root);

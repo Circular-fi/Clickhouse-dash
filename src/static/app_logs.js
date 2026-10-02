@@ -491,28 +491,35 @@
 
   // --- Errors and status -----------------------------------------------------------
 
-  // A failed step's Retry (onRetryClick): "search", "more", "histogram",
-  // "patterns", "context" or "meta".
-  const LOGS_RETRY = (what) => `<button type="button" class="button button--small logsRetry" data-logs-retry="${what}">Retry</button>`;
+  // A failed step's state block (ns.uiState) with Retry (onRetryClick):
+  // "search", "histogram", "patterns" or "context".
+  const failedHtml = (title, text, what, options = {}) => ns.uiState.errorHtml({ title, body: text, retry: { attrs: { "data-logs-retry": what } }, ...options });
 
-  // The error strip: a sentence (app_observability.js strips the API's error
-  // codes) and, for a step that can run again, Retry.
-  function showError(message, retry = "") {
-    const box = $("logsError");
-    if (!box) return;
-    box.innerHTML = message ? `<span class="tracesError__text">${esc(message)}</span>${retry ? LOGS_RETRY(retry) : ""}` : "";
-    box.hidden = !message;
+  // The error strip (ns.uiState.banner): a sentence (app_observability.js
+  // strips the API's error codes) and, for a step that can run again, Retry.
+  function showError(message, retry = null) {
+    ns.uiState.banner($("logsError"), { message, retry });
   }
 
   function onRetryClick(event) {
     const what = event.target instanceof Element ? event.target.closest("[data-logs-retry]")?.getAttribute("data-logs-retry") : "";
     if (!what) return;
     if (what === "search") void search({ push: false });
-    else if (what === "more") { showError(""); void loadMore(); }
     else if (what === "histogram" && model.lastSearch) void loadHistogram(model.lastSearch);
     else if (what === "patterns") { model.patternsKey = ""; void loadPatterns(); }
     else if (what === "context") void loadContext();
-    else if (what === "meta") { showError(""); void reloadForHost(); }
+  }
+
+  // "Clear filters" of an empty result: the range, columns and tab stay.
+  function clearFilters() {
+    model.services = [];
+    model.level = "";
+    model.sev = [];
+    model.q = "";
+    model.attrs = [];
+    model.traceId = "";
+    syncControls();
+    void search({ push: true });
   }
 
   function setStatus(text) {
@@ -523,8 +530,7 @@
 
   function setSearching(on) {
     model.searching = on;
-    const button = $("logsSearchButton");
-    if (button) { button.classList.toggle("is-loading", on); button.disabled = on; }
+    ns.uiState.busy($("logsSearchButton"), on);
   }
 
   // --- Search ------------------------------------------------------------------------
@@ -611,7 +617,7 @@
       model.exhausted = !model.nextCursor;
       model.lastPayload = payload;
     } catch (error) {
-      if (seq === model.seq.search) showError(error.message, "more");
+      if (seq === model.seq.search) showError(error.message, () => { void loadMore(); });
     } finally {
       if (seq === model.seq.search) {
         model.loadingMore = false;
@@ -682,15 +688,19 @@
     head.innerHTML = model.cols.map((col) => `<span class="logsTable__th" role="columnheader">${esc(columnLabel(col))}</span>`).join("");
   }
 
+  // No logs: where the data is (a jump to it) and no filters, the ways out.
   function emptyHtml() {
     const bounds = model.meta?.time_bounds;
-    let hint = "";
-    if (bounds && model.lastSearch && (model.lastSearch.start_ms > bounds.max_ms || model.lastSearch.end_ms < bounds.min_ms)) {
-      hint = `<p>The table holds logs from ${esc(fmt.time(bounds.min_ms))} to ${esc(fmt.time(bounds.max_ms))}.</p>
-        <button type="button" class="button button--small" data-jump-latest>Show the last hour of data</button>`;
-    }
-    const filtered = model.services.length || model.level || model.sev.length || model.q || model.attrs.length || model.traceId;
-    return `<div class="logsEmpty"><strong>No logs match${filtered ? " these filters" : ""} in this time range.</strong>${hint}</div>`;
+    const outside = !!bounds && !!model.lastSearch && (model.lastSearch.start_ms > bounds.max_ms || model.lastSearch.end_ms < bounds.min_ms);
+    const filtered = !!(model.services.length || model.level || model.sev.length || model.q || model.attrs.length || model.traceId);
+    return ns.uiState.emptyHtml({
+      title: `No logs match${filtered ? " these filters" : ""} in this time range`,
+      body: outside ? `The table holds logs from ${fmt.time(bounds.min_ms)} to ${fmt.time(bounds.max_ms)}.` : "",
+      actions: [
+        outside ? { label: "Show the last hour of data", primary: true, attrs: { "data-jump-latest": "" } } : null,
+        filtered ? { label: "Clear filters", attrs: { "data-logs-clear-filters": "" } } : null,
+      ],
+    });
   }
 
   function renderTable({ message = null, error = "" } = {}) {
@@ -701,21 +711,21 @@
     renderHead();
     if (message === "loading" && !model.rows.length) {
       messageBox.hidden = false;
-      messageBox.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Searching logs\u2026</div>';
+      messageBox.innerHTML = ns.uiState.loadingHtml({ label: "Searching logs\u2026" });
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
     }
     if (message === "error") {
       messageBox.hidden = false;
-      messageBox.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Search failed.</strong><p>${esc(error)}</p>${LOGS_RETRY("search")}</div>`;
+      messageBox.innerHTML = failedHtml("The search failed", error, "search");
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
     }
     if (!model.rows.length) {
       messageBox.hidden = false;
-      messageBox.innerHTML = model.lastSearch ? emptyHtml() : '<div class="tracesEmpty">Search to load logs.</div>';
+      messageBox.innerHTML = model.lastSearch ? emptyHtml() : ns.uiState.emptyHtml({ body: "Search to load logs." });
       spacer.style.height = "0px";
       $("logsTableRows").innerHTML = "";
       return;
@@ -747,7 +757,7 @@
       html += `<div class="${classes.join(" ")}" role="row" data-sev="${severityLevel(row)}" data-row-index="${i}" data-row-id="${esc(row.id)}" style="grid-template-columns:${template}">${model.cols.map((col) => cellHtml(row, col)).join("")}</div>`;
     }
     if (last === model.rows.length && (model.nextCursor || model.loadingMore)) {
-      html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? '<span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading older logs\u2026' : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
+      html += `<div class="logsRow logsRow--more" role="row">${model.loadingMore ? `${ns.uiState.spinnerHtml()}Loading older logs\u2026` : '<button type="button" class="logsMiniButton" data-load-more>Load older logs</button>'}</div>`;
     }
     box.style.transform = `translateY(${first * ROW_HEIGHT}px)`;
     box.innerHTML = html;
@@ -773,6 +783,7 @@
       if (row) openSidePanel(row);
     });
     message?.addEventListener("click", (event) => {
+      if (event.target.closest("[data-logs-clear-filters]")) { clearFilters(); return; }
       if (!event.target.closest("[data-jump-latest]")) return;
       const bounds = model.meta?.time_bounds;
       if (!bounds) return;
@@ -894,12 +905,12 @@
     if (histogramChart) histogramChart.root.hidden = true;
     let note = box.querySelector(":scope > .logsHistogram__placeholder");
     if (!note) {
-      box.querySelector(":scope > .tracesEmpty")?.remove();
+      box.querySelector(":scope > .uiState")?.remove();
       note = document.createElement("div");
       box.appendChild(note);
     }
-    note.className = `logsHistogram__placeholder${isError ? " is-error" : ""}`;
-    note.innerHTML = `${esc(text)}${isError ? ` ${LOGS_RETRY("histogram")}` : ""}`;
+    note.className = "logsHistogram__placeholder";
+    note.innerHTML = isError ? failedHtml("", text, "histogram", { compact: true }) : ns.uiState.loadingHtml({ label: text, compact: true });
     note.hidden = false;
   }
 
@@ -968,7 +979,7 @@
     if (meta) meta.textContent = `${ns.timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(h.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
     // While a refetch runs, the previous bars stay (dimmed) until it answers.
     if (model.histogramLoading || !ns.chartCore) return;
-    for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .tracesEmpty")) note.hidden = true;
+    for (const note of box.querySelectorAll(":scope > .logsHistogram__placeholder, :scope > .uiState")) note.hidden = true;
     const data = histogramData(h);
     if (!histogramChart) {
       histogramChart = ns.chartCore.create(box, {
@@ -1062,15 +1073,15 @@
     const toggle = $("logsDenoiseToggle");
     if (toggle) toggle.hidden = model.tab !== "patterns";
     if (model.patternsLoading && !model.patterns) {
-      box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Mining patterns from a sample\u2026</div>';
+      box.innerHTML = ns.uiState.loadingHtml({ label: "Mining patterns from a sample\u2026" });
       return;
     }
     if (model.patternsError) {
-      box.innerHTML = `<div class="logsEmpty logsEmpty--error"><strong>Patterns failed.</strong><p>${esc(model.patternsError)}</p>${LOGS_RETRY("patterns")}</div>`;
+      box.innerHTML = failedHtml("The patterns could not be mined", model.patternsError, "patterns");
       return;
     }
     const p = model.patterns;
-    if (!p) { box.innerHTML = '<div class="tracesEmpty">Search to mine patterns.</div>'; return; }
+    if (!p) { box.innerHTML = ns.uiState.emptyHtml({ body: "Search to mine patterns." }); return; }
     const all = p.patterns || [];
     const hidden = model.denoise ? all.filter((item) => item.noisy).length : 0;
     const shown = model.denoise ? all.filter((item) => !item.noisy) : all;
@@ -1078,7 +1089,7 @@
       ? `${fmt.count(p.pattern_count)} pattern${p.pattern_count === 1 ? "" : "s"} in ${p.sampled ? `a sample of ${fmt.count(p.sample_size)} of ${fmt.count(p.total)} logs (counts ×${fmt.compact(p.scale)})` : `${fmt.count(p.total)} logs`}${hidden ? ` · denoise hides ${fmt.count(hidden)} pattern${hidden === 1 ? "" : "s"} above 10 %` : ""}${model.patternsLoading ? " · updating\u2026" : ""}`
       : "";
     if (!all.length) {
-      box.innerHTML = `<div class="logsEmpty"><strong>No logs to mine in this range.</strong></div>`;
+      box.innerHTML = ns.uiState.emptyHtml({ title: "No logs to mine in this range", body: "Widen the time range or remove filters on the Results tab." });
       return;
     }
     box.innerHTML = `<div class="logsPatterns__summary">${esc(summary)}</div>
@@ -1370,8 +1381,8 @@
   function renderContext() {
     const box = $("logsContextRows");
     if (!box || model.side.tab !== "context") return;
-    if (model.side.contextLoading && !model.side.context) { box.innerHTML = '<div class="logsEmpty logsEmpty--loading"><span class="traceButtonSpinner is-visible" aria-hidden="true"></span>Loading surrounding logs\u2026</div>'; return; }
-    if (model.side.contextError) { box.innerHTML = `<div class="logsEmpty logsEmpty--error"><p>${esc(model.side.contextError)}</p>${LOGS_RETRY("context")}</div>`; return; }
+    if (model.side.contextLoading && !model.side.context) { box.innerHTML = ns.uiState.loadingHtml({ label: "Loading surrounding logs\u2026", compact: true }); return; }
+    if (model.side.contextError) { box.innerHTML = failedHtml("", model.side.contextError, "context", { compact: true }); return; }
     const ctx = model.side.context;
     if (!ctx) { box.innerHTML = ""; return; }
     const rows = ctx.rows || [];
@@ -1384,7 +1395,7 @@
           <span class="logsContextRow__service"><i class="logsServiceDot" style="background:${palette.service(r.service)}"></i>${esc(r.service)}</span>
           <span class="logsContextRow__body">${esc(r.body)}</span>
         </button>`;
-      }).join("") || '<div class="logsEmpty">No other logs in this window.</div>'}
+      }).join("") || ns.uiState.emptyHtml({ body: "No other logs in this window.", compact: true })}
       ${ctx.more_before ? '<div class="logsContext__more">Older logs continue past the window</div>' : ""}`;
   }
 
@@ -1556,7 +1567,7 @@
   async function reloadForHost() {
     await loadMeta();
     if (model.metaError) {
-      showError(model.metaError, model.meta ? "" : "meta");
+      showError(model.metaError, model.meta ? null : () => { void reloadForHost(); });
       renderTable();
       return;
     }

@@ -207,14 +207,11 @@
   function setError(message) {
     lastErrorMessage = String(message || "").trim();
     if (!dom.errorBanner) return;
+    // The server's message as sent (ns.uiState.banner, verbatim).
+    ns.uiState.banner(dom.errorBanner, { message: lastErrorMessage, verbatim: true });
     if (lastErrorMessage) {
-      dom.errorBanner.hidden = false;
-      dom.errorBanner.textContent = lastErrorMessage;
       if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
       setResultsVisible(true);
-    } else {
-      dom.errorBanner.hidden = true;
-      dom.errorBanner.textContent = "";
     }
     updateCopyButtonState();
   }
@@ -2312,9 +2309,8 @@
     const err = String(errorText || "").trim();
     if (err) {
       const eb = document.createElement("div");
-      eb.className = "errorBanner";
-      eb.textContent = err;
       body.appendChild(eb);
+      ns.uiState.banner(eb, { message: err, verbatim: true });
     }
 
     const wrap = dom.liveResultsWrap || (dom.resultsPanel ? dom.resultsPanel.querySelector(".tableWrap") : null);
@@ -2381,12 +2377,11 @@
 
   function ensureLocalErrorBanner(body) {
     if (!body) return null;
-    let el = body.querySelector(".errorBanner");
+    let el = body.querySelector(".uiBanner");
     if (!el) {
       el = document.createElement("div");
-      el.className = "errorBanner";
-      el.hidden = true;
       body.insertBefore(el, body.firstChild);
+      ns.uiState.banner(el, { message: "", verbatim: true });
     }
     return el;
   }
@@ -3086,14 +3081,8 @@
       local.errorText = String(message || "").trim();
       updateCopyEnabledLocal();
       if (!local.errorBanner) return;
-      if (local.errorText) {
-        local.errorBanner.hidden = false;
-        local.errorBanner.textContent = local.errorText;
-        if (local.wrap) local.wrap.hidden = true;
-      } else {
-        local.errorBanner.hidden = true;
-        local.errorBanner.textContent = "";
-      }
+      ns.uiState.banner(local.errorBanner, { message: local.errorText, verbatim: true });
+      if (local.errorText && local.wrap) local.wrap.hidden = true;
     }
 
     const localRowIngest = createCooperativeRowQueue(appendRowsLocalImmediate);

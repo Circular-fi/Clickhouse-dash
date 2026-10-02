@@ -281,10 +281,9 @@
 
   // --- Errors ---------------------------------------------------------------
 
-  function showError(message) {
-    if (!dom.metricsError) return;
-    dom.metricsError.hidden = !message;
-    dom.metricsError.textContent = message || "";
+  // The error strip above the view (ns.uiState.banner).
+  function showError(message, retry = null) {
+    ns.uiState.banner(dom.metricsError, { message, retry });
   }
 
   // --- Catalog --------------------------------------------------------------
@@ -358,12 +357,12 @@
     if (!root) return;
     const summary = dom.metricsCatalogSummary;
     if (model.catalogLoading && !model.catalog) {
-      root.innerHTML = `<div class="metricsEmpty metricsEmpty--loading">Loading the metrics catalog\u2026</div>`;
+      root.innerHTML = ns.uiState.loadingHtml({ label: "Loading the metrics catalog\u2026", compact: true });
       if (summary) summary.textContent = "Loading metrics\u2026";
       return;
     }
     if (model.catalogError) {
-      root.innerHTML = `<div class="metricsEmpty metricsEmpty--error" role="alert"><p>${esc(model.catalogError)}</p><button type="button" class="button button--small" data-metrics-retry="catalog">Retry</button></div>`;
+      root.innerHTML = ns.uiState.errorHtml({ body: model.catalogError, compact: true, retry: { attrs: { "data-metrics-retry": "catalog" } } });
       if (summary) summary.textContent = "Catalog unavailable";
       return;
     }
@@ -402,9 +401,13 @@
       </div>`);
     }
     if (!services.length) {
-      root.innerHTML = `<div class="metricsEmpty">No metric points in this time range.${jumpToDataHtml()}</div>`;
+      root.innerHTML = ns.uiState.emptyHtml({ title: "No metric points in this time range", compact: true, action: jumpToDataAction() });
     } else if (!groups.length) {
-      root.innerHTML = `<div class="metricsEmpty">No metric matches \u201c${esc(model.search.trim())}\u201d.</div>`;
+      root.innerHTML = ns.uiState.emptyHtml({
+        body: `No metric matches \u201c${model.search.trim()}\u201d.`,
+        compact: true,
+        action: { label: "Clear the search", attrs: { "data-metrics-clear-search": "" } },
+      });
     } else {
       root.innerHTML = groups.join("");
       if (focus) root.querySelector(`[data-service-toggle="${CSS.escape(focus)}"]`)?.scrollIntoView?.({ block: "nearest" });
@@ -420,13 +423,13 @@
   }
 
   // When the range holds no point but the tables do, offer their latest day.
-  function jumpToDataHtml() {
+  function jumpToDataAction() {
     const bounds = model.meta?.time_bounds;
     const max = Number(bounds?.max_ms);
-    if (!Number.isFinite(max) || max <= 0) return "";
+    if (!Number.isFinite(max) || max <= 0) return null;
     const range = model.resolved;
-    if (range && max >= range.start_ms && max <= range.end_ms) return "";
-    return `<button type="button" class="button metricsEmpty__jump" data-jump-to-data="${max}">Show the last 24 h with data (until ${esc(fmt.time(max))})</button>`;
+    if (range && max >= range.start_ms && max <= range.end_ms) return null;
+    return { label: `Show the last 24 h with data (until ${fmt.time(max)})`, primary: true, attrs: { "data-jump-to-data": max } };
   }
 
   function jumpToData(maxMs) {
@@ -437,6 +440,13 @@
 
   function onCatalogClick(event) {
     if (event.target.closest("[data-metrics-retry=\"catalog\"]")) { void loadCatalog(); return; }
+    if (event.target.closest("[data-metrics-clear-search]")) {
+      const input = document.getElementById("metricsSearch");
+      if (input) { input.value = ""; input.focus(); }
+      model.search = "";
+      renderCatalog();
+      return;
+    }
     const jump = event.target.closest("[data-jump-to-data]");
     if (jump) { jumpToData(Number(jump.dataset.jumpToData)); return; }
     const toggle = event.target.closest("[data-service-toggle]");
@@ -641,7 +651,7 @@
           <div class="metricsChart__state" hidden></div>
         </div>
       </div>
-      <div class="metricsPanel__empty metricsEmpty metricsEmpty--panel">Pick a metric in the catalog to chart it.</div>`;
+      <div class="metricsPanel__empty">${ns.uiState.emptyHtml({ body: "Pick a metric in the catalog to chart it." })}</div>`;
     const keysList = el.querySelector(".metricsFilterForm__keys");
     const valuesList = el.querySelector(".metricsFilterForm__values");
     keysList.id = `metricsFilterKeys${panel.id}`;
@@ -828,20 +838,22 @@
 
     const stateEl = el.querySelector(".metricsChart__state");
     el.querySelector(".metricsChart").classList.toggle("is-loading", panel.loading);
+    const ui = ns.uiState;
     if (panel.loading && !data) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--loading";
-      stateEl.textContent = "Loading\u2026";
+      ui.loading(stateEl, { label: "Loading the chart\u2026", compact: true });
     } else if (panel.error) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--error";
-      stateEl.innerHTML = `<span>${esc(panel.error)}</span> <button type="button" class="button button--small" data-metrics-retry="panel">Retry</button>`;
+      ui.error(stateEl, { body: panel.error, compact: true, retry: { attrs: { "data-metrics-retry": "panel" } } });
     } else if (data && !(data.series || []).length) {
       stateEl.hidden = false;
       stateEl.className = "metricsChart__state metricsChart__state--empty";
-      stateEl.textContent = "No data points for this metric, filters and time range.";
+      ui.empty(stateEl, { body: "No data points for this metric, filters and time range.", compact: true });
     } else {
       stateEl.hidden = true;
+      stateEl.removeAttribute("aria-busy");
     }
     drawChart(panel);
   }

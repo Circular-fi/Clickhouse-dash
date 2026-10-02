@@ -202,18 +202,11 @@
 
   function currentHost() { return state.selectedHostId || ""; }
 
-  // The error strip above the view: a sentence (app_observability.js strips
-  // the API's error codes) and, when the failed step can run again, Retry.
-  let errorRetry = null;
+  // The error strip above the view (ns.uiState.banner): a sentence
+  // (app_observability.js strips the API's error codes) and, when the failed
+  // step can run again, Retry.
   function showError(message, retry = null) {
-    if (!dom.tracesError) return;
-    const text = message instanceof Error ? message.message : String(message || "");
-    dom.tracesError.hidden = !text;
-    dom.tracesError.setAttribute("role", "alert");
-    errorRetry = text && typeof retry === "function" ? retry : null;
-    dom.tracesError.innerHTML = text
-      ? `<span class="tracesError__text">${esc(text)}</span>${errorRetry ? '<button type="button" class="button button--small tracesError__retry" data-traces-error-retry>Retry</button>' : ""}`
-      : "";
+    ns.uiState.banner(dom.tracesError, { message, retry });
   }
 
   // The search bar's height as --trace-bar-h on the root element, in px (it
@@ -233,13 +226,6 @@
     if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(bar);
   }
 
-  function onErrorClick(event) {
-    if (!(event.target instanceof Element) || !event.target.closest("[data-traces-error-retry]") || !errorRetry) return;
-    const retry = errorRetry;
-    showError("");
-    retry();
-  }
-
   function traceIdFromPath() {
     const pathname = decodeURIComponent(String(window.location.pathname || ""));
     const match = pathname.match(/\/observability\/traces\/([^/]+)\/?$/);
@@ -254,12 +240,6 @@
     if (!detail && ownsUrl()) document.title = TRACES_PAGE_TITLE;
   }
 
-
-  function setButtonLoading(button, loading) {
-    if (!button) return;
-    button.classList.toggle("is-loading", !!loading);
-    button.disabled = !!loading;
-  }
 
   // The search bar, results and view pickers are ns.menu.select pickers
   // (app_ui_menu.js): a hidden native <select> holds the value, the button
@@ -504,7 +484,10 @@
   function chartMessage(container, text, isError = false, retry = "") {
     if (!container) return;
     unmountChart(container);
-    container.innerHTML = `<div class="tracesEmpty${isError ? " traceChartError" : ""}"${isError ? ' role="alert"' : ""}>${esc(text)}${retry ? ` <button type="button" class="traceMiniButton" data-chart-retry="${esc(retry)}">Retry</button>` : ""}</div>`;
+    const state = ns.uiState;
+    container.innerHTML = isError
+      ? state.errorHtml({ body: text, compact: true, retry: retry ? { attrs: { "data-chart-retry": retry } } : null })
+      : state.emptyHtml({ body: text, compact: true });
   }
 
   // Bucket starts on a regular grid from the first to the last bucket, the
@@ -957,18 +940,27 @@
     dom.tracesResults?.querySelector(`[data-table-sort="${key}"]`)?.focus({ preventScroll: true });
   }
 
-  function emptyResultsHtml() {
-    if (!model.searched) return '<div class="tracesEmpty">Search to load traces.</div>';
-    const range = model.lastSearchRange;
-    const tr = ns.timeRange;
-    const when = range ? `between ${fmt.time(range.start_ms)} and ${fmt.time(range.end_ms)}` : "in this range";
+  // "No traces / spans found" (the result list and the span table): the
+  // range searched and the ways out, a wider range and no filters.
+  function noResultsHtml(noun, range, attrs = {}) {
+    const when = range ? `between ${fmt.time(range.start)} and ${fmt.time(range.end)}` : "in this range";
     const zoom = dom.tracesRangeZoomOut;
-    const canZoom = !!zoom && !zoom.disabled;
-    return `<div class="tracesEmpty tracesEmpty--search" data-empty-results>
-        <strong>No traces found</strong>
-        <span>No traces match these filters ${esc(when)}.</span>
-        ${canZoom ? '<button type="button" class="button button--small tracesEmpty__zoom" data-results-zoom-out><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M5 7h4M10.2 10.2 13.5 13.5"/></svg><span>Zoom out</span></button>' : ""}
-      </div>`;
+    const filtered = !!ns.traceSearch?.hasFilters?.();
+    return ns.uiState.emptyHtml({
+      title: `No ${noun} found`,
+      body: `No ${noun} match ${filtered ? "these filters" : "the search"} ${when}.`,
+      attrs: { "data-empty-results": "", ...attrs },
+      actions: [
+        zoom && !zoom.disabled ? { label: "Zoom out", icon: "zoomOut", attrs: { "data-results-zoom-out": "" } } : null,
+        filtered ? { label: "Clear filters", attrs: { "data-results-clear-filters": "" } } : null,
+      ],
+    });
+  }
+
+  function emptyResultsHtml() {
+    if (!model.searched) return ns.uiState.emptyHtml({ body: "Search to load traces." });
+    const range = model.lastSearchRange;
+    return noResultsHtml("traces", range ? { start: range.start_ms, end: range.end_ms } : null);
   }
 
   function renderResultCount(rows) {
@@ -1016,6 +1008,7 @@
         return;
       }
       if (target.closest("[data-results-zoom-out]")) { dom.tracesRangeZoomOut?.click(); return; }
+      if (target.closest("[data-results-clear-filters]")) { ns.traceSearch?.clearFilters?.(); void search(); return; }
       if (target.closest("[data-start-toggle]")) {
         event.stopPropagation();
         model.startDisplay = model.startDisplay === "relative" ? "absolute" : "relative";
@@ -1745,7 +1738,7 @@
     if (!dom.traceWaterfall) return;
     const cache = activeTraceCache();
     const spans = cache.spans;
-    if (!spans.length) { dom.traceWaterfall.innerHTML = model.traceError ? unavailableHtml(model.traceError) : '<div class="tracesEmpty">No spans.</div>'; return; }
+    if (!spans.length) { dom.traceWaterfall.innerHTML = model.traceError ? unavailableHtml(model.traceError) : ns.uiState.emptyHtml({ body: "This trace has no spans." }); return; }
     const ctx = waterfallContext(cache);
     const rows = visibleNodes(cache).filter((node) => waterfallRowShown(node, ctx));
     dom.traceWaterfall.style.setProperty("--trace-label-width", `${model.waterfallLabelPct}%`);
@@ -3044,14 +3037,14 @@
     if (tabSearch) {
       model.lastSearchKey = "";
       setView(false);
-      setButtonLoading(dom.tracesSearchButton, false);
+      ns.uiState.busy(dom.tracesSearchButton, false);
       showError("");
       tabSearch(filters, { force: url === "push" });
       return;
     }
     model.lastSearchKey = searchState?.searchKey?.() || "";
     setView(false);
-    setButtonLoading(dom.tracesSearchButton, true);
+    ns.uiState.busy(dom.tracesSearchButton, true);
     showError("");
     // The charts load right after the list: say so instead of going blank.
     model.analytics = null;
@@ -3091,7 +3084,7 @@
       renderResults();
       showError(error, () => { void search({ url: "none" }); });
     } finally {
-      if (seq === model.searchSeq) setButtonLoading(dom.tracesSearchButton, false);
+      if (seq === model.searchSeq) ns.uiState.busy(dom.tracesSearchButton, false);
     }
   }
 
@@ -3105,7 +3098,7 @@
     showError("");
     setView(true);
     dom.traceDetail?.classList.remove("is-unavailable");
-    if (dom.traceWaterfall) dom.traceWaterfall.innerHTML = '<div class="tracesEmpty">Loading trace\u2026</div>';
+    if (dom.traceWaterfall) ns.uiState.loading(dom.traceWaterfall, { label: "Loading trace\u2026" });
     if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.innerHTML = ""; }
     void ns.traceLogs?.load?.(null);
     // The entry is pushed once the answer is in (the search stays the current
@@ -3152,20 +3145,20 @@
     const missing = failed.code === "trace_not_found";
     const invalid = failed.code === "invalid_trace_id" || failed.code === "missing_trace_id";
     const zoom = dom.tracesRangeZoomOut;
-    const actions = [
-      '<button type="button" class="button button--small button--primary" data-trace-unavailable="back">Back to search</button>',
-      missing && zoom && !zoom.disabled ? '<button type="button" class="button button--small" data-trace-unavailable="wider">Search a wider time range</button>' : "",
-      !missing && !invalid ? '<button type="button" class="button button--small" data-trace-unavailable="retry">Retry</button>' : "",
-    ].join("");
-    const title = missing ? "Trace not found" : invalid ? "Not a trace ID" : "The trace could not be loaded";
-    const text = missing
-      ? "No span with this trace ID is stored. The trace may be older than the data kept, not ingested yet, or recorded on another host."
-      : invalid ? "A trace ID is 32 hexadecimal characters (16 bytes)." : failed.text;
-    return `<div class="tracesEmpty traceUnavailable" data-trace-unavailable-state="${esc(failed.code || "error")}" role="${missing || invalid ? "status" : "alert"}">
-        <strong>${esc(title)}</strong>
-        <span>${esc(text)}</span>
-        <div class="traceUnavailable__actions">${actions}</div>
-      </div>`;
+    const options = {
+      title: missing ? "Trace not found" : invalid ? "Not a trace ID" : "The trace could not be loaded",
+      body: missing
+        ? "No span with this trace ID is stored. The trace may be older than the data kept, not ingested yet, or recorded on another host."
+        : invalid ? "A trace ID is 32 hexadecimal characters (16 bytes)." : failed.text,
+      attrs: { "data-trace-unavailable-state": failed.code || "error" },
+      actions: [
+        { label: "Back to search", primary: true, attrs: { "data-trace-unavailable": "back" } },
+        missing && zoom && !zoom.disabled ? { label: "Search a wider time range", attrs: { "data-trace-unavailable": "wider" } } : null,
+        !missing && !invalid ? { label: "Retry", attrs: { "data-trace-unavailable": "retry" } } : null,
+      ],
+    };
+    // A missing or malformed ID is a state of the data (status); a failed load is an error (alert).
+    return missing || invalid ? ns.uiState.emptyHtml(options) : ns.uiState.errorHtml(options);
   }
 
   function onUnavailableClick(event) {
@@ -3330,7 +3323,7 @@
       exactStartNs: (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0))),
     });
     ns.traceSpans?.install?.({
-      model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl,
+      model, dom, api, esc, route, copyText, currentHost, loadTrace, spanTraceUrl, noResultsHtml,
       spanKindLabel, absoluteTimeText, renderJaegerAttributes, renderAttributeTable, attributeEntries,
       spanEventList, eventItemHtml, spanLinkList, spanDetailClick, enhanceTraceSelect,
       runSearch: (options) => search(options),
@@ -3375,7 +3368,6 @@
     dom.tracesService?.addEventListener("change", () => { syncServiceOperationPair("service"); });
     dom.tracesOperation?.addEventListener("change", () => { syncServiceOperationPair("operation"); });
     dom.traceBackButton?.addEventListener("click", () => returnToSearch());
-    dom.tracesError?.addEventListener("click", onErrorClick);
     dom.tracesSearchView?.addEventListener("click", (event) => {
       const retry = event.target instanceof Element ? event.target.closest("[data-chart-retry]")?.getAttribute("data-chart-retry") : "";
       if (retry === "durations") void loadDurations();

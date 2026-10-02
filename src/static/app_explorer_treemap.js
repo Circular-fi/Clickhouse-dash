@@ -469,7 +469,7 @@
 
     const output = [];
     layoutTreemapGroup(nodes, 0, 0, width, height, 1, output, context);
-    map.innerHTML = output.join("") || `<div class="explorerTreemap__empty">${esc(context.emptyText)}</div>`;
+    map.innerHTML = output.join("") || ns.uiState.emptyHtml({ body: context.emptyText, compact: true, className: "explorerTreemap__empty" });
     map.dataset.layoutWidth = String(width);
     map.dataset.layoutHeight = String(height);
     map.dataset.layoutReady = "1";

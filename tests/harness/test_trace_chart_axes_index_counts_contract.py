@@ -41,7 +41,9 @@ def test_charts_load_counts_first_and_surface_errors():
     js = read("src/static/app_traces.js")
     assert 'charts: "counts"' in js and 'charts: "durations"' in js
     assert "model.durationsError = message(error)" in js
-    assert "traceChartError" in js and ".traceChartError" in read("src/static/style.css")
+    # A failed chart is an error state with Retry (ns.uiState), not an empty one.
+    assert "state.errorHtml({ body: text, compact: true, retry: retry ? { attrs: { \"data-chart-retry\": retry } } : null })" in js
+    assert ".uiState--error .uiState__title" in read("src/static/style.css")
 
 
 def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
