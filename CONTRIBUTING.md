@@ -46,7 +46,7 @@ Details in `tests/README.md`, "Running tests quickly".
 
 - `tests/tools/pw-changed.sh` runs the Playwright specs of the files you changed, on `desktop-1440`, with `PW_SHARED_HOST=1` (one worker, no timing-budget tests).
 - A plain `npx playwright test` runs the layout specs on three viewports and the behavioural specs on `desktop-1440`; `PW_ALL_PROJECTS=1` runs everything on every viewport before a release.
-- `run-all-tests.py --quick` runs the suite without the performance phase and with the design phase on one viewport; without `--quick` it is the full official suite.
+- `run-all-tests.py --quick` runs every test at least once: the design phase on one viewport, each performance case once; without `--quick` it is the full official suite.
 - On a shared host: one Playwright run at a time, changed specs first, the full run once at the end, no `sleep` polling loops, and pytest without `CLICKHOUSE_URL`.
 
 ### Validate release builds

@@ -200,7 +200,7 @@ tests/tools/pw-changed.sh -n                      # which specs
 tests/tools/pw-changed.sh -t chdash-mine -- --reporter=line
 ```
 
-**Runner.** `python /tests/test-suite/run-all-tests.py` (the `tests` service) runs the full official suite. `--quick` (or `CHDASH_TESTS_QUICK=1`) is for iterations: the design phase runs on `desktop-1440` only, `PW_SHARED_HOST=1` leaves the timing-budget tests out, and the performance phase is skipped (`mode: quick` in `manifest.json`).
+**Runner.** `python /tests/test-suite/run-all-tests.py` (the `tests` service) runs the full official suite: it sets `PW_ALL_PROJECTS=1`, so its phases select the same tests on the same viewports whatever the defaults above (frontend-functional on `desktop-1440`, design on all three). `--quick` (or `CHDASH_TESTS_QUICK=1`) runs every test at least once: the design phase on `desktop-1440` only and each performance case once (`PERF_RUNS=1`, `PERF_WARMUP=0`); `manifest.json` says `mode: quick`.
 
 **Fixture reset.** The runner resets the ClickHouse fixtures (`01`, `02`, `04`, `05` of `clickhouse-init/`) before the backend phase and tells the backend conftest (`CHDASH_FIXTURES_FRESH=1`) not to reset them again. Run by hand with `CLICKHOUSE_URL` set, the conftest resets only when needed: after a reset it records, in the comment of the `chdash_ui` database, the digest of the four scripts and of the state they produced (fixture tables and their UUIDs, row counts, users, grants, dictionary status), and skips the next reset while both match. `CHDASH_FIXTURE_RESET=always` forces it, `=never` skips it. Without `CLICKHOUSE_URL` nothing is reset.
 
