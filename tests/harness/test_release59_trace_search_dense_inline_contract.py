@@ -9,9 +9,10 @@ def test_strict_trace_ranges_and_selection_only_prefill_pickers():
     html = read('src/static/observability.html')
     js = read('src/static/app_traces.js')
     picker = read('src/static/app_timerange.js')
-    # Quick ranges (Grafana's list) are offered only when their width fits
-    # traces.max_lookback_minutes; any other window goes through From / To.
-    for value in ('now-5m', 'now-15m', 'now-30m', 'now-1h', 'now-3h', 'now-12h', 'now-24h', 'now-2d', 'now-7d', 'now-30d', 'now-90d', 'now-6M', 'now-1y'):
+    # A short list of quick ranges (it never scrolls) is offered only when
+    # their width fits traces.max_lookback_minutes; any other window is typed
+    # in the search or goes through From / To.
+    for value in ('now-5m', 'now-15m', 'now-1h', 'now-6h', 'now-24h', 'now-7d'):
         assert f'["{value}", "now", ' in picker
     assert 'QUICK_RANGES.filter((option) => fits(option, now)' in picker
     assert 'endMs - startMs <= maxMs()' in picker

@@ -11,7 +11,7 @@
   const UNITS = "yMwdhms";
   const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
   const RECENT_KEY = "chdash.traceTimeRanges.v1";
-  const RECENT_LIMIT = 5;
+  const RECENT_LIMIT = 2;
   const pad = (value, width = 2) => String(value).padStart(width, "0");
   const esc = (value) => String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -127,35 +127,18 @@
 
   // --- Quick ranges (Grafana DateTimePickers/options.ts) --------------------
 
+  // Kept short enough that the list never scrolls next to the calendar, with
+  // the recently used ranges below it; any other span can be typed in the
+  // search ("45m", "30d") or the From / To fields.
   const QUICK_RANGES = [
     ["now-5m", "now", "Last 5 minutes"],
     ["now-15m", "now", "Last 15 minutes"],
-    ["now-30m", "now", "Last 30 minutes"],
     ["now-1h", "now", "Last 1 hour"],
-    ["now-3h", "now", "Last 3 hours"],
     ["now-6h", "now", "Last 6 hours"],
-    ["now-12h", "now", "Last 12 hours"],
     ["now-24h", "now", "Last 24 hours"],
-    ["now-2d", "now", "Last 2 days"],
     ["now-7d", "now", "Last 7 days"],
-    ["now-30d", "now", "Last 30 days"],
-    ["now-90d", "now", "Last 90 days"],
-    ["now-6M", "now", "Last 6 months"],
-    ["now-1y", "now", "Last 1 year"],
-    ["now/d", "now", "Today so far"],
     ["now/d", "now/d", "Today"],
     ["now-1d/d", "now-1d/d", "Yesterday"],
-    ["now-2d/d", "now-2d/d", "Day before yesterday"],
-    ["now-7d/d", "now-7d/d", "This day last week"],
-    ["now/w", "now", "This week so far"],
-    ["now/w", "now/w", "This week"],
-    ["now-1w/w", "now-1w/w", "Previous week"],
-    ["now/M", "now", "This month so far"],
-    ["now/M", "now/M", "This month"],
-    ["now-1M/M", "now-1M/M", "Previous month"],
-    ["now/y", "now", "This year so far"],
-    ["now/y", "now/y", "This year"],
-    ["now-1y/y", "now-1y/y", "Previous year"],
   ].map(([from, to, display]) => ({ from, to, display }));
 
   const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");

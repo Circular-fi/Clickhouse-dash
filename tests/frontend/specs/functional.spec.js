@@ -2084,9 +2084,9 @@ test('traces: quick ranges are searchable and only offer ranges within the max r
 
   const search = page.locator('#tracesQuickRangeSearch');
   await search.fill('hour');
-  await expect(items).toHaveText(['Last 1 hour', 'Last 3 hours', 'Last 6 hours', 'Last 12 hours', 'Last 24 hours']);
-  await search.fill('week');
-  await expect(items).toHaveText(['This day last week', 'This week so far', 'This week', 'Previous week']);
+  await expect(items).toHaveText(['Last 1 hour', 'Last 6 hours', 'Last 24 hours']);
+  await search.fill('day');
+  await expect(items).toHaveText(['Last 7 days', 'Today', 'Yesterday']);
   await search.fill('nothing like this');
   await expect(items).toHaveCount(0);
   await expect(page.locator('#tracesQuickRanges .timeRangeList__empty')).toBeVisible();

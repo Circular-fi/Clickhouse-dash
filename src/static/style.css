@@ -13272,7 +13272,6 @@ html[data-obs-view="traces"] .tracesResults--wide {
   }
   .timeRangeList {
     flex: 0 1 auto;
-    max-height: 180px;
   }
 }
 

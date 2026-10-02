@@ -2473,7 +2473,6 @@ html[data-obs-view="traces"] .appHeader {
   }
   .timeRangeList {
     flex: 0 1 auto;
-    max-height: 180px;
   }
 }
 :root { --traceWarn: #f0a33a; --traceError: #d64545; --traceDot: #12939a; }

@@ -44,7 +44,7 @@ def test_ranges_resolve_per_request_in_browser_local_time():
 def test_recent_ranges_are_kept_per_browser_and_bounded():
     picker = read("src/static/app_timerange.js")
     assert 'const RECENT_KEY = "chdash.traceTimeRanges.v1";' in picker
-    assert "const RECENT_LIMIT = 5;" in picker
+    assert "const RECENT_LIMIT = 2;" in picker
     assert "if (!QUICK_RANGES.some((option) => sameRange(option, result.raw))) saveRecent(result.raw);" in picker
 
 

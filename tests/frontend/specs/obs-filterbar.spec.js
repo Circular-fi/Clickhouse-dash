@@ -251,3 +251,24 @@ test('filter bar: the primary re-runs the search on every view', async ({ page, 
     await request;
   }
 });
+
+test('the quick and recently used ranges fit the time range panel without scrolling', async ({ page, request }) => {
+  await features(request);
+  await page.addInitScript(() => {
+    try { localStorage.setItem('chdash.traceTimeRanges.v1', JSON.stringify([{ from: 'now-45m', to: 'now' }, { from: 'now-2h', to: 'now-1h' }])); } catch { /* storage may be unavailable */ }
+  });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
+    for (const view of VIEWS) {
+      await page.goto(`/observability/${view}`);
+      const button = page.locator(`${BAR[view]} .tracePicker--range .tracePicker__button`);
+      await button.click();
+      const list = page.locator(`#${view}QuickRanges`);
+      await expect(list.locator('[data-group="quick"] .timeRangeList__item').first()).toBeVisible();
+      await expect(list.locator('.timeRangeList__heading')).toHaveText(['Recently used', 'Quick ranges']);
+      const box = await list.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+      expect(box.scroll, `${view} at ${width} px`).toBeLessThanOrEqual(box.client + 1);
+      await page.keyboard.press('Escape');
+    }
+  }
+});
