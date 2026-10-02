@@ -15,7 +15,8 @@
   //     wrap      long lines wrap instead of scrolling
   //   Returns the element (.sqlBlock).
   //   ui.sqlBlockHtml({ sql, inline, label }) is the same block as an HTML
-  //   string, for modules that render strings (the inline toggle is delegated).
+  //   string, for modules that render strings; ui.sqlBind(root) once on their
+  //   container gives its inline blocks the toggle.
   const ns = window.ChDash;
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
@@ -68,22 +69,34 @@
     }
   }
 
-  // Inline (table cell) block: one line, a click shows the statement whole
-  // (one delegated listener for every inline block, string-built ones too).
-  function inlineBlock(sql, label) {
-    const holder = document.createElement("div");
-    holder.innerHTML = sqlBlockHtml({ sql, inline: true, label });
-    return holder.firstElementChild;
-  }
-
-  document.addEventListener("click", (event) => {
-    const block = event.target instanceof Element ? event.target.closest(".sqlBlock--inline") : null;
-    if (!block) return;
-    event.stopPropagation();
+  // Inline (table cell) block: one line, a click shows the statement whole.
+  // A DOM block listens itself; string-built ones need sqlBind(root) once on
+  // their container (one delegated listener).
+  function toggleInline(block) {
     const open = block.getAttribute("aria-expanded") !== "true";
     block.setAttribute("aria-expanded", open ? "true" : "false");
     block.classList.toggle("is-expanded", open);
-  }, true);
+  }
+
+  function inlineBlock(sql, label) {
+    const holder = document.createElement("div");
+    holder.innerHTML = sqlBlockHtml({ sql, inline: true, label });
+    const block = holder.firstElementChild;
+    block.addEventListener("click", (event) => { event.stopPropagation(); toggleInline(block); });
+    return block;
+  }
+
+  const boundRoots = new WeakSet();
+  function sqlBind(root) {
+    if (!(root instanceof Element) || boundRoots.has(root)) return;
+    boundRoots.add(root);
+    root.addEventListener("click", (event) => {
+      const block = event.target instanceof Element ? event.target.closest(".sqlBlock--inline") : null;
+      if (!block || !root.contains(block)) return;
+      event.stopPropagation();
+      toggleInline(block);
+    }, true);
+  }
 
   function sqlBlockHtml({ sql = "", inline = true, label = "SQL" } = {}) {
     const text = String(sql ?? "").replace(/\s+$/, "");
@@ -159,5 +172,6 @@
 
   ui.sqlBlock = sqlBlock;
   ui.sqlBlockHtml = sqlBlockHtml;
+  ui.sqlBind = sqlBind;
   ns.sqlBlock = sqlBlock;
 })();

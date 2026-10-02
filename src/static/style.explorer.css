@@ -6397,7 +6397,7 @@ button:not(.is-loading) > .uiSpin { display: none; }
 .dataTable > thead > tr > th {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: var(--z-sticky);
   height: var(--dt-row);
   padding: 0 var(--dt-pad-x);
   border-bottom: 1px solid var(--border);
@@ -6463,11 +6463,11 @@ button:not(.is-loading) > .uiSpin { display: none; }
 .dataTable--grid > thead > tr > .dataTable__rowNum {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: var(--z-raised);
   background: var(--panel);
 }
 .dataTable--grid > thead > tr > .dataTable__rowNum {
-  z-index: 3;
+  z-index: calc(var(--z-sticky) + 1);
   background: var(--theadBg);
 }
 .dataTable--grid > tbody > tr:hover > .dataTable__rowNum,
@@ -6817,26 +6817,6 @@ button.chip__op:hover {
 .is-copied > .uiCopy__icon {
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.5 10.5 8 14l7.5-8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-}
-:where([data-copied]) {
-  position: relative;
-}
-[data-copied]::after {
-  content: attr(data-copied);
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  z-index: var(--z-tooltip);
-  transform: translateX(-50%);
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--text);
-  color: var(--panel);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
 }
 .sqlBlock {
   --sql-line: 20px;

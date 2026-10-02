@@ -57,7 +57,8 @@ def test_dialog_is_a_modal_layer():
 
 # Escape comparisons left outside ns.layers, per file: keys a component
 # consumes first (an editor's suggestions, a drag or a chart cursor to cancel,
-# a canvas selection, a filter field's text, the tooltip hide, a panel letting
+# a canvas selection, a data table cell going back to its row, a filter
+# field's text, the tooltip hide, a panel letting
 # the key go on to the layers), and the Query page's menus and editor, which
 # move onto ns.menu / ns.layers with the Query revamp; ns.search empties a
 # filled search field on Escape and consumes the key (preventDefault), so the
@@ -70,6 +71,7 @@ ESCAPE_ALLOWED = {
     "app_autocomplete.js": 2,
     "app_chart_core.js": 3,
     "app_graph_kit.js": 1,
+    "app_ui_table.js": 1,
     "app_trace_heatmap.js": 1,
     "app_trace_logs.js": 1,
     "app_trace_insights.js": 1,

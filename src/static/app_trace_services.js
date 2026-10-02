@@ -668,6 +668,8 @@
     ctx = context;
     root = element;
     root.addEventListener("click", onClick);
+    // The database statements' inline SQL (string-built): one toggle.
+    ns.ui.sqlBind(root);
     // Up / Down move between services, Enter / Space open one (ns.rovingRows);
     // Escape closes the detail (ns.layers).
     ns.table.rovingRows(root, { rows: "tr.traceSvcRow", onOpen: (row) => openDetail(row.getAttribute("data-svc-row") || "") });

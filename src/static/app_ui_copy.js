@@ -16,8 +16,8 @@
   //
   // One feedback, held FEEDBACK_MS: the control gets .is-copied (.is-copyFailed
   // when the clipboard refused) and reads "Copied" ("Copy failed"): a text
-  // button swaps its label, an icon button shows the check icon and a
-  // "Copied" bubble (data-copied).
+  // button swaps its label, an icon button shows the check icon and an
+  // announced "Copied" tip (ns.popover.flash; data-copied holds the state).
   const ns = window.ChDash;
   if (!ns) return;
   const ui = (ns.ui = ns.ui || {});
@@ -75,6 +75,7 @@
       label.textContent = ok ? COPIED : FAILED;
     } else {
       control.setAttribute("data-copied", ok ? COPIED : FAILED);
+      ns.popover?.flash(control, ok ? COPIED : FAILED, { duration: FEEDBACK_MS });
     }
     timers.set(control, setTimeout(() => restore(control), ok ? FEEDBACK_MS : FEEDBACK_MS + 300));
   }
