@@ -254,7 +254,7 @@ def test_menus_go_through_the_component():
     assert "ns.menu?.select(level, {" in logs
     metrics = read("app_metrics.js")
     assert "ns.menu?.bind(...pickerParts(aggPicker), { root: aggPicker });" in metrics and "ns.menu?.multi(...pickerParts(groupPicker), {" in metrics
-    assert 'ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none" })' in read("app_timerange.js")
+    assert 'ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false })' in read("app_timerange.js")
     assert "ns.menu?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false," in read("app_trace_search.js")
     assert "portal: true," in read("app_trace_spans.js")
     results = read("app_results.js")

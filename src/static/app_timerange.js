@@ -270,8 +270,9 @@
     const fields = { from: fromInput.closest(".timeRangeField"), to: toInput.closest(".timeRangeField") };
     const isOpen = () => button.getAttribute("aria-expanded") === "true";
     const idPrefix = String(options.idPrefix || "timeRange");
-    // The panel keeps its own click, keys and focus (the From field).
-    const dropdown = options.open ? null : ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none" }) || null;
+    // The panel keeps its own click, keys, focus (the From field) and
+    // layout (a sheet on phones): ns.menu does not place it.
+    const dropdown = options.open ? null : ns.menu?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false }) || null;
     const openDropdown = () => (options.open ? options.open() : dropdown?.open());
     const closeDropdown = () => (options.close ? options.close() : dropdown?.close({ focus: false }));
 
