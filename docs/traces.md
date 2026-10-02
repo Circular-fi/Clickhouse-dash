@@ -153,7 +153,7 @@ The map is drawn by the shared canvas graph kit (`app_graph_kit.js`), like the E
 
 ## Attribute facets
 
-The search page's sidebar (after HyperDX's search filters) lists the attribute keys of the spans matching the current range and filters, span (`S`) and resource (`R`) keys by the number of sampled spans carrying them. A key expands to its top values with counts; a value's checkbox adds or removes a `tag` chip, its exclude button a `tag_not` chip. Keys can be pinned to the top (stored in the browser), filtered by name and loaded 20 at a time; values load 10, then 50, 200 and 500. The sidebar folds into a rail (remembered; folded by default below 1100 px) and loads nothing while folded.
+The search page's sidebar (after HyperDX's search filters) lists the attribute keys of the spans matching the current range and filters, span (`S`) and resource (`R`) keys by the number of sampled spans carrying them. A key expands to its top values with counts; a value's checkbox adds or removes a `tag` chip, its exclude button a `tag_not` chip. Keys can be pinned to the top (stored in the browser), filtered by name and loaded 20 at a time; values load 10, then 50, 200 and 500. The sidebar folds into a rail (remembered; folded by default below 1100 px) and loads nothing while folded. The sidebar is the facets component (`app_facet_panel.js`, `ns.facetPanel`) the Logs **Fields** panel uses too (`docs/logs.md`), and the caps below (`src/facet_limits.hpp`) bound both.
 
 `/api/traces/facets` returns the keys in one pass that reads only the maps' key subcolumns:
 
@@ -322,6 +322,8 @@ Measured on the local fixture (about 2.0 B spans over 7 days), server time, medi
 | 7 days, a tag matching nothing | 50 ms | the whole range (skip indexes) |
 
 ## Trace detail rendering
+
+The views of a trace are a tab row above the waterfall, *Timeline | Graph | Statistics | Spans | Flamegraph*: the in-content tab component (`app_ui_tabs.js`, the Logs *Results | Patterns* tabs' look; arrow keys, Home and End move between them). The view is the URL's `?view=` (omitted for the timeline) and the last one is remembered; below 820 px a *View* dropdown replaces the tabs.
 
 The detail page derives the span tree, trace bounds, per-service counts, start-ordered overview bars and parsed event markers once per loaded trace. Opening or closing a span inspector and folding or unfolding a branch patch only the affected rows; service filters and range changes re-render the waterfall from the cached data. Waterfall controls use delegated listeners on the persistent container. The query-analysis trace viewer mounts rows lazily: only rows visible under the initial fold are built, and a branch mounts its children the first time it is expanded.
 

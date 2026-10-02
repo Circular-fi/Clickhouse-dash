@@ -240,6 +240,17 @@ is modelled on HyperDX's search page:
   URL (`from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `tab`,
   `cols`, `denoise`), so a search can be shared, reloaded and navigated with
   Back / Forward.
+- **Fields**: the left sidebar, the Traces **Attributes** panel's component
+  (`app_facet_panel.js`): the field keys of the matching records (record
+  columns `C`, `LogAttributes` `L`, `ResourceAttributes` `R`,
+  `ScopeAttributes` `S`) with their sampled counts, a key search, the top
+  values of an expanded key, pins and a folded 32 px rail (folded by default
+  under 1100 px; on phones it stacks above the histogram). Checking a value
+  adds a `key=value` filter (`LogAttributes.<key>=...`, the column, or the
+  service picker for `ServiceName`), the exclude button `key!=value`; several
+  checked values of one key match any of them. The panel shows the active
+  filters (from the chips, the Filter box or the URL); the pins and the fold
+  state are kept in `localStorage`.
 - **Volume histogram**: records over time stacked by severity class (error,
   warn, info, debug); the total is the sum of the buckets. Buckets align on
   the browser's local midnight. Drag over the chart to zoom the time range;
@@ -279,7 +290,7 @@ filter parameters:
 | `severity_min` | `SeverityNumber >= n` (0-24). |
 | `severity` (repeated) | Classes `error` (>= 17), `warn` (13-16), `info` (9-12), `debug` (<= 8). |
 | `q` | Body search, see below. |
-| `attr` (repeated) | `key=value` or `key!=value`. A bare key matches `LogAttributes` or `ResourceAttributes`; `LogAttributes.<key>`, `ResourceAttributes.<key>`, `ScopeAttributes.<key>` pick one map; `ServiceName`, `SeverityText`, `TraceId`, `SpanId`, `ScopeName`, `ScopeVersion` compare the column. |
+| `attr` (repeated) | `key=value` or `key!=value`. A bare key matches `LogAttributes` or `ResourceAttributes`; `LogAttributes.<key>`, `ResourceAttributes.<key>`, `ScopeAttributes.<key>` pick one map; `ServiceName`, `SeverityText`, `TraceId`, `SpanId`, `ScopeName`, `ScopeVersion` compare the column. Several `key=value` of one key match any of the values; every `key!=value` excludes its value. |
 | `trace_id`, `span_id` | Hexadecimal ids. |
 
 Every query filters the primary-key columns first (`ServiceName`, and
@@ -377,6 +388,43 @@ Response: `total`, `sample_size`, `sampled`, `sample_method` (`all` or
 `sample` (one record), `search` (the constant words, usable as `q`),
 `service` / `service_count`, `severity` (most frequent class) and `sparkline`
 (scaled counts over `sparkline_buckets` equal slices of the range).
+
+### `GET /api/logs/facets` and `GET /api/logs/facet_values`
+
+The Fields panel, with the Traces attribute facets' caps (`facet_limits.hpp`,
+see "Attribute facets" in `docs/traces.md`): the search's filters over the
+minute-aligned range (`scanned_range`; answers are cached 60 s per host,
+window and filter set), at most 3 M sampled records, at most 50 M rows read,
+100 k distinct values grouped and a 5 s budget; `estimated: true` when a cap
+stopped the scan.
+
+`/api/logs/facets` reads the maps' key subcolumns and the record columns in
+one pass: `keys: [[scope, key, count], ...]` (scopes `log`, `resource`,
+`scope` for `Map` attribute columns, and `column` for `ServiceName`,
+`SeverityText`, `ScopeName`, `ScopeVersion`), most frequent first, plus
+`sampled_records`.
+
+```sql
+SELECT toString(sampled), toString(t.1), toString(t.2), toString(t.3) FROM (
+  SELECT count() AS sampled,
+         sumMap(k0, arrayResize([toUInt64(1)], length(k0), toUInt64(1))) AS m0, ...,
+         countIf(c0 != '') AS n0, ...
+  FROM (SELECT LogAttributes.keys AS k0, ..., `ServiceName` AS c0, ...
+        FROM otel.otel_logs WHERE <time> AND <allowlist> <filters> LIMIT 3000000))
+LEFT ARRAY JOIN arrayConcat(arrayMap((k, c) -> tuple('log', toString(k), c), m0.1, m0.2), ...,
+                            [tuple('column', 'ServiceName', n0), ...]) AS t
+SETTINGS max_execution_time = 5, timeout_overflow_mode = 'break',
+         max_rows_to_read = 50000000, read_overflow_mode = 'break'
+```
+
+`/api/logs/facet_values?scope=log|resource|scope|column&key=...&limit=...`
+(limit 1-500, default 10) counts one field's values (`values: [[value,
+count], ...]`, `records_with_key`, `distinct_values`, `has_more`). The
+field's own filters are left out (the `service` filter for `ServiceName`;
+`attr` filters on the column, on `<Map>.<key>` or on the bare key), so its
+other values stay listed. A column facet must name one of the four columns
+(`400 invalid_logs_facet`); a JSON attribute column answers
+`400 logs_facet_unsupported`.
 
 ### `GET /api/logs/services`
 
