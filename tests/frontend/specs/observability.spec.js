@@ -581,15 +581,15 @@ test.describe('observability formats on a French browser in Paris', () => {
     expect(await tableRow.locator('.logsCell--time').getAttribute('title')).toContain('Sep 20, 2026 01:22:55.742983150 UTC');
     // Severity 21 is fatal: its own colour, not the error one.
     await expect(tableRow.locator('.badge--sev')).toHaveAttribute('data-sev', 'fatal');
-    const colours = await tableRow.locator('.badge--sev').evaluate((badge) => {
+    // Polled: the virtual row may re-render (a detached badge has no style).
+    await expect.poll(() => tableRow.locator('.badge--sev').evaluate((badge) => {
       const probe = document.createElement('i');
       probe.style.color = 'var(--sev-fatal)';
       document.body.appendChild(probe);
-      const out = { badge: getComputedStyle(badge).color, fatal: getComputedStyle(probe).color };
+      const same = !!getComputedStyle(badge).color && getComputedStyle(badge).color === getComputedStyle(probe).color;
       probe.remove();
-      return out;
-    });
-    expect(colours.badge).toBe(colours.fatal);
+      return same;
+    })).toBe(true);
     await tableRow.click();
     await expect(page.locator('#logsSideTitle .logsSideTitle__time')).toHaveText(sep20('03:22:55.742983150'));
   });

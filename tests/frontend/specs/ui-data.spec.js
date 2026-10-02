@@ -145,19 +145,18 @@ test.describe('badge', () => {
       await page.goto(await logsUrl(request));
       const badge = page.locator('#logsTableRows .badge--sev').first();
       await expect(badge).toBeVisible({ timeout: 30_000 });
-      const style = await badge.evaluate((el) => {
-        const cs = getComputedStyle(el);
+      // The virtual rows re-render while the page settles: retrying matchers
+      // (a detached row has no computed style).
+      await expect(badge).toHaveCSS('height', '18px');
+      await expect(badge).toHaveCSS('text-transform', 'none');
+      await expect.poll(() => badge.evaluate((el) => {
         const probe = document.createElement('i');
         probe.style.color = 'var(--sev-color)';
         el.appendChild(probe);
-        const sev = getComputedStyle(probe).color;
+        const same = el.isConnected && !!getComputedStyle(el).color && getComputedStyle(el).color === getComputedStyle(probe).color;
         probe.remove();
-        return { height: cs.height, transform: cs.textTransform, color: cs.color, sev, text: el.textContent };
-      });
-      expect(style.height).toBe('18px');
-      expect(style.transform).toBe('none');
-      expect(style.color).toBe(style.sev);
-      expect(style.text).toBe(style.text.toUpperCase());
+        return same && el.textContent === el.textContent.toUpperCase();
+      })).toBe(true);
       // The histogram's totals legend filters; the filter is a .chip.
       await page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]').click();
       const chip = page.locator('#logsChips .chip');
@@ -286,11 +285,11 @@ test.describe('stat tile', () => {
       await openApp(page);
       const rail = page.locator('.metricCompact__label.statTile__label').first();
       await expect(rail).toHaveText('Elapsed');
-      expect(await rail.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
+      await expect(rail).toHaveCSS('text-transform', 'none');
       await page.goto('/explorer/chdash_ui/weather_observations/columns');
       const about = page.locator('.explorerAboutTile .statTile__label').first();
       await expect(about).toBeAttached({ timeout: 30_000 });
-      expect(await about.evaluate((el) => getComputedStyle(el).textTransform)).toBe('none');
+      await expect(about).toHaveCSS('text-transform', 'none');
       expect(await noPageOverflow(page)).toBe(true);
     });
   }
