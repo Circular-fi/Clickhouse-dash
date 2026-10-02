@@ -294,7 +294,7 @@
     for (const key of Object.keys(props)) {
       const value = props[key];
       if (key === "class" || key === "className") {
-        const cls = classList(value, []).join(" ").trim();
+        const cls = typeof value === "string" ? value : classList(value, []).join(" ").trim();
         if (cls) el.setAttribute("class", cls);
       } else if (key === "dataset" || key === "data") {
         if (value) for (const name of Object.keys(value)) {
