@@ -208,7 +208,9 @@
   // units" for now-N to now, otherwise both sides as 24 h local time,
   // "YYYY-MM-DD HH:mm \u2192 HH:mm" with the date repeated only when the day
   // changes, and seconds only when the range is under 10 minutes. Relative
-  // sides ("now-2d") are shown as typed.
+  // sides ("now-2d") are shown as typed. Absolute ranges go through
+  // ns.format.range, the same rule; the local fallback covers a page without
+  // app_format.js and the mixed absolute / relative ranges.
   const SECONDS_BELOW_MS = 10 * 60000;
 
   function describeRange(raw, nowMs = Date.now()) {
@@ -224,6 +226,8 @@
     const b = parseAbsolute(to);
     const startMs = parseTime(from, false, nowMs);
     const endMs = parseTime(to, true, nowMs);
+    // Both sides absolute: the shared range format (app_format.js).
+    if (a && b && Number.isFinite(startMs) && Number.isFinite(endMs) && ns.format?.range) return { text: ns.format.range(startMs, endMs), relative: false };
     const seconds = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs && endMs - startMs < SECONDS_BELOW_MS;
     const stamp = (ms) => { const text = formatDateTime(ms); return seconds ? text : text.slice(0, 16); };
     const aText = a ? stamp(startMs) : from;
