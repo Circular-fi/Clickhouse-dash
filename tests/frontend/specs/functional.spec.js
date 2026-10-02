@@ -1534,6 +1534,22 @@ test('Explorer Preview cells stay raw like Query results: no grouping, no compac
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText(/^\d{1,3}(,\d{3})* rows? \(LIMIT \d+\)$/);
 });
 
+test('Explorer Parts: part ages follow the duration rule and the table fits beside About at 1440 px', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openApp(page);
+  await page.goto('/explorer/chdash_ui/weather_observations/storage');
+  const parts = page.locator('#explorerDetailContent .explorerTable--parts');
+  await expect(parts.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#explorerDetailContent .explorerAbout')).toBeVisible();
+  const headers = (await parts.locator('thead th').allTextContents()).map((text) => text.trim());
+  const age = parts.locator(`tbody ${dataRowsSelector}`).first().locator('td').nth(headers.indexOf('Age'));
+  // ns.format.duration: "20 h 19 min", "3 d 4 h", "45 s", never "20.3 h".
+  await expect(age).toHaveText(/^\d+(?:\.\d+)? (?:ms|s|min|h|d)(?: \d+ (?:s|min|h))?$/);
+  await expect(age).not.toHaveText(/\d\.\d+ (?:h|d)$/);
+  const fit = await parts.evaluate((wrap) => ({ scroll: wrap.scrollWidth, client: wrap.clientWidth }));
+  expect(fit.scroll).toBeLessThanOrEqual(fit.client + 1);
+});
+
 test('inline row details open from the Explorer data preview', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);

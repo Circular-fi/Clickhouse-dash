@@ -4967,6 +4967,9 @@ html[data-theme="light"] {
 }
 .explorerCard .explorerTable .resultTable thead th.explorerTable__numHead { text-align: right; }
 .explorerCard .explorerTable .resultTable tbody td { padding: 5px 8px; }
+.explorerCard .explorerTable--parts .resultTable thead th { padding-left: 6px; }
+.explorerCard .explorerTable--parts .resultTable tbody td { padding-left: 6px; padding-right: 6px; }
+.explorerCard .explorerTable--parts .resultTable tbody td.resultTable__gaugeCell { min-width: 5rem; }
 .explorerCard .explorerTable .resultTable tbody td.resultTable__rowIndex {
   padding: 5px 6px;
   color: var(--muted);
