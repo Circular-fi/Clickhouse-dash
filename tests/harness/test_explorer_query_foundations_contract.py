@@ -112,7 +112,8 @@ def test_migrated_modules_read_the_shared_foundations() -> None:
     chart = (STATIC / "app_query_chart.js").read_text(encoding="utf-8")
     assert "return ns.palette.categorical(slot);" in chart
     run = (STATIC / "app_run.js").read_text(encoding="utf-8")
-    assert 'ns.palette.resolve("--border")' in run and 'ns.palette.resolve("--accent-fill")' in run
+    # The rail trends are the shared SVG sparkline (--sparkline-color, a token).
+    assert "ns.ui.sparkline.draw(el, " in run and "palette.resolve" not in run
     # Explorer instants: the server's DateTime text in the browser's zone, the
     # server value in the tooltip (decision 48).
     ui = (STATIC / "app_ui.js").read_text(encoding="utf-8")

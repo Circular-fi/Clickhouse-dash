@@ -29,8 +29,9 @@ def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
     # The charts draw on the shared canvas engine: its tooltip reads the
     # bucket (count and percentile charts) or the picked trace (scatter).
     assert 'mountChart(container, "counts", {' in js and 'mountChart(container, "percentiles", {' in js
-    assert "xReadout: (i) => bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs)" in js
-    assert "xReadout: (i) => bucketRangeLabel(xs[i] - qBucketMs / 2, qBucketMs)" in js
+    # The engine's bucket readout (ns.format.range of the bucket).
+    assert 'bucketMs, bucketAlign: "center",' in js
+    assert 'bucketMs: qBucketMs, bucketAlign: "center",' in js
     assert "pickTooltip: (hit) => {" in js
     assert 'range_ms / 1000 / 60' in cpp
     assert 'range_ms / 1000 / 120' in cpp

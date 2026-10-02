@@ -3106,19 +3106,7 @@ html[data-theme="light"] {
 .logsHistogram {
   flex: 0 0 auto;
   margin: 8px 12px 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
 }
-.logsHistogram__header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 30px;
-  padding: 4px 10px 0;
-}
-.logsHistogram__total { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.logsHistogram__meta { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .logsHistogram__chart { position: relative; z-index: 2; height: 120px; }
 .logsHistogram__chart .chartCore__plot { overflow: visible; }
 .logsHistogram__placeholder { display: grid; place-items: center; height: 100%; }
@@ -5257,6 +5245,11 @@ button.chip__op:hover {
 }
 .chartCard__legend {
   padding: 0 12px 8px;
+}
+.chartCore__legendItem--total > b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .sparkline {
   --sparkline-color: var(--accent-fill);

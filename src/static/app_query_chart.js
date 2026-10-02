@@ -494,10 +494,10 @@
     toggleEl.append(tableBtn, chartBtn);
 
     const hostEl = document.createElement("div");
-    hostEl.className = "queryChart";
+    hostEl.className = "queryChart chartCard";
     hostEl.innerHTML = `
-      <div class="queryChart__toolbar">
-        <div class="segmented queryChart__types" role="group" aria-label="Chart type"></div>
+      <div class="queryChart__toolbar chartCard__head">
+        <div class="segmented queryChart__types chartCard__actions" role="group" aria-label="Chart type"></div>
         <div class="queryChart__field queryChart__xField" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
           <select class="queryChart__x" data-field-label="X axis" aria-label="X axis column"></select>
         </div>
@@ -510,14 +510,14 @@
         <div class="queryChart__field queryChart__groupField" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
           <select class="queryChart__group" data-field-label="Split by" aria-label="Split by column"></select>
         </div>
-        <span class="queryChart__note"></span>
+        <span class="queryChart__note chartCard__meta"></span>
       </div>
       <div class="queryChart__range" hidden>
         <span class="queryChart__rangeText"></span>
         <span class="queryChart__rangeHint">Drag to zoom \u00b7 double-click to reset</span>
         <button type="button" class="queryChart__resetZoom" hidden title="Show the whole x range again (or double-click the plot)">Reset zoom</button>
       </div>
-      <div class="queryChart__stage">
+      <div class="queryChart__stage chartCard__body">
         <div class="queryChart__message" hidden></div>
         <div class="queryChart__numbers" hidden></div>
       </div>`;

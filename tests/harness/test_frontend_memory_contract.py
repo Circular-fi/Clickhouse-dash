@@ -43,8 +43,9 @@ def test_idle_startup_does_not_activate_or_hydrate_catalogs() -> None:
 
 def test_chart_backing_stores_are_bounded_and_released_when_hidden() -> None:
     run_ui = read("src/static/app_run.js")
-    assert "Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1))" in run_ui
+    # The rail trends are SVG sparklines (no canvas backing store): a hidden
+    # tab empties them and the points are decimated.
     assert "function releaseChartBuffers()" in run_ui
     assert 'document.addEventListener("visibilitychange"' in run_ui
-    assert "canvas.width = 1;" in run_ui
-    assert "canvas.height = 1;" in run_ui
+    assert "el.replaceChildren();" in run_ui
+    assert "decimate(points, 120)" in run_ui

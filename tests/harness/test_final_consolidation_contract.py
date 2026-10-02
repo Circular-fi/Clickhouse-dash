@@ -263,7 +263,7 @@ def test_elapsed_restores_metric_card_and_system_is_small_terminal_footer() -> N
     run = read("src/static/app_run.js")
 
     assert 'metricCompact metricCompact--elapsed' in html
-    assert '<div class="metricCompact__label">Elapsed</div>' in html
+    assert '<div class="metricCompact__label statTile__label">Elapsed</div>' in html
     assert 'id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden' in html
     assert '.metricCompact__systemLine' in css
     assert 'justify-content: space-between' in css[css.find('.metricCompact__systemLine'):]

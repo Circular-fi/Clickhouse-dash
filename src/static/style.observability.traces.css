@@ -2393,38 +2393,11 @@ html.chdash-page-select-hidden .pageSelect {
   gap: 8px;
   padding: 8px 12px 0;
 }
-.traceAnalyticsCard {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panelBg);
-  overflow: hidden;
-}
-.traceAnalyticsCard > header {
-  height: 31px;
-  padding: 0 9px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.traceAnalyticsCard > header strong { font-size: 11px; }
-.traceAnalyticsCard > header span { color: var(--muted); font-size: 9px; }
 .traceChart { min-height: 235px; padding: 4px 6px 5px; overflow: hidden; }
 .traceChart > .uiState { min-height: 220px; }
 .traceChartLegend { min-height: 25px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px; padding: 2px 4px 0; color: var(--muted); font-size: 8px; }
 .traceChartLegend > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .traceChartLegend i { width: 7px; height: 7px; border-radius: 2px; }
-.traceChartLegend--quantiles .p50::before,
-.traceChartLegend--quantiles .p90::before,
-.traceChartLegend--quantiles .p95::before,
-.traceChartLegend--quantiles .p99::before { content: ""; width: 12px; border-top: 2px solid currentColor; }
-.traceChartLegend--quantiles .p50 { color: var(--pct-p50); }
-.traceChartLegend--quantiles .p90 { color: var(--pct-p90); }
-.traceChartLegend--quantiles .p95 { color: var(--pct-p95); }
-.traceChartLegend--quantiles .p99 { color: var(--pct-p99); }
-.traceChartLegend .point { border-radius: 50%; background: var(--accentBorder); }
 .traceResultsSection { padding: 8px 12px 20px; }
 .traceResultsSection .traceSearchResults__toolbar { min-height: 35px; }
 .traceResultsSection .traceSearchResults__toolbar h2 { font-size: 13px; }
@@ -4596,8 +4569,6 @@ html[data-obs-view="traces"] .tracesResults--wide {
 .traceTable__name:has(.traceTag--incomplete) .traceTable__nameText { max-width: calc(100% - 104px); }
 .traceTable__nameText b { color: var(--muted); font-weight: 600; }
 .traceTable__services .traceSvcPills { width: 100%; }
-.traceChartLegend--quantiles .traces::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--traceDot) 55%, transparent); border: 1px solid var(--traceDot); }
-.traceChartLegend--quantiles .traces { color: var(--muted); }
 .chartCore__tipRow.is-error em,
 .chartCore__tipRow.is-error b { color: var(--danger); }
 :root {
@@ -6205,7 +6176,6 @@ html[data-theme="light"] {
     --trace-delta-selection: #c2570c; --trace-delta-baseline: #8b95a5;
   }
 }
-.traceAnalyticsCard > header #traceDurationChartMeta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
 .chartCore__box.traceHeatDrag,
 .chartCore__region.traceHeatBrush { background: color-mix(in srgb, var(--trace-delta-selection) 16%, transparent); border: 1.5px dashed var(--trace-delta-selection); }
@@ -6313,7 +6283,6 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceSvcChart > .uiState { min-height: 140px; }
 .chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
 .chartCore__annotation.traceSvcRelease > span { color: var(--accentBorder); }
-.traceSvcDetail .traceAnalyticsCard > header .traceChartLegend--quantiles span { font-size: 9.5px; }
 .traceSvcSection { margin-top: 14px; }
 .traceSvcSection h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; }
 .traceSvcTable.dataTable--compact tbody th { max-width: 260px; }
@@ -8561,6 +8530,11 @@ button.chip__op:hover {
 }
 .chartCard__legend {
   padding: 0 12px 8px;
+}
+.chartCore__legendItem--total > b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .sparkline {
   --sparkline-color: var(--accent-fill);

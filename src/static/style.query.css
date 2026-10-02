@@ -7847,6 +7847,11 @@ button.chip__op:hover {
 .chartCard__legend {
   padding: 0 12px 8px;
 }
+.chartCore__legendItem--total > b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .sparkline {
   --sparkline-color: var(--accent-fill);
   display: block;

@@ -606,14 +606,14 @@
 
   function buildPanel(panel) {
     const el = document.createElement("article");
-    el.className = "metricsPanel";
+    el.className = "metricsPanel chartCard";
     el.dataset.panelId = String(panel.id);
     el.innerHTML = `
       <header class="metricsPanel__header">
-        <div class="metricsPanel__titleRow">
-          <h2 class="metricsPanel__name"></h2>
-          <div class="metricsPanel__badges"></div>
-          <button type="button" class="metricsPanel__remove" aria-label="Remove panel" title="Remove panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+        <div class="metricsPanel__titleRow chartCard__head">
+          <h2 class="metricsPanel__name chartCard__title"></h2>
+          <div class="metricsPanel__badges chartCard__meta"></div>
+          <button type="button" class="metricsPanel__remove chartCard__actions" aria-label="Remove panel" title="Remove panel"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         </div>
         <p class="metricsPanel__description"></p>
       </header>
@@ -654,7 +654,7 @@
         <datalist class="metricsFilterForm__values"></datalist>
       </form>
       <div class="metricsPanel__note" hidden></div>
-      <div class="metricsChart">
+      <div class="metricsChart chartCard__body">
         <div class="metricsChart__axisTitle"></div>
         <div class="metricsChart__plot">
           <div class="metricsChart__state" hidden></div>
@@ -1049,7 +1049,7 @@
       formatValue: (v) => formatValue(v, valueInfo),
       formatY: (v) => formatValue(v, valueInfo),
       // The bucket a cursor position stands for, like the Traces charts.
-      xReadout: (i) => fmt.range(xs[i], xs[i] + bucketMs),
+      bucketMs,
       tooltipFooter: () => `${fmt.duration.fromMs(bucketMs)} bucket`,
     };
     if (!panel.chart) {

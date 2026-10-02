@@ -233,7 +233,7 @@
       syncKey: ctx.CHART_SYNC_KEY, keyboard: false, zoomable: false,
       yScale: "log", yAxis: () => ({ min: lo, max: hi, ticks }),
       cells: box,
-      xReadout: (i) => fmt.range(colStart(i), colStart(i) + bucketMs),
+      bucketMs, bucketAlign: "center",
       formatY: (value) => fmt.duration(value),
       pick: (pt) => { const cell = cellAt(pt.x, pt.y); return { key: `${cell.col}:${cell.row}`, cell, x: colStart(cell.col) + bucketMs / 2 }; },
       pickTooltip: (hit) => cellTooltip(hit.cell),

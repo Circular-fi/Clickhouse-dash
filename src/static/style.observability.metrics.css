@@ -3012,9 +3012,6 @@ html[data-theme="light"] {
 }
 .metricsPanel {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panelBg);
 }
 .metricsPanels > .metricsPanel.is-active:not(:only-child) { border-color: color-mix(in srgb, var(--accentBorder) 60%, var(--border)); }
 .metricsPanel__header { display: grid; gap: 3px; padding: 9px 12px 6px; min-width: 0; }
@@ -5033,6 +5030,11 @@ button.chip__op:hover {
 }
 .chartCard__legend {
   padding: 0 12px 8px;
+}
+.chartCore__legendItem--total > b {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .sparkline {
   --sparkline-color: var(--accent-fill);

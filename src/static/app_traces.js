@@ -148,11 +148,6 @@
     return d.getTime();
   }
 
-  // The readout of a chart bucket: the time range it covers.
-  function bucketRangeLabel(startMs, sizeMs) {
-    return fmt.range(startMs, startMs + sizeMs);
-  }
-
   function timestampToNs(value) {
     if (value == null || value === "") return NaN;
     const direct = Number(value);
@@ -523,7 +518,7 @@
       xKind: "time", xs, xDomain: [start, end], zoom: null,
       series: [{ id: "traces", label: "Matching traces", color: "var(--accent-fill)", values, nulls: null }],
       type: "bar", legend: false, syncKey: CHART_SYNC_KEY,
-      xReadout: (i) => bucketRangeLabel(xs[i] - bucketMs / 2, bucketMs),
+      bucketMs, bucketAlign: "center",
       formatValue: (value) => fmt.count(value),
       formatY: (value) => fmt.count(Math.max(0, value)),
       onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); },
@@ -599,7 +594,7 @@
         const durationScaleAxis = durationAxis(yMin, yMax, 7);
         return { min: durationScaleAxis.axisMin, max: durationScaleAxis.axisMax, ticks: durationScaleAxis.values.map((tick) => ({ v: tick.value, label: tick.label })) };
       },
-      xReadout: (i) => bucketRangeLabel(xs[i] - qBucketMs / 2, qBucketMs),
+      bucketMs: qBucketMs, bucketAlign: "center",
       formatValue: (value) => fmt.duration(value),
       formatY: (value) => fmt.duration(Math.max(0, value)),
       pickTooltip: (hit) => {

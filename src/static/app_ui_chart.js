@@ -6,7 +6,8 @@
   // the same sparkline.
   //
   //   ui.chartCardHtml({ title, meta, actions, body, legend, className, id,
-  //                      tag, titleTag, titleId, metaId, bodyClass, bodyId })
+  //                      tag, titleTag, titleId, metaId, bodyClass, bodyId,
+  //                      attrs, bodyAttrs })
   //     <article class="chartCard"><header class="chartCard__head">
   //       <h3 class="chartCard__title"/> <span class="chartCard__meta"/>
   //       <span class="chartCard__actions"/></header>
@@ -25,15 +26,16 @@
 
   function chartCardHtml({
     title = "", meta = "", actions = "", body = "", legend = "", className = "", id = "", tag = "article",
-    titleTag = "h3", titleId = "", metaId = "", bodyClass = "", bodyId = "", attrs = {},
+    titleTag = "h3", titleId = "", metaId = "", bodyClass = "", bodyId = "", attrs = {}, bodyAttrs = {},
   } = {}) {
     const extra = Object.entries(attrs).map(([name, v]) => ` ${name}="${esc(v)}"`).join("");
+    const bodyExtra = Object.entries(bodyAttrs).map(([name, v]) => ` ${name}="${esc(v)}"`).join("");
     return `<${tag} class="chartCard${className ? ` ${esc(className)}` : ""}"${id ? ` id="${esc(id)}"` : ""}${extra}>`
       + `<header class="chartCard__head"><${titleTag} class="chartCard__title"${titleId ? ` id="${esc(titleId)}"` : ""}>${esc(title)}</${titleTag}>`
       + `<span class="chartCard__meta"${metaId ? ` id="${esc(metaId)}"` : ""}>${esc(meta)}</span>`
       + (actions ? `<span class="chartCard__actions">${actions}</span>` : "")
       + "</header>"
-      + `<div class="chartCard__body${bodyClass ? ` ${esc(bodyClass)}` : ""}"${bodyId ? ` id="${esc(bodyId)}"` : ""}>${body}</div>`
+      + `<div class="chartCard__body${bodyClass ? ` ${esc(bodyClass)}` : ""}"${bodyId ? ` id="${esc(bodyId)}"` : ""}${bodyExtra}>${body}</div>`
       + (legend ? `<footer class="chartCard__legend">${legend}</footer>` : "")
       + `</${tag}>`;
   }

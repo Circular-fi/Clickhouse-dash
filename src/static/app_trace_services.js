@@ -386,9 +386,10 @@
     const byIndex = new Map(points.map((p, k) => [grid.slot[k], p]));
     chart.mountChart(container, "service", {
       height: DETAIL_CHART_HEIGHT, xKind: "time", xs, xDomain: [start, end], zoom: null,
-      series: columns, type, stack: type === "bar", legend: false, syncKey: "traces-service", tooltipNulls: false,
+      // The engine legend shows for the charts with several series.
+      series: columns, type, stack: type === "bar", syncKey: "traces-service", tooltipNulls: false,
       yAxis, annotations: releases,
-      xReadout: (i) => fmt.range(xs[i] - bucketMs / 2, xs[i] + bucketMs / 2),
+      bucketMs, bucketAlign: "center",
       formatValue: (v) => format(v),
       formatY: (v) => format(Math.max(0, v)),
       tooltipFooter: footer ? (i) => { const p = byIndex.get(i); return p ? footer(p) : ""; } : null,
@@ -517,9 +518,9 @@
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">
-          <article class="traceAnalyticsCard"><header><strong>Requests</strong><span>${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word} · errors in red</span></header><div class="traceChart traceSvcChart" data-svc-chart="rate"></div></article>
-          <article class="traceAnalyticsCard"><header><strong>Error rate</strong><span>% of entry spans with status Error</span></header><div class="traceChart traceSvcChart" data-svc-chart="errors"></div></article>
-          <article class="traceAnalyticsCard"><header><strong>Latency</strong><span class="traceChartLegend--quantiles"><span class="p50">P50</span> <span class="p95">P95</span> <span class="p99">P99</span></span></header><div class="traceChart traceSvcChart" data-svc-chart="latency"></div></article>
+          ${ns.ui.chartCardHtml({ title: "Requests", meta: `${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word}`, className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "rate" } })}
+          ${ns.ui.chartCardHtml({ title: "Error rate", meta: "% of entry spans with status Error", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "errors" } })}
+          ${ns.ui.chartCardHtml({ title: "Latency", meta: "entry span duration", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "latency" } })}
         </div>
         ${releasesHtml(payload)}
         <section class="traceSvcSection"><h4>Most time-consuming endpoints</h4>${endpointsHtml(payload, name)}</section>
