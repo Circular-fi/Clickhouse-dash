@@ -22,8 +22,14 @@ from pathlib import Path
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[3]
+# Repository root (tests/api/format/corpus/run_corpus.py). parents[3] was the
+# tests/ directory, so the fixture and clickhouse-init statements the
+# docstring promises were never found and silently left out of the corpus.
+ROOT = Path(__file__).resolve().parents[4]
 SQL_BLOCK = re.compile(r"```sql[^\n]*\n(.*?)```", re.S)
+# Fixture inputs that are deliberately not the same query as their output:
+# check_format.AST_EQUIVALENCE_EXEMPT (one-line comment recovery).
+AST_EXEMPT_FIXTURES = {"059_comments_header_and_select.sql"}
 
 
 def split_statements(text: str) -> list[str]:
@@ -74,7 +80,11 @@ def corpus(ch: str, auth) -> list[tuple[str, str]]:
         for stmt in split_statements(path.read_text(encoding="utf-8")):
             if not stmt.lstrip().startswith("--"):
                 items.append((f"init:{path.name}", stmt))
-    for path in sorted((ROOT / "tests/api/format/input").glob("*.sql")):
+    fixture_dir = ROOT / "tests/api/format/input"
+    assert fixture_dir.is_dir(), fixture_dir
+    for path in sorted(fixture_dir.glob("*.sql")):
+        if path.name in AST_EXEMPT_FIXTURES:
+            continue
         for stmt in split_statements(path.read_text(encoding="utf-8")):
             items.append((f"fixture:{path.name}", stmt))
     if COMMA_COMMENTS:

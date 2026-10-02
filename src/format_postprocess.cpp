@@ -204,6 +204,18 @@ string normalize_code_spacing(string_view s) {
     }
     return true;
   };
+  // `INDEX name (expr)`: the expression of a skip index is not a call of its
+  // name; a space written there stays (the stacked index layout prints one).
+  auto index_name_before = [&]() {
+    size_t e = out.size();
+    size_t b = e;
+    while (b > 0 && is_ident_char(out[b - 1])) --b;
+    if (b == e) return false;
+    size_t w = b;
+    while (w > 0 && out[w - 1] == ' ') --w;
+    if (w == b || w < 5) return false;
+    return (w == 5 || !is_ident_char(out[w - 6])) && iequals_ascii(string_view(out).substr(w - 5, 5), "INDEX");
+  };
 
   for (size_t i = 0; i < s.size(); ++i) {
     char c = s[i];
@@ -289,7 +301,8 @@ string normalize_code_spacing(string_view s) {
                                prev_non_space() == '-' || prev_non_space() == '*' ||
                                prev_non_space() == '/' || prev_non_space() == '%' ||
                                prev_non_space() == '=' ||
-                               prev_non_space() == '>' || prev_non_space() == '<';
+                               prev_non_space() == '>' || prev_non_space() == '<' ||
+                               (i > 0 && s[i - 1] == ' ' && index_name_before());
       if (needs_space && out.size() != unary_sign_end) append_space();
       out.push_back(c);
       while (i + 1 < s.size() && (s[i + 1] == ' ' || s[i + 1] == '\t')) ++i;
@@ -1916,7 +1929,11 @@ bool arith_word_is(string_view word, std::initializer_list<const char*> words) {
 }
 
 string strip_redundant_arith_parentheses(string_view s) {
-  const vector<ArithToken> t = lex_arith_tokens(s);
+  vector<ArithToken> t = lex_arith_tokens(s);
+  // Comments are whitespace to the parser: the neighbours of a group are the
+  // code tokens around it. Seen as a token, a `-- c` before `-(1)` made the
+  // minus look binary and `-(1)` (negate(1)) became the literal `-1`.
+  t.erase(std::remove_if(t.begin(), t.end(), [](const ArithToken& tok) { return tok.kind == ArithTokenKind::Comment; }), t.end());
   if (t.empty()) return string(s);
   auto text = [&](size_t k) { return s.substr(t[k].begin, t[k].end - t[k].begin); };
   vector<size_t> match(t.size(), string::npos);
@@ -1963,6 +1980,10 @@ string strip_redundant_arith_parentheses(string_view s) {
           continue;
         }
         if (tok.kind == ArithTokenKind::Open) {
+          // `((a + b))`: the outer group is kept and the inner one decided
+          // alone (inside the outer one). Dropping both, each judged by its
+          // original neighbours, turned `((a + b)) * c` into `a + b * c`.
+          if (k == open + 1 && match[k] == close - 1) return kArithUnknown;
           ++operands;
           expect_operand = false;
           k = match[k];
@@ -2710,6 +2731,7 @@ struct Formatter {
   string format_insert_select_like(string_view s);
   string format_delete(string_view s);
   string format_kill(string_view s);
+  string commented_operand(string_view s);
   string format_optimize_table(string_view s);
   string format_row_policy(string_view s);
   string format_settings_profile(string_view s);
@@ -3233,8 +3255,10 @@ string Formatter::format_clause(string_view kw, string_view body) {
       return format_clause(kw, joins.front().first) + format_join_segments(joins);
     }
     const auto items = split_top_level(body, ',');
-    if (items.size() == 1 && trim_ascii_spaces(body).find('\n') == string::npos) {
-      auto [expr, alias] = split_top_level_as(items.front());
+    // Without comments, a single item's line breaks are an earlier layout of
+    // it (the comment path keeps them): it is judged on one line again.
+    if (items.size() == 1 && (trim_ascii_spaces(body).find('\n') == string::npos || !mask_sql_surface(body).has_comments)) {
+      auto [expr, alias] = split_top_level_as(collapse_whitespace(items.front()));
       if (!alias.empty()) return string(kw) + " " + format_expression(expr) + " AS " + format_alias_identifier(alias);
       return string(kw) + " " + format_expression(items.front());
     }
@@ -3460,8 +3484,20 @@ string Formatter::format_with_item_block(const vector<string>& items) {
   size_t min_width = static_cast<size_t>(-1);
   size_t aliased_count = 0;
   bool can_align = true;
+  // `--` comments heading an item were written after the previous item's
+  // comma: they go back there (kept with the item, they took its input
+  // indentation and drifted on every pass).
+  vector<vector<string>> lead_comments;
 
-  for (const auto& raw : items) {
+  for (const auto& source_item : items) {
+    string raw = trim_ascii_spaces(source_item);
+    lead_comments.emplace_back();
+    while (starts_with_ci(raw, "--")) {
+      auto [comment, rest] = split_leading_line_comment(raw);
+      if (rest.empty()) break;
+      lead_comments.back().push_back(comment);
+      raw = rest;
+    }
     auto [lhs, rhs] = split_top_level_as(raw);
     const string lhs_trim = trim_ascii_spaces(lhs);
     const string rhs_trim = trim_ascii_spaces(rhs);
@@ -3524,6 +3560,11 @@ string Formatter::format_with_item_block(const vector<string>& items) {
       }
     }
     if (i + 1 < parsed.size()) item += ',';
+    const vector<string>& comments = lead_comments[i];
+    for (size_t c = 0; c < comments.size(); ++c) {
+      if (c == 0 && !lines.empty() && !lines.back().empty() && lines.back().back() == ',') lines.back() += " " + comments[c];
+      else lines.push_back(comments[c]);
+    }
     lines.push_back(item);
   }
   return join_lines(lines);
@@ -3665,6 +3706,39 @@ string Formatter::strip_lambda_parentheses(string s) const {
   return out;
 }
 
+// A comma list whose items carry `--` comments: each whole-line comment
+// before an item belongs after the previous item (it was written after that
+// item's comma), comments before the first item stay above it. Returns false
+// when a comment sits inside an item (block comments, a comment within a
+// value), which the caller then leaves alone.
+struct CommentedItems {
+  vector<string> items;
+  vector<string> after;
+  string before_first;
+};
+
+bool split_commented_items(string_view inner, CommentedItems* out) {
+  for (const auto& raw : split_top_level(inner, ',')) {
+    string value = trim_ascii_spaces(raw);
+    while (starts_with_ci(value, "--") || starts_with_ci(value, "#")) {
+      auto [lead, rest] = split_leading_line_comment(value);
+      if (out->items.empty()) out->before_first += (out->before_first.empty() ? "" : "\n") + lead;
+      else out->after.back() += (out->after.back().empty() ? "" : " ") + lead;
+      value = rest;
+    }
+    // An empty item is a trailing comma (`('a',)` is a one-element tuple,
+    // not a parenthesized string): leave such a list as written.
+    if (value.empty()) return false;
+    auto [code, trailing] = split_inline_comment(value);
+    // Comments nested in brackets are laid out by the item's own formatter;
+    // a block comment at the item's top level has no place here.
+    if (contains_top_level_comment(code)) return false;
+    out->items.push_back(trim_ascii_spaces(code));
+    out->after.push_back(trailing);
+  }
+  return !out->items.empty();
+}
+
 string Formatter::format_over_clause(string_view expr) {
   const string s = trim_ascii_spaces(expr);
   const int pos = find_top_level_keyword(s, "OVER");
@@ -3711,7 +3785,20 @@ vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_
   if (part_pos >= 0) {
     const size_t end = (order_pos >= 0) ? static_cast<size_t>(order_pos) : ((rows_pos >= 0) ? static_cast<size_t>(rows_pos) : inner.size());
     const string body = trim_ascii_spaces(inner.substr(static_cast<size_t>(part_pos) + 12, end - static_cast<size_t>(part_pos) - 12));
-    lines.push_back("PARTITION BY " + format_expression(body));
+    // A partition list with comments after its commas: one key per line, each
+    // comment after its key (kept as written it drifted on every pass).
+    CommentedItems keys;
+    if (mask_sql_surface(body).has_comments && split_commented_items(body, &keys)) {
+      string block = keys.before_first.empty() ? string() : keys.before_first + "\n";
+      for (size_t j = 0; j < keys.items.size(); ++j) {
+        block += format_expression(keys.items[j]) + (j + 1 < keys.items.size() ? "," : "");
+        if (!keys.after[j].empty()) block += " " + keys.after[j];
+        if (j + 1 < keys.items.size()) block += "\n";
+      }
+      lines.push_back("PARTITION BY\n" + indent_block(block, 4));
+    } else {
+      lines.push_back("PARTITION BY " + format_expression(body));
+    }
   }
 
   if (order_pos >= 0) {
@@ -3763,39 +3850,6 @@ string Formatter::format_window_clause(string_view body) {
   }
   if (single) return "WINDOW " + rendered.front();
   return "WINDOW\n" + indent_block(join_lines(rendered), 4);
-}
-
-// A comma list whose items carry `--` comments: each whole-line comment
-// before an item belongs after the previous item (it was written after that
-// item's comma), comments before the first item stay above it. Returns false
-// when a comment sits inside an item (block comments, a comment within a
-// value), which the caller then leaves alone.
-struct CommentedItems {
-  vector<string> items;
-  vector<string> after;
-  string before_first;
-};
-
-bool split_commented_items(string_view inner, CommentedItems* out) {
-  for (const auto& raw : split_top_level(inner, ',')) {
-    string value = trim_ascii_spaces(raw);
-    while (starts_with_ci(value, "--") || starts_with_ci(value, "#")) {
-      auto [lead, rest] = split_leading_line_comment(value);
-      if (out->items.empty()) out->before_first += (out->before_first.empty() ? "" : "\n") + lead;
-      else out->after.back() += (out->after.back().empty() ? "" : " ") + lead;
-      value = rest;
-    }
-    // An empty item is a trailing comma (`('a',)` is a one-element tuple,
-    // not a parenthesized string): leave such a list as written.
-    if (value.empty()) return false;
-    auto [code, trailing] = split_inline_comment(value);
-    // Comments nested in brackets are laid out by the item's own formatter;
-    // a block comment at the item's top level has no place here.
-    if (contains_top_level_comment(code)) return false;
-    out->items.push_back(trim_ascii_spaces(code));
-    out->after.push_back(trailing);
-  }
-  return !out->items.empty();
 }
 
 string Formatter::format_array_literal(string_view expr) {
@@ -4441,6 +4495,27 @@ string Formatter::format_exists_subquery(string_view expr) {
   return prefix + "exists(\n" + indent_block(format_statement(inner), 4) + "\n)";
 }
 
+// The left operand of IN. A tuple written with comments between its items
+// (`(a, -- c\n b) NOT IN ...`) is laid out like a commented tuple, one item per
+// line; kept as written, it carried its input indentation into every pass.
+string Formatter::commented_operand(string_view s) {
+  string left = trim_ascii_spaces(s);
+  if (!mask_sql_surface(left).has_comments) return left;
+  string suffix;
+  for (bool stripped = true; stripped;) {
+    stripped = false;
+    for (const char* word : {" NOT", " GLOBAL"}) {
+      if (ends_with_ci(left, word)) {
+        suffix = string(word) + suffix;
+        left = rtrim_spaces(left.substr(0, left.size() - std::char_traits<char>::length(word)));
+        stripped = true;
+      }
+    }
+  }
+  if (left.empty() || left.front() != '(' || find_matching_paren(left, 0) != left.size() - 1) return trim_ascii_spaces(s);
+  return format_expression(left) + suffix;
+}
+
 string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
   ScanState st;
   for (size_t i = 0; i < expr.size(); ++i) {
@@ -4449,7 +4524,7 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
       for (const char* raw : ops) {
         const string_view op(raw);
         if (i + op.size() <= expr.size() && iequals_ascii(expr.substr(i, op.size()), op)) {
-          const string left = trim_ascii_spaces(expr.substr(0, i));
+          const string left = commented_operand(expr.substr(0, i));
           const string tail = trim_ascii_spaces(expr.substr(i + op.size()));
           const string inner = unwrap_outer_parens(tail);
           if (left.empty() || inner.empty() || !looks_like_query(inner)) continue;
@@ -4478,9 +4553,12 @@ string Formatter::format_in_literal(string_view expr) {
         // Whole words only: the `in` of `argMin(` or `min_value` is not IN.
         if ((i > 0 && is_ident_char(expr[i - 1])) ||
             (i + op.size() < expr.size() && is_ident_char(expr[i + op.size()]))) continue;
-        const string left = trim_ascii_spaces(expr.substr(0, i));
-        const string right = trim_ascii_spaces(expr.substr(i + op.size()));
+        const string left = commented_operand(expr.substr(0, i));
+        string right = trim_ascii_spaces(expr.substr(i + op.size()));
         if (left.empty() || right.empty()) continue;
+        // `IN tuple(('a', -- c\n 1))`: a call with comments inside is laid out
+        // by the call formatter; kept as written it drifted on every pass.
+        if (right.front() != '(' && right.front() != '[' && mask_sql_surface(right).has_comments) right = format_expression(right);
 
         const size_t wrap_threshold = std::min<size_t>(threshold, 80);
         const string compact = left + " " + string(op) + " " + right;
@@ -4517,13 +4595,15 @@ string Formatter::format_in_literal(string_view expr) {
           string rendered = left + " " + string(op) + " (\n";
           if (!before_first.empty()) rendered += indent_block(before_first, 4) + "\n";
           for (size_t j = 0; j < values.size(); ++j) {
-            rendered += "    " + format_expression(values[j]);
+            rendered += indent_block(format_expression(values[j]), 4);
             if (j + 1 < values.size()) rendered += ',';
             if (!after[j].empty()) rendered += " " + after[j];
             rendered += '\n';
           }
           return rendered + ")";
         }
+        // A commented tuple on the left is already laid out (commented_operand).
+        if (mask_sql_surface(left).has_comments && left.find('\n') != string::npos) return left + " " + string(op) + " " + right;
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};
@@ -5055,7 +5135,12 @@ string Formatter::format_commented_column_list(const string& head, const string&
       }
     }
     code = trim_ascii_spaces(code);
-    if (code.empty() || mask_sql_surface(code).has_comments) return {};
+    if (code.empty()) return {};
+    // A `--` comment inside a definition (`Map(String, -- note\n String)`)
+    // keeps its line break; the continuation lines are re-indented below.
+    // Block comments and comments elsewhere fall back to the generic layout.
+    if (const auto masked = mask_sql_surface(code); masked.has_comments &&
+        (code.find("/*") != string::npos || code.find('#') != string::npos)) return {};
     column.code = std::move(code);
     columns.push_back(std::move(column));
   }
@@ -5075,7 +5160,11 @@ string Formatter::format_commented_column_list(const string& head, const string&
       lhs = render_name(lhs);
       width = std::max(width, utf8_width(lhs));
     }
-    parsed.emplace_back(structural ? "" : lhs, structural ? col : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4));
+    // A definition with a comment inside keeps its words: the comment text is
+    // the author's, never upper-cased.
+    const bool commented = mask_sql_surface(rhs).has_comments;
+    parsed.emplace_back(structural ? "" : lhs,
+                        structural || commented ? (structural ? col : rhs) : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4));
   }
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
@@ -5085,6 +5174,13 @@ string Formatter::format_commented_column_list(const string& head, const string&
     else line += parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
     if (i + 1 < parsed.size()) line += ',';
     if (!columns[i].trailing.empty()) line += " " + columns[i].trailing;
+    // Continuation lines of a definition with a comment inside: one level
+    // under the column, whatever their input indentation.
+    if (line.find('\n') != string::npos) {
+      vector<string> parts = split_lines_keep(line);
+      for (size_t k = 1; k < parts.size(); ++k) parts[k] = "        " + trim_ascii_spaces(parts[k]);
+      line = join_lines(parts);
+    }
     out += rtrim_spaces(line) + "\n";
   }
   out += ")";
