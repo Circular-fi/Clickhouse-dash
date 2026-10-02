@@ -11,6 +11,7 @@
   // engine (app_chart_core.js), loaded on the first Chart view.
   const ns = window.ChDash;
   if (!ns) return;
+  const { h } = ns;
 
   const viewPref = () => ns.storage.pref(ns.storage.KEYS.resultsView, "table", { allowed: ["table", "chart"] });
   // Coloured series slots (--qchart-1..8); further groups fold into "Other".
@@ -29,9 +30,6 @@
     ["number", "Number", "One big number per value (single-row results)"],
   ];
   const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
-
-  // util.escapeHtml is the one escaper; null prints as "".
-  const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
 
   function readStoredView() {
     return viewPref().get();
@@ -187,13 +185,13 @@
       const parsed = Date.parse(text);
       return Number.isFinite(parsed) ? parsed : NaN;
     }
-    const [, y, mo, d, h = "0", mi = "0", s = "0", frac = "", zone] = m;
+    const [, y, mo, d, hour = "0", mi = "0", s = "0", frac = "", zone] = m;
     const fracMs = frac ? Number(`0.${frac}`) * 1000 : 0;
     const wholeMs = Math.floor(fracMs);
     if (!zone) {
-      return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s), wholeMs).getTime() + (fracMs - wholeMs);
+      return new Date(Number(y), Number(mo) - 1, Number(d), Number(hour), Number(mi), Number(s), wholeMs).getTime() + (fracMs - wholeMs);
     }
-    let ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s), wholeMs) + (fracMs - wholeMs);
+    let ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(hour), Number(mi), Number(s), wholeMs) + (fracMs - wholeMs);
     if (zone !== "Z") {
       const sign = zone[0] === "-" ? -1 : 1;
       const digits = zone.slice(1).replace(":", "");
@@ -624,11 +622,11 @@
       const { kinds, columns, types } = meta;
       const auto = autoX(kinds);
       const autoName = auto < 0 ? "row number" : columns[auto];
-      const xOptions = [`<option value="auto">Auto (${esc(autoName)})</option>`, `<option value="-1">Row number</option>`];
+      const xOptions = [h("option", { value: "auto" }, `Auto (${autoName})`), h("option", { value: "-1" }, "Row number")];
       kinds.forEach((kind, i) => {
-        xOptions.push(`<option value="${i}">${esc(columns[i])} \u00b7 ${esc(typeHint(types[i]))}</option>`);
+        xOptions.push(h("option", { value: i }, `${columns[i]} \u00b7 ${typeHint(types[i])}`));
       });
-      xSelect.innerHTML = xOptions.join("");
+      h.replace(xSelect, xOptions);
       xSelect.value = cfg.xAuto ? "auto" : String(cfg.x);
       xSelect.dataset.column = String(cfg.x);
       xSelect.title = cfg.x < 0 ? "Row number" : `${columns[cfg.x]} (${types[cfg.x]})`;
@@ -639,22 +637,24 @@
         if (kind === "number") {
           const checked = cfg.series.includes(i);
           const disabled = !checked && cfg.series.length >= MAX_SERIES;
-          options.push(`<label class="queryChart__seriesOpt"${disabled ? ` title="At most ${MAX_SERIES} series"` : ""}><input type="checkbox" value="${i}"${checked ? " checked" : ""}${disabled ? " disabled" : ""}><span>${esc(columns[i])}</span><small>${esc(typeHint(types[i]))}</small></label>`);
+          options.push(h("label", { class: "queryChart__seriesOpt", title: disabled ? `At most ${MAX_SERIES} series` : null },
+            h("input", { type: "checkbox", value: i, checked, disabled }), h("span", null, columns[i]), h("small", null, typeHint(types[i]))));
         } else {
-          options.push(`<label class="queryChart__seriesOpt is-unavailable" title="${esc(`${columns[i]} is ${types[i]}: only numeric columns can be drawn as Y values`)}"><input type="checkbox" disabled><span>${esc(columns[i])}</span><small>${esc(typeHint(types[i]))} \u00b7 not numeric</small></label>`);
+          options.push(h("label", { class: "queryChart__seriesOpt is-unavailable", title: `${columns[i]} is ${types[i]}: only numeric columns can be drawn as Y values` },
+            h("input", { type: "checkbox", disabled: true }), h("span", null, columns[i]), h("small", null, `${typeHint(types[i])} \u00b7 not numeric`)));
         }
       });
-      seriesMenu.innerHTML = options.length ? options.join("") : `<span class="queryChart__seriesEmpty">No other column</span>`;
+      h.replace(seriesMenu, options.length ? options : h("span", { class: "queryChart__seriesEmpty" }, "No other column"));
       const names = cfg.series.map((i) => meta.columns[i]);
       seriesButton.textContent = `Y values \u00b7 ${names.length ? names.join(", ") : "None"}`;
       seriesButton.title = names.length ? names.join(", ") : "Pick at least one numeric column";
 
-      const groupOptions = [`<option value="-1">None</option>`];
+      const groupOptions = [h("option", { value: "-1" }, "None")];
       kinds.forEach((kind, i) => {
         if (i === cfg.x || cfg.series.includes(i) || kind === "other") return;
-        groupOptions.push(`<option value="${i}">${esc(columns[i])} \u00b7 ${esc(typeHint(types[i]))}</option>`);
+        groupOptions.push(h("option", { value: i }, `${columns[i]} \u00b7 ${typeHint(types[i])}`));
       });
-      groupSelect.innerHTML = groupOptions.join("");
+      h.replace(groupSelect, groupOptions);
       groupSelect.value = String(cfg.group);
 
       syncTypeButtons(currentRows().length);
@@ -870,10 +870,11 @@
       if (cfg.x >= 0 && meta.kinds[cfg.x] === "number" && !cols.includes(cfg.x)) cols.push(cfg.x);
       cols.sort((a, b) => a - b);
       const format = ns.chartCore ? ns.chartCore.formatValue : formatFullNumber;
-      numbersEl.innerHTML = cols.map((col) => {
+      h.replace(numbersEl, cols.map((col) => {
         const v = toNumber(Array.isArray(row) ? row[col] : NaN);
-        return `<div class="queryChart__number"><span class="queryChart__numberLabel">${esc(meta.columns[col])}</span><span class="queryChart__numberValue">${v === v ? esc(format(v)) : ns.format.nullToken()}</span></div>`;
-      }).join("");
+        return h("div", { class: "queryChart__number" }, h("span", { class: "queryChart__numberLabel" }, meta.columns[col]),
+          h("span", { class: "queryChart__numberValue" }, v === v ? format(v) : h.html(ns.format.nullToken())));
+      }));
       noteEl.textContent = "1 row";
       delete hostEl.dataset.pointsDrawn;
     }
@@ -905,11 +906,11 @@
       const zoomed = info && info.zoomed;
       let lo = zoomed ? info.xLo : xs[0];
       let hi = zoomed ? info.xHi : xs[xs.length - 1];
-      const label = esc(model.xLabel);
+      const label = h("b", null, model.xLabel);
       if (model.xKind === "category") {
         const a = Math.max(0, Math.ceil(lo)), b = Math.min(xs.length - 1, Math.floor(hi));
         const count = Math.max(0, b - a + 1);
-        return `<b>${label}</b> ${core.formatExact(count)} of ${core.formatExact(xs.length)} values${zoomed && count ? `: ${esc(model.categories[a])} \u2026 ${esc(model.categories[b])}` : ""}`;
+        return [label, ` ${core.formatExact(count)} of ${core.formatExact(xs.length)} values${zoomed && count ? `: ${model.categories[a]} \u2026 ${model.categories[b]}` : ""}`];
       }
       if (model.xKind === "time") {
         const digits = model.xColumnKind === "date" ? 0 : model.subMillisecond ? 6 : 3;
@@ -917,10 +918,10 @@
         let to = text(hi);
         const from = text(lo);
         if (to.slice(0, 10) === from.slice(0, 10)) to = to.slice(11);
-        return `<b>${label}</b> ${esc(from)} \u2192 ${esc(to)} <span>${esc(core.formatDuration(hi - lo))} \u00b7 ${esc(core.utcOffsetText(lo))}</span>`;
+        return [label, ` ${from} \u2192 ${to} `, h("span", null, `${core.formatDuration(hi - lo)} \u00b7 ${core.utcOffsetText(lo)}`)];
       }
       if (zoomed) { lo = Number(lo.toPrecision(10)); hi = Number(hi.toPrecision(10)); }
-      return `<b>${label}</b> ${esc(core.formatExact(lo))} \u2192 ${esc(core.formatExact(hi))}`;
+      return [label, ` ${core.formatExact(lo)} \u2192 ${core.formatExact(hi)}`];
     }
 
     function onDraw(info) {
@@ -928,7 +929,7 @@
       hostEl.dataset.zoomed = String(info.zoomed);
       resetZoomBtn.hidden = !info.zoomed;
       rangeEl.classList.toggle("is-zoomed", info.zoomed);
-      if (model && model.xs.length) rangeText.innerHTML = rangeLabel(info);
+      if (model && model.xs.length) h.replace(rangeText, rangeLabel(info));
     }
 
     function renderPlot(type) {

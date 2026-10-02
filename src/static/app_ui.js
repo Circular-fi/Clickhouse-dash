@@ -206,7 +206,7 @@
       if (staticPicker) closeHostMenu();
     }
 
-    dom.hostPickerMenu.innerHTML = "";
+    dom.hostPickerMenu.replaceChildren();
 
     for (const h of hosts) {
       if (!h || !h.id) continue;

@@ -229,8 +229,8 @@
 
 
   function clearTable() {
-    if (dom.resultTableHead) dom.resultTableHead.innerHTML = "";
-    if (dom.resultTableBody) dom.resultTableBody.innerHTML = "";
+    if (dom.resultTableHead) dom.resultTableHead.replaceChildren();
+    if (dom.resultTableBody) dom.resultTableBody.replaceChildren();
   }
 
   function resetTableMode() {
@@ -1671,7 +1671,7 @@
     if (dom.liveResultsWrap) dom.liveResultsWrap.classList.remove("tableWrap--virtual");
 
     const tbody = dom.resultTableBody;
-    tbody.innerHTML = "";
+    tbody.replaceChildren();
 
     const token = ++fullRenderToken;
 
@@ -1718,7 +1718,7 @@
 
   function renderHorizontalHeader() {
     if (!dom.resultTableHead) return;
-    dom.resultTableHead.innerHTML = "";
+    dom.resultTableHead.replaceChildren();
     const tr = document.createElement("tr");
 
     const thIndex = document.createElement("th");
@@ -1911,10 +1911,10 @@
     headRow.appendChild(th1);
     headRow.appendChild(th2);
 
-    dom.resultTableHead.innerHTML = "";
+    dom.resultTableHead.replaceChildren();
     dom.resultTableHead.appendChild(headRow);
 
-    dom.resultTableBody.innerHTML = "";
+    dom.resultTableBody.replaceChildren();
     const frag = document.createDocumentFragment();
 
     for (let i = 0; i < resultColumns.length; i++) {
@@ -1953,7 +1953,7 @@
     th.title = resultTypes[0] || colName;
     headRow.appendChild(th);
 
-    dom.resultTableHead.innerHTML = "";
+    dom.resultTableHead.replaceChildren();
     dom.resultTableHead.appendChild(headRow);
 
     let tr = dom.resultTableBody.querySelector("tr");
@@ -1965,7 +1965,7 @@
     let td = tr.querySelector("td:not(.dataTable__rowNum)");
     if (!td) td = document.createElement("td");
 
-    tr.innerHTML = "";
+    tr.replaceChildren();
     tr.appendChild(td);
     return td;
   }
@@ -2304,8 +2304,8 @@
 
   function clearTableIn(wrap) {
     const { thead, tbody } = findTablePartsIn(wrap);
-    if (thead) thead.innerHTML = "";
-    if (tbody) tbody.innerHTML = "";
+    if (thead) thead.replaceChildren();
+    if (tbody) tbody.replaceChildren();
   }
 
   function ensureLocalErrorBanner(body) {
@@ -2717,7 +2717,7 @@
       local.virtualLastEnd = -1;
       local.wrap.classList.remove("tableWrap--virtual");
 
-      tbody.innerHTML = "";
+      tbody.replaceChildren();
       const token = ++localFullRenderToken;
 
       const renderBatch = (offset) => {
@@ -2760,10 +2760,10 @@
       headRow.appendChild(th1);
       headRow.appendChild(th2);
 
-      thead.innerHTML = "";
+      thead.replaceChildren();
       thead.appendChild(headRow);
 
-      tbody.innerHTML = "";
+      tbody.replaceChildren();
       const frag = document.createDocumentFragment();
 
       for (let i = 0; i < local.columns.length; i++) {
@@ -2804,7 +2804,7 @@
       th.title = local.types[0] || colName;
       headRow.appendChild(th);
 
-      thead.innerHTML = "";
+      thead.replaceChildren();
       thead.appendChild(headRow);
 
       let tr = tbody.querySelector("tr");
@@ -2816,7 +2816,7 @@
       let td = tr.querySelector("td:not(.dataTable__rowNum)");
       if (!td) td = document.createElement("td");
 
-      tr.innerHTML = "";
+      tr.replaceChildren();
       tr.appendChild(td);
       return td;
     }
@@ -2865,7 +2865,7 @@
       if (!local.wrap) return;
       const { thead } = findTablePartsIn(local.wrap);
       if (!thead) return;
-      thead.innerHTML = "";
+      thead.replaceChildren();
       const tr = document.createElement("tr");
       const thIndex = document.createElement("th");
       thIndex.textContent = "#";

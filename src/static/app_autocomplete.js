@@ -1898,7 +1898,7 @@
     currentDiagnostics = [];
     if (diagnosticsTimer) { clearTimeout(diagnosticsTimer); diagnosticsTimer = 0; }
     if (diagnosticsRaf) { cancelAnimationFrame(diagnosticsRaf); diagnosticsRaf = 0; }
-    if (diagnosticsLayer) diagnosticsLayer.innerHTML = "";
+    if (diagnosticsLayer) diagnosticsLayer.replaceChildren();
     hideDiagnosticsTooltip();
   }
 
@@ -2290,12 +2290,12 @@
   function renderDiagnosticsLayer(issues = currentDiagnostics) {
     const layer = ensureDiagnosticsLayer();
     if (!layer || !textarea || !isReferenceDiagnosticsEnabled()) {
-      if (layer) layer.innerHTML = "";
+      if (layer) layer.replaceChildren();
       hideDiagnosticsTooltip();
       return;
     }
     currentDiagnostics = Array.isArray(issues) ? issues : [];
-    layer.innerHTML = "";
+    layer.replaceChildren();
     hideDiagnosticsTooltip();
     if (!currentDiagnostics.length) return;
 
@@ -2645,7 +2645,7 @@
       return;
     }
 
-    m.innerHTML = "";
+    m.replaceChildren();
     suggestions.forEach((s, index) => {
       const row = document.createElement("button");
       row.type = "button";
@@ -2760,7 +2760,7 @@
     const g = wrap ? wrap.querySelector(".autocompleteGhost") : null;
     if (g) {
       g.hidden = true;
-      g.innerHTML = "";
+      g.replaceChildren();
     }
   }
 
@@ -2951,7 +2951,7 @@
       const maxVisibleWidth = Math.max(24, safeRight - tokenLeft);
       const width = Math.min(Math.max(availableWidth, tailWidth), maxVisibleWidth);
 
-      g.innerHTML = "";
+      g.replaceChildren();
       g.style.lineHeight = `${lineHeight}px`;
       g.style.font = `${cs.fontStyle} ${cs.fontVariant} ${cs.fontWeight} ${cs.fontSize} / ${lineHeight}px ${cs.fontFamily}`;
 

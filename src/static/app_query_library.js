@@ -1237,7 +1237,7 @@
   }
 
   function buildLibraryShell(root) {
-    root.innerHTML = "";
+    root.replaceChildren();
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql" });
     const head = h("div", { class: "ql__head" });
@@ -1320,7 +1320,7 @@
 
   function renderNotice() {
     const notice = libraryEls.notice;
-    notice.innerHTML = "";
+    notice.replaceChildren();
     if (!ctl.host) notice.appendChild(ns.uiState.banner(h("div"), { message: "Select a ClickHouse host: saved queries and History belong to a host.", inset: true }));
     if (ctl.fatal) notice.appendChild(ns.uiState.banner(h("div"), { message: ctl.fatal, retry: () => void reloadLibrary(), inset: true }));
     if (ctl.loadError) {
@@ -1463,7 +1463,7 @@
     const tree = libraryEls.tree;
     if (!tree) return;
     const hadFocus = keepFocus || tree.contains(document.activeElement);
-    tree.innerHTML = "";
+    tree.replaceChildren();
     const lib = ctl.library;
     const matches = searchMatches();
     tree.classList.toggle("is-search", !!matches);
@@ -2037,7 +2037,7 @@
   const historyEls = {};
 
   function buildHistoryShell(root) {
-    root.innerHTML = "";
+    root.replaceChildren();
     root.dataset.rendered = "1";
     const wrap = h("div", { class: "ql qh" });
     const head = h("div", { class: "ql__head" });
@@ -2117,7 +2117,7 @@
     const canClear = !!ctl.history?.canClear?.();
     historyEls.clear.hidden = !canClear;
     historyEls.clear.disabled = !hs.entries.length;
-    list.innerHTML = "";
+    list.replaceChildren();
     if (hs.error) list.appendChild(ns.uiState.banner(h("div"), { message: hs.error, retry: () => void loadHistory(), inset: true }));
     let lastDay = "";
     for (const entry of hs.entries) {
