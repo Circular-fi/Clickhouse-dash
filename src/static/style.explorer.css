@@ -249,6 +249,7 @@ html[data-theme="light"] {
   --accent-fill: #2563eb;
   --accent-tint: rgba(37, 99, 235, 0.14);
   --accent-text: #93b4ff;
+  --seg-active-bg: rgba(37, 99, 235, 0.22);
 
   /* Catalog object kinds (the Explorer lineage icon colours). */
   --kind-table: #5f8ced;
@@ -292,6 +293,7 @@ html[data-theme="light"] {
     --accent-fill: #2563eb;
     --accent-tint: rgba(37, 99, 235, 0.14);
     --accent-text: #1d4ed8;
+    --seg-active-bg: rgba(37, 99, 235, 0.12);
 
     --kind-table: #1f52c9;
     --kind-view: #0e87cd;
@@ -331,6 +333,7 @@ html[data-theme="dark"] {
   --accent-fill: #2563eb;
   --accent-tint: rgba(37, 99, 235, 0.14);
   --accent-text: #93b4ff;
+  --seg-active-bg: rgba(37, 99, 235, 0.22);
 
   --kind-table: #5f8ced;
   --kind-view: #44b7eb;
@@ -369,6 +372,7 @@ html[data-theme="light"] {
   --accent-fill: #2563eb;
   --accent-tint: rgba(37, 99, 235, 0.14);
   --accent-text: #1d4ed8;
+  --seg-active-bg: rgba(37, 99, 235, 0.12);
 
   --kind-table: #1f52c9;
   --kind-view: #0e87cd;
@@ -471,6 +475,69 @@ body {
 .contentTabs {
   display: flex;
   gap: 2px;
+}
+.segmented {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--buttonBorder);
+  border-radius: 6px;
+  background: var(--inputBg);
+  vertical-align: middle;
+}
+.segmented--compact {
+  height: 24px;
+  border-radius: 5px;
+}
+.segmented[hidden],
+.segmented__option[hidden] {
+  display: none;
+}
+.segmented__option {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1 Arial, Helvetica, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.segmented--compact .segmented__option {
+  padding: 0 7px;
+  border-radius: 3px;
+  font-size: 10.5px;
+}
+.segmented__option svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.segmented__option:hover:not(:disabled) {
+  color: var(--text);
+}
+.segmented__option[aria-pressed="true"] {
+  border-color: var(--accentBorder);
+  background: var(--seg-active-bg);
+  color: var(--text);
+}
+.segmented__option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .editorWrap {
   --gutterW: 6ch;
