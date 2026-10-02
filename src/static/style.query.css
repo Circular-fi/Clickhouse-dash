@@ -3,7 +3,7 @@
   color-scheme: dark;
 
   --bg: #0b0f14;
-  --error-bg: rgba(239, 68, 68, 0.12);
+  --error-bg: var(--danger-bg);
 
   --border: rgba(148, 163, 184, 0.14);
   --borderStrong: rgba(148, 163, 184, 0.22);
@@ -14,7 +14,7 @@
   --accent: #1d4ed8;
   --accentBorder: #2563eb;
   /* Accent-coloured text and icons (links, active facets, pins). */
-  --accentText: #93b4ff;
+  --accentText: var(--accent-text);
   /* Keyboard focus indicator: the global :focus-visible outline and the
      box-shadow --ring of controls that draw it as a shadow. */
   --focusRingColor: #3b82f6;
@@ -78,7 +78,7 @@
     color-scheme: light;
 
     --bg: #f6f8fc;
-    --error-bg: rgba(239, 68, 68, 0.12);
+    --error-bg: var(--danger-bg);
 
     --border: rgba(15, 23, 42, 0.14);
     --borderStrong: rgba(15, 23, 42, 0.22);
@@ -86,9 +86,9 @@
     --muted: rgba(0, 41, 138, 0.62);
     --text: #102c7a;
 
-    --accent: rgba(37, 99, 235, 0.14);
+    --accent: var(--accent-tint);
     --accentBorder: #2563eb;
-    --accentText: #1d4ed8;
+    --accentText: var(--accent-text);
     --focusRingColor: #2563eb;
     --hoverTint: rgba(0, 0, 0, 0.06);
 
@@ -129,7 +129,7 @@ html[data-theme="dark"] {
   color-scheme: dark;
 
   --bg: #0b0f14;
-  --error-bg: rgba(239, 68, 68, 0.12);
+  --error-bg: var(--danger-bg);
 
   --border: rgba(148, 163, 184, 0.14);
   --borderStrong: rgba(148, 163, 184, 0.22);
@@ -139,7 +139,7 @@ html[data-theme="dark"] {
 
   --accent: #1d4ed8;
   --accentBorder: #2563eb;
-  --accentText: #93b4ff;
+  --accentText: var(--accent-text);
   --focusRingColor: #3b82f6;
   --hoverTint: rgba(255, 255, 255, 0.06);
 
@@ -179,7 +179,7 @@ html[data-theme="light"] {
   color-scheme: light;
 
   --bg: #f6f8fc;
-  --error-bg: rgba(239, 68, 68, 0.12);
+  --error-bg: var(--danger-bg);
 
   --border: rgba(15, 23, 42, 0.14);
   --borderStrong: rgba(15, 23, 42, 0.22);
@@ -187,9 +187,9 @@ html[data-theme="light"] {
   --muted: rgba(0, 41, 138, 0.62);
   --text: #102c7a;
 
-  --accent: rgba(37, 99, 235, 0.14);
+  --accent: var(--accent-tint);
   --accentBorder: #2563eb;
-  --accentText: #1d4ed8;
+  --accentText: var(--accent-text);
   --focusRingColor: #2563eb;
   --hoverTint: rgba(0, 0, 0, 0.06);
 
@@ -224,6 +224,168 @@ html[data-theme="light"] {
 
   --rowHover: rgba(29, 78, 216, 0.06);
   --rowDivider: rgba(0, 0, 0, 0.04);
+}
+:root {
+  /* Status: text / icon colour and its 12 % tint background. */
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --success: #34d399;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --info: #60a5fa;
+  --info-bg: rgba(59, 130, 246, 0.12);
+
+  /* Log / span severity (OpenTelemetry levels). */
+  --sev-fatal: #ff5f8a;
+  --sev-error: #f87171;
+  --sev-warn: #fbbf24;
+  --sev-info: #60a5fa;
+  --sev-debug: #8b95a5;
+  --sev-trace: #7d8590;
+
+  /* Accent, split by role: a solid fill (white text on it), a 14 % tint
+     (selected / active backgrounds) and accent-coloured text. */
+  --accent-fill: #2563eb;
+  --accent-tint: rgba(37, 99, 235, 0.14);
+  --accent-text: #93b4ff;
+
+  /* Catalog object kinds (the Explorer lineage icon colours). */
+  --kind-table: #5f8ced;
+  --kind-view: #44b7eb;
+  --kind-mv: #9f7cf5;
+  --kind-dict: #dc913a;
+  --kind-buffer: #49c5b9;
+  --kind-distributed: #5dd18b;
+
+  /* Latency percentiles (Vega hues; p50 and p95 darkened on light surfaces). */
+  --pct-p50: #54a24b;
+  --pct-p90: #4c78a8;
+  --pct-p95: #f58518;
+  --pct-p99: #b279a2;
+
+  /* JSON values (util.highlightJsonHtml: a hue mixed into --text, like the
+     --sql* tokens). */
+  --json-string: #bbe4d2;
+  --json-number: #e9dcc0;
+  --json-bool: #d8d7f5;
+  --json-null: #b1bac6;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --danger: #b91c1c;
+    --danger-bg: rgba(239, 68, 68, 0.12);
+    --warning: #9a5b00;
+    --warning-bg: rgba(245, 158, 11, 0.12);
+    --success: #137333;
+    --success-bg: rgba(34, 197, 94, 0.12);
+    --info: #1d4ed8;
+    --info-bg: rgba(59, 130, 246, 0.12);
+
+    --sev-fatal: #b4235a;
+    --sev-error: #dc2626;
+    --sev-warn: #b45309;
+    --sev-info: #2563eb;
+    --sev-debug: #556378;
+    --sev-trace: #66727f;
+
+    --accent-fill: #2563eb;
+    --accent-tint: rgba(37, 99, 235, 0.14);
+    --accent-text: #1d4ed8;
+
+    --kind-table: #1f52c9;
+    --kind-view: #0e87cd;
+    --kind-mv: #7051db;
+    --kind-dict: #ad6720;
+    --kind-buffer: #13959b;
+    --kind-distributed: #1d9766;
+
+    --pct-p50: #3f8a37;
+    --pct-p90: #4c78a8;
+    --pct-p95: #c8650a;
+    --pct-p99: #b279a2;
+
+    --json-string: #144e74;
+    --json-number: #424562;
+    --json-bool: #314196;
+    --json-null: rgba(7, 42, 131, 0.733);
+  }
+}
+html[data-theme="dark"] {
+  --danger: #f87171;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --warning: #fbbf24;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --success: #34d399;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --info: #60a5fa;
+  --info-bg: rgba(59, 130, 246, 0.12);
+
+  --sev-fatal: #ff5f8a;
+  --sev-error: #f87171;
+  --sev-warn: #fbbf24;
+  --sev-info: #60a5fa;
+  --sev-debug: #8b95a5;
+  --sev-trace: #7d8590;
+
+  --accent-fill: #2563eb;
+  --accent-tint: rgba(37, 99, 235, 0.14);
+  --accent-text: #93b4ff;
+
+  --kind-table: #5f8ced;
+  --kind-view: #44b7eb;
+  --kind-mv: #9f7cf5;
+  --kind-dict: #dc913a;
+  --kind-buffer: #49c5b9;
+  --kind-distributed: #5dd18b;
+
+  --pct-p50: #54a24b;
+  --pct-p90: #4c78a8;
+  --pct-p95: #f58518;
+  --pct-p99: #b279a2;
+
+  --json-string: #bbe4d2;
+  --json-number: #e9dcc0;
+  --json-bool: #d8d7f5;
+  --json-null: #b1bac6;
+}
+html[data-theme="light"] {
+  --danger: #b91c1c;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --warning: #9a5b00;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --success: #137333;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --info: #1d4ed8;
+  --info-bg: rgba(59, 130, 246, 0.12);
+
+  --sev-fatal: #b4235a;
+  --sev-error: #dc2626;
+  --sev-warn: #b45309;
+  --sev-info: #2563eb;
+  --sev-debug: #556378;
+  --sev-trace: #66727f;
+
+  --accent-fill: #2563eb;
+  --accent-tint: rgba(37, 99, 235, 0.14);
+  --accent-text: #1d4ed8;
+
+  --kind-table: #1f52c9;
+  --kind-view: #0e87cd;
+  --kind-mv: #7051db;
+  --kind-dict: #ad6720;
+  --kind-buffer: #13959b;
+  --kind-distributed: #1d9766;
+
+  --pct-p50: #3f8a37;
+  --pct-p90: #4c78a8;
+  --pct-p95: #c8650a;
+  --pct-p99: #b279a2;
+
+  --json-string: #144e74;
+  --json-number: #424562;
+  --json-bool: #314196;
+  --json-null: rgba(7, 42, 131, 0.733);
 }
 html {
   font-size: 16px;
@@ -4981,36 +5143,36 @@ html[data-theme="light"] {
 [data-sev="trace"] { --trace-log-color: var(--trace-log-trace); }
 [data-sev="unset"] { --trace-log-color: var(--trace-log-unset); }
 :root {
-  --log-sev-fatal: #ff5f8a;
-  --log-sev-error: #f87171;
+  --log-sev-fatal: var(--sev-fatal);
+  --log-sev-error: var(--sev-error);
   --log-sev-warn: #fbbf24;
-  --log-sev-info: #60a5fa;
+  --log-sev-info: var(--sev-info);
   --log-sev-debug: #8b95a5;
   --log-sev-trace: #6e7681;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --log-sev-fatal: #b4235a;
-    --log-sev-error: #dc2626;
+    --log-sev-fatal: var(--sev-fatal);
+    --log-sev-error: var(--sev-error);
     --log-sev-warn: #d97706;
-    --log-sev-info: #2563eb;
+    --log-sev-info: var(--sev-info);
     --log-sev-debug: #64748b;
     --log-sev-trace: #8c959f;
   }
 }
 html[data-theme="dark"] {
-  --log-sev-fatal: #ff5f8a;
-  --log-sev-error: #f87171;
+  --log-sev-fatal: var(--sev-fatal);
+  --log-sev-error: var(--sev-error);
   --log-sev-warn: #fbbf24;
-  --log-sev-info: #60a5fa;
+  --log-sev-info: var(--sev-info);
   --log-sev-debug: #8b95a5;
   --log-sev-trace: #6e7681;
 }
 html[data-theme="light"] {
-  --log-sev-fatal: #b4235a;
-  --log-sev-error: #dc2626;
+  --log-sev-fatal: var(--sev-fatal);
+  --log-sev-error: var(--sev-error);
   --log-sev-warn: #d97706;
-  --log-sev-info: #2563eb;
+  --log-sev-info: var(--sev-info);
   --log-sev-debug: #64748b;
   --log-sev-trace: #8c959f;
 }
@@ -5076,7 +5238,7 @@ html[data-theme="light"] {
   --graph-band-bg: var(--tableBg);
   --graph-label-bg: var(--panelBg);
   --graph-warn: #f0a33a;
-  --graph-error: #f87171;
+  --graph-error: var(--danger);
   --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-bg: var(--panelBg);
@@ -5096,7 +5258,7 @@ html[data-theme="light"] {
     --graph-node-bg: #ffffff;
     --graph-group-bg: #eef3ff;
     --graph-warn: #b45309;
-    --graph-error: #b91c1c;
+    --graph-error: var(--danger);
     --graph-heat: #f97316;
     --graph-surface: rgba(255, 255, 255, 0.94);
     --graph-minimap-view: rgba(15, 23, 42, 0.92);
@@ -5114,7 +5276,7 @@ html[data-theme="dark"] {
   --graph-node-bg: #141b27;
   --graph-group-bg: #172033;
   --graph-warn: #f0a33a;
-  --graph-error: #f87171;
+  --graph-error: var(--danger);
   --graph-heat: #c2410c;
   --graph-surface: rgba(15, 22, 35, 0.92);
   --graph-minimap-view: var(--graph-halo);
@@ -5131,7 +5293,7 @@ html[data-theme="light"] {
   --graph-node-bg: #ffffff;
   --graph-group-bg: #eef3ff;
   --graph-warn: #b45309;
-  --graph-error: #b91c1c;
+  --graph-error: var(--danger);
   --graph-heat: #f97316;
   --graph-surface: rgba(255, 255, 255, 0.94);
   --graph-minimap-view: rgba(15, 23, 42, 0.92);
