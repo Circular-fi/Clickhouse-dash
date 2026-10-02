@@ -82,7 +82,7 @@ for (const theme of ['dark', 'light']) {
         expect(await page.locator('.uiTip').count()).toBe(1);
       });
 
-      test('open() is a layer: Escape closes it and the focus goes back to its anchor; a press outside or a scroll closes it', async ({ page }) => {
+      test('open() is a layer: Escape closes it and the focus goes back to its anchor; a press outside or a scroll that moves its anchor closes it', async ({ page }) => {
         await ready(page);
         await page.evaluate(() => {
           const anchor = document.createElement('button');
@@ -117,7 +117,12 @@ for (const theme of ['dark', 'light']) {
         await expect(pop).toHaveCount(0);
         await anchor.click();
         await expect(pop).toBeVisible();
+        // A scroll event that leaves the anchor in place (the one of a scroll
+        // made before opening) keeps it; one that moves the anchor closes it.
         await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        await expect(pop).toBeVisible();
+        await page.evaluate(() => { document.getElementById('popAnchor').style.top = '160px'; window.dispatchEvent(new Event('scroll')); });
         await expect(pop).toHaveCount(0);
         expect(await page.evaluate(() => ({ closed: window.__closed, layers: window.ChDash.layers.size() }))).toEqual({ closed: 3, layers: 0 });
       });

@@ -26,7 +26,7 @@
   //     -> { el, close(), place(), update(content), isOpen() }
   //     A click-opened popover (.uiPopover, role=dialog by default) beside
   //     its anchor: an ns.layers layer (Escape, a press outside, focus back
-  //     to the anchor), closed when the page scrolls under it or resizes.
+  //     to the anchor), closed when the page scrolls it away or resizes.
   //
   //   flash(anchor, text = "Copied") -> a short confirmation beside a button
   //     (role=status: it is the result of the user's own action).
@@ -273,7 +273,16 @@
     });
     if (anchorEl && anchorEl.hasAttribute("aria-haspopup")) anchorEl.setAttribute("aria-expanded", "true");
     if (closeOnScroll) {
-      scope.listen(window, "scroll", (event) => { if (!(event.target instanceof Node && el.contains(event.target))) handle.close({ restoreFocus: false }); }, { capture: true, passive: true });
+      // Only a scroll that moves the anchor: the scroll event of a scroll
+      // made before opening (a click bringing its button into view) arrives
+      // once the popover is open, with the anchor where it already was.
+      const at = () => { const box = anchorEl?.getBoundingClientRect?.(); return box ? `${Math.round(box.left)},${Math.round(box.top)}` : ""; };
+      const openedAt = at();
+      scope.listen(window, "scroll", (event) => {
+        if (event.target instanceof Node && el.contains(event.target)) return;
+        if (anchorEl && at() === openedAt) return;
+        handle.close({ restoreFocus: false });
+      }, { capture: true, passive: true });
       scope.listen(window, "resize", () => handle.close({ restoreFocus: false }), { passive: true });
     }
     const target = typeof focus === "function" ? focus(el) : focus;
