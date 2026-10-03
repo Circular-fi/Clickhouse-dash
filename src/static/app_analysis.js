@@ -282,7 +282,7 @@
       else renderPipeline();
     } catch (err) {
       releaseData();
-      notice(err instanceof Error ? err.message : String(err), "error");
+      notice(ns.util.errorText(err), "error");
       clear(dom.analysisContent);
       dom.analysisContent?.appendChild(emptyState("The profiling views could not be loaded.", "error"));
     }
@@ -364,7 +364,7 @@
     } catch (err) {
       if (generation !== loadGeneration) return;
       releaseData();
-      notice(err instanceof Error ? err.message : String(err), "error");
+      notice(ns.util.errorText(err), "error");
       if (dom.analysisContent) {
         clear(dom.analysisContent);
         dom.analysisContent.appendChild(emptyState("The profiling views could not be loaded.", "error"));

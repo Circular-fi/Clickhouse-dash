@@ -183,7 +183,7 @@
 
   // The error strip above the Explorer (ns.uiState.banner).
   function setError(error) {
-    const message = !error ? "" : error instanceof Error ? String(error.message || "The Explorer request failed.") : String(error || "The Explorer request failed.");
+    const message = !error ? "" : ns.util.errorText(error, "The Explorer request failed.");
     ns.uiState.banner(dom.explorerError, { message });
   }
 
@@ -1561,7 +1561,7 @@
 
     if (!model.databaseTablesLoaded.has(name)) {
       const error = model.databaseLoadErrors.get(name);
-      if (error) showDetailState("error", { title: "The database could not be loaded", body: error.message || name, retry: () => void loadDatabaseTables(name, true) });
+      if (error) showDetailState("error", { title: "The database could not be loaded", body: util.errorText(error, name), retry: () => void loadDatabaseTables(name, true) });
       else showDetailState("loading", { label: `Loading the tables of ${name}\u2026` });
       if (dom.explorerDetail) dom.explorerDetail.hidden = true;
       // A failed load waits for Retry (no automatic retry loop against a failing server).
@@ -2205,7 +2205,7 @@
           detail.formatted_ddl = formatted[0];
           if (model.tab === "DDL") renderTabContent();
         }).catch((formatError) => {
-          detail.ddl_format_error = formatError instanceof Error ? formatError.message : String(formatError || "format failed");
+          detail.ddl_format_error = ns.util.errorText(formatError, "format failed");
         });
       }
     } catch (e) {

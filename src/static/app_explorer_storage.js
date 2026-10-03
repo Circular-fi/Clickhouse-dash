@@ -636,7 +636,7 @@
       view.map.hidden = true;
       view.footnote.textContent = "";
       if (data.error) {
-        setNotice(String(data.error?.message || "The storage distribution could not be loaded."), "error");
+        setNotice(ns.util.errorText(data.error, "The storage distribution could not be loaded."), "error");
         emptyList("The storage distribution is unavailable.");
       } else {
         setNotice("");
@@ -644,7 +644,7 @@
       }
       return;
     }
-    setNotice(data.error ? `Showing the last loaded distribution: ${data.error.message || "refresh failed"}` : (data.storage.stale ? "Showing a stale distribution while the server refreshes it." : ""), data.error ? "error" : "");
+    setNotice(data.error ? `Showing the last loaded distribution: ${ns.util.errorText(data.error, "refresh failed")}` : (data.storage.stale ? "Showing a stale distribution while the server refreshes it." : ""), data.error ? "error" : "");
 
     let level;
     let info;
@@ -683,7 +683,7 @@
 
     if (level === "table") {
       if (info.loading) { emptyList("Loading partitions\u2026"); return; }
-      if (info.error) { emptyList(`Partitions unavailable: ${info.error.message || "request failed"}`); return; }
+      if (info.error) { emptyList(`Partitions unavailable: ${ns.util.errorText(info.error, "request failed")}`); return; }
       if (!info.rows.length) {
         emptyList(info.total > 0
           ? `${info.engine || "This engine"} has no partitions: the table is stored as one unit of ${format.bytes(info.total)}.`

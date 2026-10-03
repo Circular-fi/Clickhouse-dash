@@ -383,7 +383,7 @@
       const payload = await ns.api.getTraceLinkedFrom(ctx.currentHost(), params);
       linkedFromState.set(key, { status: "done", rows: payload?.rows || [], truncated: !!payload?.truncated, range: payload?.range, margin: payload?.margin_minutes });
     } catch (error) {
-      linkedFromState.set(key, { status: "error", error: error instanceof Error ? error.message : String(error) });
+      linkedFromState.set(key, { status: "error", error: ns.util.errorText(error) });
     }
     if (String(ctx.activeTraceCache().trace?.trace_id || "") === traceId) patchLinkedFrom(spanId);
   }
@@ -550,7 +550,7 @@
       context.elapsedMs = Number(payload?.elapsed_ms);
     } catch (error) {
       if (!req.isCurrent()) return;
-      context.error = error instanceof Error ? error.message : String(error);
+      context.error = ns.util.errorText(error);
     }
     context.loading = "";
     renderContext();

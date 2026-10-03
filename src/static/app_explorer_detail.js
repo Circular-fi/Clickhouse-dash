@@ -1723,7 +1723,7 @@
         setTimeout(loadPreview, 0);
         return;
       }
-      if (model.preview.error) return container.appendChild(emptyNote(model.preview.error.message || "Preview failed."));
+      if (model.preview.error) return container.appendChild(emptyNote(util.errorText(model.preview.error, "Preview failed.")));
       const previewColumns = Array.isArray(model.preview.columns) ? model.preview.columns : [];
       const sourceColumns = previewColumns.map((c) => c.name);
       const sourceRows = Array.isArray(model.preview.rows) ? model.preview.rows : [];

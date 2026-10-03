@@ -517,7 +517,7 @@
     try {
       range = resolvedRange();
     } catch (error) {
-      showError(error.message);
+      showError(util.errorText(error));
       return;
     }
     showError("");
@@ -561,9 +561,9 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       model.rows = [];
-      renderTable({ message: "error", error: error.message });
+      renderTable({ message: "error", error: util.errorText(error) });
       setStatus("");
-      showError(error.message);
+      showError(util.errorText(error));
     } finally {
       if (req.isCurrent()) setSearching(false);
     }
@@ -596,7 +596,7 @@
       model.exhausted = !model.nextCursor;
       model.lastPayload = payload;
     } catch (error) {
-      if (req.isCurrent()) showError(error.message, () => { void loadMore(); });
+      if (req.isCurrent()) showError(util.errorText(error), () => { void loadMore(); });
     } finally {
       if (req.isCurrent()) {
         model.loadingMore = false;
@@ -874,7 +874,7 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       model.histogram = null;
-      model.histogramError = error.message;
+      model.histogramError = util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         model.histogramLoading = false;
@@ -1018,7 +1018,7 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       model.patterns = null;
-      model.patternsError = error.message;
+      model.patternsError = util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         model.patternsLoading = false;
@@ -1321,7 +1321,7 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       model.side.context = null;
-      model.side.contextError = error.message;
+      model.side.contextError = util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         model.side.contextLoading = false;
@@ -1463,7 +1463,7 @@
       if (model.livePolls % LIVE_HISTOGRAM_EVERY === 0) void loadHistogram(range);
       renderStatus();
     } catch (error) {
-      if (model.live && req.isCurrent()) setStatus(`Live tail paused on error: ${error.message}`);
+      if (model.live && req.isCurrent()) setStatus(`Live tail paused on error: ${util.errorText(error)}`);
     } finally {
       scheduleLive();
     }
@@ -1498,7 +1498,7 @@
       else if (model.meta.table_exists === false || model.meta.schema_ok === false) model.metaError = model.meta.message || "The logs table is not available.";
     } catch (error) {
       model.meta = null;
-      model.metaError = error.message;
+      model.metaError = util.errorText(error);
     }
     const input = byId("logsQuery");
     const mode = model.meta?.body_search?.effective || "token";

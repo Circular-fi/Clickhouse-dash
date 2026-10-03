@@ -723,7 +723,7 @@
       fit();
     } catch (error) {
       if (!req.isCurrent()) return;
-      map.error = error instanceof Error ? error.message : String(error);
+      map.error = ns.util.errorText(error);
       // Not the key of any search (the default search's key is ""): Retry reloads.
       map.key = null;
     } finally {

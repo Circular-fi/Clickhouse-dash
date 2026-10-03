@@ -235,7 +235,7 @@
         },
       });
       const showError = (err) => {
-        error.textContent = err instanceof Error ? err.message : String(err || "The change failed.");
+        error.textContent = ns.util.errorText(err, "The change failed.");
         error.hidden = false;
         for (const input of $$("[aria-invalid]", frame)) input.removeAttribute("aria-invalid");
         const field = err && err.field ? $(`[data-field="${String(err.field).replace(/["\\]/g, "")}"]`, frame) : null;

@@ -1145,7 +1145,7 @@
       return !!result;
     } catch (err) {
       if (inDialog) throw err;
-      toast(err.message || "The item could not be moved.", "error");
+      toast(util.errorText(err, "The item could not be moved."), "error");
       return false;
     }
   }

@@ -348,27 +348,10 @@
   }
 
 
-  // A view's message for a failed request: the server's own sentence, without
-  // the "error_code: " prefix of app_api.js's Error text (the Query page's
-  // error panel shows the code; a reader of a chart or a list has no use for
-  // it). The code stays on error.code, the original text on error.rawMessage.
-  const ERROR_TEXT = {
-    network_error: "The server could not be reached. Check the connection and retry.",
-    invalid_api_response: "The server sent an unexpected response. Retry, or reload the page.",
-  };
-  function errorText(error, fallback = "The request failed.") {
-    const code = String(error?.code || error?.payload?.error_code || "");
-    if (ERROR_TEXT[code]) return ERROR_TEXT[code];
-    let text = String(error?.payload?.message ?? (error instanceof Error ? error.message : error ?? "")).trim();
-    // An Error from app_api.js reads "code: message"; a plain one may too.
-    if (code && text.toLowerCase().startsWith(`${code.toLowerCase()}:`)) text = text.slice(code.length + 1).trim();
-    else if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+: /.test(text)) text = text.replace(/^[a-z][a-z0-9_]*: /, "");
-    return text || fallback;
-  }
-
-  // Every request of the page's API client rejects with that message, so each
-  // view (and every module of the Traces view, the service map included)
-  // shows a sentence rather than "trace_not_found: Trace was not found...".
+  // Every request of the page's API client rejects with util.errorText's
+  // message (the original text on error.rawMessage), so each view (and every
+  // module of the Traces view, the service map included) shows a sentence
+  // rather than "trace_not_found: Trace was not found...".
   function humanizeApiErrors(api) {
     if (!api || api.__humanErrors) return;
     for (const [name, fn] of Object.entries(api)) {
@@ -379,7 +362,7 @@
         return out.catch((error) => {
           if (error instanceof Error && error.code && error.rawMessage == null) {
             error.rawMessage = error.message;
-            error.message = errorText(error);
+            error.message = window.ChDash.util.errorText(error);
           }
           throw error;
         });
@@ -389,7 +372,7 @@
   }
 
   async function start() {
-    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, errorText, VIEWS };
+    window.ChDash.observability = { show, open, isActive, active: () => ctl.active, viewFromPath, VIEWS };
     // --shell-top (the header and #obsNav) is measured by app_dom.js
     // (ns.shell), as on every page.
     const named = viewFromPath(window.location.pathname);

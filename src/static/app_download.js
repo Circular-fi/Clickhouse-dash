@@ -128,7 +128,7 @@
     try {
       payload = await api.getQueryExecution(entry.hostId || runHostId, entry.queryId);
     } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e || "Execution statistics request failed.");
+      const detail = ns.util.errorText(e, "Execution statistics request failed.");
       throw new Error(`Export metadata failed for statement ${Number(entry.index || 0) + 1}: ${detail}`);
     }
 
@@ -161,7 +161,7 @@
       // offline diagnostics and exact timing inspection.
       return [{ name: `${prefix}profiling.json`, text: JSON.stringify(analysis, null, 2) }];
     } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e || "Profiling request failed.");
+      const detail = ns.util.errorText(e, "Profiling request failed.");
       throw new Error(`Profiling export failed for statement ${Number(entry.index || 0) + 1}: ${detail}`);
     }
   }
@@ -250,7 +250,7 @@
       try {
         detail = await api.getExplorerTable(hostId, current.database, current.table);
       } catch (e) {
-        const reason = e instanceof Error ? e.message : String(e || "Table metadata request failed.");
+        const reason = ns.util.errorText(e, "Table metadata request failed.");
         throw new Error(`Table-definition export failed for ${current.database}.${current.table}: ${reason}`);
       }
 
@@ -577,7 +577,7 @@
       saveBlob(blob, many ? "queries.json" : "results.json");
       return true;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e || "Download JSON failed.");
+      const message = ns.util.errorText(e, "Download JSON failed.");
       if (ns.results && typeof ns.results.setError === "function") ns.results.setError(message);
       return false;
     }
@@ -594,7 +594,7 @@
       saveBlob(blob, "results.csv");
       return true;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e || "Download CSV failed.");
+      const message = ns.util.errorText(e, "Download CSV failed.");
       if (ns.results && typeof ns.results.setError === "function") ns.results.setError(message);
       return false;
     }
@@ -612,7 +612,7 @@
       if (button) flashDownloadLabel("Downloaded", 1200);
       return true;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e || "Download failed.");
+      const message = ns.util.errorText(e, "Download failed.");
       if (button) flashDownloadLabel("Download failed", 1600);
       if (ns.results && typeof ns.results.setError === "function") ns.results.setError(message);
       if (throwOnError) throw e instanceof Error ? e : new Error(message);

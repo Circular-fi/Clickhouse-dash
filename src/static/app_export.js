@@ -77,7 +77,7 @@
       }
       triggerDownload(prepared.downloadUrl, normalizedFormat, statements.length > 1);
     } catch (error) {
-      reportError(error instanceof Error ? error.message : "Export failed.");
+      reportError(ns.util.errorText(error, "Export failed."));
     } finally {
       setPreparing(false);
     }

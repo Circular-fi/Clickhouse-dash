@@ -525,12 +525,21 @@ and `test_page_manifest_contract.py` fail on a local copy.
   `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the server's defaults
   table (`server.hpp`); `fallback` applies only before `/api/version`
   answers.
-- **Requests** (`app_api.js`): every call goes through `request()` and takes
-  a last `{ signal }`; `request(path, { method, body, headers, signal })`
-  adds request headers (the query library's `If-Match`), and an HTTP error
+- **Requests** (`app_api.js`): every route is a named endpoint there
+  (`api.searchTraceSpans`, `api.getMetricsSeries`...); no module builds an
+  `api/...` URL (the hosts `EventSource` and the query library's REST
+  adapter excepted). Every call goes through `request()` and takes a last
+  `{ signal }`; `request(path, { method, body, headers, signal })` adds
+  request headers (the query library's `If-Match`), and an HTTP error
   carries `.status` and `.body` (the answer as sent). `util.latest(key)`
   aborts the previous request for `key`: check `isCurrent()` before using an
   answer or showing an error.
+- **Error messages**: `util.errorText(error, fallback)` is the one way to
+  turn an error into the reader's sentence: the server's message without
+  its `error_code: ` prefix (the code stays on `error.code`), a sentence for
+  a network failure or an answer that is not JSON, `fallback` otherwise. An
+  `ns.uiState.banner` given an Error shows it; the Query result alone keeps
+  a server error verbatim, code included (`verbatim`).
 - **Storage** (`storage.pref(key, fallback, options)`, `storage.KEYS`):
   never throws; the fallback's type keeps the stored format of the key.
 - **Search fields** (`ns.search.bind`, `ns.search.within`): the one delay

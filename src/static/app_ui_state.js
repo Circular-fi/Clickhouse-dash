@@ -131,7 +131,8 @@
 
   function banner(container, { message = "", retry = null, verbatim = false, level = "error", inset = false } = {}) {
     if (!container) return null;
-    const text = message instanceof Error ? message.message : String(message || "");
+    // An Error reads as util.errorText; a verbatim banner keeps it as sent.
+    const text = message instanceof Error ? (verbatim ? message.message : ns.util.errorText(message)) : String(message || "");
     container.classList.add("uiBanner");
     container.classList.toggle("uiBanner--verbatim", !!verbatim);
     container.classList.toggle("uiBanner--inset", !!inset);

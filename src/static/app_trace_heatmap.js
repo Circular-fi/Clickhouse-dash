@@ -127,7 +127,7 @@
       hm.data = data;
     } catch (error) {
       if (!req.isCurrent()) return;
-      hm.error = error instanceof Error ? error.message : String(error);
+      hm.error = ns.util.errorText(error);
       hm.dataKey = "";
     } finally {
       if (req.isCurrent()) {
@@ -437,7 +437,7 @@
       deltas.data = data;
     } catch (error) {
       if (!req.isCurrent()) return;
-      deltas.error = error instanceof Error ? error.message : String(error);
+      deltas.error = ns.util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         deltas.loading = false;

@@ -148,7 +148,7 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       view.payload = null;
-      view.error = error instanceof Error ? error.message : String(error);
+      view.error = ns.util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         view.loading = false;
@@ -178,7 +178,7 @@
       detail.payload = payload;
     } catch (error) {
       if (!req.isCurrent()) return;
-      detail.error = error instanceof Error ? error.message : String(error);
+      detail.error = ns.util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         detail.loading = false;
@@ -206,7 +206,7 @@
       db.payload = payload;
     } catch (error) {
       if (!req.isCurrent()) return;
-      db.error = error instanceof Error ? error.message : String(error);
+      db.error = ns.util.errorText(error);
     } finally {
       if (req.isCurrent()) {
         db.loading = false;

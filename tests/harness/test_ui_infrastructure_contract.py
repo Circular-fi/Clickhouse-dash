@@ -167,6 +167,20 @@ def test_search_fields_share_one_helper_one_delay_and_one_look():
     assert ".uiSearch {" in comp and ".uiSearch--compact {" in comp
 
 
+def test_one_error_message_helper():
+    # util.errorText turns an error into the reader's sentence; the Query
+    # result (app_run.js) alone shows a server error verbatim, code included.
+    util = read("src/static/app_util.js")
+    assert 'function errorText(error, fallback = "The request failed.") {' in util
+    assert "error.message = window.ChDash.util.errorText(error);" in read("src/static/app_observability.js")
+    verbatim = {"app_util.js": 1, "app_api.js": 1, "app_run.js": 5, "app_ui_state.js": 1, "app_download.js": 1}
+    for name, text in sources().items():
+        found = len(re.findall(r"instanceof Error \?", text))
+        assert found <= verbatim.get(name, 0), (name, found)
+        # app_api.js builds the errors; app_run.js keeps the Query result's.
+        assert name in ("app_api.js", "app_run.js") or not re.search(r"\b(?:e|err|error)\??\.message \|\| ", text), name
+
+
 def test_one_html_escaper():
     for name, text in sources().items():
         if name == "app_util.js":

@@ -128,6 +128,31 @@ test('ui infrastructure: ns.features follows /api/version over the defaults tabl
   expect(out).toEqual({ known: true, explorer: true, traces: true, keeper: 'boolean', missing: 'fallback', defaults: { enabled: true, keeper: true } });
 });
 
+test('ui infrastructure: util.errorText says what failed in a sentence, without the error code', async ({ page }) => {
+  await open(page, '/query');
+  const out = await page.evaluate(async () => {
+    const { util, api } = window.ChDash;
+    const missing = await api.getTrace('local', '0123').then(() => null, (error) => ({ raw: error.message, text: util.errorText(error) }));
+    const network = Object.assign(new Error('network_error: Failed to fetch'), { code: 'network_error' });
+    return {
+      missing,
+      network: util.errorText(network),
+      plain: util.errorText(new Error('The query is empty.')),
+      prefixed: util.errorText('invalid_trace_charts: Unknown chart list.'),
+      empty: util.errorText(new Error(''), 'Cannot load the metric.'),
+      none: util.errorText(null),
+    };
+  });
+  // app_api.js errors read "code: message"; the sentence drops the code.
+  expect(out.missing.raw).toMatch(/^[a-z_]+: /);
+  expect(out.missing.text).toBe(out.missing.raw.replace(/^[a-z_]+: /, ''));
+  expect(out.network).toBe('The server could not be reached. Check the connection and retry.');
+  expect(out.plain).toBe('The query is empty.');
+  expect(out.prefixed).toBe('Unknown chart list.');
+  expect(out.empty).toBe('Cannot load the metric.');
+  expect(out.none).toBe('The request failed.');
+});
+
 test('ui infrastructure: util.latest aborts the superseded request and keeps the last answer', async ({ page }) => {
   await open(page, '/query');
   const out = await page.evaluate(async () => {

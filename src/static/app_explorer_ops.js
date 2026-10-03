@@ -212,7 +212,7 @@
     if (!keeper) {
       if (!view.keeperError) return null;
       const el = section("keeper", "Keeper", "unavailable", { warn: 1 });
-      el.appendChild(h("div", { class: "explorerOpsSection__empty" }, String(view.keeperError.message || "Keeper status is unavailable.")));
+      el.appendChild(h("div", { class: "explorerOpsSection__empty" }, ns.util.errorText(view.keeperError, "Keeper status is unavailable.")));
       return el;
     }
     if (!keeper.configured) {
@@ -411,7 +411,7 @@
     const body = view.body;
     body.replaceChildren();
     if (view.activityError) {
-      body.appendChild(ns.uiState.banner(h("div"), { message: String(view.activityError.message || "Server operations are unavailable."), retry: () => void load(true), inset: true }));
+      body.appendChild(ns.uiState.banner(h("div"), { message: ns.util.errorText(view.activityError, "Server operations are unavailable."), retry: () => void load(true), inset: true }));
     }
     const activity = view.activity;
     if (!activity) {

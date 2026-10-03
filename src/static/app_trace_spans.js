@@ -221,7 +221,7 @@
   }
 
   function message(error) {
-    return error instanceof Error ? error.message : String(error);
+    return ns.util.errorText(error);
   }
 
   // A new search (app_traces.js): the first page, replacing the rows.

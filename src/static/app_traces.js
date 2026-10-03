@@ -2865,7 +2865,7 @@
       await prefillForSelectedRange();
       await search();
     } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
+      showError(ns.util.errorText(error));
     }
   }
 
@@ -2893,7 +2893,7 @@
     model.analyticsFilters = analyticsFilters;
     // The heatmap mode loads its own answer instead of the percentiles.
     ns.traceHeatmap?.onSearch?.(analyticsFilters);
-    const message = (error) => (error instanceof Error ? error.message : String(error));
+    const message = (error) => ns.util.errorText(error);
     // Counts first: without filters the server reads them from the trace
     // index (well under a second for 7 days), while the duration percentiles
     // need the span aggregation, which takes seconds on multi-day windows.
@@ -2942,7 +2942,7 @@
       model.analytics = unpackAnalytics(full, model.analytics);
     } catch (error) {
       if (!req.isCurrent()) return;
-      model.durationsError = error instanceof Error ? error.message : String(error);
+      model.durationsError = ns.util.errorText(error);
     }
     renderAnalytics();
   }
@@ -2956,7 +2956,7 @@
     try {
       searchState?.commitPendingTag?.();
     } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
+      showError(ns.util.errorText(error));
       return;
     }
     if (searchState?.prefillTagsChanged?.() && model.prefillPairs.length) {
@@ -2973,7 +2973,7 @@
     try {
       filters = searchFilters();
     } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
+      showError(ns.util.errorText(error));
       return;
     }
     address.write(url);
@@ -3079,7 +3079,7 @@
       model.disabledServices.clear();
       model.collapsed.clear();
       // The detail pane says what happened (unavailableHtml), not the strip.
-      model.traceError = { id, code: String(error?.code || ""), text: error instanceof Error ? error.message : String(error) };
+      model.traceError = { id, code: String(error?.code || ""), text: ns.util.errorText(error) };
       pushEntry();
       renderTrace();
       ns.traceViews?.applyLocation?.();

@@ -315,7 +315,7 @@
     } catch (e) {
       if (!req.isCurrent()) return;
       model.catalog = null;
-      model.catalogError = e?.message || "Cannot load the metrics catalog.";
+      model.catalogError = util.errorText(e, "Cannot load the metrics catalog.");
     }
     model.catalogLoading = false;
     // Panels opened from the URL may omit the kind: take it from the catalog.
@@ -533,7 +533,7 @@
     } catch (e) {
       if (!req.isCurrent()) return;
       panel.data = null;
-      panel.error = e?.message || "Cannot load the metric.";
+      panel.error = util.errorText(e, "Cannot load the metric.");
     }
     panel.loading = false;
     renderPanel(panel);
@@ -553,7 +553,7 @@
     } catch (e) {
       if (!req.isCurrent()) return;
       panel.exemplarData = null;
-      panel.exemplarError = e?.message || "Cannot load exemplars.";
+      panel.exemplarError = util.errorText(e, "Cannot load exemplars.");
     }
     renderPanelNote(panel);
     drawChart(panel);

@@ -326,6 +326,25 @@
     token.controller.abort();
   };
 
+  // The one way to turn an error into a message for the reader: the server's
+  // own sentence, without the "error_code: " prefix of app_api.js's Error text
+  // (the code stays on error.code); our sentence for a network failure or an
+  // answer that is not JSON; `fallback` when the error says nothing. The
+  // Query result alone shows a server error verbatim, code included.
+  const ERROR_TEXT = {
+    network_error: "The server could not be reached. Check the connection and retry.",
+    invalid_api_response: "The server sent an unexpected response. Retry, or reload the page.",
+  };
+  function errorText(error, fallback = "The request failed.") {
+    const code = String(error?.code || error?.payload?.error_code || "");
+    if (ERROR_TEXT[code]) return ERROR_TEXT[code];
+    let text = String(error?.payload?.message ?? (error instanceof Error ? error.message : error ?? "")).trim();
+    // An Error from app_api.js reads "code: message"; a plain one may too.
+    if (code && text.toLowerCase().startsWith(`${code.toLowerCase()}:`)) text = text.slice(code.length + 1).trim();
+    else if (/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+: /.test(text)) text = text.replace(/^[a-z][a-z0-9_]*: /, "");
+    return text || fallback;
+  }
+
   function isAbort(error) {
     return !!error && (error.name === "AbortError" || error.code === "aborted");
   }
@@ -336,6 +355,7 @@
     rafOnce,
     latest,
     isAbort,
+    errorText,
     setText,
     setMetricText,
     escapeHtml,

@@ -2897,7 +2897,7 @@
       if (!facts.length && !definition.select_sql) container.append(h("p", { class: "graphKitPanel__note" }, "No definition beyond the table structure."));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = ns.util.errorText(error);
     });
   }
 
@@ -2917,7 +2917,7 @@
       if (columns.length > limit) container.append(h("p", { class: "graphKitPanel__note" }, `${format.count(columns.length - limit)} more columns in the table card.`));
     }).catch((error) => {
       if (serial !== model.panelSerial) return;
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = ns.util.errorText(error);
     });
   }
 
@@ -3591,9 +3591,9 @@
         || graphRequestKey(graphRequestOptions(false)) !== requestKey;
       if (!stale) {
         model.graph = null;
-        model.lastError = e instanceof Error ? e.message : String(e);
+        model.lastError = ns.util.errorText(e);
         model.layout.clear();
-        if (dom.explorerGraphStatus) dom.explorerGraphStatus.textContent = e instanceof Error ? e.message : String(e);
+        if (dom.explorerGraphStatus) dom.explorerGraphStatus.textContent = ns.util.errorText(e);
         scheduleDraw();
       }
     } finally {

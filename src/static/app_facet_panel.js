@@ -122,7 +122,7 @@
       } catch (error) {
         if (!req.isCurrent()) return;
         state.keys = [];
-        state.error = error instanceof Error ? error.message : String(error);
+        state.error = ns.util.errorText(error);
       } finally {
         if (req.isCurrent()) {
           state.loading = false;
@@ -155,7 +155,7 @@
       } catch (error) {
         if (!current()) return;
         entry.values = [];
-        entry.error = error instanceof Error ? error.message : String(error);
+        entry.error = ns.util.errorText(error);
       } finally {
         if (current()) {
           entry.loading = false;

@@ -231,7 +231,7 @@
     } catch (e) {
       util.setText(dom.clickhouseElapsedText, "error");
       if (dom.clickhouseElapsedWrap) dom.clickhouseElapsedWrap.hidden = false;
-      dom.clickhouseElapsedText.title = e instanceof Error ? e.message : String(e || "ClickHouse execution lookup failed.");
+      dom.clickhouseElapsedText.title = ns.util.errorText(e, "ClickHouse execution lookup failed.");
     }
   }
 

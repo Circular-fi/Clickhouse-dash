@@ -173,7 +173,7 @@
     } catch (error) {
       if (!req.isCurrent()) return;
       view.status = "error";
-      view.message = error instanceof Error ? error.message : String(error);
+      view.message = ns.util.errorText(error);
     }
     afterLoad();
   }
