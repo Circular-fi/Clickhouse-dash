@@ -60,9 +60,12 @@
   colorSchemeQuery?.addEventListener?.("change", themeChanged);
   // Text measured before a web font arrived used the fallback face: drop the cached truncations
   // and redraw every view, as a theme change does.
+  // A view that measured text for its layout or its fit (card widths, the legend's box) measures
+  // again through fonts.onLoad.
+  const fontListeners = new Set();
   document.fonts?.addEventListener?.("loadingdone", () => {
     ellipsisCache.clear();
-    for (const listener of themeListeners) {
+    for (const listener of [...themeListeners, ...fontListeners]) {
       try { listener(); } catch (error) { console.error(error); }
     }
   });
@@ -2495,6 +2498,7 @@
     LINEAGE_NODE_PORT_TOP_OFFSET,
     ROUTE_GRID_POINT_BUDGET,
     theme: { cssVar, color, resolveColor, isLight, invalidate: invalidateTheme, onChange: (fn) => themeListeners.add(fn) },
+    fonts: { onLoad: (fn) => fontListeners.add(fn) },
     color,
     parseColor,
     mixColor,

@@ -781,6 +781,8 @@
       toolbar: { zoomIn: byId("traceMapZoomIn"), zoomOut: byId("traceMapZoomOut"), fit: byId("traceMapFit") },
     });
     kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
+    // Cards and the fit were measured in the fallback face: lay out and fit again, unless the user moved.
+    kit.fonts.onLoad(() => { if (map.data && map.fitted) { renderGraph(); fit(); } });
     byId("traceMapPanel")?.addEventListener("click", onActionClick);
     byId("traceMapState")?.addEventListener("click", (event) => {
       if (!(event.target instanceof Element)) return;

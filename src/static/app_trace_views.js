@@ -950,6 +950,7 @@
       graphUi.fills.clear();
       if (graphShown()) graphUi.ctl.drawNow();
     });
+    kit.fonts.onLoad(() => { if (graphUi.layout && graphUi.fitted) fitGraph(); });
     pane.addEventListener("click", onGraphActionClick);
     return pane;
   }
