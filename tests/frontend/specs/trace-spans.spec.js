@@ -379,7 +379,8 @@ test('spans: beside the docked panel the table fits its column at 1440 px (Kind 
   const range = await denseWindow(request);
   await freshColumns(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(tracesUrl(range, { mode: 'spans' }));
+  // Spans with a drawn status (Unset draws nothing in the Status column).
+  await page.goto(tracesUrl(range, { mode: 'spans', status_not: 'Unset' }));
   await waitRows(page);
   const all = ['Time', 'Service', 'Operation', 'Duration', 'Status', 'Kind'];
   expect((await spanColumns(page)).labels).toEqual(all);
@@ -389,8 +390,8 @@ test('spans: beside the docked panel the table fits its column at 1440 px (Kind 
   const narrow = await spanColumns(page);
   expect(narrow.labels).toEqual(['Time', 'Service', 'Operation', 'Duration', 'Status']);
   expect(narrow).toMatchObject({ inside: true, fits: true, cells: 5 });
-  // The status badge is whole and hit-testable at the table's right edge.
-  const status = rows(page).nth(1).locator('.traceSpanListRow__cell--status .badge');
+  // The status (an Error chip or OK text) is whole and hit-testable at the table's right edge.
+  const status = rows(page).nth(1).locator('.traceSpanListRow__cell--status [data-status]');
   const badge = await status.boundingBox();
   const table = await page.locator('#traceSpanTable').boundingBox();
   expect(badge.x + badge.width).toBeLessThanOrEqual(table.x + table.width);

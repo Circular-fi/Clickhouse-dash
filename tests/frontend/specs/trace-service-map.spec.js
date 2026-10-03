@@ -215,6 +215,36 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   expect(state.minimapVisible).toBe(false);
 });
 
+test('the health dot, border and edges take the shared thresholds: 0.5 % nothing, 2 % amber, 7 % red', async ({ page }) => {
+  const payload = {
+    ...MAP, sampled: false, sample_factor: 1, sampling: null,
+    nodes: [node('frontend', 100_000, 500, 100), node('cart', 100_000, 2_000, 40), node('checkout', 100_000, 7_000, 300)],
+    edges: [edge('frontend', 'cart', 100_000, 500, 40), edge('frontend', 'checkout', 100_000, 2_000, 300), edge('checkout', 'cart', 50_000, 3_500, 30)],
+  };
+  await mockTraceResults(page);
+  await mockMap(page, { payload });
+  await openMap(page, '', 3);
+  const state = await inspect(page);
+  const at = Object.fromEntries(state.nodes.map((n) => [n.service, n]));
+  expect([at.frontend.severity, at.frontend.health, at.frontend.status]).toEqual(['ok', false, null]);
+  expect([at.cart.severity, at.cart.health, at.cart.status]).toEqual(['warn', true, 'warn']);
+  expect([at.checkout.severity, at.checkout.health, at.checkout.status]).toEqual(['err', true, 'error']);
+  const edgeOf = (source, target) => state.edges.find((e) => e.source === source && e.target === target);
+  expect(edgeOf('frontend', 'cart').severity).toBe('ok');
+  expect(edgeOf('frontend', 'checkout').severity).toBe('warn');
+  expect(edgeOf('checkout', 'cart').severity).toBe('err');
+  await expect(page.locator('#traceMapLegend')).toContainText('Health dot: amber 1–5% errors, red ≥ 5% with a red border');
+  await expect(page.locator('#traceMapLegend .graphKitLegend__dot--warn')).toHaveCount(1);
+  // The dots as drawn: amber on cart, red on checkout, none on frontend.
+  const colors = await tokenColors(page, ['--graph-warn', '--graph-error']);
+  const dot = (n) => pixel(page, '#traceMapCanvas', n.x + n.width - 16 * state.scale, n.y + 17 * state.scale);
+  expect(colorDistance(await dot(at.cart), colors['--graph-warn'])).toBeLessThan(40);
+  expect(colorDistance(await dot(at.checkout), colors['--graph-error'])).toBeLessThan(40);
+  const none = await dot(at.frontend);
+  expect(colorDistance(none, colors['--graph-warn'])).toBeGreaterThan(80);
+  expect(colorDistance(none, colors['--graph-error'])).toBeGreaterThan(80);
+});
+
 test('zoom tools, + - 0 keys, wheel and drag pan, and the minimap once a card is clipped', async ({ page }) => {
   await mockTraceResults(page);
   await mockMap(page);

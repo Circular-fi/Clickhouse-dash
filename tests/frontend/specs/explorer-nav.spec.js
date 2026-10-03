@@ -283,7 +283,7 @@ for (const theme of ['dark', 'light']) {
       // Largest object of the database: full bar; the bar is a visible fill.
       expect(await badge.evaluate((el) => el.style.getPropertyValue('--bar-pct'))).toBe('100%');
       expect(await badge.evaluate((el) => getComputedStyle(el).backgroundImage)).toMatch(/gradient/);
-      await expect(row).toHaveAttribute('title', /Merge Tree · [\d,]+ rows · \d+\.\d MB on disk/);
+      await expect(row).toHaveAttribute('title', /MergeTree · [\d,]+ rows · \d+\.\d MB on disk/);
       // Views carry no badge; a Buffer shows its resident bytes, or its
       // buffered rows while it holds no measurable memory.
       await expect(page.locator('.explorerTreeObject[data-table="valid_weather_observations"] .explorerTreeObject__size')).toHaveCount(0);

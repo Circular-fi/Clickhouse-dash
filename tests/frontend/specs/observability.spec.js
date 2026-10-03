@@ -319,6 +319,27 @@ test('observability: deep links open each view and Traces sub-tab', async ({ pag
   await expect.poll(() => pathOf(page)).toBe('/observability/traces');
 });
 
+test('observability: every "any value" picker reads All, never ALL', async ({ page, request }) => {
+  await features(request);
+  const button = (select) => page.locator(`.tracePicker:has(#${select}) > .tracePicker__button`);
+  await mockTraceResults(page);
+  await page.goto('/observability/traces');
+  await expectView(page, 'traces');
+  await expect(button('tracesStatus')).toHaveText('Status · All');
+  await expect(button('tracesService')).toHaveText('Service · All');
+  await expect(button('tracesOperation')).toHaveText('Operation · All');
+  expect(await page.locator('#tracesStatus option').first().textContent()).toBe('All');
+  await page.goto('/observability/traces?mode=spans');
+  await expect(button('traceSpanKind')).toHaveText('Kind · All');
+  await page.goto('/observability/logs');
+  await expectView(page, 'logs');
+  await expect(page.locator('#logsServiceButton')).toHaveText('Service · All');
+  await expect(button('logsLevel')).toHaveText('Level · All');
+  // Only that word changed case: the other labels keep theirs.
+  await expect(page.locator('#logsLevel option[value="5"]')).toHaveText(/DEBUG/);
+  expect(await page.locator('.tracePicker__button').evaluateAll((els) => els.map((el) => el.textContent).filter((text) => /\bALL\b/.test(text)))).toEqual([]);
+});
+
 test('observability: the former pages are gone', async ({ request }) => {
   for (const path of ['/traces', '/traces/0123456789abcdef0123456789abcdef', '/logs', '/metrics', '/static/traces.html', '/static/logs.html', '/static/metrics.html']) {
     expect((await request.get(path)).status(), path).toBe(404);
@@ -579,14 +600,16 @@ test.describe('observability formats on a French browser in Paris', () => {
     const tableRow = page.locator('#logsTableRows .logsRow[data-row-id]').first();
     await expect(tableRow.locator('.logsCell--time')).toHaveText(sep20('03:22:55.742'), { timeout: 30_000 });
     expect(await tableRow.locator('.logsCell--time').getAttribute('title')).toContain('Sep 20, 2026 01:22:55.742983150 UTC');
-    // Severity 21 is fatal: its own colour, not the error one.
+    // Severity 21 is fatal: a solid chip in its own colour, not the error one.
     await expect(tableRow.locator('.badge--sev')).toHaveAttribute('data-sev', 'fatal');
+    await expect(tableRow.locator('.badge--sev')).toHaveClass(/badge--solid/);
     // Polled: the virtual row may re-render (a detached badge has no style).
     await expect.poll(() => tableRow.locator('.badge--sev').evaluate((badge) => {
       const probe = document.createElement('i');
       probe.style.color = 'var(--sev-fatal)';
       document.body.appendChild(probe);
-      const same = !!getComputedStyle(badge).color && getComputedStyle(badge).color === getComputedStyle(probe).color;
+      const fill = getComputedStyle(badge).backgroundColor;
+      const same = !!fill && fill === getComputedStyle(probe).color;
       probe.remove();
       return same;
     })).toBe(true);

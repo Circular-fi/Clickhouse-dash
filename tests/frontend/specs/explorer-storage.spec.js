@@ -118,7 +118,7 @@ test('database page draws a bounded treemap band when three tables hold 1% or mo
   const tooltip = page.locator('#explorerDatabaseTreemap [data-treemap-tooltip]');
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toContainText('chdash_ui.weather_observations');
-  await expect(tooltip).toContainText(/rows · Merge Tree · \d+(?:\.\d+)?% of chdash_ui/);
+  await expect(tooltip).toContainText(/rows · MergeTree · \d+(?:\.\d+)?% of chdash_ui/);
   await page.mouse.move(2, 2);
   await expect(tooltip).toBeHidden();
 
@@ -185,7 +185,7 @@ test('Storage mode lists databases by size and zooms into a database and a table
   await expect(page.locator('#explorerTableList .explorerTreeObject.is-selected')).toHaveAttribute('data-table', 'weather_observations');
   await expect(list.locator('thead th')).toHaveText([/^Partition/, /^Size/, /^Share/, /^Rows/, /^Parts/], { timeout: 15_000 });
   await expect(list.locator('tbody tr').first()).toBeVisible();
-  await expect(page.locator('.explorerStorageView__meta')).toContainText(/Merge Tree · [\d,]+ partitions? · /);
+  await expect(page.locator('.explorerStorageView__meta')).toContainText(/MergeTree · [\d,]+ partitions? · /);
 
   // A reload keeps the scope; Up and Back zoom out.
   await page.reload();

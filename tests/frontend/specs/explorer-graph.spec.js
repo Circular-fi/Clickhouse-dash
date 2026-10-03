@@ -215,7 +215,7 @@ test('node click opens the side panel with summary, definition and columns, and 
   const panel = page.locator('#explorerGraphPanel');
   await expect(panel).toBeVisible();
   await expect(panel).toHaveClass(/graphKitPanel/);
-  await expect(panel.locator('.graphKitPanel__eyebrow')).toHaveText('Materialized View');
+  await expect(panel.locator('.graphKitPanel__eyebrow')).toHaveText('MaterializedView');
   await expect(panel.locator('.graphKitPanel__title')).toHaveText('weather_daily_summary_mv');
   await expect(panel.locator('.graphKitPanel__subtitle')).toHaveText('chdash_ui');
   await expect(panel).toContainText('Writes to');

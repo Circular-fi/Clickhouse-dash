@@ -263,7 +263,7 @@
 .chartCore__region.traceHeatCursor { background: none; border: 1.5px solid var(--text); }
 
 /* Services trends: a neutral line and light area; anomalies are the only colour (dots). */
-.traceSvcSpark { --sparkline-color: var(--graph-edge-muted); flex: 1 1 auto; min-width: 0; width: 72px; height: 24px; }
+.sparkline.traceSvcSpark { --sparkline-color: var(--graph-edge-muted); flex: 1 1 auto; min-width: 0; width: 72px; height: 24px; }
 
 .chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
 

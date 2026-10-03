@@ -273,6 +273,89 @@ test('the detail charts read in the table\'s units: a per-minute Requests axis a
   await expect(rate.locator('.chartCore__tooltip')).not.toContainText('/s');
 });
 
+// Error rates of 7 %, 2 % and 0.5 % (and none): one bucket of each series
+// carries them, and one P95 bucket spikes to five times the others.
+const RATES = { checkout: 0.07, frontend: 0.02, orders: 0.005, auth: 0 };
+async function mockThresholdServices(page) {
+  await page.route('**/api/traces/services?**', (route) => {
+    const payload = syntheticServices(new URL(route.request().url()).searchParams);
+    payload.services = payload.services.map((row) => [row[0], 100_000, Math.round(100_000 * RATES[row[0]]), ...row.slice(3)]);
+    for (const name of Object.keys(payload.series)) {
+      payload.series[name] = payload.series[name].map((p, i) => [p[0], 1000 + (i % 3) * 100, i === 3 ? Math.round(1000 * RATES[name]) : 0, p[3], i === 5 ? p[4] * 5 : p[4], p[5]]);
+    }
+    return route.fulfill({ json: payload });
+  });
+}
+
+test('error rates take the shared thresholds: 0.5 % neutral, 2 % amber, 7 % red, in the table, the panel and the sparkline dots', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  await mockThresholdServices(page);
+  await openServices(page);
+  const row = (name) => rows(page).filter({ has: page.locator(`.traceSvcRow__label[title="${name}"]`) });
+  const cell = (name) => row(name).locator('[data-svc-col="errors"]');
+  await expect(cell('checkout')).toHaveText('7%');
+  await expect(cell('frontend')).toHaveText('2%');
+  await expect(cell('orders')).toHaveText('0.5%');
+  const levels = {};
+  for (const name of Object.keys(RATES)) levels[name] = await cell(name).getAttribute('data-error-level');
+  expect(levels).toEqual({ checkout: 'danger', frontend: 'warn', orders: 'neutral', auth: 'neutral' });
+  const colorOf = (name) => cell(name).evaluate((el) => {
+    const probe = document.createElement('i');
+    document.body.appendChild(probe);
+    const resolve = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+    const color = getComputedStyle(el).color;
+    const out = color === resolve('--danger') ? 'danger' : color === resolve('--warning') ? 'warning' : color === resolve('--text') ? 'text' : color;
+    probe.remove();
+    return out;
+  });
+  expect(await colorOf('checkout')).toBe('danger');
+  expect(await colorOf('frontend')).toBe('warning');
+  expect(await colorOf('orders')).toBe('text');
+  // Sparklines: a neutral line and area bound to the data, the peak printed
+  // beside it; a dot only where a bucket crosses a threshold (or a P95 spike).
+  const rate = (name) => row(name).locator('.traceSvcSpark--rate');
+  await expect(rate('checkout').locator('.sparkline__mark--danger')).toHaveCount(1);
+  await expect(rate('frontend').locator('.sparkline__mark--warn')).toHaveCount(1);
+  await expect(rate('orders').locator('.sparkline__mark')).toHaveCount(0);
+  await expect(rate('auth').locator('.sparkline__mark')).toHaveCount(0);
+  await expect(row('checkout').locator('.traceSvcSpark--p95 .sparkline__mark--accent')).toHaveCount(1);
+  await expect(rate('checkout').locator('.sparkline__area')).toHaveCount(1);
+  await expect(row('checkout').locator('.traceSvcTrend__peak').first()).toHaveText(/^\d+(\.\d+)?\/(s|min|h)$/);
+  await expect(row('checkout').locator('.traceSvcTrend__peak').last()).toHaveText(/\d (ms|s)$/);
+  const line = await rate('checkout').evaluate((svg) => {
+    const ys = svg.querySelector('.sparkline__line').getAttribute('points').trim().split(/\s+/).map((p) => Number(p.split(',')[1]));
+    const xs = svg.querySelector('.sparkline__line').getAttribute('points').trim().split(/\s+/).map((p) => Number(p.split(',')[0]));
+    return { top: Math.min(...ys), bottom: Math.max(...ys), firstX: xs[0], stroke: getComputedStyle(svg.querySelector('.sparkline__line')).stroke };
+  });
+  // Bound to the data: the lowest bucket sits on the bottom, the highest on top (no zero baseline).
+  expect(line.top).toBeCloseTo(1.5, 1);
+  expect(line.bottom).toBeCloseTo(22.5, 1);
+  expect(line.stroke).toBe(await page.evaluate(() => { const probe = document.createElement('i'); probe.style.color = 'var(--graph-edge-muted)'; document.body.appendChild(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }));
+  // The panel's Errors tile takes the same level.
+  await row('frontend').locator('.traceSvcRow__label').click();
+  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Errors' })).toHaveClass(/is-warn/);
+  await row('checkout').locator('.traceSvcRow__label').click();
+  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Errors' })).toHaveClass(/is-error/);
+  await row('orders').locator('.traceSvcRow__label').click();
+  await expect(drawer(page).locator('.traceSvcStat', { hasText: 'Errors' })).not.toHaveClass(/is-(warn|error)/);
+});
+
+test('the latency chart shows P50 and P99 by default; P95 is one legend click away', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  await openServices(page);
+  await rows(page).filter({ hasText: 'checkout' }).locator('.traceSvcRow__label').click();
+  const legend = drawer(page).locator('[data-svc-chart="latency"] .chartCore__legendItem');
+  await expect(legend).toHaveText(['P50', 'P95', 'P99']);
+  expect(await legend.evaluateAll((items) => items.map((item) => item.getAttribute('aria-pressed')))).toEqual(['true', 'false', 'true']);
+  // The percentiles are one hue: p50 the quietest step, p99 the strongest.
+  const colors = await legend.evaluateAll((items) => items.map((item) => getComputedStyle(item.querySelector('i')).backgroundColor));
+  expect(new Set(colors).size).toBe(3);
+  await legend.nth(1).click({ modifiers: ['Control'] });
+  expect(await legend.evaluateAll((items) => items.map((item) => item.getAttribute('aria-pressed')))).toEqual(['true', 'true', 'true']);
+});
+
 test('the service drawer opens under the search bar, a bottom sheet on a phone; Escape and its close button give focus back to the row', async ({ page }) => {
   await mockTraceServices(page);
   await mockTraceResults(page);

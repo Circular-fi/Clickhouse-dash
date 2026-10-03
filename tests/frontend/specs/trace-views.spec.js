@@ -505,6 +505,13 @@ test('trace spans table: sort, filter, and a row click focuses the span in the t
   await expect(page.locator('#traceSpansCount')).toHaveText('9 of 9 spans');
   // Default: start order.
   await expect(table.locator('tbody td[data-col="start"]')).toHaveText(['0 ns', '10 ms', '15 ms', '30 ms', '32 ms', '33 ms', '40 ms', '75 ms', '90 ms']);
+  // Status: OK is discreet text (no chip), Error a red chip, Unset nothing.
+  const statusCells = table.locator('tbody td[data-col="status"]');
+  await expect(statusCells.first().locator('.statusText')).toHaveText('OK');
+  await expect(statusCells.first().locator('.badge')).toHaveCount(0);
+  await expect(table.locator('tbody td[data-col="status"] .badge')).toHaveCount(1);
+  await expect(table.locator('tbody td[data-col="status"] .badge.badge--error')).toHaveText('Error');
+  expect(await statusCells.evaluateAll((cells) => cells.filter((cell) => cell.textContent === '' && !cell.children.length).length)).toBe(7);
   await table.getByRole('button', { name: 'Duration' }).click();
   await expect(table.locator('tbody td[data-col="duration"]')).toHaveText(['100 ms', '60 ms', '30 ms', '20 ms', '20 ms', '15 ms', '8 ms', '5 ms', '5 ms']);
   await expect(table.locator('tbody td[data-col="operation"]')).toHaveText(['GET /checkout', 'POST /cart/checkout', 'charge', 'SELECT orders', 'render', 'hydrate', 'fraud.check', 'score', 'SELECT orders']);
@@ -575,6 +582,66 @@ test('trace flamegraph: widths follow durations, a click zooms into a frame, res
   await expect(frames).toHaveCount(9);
   expect((await box('checkout: POST /cart/checkout')).width).toBe(60);
   await expect(page.locator('#traceFlameReset')).toBeDisabled();
+});
+
+// WCAG contrast of two computed colours (rgb() or a color-mix()'s color(srgb ...)), in the page.
+const CONTRAST_JS = `(a, b) => {
+  const lum = (c) => {
+    const scale = c.startsWith('color(') ? 1 : 255;
+    const [r, g, b2] = c.replace(/^color\\(srgb/, '').match(/[\\d.]+(?:e-?\\d+)?/g).slice(0, 3).map((v) => {
+      const x = Number(v) / scale;
+      return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b2;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}`;
+
+test('trace flamegraph: a frame is its service colour 40 % into the surface under a 2 px edge, its label passes 4.5:1 in both themes', async ({ page }) => {
+  await openTrace(page, '?tab=flamegraph');
+  const canvas = page.locator('#traceAltView .traceFlame__canvas');
+  await expect(canvas.locator('.traceFlame__frame')).toHaveCount(9);
+  for (const theme of ['dark', 'light']) {
+    // A theme switch picks the labels again.
+    await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+    await expect.poll(() => page.evaluate(([contrastSource]) => {
+      const contrast = new Function(`return ${contrastSource}`)();
+      const probe = document.createElement('i');
+      document.body.appendChild(probe);
+      const resolve = (expr) => { probe.style.color = ''; probe.style.color = expr; return getComputedStyle(probe).color; };
+      const frames = [...document.querySelectorAll('#traceAltView .traceFlame__frame:not(.is-ancestor)')].filter((el) => el.style.getPropertyValue('--trace-service-color'));
+      const out = frames.map((el) => {
+        const cs = getComputedStyle(el);
+        const service = el.style.getPropertyValue('--trace-service-color');
+        return {
+          name: el.dataset.flameName,
+          ratio: contrast(cs.backgroundColor, cs.color),
+          edge: cs.borderTopWidth === '2px' && cs.borderTopColor === resolve(service),
+          fill: cs.backgroundColor === resolve(`color-mix(in srgb, ${service} 40%, var(--panelBg))`),
+        };
+      });
+      probe.remove();
+      return out.length > 0 && out.every((f) => f.ratio >= 4.5 && f.edge && f.fill);
+    }, [CONTRAST_JS])).toBe(true);
+    // Every one of the 18 service colours gets a readable label on its frame fill.
+    const ratios = await page.evaluate(([contrastSource]) => {
+      const contrast = new Function(`return ${contrastSource}`)();
+      const { palette } = window.ChDash;
+      const probe = document.createElement('i');
+      document.body.appendChild(probe);
+      const resolve = (expr) => { probe.style.color = ''; probe.style.color = expr; return getComputedStyle(probe).color; };
+      const out = [];
+      for (let i = 1; i <= palette.SERVICE_SLOTS; i += 1) {
+        const fill = `color-mix(in srgb, var(--trace-span-color-${i}) 40%, var(--panelBg))`;
+        out.push(contrast(resolve(fill), resolve(palette.readableText(fill))));
+      }
+      probe.remove();
+      return out;
+    }, [CONTRAST_JS]);
+    expect(ratios).toHaveLength(18);
+    for (const ratio of ratios) expect(ratio, theme).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 // ---------------------------------------------------------------- trace graph

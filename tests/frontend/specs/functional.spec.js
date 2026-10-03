@@ -607,7 +607,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
   await expect(page.locator('#explorerDatabaseObjects tbody tr[data-table="weather_observations"]'))
-    .toContainText(/weather_observations\s*Merge Tree\s*[\d,]+/);
+    .toContainText(/weather_observations\s*MergeTree\s*[\d,]+/);
   await page.getByText('station_dictionary', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailName')).toContainText('station_dictionary');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/Dictionary/i);
@@ -620,7 +620,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // Header: chips (engine, health, rows, size, parts) instead of a dotted
   // sentence; no ingress rate.
   const chips = page.locator('#explorerDetailMeta .explorerMetaChip');
-  await expect(chips.first()).toHaveText('Merge Tree');
+  await expect(chips.first()).toHaveText('MergeTree');
   await expect(page.locator('#explorerDetailMeta .explorerMetaChip--health .explorerHealthDot--healthy')).toBeVisible();
   await expect(page.locator('#explorerDetailMeta .explorerMetaChip--rows')).toHaveText(/^[\d,]+ rows$/);
   await expect(page.locator('#explorerDetailMeta .explorerMetaChip--size')).toHaveText(/on disk$/);
@@ -651,7 +651,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // About: value + context tiles beside the tab body.
   const about = page.locator('#explorerDetailContent .explorerAbout');
   await expect(about).toBeVisible();
-  await expect(about.locator('[data-tile="engine"]')).toContainText('Merge Tree');
+  await expect(about.locator('[data-tile="engine"]')).toContainText('MergeTree');
   await expect(about.locator('[data-tile="size"]')).toContainText(/rows/);
   await expect(about.locator('[data-tile="sorting_key"]')).toContainText('station_id');
   await expect(about.locator('[data-tile="ttl"]')).toContainText(/3 rules/);
@@ -749,12 +749,37 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   expect(String(firstFunctionName || '').toLowerCase().startsWith('array')).toBeTruthy();
 });
 
+test('explorer: engines read as ClickHouse names them (MergeTree, MaterializedView, TinyLog), never spaced out', async ({ page }) => {
+  await openApp(page);
+  await openExplorerDatabase(page);
+  await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
+  await expect(page).toHaveURL(/\/explorer\/chdash_ui$/);
+  const spaced = /Merge Tree|Tiny Log|Stripe Log|Replacing Merge|Summing Merge|Aggregating Merge/;
+  // The database's object list.
+  const objects = page.locator('#explorerDatabaseObjects');
+  await expect(objects.locator('tbody tr[data-table="weather_observations"]')).toContainText('MergeTree');
+  await expect(objects.locator('tbody tr[data-table="weather_daily_summary_mv"]')).toContainText('MaterializedView');
+  await expect(objects.locator('tbody tr[data-table="station_dictionary_source"]')).toContainText('TinyLog');
+  expect(await objects.innerText()).not.toMatch(spaced);
+  // A table's header chip and About tile, a MV's chip, a Log table's chip.
+  await page.getByText('weather_observations', { exact: true }).first().click();
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip').first()).toHaveText('MergeTree');
+  await expect(page.locator('#explorerDetailContent [data-tile="engine"]')).toContainText('MergeTree');
+  expect(await page.locator('#explorerDetail').innerText()).not.toMatch(spaced);
+  await page.getByText('weather_daily_summary_mv', { exact: true }).first().click();
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip').first()).toHaveText('MaterializedView');
+  await page.getByText('station_dictionary_source', { exact: true }).first().click();
+  await expect(page.locator('#explorerDetailMeta .explorerMetaChip').first()).toHaveText('TinyLog');
+  // The tree's tooltips name the engine the same way.
+  await expect(page.locator('.explorerTreeObject[data-table="weather_observations"]')).toHaveAttribute('title', /MergeTree · [\d,]+ rows/);
+});
+
 test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL', async ({ page }) => {
   await openApp(page);
   await openExplorerDatabase(page);
 
   await page.getByText('weather_daily_summary_mv', { exact: true }).first().click();
-  await expect(page.locator('#explorerDetailMeta')).toContainText('Materialized View');
+  await expect(page.locator('#explorerDetailMeta')).toContainText('MaterializedView');
   await expect(page.locator('#explorerDetailTabs').getByRole('tab')).toHaveText(['Columns', 'Lineage', 'DDL']);
   // About names the MV target as a lineage chip.
   await expect(page.locator('.explorerAboutTile[data-tile="target"] .explorerLineageChip')).toContainText('weather_daily_summary');
@@ -791,7 +816,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   // Log-family tables are disk-backed: a Storage tab with their disks only
   // (no parts, partitions, merges or composition bar).
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
-  await expect(page.locator('#explorerDetailMeta')).toContainText('Tiny Log');
+  await expect(page.locator('#explorerDetailMeta')).toContainText('TinyLog');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/on disk/);
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Storage', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerStorageCompositionCard')).toHaveCount(0);
@@ -951,7 +976,7 @@ test('database detail lists every object under the storage band, sorts each colu
 
   const weather = rows.find((row) => row.name === 'weather_observations').cells;
   const weatherSummary = catalog.tables.find((table) => table.name === 'weather_observations');
-  expect(weather[1].text).toBe('Merge Tree');
+  expect(weather[1].text).toBe('MergeTree');
   expect(Number(weather[2].value)).toBe(weatherSummary.rows);
   expect(Number(weather[3].value)).toBe(weatherSummary.bytes);
   // One byte format: one decimal and a unit (10.3 MB); rows are grouped.
@@ -2312,7 +2337,7 @@ test('traces: time range, status and result pickers have their final style at fi
     expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
     const firstPaint = await snapshot(pickers);
     expect(firstPaint.tracesRangeUnit.text).toBe('Time range · Last 1 hour');
-    expect(firstPaint.tracesStatus.text).toBe('Status · ALL');
+    expect(firstPaint.tracesStatus.text).toBe('Status · All');
     expect(firstPaint.tracesLimit.text).toBe('Results · 50');
     expect(firstPaint.tracesService.disabled).toBe(true);
 
@@ -2972,10 +2997,17 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     const durationsPayload = await durationsResponse.json();
     expect(durationsPayload.duration_quantiles.length).toBeGreaterThan(0);
     const durationChart = chartCore(page.locator('#traceDurationChart'));
-    // One line per percentile (a lone bucket is a dot), over the listed traces.
+    // One line per percentile (a lone bucket is a dot), over the listed
+    // traces: P50 and P99 by default, P90 and P95 one legend click away.
     await expect(durationChart).toHaveAttribute('data-series-stats', /"P99"/);
     const stats = await chartJson(durationChart, 'data-series-stats');
-    for (const q of ['P50', 'P90', 'P95', 'P99']) expect(stats[q].points).toBeGreaterThan(0);
+    for (const q of ['P50', 'P99']) expect(stats[q].points).toBeGreaterThan(0);
+    for (const q of ['P90', 'P95']) expect(stats[q]?.points || 0).toBe(0);
+    const legendItems = page.locator('#traceDurationChart .chartCore__legendItem');
+    expect(await legendItems.evaluateAll((items) => Object.fromEntries(items.map((item) => [item.textContent.trim(), item.getAttribute('aria-pressed')]))))
+      .toMatchObject({ P50: 'true', P90: 'false', P95: 'false', P99: 'true' });
+    await legendItems.filter({ hasText: 'P95' }).click({ modifiers: ['Control'] });
+    await expect.poll(async () => (await chartJson(durationChart, 'data-series-stats')).P95?.points || 0).toBeGreaterThan(0);
     // One bar per bucket holding traces (the exact counts of the second answer).
     const [rangeStart, rangeEnd] = durationsPayload.range.map(Number);
     const bucketMs = Number(durationsPayload.bucket_ms);

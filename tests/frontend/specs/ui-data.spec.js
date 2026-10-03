@@ -149,9 +149,12 @@ test.describe('badge', () => {
       // (a detached row has no computed style).
       await expect(badge).toHaveCSS('height', '18px');
       await expect(badge).toHaveCSS('text-transform', 'none');
+      // Its level's colour: ERROR the danger chip, FATAL solid, WARN amber
+      // text, INFO muted, DEBUG and TRACE dimmed.
       await expect.poll(() => badge.evaluate((el) => {
+        const token = { error: '--danger', fatal: '--panel', warn: '--sev-color', info: '--muted', debug: '--sev-trace', trace: '--sev-trace', unset: '--sev-trace' }[el.dataset.sev];
         const probe = document.createElement('i');
-        probe.style.color = 'var(--sev-color)';
+        probe.style.color = `var(${token})`;
         el.appendChild(probe);
         const same = el.isConnected && !!getComputedStyle(el).color && getComputedStyle(el).color === getComputedStyle(probe).color;
         probe.remove();
@@ -168,23 +171,68 @@ test.describe('badge', () => {
     });
   }
 
-  test('status reads OK / Error / Unset and a metric kind is never a status hue', async ({ page }) => {
+  test('status reads OK / Error / Unset and a metric kind is muted mono text', async ({ page }) => {
     await openApp(page);
     const labels = await page.evaluate(() => ['Ok', 'STATUS_CODE_ERROR', 'Unset', 2, 'ok'].map((code) => window.ChDash.badge.statusLabel(code)));
     expect(labels).toEqual(['OK', 'Error', 'Unset', 'Error', 'OK']);
+    // Unset draws nothing (or the caller's mark), OK discreet muted text, Error a red chip.
+    const drawn = await page.evaluate(() => {
+      const { badge } = window.ChDash;
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const probe = document.createElement('i');
+      host.appendChild(probe);
+      const resolve = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+      const look = (html) => {
+        const holder = document.createElement('span');
+        holder.innerHTML = html;
+        host.appendChild(holder);
+        const el = holder.firstElementChild;
+        const cs = getComputedStyle(el);
+        return {
+          text: el.textContent,
+          chip: el.classList.contains('badge'),
+          border: cs.borderTopStyle !== 'none' && parseFloat(cs.borderTopWidth) > 0,
+          fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+          color: cs.color === resolve('--danger') ? 'danger' : cs.color === resolve('--muted') ? 'muted' : cs.color,
+        };
+      };
+      const out = {
+        unset: badge.statusHtml('Unset'),
+        unsetCode: badge.statusHtml(0),
+        unsetMark: badge.statusHtml('STATUS_CODE_UNSET', { empty: '—' }),
+        ok: look(badge.statusHtml('Ok')),
+        error: look(badge.statusHtml('STATUS_CODE_ERROR')),
+      };
+      host.remove();
+      return out;
+    });
+    expect(drawn).toEqual({
+      unset: '',
+      unsetCode: '',
+      unsetMark: '—',
+      ok: { text: 'OK', chip: false, border: false, fill: false, color: 'muted' },
+      error: { text: 'Error', chip: true, border: true, fill: true, color: 'danger' },
+    });
     const meta = await (await page.request.get('/api/metrics/meta')).json();
     test.skip(!meta.enabled || !meta.kinds?.histogram?.time_bounds, 'metrics are disabled');
     const end = Math.floor(Number(meta.kinds.histogram.time_bounds.max_ms) / 60000) * 60000;
     await page.goto(`/observability/metrics?from=${encodeURIComponent(isoSecond(end - 6 * 3600000))}&to=${encodeURIComponent(isoSecond(end))}`);
-    const hist = page.locator('.metricsBadge--histogram').first();
+    const hist = page.locator('.metricsCatalog .metricsBadge--histogram').first();
     await expect(hist).toBeVisible({ timeout: 30_000 });
-    const hue = await hist.evaluate((el) => ({
-      badge: getComputedStyle(el).getPropertyValue('--badge-color').trim(),
-      slot: getComputedStyle(document.documentElement).getPropertyValue('--qchart-7').trim(),
-      danger: getComputedStyle(document.documentElement).getPropertyValue('--danger').trim(),
-    }));
-    expect(hue.badge).toBe(hue.slot);
-    expect(hue.badge).not.toBe(hue.danger);
+    // Kind and unit: muted mono text, no fill and no border.
+    for (const meta of [hist, page.locator('.metricsCatalog .metricsBadge--unit').first()]) {
+      const look = await meta.evaluate((el) => {
+        const probe = document.createElement('i');
+        probe.style.color = 'var(--muted)';
+        document.body.appendChild(probe);
+        const muted = getComputedStyle(probe).color;
+        probe.remove();
+        const cs = getComputedStyle(el);
+        return { muted: cs.color === muted, mono: /Plex Mono|monospace/i.test(cs.fontFamily), fill: cs.backgroundColor, border: cs.borderTopWidth };
+      });
+      expect(look).toEqual({ muted: true, mono: true, fill: 'rgba(0, 0, 0, 0)', border: '0px' });
+    }
   });
 });
 

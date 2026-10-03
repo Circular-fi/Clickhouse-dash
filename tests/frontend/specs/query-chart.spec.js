@@ -729,10 +729,10 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
   const swatch = () => chart.locator('.chartCore__legendItem i').first().evaluate((el) => getComputedStyle(el).backgroundColor);
   const draws = async () => Number(await core(chart).getAttribute('data-draws'));
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-  await expect.poll(swatch).toBe('rgb(57, 135, 229)');
+  await expect.poll(swatch).toBe('rgb(66, 150, 251)');
   const before = await draws();
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-  await expect.poll(swatch).toBe('rgb(42, 120, 214)');
+  await expect.poll(swatch).toBe('rgb(26, 115, 213)');
   // The canvas redraws with the new tokens.
   await expect.poll(draws).toBeGreaterThan(before);
 

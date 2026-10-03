@@ -10,18 +10,17 @@ const rows = '#traceWaterfall .traceSpanRow';
 const row = (page, n) => page.locator(`${rows}[data-span-id="${spanId(n)}"]`);
 const rowIds = (page) => page.locator(rows).evaluateAll((els) => els.map((el) => el.getAttribute('data-span-id')));
 
-// Jaeger UI's --span-color-1..20 (components/common/vars.css), dark theme.
-const JAEGER_DARK = [
-  '#1192e8', '#ff832b', '#a56eff', '#f1c21b', '#009d9a', '#da1e28', '#24a148', '#ee538b', '#00539c', '#8d8d8d',
-  '#0072c3', '#ba4e00', '#8a3ffc', '#b28600', '#005d5d', '#a2191f', '#198038', '#9f1853', '#002d9c', '#6929c4',
+// The one categorical palette (--qchart-1..18), dark theme: services and
+// chart series. No red: red is for errors.
+const SERVICE_DARK = [
+  '#4296fb', '#e86a34', '#29ae81', '#d28f09', '#de669a', '#4ba435', '#9e8cf4', '#49c1ea', '#febad9',
+  '#ddd674', '#7572ae', '#a86751', '#9fb83c', '#0695b5', '#cf95c1', '#bdbcfd', '#8e8945', '#85e2ed',
 ];
 // ... light theme.
-const JAEGER_LIGHT = [
-  '#0072c3', '#eb6200', '#8a3ffc', '#b28600', '#005d5d', '#fa4d56', '#198038', '#9f1853', '#002d9c', '#6f6f6f',
-  '#00539c', '#8a3800', '#6929c4', '#8e6a00', '#002d2d', '#570408', '#0e6027', '#510224', '#001141', '#491d8b',
+const SERVICE_LIGHT = [
+  '#1a73d5', '#c14802', '#088963', '#9c6900', '#b84379', '#227702', '#644fb1', '#046480', '#700048',
+  '#433f01', '#39346a', '#7c3f2a', '#768c02', '#078ead', '#7c4972', '#7b78b4', '#656019', '#03464c',
 ];
-// Without the two reds (6 and 16): red is for errors.
-const withoutReds = (palette) => palette.filter((_, index) => index !== 5 && index !== 15);
 const rgb = (hex) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
 
 async function openTrace(page, trace) {
@@ -39,7 +38,7 @@ async function openTrace(page, trace) {
 // Colour of the service marker of a row, resolved.
 const rowColor = (locator) => locator.locator('.traceSpanRow__serviceDot').evaluate((el) => getComputedStyle(el).backgroundColor);
 
-test('trace detail: services take Jaeger\'s palette in first-seen order, the same in the result list and the trace', async ({ page }) => {
+test('trace detail: services take the categorical palette in first-seen order, the same in the result list and the trace', async ({ page }) => {
   const trace = nestedTrace();
   const services = [...new Set(trace.spans.map((span) => span.service))].sort();
   await routeSearch(page, [trace]);
@@ -51,12 +50,11 @@ test('trace detail: services take Jaeger\'s palette in first-seen order, the sam
     el.querySelector('b')?.textContent || el.textContent,
     getComputedStyle(el).getPropertyValue('--trace-service-color').trim(),
   ])));
-  const palette = withoutReds(JAEGER_DARK);
+  const palette = SERVICE_DARK;
   // The search registers its services in name order: the n-th name takes
-  // Jaeger's n-th colour (reds skipped).
+  // the n-th slot.
   expect(Object.keys(listColors).sort()).toEqual(services);
   for (const [index, service] of services.entries()) expect(listColors[service]).toBe(palette[index]);
-  expect(Object.values(listColors)).not.toContain('#da1e28');
 
   await result.click();
   await expect(page.locator(rows)).toHaveCount(trace.spans.length, { timeout: 20_000 });
@@ -69,10 +67,10 @@ test('trace detail: services take Jaeger\'s palette in first-seen order, the sam
   await expect(page.locator(rows)).toHaveCount(trace.spans.length, { timeout: 20_000 });
   expect(await rowColor(row(page, 13))).toBe(rgb(palette[services.indexOf('mailer')]));
 
-  // Light theme: Jaeger's light variants of the same slots.
+  // Light theme: the light values of the same slots.
   await page.emulateMedia({ colorScheme: 'light' });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-  expect(await rowColor(row(page, 1))).toBe(rgb(withoutReds(JAEGER_LIGHT)[services.indexOf('frontend')]));
+  expect(await rowColor(row(page, 1))).toBe(rgb(SERVICE_LIGHT[services.indexOf('frontend')]));
 });
 
 test('trace detail: error bars keep their service colour with a (!) badge, a collapsed branch hiding errors gets a hollow (!)', async ({ page }) => {
@@ -216,12 +214,15 @@ test('trace detail: the tree shows guides in ancestor colours, child-count boxes
   await page.mouse.move(5, 5);
   await expect(hovered).toHaveCount(0);
 
-  // Collapsed: a tinted box and a bold italic service name.
-  const before = await box(4).evaluate((el) => getComputedStyle(el).backgroundColor);
+  // Collapsed: the count reads +N in the service's colour (no box) and the
+  // service name is bold italic.
+  const before = await box(4).evaluate((el) => getComputedStyle(el).color);
   await box(4).click();
   await expect(box(4)).toHaveClass(/is-collapsed/);
   await expect(box(4)).toHaveAttribute('aria-expanded', 'false');
-  expect(await box(4).evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(before);
+  expect(await box(4).evaluate((el) => getComputedStyle(el).color)).not.toBe(before);
+  expect(await box(4).evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"+"');
+  expect(await box(4).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'italic');
   await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-weight', '600');
   await expect(row(page, 3).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'normal');
@@ -381,16 +382,16 @@ test('trace detail: the critical path marks the blocking chain of the mocked tra
   await expect(row(page, 1).locator('.traceSpanBar__critical').first()).toBeVisible();
 });
 
-test('trace detail: well-known attributes show as pills and icons in the name column, a 5xx status in red', async ({ page }) => {
+test('trace detail: well-known attributes show as muted text and icons in the name column, a 5xx status a red chip', async ({ page }) => {
   await openTrace(page, nestedTrace());
   const pills = (n) => row(page, n).locator('.traceSpanPill');
-  await expect(pills(1)).toHaveText(['200', 'GET']);
-  await expect(pills(1).first()).not.toHaveClass(/is-error/);
-  await expect(pills(3)).toHaveText(['502', 'POST']);
-  await expect(pills(3).first()).toHaveClass(/is-error/);
-  await expect(pills(3).first()).toHaveAttribute('title', 'http.status_code: 502');
-  await expect(pills(10)).toHaveText(['503', 'POST']);
-  await expect(pills(10).first()).toHaveClass(/is-error/);
+  await expect(pills(1)).toHaveText(['GET', '200']);
+  await expect(pills(1).last()).not.toHaveClass(/is-error/);
+  await expect(pills(3)).toHaveText(['POST', '502']);
+  await expect(pills(3).last()).toHaveClass(/is-error/);
+  await expect(pills(3).last()).toHaveAttribute('title', 'http.status_code: 502');
+  await expect(pills(10)).toHaveText(['POST', '503']);
+  await expect(pills(10).last()).toHaveClass(/is-error/);
   await expect(pills(6)).toHaveText(['postgresql']);
   await expect(pills(6)).toHaveAttribute('title', 'db.system: postgresql');
   await expect(pills(9)).toHaveText(['mysql']);
@@ -407,10 +408,58 @@ test('trace detail: well-known attributes show as pills and icons in the name co
   await expect(icon(2)).toHaveCount(0);
   // Red is the error colour, shared with the (!) badge.
   const [pillColor, badgeColor] = await Promise.all([
-    pills(10).first().evaluate((el) => getComputedStyle(el).color),
+    pills(10).last().evaluate((el) => getComputedStyle(el).color),
     row(page, 10).locator('.traceSpanRow__errorBadge').evaluate((el) => getComputedStyle(el).backgroundColor),
   ]);
   expect(pillColor).toBe(badgeColor);
+});
+
+test('trace detail: method and a status under 400 are muted mono text with no chip; 4xx an amber chip, 5xx a red one; child counts have no box', async ({ page }) => {
+  const trace = nestedTrace();
+  // A 404 on the checkout call (4xx), the 503 of the fraud score stays (5xx).
+  trace.spans[2].attributes = { 'http.request.method': 'POST', 'http.response.status_code': 404 };
+  await openTrace(page, trace);
+  const pills = (n) => row(page, n).locator('.traceSpanPill');
+  const look = (locator) => locator.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const probe = document.createElement('i');
+    document.body.appendChild(probe);
+    const resolve = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+    const out = {
+      chip: el.classList.contains('badge'),
+      border: cs.borderTopStyle !== 'none' && parseFloat(cs.borderTopWidth) > 0,
+      fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+      mono: /Plex Mono|monospace/i.test(cs.fontFamily),
+      muted: cs.color === resolve('--muted'),
+      warn: cs.color === resolve('--warning'),
+      danger: cs.color === resolve('--danger'),
+    };
+    probe.remove();
+    return out;
+  });
+  // GET 200: two muted mono texts, no chip.
+  for (const pill of [pills(1).first(), pills(1).last()]) {
+    expect(await look(pill)).toMatchObject({ chip: false, border: false, fill: false, mono: true, muted: true });
+  }
+  // db / rpc / messaging systems: text too.
+  for (const n of [5, 6, 11]) expect(await look(pills(n).first())).toMatchObject({ chip: false, mono: true, muted: true });
+  // 404: an amber chip; 503: a red chip; their methods stay text.
+  await expect(pills(3)).toHaveText(['POST', '404']);
+  expect(await look(pills(3).last())).toMatchObject({ chip: true, border: true, warn: true });
+  expect(await look(pills(3).first())).toMatchObject({ chip: false, muted: true });
+  expect(await look(pills(10).last())).toMatchObject({ chip: true, border: true, danger: true });
+  // One chip per span at most here: only the >= 400 statuses are badges.
+  expect(await page.locator('#traceWaterfall .traceSpanPill.badge').count()).toBe(2);
+  // The child count is plain text: no border, no fill; a collapsed span reads +N.
+  const count = row(page, 1).locator('.traceTreeOffset__box');
+  await expect(count).toHaveText('3');
+  expect(await count.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { border: cs.borderTopStyle === 'none' || parseFloat(cs.borderTopWidth) === 0, fill: cs.backgroundColor };
+  })).toEqual({ border: true, fill: 'rgba(0, 0, 0, 0)' });
+  await count.click();
+  await expect(count).toHaveClass(/is-collapsed/);
+  expect(await count.evaluate((el) => getComputedStyle(el, '::before').content)).toBe('"+"');
 });
 
 test('trace detail: the in-trace span search and trace id lookup are gone', async ({ page, request }) => {

@@ -227,8 +227,8 @@ Where they come from:
   hues and lightness steps chosen to stay apart (OKLab distance 0.08 or more
   between any two slots in dark, 0.095 in light). No slot is red: a red
   service or series would read as an error. Every slot keeps 3:1 on `--bg`,
-  `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (see the
-  table below).
+  `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (the
+  table above).
 - **JSON** values are the `.jsonPretty` colours (`util.highlightJsonHtml`):
   22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`, and
   null 70 % `--muted` into `--text`, recomputed for the graphite `--text`.

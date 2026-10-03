@@ -494,7 +494,7 @@
     return `<ol class="traceSvcSlowest">${rows.map((row) => {
       const [traceId, spanId, operation, startMs, durationNs, status] = row;
       const href = ctx.spanTraceUrl(String(traceId), String(spanId || ""));
-      return `<li><a class="traceSvcSlowest__link" href="${esc(href)}" data-svc-trace="${esc(traceId)}" data-svc-span="${esc(spanId)}" title="Open trace ${esc(traceId)}"><b class="traceSvcSlowest__duration">${esc(fmt.duration(durationNs))}</b><span class="traceSvcSlowest__op">${esc(operation)}</span>${status === "Error" ? '<span class="traceSvcSlowest__error">ERROR</span>' : ""}<time class="traceSvcSlowest__time" title="${esc(fmt.timeTitle(Number(startMs)))}">${esc(fmt.time(Number(startMs)))}</time><code>${esc(String(traceId).slice(0, 12))}</code></a></li>`;
+      return `<li><a class="traceSvcSlowest__link" href="${esc(href)}" data-svc-trace="${esc(traceId)}" data-svc-span="${esc(spanId)}" title="Open trace ${esc(traceId)}"><b class="traceSvcSlowest__duration">${esc(fmt.duration(durationNs))}</b><span class="traceSvcSlowest__op">${esc(operation)}</span>${status === "Error" ? ns.badge.statusHtml(status, { className: "traceSvcSlowest__error" }) : ""}<time class="traceSvcSlowest__time" title="${esc(fmt.timeTitle(Number(startMs)))}">${esc(fmt.time(Number(startMs)))}</time><code>${esc(String(traceId).slice(0, 12))}</code></a></li>`;
     }).join("")}</ol>`;
   }
 

@@ -143,7 +143,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await expect(panelRows(page)).toHaveCount(logs.filter((r) => r.service_name === service).length);
   await expect(panelRows(page).locator('.traceLog__service')).toHaveText(Array(logs.filter((r) => r.service_name === service).length).fill(service));
   await page.locator('#traceLogsPanel .traceLogsPanel__service .tracePicker__button').click();
-  await page.locator('#traceLogsPanel .traceLogsPanel__service .tracePicker__menu').getByRole('option', { name: /^ALL/ }).click();
+  await page.locator('#traceLogsPanel .traceLogsPanel__service .tracePicker__menu').getByRole('option', { name: /^All/ }).click();
   const word = logs[0].body.split(/\s+/)[0];
   await page.locator('#traceLogsFilter').fill(word);
   const matching = logs.filter((r) => [r.body, r.severity_text, r.service_name, r.span_id, r.scope_name, r.log_attributes].join(' ').toLowerCase().includes(word.toLowerCase())).length;
@@ -284,7 +284,7 @@ test('mocked: an error answer shows in the header and the panel, Retry loads aga
   await expect(spanRow(page, sid(7)).locator('.traceSpanLogsBadge')).toHaveAttribute('data-sev', 'error');
 });
 
-test('mocked: severities use the Logs view palette (info blue) in both themes; Escape closes the panel back to its toggle', async ({ page }) => {
+test('mocked: severities use the Logs view palette (info blue, ERROR in the status red) in both themes; Escape closes the panel back to its toggle', async ({ page }) => {
   await routeLogs(page, (route) => json(route, logsAnswer([
     logRecord({ span: sid(1), at: 5, sev: 'INFO', body: 'request received' }),
     logRecord({ span: sid(2), at: 9, sev: 'WARN', body: 'slow cache' }),
@@ -299,7 +299,8 @@ test('mocked: severities use the Logs view palette (info blue) in both themes; E
     document.body.appendChild(probe);
     const out = {};
     for (const sev of ['error', 'warn', 'info', 'debug']) {
-      probe.style.color = `var(--sev-${sev})`;
+      // ERROR chips read in --danger (4.5:1 on their tint), as on the Logs view.
+      probe.style.color = sev === 'error' ? 'var(--danger)' : `var(--sev-${sev})`;
       // The severity chips are the shared severity badge: its text colour.
       const chip = document.querySelector(`#traceLogsPanel [data-log-severity="${sev}"]`);
       out[sev] = { logs: getComputedStyle(probe).color, trace: chip ? getComputedStyle(chip).color : null };

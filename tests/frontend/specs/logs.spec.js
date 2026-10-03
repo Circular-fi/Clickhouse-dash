@@ -108,6 +108,69 @@ test('logs: service, level and severity class filters', async ({ page, request }
   await expect.poll(() => param(page, 'sev')).toEqual([]);
 });
 
+test('logs: only ERROR and FATAL are chips; WARN is amber text with the row bar, INFO muted, DEBUG and TRACE dimmed', async ({ page, request }) => {
+  const win = await logsWindow(request);
+  const levels = [['FATAL', 21], ['ERROR', 17], ['WARN', 13], ['INFO', 9], ['DEBUG', 5], ['TRACE', 1]];
+  const mocked = levels.map(([text, number], i) => ({
+    id: `1789867375742983150-${i}`, ts_ns: String(1789867375742983150n - BigInt(i) * 1000000n), ts_ms: 1789867375742 - i, service: 'sev_service',
+    severity_text: text, severity_number: number, body: `${text.toLowerCase()} record`, trace_id: '', span_id: '', trace_flags: 0,
+    scope_name: '', scope_version: '', log_attributes: {}, resource_attributes: {}, scope_attributes: {},
+  }));
+  await page.route('**/api/logs/search**', (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ v: 1, rows: mocked, row_count: mocked.length, next_cursor: null, exhausted: true, truncated: false, mode: 'page', tail_gap: false, windows: [], text_search: { active: false } }),
+  }));
+  await openLogs(page, logsUrl(win));
+  await expect(rows(page)).toHaveCount(levels.length);
+  await expect.poll(() => page.evaluate(() => {
+    const probe = document.createElement('i');
+    document.body.appendChild(probe);
+    const resolve = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+    const out = {};
+    for (const row of document.querySelectorAll('#logsTableRows .logsRow[data-row-id]')) {
+      const badge = row.querySelector('.badge--sev');
+      const cs = getComputedStyle(badge);
+      out[badge.textContent] = {
+        chip: !badge.classList.contains('badge--sevText') && cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+        fill: cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? 'none' : cs.backgroundColor === resolve('--sev-fatal') ? 'solid' : 'tint',
+        color: [['--danger', 'danger'], ['--panel', 'panel'], ['--sev-warn', 'amber'], ['--muted', 'muted'], ['--sev-trace', 'dimmed']].find(([token]) => cs.color === resolve(token))?.[1] || cs.color,
+        bar: getComputedStyle(row).boxShadow !== 'none',
+      };
+    }
+    probe.remove();
+    return out;
+  })).toEqual({
+    FATAL: { chip: true, fill: 'solid', color: 'panel', bar: true },
+    ERROR: { chip: true, fill: 'tint', color: 'danger', bar: true },
+    WARN: { chip: false, fill: 'none', color: 'amber', bar: true },
+    INFO: { chip: false, fill: 'none', color: 'muted', bar: false },
+    DEBUG: { chip: false, fill: 'none', color: 'dimmed', bar: false },
+    TRACE: { chip: false, fill: 'none', color: 'dimmed', bar: false },
+  });
+});
+
+test('logs: the histogram legend reads at full strength; a severity filter dims only the severities it leaves out', async ({ page, request }) => {
+  const win = await logsWindow(request);
+  await openLogs(page, logsUrl(win));
+  await expectBars(page);
+  const legend = page.locator('#logsHistogram .chartCore__legendItem');
+  const states = () => legend.evaluateAll((items) => {
+    const probe = document.createElement('i');
+    document.body.appendChild(probe);
+    probe.style.color = 'var(--text)';
+    const text = getComputedStyle(probe).color;
+    probe.remove();
+    return Object.fromEntries(items.map((item) => [item.dataset.series, getComputedStyle(item).color === text && getComputedStyle(item.querySelector('i')).opacity === '1' ? 'full' : 'dim']));
+  });
+  await expect.poll(async () => Object.values(await states()).every((state) => state === 'full')).toBe(true);
+  await page.locator('#logsHistogram .chartCore__legendItem[data-series="error"]').click();
+  await expect(page.locator('#logsHistogram .chartCore__legendItem[data-series="error"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => {
+    const all = await states();
+    return all.error === 'full' && Object.entries(all).filter(([id]) => id !== 'error').every(([, state]) => state === 'dim');
+  }).toBe(true);
+});
+
 test('logs: dragging over the histogram zooms the time range', async ({ page, request }) => {
   const win = await logsWindow(request, 30);
   await openLogs(page, logsUrl(win));
