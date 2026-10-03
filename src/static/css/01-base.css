@@ -1,0 +1,62 @@
+/* Base: the box model, the page typography, scrollbars and the focus ring offset. */
+
+html {
+  font-size: 16px;
+  height: 100%;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollThumb) var(--scrollTrack);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* --- Focus ring --------------------------------------------------------------
+   One keyboard focus indicator for every interactive element: a 2px
+   --focusRingColor outline on :focus-visible. Its outline is in the overrides
+   layer (30-overrides.css), so no component rule can remove it; a component may recolour it
+   (--focusRingColor) or move it (outline-offset). Controls that also draw a
+   box-shadow --ring get the same 2px ring on the same edge. Rows and options
+   of scrolling lists and menus draw it inside, where overflow cannot clip it.
+   The Query editor textarea keeps its own treatment. */
+:where(a[href], area[href], button, input, select, textarea:not(#queryTextArea), summary, iframe, [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])):focus-visible {
+  outline-offset: 0;
+}
+
+:where([role="option"], [role="treeitem"], [role="row"], [role^="menuitem"], tr, td, th):focus-visible {
+  outline-offset: -2px;
+}
+
+::-webkit-scrollbar {
+  width: 0.625rem;
+  height: 0.625rem;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollThumb);
+  border-radius: 999rem;
+  border: 0.125rem solid var(--scrollThumbBorder);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollThumbHover);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollTrack);
+}
