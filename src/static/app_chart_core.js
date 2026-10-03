@@ -857,12 +857,14 @@
     // Snap a css coordinate to the device pixel grid so 1px lines stay crisp.
     const crisp = (v) => (Math.round(v * dpr) + 0.5) / dpr;
 
-    function draw() {
+    // measure: a draw asked for now (flush) measures the plot when the
+    // resize observer last saw it hidden (it may just have been shown).
+    function draw(measure = false) {
       drawRaf = 0;
       if (destroyed) return;
       // The width the resize observer saw last: measuring would force a
       // layout per chart (several charts redraw in one frame).
-      const width = widthObserved ? observedWidth : plotWidth();
+      const width = widthObserved && !(measure && !observedWidth) ? observedWidth : (observedWidth = plotWidth());
       if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
       pendingDraw = false;
       const t0 = performance.now();
@@ -2222,7 +2224,7 @@
     // --- lifecycle -------------------------------------------------------------------------
 
     function scheduleDraw() {
-      if (!drawRaf && !destroyed) drawRaf = requestAnimationFrame(draw);
+      if (!drawRaf && !destroyed) drawRaf = requestAnimationFrame(() => draw());
     }
 
     // Redraw when the width changes or when the chart shows again after a
@@ -2294,7 +2296,7 @@
     function flushDraw(force = false) {
       if (destroyed || (!drawRaf && !force)) return;
       if (drawRaf) { cancelAnimationFrame(drawRaf); drawRaf = 0; }
-      draw();
+      draw(true);
     }
 
     function themeChanged() {
