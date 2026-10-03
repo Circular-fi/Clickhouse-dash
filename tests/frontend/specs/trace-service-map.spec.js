@@ -380,9 +380,17 @@ test('an edge label opens the call panel and "Search errors" searches the callee
   expect(last.status).toBe('Error');
   await expect(page.locator('.traceSearchBody')).toBeVisible();
 
-  // "Focus map" keeps the map tab with the service filter.
+  // "Focus map" keeps the map tab with the service filter. Back on its tab,
+  // the map first loads the current filters (the callee's errors): wait for
+  // that load, or the card is picked on the map it replaces and "Focus map"'s
+  // own request races it.
+  const shown = maps.length;
   await page.locator('#tracesTab-map').click();
+  await expect.poll(() => maps.length).toBeGreaterThan(shown);
+  expect(maps[maps.length - 1].get('service')).toBe('payment');
+  await expect(page.locator('#traceMapView')).toHaveAttribute('aria-busy', 'false');
   await expect.poll(async () => (await inspect(page)).nodes.length).toBe(MAP.nodes.length);
+  await cameraIdle(page, 'ChDash.traceMap');
   const cart = await service(page, 'cart');
   await page.mouse.click(cart.x + cart.width / 2, cart.y + cart.height / 2);
   const before = maps.length;
