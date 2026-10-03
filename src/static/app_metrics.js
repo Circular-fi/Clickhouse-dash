@@ -8,7 +8,7 @@
   // picks (range, panels, aggregation, group-by, filters) lives in the URL.
   const ns = window.ChDash;
   if (!ns) return;
-  const { byId, $ } = ns.dom;
+  const { byId, $, $$ } = ns.dom;
   const { dom, state, api, ui, util, h } = ns;
 
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
@@ -29,6 +29,9 @@
     count_rate: "Count rate (per second)", count: "Count",
   };
   const EXEMPLAR_KINDS = new Set(["gauge", "sum", "histogram", "exponential_histogram"]);
+
+  // The catalog's grouping, remembered: "metric" (default) or "service".
+  const catalogByPref = () => ns.storage.pref(ns.storage.KEYS.metricsCatalogBy, "metric", { allowed: ["metric", "service"] });
 
   // util.escapeHtml is the one escaper; null prints as "".
   const esc = (value) => ns.util.escapeHtml(value == null ? "" : value);
@@ -58,6 +61,26 @@
   // annotations for counts, "1" dimensionless. A trailing "/s" is a rate.
 
   const DURATION_SCALE = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, min: 60, h: 3600, d: 86400 };
+
+  // A unit as the catalog and the panel head say it: "seconds", "bytes",
+  // "ratio" for the dimensionless "1", "calls" for "{call}"; the UCUM unit
+  // itself stays in the tooltip.
+  const UNIT_WORDS = {
+    "1": "ratio", "%": "percent", s: "seconds", ms: "milliseconds", us: "microseconds", "µs": "microseconds", ns: "nanoseconds",
+    min: "minutes", h: "hours", d: "days", By: "bytes", KiBy: "KiB", MiBy: "MiB", GiBy: "GiB", bit: "bits", Hz: "hertz",
+  };
+  function unitWords(unit) {
+    const raw = String(unit || "").trim();
+    if (!raw) return "";
+    const rate = raw.match(/^(.+)\/s$/);
+    if (rate) return `${unitWords(rate[1])}/s`;
+    if (UNIT_WORDS[raw]) return UNIT_WORDS[raw];
+    const annotation = raw.match(/^\{([^}]+)\}$/);
+    // "{call}" -> "calls", "{requests}" stays.
+    if (annotation) return /s$/.test(annotation[1]) ? annotation[1] : annotation[1].concat("s");
+    return raw;
+  }
+  const unitText = (unit) => metaText(unitWords(unit), `Unit: ${unit}`, "metricsBadge metricsBadge--unit");
   const BYTE_SCALE = { By: 1, B: 1, bit: 1 / 8, kBy: 1e3, KBy: 1e3, MBy: 1e6, GBy: 1e9, TBy: 1e12, KiBy: 1024, MiBy: 1024 ** 2, GiBy: 1024 ** 3, TiBy: 1024 ** 4 };
   const DURATION_STEPS = [[1e-9, "ns"], [1e-6, "µs"], [1e-3, "ms"], [1, "s"], [60, "min"], [3600, "h"], [86400, "d"]];
   const BYTE_STEPS = [[1, "B"], [1024, "KB"], [1024 ** 2, "MB"], [1024 ** 3, "GB"], [1024 ** 4, "TB"]];
@@ -167,6 +190,10 @@
     meta: null,
     search: "",
     collapsed: new Set(),
+    // The catalog's grouping: "metric" (each metric once, its services under
+    // it) or "service"; the metric groups the viewer opened.
+    catalogBy: catalogByPref().get(),
+    openMetrics: new Set(),
     focusService: "",
     panels: [newPanel()],
     active: 0,
@@ -367,8 +394,9 @@
     const needle = model.search.trim().toLowerCase();
     const active = model.panels[model.active] || null;
     let shown = 0;
-    const groups = [];
-    for (const svc of services) {
+    const groups = model.catalogBy === "service" ? [] : metricGroups(services, needle, active);
+    if (groups.length) shown = groups.shown;
+    if (model.catalogBy === "service") for (const svc of services) {
       const serviceMatch = needle && String(svc.name).toLowerCase().includes(needle);
       const metrics = (svc.metrics || []).filter((m) => !needle || serviceMatch || String(m.name).toLowerCase().includes(needle));
       if (!metrics.length) continue;
@@ -376,8 +404,8 @@
       const collapsed = !needle && model.collapsed.has(svc.name);
       const items = collapsed ? "" : metrics.map((m) => {
         const selected = !!active && active.service === svc.name && active.metric === m.name && active.kind === m.kind;
-        const unit = m.unit ? metaText(m.unit, "Unit", "metricsBadge metricsBadge--unit") : "";
-        const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${m.unit}` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
+        const unit = m.unit ? unitText(m.unit) : "";
+        const title = `${m.name}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` · ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` · ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
         return `<button type="button" class="metricsCatalog__metric${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(svc.name)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">
           <span class="metricsCatalog__name">${highlight(m.name, needle)}</span>
           <span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${unit}</span>
@@ -392,8 +420,10 @@
         ${items ? `<div class="metricsCatalog__metrics">${items}</div>` : ""}
       </div>`);
     }
+    syncCatalogBy();
     if (!services.length) {
-      root.innerHTML = ns.uiState.emptyHtml({ title: "No metric points in this time range", compact: true, action: jumpToDataAction() });
+      const jump = jumpToDataAction();
+      root.innerHTML = ns.uiState.emptyHtml({ title: "No metric points in this time range", body: jump ? `The latest point is at ${fmt.time(jump.max)}.` : "", compact: true, action: jump?.action || null });
     } else if (!groups.length) {
       root.innerHTML = ns.uiState.emptyHtml({
         body: `No metric matches \u201c${model.search.trim()}\u201d.`,
@@ -402,10 +432,13 @@
       });
     } else {
       root.innerHTML = groups.join("");
-      if (focus) $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
+      if (focus && model.catalogBy === "service") $(`[data-service-toggle="${CSS.escape(focus)}"]`, root)?.scrollIntoView?.({ block: "nearest" });
     }
     if (summary) {
-      const total = Number(model.catalog?.metric_count || 0);
+      // By metric, a metric counts once whatever sends it.
+      const total = model.catalogBy === "service"
+        ? Number(model.catalog?.metric_count || 0)
+        : new Set(services.flatMap((svc) => (svc.metrics || []).map((m) => `${m.name}\u0000${m.kind}`))).size;
       const serviceCount = Number(model.catalog?.service_count || services.length);
       const truncated = model.catalog?.truncated ? " (truncated)" : "";
       summary.textContent = needle
@@ -414,14 +447,72 @@
     }
   }
 
-  // When the range holds no point but the tables do, offer their latest day.
+  // When the range holds no point but the tables do, offer their latest day
+  // (a secondary action: the search itself stays the primary one).
   function jumpToDataAction() {
     const bounds = model.meta?.time_bounds;
     const max = Number(bounds?.max_ms);
     if (!Number.isFinite(max) || max <= 0) return null;
     const range = model.resolved;
     if (range && max >= range.start_ms && max <= range.end_ms) return null;
-    return { label: `Show the last 24 h with data (until ${fmt.time(max)})`, primary: true, attrs: { "data-jump-to-data": max } };
+    return { max, action: { label: "Jump to last data", attrs: { "data-jump-to-data": max, title: `The 24 hours up to ${fmt.time(max)}` } } };
+  }
+
+  // The catalog by metric (default): each metric once, with its kind and
+  // unit and the number of services sending it; open, the services. A
+  // metric sent by one service is one row.
+  function metricGroups(services, needle, active) {
+    const byMetric = new Map();
+    for (const svc of services) {
+      for (const m of svc.metrics || []) {
+        const key = `${m.name}\u0000${m.kind}`;
+        if (!byMetric.has(key)) byMetric.set(key, { name: m.name, kind: m.kind, unit: m.unit, description: m.description, rows: [] });
+        byMetric.get(key).rows.push({ service: svc.name, metric: m });
+      }
+    }
+    const groups = [];
+    let shown = 0;
+    const metricRow = (group, row, single) => {
+      const m = row.metric;
+      const selected = !!active && active.service === row.service && active.metric === m.name && active.kind === m.kind;
+      const title = `${m.name} \u00b7 ${row.service}\n${KIND_LABEL[m.kind] || m.kind}${m.unit ? ` \u00b7 ${unitWords(m.unit)} (${m.unit})` : ""}${temporalityLabel(m) ? ` \u00b7 ${temporalityLabel(m)}` : ""}\n${fmt.count(Number(m.points || 0))} points${m.description ? `\n${m.description}` : ""}`;
+      const label = single
+        ? `<span class="metricsCatalog__name">${highlight(m.name, needle)}</span><span class="metricsCatalog__badges">${kindText(m.kind, KIND_BADGE[m.kind] || m.kind)}${m.unit ? unitText(m.unit) : ""}</span>`
+        : `<span class="metricsCatalog__name">${ns.badge.swatchHtml(row.service)}${highlight(row.service, needle)}</span><span class="metricsCatalog__points" title="Points in the range">${esc(fmt.compact(Number(m.points || 0)))}</span>`;
+      return `<button type="button" class="metricsCatalog__metric${single ? "" : " metricsCatalog__metric--service"}${selected ? " is-selected" : ""}" role="treeitem" aria-selected="${selected}" data-service="${esc(row.service)}" data-metric="${esc(m.name)}" data-kind="${esc(m.kind)}" title="${esc(title)}">${label}</button>`;
+    };
+    for (const group of [...byMetric.values()].sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind))) {
+      const metricMatch = !needle || group.name.toLowerCase().includes(needle);
+      const rows = group.rows.filter((row) => metricMatch || row.service.toLowerCase().includes(needle)).sort((a, b) => a.service.localeCompare(b.service));
+      if (!rows.length) continue;
+      shown += 1;
+      if (group.rows.length === 1) { groups.push(metricRow(group, rows[0], true)); continue; }
+      // "kind:name" (an attribute value cannot hold a NUL).
+      const key = `${group.kind}:${group.name}`;
+      const holdsActive = !!active && active.metric === group.name && active.kind === group.kind;
+      const open = !!needle || holdsActive || model.openMetrics.has(key);
+      groups.push(`<div class="metricsCatalog__service metricsCatalog__group${open ? "" : " is-collapsed"}" role="group" data-metric-group="${esc(group.name)}">
+        <button type="button" class="metricsCatalog__serviceHead" role="treeitem" aria-expanded="${open}" data-metric-toggle="${esc(key)}" title="${esc(`${group.name}${group.description ? `\n${group.description}` : ""}`)}">
+          <span class="metricsCatalog__chevron" aria-hidden="true"></span>
+          <span class="metricsCatalog__serviceName metricsCatalog__metricName">${highlight(group.name, needle)}</span>
+          <span class="metricsCatalog__badges">${kindText(group.kind, KIND_BADGE[group.kind] || group.kind)}${group.unit ? unitText(group.unit) : ""}</span>
+          <span class="metricsCatalog__count" title="Services">${group.rows.length}</span>
+        </button>
+        ${open ? `<div class="metricsCatalog__metrics">${rows.map((row) => metricRow(group, row, false)).join("")}</div>` : ""}
+      </div>`);
+    }
+    groups.shown = shown;
+    return groups;
+  }
+
+  // The Metric | Service switch of the catalog (remembered).
+  function syncCatalogBy() {
+    const control = byId("metricsCatalogBy");
+    if (control) ns.segmented?.set(control, model.catalogBy, "catalogBy");
+    const tree = dom.metricsCatalog;
+    if (tree) tree.setAttribute("aria-label", model.catalogBy === "service" ? "Services and metrics" : "Metrics and services");
+    const search = byId("metricsSearch");
+    if (search) search.placeholder = model.catalogBy === "service" ? "Search services or metrics" : "Search metrics or services";
   }
 
   function jumpToData(maxMs) {
@@ -441,6 +532,14 @@
     }
     const jump = event.target.closest("[data-jump-to-data]");
     if (jump) { jumpToData(Number(jump.dataset.jumpToData)); return; }
+    const metricToggle = event.target.closest("[data-metric-toggle]");
+    if (metricToggle) {
+      const key = metricToggle.dataset.metricToggle;
+      if (model.openMetrics.has(key)) model.openMetrics.delete(key);
+      else model.openMetrics.add(key);
+      renderCatalog();
+      return;
+    }
     const toggle = event.target.closest("[data-service-toggle]");
     if (toggle) {
       const name = toggle.dataset.serviceToggle;
@@ -647,7 +746,7 @@
           <div class="metricsChart__state" hidden></div>
         </div>
       </div>
-      <div class="metricsPanel__empty">${ns.uiState.emptyHtml({ body: "Pick a metric in the catalog to chart it." })}</div>`;
+      <div class="metricsPanel__empty">${ns.uiState.emptyHtml({ title: "No metric in this panel", body: "Pick one in the catalog to chart it.", action: { label: "Pick a metric", primary: true, attrs: { "data-metrics-pick": "" } } })}</div>`;
     const keysList = $(".metricsFilterForm__keys", el);
     const valuesList = $(".metricsFilterForm__values", el);
     keysList.id = `metricsFilterKeys${panel.id}`;
@@ -791,7 +890,16 @@
     el.classList.toggle("is-empty", !hasMetric);
     $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
     $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
-    $(".metricsPanel__controls", el).hidden = !hasMetric;
+    // An empty panel shows its controls disabled (what it will offer) and
+    // the way to fill it: Pick a metric.
+    for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
+      if (!hasMetric) control.disabled = true;
+      else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
+    }
+    if (!hasMetric) {
+      $(".metricsPicker--agg .tracePicker__button", el).textContent = "Aggregation \u00b7 Default";
+      $(".metricsPicker--group .tracePicker__button", el).textContent = "Group by \u00b7 None";
+    }
     $(".metricsChart", el).hidden = !hasMetric;
     $(".metricsPanel__empty", el).hidden = hasMetric;
     const name = $(".metricsPanel__name", el);
@@ -803,7 +911,7 @@
     const badges = [];
     if (hasMetric) {
       badges.push(kindText(panel.kind, KIND_LABEL[panel.kind] || panel.kind || "?", "Metric type"));
-      if (unit) badges.push(metaText(unit, "Unit", "metricsBadge metricsBadge--unit"));
+      if (unit) badges.push(unitText(unit));
       if (temporality) badges.push(metaText(temporality, "Aggregation temporality", "metricsBadge"));
       if (panel.kind === "sum" && monotonic != null) badges.push(metaText(monotonic ? "monotonic" : "non-monotonic", "Monotonic", "metricsBadge"));
       badges.push(`<span class="metricsPanel__service" title="Service">${ns.badge.swatchHtml(panel.service)}${esc(panel.service)}</span>`);
@@ -1190,12 +1298,30 @@
 
     // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
     // windows (remembered), a drawer on phones opened from the charts' top.
-    ns.sidePanel.mount(byId("metricsSidebar"), {
+    const catalogPanel = ns.sidePanel.mount(byId("metricsSidebar"), {
       label: "Metrics",
       collapse: { button: byId("metricsSidebarToggle"), storeKey: ns.storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
       drawer: { host: $(".metricsMain") },
     });
     dom.metricsCatalog?.addEventListener("click", onCatalogClick);
+    // Metric | Service: how the catalog groups (remembered).
+    ns.segmented?.bind(byId("metricsCatalogBy"), {
+      attr: "catalogBy",
+      onChange: (value) => {
+        model.catalogBy = value === "service" ? "service" : "metric";
+        catalogByPref().set(model.catalogBy);
+        renderCatalog();
+      },
+    });
+    syncCatalogBy();
+    // An empty panel's "Pick a metric": the catalog's search (its drawer on a
+    // phone, its rail unfolded).
+    dom.metricsPanels?.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-metrics-pick]")) return;
+      if (ns.shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);
+      else if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
+      byId("metricsSearch")?.focus();
+    });
     const search = byId("metricsSearch");
     // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
     ns.search.bind(search, (value) => { model.search = value; renderCatalog(); });

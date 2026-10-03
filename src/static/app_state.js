@@ -77,6 +77,7 @@
     explorerTreeCollapsed: "chdash.explorerTreeCollapsed.v1",
     explorerFunctionsCollapsed: "chdash.explorerFunctionsCollapsed.v1",
     metricsCatalogCollapsed: "chdash.metricsCatalogCollapsed.v1",
+    metricsCatalogBy: "chdash.metricsCatalogBy.v1",
   });
 
   // A stored preference: storage.pref(key, fallback, options) -> { get(), set(value), remove() }.

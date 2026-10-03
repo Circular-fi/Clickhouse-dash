@@ -82,6 +82,16 @@
 
 .metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 6px; }
 
+/* By metric: the metric is the group head (mono, an identifier), its
+   services the rows under it, with their color and point count. */
+.metricsCatalog__metricName { font-family: var(--font-mono); font-weight: var(--fw-medium); }
+
+.metricsCatalog__metric--service .metricsCatalog__name { display: inline-flex; align-items: center; gap: 6px; }
+
+.metricsCatalog__points { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+
+.metricsCatalogBy { justify-self: start; }
+
 /* Kind and unit: muted mono text (app_metrics.js metaText). */
 .metricsMeta { color: var(--muted); font: var(--fw-regular) var(--fs-xs)/1.4 var(--font-mono); white-space: nowrap; }
 

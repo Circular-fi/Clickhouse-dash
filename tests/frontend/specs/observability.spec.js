@@ -257,6 +257,8 @@ test('observability: a service picked in Logs filters Traces and opens its Metri
   const end = Number(meta.time_bounds.max_ms);
   const fmt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
   const range = `from=${encodeURIComponent(fmt(end - 3600000))}&to=${encodeURIComponent(fmt(end + 1000))}`;
+  // The catalog grouped by service (the By service switch).
+  await page.addInitScript(() => { try { localStorage.setItem('chdash.metricsCatalogBy.v1', 'service'); } catch (_) {} });
   await page.goto(`/observability/metrics?${range}`);
   await expectView(page, 'metrics');
   const services = page.locator('#metricsCatalog [data-service-toggle]');

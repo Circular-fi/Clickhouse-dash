@@ -586,6 +586,10 @@
           <span id="metricsCatalogSummary" class="uiSide__meta metricsSidebar__summary" aria-live="polite">Loading metrics…</span>
         </div>
         <input id="metricsSearch" class="uiSide__search uiSearch metricsSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
+        <div id="metricsCatalogBy" class="segmented segmented--compact metricsCatalogBy" role="group" aria-label="Group the catalog by">
+          <button type="button" class="segmented__option" data-catalog-by="metric" aria-pressed="true" title="Each metric once, the services sending it under it">By metric</button>
+          <button type="button" class="segmented__option" data-catalog-by="service" aria-pressed="false" title="Each service, its metrics under it">By service</button>
+        </div>
       </div>
       <div id="metricsCatalog" class="uiSide__body metricsCatalog" role="tree" aria-label="Services and metrics">
         <div class="uiState uiState--loading uiState--compact" role="status"><span class="uiSpin" aria-hidden="true"></span><p class="uiState__body">Loading the metrics catalog…</p></div>

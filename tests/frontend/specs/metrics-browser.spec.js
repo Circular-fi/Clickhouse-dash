@@ -73,7 +73,52 @@ async function plotBox(panel) {
 
 const seriesDrawn = async (panel) => Number(await chartOf(panel).getAttribute('data-series-drawn'));
 
+// The catalog grouped by service (its "By service" switch, remembered).
+const byService = (page) => page.addInitScript(() => { try { localStorage.setItem('chdash.metricsCatalogBy.v1', 'service'); } catch (_) {} });
+
+// By metric (the default): each metric once with its kind and human unit and
+// the number of services sending it; open, its services; the switch to By
+// service is remembered. Units read as words ("seconds", "calls", "ratio"),
+// the UCUM unit in the tooltip.
+test('metrics: the catalog groups by metric with human units, or by service', async ({ page, request }) => {
+  const range = await windowParams(request, 24);
+  await page.goto(metricsUrl(range));
+  const catalog = page.locator('#metricsCatalog');
+  const by = page.locator('#metricsCatalogBy');
+  await expect(by.locator('[data-catalog-by="metric"]')).toHaveAttribute('aria-pressed', 'true');
+  const group = catalog.locator('.metricsCatalog__group[data-metric-group="http.server.request.duration"]');
+  await expect(group).toBeVisible({ timeout: 30_000 });
+  const head = group.locator('[data-metric-toggle]');
+  await expect(head.locator('.metricsBadge--histogram')).toHaveText('hist');
+  await expect(head.locator('.metricsBadge--unit')).toHaveText('seconds');
+  await expect(head.locator('.metricsBadge--unit')).toHaveAttribute('title', 'Unit: s');
+  expect(Number(await head.locator('.metricsCatalog__count').textContent())).toBeGreaterThan(1);
+  await expect(catalog.locator('.metricsCatalog__group[data-metric-group="traces.span.metrics.calls"] .metricsBadge--unit')).toHaveText('calls');
+  await expect(catalog.locator('.metricsCatalog__group[data-metric-group="process.cpu.utilization"] .metricsBadge--unit')).toHaveText('ratio');
+  // Each metric once.
+  const names = await catalog.locator('[data-metric-group]').evaluateAll((els) => els.map((el) => el.dataset.metricGroup));
+  expect(new Set(names).size).toBe(names.length);
+  await expect(page.locator('#metricsCatalogSummary')).toHaveText(new RegExp(`^${names.length + await catalog.locator(':scope > .metricsCatalog__metric').count()} metrics · \\d+ services`));
+  // Open: its services, one picks it.
+  await expect(group).toHaveClass(/is-collapsed/);
+  await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+  const api = group.locator('.metricsCatalog__metric[data-service="api_service"]');
+  await expect(api).toBeVisible();
+  await api.click();
+  await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__name')).toHaveText('http.server.request.duration');
+  await expect(page.locator('.metricsPanel').first().locator('.metricsBadge--unit')).toHaveText('seconds');
+  // By service, remembered across a reload.
+  await by.locator('[data-catalog-by="service"]').click();
+  await expect(catalog.locator('[data-service-toggle="api_service"]')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('chdash.metricsCatalogBy.v1'))).toBe('service');
+  await page.reload();
+  await expect(page.locator('#metricsCatalogBy [data-catalog-by="service"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#metricsCatalog [data-service-toggle="api_service"]')).toBeVisible({ timeout: 30_000 });
+});
+
 test('metrics: catalog lists services and metrics with type and unit badges, and search narrows it', async ({ page, request }) => {
+  await byService(page);
   const range = await windowParams(request, 24);
   await page.goto(metricsUrl(range));
   const catalog = page.locator('#metricsCatalog');
@@ -82,7 +127,7 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await expect(page.locator('#obsTab-metrics')).toHaveAttribute('aria-selected', 'true');
   const api = catalog.locator('.metricsCatalog__service', { has: page.locator('[data-service-toggle="api_service"]') });
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--histogram')).toHaveText('hist');
-  await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--unit')).toHaveText('s');
+  await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--unit')).toHaveText('seconds');
   await expect(api.locator('.metricsCatalog__metric[data-metric="traces.span.metrics.calls"] .metricsBadge--sum')).toBeVisible();
   await expect(api.locator('.metricsCatalog__metric[data-metric="process.cpu.utilization"] .metricsBadge--gauge')).toBeVisible();
   await expect(page.locator('#metricsCatalogSummary')).toContainText(/metrics · \d+ services/);
@@ -100,6 +145,7 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
 });
 
 test('metrics: every metric type charts with the aggregations of its type', async ({ page, request }) => {
+  await byService(page);
   const range = await windowParams(request, 1, 'summaryMax');
   await page.goto(metricsUrl(range));
   const catalog = page.locator('#metricsCatalog');
@@ -230,7 +276,15 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   // Add then remove a panel.
   await page.locator('#metricsAddPanelButton').click();
   await expect(panels).toHaveCount(3);
-  await expect(panels.nth(2)).toContainText('Pick a metric in the catalog');
+  // An empty panel: its controls disabled, and the way to fill it.
+  await expect(panels.nth(2)).toContainText('No metric in this panel');
+  const pick = panels.nth(2).getByRole('button', { name: 'Pick a metric' });
+  await expect(pick).toBeVisible();
+  for (const control of await panels.nth(2).locator('.metricsPanel__controls button, .metricsPanel__controls input').all()) {
+    if (await control.isVisible()) await expect(control).toBeDisabled();
+  }
+  await pick.click();
+  await expect(page.locator('#metricsSearch')).toBeFocused();
   await panels.nth(2).locator('.metricsPanel__remove').click();
   await expect(panels).toHaveCount(2);
 
@@ -312,7 +366,7 @@ test('metrics: panels share the crosshair, and a drag sets the time range of eve
 test('metrics: values and axes follow the OpenTelemetry unit', async ({ page, request }) => {
   const range = await windowParams(request, 1);
   await page.goto(metricsUrl(range));
-  await expect(page.locator('#metricsCatalog .metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#metricsCatalog :is(.metricsCatalog__metric, [data-metric-toggle])').first()).toBeVisible({ timeout: 30_000 });
   const formatted = await page.evaluate(() => {
     const m = window.ChDash.metrics;
     const fmt = (value, unit) => m.formatValue(value, m.parseUnit(unit));
@@ -353,7 +407,7 @@ test('metrics: a failed catalog or chart says so in a sentence, without the erro
   failCatalog = false;
   failSeries = false;
   await catalog.getByRole('button', { name: 'Retry' }).click();
-  await expect(page.locator('#metricsCatalog .metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#metricsCatalog :is(.metricsCatalog__metric, [data-metric-toggle])').first()).toBeVisible({ timeout: 30_000 });
   // (A catalog answer may reload the panel by itself.)
   if (await state.isVisible()) await state.getByRole('button', { name: 'Retry' }).click();
   await waitForChart(page);
@@ -364,8 +418,12 @@ test('metrics: an empty range offers the latest data', async ({ page, request })
   await page.goto(metricsUrl({ from: '2001-01-01 00:00:00', to: '2001-01-01 01:00:00' }));
   const jump = page.locator('#metricsCatalog [data-jump-to-data]');
   await expect(jump).toBeVisible({ timeout: 30_000 });
+  // A secondary action (the search stays the primary one), with the time.
+  await expect(jump).toHaveText('Jump to last data');
+  await expect(jump).not.toHaveClass(/button--primary/);
+  await expect(page.locator('#metricsCatalog')).toContainText(/The latest point is at /);
   await jump.click();
-  await expect(page.locator('#metricsCatalog .metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#metricsCatalog :is(.metricsCatalog__metric, [data-metric-toggle])').first()).toBeVisible({ timeout: 30_000 });
 });
 
 for (const theme of ['dark', 'light']) {
