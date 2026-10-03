@@ -410,7 +410,29 @@
     window.addEventListener("resize", update);
   }
 
-  ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop });
+  // Edge cues: a row that scrolls sideways (a tab strip, a chip row, the
+  // Observability nav row) carries .has-edge-start / .has-edge-end while
+  // content hides past that side, and shell.css fades that edge over
+  // --edge-fade. Follows scrolls, resizes and content changes; once per
+  // element.
+  const cued = new WeakSet();
+  function edgeCues(el) {
+    if (!el || cued.has(el)) return;
+    cued.add(el);
+    const update = () => {
+      const hidden = el.scrollWidth - el.clientWidth;
+      const left = Math.abs(el.scrollLeft);
+      el.classList.toggle("has-edge-start", hidden > 1 && left > 1);
+      el.classList.toggle("has-edge-end", hidden > 1 && hidden - left > 1);
+    };
+    const later = () => requestAnimationFrame(update);
+    el.addEventListener("scroll", update, { passive: true });
+    if (typeof ResizeObserver === "function") new ResizeObserver(later).observe(el);
+    if (typeof MutationObserver === "function") new MutationObserver(later).observe(el, { childList: true, subtree: true, characterData: true });
+    update();
+  }
+
+  ns.shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", trackShellTop, { once: true });
   else trackShellTop();
 })();

@@ -35,7 +35,8 @@
     return tabsOf(list).find((tab) => tab.dataset[attr] === value) || null;
   }
 
-  // Marks the tab whose value is `value` selected (the others not).
+  // Marks the tab whose value is `value` selected (the others not); in a row
+  // that scrolls sideways (a phone), the selected tab scrolls into view.
   function select(list, value, attr = "tab") {
     if (!list) return;
     for (const tab of tabsOf(list)) {
@@ -43,7 +44,18 @@
       tab.classList.toggle("is-active", on);
       tab.setAttribute("aria-selected", on ? "true" : "false");
       tab.tabIndex = on ? 0 : -1;
+      if (on) reveal(list, tab);
     }
+  }
+
+  // Scrolls a sideways-scrolling row (only it, never the page) so the tab
+  // shows whole.
+  function reveal(list, tab) {
+    if (!(list.scrollWidth > list.clientWidth + 1) || tab.hidden) return;
+    const box = tab.getBoundingClientRect();
+    const left = box.left - list.getBoundingClientRect().left - list.clientLeft + list.scrollLeft;
+    if (left < list.scrollLeft) list.scrollLeft = left;
+    else if (left + box.width > list.scrollLeft + list.clientWidth) list.scrollLeft = left + box.width - list.clientWidth;
   }
 
   // render(list, items, { attr = "tab", tier = "content", selected }): one
@@ -77,6 +89,9 @@
     if (!list) return { select: () => {}, render: () => {} };
     list.setAttribute("role", "tablist");
     for (const tab of tabsOf(list)) tab.setAttribute("role", "tab");
+    // A row too narrow for its tabs scrolls sideways and fades the side it
+    // hides tabs on (ns.shell.edgeCues).
+    ns.shell?.edgeCues?.(list);
     list.addEventListener("click", (event) => {
       const tab = event.target instanceof Element ? event.target.closest('[role="tab"]') : null;
       if (!tab || !list.contains(tab) || tab.disabled) return;

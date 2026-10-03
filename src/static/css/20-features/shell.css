@@ -240,6 +240,44 @@ body {
   }
 }
 
+/* A phone: the host's ClickHouse version reads in full (the ping is in the host menu); the
+   page picker is just wide enough for "Observability". */
+@media (max-width: 600px) {
+  .appHeader__right .picker__button {
+    column-gap: 6px;
+    padding-right: 2rem;
+    grid-template-columns: 0.6rem minmax(1.5rem, 1fr) auto;
+  }
+  .appHeader__right .hostVersion {
+    width: auto;
+    overflow: visible;
+  }
+  .appHeader__right .hostPing { display: none; }
+  .pageSelect .pageSelect__button {
+    width: 8rem;
+    min-width: 8rem;
+    padding-right: 2rem;
+  }
+  .pageSelect__menu {
+    width: 8rem;
+    min-width: 8rem;
+  }
+}
+
+/* -- Edge cues (ns.shell.edgeCues): a row that scrolls sideways fades the side it hides
+   content on, over --edge-fade. ------------------------------------------------- */
+.has-edge-end {
+  mask-image: linear-gradient(to right, var(--mask-ink) calc(100% - var(--edge-fade)), transparent);
+}
+
+.has-edge-start {
+  mask-image: linear-gradient(to left, var(--mask-ink) calc(100% - var(--edge-fade)), transparent);
+}
+
+.has-edge-start.has-edge-end {
+  mask-image: linear-gradient(to right, transparent, var(--mask-ink) var(--edge-fade), var(--mask-ink) calc(100% - var(--edge-fade)), transparent);
+}
+
 /* -- Nav rows: the Explorer's one row under the header ---------------------
    Tier-1 tabs (Catalog, Functions) on the left, the Catalog modes (a
    segmented control) and the way up on the right. */
