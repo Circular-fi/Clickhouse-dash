@@ -202,7 +202,7 @@
     ns.uiState.banner(dom.tracesError, { message, retry });
   }
 
-  // The search bar's height as --trace-bar-h on the root element, in px (it
+  // The search bar's height as --trace-search-h on the root element, in px (it
   // wraps to 2 or more rows on narrower windows): the drawers of the Search
   // and Services tabs open under it and the facets sidebar sticks under it,
   // below --shell-top (app_dom.js).
@@ -213,7 +213,7 @@
     const update = () => {
       // A hidden bar (the trace detail) keeps the last height.
       const height = bar.offsetHeight;
-      if (height > 0) root.style.setProperty("--trace-bar-h", `${height}px`);
+      if (height > 0) root.style.setProperty("--trace-search-h", `${height}px`);
     };
     update();
     if (typeof ResizeObserver === "function") new ResizeObserver(update).observe(bar);

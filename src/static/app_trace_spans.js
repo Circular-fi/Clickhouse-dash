@@ -640,7 +640,7 @@
     if (!row) return;
     state.panelOpen = true;
     const panel = panelEl();
-    // Its place is CSS: sticky under the search bar (--trace-bar-h), a
+    // Its place is CSS: sticky under the search bar (--trace-search-h), a
     // bottom sheet on narrow windows.
     panelApi().open({ opener: byId("traceSpanTable") });
     panel.dataset.spanIndex = String(index);

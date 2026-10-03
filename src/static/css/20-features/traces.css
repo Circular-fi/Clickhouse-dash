@@ -398,7 +398,7 @@
 /* Trace search dashboard - dense full-width search, analytics and result rows. */
 .traceSearchView {
   /* Detail panels stick under the search bar (app_ui_panel.js). */
-  --panel-top: var(--trace-bar-h, 0px);
+  --panel-top: var(--trace-search-h, 0px);
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
