@@ -300,6 +300,15 @@
     return getJson(`api/explorer/ops/keeper?${query.toString()}`, { signal });
   }
 
+  // Explorer Monitoring: the Overview section (server tiles, topology,
+  // replication summary, detected system logs).
+  async function getExplorerMonitorOverview(hostId, refresh = false, { signal } = {}) {
+    if (!hostId) throw new Error("No host selected.");
+    const query = new URLSearchParams({ host_id: String(hostId) });
+    if (refresh) query.set("refresh", "1");
+    return getJson(`api/explorer/monitor/overview?${query.toString()}`, { signal });
+  }
+
   async function getExplorerFunctions(hostId, refresh = false, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     const query = new URLSearchParams({ host_id: String(hostId) });
@@ -458,7 +467,7 @@
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
     formatSqls, runSql, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
-    getExplorerOpsActivity, getExplorerOpsKeeper,
+    getExplorerOpsActivity, getExplorerOpsKeeper, getExplorerMonitorOverview,
     getExplorerGraph, getExplorerGraphDefinition, getTracesMeta, prefillTraces, searchTraces, getTraceServiceMap, getTraceAnalytics, getTraceHeatmap, getTraceDeltas, getTraceFacets, getTraceFacetValues, getTrace, getTraceLogs,
     getTraceLinkedFrom, getTraceContext,
     getLogs,

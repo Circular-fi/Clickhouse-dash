@@ -21,7 +21,7 @@ The important invariant is that `system_uri` is enrichment-only: it never author
 ## Shell and navigation
 
 The Explorer shell has one nav row (48 px, `#explorerTopBar`): the view tabs
-`Catalog | Functions` on the left and, in the Catalog, its modes `Browse |
+`Catalog | Functions | Monitoring` on the left and, in the Catalog, its modes `Browse |
 Graph` as a segmented control on the right (`#explorerModeBar`). Segmented
 controls are modes (the same scope shown another way); underlined tabs are
 sections (the card's Columns, Preview, Storage...). There is no breadcrumb: in
@@ -55,6 +55,7 @@ card tabs:
 | `/explorer[/<db>[/<table>]][?tab=<tab>]` | Browse (the default mode); `tab` the card tab, omitted for the first one (Columns on a table, Objects on a database): `?tab=storage` is the Storage tab of either card |
 | `/explorer[/<db>[/<table>]]?mode=graph&graph=lineage\|storage&depth=N` | Graph (`graph=storage` is the type labelled **Tiers**) |
 | `/explorer/_functions[/<name>]` | Functions (`#explorerFunctionsPane`) |
+| `/explorer/_monitoring[/<section>]` | Monitoring (`#explorerMonitorPane`): Overview without a section, `activity` |
 
 Former addresses stay aliases and are rewritten to that form: `?view=browse` and
 `?view=graph` (the former Browse / Graph views), `?mode=storage` (the former
@@ -62,7 +63,9 @@ Storage mode) and `/explorer/_system[?database=<db>[&table=<t>]]` (the former
 Storage view), which open the Storage tab of the database or table card and the
 databases overview at the root, the card tab as a path segment
 (`/explorer/<db>/<table>/<tab>`) and the former card tab slugs (`overview`,
-`schema`, `data`), `/explorer/functions` and `/explorer/databases`. The scheme
+`schema`, `data`), `/explorer/functions` and `/explorer/databases`, and
+`/explorer/_operations` (the former Server operations view), which opens
+Monitoring's Activity section. The scheme
 of every page is in `docs/ui-foundations.md` ("Routes"); the Explorer writes its
 address through `ns.router` while its workspace shows.
 
@@ -71,13 +74,12 @@ mode (`"browse"`, `"graph"`); `"storage"` opens Browse on the Storage tab of the
 selection's card. Modes disabled by `explorer.browse` / `explorer.graph` are
 hidden, and a disabled mode falls back to the first available one.
 
-**Server operations** (`/explorer/_operations`, `#explorerOpsPane`) is hidden
-for now: its code is kept, but the Explorer does not load `app_explorer_ops.js`
-(it is not in `pages.explorer.modules` of `src/static/modules.json`), so the tab
-stays hidden and the deep link falls back to the Catalog. To bring it back, add
-`"app_explorer_ops.js"` to that list and rerun `tools/build_page_css.py`; the
-tab then shows unless `explorer.operations.enabled = false`, and the view calls
-`ns.explorerOps.show(container, { onOpenTable })`.
+**Monitoring** (`/explorer/_monitoring[/<section>]`, `#explorerMonitorPane`)
+is the selected server rather than the tree selection, so it is a view of its
+own, not a Catalog mode (see *Monitoring*). Its modules are the lazy group
+`pages.explorer.lazy.monitoring` of `src/static/modules.json`, loaded on its
+first show: the Catalog pays nothing for it. The tab shows while
+`explorer.monitoring.enabled`.
 
 The object tree shows one line per object: a type icon (table, Distributed,
 Buffer, Memory, view, materialized view, dictionary), the name, a health dot for
@@ -285,12 +287,99 @@ each hold 1% of their parent, and everything smaller is grouped into Others. The
 remainder is still reported exactly through `omitted_*`, so `bytes` always equals
 listed + omitted bytes.
 
-## Server operations
+## Monitoring
 
-Hidden for now (see *Shell and navigation*: the Explorer does not load the
-module). The **Operations** Explorer section (route
-`/explorer/_operations`, `app_explorer_ops.js`,
-`ns.explorerOps.show(container, { onOpenTable })`) shows
+The **Monitoring** view (`app_explorer_monitor.js`,
+`ns.explorerMonitor.show(container, { section, onSection, onOpenTable })`)
+shows the selected server's health from its system tables. Its sections are
+underlined tabs (tier 2) under the view tabs:
+
+| Section | Address | What it shows |
+| --- | --- | --- |
+| Overview | `/explorer/_monitoring` | server tiles, topology, Keeper, replication summary |
+| Activity | `/explorer/_monitoring/activity` (`/explorer/_operations` is an alias) | *Server operations* below, mounted as it is |
+
+Performance, Queries and Disks are later sections: each registers itself
+(`ns.explorerMonitor.register({ id, label, order, available, create })`)
+when its module ships. Until then their tabs do not exist and their addresses
+fall back to Overview (the address is replaced). A section the configuration
+turns off does the same (Activity with `explorer.operations.enabled =
+false`).
+
+Every figure is **this server's own**: system tables are local to each node,
+so `query_log` holds the queries that node received or ran and the metrics are
+that node's. Each replica configured as a ChDash host gets its own view (the
+host picker), with no extra grant. The section bar says so ("This server:
+<hostName()>"). The `clusterAllReplicas` views across a cluster are opt-in
+(`explorer.monitoring.cluster_fanout`) and need `GRANT REMOTE ON *.*` for the
+system account. Topology always comes from the local `system.clusters`.
+
+**Overview** reads `GET /api/explorer/monitor/overview?host_id=<id>[&refresh=1]`
+and Keeper's session from `/api/explorer/ops/keeper`:
+
+- **Server tiles**: uptime, CPU (`OSUserTimeNormalized` +
+  `OSSystemTimeNormalized`, the share of all cores), resident memory of the
+  total (`CGroupMemoryTotal` when the container has a limit, else
+  `OSMemoryTotal`), load average, running queries / merges / mutations, client
+  connections, MergeTree parts with their size and the most parts in one
+  partition (warning from 300, error from 1,000: `parts_to_delay_insert`), and
+  delayed inserts. A metric the server does not have shows `—`.
+- **Topology**: per cluster of `system.clusters`, one row per shard and replica
+  (host, address, `errors_count`, `slowdowns_count`,
+  `estimated_recovery_time`), this server marked. A cluster of one local
+  replica (the built-in `default`) is this server alone: when every cluster is,
+  the card says "Single server, no multi-replica cluster". At most 1,000 rows.
+- **Keeper**: the connection, session uptime and the average request latency
+  since start; for a Keeper embedded in this server, its role, znodes,
+  latency and followers in sync (`Keeper*` asynchronous metrics). "No Keeper
+  configured" when there is no connection and no session; the card is hidden
+  with `explorer.operations.keeper = false`.
+- **Replication**: the replicated tables the runner can see, their read-only
+  and expired sessions, the largest delay and the queues, with Altinity's
+  alert thresholds (`future_parts > 20`, `parts_to_check > 10`,
+  `queue_size > 20`, `inserts_in_queue > 10`, delay over 5 minutes); hidden
+  without replicated tables; **Open Activity** for the tables.
+
+A refresh button and **Auto-refresh (5 s)** (the one choice of Overview and
+Activity, remembered per browser, paused while the section or the browser tab
+is hidden) keep it live.
+
+The endpoint runs fixed queries through the system context: `version()`,
+`timezone()`, `hostName()` and `uptime()`, allowlisted
+`system.asynchronous_metrics` and `system.metrics` names, `system.clusters`
+(`LIMIT 1001`) and the in-memory columns of `system.replicas` restricted to
+`database IN (<databases the runner can SHOW>)` (`LIMIT 10001`), each row
+counted only when the runner can SHOW that table. `log_max_index`,
+`log_pointer`, `total_replicas` and `active_replicas` cost a Keeper request per
+table and are not read. Every SELECT ends with `SETTINGS readonly = 2,
+max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R,
+read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode =
+'throw', log_comment = 'chdash-monitoring'`: a cap stops the read with an error
+rather than a silently partial answer, and our own load stays visible (and
+excludable) in `system.query_log`. No SQL, column, filter or limit is taken
+from the request.
+
+What a server exposes is detected once per host and kept 10 minutes: the
+optional system logs (`query_log`, `metric_log`, `asynchronous_metric_log`,
+`part_log`, `zookeeper_connection`, reported in `logs`) and the
+`system.clusters` columns older versions lack (left out, shown as `—`). The
+snapshot is cached per host for `min(explorer.cache_ttl_ms, 5 s)` (at least
+1 s), so any number of auto-refreshing pages costs one read per interval;
+`refresh=1` bypasses it.
+
+A panel that cannot be read degrades on its own and is listed in
+`unavailable_panels` (`panel`, `table`, `reason`, `message`, `hint`), never as a
+page error. Reasons: `disabled` (the table does not exist: ClickHouse codes 60,
+81), `not_granted` (497; `hint` is the statement to run, `GRANT SELECT ON
+system.<table> TO <system user>`, which the card shows with a copy button),
+`unsupported` (a column this version lacks: 16, 47), `window_too_large` (the
+time budget or read cap: 159, 158), `readonly_account` (164: a `readonly = 1`
+profile cannot set the limits) and `failed`.
+
+### Server operations (Activity)
+
+The **Activity** section of Monitoring (`app_explorer_ops.js`,
+`ns.explorerOps.show(container, { onOpenTable })`, mounted unchanged) shows
 what the selected server is doing in the background, in the spirit of
 clickhouse-monitoring:
 

@@ -18,8 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
 PAGES = ("query", "explorer", "observability")
-# Shipped but not loaded for now (the hidden Server operations view).
-UNLISTED = {"app_explorer_ops.js"}
+# Shipped but listed nowhere (none: Server operations is the lazy Activity
+# section of the Explorer's Monitoring view).
+UNLISTED: set[str] = set()
 
 
 def read(rel: str) -> str:

@@ -6,7 +6,7 @@
     "lazy.<group>: loaded on first use through ns.loader.loadGroup(group); views.<view> (Observability): a view's modules, loaded when it is first shown.",
     "A module's stylesheet rules ship on a page only when the module is listed for it. Edit this file, then run python3 tools/build_page_css.py:",
     "it copies each page's entry into its shell (<script id=\"chdashModules\">) and rebuilds the page stylesheets.",
-    "The Explorer's Server operations view is hidden for now: its tab only shows while app_explorer_ops.js is loaded. To bring it back, add \"app_explorer_ops.js\" to pages.explorer.modules before app_explorer_detail.js."
+    "The Explorer's Monitoring view loads pages.explorer.lazy.monitoring on its first show: app_explorer_ops.js (its Activity section) and app_explorer_monitor.js (the view and its other sections)."
   ],
   "common": [
     "app_format.js",
@@ -75,7 +75,9 @@
         "app_explorer_detail.js",
         "app_explorer.js"
       ],
-      "lazy": {}
+      "lazy": {
+        "monitoring": ["app_explorer_ops.js", "app_explorer_monitor.js"]
+      }
     },
     "observability": {
       "bootstrap": "app_observability.js",

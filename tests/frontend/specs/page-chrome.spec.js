@@ -305,6 +305,14 @@ const TOUCH_STATES = {
     await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
   },
   explorer: (page) => open(page, 'explorer'),
+  monitoring: async (page) => {
+    await page.goto('/explorer/_monitoring');
+    await expect(page.locator('#explorerMonitorTopology')).toBeVisible({ timeout: 20_000 });
+  },
+  activity: async (page) => {
+    await page.goto('/explorer/_monitoring/activity');
+    await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 20_000 });
+  },
   traces: async (page) => {
     await page.goto(`/observability/traces${HOUR}`);
     await expect(page.locator('#tracesResults .traceResultItem').first()).toBeVisible({ timeout: 30_000 });

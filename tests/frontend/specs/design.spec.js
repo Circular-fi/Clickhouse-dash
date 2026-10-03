@@ -249,7 +249,7 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-database-detail');
 });
 
-test('explorer captures the database Storage tab, a table Storage tab and Server operations', async ({ page }, testInfo) => {
+test('explorer captures the database Storage tab, a table Storage tab and Monitoring', async ({ page }, testInfo) => {
   await openApp(page);
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
@@ -270,14 +270,13 @@ test('explorer captures the database Storage tab, a table Storage tab and Server
   }
   await captureState(page, testInfo, 'explorer-storage-system-database');
 
-  // Server operations is hidden for now (app.js does not load its module).
-  if (await page.evaluate(() => !!window.ChDash?.explorerOps)) {
-    await page.locator('#explorerOpsTab').click();
-    await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
-    await captureState(page, testInfo, 'explorer-server-operations');
-  } else {
-    await expect(page.locator('#explorerOpsTab')).toBeHidden();
-  }
+  // Monitoring: the Overview, then Activity (the Server operations view).
+  await page.locator('#explorerMonitorTab').click();
+  await expect(page.locator('#explorerMonitorTopology')).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-monitoring-overview');
+  await page.locator('#explorerMonitorTab-activity').click();
+  await expect(page.locator('.explorerOpsSection').first()).toBeVisible({ timeout: 15_000 });
+  await captureState(page, testInfo, 'explorer-server-operations');
 });
 
 

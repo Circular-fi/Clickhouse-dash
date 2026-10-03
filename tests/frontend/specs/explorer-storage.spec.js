@@ -5,8 +5,8 @@ import { openApp, openExplorer, openExplorerDatabase } from '../helpers/app.js';
 // former Storage mode), the Columns tab's sizes and size map, the keys one
 // element per line, the expressions coloured by the shared highlighter, the
 // About panel that never truncates, the tree without a reserved scrollbar
-// gutter; plus the Server operations section (hidden for now) and the
-// Functions overview.
+// gutter; plus the Server operations view (Monitoring's Activity section)
+// and the Functions overview.
 
 const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
@@ -60,13 +60,6 @@ async function openCard(page, path, name) {
 }
 
 const selectedTab = (page) => page.locator('#explorerDetailTabs [aria-selected="true"]');
-
-// Server operations is hidden for now: app.js does not load its module.
-async function operationsLoaded(page) {
-  await page.goto('/explorer');
-  await page.waitForFunction(() => window.ChDash?.explorer);
-  return page.evaluate(() => !!window.ChDash.explorerOps);
-}
 
 test('the database card has Objects and Storage tabs: a share strip when one table dominates, and the disks', async ({ page }) => {
   await openApp(page);
@@ -365,11 +358,11 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
   await page.locator('.explorerFilterChip[data-filter="system"]').click();
 });
 
-test('Operations section reports replica health and Keeper, and lists problems first', async ({ page }) => {
-  test.skip(!(await operationsLoaded(page)), 'Server operations is hidden for now (app.js does not load app_explorer_ops.js)');
-  await openSection(page, 'explorerOpsTab');
-  await expect(page).toHaveURL(/\/explorer\/_operations$/);
-  await expect(page.locator('#explorerOpsPane')).toBeVisible();
+test('Activity reports replica health and Keeper, and lists problems first', async ({ page }) => {
+  await openSection(page, 'explorerMonitorTab');
+  await page.locator('#explorerMonitorTab-activity').click();
+  await expect(page).toHaveURL(/\/explorer\/_monitoring\/activity$/);
+  await expect(page.locator('#explorerMonitorPanel-activity')).toBeVisible();
   const replicas = page.locator('#explorerOpsReplicas');
   await expect(replicas).toContainText('replicated_events', { timeout: 15_000 });
   const row = replicas.locator('tbody tr').filter({ hasText: 'replicated_events' }).first();
@@ -395,7 +388,8 @@ test('Operations section reports replica health and Keeper, and lists problems f
   await expect(page.locator('#explorerOpsMutations')).toContainText('Part all_1_1_0: Code: 395.');
   await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('Read-only');
   await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('1 / 2');
-  await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('1 h 1 min');
+  // 3,700 s: two whole units, rounded (ns.format.duration).
+  await expect(page.locator('#explorerOpsReplicas tbody tr').first()).toContainText('1 h 2 min');
   await expect(page.locator('#explorerOpsReplicationQueue')).toContainText('GET_PART, MERGE_PARTS');
   await expect(page.locator('#explorerOpsDistribution')).toContainText('Retrying');
   await expect(page.locator('#explorerOpsMerges')).toContainText('42%');
@@ -498,11 +492,11 @@ for (const theme of ['dark', 'light']) {
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
       const paths = ['/explorer/chdash_ui?tab=storage', '/explorer/chdash_ui/weather_observations?tab=storage', '/explorer/chdash_ui/weather_observations'];
-      if (await operationsLoaded(page)) paths.push('/explorer/_operations');
+      paths.push('/explorer/_monitoring/activity');
       for (const path of paths) {
         await page.goto(path);
-        const ops = path.includes('_operations');
-        const pane = ops ? page.locator('#explorerOpsPane') : page.locator('#explorerDetailPane');
+        const ops = path.includes('_monitoring');
+        const pane = ops ? page.locator('#explorerMonitorPane') : page.locator('#explorerDetailPane');
         const ready = ops ? page.locator('.explorerOpsSection').first()
           : path.endsWith('?tab=storage') && !path.includes('weather') ? page.locator('#explorerDatabaseDisks tbody tr').first()
             : path.includes('?tab=storage') ? page.locator('.explorerTable--partitions tbody tr').first()

@@ -806,17 +806,18 @@
 
 .explorerTreemapFootnote--start { text-align: left; }
 
-/* The Server operations section (app_explorer_ops.js, hidden for now). Tables
-   use the Explorer table type scale (13px), section titles sit above their
-   tables, monospace only for identifiers such as paths, part names and SQL. */
-.explorerOpsPane {
+/* The Monitoring pane (app_explorer_monitor.js) and its Activity section, the
+   Server operations view (app_explorer_ops.js). Tables use the Explorer table
+   type scale (13px), section titles sit above their tables, monospace only
+   for identifiers such as hosts, paths, part names and SQL. */
+.explorerMonitorPane {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
 }
 
-.explorerOpsPane[hidden] {
+.explorerMonitorPane[hidden] {
   display: none;
 }
 
@@ -831,10 +832,11 @@
   font-size: var(--explorer-table-font);
 }
 
-.explorerOpsView__header {
+.explorerOpsView__header,
+.explorerMonitorBar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
 }
@@ -845,19 +847,22 @@
   gap: 3px;
 }
 
-.explorerOpsView__meta {
+.explorerOpsView__meta,
+.explorerMonitorBar__meta {
   color: var(--muted);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.explorerOpsView__actions {
+.explorerOpsView__actions,
+.explorerMonitorBar__actions {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.explorerOpsView__option {
+.explorerOpsView__option,
+.explorerMonitorBar__option {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -867,7 +872,8 @@
   cursor: pointer;
 }
 
-.explorerOpsView__option input {
+.explorerOpsView__option input,
+.explorerMonitorBar__option input {
   margin: 0;
 }
 
@@ -1042,6 +1048,9 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerOpsView__body {
   display: grid;
+  /* One column no wider than the view: a wide table scrolls in its own
+     wrap instead of widening the page (phones). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -1081,7 +1090,8 @@ button.explorerStorageStrip__segment:focus-visible {
   background: var(--warning);
 }
 
-.explorerOpsTableWrap {
+.explorerOpsTableWrap,
+.explorerMonitorTableWrap {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -1145,6 +1155,205 @@ button.explorerStorageStrip__segment:focus-visible {
   gap: 4px;
   color: var(--muted);
   font-size: var(--fs-sm);
+}
+
+/* The Monitoring view (app_explorer_monitor.js): the server, not the tree
+   selection. Underlined section tabs, then the section: its bar (what the
+   figures are, Auto-refresh, refresh) and its cards. Activity is the Server
+   operations view, inset by this view instead of its own padding. */
+.explorerMonitor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  /* The content region's inset (Page shell block). */
+  padding: var(--gutter);
+  color: var(--text);
+  font-size: var(--explorer-table-font);
+}
+
+.explorerMonitor__tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.explorerMonitor__panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.explorerMonitor__panel[hidden] {
+  display: none;
+}
+
+.explorerMonitor__panel .explorerOpsView {
+  padding: 0;
+}
+
+/* The section tab names Activity. */
+.explorerMonitor__panel .explorerOpsView__title {
+  display: none;
+}
+
+.explorerMonitorOverview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.explorerMonitorServer {
+  display: grid;
+  gap: 8px;
+}
+
+/* Eight tiles: one row, two rows of four under --bp-lg, four rows of two
+   on a phone. */
+.explorerMonitorTiles {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.explorerMonitorTiles--small {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+}
+
+.explorerMonitorGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 18px 24px;
+}
+
+.explorerMonitorGrid__side {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+}
+
+.explorerMonitorCard {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.explorerWorkspace .explorerMonitorCard > .explorerMonitorCard__head {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.explorerMonitorCard__link {
+  margin-left: auto;
+}
+
+.explorerMonitorCard__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorCard .uiState--compact {
+  justify-items: start;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+.explorerMonitorCluster {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.explorerMonitorCluster__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.explorerMonitorCluster__name {
+  font-weight: var(--fw-semibold);
+}
+
+.explorerMonitorCluster__shape {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.explorerMonitorTable__local {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.explorerMonitorTable td.is-warning {
+  color: var(--warning);
+  font-weight: var(--fw-semibold);
+}
+
+/* A panel that could not be read: why, and the GRANT to run. */
+.explorerMonitorIssue {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--r-md);
+}
+
+.explorerMonitorIssue[data-reason="disabled"] {
+  border-color: var(--border);
+}
+
+.explorerMonitorIssue__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.explorerMonitorIssue__hint {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorerMonitorIssue__code {
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--theadBg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .explorerMonitorGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .explorerMonitorTiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Phones: two tiles a row, the topology without its low-priority columns
+   (the address stays in the host's title). */
+@media (max-width: 600px) {
+  .explorerMonitorTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .explorerMonitorTable .explorerMonitorTable__address,
+  .explorerMonitorTable .explorerMonitorTable__slow,
+  .explorerMonitorTable .explorerMonitorTable__recovery {
+    display: none;
+  }
 }
 
 /* Functions: one line per function, counted categories, overview as the
@@ -1227,7 +1436,8 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 @media (max-width: 820px) {
-  .explorerOpsView {
+  .explorerOpsView,
+  .explorerMonitor {
     padding: 10px;
   }
   .explorerTreemapPanel--database {

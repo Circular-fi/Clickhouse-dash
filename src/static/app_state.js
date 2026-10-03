@@ -438,6 +438,10 @@
       browse: true,
       graph: { enabled: true, lineage: true, storage_topology: true },
       operations: { enabled: true, keeper: true },
+      monitoring: {
+        enabled: true, top_queries: true, cluster_fanout: false,
+        default_lookback_minutes: 60, max_lookback_days: 30, query_log_max_lookback_hours: 168, disk_growth_days: 7,
+      },
     },
     traces: { enabled: false },
     logs: { enabled: false, body_search: "token" },
@@ -469,6 +473,10 @@
     const lineage = bool(graph.lineage, d.explorer.graph.lineage);
     const storageTopology = bool(graph.storage_topology, d.explorer.graph.storage_topology);
     const operationsEnabled = bool(operations.enabled, d.explorer.operations.enabled);
+    const monitoring = explorer.monitoring || {};
+    const dm = d.explorer.monitoring;
+    const monitoringEnabled = bool(monitoring.enabled, dm.enabled);
+    const positive = (value, fallback) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback);
     const library = src.query_library || {};
     const libraryEnabled = bool(library.enabled, d.query_library.enabled);
     return {
@@ -477,6 +485,15 @@
         browse: bool(explorer.browse, d.explorer.browse),
         graph: { enabled: bool(graph.enabled, d.explorer.graph.enabled) && (lineage || storageTopology), lineage, storage_topology: storageTopology },
         operations: { enabled: operationsEnabled, keeper: operationsEnabled && bool(operations.keeper, d.explorer.operations.keeper) },
+        monitoring: {
+          enabled: monitoringEnabled,
+          top_queries: monitoringEnabled && bool(monitoring.top_queries, dm.top_queries),
+          cluster_fanout: monitoringEnabled && bool(monitoring.cluster_fanout, dm.cluster_fanout),
+          default_lookback_minutes: positive(monitoring.default_lookback_minutes, dm.default_lookback_minutes),
+          max_lookback_days: positive(monitoring.max_lookback_days, dm.max_lookback_days),
+          query_log_max_lookback_hours: positive(monitoring.query_log_max_lookback_hours, dm.query_log_max_lookback_hours),
+          disk_growth_days: positive(monitoring.disk_growth_days, dm.disk_growth_days),
+        },
       },
       traces: { enabled: bool(src.traces?.enabled, d.traces.enabled) },
       logs: { enabled: bool(src.logs?.enabled, d.logs.enabled), body_search: String(src.logs?.body_search || d.logs.body_search) },

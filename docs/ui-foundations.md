@@ -925,7 +925,7 @@ rewrites the address with replace on load.
 | `/explorer/<db>/<object>` | Browse: `?tab=columns\|preview\|storage\|operations\|lineage\|ddl` (none for Columns) |
 | `/explorer[/<db>[/<object>]]?mode=graph` | `?graph=lineage\|storage`, `?depth=0..8` (lineage) |
 | `/explorer/_functions[/<name>]` | Functions, the selected function |
-| `/explorer/_operations` | Server operations (hidden: falls back to the Catalog) |
+| `/explorer/_monitoring[/<section>]` | Monitoring: Overview (no section), `activity`; a section the server or configuration does not offer falls back to Overview (replaced) |
 | `/observability` | the first enabled view, its parameters kept |
 | `/observability/traces` | the search: `from`, `to`, `status`, `service`, `operation`, `tag`, `tag_not`, `tag_exists`, `tag_missing`, `service_not`, `operation_not`, `status_not`, `min_duration_ms`, `max_duration_ms`, `limit`, `sort`, `results=table`, `duration_view=heatmap`; `?mode=spans` with `kind`, `span_min_duration_ms`, `span_max_duration_ms` and the panel's `span=`; `?tab=services` with `svc=` (panel) and `svc_sort`; `?tab=map` with `node=` (panel) |
 | `/observability/traces/<traceId>` | `span=` the focused span, `?tab=graph\|statistics\|spans\|flamegraph` (none for the timeline), then the search context it was opened from (the filters, not the search page's tab) |
@@ -949,6 +949,7 @@ search it came from (`returnToSearch`, `state.searchBack` steps).
 | `/explorer…?view=browse\|graph` | `/explorer…` / `?mode=graph&graph=lineage&depth=1` |
 | `/explorer/_system[?database=<db>[&table=<t>]]`, `/explorer[/<db>[/<t>]]?mode=storage` (the former Storage view and mode) | `/explorer/<db>[/<t>]?tab=storage`, `/explorer` at the root |
 | `/explorer/functions[/<name>]`, `/explorer/databases` (no database of that name) | `/explorer/_functions[/<name>]`, `/explorer` |
+| `/explorer/_operations` (the former Server operations view) | `/explorer/_monitoring/activity` |
 | `/observability/traces/<traceId>?view=<tab>` (and a search `tab=` there) | `?tab=<tab>` |
 | `/observability/traces?results=spans` | `?mode=spans` |
 
