@@ -401,10 +401,66 @@
     return !!(payload && payload.ok);
   }
 
+  // A route's query string from the caller's parameters: a URLSearchParams
+  // as built, or an object (arrays repeat the key; null and "" are left out).
+  function queryOf(params) {
+    if (params instanceof URLSearchParams) return params;
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params || {})) {
+      if (Array.isArray(value)) {
+        for (const item of value) if (item != null && String(item) !== "") query.append(key, String(item));
+      } else if (value != null && String(value) !== "") {
+        query.set(key, String(value));
+      }
+    }
+    return query;
+  }
+
   // Logs explorer routes: api/logs/{meta,search,histogram,context,patterns,services}.
   async function getLogs(endpoint, params, { signal } = {}) {
     const query = params instanceof URLSearchParams ? params : new URLSearchParams(params || {});
     return getJson(`api/logs/${endpoint}?${query.toString()}`, { signal });
+  }
+
+  // Spans mode of the trace search (app_trace_spans.js): one row per span,
+  // keyset pages by cursor; and one span's full record.
+  async function searchTraceSpans(params, { signal } = {}) {
+    return getJson(`api/traces/spans?${queryOf(params).toString()}`, { signal });
+  }
+
+  async function getTraceSpan(hostId, { traceId, spanId, timestampNs } = {}, { signal } = {}) {
+    if (!traceId || !spanId) throw new Error("No span selected.");
+    const query = queryOf({ host_id: hostId, trace_id: traceId, span_id: spanId, timestamp_ns: timestampNs });
+    return getJson(`api/traces/span?${query.toString()}`, { signal });
+  }
+
+  // Metrics browser routes (app_metrics.js, docs/metrics.md): the enabled
+  // kinds, the catalog of a window, a panel's series and exemplars, and its
+  // attribute keys (or one key's values with `key`).
+  async function getMetricsMeta(params, { signal } = {}) {
+    return getJson(`api/metrics/meta?${queryOf(params).toString()}`, { signal });
+  }
+
+  async function getMetricsCatalog(params, { signal } = {}) {
+    return getJson(`api/metrics/catalog?${queryOf(params).toString()}`, { signal });
+  }
+
+  async function getMetricsSeries(params, { signal } = {}) {
+    return getJson(`api/metrics/series?${queryOf(params).toString()}`, { signal });
+  }
+
+  async function getMetricsExemplars(params, { signal } = {}) {
+    return getJson(`api/metrics/exemplars?${queryOf(params).toString()}`, { signal });
+  }
+
+  async function getMetricsAttributes(params, { signal } = {}) {
+    return getJson(`api/metrics/attributes?${queryOf(params).toString()}`, { signal });
+  }
+
+  // A run appended to the server History of its host (features.query_library
+  // in server mode); the answer carries its id and the history revision.
+  async function addQueryHistory(entry, { signal } = {}) {
+    return postJson("api/query-library/history", entry, { signal });
   }
 
   // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
@@ -416,5 +472,8 @@
     getTraceLinkedFrom, getTraceContext,
     getLogs,
     getTraceServices, getTraceServicesDb,
+    searchTraceSpans, getTraceSpan,
+    getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
+    addQueryHistory,
   };
 })();

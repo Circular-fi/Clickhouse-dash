@@ -505,7 +505,7 @@
       notify({ entry, store: "browser" });
       return;
     }
-    api.postJson("api/query-library/history", entry)
+    api.addQueryHistory(entry)
       .then((response) => notify({ entry: { ...entry, id: response && response.id }, store: "server", revision: response && response.revision }))
       .catch(() => notify({ entry, store: "browser", failed: true }));
   }

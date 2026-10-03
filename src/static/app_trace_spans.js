@@ -256,7 +256,7 @@
     const started = performance.now();
     let payload = null;
     try {
-      payload = await ctx.api.getJson(`api/traces/spans?${requestQuery(state.base, first ? "" : state.cursor).toString()}`, { signal: req.signal });
+      payload = await ctx.api.searchTraceSpans(requestQuery(state.base, first ? "" : state.cursor), { signal: req.signal });
     } catch (error) {
       if (!req.isCurrent()) return;
       state.loading = false;
@@ -649,10 +649,7 @@
     const entry = { status: "loading", span: null, error: "" };
     state.details.set(key, entry);
     const seq = ++state.detailSeq;
-    const query = new URLSearchParams({ trace_id: row.trace_id, span_id: row.span_id, timestamp_ns: row.start_ns });
-    const host = ctx.currentHost();
-    if (host) query.set("host_id", host);
-    ctx.api.getJson(`api/traces/span?${query.toString()}`).then((payload) => {
+    ctx.api.getTraceSpan(ctx.currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }).then((payload) => {
       entry.status = "ready";
       entry.span = payload?.span || null;
     }).catch((error) => {

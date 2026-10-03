@@ -119,6 +119,15 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
         if name in ("app_api.js",):
             continue
         assert not re.search(r"(?<![.\w])fetch\(", text), name
+    # Routes are named endpoints of app_api.js: no module builds an "api/..."
+    # URL, apart from the hosts EventSource and the query library's REST
+    # adapter (its base path, through api.request).
+    for name, text in sources().items():
+        if name == "app_api.js":
+            continue
+        routes = re.findall(r"""["'`]api/[\w/-]*""", text)
+        allowed = {"app_ui.js": ['"api/hosts/stream'], "app_query_library.js": ['"api/query-library']}.get(name, [])
+        assert sorted(routes) == sorted(allowed), (name, routes)
     # The query library sends its If-Match revision through api.request, and
     # its list reloads are util.latest requests.
     library = sources()["app_query_library.js"]

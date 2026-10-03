@@ -80,7 +80,10 @@ def test_spans_mode_page_wiring():
     assert "await ns.traceSpans.search(filters)" in traces
     assert "ns.traceSpans.hasResults()" in traces
     spans = read("src/static/app_trace_spans.js")
-    assert "api/traces/spans?" in spans and "api/traces/span?" in spans
+    api = read("src/static/app_api.js")
+    assert "api/traces/spans?" in api and "api/traces/span?" in api
+    assert "ctx.api.searchTraceSpans(" in spans and "ctx.api.getTraceSpan(" in spans
+    assert "`api/traces/span" not in spans
     assert "ns.storage.KEYS.traceSpanColumns" in spans
     assert 'traceSpanColumns: "chdash.traceSpanColumns.v1",' in read("src/static/app_state.js")
     assert "ROW_HEIGHT" in spans and "updateWindow" in spans

@@ -288,7 +288,7 @@
 
   async function loadMeta() {
     try {
-      model.meta = await api.getJson?.(`api/metrics/meta?${hostParams().toString()}`) || null;
+      model.meta = await api.getMetricsMeta(hostParams()) || null;
     } catch {
       model.meta = null;
     }
@@ -309,7 +309,7 @@
       return;
     }
     try {
-      const data = await api.getJson(`api/metrics/catalog?${hostParams(range).toString()}`, { signal: req.signal });
+      const data = await api.getMetricsCatalog(hostParams(range), { signal: req.signal });
       if (!req.isCurrent()) return;
       model.catalog = data;
     } catch (e) {
@@ -523,7 +523,7 @@
     renderPanel(panel);
     try {
       const query = panelQuery(panel, { agg: panel.agg, group_by: panel.groupBy.join(","), ...filterParams(panel) });
-      const data = await api.getJson(`api/metrics/series?${query.toString()}`, { signal: req.signal });
+      const data = await api.getMetricsSeries(query, { signal: req.signal });
       if (!req.isCurrent()) return;
       panel.data = data;
       if (data?.agg && data.agg !== panel.agg) {
@@ -546,7 +546,7 @@
     const req = util.latest(`metrics.exemplars.${panel.id}`);
     try {
       const query = panelQuery(panel, { step_ms: panel.data?.bucket_ms, ...filterParams(panel) });
-      const data = await api.getJson(`api/metrics/exemplars?${query.toString()}`, { signal: req.signal });
+      const data = await api.getMetricsExemplars(query, { signal: req.signal });
       if (!req.isCurrent()) return;
       panel.exemplarData = data;
       panel.exemplarError = "";
@@ -562,7 +562,7 @@
   async function ensureKeys(panel) {
     if (panel.keys) return panel.keys;
     if (!panel.keysPromise) {
-      panel.keysPromise = api.getJson(`api/metrics/attributes?${panelQuery(panel).toString()}`)
+      panel.keysPromise = api.getMetricsAttributes(panelQuery(panel))
         .then((data) => { panel.keys = Array.isArray(data?.keys) ? data.keys : []; return panel.keys; })
         .catch(() => { panel.keys = []; return panel.keys; })
         .finally(() => { panel.keysPromise = null; });
@@ -574,7 +574,7 @@
     if (!key) return [];
     if (panel.values.has(key)) return panel.values.get(key);
     try {
-      const data = await api.getJson(`api/metrics/attributes?${panelQuery(panel, { key }).toString()}`);
+      const data = await api.getMetricsAttributes(panelQuery(panel, { key }));
       const values = Array.isArray(data?.values) ? data.values : [];
       panel.values.set(key, values);
       return values;
