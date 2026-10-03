@@ -290,6 +290,9 @@ Server::Server(AppConfig cfg, bool start_background)
         http_.Get("/api/explorer/ops/keeper", [&](const auto& req, auto& res) { handle_explorer_ops_keeper(req, res); });
       }
     }
+    if (cfg_.explorer.monitoring_enabled()) {
+      http_.Get("/api/explorer/monitor/overview", [&](const auto& req, auto& res) { handle_explorer_monitor_overview(req, res); });
+    }
     if (cfg_.explorer.graph_enabled()) {
       http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
       http_.Get("/api/explorer/graph/definition", [&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); });
@@ -453,6 +456,17 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.explorer.operations_enabled());
   w.Key("keeper"); w.Bool(cfg_.explorer.operations_enabled() && cfg_.explorer.operations_keeper);
+  w.EndObject();
+  // The Monitoring tab and the windows its history sections may ask for.
+  w.Key("monitoring");
+  w.StartObject();
+  w.Key("enabled"); w.Bool(cfg_.explorer.monitoring_enabled());
+  w.Key("top_queries"); w.Bool(cfg_.explorer.monitoring_enabled() && cfg_.explorer.monitoring_top_queries);
+  w.Key("cluster_fanout"); w.Bool(cfg_.explorer.monitoring_enabled() && cfg_.explorer.monitoring_cluster_fanout);
+  w.Key("default_lookback_minutes"); w.Int(cfg_.explorer.monitoring_default_lookback_minutes);
+  w.Key("max_lookback_days"); w.Int(cfg_.explorer.monitoring_max_lookback_days);
+  w.Key("query_log_max_lookback_hours"); w.Int(cfg_.explorer.monitoring_query_log_max_lookback_hours);
+  w.Key("disk_growth_days"); w.Int(cfg_.explorer.monitoring_disk_growth_days);
   w.EndObject();
   w.EndObject();
   w.Key("traces");

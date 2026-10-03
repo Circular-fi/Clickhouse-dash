@@ -5,6 +5,7 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
+#include "explorer_monitor.hpp"
 #include "explorer_ops.hpp"
 #include "export_job.hpp"
 #include "health_runner.hpp"
@@ -50,6 +51,21 @@ struct ExplorerSettings {
   bool operations = true;
   bool operations_keeper = true;
   bool operations_enabled() const { return enabled() && operations; }
+  // The Monitoring tab (Overview, Performance, Queries, Disks, Activity:
+  // docs/explorer.md "Monitoring"). Activity is the operations view above and
+  // keeps its own switch. Every read is a fixed, bounded system-table SELECT.
+  bool monitoring = true;
+  // The Queries section (top queries of system.query_log, runner context).
+  bool monitoring_top_queries = true;
+  // clusterAllReplicas() views; needs GRANT REMOTE for the system account.
+  bool monitoring_cluster_fanout = false;
+  // Time windows and caps of the history sections.
+  int monitoring_default_lookback_minutes = 60;
+  int monitoring_max_lookback_days = 30;
+  int monitoring_query_log_max_lookback_hours = 7 * 24;
+  uint64_t monitoring_query_log_max_rows = 50'000'000;
+  int monitoring_disk_growth_days = 7;
+  bool monitoring_enabled() const { return enabled() && monitoring; }
 };
 
 struct TraceFeatureSettings {
@@ -265,6 +281,7 @@ private:
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_ops_activity(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_ops_keeper(const httplib::Request& req, httplib::Response& res);
+  void handle_explorer_monitor_overview(const httplib::Request& req, httplib::Response& res);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -365,6 +382,10 @@ private:
   // a host, so an auto-refreshing page costs one read per TTL, not per tab.
   StaleCache<std::string, ExplorerOpsActivity> explorer_ops_activity_cache_;
   StaleCache<std::string, ExplorerKeeperStatus> explorer_keeper_cache_;
+  // Monitoring: what each host exposes (10 min), and the Overview snapshot
+  // (the operations TTL), shared by every viewer of a host.
+  StaleCache<std::string, MonitorCapabilities> explorer_monitor_caps_cache_;
+  StaleCache<std::string, ExplorerMonitorOverview> explorer_monitor_overview_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one

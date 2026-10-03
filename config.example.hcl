@@ -67,6 +67,19 @@ explorer {
     enabled = true
     keeper  = true
   }
+
+  # The Monitoring tab (docs/explorer.md "Monitoring"): Overview, the history
+  # sections and Activity (the operations view above).
+  monitoring {
+    enabled                      = true
+    top_queries                  = true     # the Queries section (runner context)
+    cluster_fanout               = false    # clusterAllReplicas, needs GRANT REMOTE
+    default_lookback_minutes     = 60
+    max_lookback_days            = 30       # metric_log / asynchronous_metric_log
+    query_log_max_lookback_hours = 168
+    query_log_max_rows           = 50000000
+    disk_growth_days             = 7
+  }
 }
 
 traces {

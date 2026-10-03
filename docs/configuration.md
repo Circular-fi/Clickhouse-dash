@@ -62,6 +62,17 @@ explorer {
     enabled = true
     keeper  = true
   }
+
+  monitoring {
+    enabled                      = true
+    top_queries                  = true
+    cluster_fanout               = false
+    default_lookback_minutes     = 60
+    max_lookback_days            = 30
+    query_log_max_lookback_hours = 168
+    query_log_max_rows           = 50000000
+    disk_growth_days             = 7
+  }
 }
 
 traces {
@@ -110,7 +121,9 @@ export {
 
 Explorer availability is derived from the enabled surfaces; there is no separate `enabled` switch. `explorer.browse` controls the Browse surface. The nested `explorer.graph` block controls the graph families: Graph is enabled when either `lineage` or `storage_topology` is true, and Explorer itself is enabled when Browse or Graph is enabled. If only Browse or Graph remains, the Browse/Graph selector disappears and that surface becomes implicit. Likewise, if only one graph family remains, the Lineage/Storage selector disappears and that family becomes implicit. Setting `browse = false`, `graph.lineage = false`, and `graph.storage_topology = false` disables Explorer routes and removes the Query/Explorer page selector entirely.
 
-`explorer.operations` controls the Explorer **Operations** section (`/explorer/_operations`, hidden in the UI for now, see [Explorer](explorer.md#shell-and-navigation)) and its `/api/explorer/ops/...` endpoints: `enabled = false` removes the section and both routes; `keeper = false` keeps the merge/mutation/replication/Distributed tables but removes the Keeper/ZooKeeper summary (connection host, session, latency) and `/api/explorer/ops/keeper`. Both default to `true` and are reported in `/api/version` as `features.explorer.operations`.
+`explorer.monitoring` controls the Explorer **Monitoring** tab (`/explorer/_monitoring`, see [Explorer](explorer.md#monitoring)) and its `/api/explorer/monitor/...` endpoints. `enabled = false` removes the tab, every section of it (Activity included) and the routes; it defaults to `true`. The other keys bound the history sections, which read the server's system logs: `top_queries` (the Queries section, read with the runner account), `cluster_fanout` (the opt-in `clusterAllReplicas` views, which need `GRANT REMOTE ON *.*` for the system account; off by default, so every figure is the selected host's own), `default_lookback_minutes` (60, 1 minute to `max_lookback_days`), `max_lookback_days` (30, 1 to 365: `metric_log` and `asynchronous_metric_log`), `query_log_max_lookback_hours` (168, 1 to 720), `query_log_max_rows` (50,000,000 rows read per request, 1 M to 10 G; a larger read stops with an error rather than a partial answer) and `disk_growth_days` (7, at most `max_lookback_days`). They are reported in `/api/version` as `features.explorer.monitoring`, except `query_log_max_rows`, which stays on the server. Every Monitoring query sets `readonly = 2`, a time budget and read caps, so neither account may have a `readonly = 1` profile.
+
+`explorer.operations` controls the Monitoring tab's **Activity** section (`/explorer/_monitoring/activity`; `/explorer/_operations` is an alias) and its `/api/explorer/ops/...` endpoints: `enabled = false` removes the section and both routes; `keeper = false` keeps the merge/mutation/replication/Distributed tables but removes the Keeper/ZooKeeper summary (connection host, session, latency), the Overview's Keeper card and `/api/explorer/ops/keeper`. Both default to `true` and are reported in `/api/version` as `features.explorer.operations`.
 
 `explorer.function_markdown_links` defaults to `false`, so links embedded in ClickHouse function Markdown are rendered as plain text. When enabled, only documentation-relative targets beginning with `/` or `./` become links; arbitrary external URLs remain non-clickable.
 

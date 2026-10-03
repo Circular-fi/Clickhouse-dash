@@ -176,6 +176,10 @@ queryable host as down.
   topology. Optional `database=...` limits the serialized scope.
 - `GET /api/explorer/activity?host_id=...` short-lived live activity overlay for
   the graph; it does not rebuild topology metadata.
+- `GET /api/explorer/monitor/overview?host_id=...` the Explorer Monitoring
+  Overview: server tiles, `system.clusters` topology and the replication summary
+  of runner-visible tables, from fixed, read-only, bounded system-table reads
+  (`explorer.monitoring`).
 - `POST /api/export/run` prepare a direct-download request and issue a short-lived one-time export token.
 - `GET /api/export/stream?token=...` stream a ZIP64 archive directly from ClickHouse with bounded memory and no result-sized temporary file.
 

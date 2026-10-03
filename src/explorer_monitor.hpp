@@ -1,0 +1,139 @@
+#pragma once
+
+#include <clickhouse/client.h>
+
+#include <cstdint>
+#include <exception>
+#include <map>
+#include <optional>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace chdash {
+
+// Explorer "Monitoring" tab (docs/explorer.md "Monitoring"): the selected
+// server's health, read from its system tables. Every SELECT is fixed and
+// built here; a request only picks the host (and, in later sections, a
+// clamped time range and allowlisted enums). Every SELECT ends with
+// monitor_settings_sql(): read-only, a time budget and a read cap that throw
+// rather than return a silently partial answer, and the 'chdash-monitoring'
+// log_comment that keeps our own load auditable in system.query_log.
+
+// What the server exposes, detected once per host and cached (10 min): the
+// optional system tables and the allowlisted columns of the system tables
+// whose schema changed across ClickHouse versions. A panel whose table or
+// columns are missing is reported in unavailable_panels instead of failing.
+struct MonitorCapabilities {
+  uint64_t detected_at_ms = 0;
+  // false when the detection itself failed: the panels then read their base
+  // columns only and let ClickHouse answer.
+  bool detected = false;
+  std::set<std::string> tables;   // system.<name>
+  std::set<std::string> columns;  // "<table>.<column>"
+  // currentUser() of the system context, for the GRANT hints.
+  std::string system_user;
+
+  bool has_table(const std::string& table) const { return !detected || tables.count(table) > 0; }
+  bool has_column(const std::string& table, const std::string& column) const {
+    return detected && columns.count(table + "." + column) > 0;
+  }
+};
+
+bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities& out, std::string* error);
+
+// The SETTINGS clause of every Monitoring SELECT.
+std::string monitor_settings_sql(int max_execution_time_seconds, uint64_t max_rows_to_read, uint64_t max_result_rows);
+
+// A panel that could not be read, and why:
+//   disabled          the system table does not exist (log disabled in the
+//                     server config): ClickHouse code 60 / 81
+//   not_granted       the account lacks a grant (497); hint names it
+//   unsupported       a column this server version lacks (47 / 16)
+//   window_too_large  the time budget or the read cap stopped it (159 / 158)
+//   readonly_account  the account's profile has readonly = 1 (164): no
+//                     query-level limits can be set
+//   failed            anything else
+struct MonitorPanelIssue {
+  std::string panel;
+  // The system table it reads (system.<table>).
+  std::string table;
+  std::string reason;
+  std::string message;
+  std::string hint;
+};
+
+// The reason of an exception thrown by a Monitoring SELECT.
+std::string monitor_reason_of(const std::exception& error);
+// "GRANT SELECT ON system.<table> TO <user>" (the user quoted when needed).
+std::string monitor_grant_hint(const std::string& table, const std::string& user);
+
+struct MonitorClusterNode {
+  std::string cluster;
+  uint64_t shard_num = 0;
+  uint64_t shard_weight = 0;
+  uint64_t replica_num = 0;
+  std::string host_name;
+  std::string host_address;
+  uint64_t port = 0;
+  bool is_local = false;
+  // Absent on servers without these columns.
+  std::optional<uint64_t> errors_count;
+  std::optional<uint64_t> slowdowns_count;
+  std::optional<uint64_t> estimated_recovery_time;
+};
+
+// Replicated tables the runner can see, summarised (in-memory columns of
+// system.replicas only; the thresholds are Altinity's replica alerts).
+struct MonitorReplicationSummary {
+  uint64_t tables = 0;
+  uint64_t readonly = 0;
+  uint64_t session_expired = 0;
+  uint64_t max_delay_seconds = 0;
+  uint64_t queue_size = 0;
+  uint64_t inserts_in_queue = 0;
+  uint64_t merges_in_queue = 0;
+  uint64_t future_parts_over = 0;    // future_parts > 20
+  uint64_t parts_to_check_over = 0;  // parts_to_check > 10
+  uint64_t queue_over = 0;           // queue_size > 20
+  uint64_t inserts_over = 0;         // inserts_in_queue > 10
+  bool truncated = false;
+};
+
+struct ExplorerMonitorOverview {
+  uint64_t generated_at_ms = 0;
+  std::string hostname;
+  std::string version;
+  std::string timezone;
+  std::optional<uint64_t> uptime_seconds;
+  // Allowlisted system.asynchronous_metrics and system.metrics values, by name.
+  std::map<std::string, double> metrics;
+  std::vector<MonitorClusterNode> topology;
+  bool topology_truncated = false;
+  std::optional<MonitorReplicationSummary> replication;
+  // Optional system logs, as detected (the Performance, Queries and Disks
+  // sections read them).
+  std::map<std::string, bool> logs;
+  std::vector<MonitorPanelIssue> unavailable_panels;
+};
+
+// Rows of system.clusters kept per response.
+constexpr size_t kMonitorTopologyRowLimit = 1000;
+// Replicated tables read for the replication summary.
+constexpr size_t kMonitorReplicaRowLimit = 10000;
+
+// Server tiles, topology and the replication summary of the runner-visible
+// replicated tables. Returns false only when nothing at all could be read.
+bool load_explorer_monitor_overview(
+    clickhouse::Client& system,
+    clickhouse::Client& runner,
+    const MonitorCapabilities& caps,
+    ExplorerMonitorOverview& out,
+    std::string* error);
+
+// The allowlists, exposed for the contract tests and the docs.
+const std::vector<std::string>& monitor_overview_async_metrics();
+const std::vector<std::string>& monitor_overview_metrics();
+const std::vector<std::string>& monitor_detected_tables();
+
+} // namespace chdash
