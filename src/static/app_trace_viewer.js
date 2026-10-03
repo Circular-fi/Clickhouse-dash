@@ -610,7 +610,8 @@
       } else {
         for (const segment of renderSegments) {
           const bar = document.createElement("span");
-          bar.className = "traceViewer__bar";
+          // The waterfall's bar (.traceSpanBar), in the attempt's colour.
+          bar.className = "traceViewer__bar traceSpanBar";
           const left = Math.max(0, Math.min(100, (segment.start - model.start) / model.window * 100));
           const width = Math.max(0.12, Math.min(100 - left, segment.duration / model.window * 100));
           bar.style.left = `${left}%`;

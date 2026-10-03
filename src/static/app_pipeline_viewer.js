@@ -598,19 +598,29 @@
     const overviewTables = Array.isArray(options.overview?.tables) ? options.overview.tables.map(String).filter(Boolean) : [];
     const root = h("div");
     root.className = "pipelineViewer";
+    // The figures, then the reading guide folded under "How to read this"
+    // (closed by default: the rows speak first).
     const header = h("div", { class: "pipelineViewer__summary" });
-    header.append(
-      h("div", { class: "pipelineViewer__summaryText" }, `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
-      h("div", { class: "pipelineViewer__summaryNote" }, "Time position and accumulated work are separate measurements"));
-    root.appendChild(header);
-
-    const legend = h("div", { class: "pipelineViewer__legend" });
-    legend.append(h("span", { class: "pipelineViewer__explanation" }, "Stages process blocks concurrently. Read each row on the same time axis."));
     const scale = h("span", { class: "pipelineViewer__densityLegend" }, "Height + shade: work density ");
     scale.append(h("span", { class: "pipelineViewer__densityRamp" }), document.createTextNode(" low \u2192 high"));
     scale.title = "Same color scale for every stage. Summed processor work divided by the observed window duration; not CPU utilization. Activity inside each summary window is coalesced.";
-    legend.append(scale);
-    root.appendChild(legend);
+    const resolution = number(options.summaryBucketUs) > 0
+      ? `Summary resolution: ${durationUs(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown.`
+      : model.envelopeCount
+        ? "Dashed ranges contain unknown activity gaps. Work \u03a3 stays available even when the temporal detail is missing."
+        : "Recorded intervals use the available trace resolution. Work \u03a3 covers the whole query; waits have no recorded position on the time axis.";
+    const help = h("details", { class: "pipelineViewer__help" },
+      h("summary", { class: "pipelineViewer__helpToggle" }, "How to read this"),
+      h("ul", { class: "pipelineViewer__helpPopover" },
+        h("li", null, "Stages process blocks concurrently: read each row on the same time axis."),
+        h("li", null, "Time position and accumulated work (Work \u03a3) are separate measurements."),
+        h("li", null, scale),
+        h("li", null, resolution),
+        h("li", null, "Hover a row for its times; \u2315 focuses the time axis on a stage.")));
+    header.append(
+      h("div", { class: "pipelineViewer__summaryText" }, `${model.groups.length} stages · ${model.processorCount} processors · ${durationUs(model.totalWorkUs)} total work`),
+      help);
+    root.appendChild(header);
 
     const warnings = [];
     if (options.processorsTruncated) warnings.push("Processor limit reached; costs, shares and flows cover retained processors only.");
@@ -643,12 +653,13 @@
       const width = Math.min(model.window, Math.max(1, view.width * factor));
       setView(view.start + (view.width - width) / 2, view.start + (view.width + width) / 2);
     };
+    // Every control says what it does (glyph and word).
     const reset = button("Full query", "Show the complete query", () => setView(0, model.window));
-    const back = button("\u2190", "Move to earlier activity", () => shift(-1));
-    const zoomOut = button("\u2212", "Zoom out", () => zoom(2));
-    const zoomIn = button("+", "Zoom in", () => zoom(0.5));
-    const forward = button("\u2192", "Move to later activity", () => shift(1));
-    const end = button("End · 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
+    const back = button("\u2190 Earlier", "Move to earlier activity", () => shift(-1));
+    const zoomOut = button("\u2212 Zoom out", "Zoom out", () => zoom(2));
+    const zoomIn = button("+ Zoom in", "Zoom in", () => zoom(0.5));
+    const forward = button("Later \u2192", "Move to later activity", () => shift(1));
+    const end = button("Last 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
     const rangeLabel = h("output", { class: "pipelineViewer__range" });
     rangeLabel.setAttribute("aria-live", "polite");
     const sort = h("select", { class: "pipelineViewer__sort" });
@@ -742,11 +753,9 @@
     });
 
     const hint = h("div", { class: "pipelineViewer__hint" });
-    const defaultHint = () => number(options.summaryBucketUs) > 0
-      ? `Summary resolution: ${durationUs(options.summaryBucketUs)}. Shade estimates work density inside each window; gaps within a window are unknown. Hover for times; use \u2315 to focus a stage.`
-      : model.envelopeCount
-        ? "Dashed ranges contain unknown activity gaps. Work \u03a3 stays available even when the temporal detail is missing."
-        : "Recorded intervals use the available trace resolution. Work \u03a3 covers the whole query; waits have no recorded position on the time axis.";
+    // The hover readout; at rest, the one-line way to use it (the reading
+    // guide is under "How to read this").
+    const defaultHint = () => "Hover a row for its times; \u2315 focuses a stage.";
     hint.textContent = defaultHint();
     table.appendChild(body);
     root.append(table, hint);

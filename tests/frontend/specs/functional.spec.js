@@ -590,6 +590,56 @@ test('profiling auto-opens Pipeline and lazily mounts Tracing', async ({ page })
   await expect(page.locator('#deepAnalyzeButton')).toHaveCount(0);
 });
 
+// The profiling dialog reads at 11 px or more everywhere, keeps its reading
+// guide under "How to read this", names every zoom control, and its Tracing
+// tab draws like the trace waterfall (row height, .traceSpanBar).
+test('profiling dialog: text of 11 px or more, a folded reading guide, labelled zoom controls, a Tracing tab drawn like the waterfall', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
+  const modal = page.locator('#analysisModal');
+  await expect(modal.locator('.pipelineViewer__row').first()).toBeVisible({ timeout: 15_000 });
+  const tinyText = () => page.evaluate(() => [...document.querySelectorAll('#analysisModal *')].filter((el) => {
+    if (![...el.childNodes].some((node) => node.nodeType === 3 && node.textContent.trim())) return false;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || getComputedStyle(el).visibility === 'hidden') return false;
+    return parseFloat(getComputedStyle(el).fontSize) < 11 - 0.01;
+  }).map((el) => `${el.className}: ${el.textContent.trim().slice(0, 30)} (${getComputedStyle(el).fontSize})`));
+  expect(await tinyText()).toEqual([]);
+  // The subtitle: the query id in mono, the measures in sans, never "0 ns".
+  await expect(modal.locator('.analysisModal__queryId')).toHaveText(/^[0-9a-f-]{36}$/);
+  await expect(modal.locator('.analysisModal__measures')).toContainText(/ClickHouse (?:<1 ms|[\d.]+ (?:ms|s))/);
+  await expect(modal.locator('#analysisSummary')).not.toContainText(/ClickHouse 0 ns/);
+  // The reading guide folds away.
+  const help = modal.locator('details.pipelineViewer__help');
+  await expect(help.locator('summary')).toHaveText('How to read this');
+  await expect(help).not.toHaveAttribute('open', '');
+  await expect(help.locator('.pipelineViewer__helpPopover')).toBeHidden();
+  await help.locator('summary').click();
+  await expect(help.locator('.pipelineViewer__helpPopover')).toContainText('Stages process blocks concurrently');
+  await expect(help.locator('.pipelineViewer__helpPopover')).toContainText('work density');
+  expect(await tinyText()).toEqual([]);
+  await help.locator('summary').click();
+  // Every zoom control says what it does.
+  const controls = modal.locator('.pipelineViewer__controls button');
+  await expect(controls).toHaveText(['Full query', '\u2190 Earlier', '\u2212 Zoom out', '+ Zoom in', 'Later \u2192', 'Last 1%']);
+  // Tracing: the waterfall's rows and bars.
+  await page.locator('#analysisTraceTab').click();
+  const bar = modal.locator('.traceViewer .traceSpanBar').first();
+  await expect(bar).toBeVisible({ timeout: 15_000 });
+  const geometry = await bar.evaluate((el) => {
+    const root = getComputedStyle(document.documentElement);
+    return {
+      row: Math.round(el.closest('.traceViewer__row').getBoundingClientRect().height),
+      bar: Math.round(el.getBoundingClientRect().height),
+      rowToken: parseFloat(root.getPropertyValue('--trace-row-h')),
+      barToken: parseFloat(root.getPropertyValue('--trace-bar-h')),
+    };
+  });
+  expect(geometry.row).toBeGreaterThanOrEqual(geometry.rowToken);
+  expect(geometry.bar).toBe(geometry.barToken);
+  expect(await tinyText()).toEqual([]);
+});
+
 test('the profiling dialog is the shared modal: focus moves in and stays, Escape, backdrop and close return it', async ({ page }) => {
   await openApp(page);
   const modal = page.locator('#analysisModal');

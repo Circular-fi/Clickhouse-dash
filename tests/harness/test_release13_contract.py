@@ -75,8 +75,10 @@ def test_trace_viewer_is_compact_resizable_and_uses_service_marker() -> None:
     assert "columnResize.setPointerCapture" in viewer
     assert "columnResize.addEventListener(\"dblclick\"" in viewer
     assert "scrollbar-gutter: stable;" in css
-    assert re.search(r"\.traceViewer__row\s*\{[^}]*min-height:\s*26px", css, re.S)
-    assert re.search(r"\.traceViewer__bar\s*\{[^}]*height:\s*9px", css, re.S)
+    # The trace waterfall's row and bar (one set of span timeline tokens).
+    assert re.search(r"\.traceViewer__row\s*\{[^}]*min-height:\s*var\(--trace-row-h\)", css, re.S)
+    assert re.search(r"\.traceViewer__bar\s*\{[^}]*height:\s*var\(--trace-bar-h\)", css, re.S)
+    assert 'bar.className = "traceViewer__bar traceSpanBar";' in viewer
     identity = re.search(r"\.traceViewer__identity\s*\{([^}]*)\}", css, re.S)
     assert identity and "box-shadow" not in identity.group(1)
     row = re.search(r"\.traceViewer__row\s*\{([^}]*)\}", css, re.S)

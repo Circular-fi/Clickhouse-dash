@@ -173,8 +173,16 @@ contributions are additive. Height and shade distinguish recurring brief work
 from heavier processing across the same query duration. SVG paths are batched
 into eight color levels rather than creating a DOM element per call.
 
-Full-query, zoom, pan, last-one-percent and per-stage focus controls share one
-time range across all rows. Zoom does not invent more detailed measurements.
+The pipeline's reading guide (concurrency, separate time and work measures, the
+density scale, the summary resolution) is folded under **How to read this**
+beside the stage count. The controls are labelled: *Full query*, *← Earlier*,
+*− Zoom out*, *+ Zoom in*, *Later →*, *Last 1%*; they and the per-stage focus
+share one time range across all rows. The dialog's subtitle is the query id
+(mono), then the ClickHouse and session times (`<1 ms` for a query faster than
+the millisecond query_log counts), rows read and memory. Every text of the
+dialog is 11 px or more. The **Tracing** tab draws like the trace waterfall:
+its row height and bar (`--trace-row-h`, `--trace-bar-h`, `.traceSpanBar` in
+the attempt's color) and muted duration labels. Zoom does not invent more detailed measurements.
 Work counters and their shares remain totals for the whole query while zoomed.
 Time labels increase their precision when viewing short ranges near query end.
 Waits stay separate numeric maxima because their temporal positions are absent.

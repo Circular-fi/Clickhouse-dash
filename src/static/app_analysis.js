@@ -167,15 +167,22 @@
     dom.analysisNotice.hidden = !text;
   }
 
+  // The dialog's subtitle: the query id (mono), then the measures (sans).
+  // query_log counts whole milliseconds: a faster query reads "<1 ms", never
+  // "0 ns".
   function renderSummary(data) {
     if (!dom.analysisSummary) return;
     const overview = data?.overview || null;
-    const parts = [data?.query_id || ""];
-    if (overview && Number.isFinite(Number(overview.duration_ms))) parts.push(`ClickHouse ${format.duration.fromMs(overview.duration_ms)}`);
-    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) parts.push(`Session ${format.duration.fromMs(data.session_elapsed_ms)}`);
+    const parts = [];
+    const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");
+    if (overview && Number.isFinite(Number(overview.duration_ms))) parts.push(`ClickHouse ${ms(overview.duration_ms)}`);
+    if (Number.isFinite(Number(data?.session_elapsed_ms)) && Number(data.session_elapsed_ms) >= 0) parts.push(`Session ${ms(data.session_elapsed_ms)}`);
     if (overview && Number(overview.read_rows) > 0) parts.push(`${format.count(overview.read_rows)} rows read`);
     if (overview && Number(overview.memory_usage) > 0) parts.push(`${format.bytes(overview.memory_usage)} memory`);
-    dom.analysisSummary.textContent = parts.filter(Boolean).join(" · ");
+    const id = String(data?.query_id || "");
+    ns.h.replace(dom.analysisSummary,
+      id ? ns.h("code", { class: "analysisModal__queryId" }, id) : null,
+      parts.length ? ns.h("span", { class: "analysisModal__measures" }, `${id ? " \u00b7 " : ""}${parts.join(" \u00b7 ")}`) : null);
   }
 
   function decodedSpans() {

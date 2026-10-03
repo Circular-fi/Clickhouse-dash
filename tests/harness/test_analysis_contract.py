@@ -138,8 +138,10 @@ def test_analysis_exposes_session_elapsed_separately_from_clickhouse_duration() 
     assert "session_elapsed_ms);" in query_api
     assert 'writer.Key("session_elapsed_ms"); writer.Int64(record->session_elapsed_ms);' in analysis_api
     # Both durations in the one ns.format duration ("9 ms", "1.23 s").
-    assert 'parts.push(`ClickHouse ${format.duration.fromMs(overview.duration_ms)}`)' in analysis_ui
-    assert 'parts.push(`Session ${format.duration.fromMs(data.session_elapsed_ms)}`)' in analysis_ui
+    # query_log counts whole milliseconds: 0 reads "<1 ms", never "0 ns".
+    assert 'const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");' in analysis_ui
+    assert 'parts.push(`ClickHouse ${ms(overview.duration_ms)}`)' in analysis_ui
+    assert 'parts.push(`Session ${ms(data.session_elapsed_ms)}`)' in analysis_ui
     assert 'fmtMs' not in analysis_ui and 'formatSeconds' not in analysis_ui
 
 
