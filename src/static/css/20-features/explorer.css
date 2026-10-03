@@ -2541,10 +2541,11 @@ button.explorerStorageStrip__segment:focus-visible {
   margin-top: 0;
 }
 
-/* Table cells ignore max-width: long names and engines clip inside a span. */
+/* Table cells ignore max-width: long names and engines clip inside a span. The widths are in ch
+   of IBM Plex Sans (a wider 0 than Arial's): the same pixels as 15ch and 24ch were before. */
 .explorerDatabaseObjectsTable__clip {
   display: inline-block;
-  max-width: 15ch;
+  max-width: 14ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2552,7 +2553,7 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerWorkspace .explorerDatabaseObjectsTable__open.explorerDatabaseObjectsTable__clip {
-  max-width: 24ch;
+  max-width: 22ch;
 }
 
 @media (max-width: 820px) {
